@@ -1,0 +1,24 @@
+[package]
+name = "ts-to-clar"
+version.workspace = true
+edition = "2021"
+description = "Transpile TypeScript to Clarity."
+license = "GPL-3.0"
+
+[dependencies]
+anyhow = "1.0.98"
+swc_ecma_parser = "14.0.2"
+swc_common = "11.1.0"
+swc_ecma_ast = "11.0.0"
+swc_ecma_visit = "11.0.0"
+
+clarity = { workspace = true }
+
+clarinet-format = { path = "../clarinet-format" }
+
+[dev-dependencies]
+indoc = "2.0.6"
+
+[lib]
+name = "ts_to_clar"
+path = "src/lib.rs"
