@@ -18,6 +18,7 @@ clarinet-format = { path = "../clarinet-format" }
 
 [dev-dependencies]
 indoc = "2.0.6"
+swc_atoms = "5.0.0"
 
 [lib]
 name = "ts_to_clar"
