@@ -34,12 +34,13 @@ mod test {
         let src = indoc! {
             "const OWNER_ROLE = new Constant<Uint>(1);
             const count = new DataVar<Uint>(0);
+            const msgs = new DataMap<Uint, StringAscii<16>>();
         "};
         let clarity_code = transpile("test.clar.ts", src).unwrap();
 
         assert_eq!(
             clarity_code,
-            "(define-const OWNER_ROLE u1)\n(define-data-var count uint u0)\n"
+            "(define-const OWNER_ROLE u1)\n(define-data-var count uint u0)\n(define-data-map msgs uint (string-ascii 16))"
         );
     }
 }
