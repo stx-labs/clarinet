@@ -22,7 +22,7 @@ fn build_default_pse(pre_expr: PreSymbolicExpressionType) -> PreSymbolicExpressi
 
 fn convert_constant(constant: &IRConstant) -> Result<PreSymbolicExpression, anyhow::Error> {
     let value = match &constant.expr {
-        swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(num)) => match constant.typ {
+        oxc_ast::ast::Expression::NumericLiteral(num) => match constant.r#type {
             ClarityTypeSignature::UIntType => ClarityValue::UInt(num.value as u128),
             ClarityTypeSignature::IntType => ClarityValue::Int(num.value as i128),
             _ => return Err(anyhow::anyhow!("Unsupported numeric type for constant")),
@@ -43,7 +43,7 @@ fn convert_constant(constant: &IRConstant) -> Result<PreSymbolicExpression, anyh
 
 fn convert_data_var(data_var: &IRDataVar) -> Result<PreSymbolicExpression, anyhow::Error> {
     let value = match &data_var.expr {
-        swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(num)) => match data_var.typ {
+        oxc_ast::ast::Expression::NumericLiteral(num) => match data_var.r#type {
             ClarityTypeSignature::UIntType => ClarityValue::UInt(num.value as u128),
             ClarityTypeSignature::IntType => ClarityValue::Int(num.value as i128),
             _ => return Err(anyhow::anyhow!("Unsupported numeric type for data var")),
@@ -55,7 +55,9 @@ fn convert_data_var(data_var: &IRDataVar) -> Result<PreSymbolicExpression, anyho
         pre_expr: List(vec![
             build_default_pse(Atom(ClarityName::from("define-data-var"))),
             build_default_pse(Atom(ClarityName::from(data_var.name.as_str()))),
-            build_default_pse(Atom(ClarityName::from(data_var.typ.to_string().as_str()))),
+            build_default_pse(Atom(ClarityName::from(
+                data_var.r#type.to_string().as_str(),
+            ))),
             build_default_pse(AtomValue(value)),
         ]),
         id: 0,
@@ -93,19 +95,21 @@ mod test {
         },
         ClarityName, Value as ClarityValue,
     };
+    use oxc_allocator::Allocator;
 
     use crate::parser::get_ir;
 
     use super::*;
 
-    fn get_tmp_ir(ts_source: &str) -> IR {
-        get_ir("tmp.clar.ts", ts_source.to_string())
+    fn get_tmp_ir<'a>(allocator: &'a Allocator, ts_source: &'a str) -> IR<'a> {
+        get_ir(allocator, "tmp.clar.ts", ts_source)
     }
 
     // fn assert_pses_eq(ts_source: &str, expected_clar_source: &str) {
     //     let expected_pse = clarity::vm::ast::parser::v2::parse(expected_clar_source).unwrap();
     //     println!("expected_pse: {:#?}", expected_pse);
-    //     let ir = get_tmp_ir(ts_source);
+    //     let allocator = Allocator::default();
+    //     let ir = get_tmp_ir(&allocator, ts_source);
     //     let pses = convert(ir).unwrap();
     //     assert_eq!(pses, expected_pse);
     // }
@@ -123,7 +127,8 @@ mod test {
             ]),
         };
 
-        let ir = get_tmp_ir(ts_src);
+        let allocator = Allocator::default();
+        let ir = get_tmp_ir(&allocator, ts_src);
         let pses = convert(ir).unwrap();
         assert_eq!(pses, vec![expected_pse]);
     }
@@ -131,7 +136,7 @@ mod test {
     #[test]
     fn test_convert_data_var() {
         let ts_src = "const count = new DataVar<Uint>(0);";
-        // let epse = assert_pses_eq(ts_src, "(define-data-var count uint u1)");
+        // assert_pses_eq(ts_src, "(define-data-var count uint u0)");
         // (define-data-var count uint u1)
         let expected_pse = PreSymbolicExpression {
             id: 0,
@@ -144,7 +149,8 @@ mod test {
             ]),
         };
 
-        let ir = get_tmp_ir(ts_src);
+        let allocator = Allocator::default();
+        let ir = get_tmp_ir(&allocator, ts_src);
         let pses = convert(ir).unwrap();
         assert_eq!(pses, vec![expected_pse]);
     }

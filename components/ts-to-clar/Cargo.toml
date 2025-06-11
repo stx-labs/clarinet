@@ -7,10 +7,15 @@ license = "GPL-3.0"
 
 [dependencies]
 anyhow = "1.0.98"
-swc_ecma_parser = "14.0.2"
-swc_common = "11.1.0"
-swc_ecma_ast = "11.0.0"
-swc_ecma_visit = "11.0.0"
+
+oxc_allocator = "0.72.3"
+oxc_ast = { version = "0.72.3", features = ["serialize"] }
+oxc_ast_visit = "0.72.3"
+oxc_parser = "0.72.3"
+oxc_span = "0.72.3"
+oxc_syntax = "0.72.3"
+oxc_traverse = "0.72.3"
+oxc_semantic = "0.72.3"
 
 clarity = { workspace = true }
 
