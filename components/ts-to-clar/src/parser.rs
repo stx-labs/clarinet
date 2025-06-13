@@ -10,8 +10,8 @@
 use anyhow::{anyhow, Result};
 use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{
-    Expression, Function, Program, Statement, TSLiteral, TSType, TSTypeParameterInstantiation,
-    VariableDeclaration, VariableDeclarator,
+    Expression, Function, Program, PropertyKey, Statement, TSLiteral, TSSignature, TSType,
+    TSTypeParameterInstantiation, VariableDeclaration, VariableDeclarator,
 };
 
 use oxc_parser::Parser;
@@ -21,7 +21,8 @@ use oxc_span::SourceType;
 use oxc_traverse::{traverse_mut_with_ctx, ReusableTraverseCtx, Traverse, TraverseCtx};
 
 use clarity::vm::callables::DefineType;
-use clarity::vm::types::{SequenceSubtype, TypeSignature};
+use clarity::vm::types::{SequenceSubtype, TupleTypeSignature, TypeSignature};
+use clarity::vm::ClarityName;
 
 pub struct IRConstant<'a> {
     pub name: String,
@@ -111,12 +112,39 @@ fn extract_type(
     }
 }
 
-fn arg_type_to_signature(ts_type: &TSType) -> Result<TypeSignature> {
-    if let TSType::TSTypeReference(boxed_ref) = ts_type {
-        let type_name = boxed_ref.type_name.get_identifier_reference();
-        extract_type(type_name.name.as_str(), boxed_ref.type_arguments.as_deref())
-    } else {
-        Err(anyhow!("Expected TsTypeRef with Ident type name"))
+fn ts_to_clar_type(ts_type: &TSType) -> Result<TypeSignature> {
+    match ts_type {
+        TSType::TSTypeReference(boxed_ref) => {
+            let type_name = boxed_ref.type_name.get_identifier_reference();
+            extract_type(type_name.name.as_str(), boxed_ref.type_arguments.as_deref())
+        }
+        TSType::TSTypeLiteral(boxed_lit) => {
+            let mut members = Vec::new();
+            for member in &boxed_lit.members {
+                match member {
+                    TSSignature::TSPropertySignature(prop_signature) => {
+                        let key = &prop_signature.key;
+                        let type_annotation = &prop_signature.type_annotation;
+                        if let Some(type_annotation) = type_annotation {
+                            match key {
+                                PropertyKey::StaticIdentifier(ident) => {
+                                    let name = ClarityName::from(ident.name.as_str());
+                                    let member_type =
+                                        ts_to_clar_type(&type_annotation.type_annotation)?;
+                                    members.push((name, member_type));
+                                }
+                                _ => return Err(anyhow!("Expected identifier for property key")),
+                            }
+                        }
+                    }
+                    _ => return Err(anyhow!("Unexpected type for member: {:?}", member)),
+                }
+            }
+            Ok(TypeSignature::TupleType(TupleTypeSignature::try_from(
+                members,
+            )?))
+        }
+        _ => Err(anyhow!("Unexpected type: {:?}", ts_type)),
     }
 }
 
@@ -142,7 +170,7 @@ fn parse_function_params(
                     .as_ref()
                     .ok_or_else(|| anyhow!("Missing type annotation for param '{}'.", param_name))
                     .and_then(|type_ann| {
-                        arg_type_to_signature(&type_ann.type_annotation)
+                        ts_to_clar_type(&type_ann.type_annotation)
                             .map_err(|e| anyhow!("Invalid param type for '{}': {}", param_name, e))
                     })?;
                 Ok((param_name, param_type))
@@ -176,36 +204,44 @@ impl<'a> Traverse<'a> for IR<'a> {
                 match callee_ident.name.as_str() {
                     "Constant" => {
                         let type_args = new_expr.type_arguments.as_ref().unwrap();
-                        let typ = arg_type_to_signature(&type_args.params[0]);
-                        if let Ok(typ) = typ {
-                            let expr = extract_var_expr(new_expr).unwrap();
-                            self.constants.push(IRConstant {
-                                name,
-                                r#type: typ,
-                                // todo: explore if we can avoid cloning the expression
-                                expr: expr.clone_in(self.allocator),
-                            });
+                        let r#type = ts_to_clar_type(&type_args.params[0]);
+                        match r#type {
+                            Ok(r#type) => {
+                                let expr = extract_var_expr(new_expr).unwrap();
+                                self.constants.push(IRConstant {
+                                    name,
+                                    r#type,
+                                    // todo: explore if we can avoid cloning the expression
+                                    expr: expr.clone_in(self.allocator),
+                                });
+                            }
+                            Err(e) => {
+                                println!("Error: {}", e);
+                            }
                         }
                     }
                     "DataVar" => {
                         let type_args = new_expr.type_arguments.as_ref().unwrap();
-                        let typ = arg_type_to_signature(&type_args.params[0]);
-                        if let Ok(typ) = typ {
-                            let expr = extract_var_expr(new_expr).unwrap();
-                            self.data_vars.push(IRDataVar {
-                                name,
-                                r#type: typ,
-                                // todo: explore if we can avoid cloning the expression
-                                expr: expr.clone_in(self.allocator),
-                            });
+                        let r#type = ts_to_clar_type(&type_args.params[0]);
+                        match r#type {
+                            Ok(r#type) => {
+                                let expr = extract_var_expr(new_expr).unwrap();
+                                self.data_vars.push(IRDataVar {
+                                    name,
+                                    r#type,
+                                    // todo: explore if we can avoid cloning the expression
+                                    expr: expr.clone_in(self.allocator),
+                                });
+                            }
+                            Err(e) => {
+                                println!("Error: {}", e);
+                            }
                         }
                     }
                     "DataMap" => {
-                        let type_args = new_expr.type_arguments.as_ref().unwrap();
-                        let key_type =
-                            arg_type_to_signature(&type_args.params[0]).expect("Expected key type");
-                        let value_type = arg_type_to_signature(&type_args.params[1])
-                            .expect("Expected value type");
+                        let params = &new_expr.type_arguments.as_ref().unwrap().params;
+                        let key_type = ts_to_clar_type(&params[0]).expect("Invalid key type");
+                        let value_type = ts_to_clar_type(&params[1]).expect("Invalid value type");
                         self.data_maps.push(IRDataMap {
                             name,
                             key_type,
@@ -225,7 +261,7 @@ impl<'a> Traverse<'a> for IR<'a> {
         let name = node.id.as_ref().unwrap().name.to_string();
         let params = parse_function_params(&node.params.items);
         let return_type = if let Some(type_ann) = &node.return_type {
-            match arg_type_to_signature(&type_ann.type_annotation) {
+            match ts_to_clar_type(&type_ann.type_annotation) {
                 Ok(t) => t,
                 Err(_) => return,
             }
@@ -286,11 +322,21 @@ mod test {
         get_ascii_type, get_ir, get_utf8_type, IRConstant, IRDataMap, IRDataVar, IR,
     };
 
-    use clarity::vm::{callables::DefineType, types::TypeSignature::*};
+    use clarity::vm::{
+        callables::DefineType,
+        types::{
+            TupleTypeSignature,
+            TypeSignature::{self, *},
+        },
+        ClarityName,
+    };
     use indoc::indoc;
     use oxc_allocator::{Allocator, Box, FromIn};
     use oxc_ast::{
-        ast::{BinaryOperator, Expression, NumberBase, Statement},
+        ast::{
+            BinaryOperator, Expression, NumberBase, ObjectPropertyKind, PropertyKey, PropertyKind,
+            Statement,
+        },
         AstBuilder,
     };
     use oxc_span::{Atom, Span};
@@ -327,8 +373,26 @@ mod test {
         right: Expression<'a>,
         operator: BinaryOperator,
     ) -> Expression<'a> {
-        let a = AstBuilder::new(allocator).binary_expression(Span::empty(0), left, operator, right);
-        Expression::BinaryExpression(Box::new_in(a, allocator))
+        let expr =
+            AstBuilder::new(allocator).binary_expression(Span::empty(0), left, operator, right);
+        Expression::BinaryExpression(Box::new_in(expr, allocator))
+    }
+
+    fn simple_object_property<'a>(
+        builder: &'a AstBuilder<'a>,
+        key: &'a str,
+        value: Expression<'a>,
+    ) -> ObjectPropertyKind<'a> {
+        let k = builder.property_key_static_identifier(Span::default(), key);
+        builder.object_property_kind_object_property(
+            Span::default(),
+            PropertyKind::Init,
+            k,
+            value,
+            false,
+            false,
+            false,
+        )
     }
 
     #[track_caller]
@@ -349,18 +413,43 @@ mod test {
                 assert_expr_eq(&actual_bin.left, &expected_bin.left);
                 assert_expr_eq(&actual_bin.right, &expected_bin.right);
             }
+            (ObjectExpression(actual_obj), ObjectExpression(expected_obj)) => {
+                assert_eq!(actual_obj.properties.len(), expected_obj.properties.len());
+                for (actual_prop, expected_prop) in actual_obj
+                    .properties
+                    .iter()
+                    .zip(expected_obj.properties.iter())
+                {
+                    match (actual_prop, expected_prop) {
+                        (
+                            ObjectPropertyKind::ObjectProperty(actual_prop),
+                            ObjectPropertyKind::ObjectProperty(expected_prop),
+                        ) => {
+                            match (&actual_prop.key, &expected_prop.key) {
+                                (
+                                    PropertyKey::StaticIdentifier(actual_key),
+                                    PropertyKey::StaticIdentifier(expected_key),
+                                ) => {
+                                    assert_eq!(actual_key.name, expected_key.name);
+                                }
+                                _ => panic!("Expected matching expression types"),
+                            }
+                            assert_expr_eq(&actual_prop.value, &expected_prop.value);
+                        }
+                        _ => panic!("Expected matching expression types"),
+                    }
+                }
+            }
             _ => panic!("Expected matching expression types"),
         }
     }
 
-    #[track_caller]
     fn assert_constant_eq(actual: &IRConstant, expected: &IRConstant) {
         assert_eq!(actual.name, expected.name);
         assert_eq!(actual.r#type, expected.r#type);
         assert_expr_eq(&actual.expr, &expected.expr);
     }
 
-    #[track_caller]
     fn assert_data_var_eq(actual: &IRDataVar, expected: &IRDataVar) {
         assert_eq!(actual.name, expected.name);
         assert_eq!(actual.r#type, expected.r#type);
@@ -504,6 +593,86 @@ mod test {
         assert_constant_eq(&ir.constants[0], &expected_constant);
         assert_data_var_eq(&ir.data_vars[0], &expected_data_var);
         assert_eq!(&ir.data_maps[0], &expected_data_map);
+    }
+
+    #[test]
+    fn test_tuple_type_data_var_ir() {
+        let src = "const state = new DataVar<{ active: Bool, ok: Uint }>({ active: true, ok: 1 });";
+        let allocator = Allocator::default();
+        assert_eq!(get_tmp_ir(&allocator, src).data_vars.len(), 1);
+        let ir = &get_tmp_ir(&allocator, src).data_vars[0];
+        let tuple_type = TypeSignature::TupleType(
+            TupleTypeSignature::try_from(vec![
+                (ClarityName::from("active"), TypeSignature::BoolType),
+                (ClarityName::from("ok"), TypeSignature::UIntType),
+            ])
+            .unwrap(),
+        );
+        let b = AstBuilder::new(&allocator);
+        let span = Span::default();
+        let val = b.expression_boolean_literal(span, true);
+        let prop_active = simple_object_property(&b, "active", val);
+        let val = b.expression_numeric_literal(span, 1.0, Some(b.atom("1")), NumberBase::Decimal);
+        let prop_ok = simple_object_property(&b, "ok", val);
+
+        let expected = IRDataVar {
+            name: "state".to_string(),
+            r#type: tuple_type,
+            expr: b.expression_object(span, b.vec_from_iter(vec![prop_active, prop_ok])),
+        };
+        assert_data_var_eq(ir, &expected);
+    }
+
+    #[test]
+    fn test_tuple_type_constant_ir() {
+        let src = "const state = new Constant<{ active: Bool }>({ active: true });";
+        let allocator = Allocator::default();
+        assert_eq!(get_tmp_ir(&allocator, src).constants.len(), 1);
+        let ir = &get_tmp_ir(&allocator, src).constants[0];
+
+        let tuple_type = TypeSignature::TupleType(
+            TupleTypeSignature::try_from(vec![(
+                ClarityName::from("active"),
+                TypeSignature::BoolType,
+            )])
+            .unwrap(),
+        );
+
+        let b = AstBuilder::new(&allocator);
+        let span = Span::default();
+        let val = b.expression_boolean_literal(span, true);
+        let prop_active = simple_object_property(&b, "active", val);
+
+        let expected = IRConstant {
+            name: "state".to_string(),
+            r#type: tuple_type,
+            expr: b.expression_object(span, b.vec_from_iter(vec![prop_active])),
+        };
+        assert_constant_eq(ir, &expected);
+    }
+
+    #[test]
+    fn test_tuple_type_data_map() {
+        use clarity::vm::types::TypeSignature::*;
+        let src = "const state = new DataMap<{ ok: Uint }, { active: Bool }>();";
+        let allocator = Allocator::default();
+        assert_eq!(get_tmp_ir(&allocator, src).data_maps.len(), 1);
+        let ir = &get_tmp_ir(&allocator, src).data_maps[0];
+
+        let key_tuple_type = TupleType(
+            TupleTypeSignature::try_from(vec![(ClarityName::from("ok"), UIntType)]).unwrap(),
+        );
+        let value_tuple_type = TupleType(
+            TupleTypeSignature::try_from(vec![(ClarityName::from("active"), BoolType)]).unwrap(),
+        );
+
+        let expected = IRDataMap {
+            name: "state".to_string(),
+            key_type: key_tuple_type,
+            value_type: value_tuple_type,
+        };
+
+        assert_eq!(ir, &expected);
     }
 
     #[test]
