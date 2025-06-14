@@ -119,9 +119,10 @@ fn ts_to_clar_type(ts_type: &TSType) -> Result<TypeSignature> {
             extract_type(type_name.name.as_str(), boxed_ref.type_arguments.as_deref())
         }
         TSType::TSTypeLiteral(boxed_lit) => {
-            let mut members = Vec::new();
-            for member in &boxed_lit.members {
-                match member {
+            let members = boxed_lit
+                .members
+                .iter()
+                .map(|member| match member {
                     TSSignature::TSPropertySignature(prop_signature) => {
                         let key = &prop_signature.key;
                         let type_annotation = &prop_signature.type_annotation;
@@ -131,15 +132,17 @@ fn ts_to_clar_type(ts_type: &TSType) -> Result<TypeSignature> {
                                     let name = ClarityName::from(ident.name.as_str());
                                     let member_type =
                                         ts_to_clar_type(&type_annotation.type_annotation)?;
-                                    members.push((name, member_type));
+                                    Ok((name, member_type))
                                 }
-                                _ => return Err(anyhow!("Expected identifier for property key")),
+                                _ => Err(anyhow!("Expected identifier for property key")),
                             }
+                        } else {
+                            Err(anyhow!("Missing type annotation"))
                         }
                     }
-                    _ => return Err(anyhow!("Unexpected type for member: {:?}", member)),
-                }
-            }
+                    _ => Err(anyhow!("Unexpected type for member: {:?}", member)),
+                })
+                .collect::<Result<Vec<_>>>()?;
             Ok(TypeSignature::TupleType(TupleTypeSignature::try_from(
                 members,
             )?))
@@ -446,13 +449,13 @@ mod test {
 
     fn assert_constant_eq(actual: &IRConstant, expected: &IRConstant) {
         assert_eq!(actual.name, expected.name);
-        assert_eq!(actual.r#type, expected.r#type);
+        pretty_assertions::assert_eq!(actual.r#type, expected.r#type);
         assert_expr_eq(&actual.expr, &expected.expr);
     }
 
     fn assert_data_var_eq(actual: &IRDataVar, expected: &IRDataVar) {
         assert_eq!(actual.name, expected.name);
-        assert_eq!(actual.r#type, expected.r#type);
+        pretty_assertions::assert_eq!(actual.r#type, expected.r#type);
         assert_expr_eq(&actual.expr, &expected.expr);
     }
 

@@ -30,17 +30,21 @@ fn type_signature_to_pse(
             _ => return Err(anyhow::anyhow!("Unsupported sequence type")),
         },
         ClarityTypeSignature::TupleType(tuple_type) => {
-            let data_map: Vec<PreSymbolicExpression> = tuple_type
+            let data_map = tuple_type
                 .get_type_map()
                 .iter()
-                .flat_map(|(key, signature)| {
+                .map(|(key, signature)| {
                     let name_expr =
                         PreSymbolicExpression::atom(ClarityName::from(key.to_string().as_str()));
-                    let type_expr = type_signature_to_pse(signature).unwrap();
-                    vec![name_expr, type_expr]
+                    let type_expr = type_signature_to_pse(signature)?;
+                    Ok(vec![name_expr, type_expr])
                 })
-                .collect();
-            PreSymbolicExpression::tuple(data_map)
+                .collect::<Result<Vec<_>, anyhow::Error>>()?;
+
+            let flattened_data_map: Vec<PreSymbolicExpression> =
+                data_map.iter().flatten().cloned().collect();
+
+            PreSymbolicExpression::tuple(flattened_data_map)
         }
         _ => return Err(anyhow::anyhow!("Unsupported type signature")),
     })
@@ -120,25 +124,21 @@ fn convert_expression_with_type(
 }
 
 fn convert_constant(constant: &IRConstant) -> Result<PreSymbolicExpression, anyhow::Error> {
-    let value = convert_expression_with_type(&constant.expr, &constant.r#type)?;
-
     Ok(PreSymbolicExpression::list(vec![
         PreSymbolicExpression::atom(ClarityName::from("define-const")),
         PreSymbolicExpression::atom(ClarityName::from(constant.name.as_str())),
-        value,
+        convert_expression_with_type(&constant.expr, &constant.r#type)?,
     ]))
 }
 
 fn convert_data_var(data_var: &IRDataVar) -> Result<PreSymbolicExpression, anyhow::Error> {
-    let value = convert_expression_with_type(&data_var.expr, &data_var.r#type)?;
-
     Ok(PreSymbolicExpression {
         id: 0,
         pre_expr: PreSymbolicExpressionType::List(vec![
             PreSymbolicExpression::atom(ClarityName::from("define-data-var")),
             PreSymbolicExpression::atom(ClarityName::from(data_var.name.as_str())),
             type_signature_to_pse(&data_var.r#type)?,
-            value,
+            convert_expression_with_type(&data_var.expr, &data_var.r#type)?,
         ]),
         span: Span::zero(),
     })
@@ -156,26 +156,24 @@ fn convert_data_map(data_map: &IRDataMap) -> Result<PreSymbolicExpression, anyho
 pub fn convert(ir: IR) -> Result<Vec<PreSymbolicExpression>, anyhow::Error> {
     let mut pses = vec![];
 
-    let constants = ir
-        .constants
-        .iter()
-        .map(convert_constant)
-        .collect::<Result<Vec<_>, _>>()?;
-    pses.extend(constants);
-
-    let data_vars = ir
-        .data_vars
-        .iter()
-        .map(convert_data_var)
-        .collect::<Result<Vec<_>, _>>()?;
-    pses.extend(data_vars);
-
-    let data_maps = ir
-        .data_maps
-        .iter()
-        .map(convert_data_map)
-        .collect::<Result<Vec<_>, _>>()?;
-    pses.extend(data_maps);
+    pses.extend(
+        ir.constants
+            .iter()
+            .map(convert_constant)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    pses.extend(
+        ir.data_vars
+            .iter()
+            .map(convert_data_var)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    pses.extend(
+        ir.data_maps
+            .iter()
+            .map(convert_data_map)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
 
     Ok(pses)
 }
@@ -285,12 +283,26 @@ mod test {
             ts_src,
             r#"(define-data-var state { ok: bool } { ok: true })"#,
         );
-        // let ts_src =
-        //     "const state = new DataVar<{ ok: Int, active: Bool }>({ ok: 1, active: true });";
+    }
+
+    #[test]
+    fn test_convert_tuple_type_preserves_order() {
+        // let ts_src = "const state = new DataVar<{ zz: Bool, aa: Int }>({ zz: true, aa: 2 });";
+
+        // TODO: explore tuple type sig conversation.
+        // Because TupleTypeSignature.type_map is a BTreeMap, the order of the properties
+        // is sorted. We would prefer it to preserve the order of the properties.
+
         // assert_pses_eq(
         //     ts_src,
-        //     r#"(define-data-var state { ok: int, active: bool } { ok: 1, active: true })"#,
+        //     r#"(define-data-var state { zz: bool, aa: int } { zz: true, aa: 2 })"#,
         // );
+
+        let ts_src = "const state = new DataVar<{ aa: Int, zz: Int }>({ aa: 2, zz: 1 });";
+        assert_pses_eq(
+            ts_src,
+            r#"(define-data-var state { aa: int, zz: int } { aa: 2, zz: 1 })"#,
+        );
     }
 
     #[test]
