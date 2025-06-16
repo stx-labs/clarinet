@@ -1,4 +1,5 @@
 mod converter;
+mod expression_converter;
 mod helper;
 mod parser;
 
@@ -18,7 +19,7 @@ pub use self::helper::to_kebab_case;
 pub fn transpile(file_name: &str, src: &str) -> Result<String, anyhow::Error> {
     let allocator = Allocator::default();
     let ir = get_ir(&allocator, file_name, src);
-    let pses = convert(ir)?;
+    let pses = convert(&allocator, ir)?;
     let formatter = ClarityFormatter::new(formatter::Settings::default());
     Ok(formatter.format_ast(&pses))
 }

@@ -46,8 +46,8 @@ pub struct IRDataMap {
 pub struct IRFunction<'a> {
     pub name: String,
     pub define_type: DefineType,
-    pub params: Vec<(String, TypeSignature)>,
-    pub return_type: TypeSignature,
+    pub parameters: Vec<(String, TypeSignature)>,
+    pub return_type: Option<TypeSignature>,
     pub body: oxc_allocator::Vec<'a, Statement<'a>>,
 }
 
@@ -60,7 +60,11 @@ pub struct IR<'a> {
     pub top_level_exprs: Vec<Expression<'a>>,
 }
 
-fn parse_ts<'a>(allocator: &'a Allocator, file_name: &str, src: &'a str) -> Result<Program<'a>> {
+pub fn parse_ts<'a>(
+    allocator: &'a Allocator,
+    file_name: &str,
+    src: &'a str,
+) -> Result<Program<'a>> {
     let source_type = SourceType::from_path(file_name).unwrap_or_default();
     let parser_return = Parser::new(allocator, src, source_type).parse();
 
@@ -263,14 +267,11 @@ impl<'a> Traverse<'a> for IR<'a> {
         }
         let name = node.id.as_ref().unwrap().name.to_string();
         let params = parse_function_params(&node.params.items);
-        let return_type = if let Some(type_ann) = &node.return_type {
-            match ts_to_clar_type(&type_ann.type_annotation) {
-                Ok(t) => t,
-                Err(_) => return,
-            }
-        } else {
-            TypeSignature::BoolType
-        };
+
+        let return_type = node
+            .return_type
+            .as_ref()
+            .and_then(|type_ann| ts_to_clar_type(&type_ann.type_annotation).ok());
         let Some(body) = node.body.as_ref() else {
             return;
         };
@@ -281,7 +282,7 @@ impl<'a> Traverse<'a> for IR<'a> {
         self.functions.push(IRFunction {
             name,
             define_type: DefineType::Private,
-            params,
+            parameters: params,
             return_type,
             body: body.statements.clone_in(self.allocator),
         });
@@ -696,11 +697,25 @@ mod test {
         let func = &ir.functions[0];
         let expected_params = vec![("a".to_string(), IntType), ("b".to_string(), IntType)];
         assert_eq!(func.name, "add");
-        assert_eq!(func.params, expected_params);
-        assert_eq!(func.return_type, IntType);
+        assert_eq!(func.parameters, expected_params);
+        assert_eq!(func.return_type, Some(IntType));
         assert_eq!(func.define_type, DefineType::Private);
         assert_eq!(func.body.len(), 1);
         matches!(func.body[0], Statement::ReturnStatement(_));
+    }
+
+    #[test]
+    fn test_function_return_true() {
+        let src = "function returntrue() { return true; }";
+
+        let allocator = Allocator::default();
+        let ir = get_tmp_ir(&allocator, src);
+        assert_eq!(ir.functions.len(), 1);
+
+        let func = &ir.functions[0];
+        assert_eq!(func.name, "returntrue");
+        assert_eq!(func.parameters, vec![]);
+        assert_eq!(func.return_type, None);
     }
 
     #[test]
@@ -718,7 +733,7 @@ mod test {
         let func = &ir.functions[0];
         assert_eq!(func.name, "setN");
         let expected_params = vec![("newValue".to_string(), IntType)];
-        assert_eq!(func.params, expected_params);
-        assert_eq!(func.return_type, BoolType);
+        assert_eq!(func.parameters, expected_params);
+        assert_eq!(func.return_type, None);
     }
 }

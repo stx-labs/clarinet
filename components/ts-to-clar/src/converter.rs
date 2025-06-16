@@ -1,13 +1,19 @@
 // converter.rs converts the TS intermediate representation (IR) to Clarity PreSymbolicExpressions (PSEs)
 
+use std::vec;
+
 use clarity::vm::{
     representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span},
     types::{SequenceSubtype, StringSubtype, TypeSignature as ClarityTypeSignature},
     ClarityName, Value as ClarityValue,
 };
+use oxc_allocator::Allocator;
 use oxc_ast::ast::{Expression as OxcExpression, ObjectPropertyKind};
 
-use crate::parser::{IRConstant, IRDataMap, IRDataVar, IR};
+use crate::{
+    expression_converter,
+    parser::{IRConstant, IRDataMap, IRDataVar, IRFunction, IR},
+};
 
 fn type_signature_to_pse(
     type_signature: &ClarityTypeSignature,
@@ -39,12 +45,12 @@ fn type_signature_to_pse(
                     let type_expr = type_signature_to_pse(signature)?;
                     Ok(vec![name_expr, type_expr])
                 })
-                .collect::<Result<Vec<_>, anyhow::Error>>()?;
+                .collect::<Result<Vec<_>, anyhow::Error>>()?
+                .into_iter()
+                .flatten()
+                .collect();
 
-            let flattened_data_map: Vec<PreSymbolicExpression> =
-                data_map.iter().flatten().cloned().collect();
-
-            PreSymbolicExpression::tuple(flattened_data_map)
+            PreSymbolicExpression::tuple(data_map)
         }
         _ => return Err(anyhow::anyhow!("Unsupported type signature")),
     })
@@ -91,7 +97,7 @@ fn convert_expression_with_type(
         },
         ClarityTypeSignature::TupleType(tuple_type) => match &expr {
             OxcExpression::ObjectExpression(obj) => {
-                let data_map: Vec<Vec<PreSymbolicExpression>> = obj
+                let data_map: Vec<PreSymbolicExpression> = obj
                     .properties
                     .iter()
                     .map(|property| match property {
@@ -107,14 +113,12 @@ fn convert_expression_with_type(
                             Err(anyhow::anyhow!("Todo: spread property for Tuple"))
                         }
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect();
 
-                // Flatten in a second step for simpler error handling in the map above
-                // Todo: explore using .flat_map() directly above
-                let flattened_data_map: Vec<PreSymbolicExpression> =
-                    data_map.iter().flatten().cloned().collect();
-
-                PreSymbolicExpression::tuple(flattened_data_map)
+                PreSymbolicExpression::tuple(data_map)
             }
 
             _ => return Err(anyhow::anyhow!("Unsupported expression for Tuple")),
@@ -153,7 +157,34 @@ fn convert_data_map(data_map: &IRDataMap) -> Result<PreSymbolicExpression, anyho
     ]))
 }
 
-pub fn convert(ir: IR) -> Result<Vec<PreSymbolicExpression>, anyhow::Error> {
+fn convert_function(
+    allocator: &Allocator,
+    function: &IRFunction,
+) -> Result<PreSymbolicExpression, anyhow::Error> {
+    let parameters: Vec<PreSymbolicExpression> = function
+        .parameters
+        .iter()
+        .map(|(name, r#type)| {
+            let name = PreSymbolicExpression::atom(ClarityName::from(name.as_str()));
+            let r#type = type_signature_to_pse(r#type)?;
+            Ok(vec![name, r#type])
+        })
+        .collect::<Result<Vec<_>, anyhow::Error>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+
+    Ok(PreSymbolicExpression::list(vec![
+        PreSymbolicExpression::atom(ClarityName::from("define-private")),
+        PreSymbolicExpression::list(vec![
+            PreSymbolicExpression::atom(ClarityName::from(function.name.as_str())),
+            PreSymbolicExpression::list(parameters),
+        ]),
+        expression_converter::convert(allocator, function)?,
+    ]))
+}
+
+pub fn convert(allocator: &Allocator, ir: IR) -> Result<Vec<PreSymbolicExpression>, anyhow::Error> {
     let mut pses = vec![];
 
     pses.extend(
@@ -172,6 +203,13 @@ pub fn convert(ir: IR) -> Result<Vec<PreSymbolicExpression>, anyhow::Error> {
         ir.data_maps
             .iter()
             .map(convert_data_map)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+
+    pses.extend(
+        ir.functions
+            .iter()
+            .map(|function| convert_function(allocator, function))
             .collect::<Result<Vec<_>, _>>()?,
     );
 
@@ -211,7 +249,7 @@ mod test {
 
         let allocator = Allocator::default();
         let ir = get_tmp_ir(&allocator, ts_source);
-        let actual_pse = convert(ir).expect("Failed to convert IR to PSE");
+        let actual_pse = convert(&allocator, ir).expect("Failed to convert IR to PSE");
 
         pretty_assertions::assert_eq!(actual_pse, expected_pse);
     }
@@ -236,7 +274,7 @@ mod test {
 
         let allocator = Allocator::default();
         let ir = get_tmp_ir(&allocator, ts_src);
-        let pses = convert(ir).unwrap();
+        let pses = convert(&allocator, ir).unwrap();
         assert_eq!(pses, vec![expected_pse]);
     }
 
@@ -252,7 +290,7 @@ mod test {
 
         let allocator = Allocator::default();
         let ir = get_tmp_ir(&allocator, ts_src);
-        let pses = convert(ir).unwrap();
+        let pses = convert(&allocator, ir).unwrap();
         assert_eq!(pses, vec![expected_pse]);
 
         let ts_src = r#"const msg = new DataVar<StringAscii<16>>("hello");"#;
@@ -267,7 +305,7 @@ mod test {
             PreSymbolicExpression::atom_value(ascii_value("hello")),
         ]);
         let ir = get_tmp_ir(&allocator, ts_src);
-        let pses = convert(ir).unwrap();
+        let pses = convert(&allocator, ir).unwrap();
         pretty_assertions::assert_eq!(pses, vec![expected_pse]);
     }
 
@@ -319,4 +357,22 @@ mod test {
             r#"(define-data-map state { ok: uint } { active: bool })"#,
         );
     }
+
+    #[test]
+    fn test_convert_function() {
+        let ts_src = "function printarg(arg: Uint) { return print(arg); }";
+        assert_pses_eq(
+            ts_src,
+            r#"(define-private (printarg (arg uint)) (print arg))"#,
+        );
+    }
+
+    // #[test]
+    // fn test_convert_function() {
+    //     let ts_src = "function printarg(arg: StringAscii<16>) { return print(arg); }";
+    //     assert_pses_eq(
+    //         ts_src,
+    //         r#"(define-private (printarg (arg (string-ascii 16))) (print arg))"#,
+    //     );
+    // }
 }

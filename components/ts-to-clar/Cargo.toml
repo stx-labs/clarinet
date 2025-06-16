@@ -8,14 +8,14 @@ license = "GPL-3.0"
 [dependencies]
 anyhow = "1.0.98"
 
-oxc_allocator = "0.72.3"
-oxc_ast = { version = "0.72.3", features = ["serialize"] }
-oxc_ast_visit = "0.72.3"
-oxc_parser = "0.72.3"
-oxc_span = "0.72.3"
-oxc_syntax = "0.72.3"
-oxc_traverse = "0.72.3"
-oxc_semantic = "0.72.3"
+oxc_allocator = "0.73"
+oxc_ast = { version = "0.73", features = ["serialize"] }
+oxc_ast_visit = "0.73"
+oxc_parser = "0.73"
+oxc_span = "0.73"
+oxc_syntax = "0.73"
+oxc_traverse = "0.73"
+oxc_semantic = "0.73"
 
 clarity = { workspace = true }
 
@@ -23,7 +23,6 @@ clarinet-format = { path = "../clarinet-format" }
 
 [dev-dependencies]
 indoc = "2.0.6"
-swc_atoms = "5.0.0"
 pretty_assertions = "1.4"
 
 [lib]
