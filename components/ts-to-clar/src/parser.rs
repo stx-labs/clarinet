@@ -10,8 +10,8 @@
 use anyhow::{anyhow, Result};
 use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{
-    Expression, Function, Program, PropertyKey, Statement, TSLiteral, TSSignature, TSType,
-    TSTypeParameterInstantiation, VariableDeclaration, VariableDeclarator,
+    Expression, Function, ObjectPropertyKind, Program, PropertyKey, Statement, TSLiteral,
+    TSSignature, TSType, TSTypeParameterInstantiation, VariableDeclaration, VariableDeclarator,
 };
 
 use oxc_parser::Parser;
@@ -58,6 +58,8 @@ pub struct IR<'a> {
     pub data_maps: Vec<IRDataMap>,
     pub functions: Vec<IRFunction<'a>>,
     pub top_level_exprs: Vec<Expression<'a>>,
+    pub read_only_functions: Vec<String>,
+    pub public_functions: Vec<String>,
 }
 
 pub fn parse_ts<'a>(
@@ -294,6 +296,52 @@ impl<'a> Traverse<'a> for IR<'a> {
             self.top_level_exprs.push(expr);
         }
     }
+
+    fn enter_export_default_declaration(
+        &mut self,
+        node: &mut oxc_ast::ast::ExportDefaultDeclaration<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        if let oxc_ast::ast::ExportDefaultDeclarationKind::TSSatisfiesExpression(boxed_expr) =
+            &node.declaration
+        {
+            if let Some(type_annotation) = &boxed_expr.type_annotation.get_identifier_reference() {
+                if type_annotation.name != "Contract" {
+                    panic!("Expected Contract type annotation");
+                }
+            }
+
+            if let Expression::ObjectExpression(object_expression) = &boxed_expr.expression {
+                for prop in &object_expression.properties {
+                    if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+                        if let PropertyKey::StaticIdentifier(ident) = &prop.key {
+                            if let Expression::ObjectExpression(obj) = &prop.value {
+                                for prop in &obj.properties {
+                                    if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+                                        if let PropertyKey::StaticIdentifier(func_ident) = &prop.key
+                                        {
+                                            if ident.name.as_str() == "readOnly" {
+                                                self.read_only_functions
+                                                    .push(func_ident.name.to_string());
+                                            } else if ident.name.as_str() == "public" {
+                                                self.public_functions
+                                                    .push(func_ident.name.to_string());
+                                            } else {
+                                                panic!(
+                                                    "Exported property {} will be ignored",
+                                                    ident.name
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) -> IR<'a> {
@@ -306,6 +354,8 @@ pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) ->
         data_maps: Vec::new(),
         functions: Vec::new(),
         top_level_exprs: Vec::new(),
+        read_only_functions: Vec::new(),
+        public_functions: Vec::new(),
     };
     let scoping = SemanticBuilder::new()
         .build(&module)
@@ -735,5 +785,33 @@ mod test {
         let expected_params = vec![("newValue".to_string(), IntType)];
         assert_eq!(func.parameters, expected_params);
         assert_eq!(func.return_type, None);
+    }
+
+    #[test]
+    fn test_read_only_functions() {
+        let ts_src = indoc! {
+            r#"function myfunc() { return true; }
+            export default { readOnly: { myfunc } } satisfies Contract
+            "#
+        };
+
+        let allocator = Allocator::default();
+        let ir = get_tmp_ir(&allocator, ts_src);
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.read_only_functions, vec!["myfunc".to_string()]);
+    }
+
+    #[test]
+    fn test_public_functions() {
+        let ts_src = indoc! {
+            r#"function myfunc() { return ok(true); }
+            export default { public: { myfunc } } satisfies Contract
+            "#
+        };
+
+        let allocator = Allocator::default();
+        let ir = get_tmp_ir(&allocator, ts_src);
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.public_functions, vec!["myfunc".to_string()]);
     }
 }

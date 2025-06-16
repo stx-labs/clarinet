@@ -176,6 +176,14 @@ fn convert_function(
         .flatten()
         .collect();
 
+    let define_type = if ir.read_only_functions.contains(&function.name) {
+        PreSymbolicExpression::atom(ClarityName::from("define-read-only"))
+    } else if ir.public_functions.contains(&function.name) {
+        PreSymbolicExpression::atom(ClarityName::from("define-public"))
+    } else {
+        PreSymbolicExpression::atom(ClarityName::from("define-private"))
+    };
+
     let function_name = to_kebab_case(function.name.as_str());
     let name_expr = PreSymbolicExpression::atom(ClarityName::from(function_name.as_str()));
     let name_and_parameters = if parameters.is_empty() {
@@ -185,7 +193,7 @@ fn convert_function(
     };
 
     Ok(PreSymbolicExpression::list(vec![
-        PreSymbolicExpression::atom(ClarityName::from("define-private")),
+        define_type,
         name_and_parameters,
         expression_converter::convert_function_body(allocator, ir, function)?,
     ]))
@@ -393,6 +401,16 @@ mod test {
             export default { readOnly: { myfunc } } satisfies Contract
             "#
         };
-        // assert_pses_eq(ts_src, r#"(define-read-only (myfunc) true)"#);
+        assert_pses_eq(ts_src, r#"(define-read-only (myfunc) true)"#);
+    }
+
+    #[test]
+    fn test_public_functions() {
+        let ts_src = indoc! {
+            r#"function myfunc() { return ok(true); }
+            export default { public: { myfunc } } satisfies Contract
+            "#
+        };
+        assert_pses_eq(ts_src, r#"(define-public (myfunc) (ok true))"#);
     }
 }
