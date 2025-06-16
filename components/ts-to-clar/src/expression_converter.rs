@@ -10,16 +10,18 @@ use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use oxc_traverse::{traverse_mut_with_ctx, ReusableTraverseCtx, Traverse, TraverseCtx};
 
-use crate::parser::IRFunction;
+use crate::parser::{IRFunction, IR};
 
 struct StatementConverter<'a> {
+    ir: &'a IR<'a>,
     function: &'a IRFunction<'a>,
     expressions: Vec<PreSymbolicExpression>,
 }
 
 impl<'a> StatementConverter<'a> {
-    fn new(function: &'a IRFunction<'a>) -> Self {
+    fn new(ir: &'a IR, function: &'a IRFunction<'a>) -> Self {
         Self {
+            ir,
             function,
             expressions: Vec::new(),
         }
@@ -37,6 +39,16 @@ impl<'a> StatementConverter<'a> {
                     None
                 }
             })
+    }
+
+    fn get_data_var_type(&self, var_name: &str) -> Option<&TypeSignature> {
+        self.ir.data_vars.iter().find_map(|data_var| {
+            if data_var.name == var_name {
+                Some(&data_var.r#type)
+            } else {
+                None
+            }
+        })
     }
 
     /// Convert a numeric literal to a PreSymbolicExpression
@@ -77,7 +89,9 @@ impl<'a> StatementConverter<'a> {
                     None
                 }
             }
-            Expression::Identifier(ident) => self.get_parameter_type(ident.name.as_str()),
+            Expression::Identifier(ident) => self
+                .get_parameter_type(ident.name.as_str())
+                .or_else(|| self.get_data_var_type(ident.name.as_str())),
             _ => None,
         }
     }
@@ -135,7 +149,9 @@ impl<'a> StatementConverter<'a> {
 
                 if is_variadic {
                     let mut operands = Vec::new();
-                    let chain_context_type = self.find_chain_context_type(expr, operator);
+                    let chain_context_type = self
+                        .find_chain_context_type(expr, operator)
+                        .or(context_type);
                     self.collect_operands(
                         &bin_expr.left,
                         operator,
@@ -160,16 +176,54 @@ impl<'a> StatementConverter<'a> {
                 }
             }
             Expression::CallExpression(call_expr) => {
-                let callee = call_expr.callee.get_identifier_reference().unwrap();
-                let callee_atom =
-                    PreSymbolicExpression::atom(ClarityName::from(callee.name.as_str()));
-                let mut args = vec![callee_atom];
+                // Support both identifier and member expression as callee
+                match &call_expr.callee {
+                    Expression::Identifier(ident) => {
+                        let callee_atom =
+                            PreSymbolicExpression::atom(ClarityName::from(ident.name.as_str()));
+                        let mut args = vec![callee_atom];
+                        for arg in &call_expr.arguments {
+                            args.push(self.convert_expression(arg.to_expression(), None));
+                        }
+                        PreSymbolicExpression::list(args)
+                    }
+                    Expression::StaticMemberExpression(member_expr) => {
+                        let data_var_type =
+                            if let Expression::Identifier(ident) = &member_expr.object {
+                                self.get_data_var_type(ident.name.as_str())
+                            } else {
+                                None
+                            };
 
-                for arg in &call_expr.arguments {
-                    args.push(self.convert_expression(arg.to_expression(), None));
+                        if member_expr.property.name == "get" {
+                            let object = self.convert_expression(&member_expr.object, None);
+                            PreSymbolicExpression::list(vec![
+                                PreSymbolicExpression::atom(ClarityName::from("var-get")),
+                                object,
+                            ])
+                        } else if member_expr.property.name == "set" {
+                            let object = self.convert_expression(&member_expr.object, None);
+                            let value = self.convert_expression(
+                                call_expr.arguments[0].to_expression(),
+                                data_var_type,
+                            );
+                            PreSymbolicExpression::list(vec![
+                                PreSymbolicExpression::atom(ClarityName::from("var-set")),
+                                object,
+                                value,
+                            ])
+                        } else {
+                            panic!(
+                                "Unsupported static member property in call: {}",
+                                member_expr.property.name
+                            );
+                        }
+                    }
+                    _ => panic!(
+                        "Unsupported callee type in CallExpression: {:?}",
+                        call_expr.callee
+                    ),
                 }
-
-                PreSymbolicExpression::list(args)
             }
             _ => panic!("Unsupported expression type: {:?}", expr),
         }
@@ -222,8 +276,9 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
 }
 
 /// Convert a TypeScript function to a Clarity expression
-pub fn convert<'a>(
+pub fn convert_function_body<'a>(
     allocator: &'a Allocator,
+    ir: &IR,
     function: &IRFunction<'a>,
 ) -> Result<PreSymbolicExpression, anyhow::Error> {
     let mut program = Program {
@@ -242,7 +297,7 @@ pub fn convert<'a>(
         .semantic
         .into_scoping();
 
-    let mut converter = StatementConverter::new(function);
+    let mut converter = StatementConverter::new(ir, function);
     traverse_mut_with_ctx(
         &mut converter,
         &mut program,
@@ -292,8 +347,8 @@ mod test {
     #[track_caller]
     fn assert_pses_eq(ts_src: &str, expected_clar_source: &str) {
         let allocator = Allocator::default();
-        let expr = get_ir(&allocator, "tmp.clar.ts", ts_src);
-        let result = convert(&allocator, &expr.functions[0]).unwrap();
+        let ir = get_ir(&allocator, "tmp.clar.ts", ts_src);
+        let result = convert_function_body(&allocator, &ir, &ir.functions[0]).unwrap();
         let expected_pse = get_expected_pse(expected_clar_source);
         pretty_assertions::assert_eq!(result, expected_pse);
     }
@@ -374,5 +429,47 @@ mod test {
     fn test_ok_operator() {
         let ts_src = "function okarg(arg: Uint) { return ok(arg + 1); }";
         assert_pses_eq(ts_src, "(ok (+ arg u1))");
+    }
+
+    #[test]
+    fn test_data_var_get() {
+        let ts_src = indoc!(
+            r#"const count = new DataVar<Uint>(0);
+            function getCount() {
+                return count.get();
+            }
+            "#
+        );
+        let expected_clar_src = indoc!(r#"(var-get count)"#);
+
+        assert_pses_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_data_var_set() {
+        let ts_src = indoc!(
+            r#"const count = new DataVar<Int>(0);
+            function increment() {
+                return count.set(count.get() + 1);
+            }
+            "#
+        );
+        let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) 1))"#);
+
+        assert_pses_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_data_var_type_casting() {
+        let ts_src = indoc!(
+            r#"const count = new DataVar<Uint>(0);
+            function increment() {
+                return count.set(count.get() + 1);
+            }
+            "#
+        );
+        let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) u1))"#);
+
+        assert_pses_eq(ts_src, expected_clar_src);
     }
 }

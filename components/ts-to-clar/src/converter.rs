@@ -13,6 +13,7 @@ use oxc_ast::ast::{Expression as OxcExpression, ObjectPropertyKind};
 use crate::{
     expression_converter,
     parser::{IRConstant, IRDataMap, IRDataVar, IRFunction, IR},
+    to_kebab_case,
 };
 
 fn type_signature_to_pse(
@@ -159,6 +160,7 @@ fn convert_data_map(data_map: &IRDataMap) -> Result<PreSymbolicExpression, anyho
 
 fn convert_function(
     allocator: &Allocator,
+    ir: &IR,
     function: &IRFunction,
 ) -> Result<PreSymbolicExpression, anyhow::Error> {
     let parameters: Vec<PreSymbolicExpression> = function
@@ -174,13 +176,18 @@ fn convert_function(
         .flatten()
         .collect();
 
+    let function_name = to_kebab_case(function.name.as_str());
+    let name_expr = PreSymbolicExpression::atom(ClarityName::from(function_name.as_str()));
+    let name_and_parameters = if parameters.is_empty() {
+        PreSymbolicExpression::list(vec![name_expr])
+    } else {
+        PreSymbolicExpression::list(vec![name_expr, PreSymbolicExpression::list(parameters)])
+    };
+
     Ok(PreSymbolicExpression::list(vec![
         PreSymbolicExpression::atom(ClarityName::from("define-private")),
-        PreSymbolicExpression::list(vec![
-            PreSymbolicExpression::atom(ClarityName::from(function.name.as_str())),
-            PreSymbolicExpression::list(parameters),
-        ]),
-        expression_converter::convert(allocator, function)?,
+        name_and_parameters,
+        expression_converter::convert_function_body(allocator, ir, function)?,
     ]))
 }
 
@@ -209,7 +216,7 @@ pub fn convert(allocator: &Allocator, ir: IR) -> Result<Vec<PreSymbolicExpressio
     pses.extend(
         ir.functions
             .iter()
-            .map(|function| convert_function(allocator, function))
+            .map(|function| convert_function(allocator, &ir, function))
             .collect::<Result<Vec<_>, _>>()?,
     );
 
@@ -222,6 +229,7 @@ mod test {
         representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span},
         ClarityName, Value as ClarityValue,
     };
+    use indoc::indoc;
     use oxc_allocator::Allocator;
 
     use crate::parser::get_ir;
@@ -359,20 +367,32 @@ mod test {
     }
 
     #[test]
-    fn test_convert_function() {
+    fn test_function_with_no_parameters() {
+        let ts_src = "function printtrue() { return print(true); }";
+        assert_pses_eq(ts_src, r#"(define-private (printtrue) (print true))"#);
+    }
+
+    #[test]
+    fn test_function_with_parameters() {
         let ts_src = "function printarg(arg: Uint) { return print(arg); }";
         assert_pses_eq(
             ts_src,
             r#"(define-private (printarg (arg uint)) (print arg))"#,
         );
+        let ts_src = "function printarg(arg: StringAscii<16>) { return print(arg); }";
+        assert_pses_eq(
+            ts_src,
+            r#"(define-private (printarg (arg (string-ascii 16))) (print arg))"#,
+        );
     }
 
-    // #[test]
-    // fn test_convert_function() {
-    //     let ts_src = "function printarg(arg: StringAscii<16>) { return print(arg); }";
-    //     assert_pses_eq(
-    //         ts_src,
-    //         r#"(define-private (printarg (arg (string-ascii 16))) (print arg))"#,
-    //     );
-    // }
+    #[test]
+    fn test_read_only_functions() {
+        let ts_src = indoc! {
+            r#"function myfunc() { return true; }
+            export default { readOnly: { myfunc } } satisfies Contract
+            "#
+        };
+        // assert_pses_eq(ts_src, r#"(define-read-only (myfunc) true)"#);
+    }
 }

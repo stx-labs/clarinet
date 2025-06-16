@@ -31,7 +31,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_transpile() {
+    fn test_transpile_toplevel_data() {
         let src = indoc! {
             "const OWNER_ROLE = new Constant<Uint>(1);
             const count = new DataVar<Uint>(0);
