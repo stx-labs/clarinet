@@ -25,6 +25,7 @@ impl<'a> StatementConverter<'a> {
         }
     }
 
+    /// Get the type signature for a parameter by name
     fn get_parameter_type(&self, param_name: &str) -> Option<&TypeSignature> {
         self.function
             .parameters
@@ -38,6 +39,7 @@ impl<'a> StatementConverter<'a> {
             })
     }
 
+    /// Convert a numeric literal to a PreSymbolicExpression
     fn convert_numeric_literal(
         &self,
         value: i128,
@@ -69,45 +71,14 @@ impl<'a> StatementConverter<'a> {
                     _ => return None,
                 };
                 if bin_op == operator {
-                    let left = self.find_chain_context_type(&bin.left, operator);
-                    if left.is_some() {
-                        left
-                    } else {
-                        self.find_chain_context_type(&bin.right, operator)
-                    }
+                    self.find_chain_context_type(&bin.left, operator)
+                        .or_else(|| self.find_chain_context_type(&bin.right, operator))
                 } else {
                     None
                 }
             }
             Expression::Identifier(ident) => self.get_parameter_type(ident.name.as_str()),
             _ => None,
-        }
-    }
-
-    fn collect_operands(
-        &self,
-        expr: &Expression<'a>,
-        operator: &str,
-        operands: &mut Vec<PreSymbolicExpression>,
-        context_type: Option<&'a TypeSignature>,
-    ) {
-        match expr {
-            Expression::BinaryExpression(bin) => {
-                let bin_op = match bin.operator {
-                    oxc_ast::ast::BinaryOperator::Addition => "+",
-                    oxc_ast::ast::BinaryOperator::Subtraction => "-",
-                    oxc_ast::ast::BinaryOperator::Multiplication => "*",
-                    oxc_ast::ast::BinaryOperator::Division => "/",
-                    _ => return,
-                };
-                if bin_op == operator {
-                    self.collect_operands(&bin.left, operator, operands, context_type);
-                    self.collect_operands(&bin.right, operator, operands, context_type);
-                } else {
-                    operands.push(self.convert_expression(expr, context_type));
-                }
-            }
-            _ => operands.push(self.convert_expression(expr, context_type)),
         }
     }
 
@@ -123,27 +94,8 @@ impl<'a> StatementConverter<'a> {
             Expression::NumericLiteral(num_lit) => {
                 self.convert_numeric_literal(num_lit.value as i128, context_type)
             }
-            Expression::CallExpression(call_expr) => {
-                // TODO: callee should be an authorized function name
-                // `clarity::functions::NativeFunctions::ALL_NAMES` can be used
-                let callee = call_expr.callee.get_identifier_reference().unwrap();
-                let callee_atom =
-                    PreSymbolicExpression::atom(ClarityName::from(callee.name.as_str()));
-                let arg = call_expr.arguments.first().unwrap().to_expression();
-
-                match &arg {
-                    Expression::BooleanLiteral(bool_lit) => PreSymbolicExpression::list(vec![
-                        callee_atom,
-                        PreSymbolicExpression::atom(ClarityName::from(
-                            bool_lit.value.to_string().as_str(),
-                        )),
-                    ]),
-                    Expression::Identifier(ident) => PreSymbolicExpression::list(vec![
-                        callee_atom,
-                        PreSymbolicExpression::atom(ClarityName::from(ident.name.as_str())),
-                    ]),
-                    _ => panic!("Only boolean literals and identifiers are supported for now"),
-                }
+            Expression::BooleanLiteral(bool_lit) => {
+                PreSymbolicExpression::atom(ClarityName::from(bool_lit.value.to_string().as_str()))
             }
             Expression::BinaryExpression(bin_expr) => {
                 use oxc_ast::ast::BinaryOperator;
@@ -207,7 +159,47 @@ impl<'a> StatementConverter<'a> {
                     ])
                 }
             }
-            _ => panic!("Only function calls and binary expressions are supported for now"),
+            Expression::CallExpression(call_expr) => {
+                let callee = call_expr.callee.get_identifier_reference().unwrap();
+                let callee_atom =
+                    PreSymbolicExpression::atom(ClarityName::from(callee.name.as_str()));
+                let mut args = vec![callee_atom];
+
+                for arg in &call_expr.arguments {
+                    args.push(self.convert_expression(arg.to_expression(), None));
+                }
+
+                PreSymbolicExpression::list(args)
+            }
+            _ => panic!("Unsupported expression type: {:?}", expr),
+        }
+    }
+
+    /// Collect operands for variadic operators
+    fn collect_operands(
+        &self,
+        expr: &Expression<'a>,
+        operator: &str,
+        operands: &mut Vec<PreSymbolicExpression>,
+        chain_context_type: Option<&'a TypeSignature>,
+    ) {
+        match expr {
+            Expression::BinaryExpression(bin) => {
+                let bin_op = match bin.operator {
+                    oxc_ast::ast::BinaryOperator::Addition => "+",
+                    oxc_ast::ast::BinaryOperator::Subtraction => "-",
+                    oxc_ast::ast::BinaryOperator::Multiplication => "*",
+                    oxc_ast::ast::BinaryOperator::Division => "/",
+                    _ => return,
+                };
+                if bin_op == operator {
+                    self.collect_operands(&bin.left, operator, operands, chain_context_type);
+                    self.collect_operands(&bin.right, operator, operands, chain_context_type);
+                } else {
+                    operands.push(self.convert_expression(expr, chain_context_type));
+                }
+            }
+            _ => operands.push(self.convert_expression(expr, chain_context_type)),
         }
     }
 }
@@ -227,10 +219,9 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
             _ => {}
         }
     }
-
-    fn enter_expression(&mut self, node: &mut Expression<'a>, ctx: &mut TraverseCtx<'a>) {}
 }
 
+/// Convert a TypeScript function to a Clarity expression
 pub fn convert<'a>(
     allocator: &'a Allocator,
     function: &IRFunction<'a>,
@@ -274,6 +265,7 @@ pub fn convert<'a>(
 #[cfg(test)]
 mod test {
     use clarity::vm::representations::{PreSymbolicExpressionType, Span};
+    use indoc::indoc;
     use oxc_allocator::Allocator;
 
     use crate::parser::get_ir;
@@ -297,6 +289,7 @@ mod test {
         expected_pse.into_iter().next().unwrap()
     }
 
+    #[track_caller]
     fn assert_pses_eq(ts_src: &str, expected_clar_source: &str) {
         let allocator = Allocator::default();
         let expr = get_ir(&allocator, "tmp.clar.ts", ts_src);
@@ -377,9 +370,9 @@ mod test {
         assert_pses_eq(ts_src, "(* 1 2 a)");
     }
 
-    // #[test]
-    // fn test_ok_operator() {
-    //     let ts_src = "function okarg(arg: Uint) { return ok(arg + 1); }";
-    //     assert_pses_eq(ts_src, "(ok (+ arg u1))");
-    // }
+    #[test]
+    fn test_ok_operator() {
+        let ts_src = "function okarg(arg: Uint) { return ok(arg + 1); }";
+        assert_pses_eq(ts_src, "(ok (+ arg u1))");
+    }
 }
