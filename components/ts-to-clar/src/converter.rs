@@ -177,11 +177,11 @@ fn convert_function(
         .collect();
 
     let define_type = if ir.read_only_functions.contains(&function.name) {
-        PreSymbolicExpression::atom(ClarityName::from("define-read-only"))
+        "define-read-only"
     } else if ir.public_functions.contains(&function.name) {
-        PreSymbolicExpression::atom(ClarityName::from("define-public"))
+        "define-public"
     } else {
-        PreSymbolicExpression::atom(ClarityName::from("define-private"))
+        "define-private"
     };
 
     let function_name = to_kebab_case(function.name.as_str());
@@ -193,7 +193,7 @@ fn convert_function(
     };
 
     Ok(PreSymbolicExpression::list(vec![
-        define_type,
+        PreSymbolicExpression::atom(ClarityName::from(define_type)),
         name_and_parameters,
         expression_converter::convert_function_body(allocator, ir, function)?,
     ]))
@@ -208,12 +208,14 @@ pub fn convert(allocator: &Allocator, ir: IR) -> Result<Vec<PreSymbolicExpressio
             .map(convert_constant)
             .collect::<Result<Vec<_>, _>>()?,
     );
+
     pses.extend(
         ir.data_vars
             .iter()
             .map(convert_data_var)
             .collect::<Result<Vec<_>, _>>()?,
     );
+
     pses.extend(
         ir.data_maps
             .iter()
@@ -259,6 +261,7 @@ mod test {
         }
     }
 
+    #[track_caller]
     fn assert_pses_eq(ts_source: &str, expected_clar_source: &str) {
         let mut expected_pse = clarity::vm::ast::parser::v2::parse(expected_clar_source).unwrap();
         set_pse_span_to_0(&mut expected_pse);

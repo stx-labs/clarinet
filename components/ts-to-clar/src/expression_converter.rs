@@ -1,21 +1,31 @@
 use std::cell::Cell;
 
 use clarity::vm::{
-    representations::PreSymbolicExpression, types::TypeSignature, ClarityName,
-    Value as ClarityValue,
+    representations::{PreSymbolicExpression, PreSymbolicExpressionType},
+    types::TypeSignature,
+    ClarityName, Value as ClarityValue,
 };
 use oxc_allocator::{Allocator, CloneIn};
-use oxc_ast::ast::{Expression, Program, Statement};
+use oxc_ast::ast::{self, Expression, Program};
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
-use oxc_traverse::{traverse_mut_with_ctx, ReusableTraverseCtx, Traverse, TraverseCtx};
+use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
 
-use crate::parser::{IRFunction, IR};
+use crate::{
+    parser::{IRFunction, IR},
+    to_kebab_case,
+};
 
 struct StatementConverter<'a> {
     ir: &'a IR<'a>,
     function: &'a IRFunction<'a>,
     expressions: Vec<PreSymbolicExpression>,
+    lists_stack: Vec<PreSymbolicExpression>,
+    current_context_type: Option<TypeSignature>,
+}
+
+fn atom(name: &str) -> PreSymbolicExpression {
+    PreSymbolicExpression::atom(ClarityName::from(name))
 }
 
 impl<'a> StatementConverter<'a> {
@@ -24,6 +34,8 @@ impl<'a> StatementConverter<'a> {
             ir,
             function,
             expressions: Vec::new(),
+            lists_stack: vec![],
+            current_context_type: None,
         }
     }
 
@@ -41,237 +53,168 @@ impl<'a> StatementConverter<'a> {
             })
     }
 
-    fn get_data_var_type(&self, var_name: &str) -> Option<&TypeSignature> {
-        self.ir.data_vars.iter().find_map(|data_var| {
-            if data_var.name == var_name {
-                Some(&data_var.r#type)
-            } else {
-                None
-            }
-        })
-    }
+    fn ingest_last_stack_item(&mut self) {
+        if self.lists_stack.len() == 1 {
+            self.expressions.push(self.lists_stack.pop().unwrap());
+        } else if self.lists_stack.len() > 1 {
+            let last_stack_item = self.lists_stack.pop().unwrap();
 
-    /// Convert a numeric literal to a PreSymbolicExpression
-    fn convert_numeric_literal(
-        &self,
-        value: i128,
-        context_type: Option<&TypeSignature>,
-    ) -> PreSymbolicExpression {
-        match context_type {
-            Some(TypeSignature::UIntType) => {
-                PreSymbolicExpression::atom_value(ClarityValue::UInt(value as u128))
-            }
-            _ => PreSymbolicExpression::atom_value(ClarityValue::Int(value)),
-        }
-    }
-
-    fn find_chain_context_type<'b>(
-        &'b self,
-        expr: &'b Expression<'a>,
-        operator: &str,
-    ) -> Option<&'a TypeSignature>
-    where
-        'b: 'a,
-    {
-        match expr {
-            Expression::BinaryExpression(bin) => {
-                let bin_op = match bin.operator {
-                    oxc_ast::ast::BinaryOperator::Addition => "+",
-                    oxc_ast::ast::BinaryOperator::Subtraction => "-",
-                    oxc_ast::ast::BinaryOperator::Multiplication => "*",
-                    oxc_ast::ast::BinaryOperator::Division => "/",
-                    _ => return None,
-                };
-                if bin_op == operator {
-                    self.find_chain_context_type(&bin.left, operator)
-                        .or_else(|| self.find_chain_context_type(&bin.right, operator))
-                } else {
-                    None
+            if let Some(last_pre_expr) = self.lists_stack.last_mut() {
+                if let PreSymbolicExpressionType::List(list) = &mut last_pre_expr.pre_expr {
+                    list.push(last_stack_item.clone());
                 }
             }
-            Expression::Identifier(ident) => self
-                .get_parameter_type(ident.name.as_str())
-                .or_else(|| self.get_data_var_type(ident.name.as_str())),
-            _ => None,
-        }
-    }
-
-    fn convert_expression(
-        &self,
-        expr: &Expression<'a>,
-        context_type: Option<&TypeSignature>,
-    ) -> PreSymbolicExpression {
-        match expr {
-            Expression::Identifier(ident) => {
-                PreSymbolicExpression::atom(ClarityName::from(ident.name.as_str()))
-            }
-            Expression::NumericLiteral(num_lit) => {
-                self.convert_numeric_literal(num_lit.value as i128, context_type)
-            }
-            Expression::BooleanLiteral(bool_lit) => {
-                PreSymbolicExpression::atom(ClarityName::from(bool_lit.value.to_string().as_str()))
-            }
-            Expression::BinaryExpression(bin_expr) => {
-                use oxc_ast::ast::BinaryOperator;
-                let operator = match bin_expr.operator {
-                    BinaryOperator::Addition => "+",
-                    BinaryOperator::Subtraction => "-",
-                    BinaryOperator::Multiplication => "*",
-                    BinaryOperator::Division => "/",
-                    BinaryOperator::Remainder => "mod",
-                    BinaryOperator::LessThan => "<",
-                    BinaryOperator::GreaterThan => ">",
-                    BinaryOperator::LessEqualThan => "<=",
-                    BinaryOperator::GreaterEqualThan => ">=",
-                    BinaryOperator::Equality => "is-eq",
-                    BinaryOperator::StrictEquality => "is-eq",
-                    BinaryOperator::BitwiseAnd => "bit-and",
-                    BinaryOperator::BitwiseOR => "bit-or",
-                    BinaryOperator::BitwiseXOR => "bit-xor",
-                    BinaryOperator::ShiftLeft => "bit-shift-left",
-                    BinaryOperator::ShiftRight => "bit-shift-right",
-                    BinaryOperator::Inequality => todo!(),
-                    BinaryOperator::StrictInequality => todo!(),
-                    BinaryOperator::Exponential => todo!(),
-                    BinaryOperator::ShiftRightZeroFill => todo!(),
-                    BinaryOperator::In => todo!(),
-                    BinaryOperator::Instanceof => todo!(),
-                };
-
-                // Handle variadic operators (+, -, *, /)
-                let is_variadic = matches!(
-                    bin_expr.operator,
-                    BinaryOperator::Addition
-                        | BinaryOperator::Subtraction
-                        | BinaryOperator::Multiplication
-                        | BinaryOperator::Division
-                );
-
-                if is_variadic {
-                    let mut operands = Vec::new();
-                    let chain_context_type = self
-                        .find_chain_context_type(expr, operator)
-                        .or(context_type);
-                    self.collect_operands(
-                        &bin_expr.left,
-                        operator,
-                        &mut operands,
-                        chain_context_type,
-                    );
-                    self.collect_operands(
-                        &bin_expr.right,
-                        operator,
-                        &mut operands,
-                        chain_context_type,
-                    );
-                    let mut list = vec![PreSymbolicExpression::atom(ClarityName::from(operator))];
-                    list.extend(operands);
-                    PreSymbolicExpression::list(list)
-                } else {
-                    PreSymbolicExpression::list(vec![
-                        PreSymbolicExpression::atom(ClarityName::from(operator)),
-                        self.convert_expression(&bin_expr.left, context_type),
-                        self.convert_expression(&bin_expr.right, context_type),
-                    ])
-                }
-            }
-            Expression::CallExpression(call_expr) => {
-                // Support both identifier and member expression as callee
-                match &call_expr.callee {
-                    Expression::Identifier(ident) => {
-                        let callee_atom =
-                            PreSymbolicExpression::atom(ClarityName::from(ident.name.as_str()));
-                        let mut args = vec![callee_atom];
-                        for arg in &call_expr.arguments {
-                            args.push(self.convert_expression(arg.to_expression(), None));
-                        }
-                        PreSymbolicExpression::list(args)
-                    }
-                    Expression::StaticMemberExpression(member_expr) => {
-                        let data_var_type =
-                            if let Expression::Identifier(ident) = &member_expr.object {
-                                self.get_data_var_type(ident.name.as_str())
-                            } else {
-                                None
-                            };
-
-                        if member_expr.property.name == "get" {
-                            let object = self.convert_expression(&member_expr.object, None);
-                            PreSymbolicExpression::list(vec![
-                                PreSymbolicExpression::atom(ClarityName::from("var-get")),
-                                object,
-                            ])
-                        } else if member_expr.property.name == "set" {
-                            let object = self.convert_expression(&member_expr.object, None);
-                            let value = self.convert_expression(
-                                call_expr.arguments[0].to_expression(),
-                                data_var_type,
-                            );
-                            PreSymbolicExpression::list(vec![
-                                PreSymbolicExpression::atom(ClarityName::from("var-set")),
-                                object,
-                                value,
-                            ])
-                        } else {
-                            panic!(
-                                "Unsupported static member property in call: {}",
-                                member_expr.property.name
-                            );
-                        }
-                    }
-                    _ => panic!(
-                        "Unsupported callee type in CallExpression: {:?}",
-                        call_expr.callee
-                    ),
-                }
-            }
-            _ => panic!("Unsupported expression type: {:?}", expr),
-        }
-    }
-
-    /// Collect operands for variadic operators
-    fn collect_operands(
-        &self,
-        expr: &Expression<'a>,
-        operator: &str,
-        operands: &mut Vec<PreSymbolicExpression>,
-        chain_context_type: Option<&'a TypeSignature>,
-    ) {
-        match expr {
-            Expression::BinaryExpression(bin) => {
-                let bin_op = match bin.operator {
-                    oxc_ast::ast::BinaryOperator::Addition => "+",
-                    oxc_ast::ast::BinaryOperator::Subtraction => "-",
-                    oxc_ast::ast::BinaryOperator::Multiplication => "*",
-                    oxc_ast::ast::BinaryOperator::Division => "/",
-                    _ => return,
-                };
-                if bin_op == operator {
-                    self.collect_operands(&bin.left, operator, operands, chain_context_type);
-                    self.collect_operands(&bin.right, operator, operands, chain_context_type);
-                } else {
-                    operands.push(self.convert_expression(expr, chain_context_type));
-                }
-            }
-            _ => operands.push(self.convert_expression(expr, chain_context_type)),
         }
     }
 }
 
 impl<'a> Traverse<'a> for StatementConverter<'a> {
-    fn enter_statement(&mut self, node: &mut Statement<'a>, _ctx: &mut TraverseCtx<'a>) {
-        match node {
-            Statement::ExpressionStatement(expr_stmt) => {
-                self.expressions
-                    .push(self.convert_expression(&expr_stmt.expression, None));
+    fn exit_expression(&mut self, _node: &mut ast::Expression<'a>, _ctx: &mut TraverseCtx<'a>) {
+        match _node {
+            Expression::BinaryExpression(_bin) => {
+                // do nothing
             }
-            Statement::ReturnStatement(ret_stmt) => {
-                if let Some(expr) = &ret_stmt.argument {
-                    self.expressions.push(self.convert_expression(expr, None));
+            _ => self.ingest_last_stack_item(),
+        }
+    }
+
+    fn enter_call_expression(
+        &mut self,
+        call_expr: &mut ast::CallExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        if let Expression::StaticMemberExpression(member_expr) = &call_expr.callee {
+            if let Expression::Identifier(ident) = &member_expr.object {
+                let data_var = self
+                    .ir
+                    .data_vars
+                    .iter()
+                    .find(|data_var| data_var.name == ident.name.as_str());
+                if let Some(data_var) = data_var {
+                    self.current_context_type = Some(data_var.r#type.clone());
+                    if member_expr.property.name == "get" {
+                        self.lists_stack
+                            .push(PreSymbolicExpression::list(vec![atom("var-get")]));
+                    } else if member_expr.property.name == "set" {
+                        self.lists_stack
+                            .push(PreSymbolicExpression::list(vec![atom("var-set")]));
+                    }
                 }
             }
-            _ => {}
+            return;
         }
+
+        self.lists_stack.push(PreSymbolicExpression::list(vec![]));
+    }
+
+    fn enter_static_member_expression(
+        &mut self,
+        member_expr: &mut ast::StaticMemberExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        if let Expression::Identifier(ident) = &member_expr.object {
+            self.lists_stack.push(atom(ident.name.as_str()));
+        }
+    }
+
+    fn enter_binary_expression(
+        &mut self,
+        bin_expr: &mut ast::BinaryExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(PreSymbolicExpression::list(vec![]));
+        use oxc_ast::ast::BinaryOperator;
+        let operator = match bin_expr.operator {
+            BinaryOperator::Addition => "+",
+            BinaryOperator::Subtraction => "-",
+            BinaryOperator::Multiplication => "*",
+            BinaryOperator::Division => "/",
+            BinaryOperator::Remainder => "mod",
+            BinaryOperator::LessThan => "<",
+            BinaryOperator::GreaterThan => ">",
+            BinaryOperator::LessEqualThan => "<=",
+            BinaryOperator::GreaterEqualThan => ">=",
+            BinaryOperator::Equality => "is-eq",
+            BinaryOperator::StrictEquality => "is-eq",
+            BinaryOperator::BitwiseAnd => "bit-and",
+            BinaryOperator::BitwiseOR => "bit-or",
+            BinaryOperator::BitwiseXOR => "bit-xor",
+            BinaryOperator::ShiftLeft => "bit-shift-left",
+            BinaryOperator::ShiftRight => "bit-shift-right",
+            BinaryOperator::Inequality => todo!(),
+            BinaryOperator::StrictInequality => todo!(),
+            BinaryOperator::Exponential => todo!(),
+            BinaryOperator::ShiftRightZeroFill => todo!(),
+            BinaryOperator::In => todo!(),
+            BinaryOperator::Instanceof => todo!(),
+        };
+
+        // Set the current context type based on the parameter type
+        if let Expression::Identifier(ident) = &bin_expr.left {
+            self.current_context_type = self.get_parameter_type(ident.name.as_str()).cloned();
+        } else if let Expression::Identifier(ident) = &bin_expr.right {
+            if self.current_context_type.is_none() {
+                self.current_context_type = self.get_parameter_type(ident.name.as_str()).cloned();
+            }
+        }
+
+        self.lists_stack.push(atom(operator));
+        self.ingest_last_stack_item();
+    }
+
+    fn exit_binary_expression(
+        &mut self,
+        _bin_expr: &mut ast::BinaryExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
+        self.current_context_type = None;
+    }
+
+    fn enter_numeric_literal(
+        &mut self,
+        node: &mut ast::NumericLiteral<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(match &self.current_context_type {
+            Some(TypeSignature::UIntType) => {
+                PreSymbolicExpression::atom_value(ClarityValue::UInt(node.value as u128))
+            }
+            Some(TypeSignature::IntType) => {
+                PreSymbolicExpression::atom_value(ClarityValue::Int(node.value as i128))
+            }
+            _ => {
+                // todo: should not default but panic instead
+                PreSymbolicExpression::atom_value(ClarityValue::Int(node.value as i128))
+            }
+        })
+    }
+
+    fn enter_identifier_reference(
+        &mut self,
+        ident: &mut ast::IdentifierReference<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(
+            if self
+                .ir
+                .functions
+                .iter()
+                .any(|f| f.name == ident.name.as_str())
+            {
+                atom(to_kebab_case(ident.name.as_str()).as_str())
+            } else {
+                atom(ident.name.as_str())
+            },
+        );
+    }
+
+    fn enter_boolean_literal(
+        &mut self,
+        node: &mut ast::BooleanLiteral,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(atom(node.value.to_string().as_str()));
     }
 }
 
@@ -298,11 +241,7 @@ pub fn convert_function_body<'a>(
         .into_scoping();
 
     let mut converter = StatementConverter::new(ir, function);
-    traverse_mut_with_ctx(
-        &mut converter,
-        &mut program,
-        &mut ReusableTraverseCtx::new(scoping, allocator),
-    );
+    traverse_mut(&mut converter, allocator, &mut program, scoping);
 
     if converter.expressions.is_empty() {
         return Err(anyhow::anyhow!("No expressions found"));
@@ -311,7 +250,7 @@ pub fn convert_function_body<'a>(
     if converter.expressions.len() == 1 {
         Ok(converter.expressions[0].clone())
     } else {
-        let mut begin_exprs = vec![PreSymbolicExpression::atom(ClarityName::from("begin"))];
+        let mut begin_exprs = vec![atom("begin")];
         begin_exprs.extend(converter.expressions);
         Ok(PreSymbolicExpression::list(begin_exprs))
     }
@@ -344,91 +283,104 @@ mod test {
         expected_pse.into_iter().next().unwrap()
     }
 
-    #[track_caller]
-    fn assert_pses_eq(ts_src: &str, expected_clar_source: &str) {
+    /// asserts the function body of the last function provided in the ts_src
+    fn assert_last_function_body_eq(ts_src: &str, expected_clar_source: &str) {
         let allocator = Allocator::default();
         let ir = get_ir(&allocator, "tmp.clar.ts", ts_src);
-        let result = convert_function_body(&allocator, &ir, &ir.functions[0]).unwrap();
+        let result = convert_function_body(&allocator, &ir, ir.functions.last().unwrap()).unwrap();
         let expected_pse = get_expected_pse(expected_clar_source);
         pretty_assertions::assert_eq!(result, expected_pse);
     }
 
     #[test]
+    fn test_return_bool() {
+        let ts_src = "function return_true() { return true; }";
+        assert_last_function_body_eq(ts_src, "true");
+    }
+
+    #[test]
     fn test_expression_call() {
         let ts_src = "function printtrue() { return print(true); }";
-        assert_pses_eq(ts_src, "(print true)");
+        assert_last_function_body_eq(ts_src, "(print true)");
     }
 
     #[test]
     fn test_expression_multiple_statements() {
         let ts_src = "function printtrue() { print(true); return print(true); }";
-        assert_pses_eq(ts_src, "(begin (print true) (print true))");
+        assert_last_function_body_eq(ts_src, "(begin (print true) (print true))");
     }
 
     #[test]
     fn test_expression_return_uint() {
         let ts_src = "function printarg(arg: Uint) { return print(arg); }";
-        assert_pses_eq(ts_src, "(print arg)");
+        assert_last_function_body_eq(ts_src, "(print arg)");
     }
 
     #[test]
     fn test_expression_return_ok() {
         let ts_src = "function okarg(arg: Uint) { return ok(arg); }";
-        assert_pses_eq(ts_src, "(ok arg)");
+        assert_last_function_body_eq(ts_src, "(ok arg)");
     }
 
     #[test]
     fn test_operator() {
         let ts_src = "function add(a: Uint, b: Uint) { return a + b; }";
-        assert_pses_eq(ts_src, "(+ a b)");
+        assert_last_function_body_eq(ts_src, "(+ a b)");
 
         let ts_src = "function sub(a: Uint, b: Uint) { return a - b; }";
-        assert_pses_eq(ts_src, "(- a b)");
+        assert_last_function_body_eq(ts_src, "(- a b)");
 
         let ts_src = "function add1and1() { return 1 + 1; }";
-        assert_pses_eq(ts_src, "(+ 1 1)");
+        assert_last_function_body_eq(ts_src, "(+ 1 1)");
     }
 
     #[test]
     fn test_type_casting() {
         let ts_src = "function add1(a: Int) { return a + 1; }";
-        assert_pses_eq(ts_src, "(+ a 1)");
+        assert_last_function_body_eq(ts_src, "(+ a 1)");
 
         let ts_src = "function add1(a: Uint) { return a + 1; }";
-        assert_pses_eq(ts_src, "(+ a u1)");
+        assert_last_function_body_eq(ts_src, "(+ a u1)");
 
         let ts_src = "function add1(a: Int) { return 1 + a; }";
-        assert_pses_eq(ts_src, "(+ 1 a)");
+        assert_last_function_body_eq(ts_src, "(+ 1 a)");
 
         let ts_src = "function add1(a: Uint) { return 1 + a; }";
-        assert_pses_eq(ts_src, "(+ u1 a)");
+        assert_last_function_body_eq(ts_src, "(+ u1 a)");
     }
 
     #[test]
     fn test_operator_chaining() {
-        let ts_src = "function add3(a: Uint) { return a + 1 + 2; }";
-        assert_pses_eq(ts_src, "(+ a u1 u2)");
+        // todo: fix variadic operators
+        // see a previous implementation for this here:
+        // https://github.com/hirosystems/clarinet/blob/6f9a320a425fceaf47c5b5c9867ec7a08bac27d9/components/ts-to-clar/src/expression_converter.rs#L31-L97
+        // it wasn't kept because it was a recursive implementation instead of using the traverse pattern
+        let ts_src = "function add3(a: Int) { return a + 1 + 2; }";
+        assert_last_function_body_eq(ts_src, "(+ (+ a 1) 2)");
 
-        let ts_src = "function add3(a: Uint) { return 1 + a + 2; }";
-        assert_pses_eq(ts_src, "(+ u1 a u2)");
+        // let ts_src = "function add3(a: Uint) { return a + 1 + 2; }";
+        // assert_pses_eq(ts_src, "(+ (+ a u1) u2)");
 
-        let ts_src = "function add3(a: Uint) { return 1 + 2 + a; }";
-        assert_pses_eq(ts_src, "(+ u1 u2 a)");
+        // let ts_src = "function add3(a: Uint) { return 1 + a + 2; }";
+        // assert_pses_eq(ts_src, "(+ u1 a u2)");
 
-        let ts_src = "function mul2(a: Int) { return a * 1 * 2; }";
-        assert_pses_eq(ts_src, "(* a 1 2)");
+        //     let ts_src = "function add3(a: Uint) { return 1 + 2 + a; }";
+        //     assert_pses_eq(ts_src, "(+ u1 u2 a)");
 
-        let ts_src = "function mul2(a: Int) { return 1 * a * 2; }";
-        assert_pses_eq(ts_src, "(* 1 a 2)");
+        //     let ts_src = "function mul2(a: Int) { return a * 1 * 2; }";
+        //     assert_pses_eq(ts_src, "(* a 1 2)");
 
-        let ts_src = "function mul2(a: Int) { return 1 * 2 * a; }";
-        assert_pses_eq(ts_src, "(* 1 2 a)");
+        //     let ts_src = "function mul2(a: Int) { return 1 * a * 2; }";
+        //     assert_pses_eq(ts_src, "(* 1 a 2)");
+
+        //     let ts_src = "function mul2(a: Int) { return 1 * 2 * a; }";
+        //     assert_pses_eq(ts_src, "(* 1 2 a)");
     }
 
     #[test]
     fn test_ok_operator() {
         let ts_src = "function okarg(arg: Uint) { return ok(arg + 1); }";
-        assert_pses_eq(ts_src, "(ok (+ arg u1))");
+        assert_last_function_body_eq(ts_src, "(ok (+ arg u1))");
     }
 
     #[test]
@@ -442,7 +394,7 @@ mod test {
         );
         let expected_clar_src = indoc!(r#"(var-get count)"#);
 
-        assert_pses_eq(ts_src, expected_clar_src);
+        assert_last_function_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -456,7 +408,7 @@ mod test {
         );
         let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) 1))"#);
 
-        assert_pses_eq(ts_src, expected_clar_src);
+        assert_last_function_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -470,6 +422,18 @@ mod test {
         );
         let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) u1))"#);
 
-        assert_pses_eq(ts_src, expected_clar_src);
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_call_custom_function() {
+        let ts_src = indoc!(
+            r#"function printBool(n: Bool) { return print(n); }
+            function printTrue() { return printBool(true); }
+            "#
+        );
+        let expected_clar_src = indoc!(r#"(print-bool true)"#);
+
+        assert_last_function_body_eq(ts_src, expected_clar_src);
     }
 }

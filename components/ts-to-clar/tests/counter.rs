@@ -11,12 +11,17 @@ fn test_counter() {
         }
 
         function getCount() {
-            print(count.get());
+            printCount();
             return count.get();
         }
 
         function increment() {
             return count.set(count.get() + 1);
+        }
+
+        function add(n: Uint) {
+            print(n);
+            return count.get() + n;
         }
 
         export default { readOnly: { getCount }, public: { increment } } satisfies Contract
@@ -33,12 +38,18 @@ fn test_counter() {
             )
             (define-read-only (get-count)
               (begin
-                (print (var-get count))
+                (print-count)
                 (var-get count)
               )
             )
             (define-public (increment)
               (var-set count (+ (var-get count) u1))
+            )
+            (define-private (add (n uint))
+              (begin
+                (print n)
+                (+ (var-get count) n)
+              )
             )
             "#
         }

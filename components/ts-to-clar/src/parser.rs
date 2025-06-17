@@ -18,9 +18,8 @@ use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 
-use oxc_traverse::{traverse_mut_with_ctx, ReusableTraverseCtx, Traverse, TraverseCtx};
+use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
 
-use clarity::vm::callables::DefineType;
 use clarity::vm::types::{SequenceSubtype, TupleTypeSignature, TypeSignature};
 use clarity::vm::ClarityName;
 
@@ -43,11 +42,11 @@ pub struct IRDataMap {
     pub value_type: TypeSignature,
 }
 
+#[derive(Debug)]
 pub struct IRFunction<'a> {
     pub name: String,
-    pub define_type: DefineType,
     pub parameters: Vec<(String, TypeSignature)>,
-    pub return_type: Option<TypeSignature>,
+    pub _return_type: Option<TypeSignature>,
     pub body: oxc_allocator::Vec<'a, Statement<'a>>,
 }
 
@@ -283,9 +282,8 @@ impl<'a> Traverse<'a> for IR<'a> {
 
         self.functions.push(IRFunction {
             name,
-            define_type: DefineType::Private,
             parameters: params,
-            return_type,
+            _return_type: return_type,
             body: body.statements.clone_in(self.allocator),
         });
     }
@@ -302,42 +300,51 @@ impl<'a> Traverse<'a> for IR<'a> {
         node: &mut oxc_ast::ast::ExportDefaultDeclaration<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
-        if let oxc_ast::ast::ExportDefaultDeclarationKind::TSSatisfiesExpression(boxed_expr) =
-            &node.declaration
-        {
-            if let Some(type_annotation) = &boxed_expr.type_annotation.get_identifier_reference() {
-                if type_annotation.name != "Contract" {
-                    panic!("Expected Contract type annotation");
-                }
-            }
+        let boxed_expr = match &node.declaration {
+            oxc_ast::ast::ExportDefaultDeclarationKind::TSSatisfiesExpression(expr) => expr,
+            _ => return,
+        };
 
-            if let Expression::ObjectExpression(object_expression) = &boxed_expr.expression {
-                for prop in &object_expression.properties {
-                    if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                        if let PropertyKey::StaticIdentifier(ident) = &prop.key {
-                            if let Expression::ObjectExpression(obj) = &prop.value {
-                                for prop in &obj.properties {
-                                    if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                                        if let PropertyKey::StaticIdentifier(func_ident) = &prop.key
-                                        {
-                                            if ident.name.as_str() == "readOnly" {
-                                                self.read_only_functions
-                                                    .push(func_ident.name.to_string());
-                                            } else if ident.name.as_str() == "public" {
-                                                self.public_functions
-                                                    .push(func_ident.name.to_string());
-                                            } else {
-                                                panic!(
-                                                    "Exported property {} will be ignored",
-                                                    ident.name
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+        if let Some(type_annotation) = &boxed_expr.type_annotation.get_identifier_reference() {
+            if type_annotation.name != "Contract" {
+                panic!("Expected Contract type annotation");
+            }
+        }
+
+        let object_expression = match &boxed_expr.expression {
+            Expression::ObjectExpression(expr) => expr,
+            _ => return,
+        };
+
+        for prop in &object_expression.properties {
+            let (section_name, func_obj) = match prop {
+                ObjectPropertyKind::ObjectProperty(prop) => {
+                    let section = match &prop.key {
+                        PropertyKey::StaticIdentifier(ident) => ident.name.as_str(),
+                        _ => continue,
+                    };
+                    let func_obj = match &prop.value {
+                        Expression::ObjectExpression(obj) => obj,
+                        _ => continue,
+                    };
+                    (section, func_obj)
+                }
+                _ => continue,
+            };
+
+            for func_prop in &func_obj.properties {
+                let func_name = match func_prop {
+                    ObjectPropertyKind::ObjectProperty(prop) => match &prop.key {
+                        PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
+                        _ => continue,
+                    },
+                    _ => continue,
+                };
+
+                match section_name {
+                    "readOnly" => self.read_only_functions.push(func_name),
+                    "public" => self.public_functions.push(func_name),
+                    _ => panic!("Exported property {} will be ignored", section_name),
                 }
             }
         }
@@ -361,11 +368,7 @@ pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) ->
         .build(&module)
         .semantic
         .into_scoping();
-    traverse_mut_with_ctx(
-        &mut ir,
-        &mut module,
-        &mut ReusableTraverseCtx::new(scoping, allocator),
-    );
+    traverse_mut(&mut ir, allocator, &mut module, scoping);
 
     ir
 }
@@ -377,7 +380,6 @@ mod test {
     };
 
     use clarity::vm::{
-        callables::DefineType,
         types::{
             TupleTypeSignature,
             TypeSignature::{self, *},
@@ -748,8 +750,7 @@ mod test {
         let expected_params = vec![("a".to_string(), IntType), ("b".to_string(), IntType)];
         assert_eq!(func.name, "add");
         assert_eq!(func.parameters, expected_params);
-        assert_eq!(func.return_type, Some(IntType));
-        assert_eq!(func.define_type, DefineType::Private);
+        assert_eq!(func._return_type, Some(IntType));
         assert_eq!(func.body.len(), 1);
         matches!(func.body[0], Statement::ReturnStatement(_));
     }
@@ -765,7 +766,7 @@ mod test {
         let func = &ir.functions[0];
         assert_eq!(func.name, "returntrue");
         assert_eq!(func.parameters, vec![]);
-        assert_eq!(func.return_type, None);
+        assert_eq!(func._return_type, None);
     }
 
     #[test]
@@ -784,21 +785,21 @@ mod test {
         assert_eq!(func.name, "setN");
         let expected_params = vec![("newValue".to_string(), IntType)];
         assert_eq!(func.parameters, expected_params);
-        assert_eq!(func.return_type, None);
+        assert_eq!(func._return_type, None);
     }
 
     #[test]
     fn test_read_only_functions() {
         let ts_src = indoc! {
-            r#"function myfunc() { return true; }
-            export default { readOnly: { myfunc } } satisfies Contract
+            r#"function myFunc() { return true; }
+            export default { readOnly: { myFunc } } satisfies Contract
             "#
         };
 
         let allocator = Allocator::default();
         let ir = get_tmp_ir(&allocator, ts_src);
         assert_eq!(ir.functions.len(), 1);
-        assert_eq!(ir.read_only_functions, vec!["myfunc".to_string()]);
+        assert_eq!(ir.read_only_functions, vec!["myFunc".to_string()]);
     }
 
     #[test]
