@@ -117,7 +117,7 @@ fn extract_type(
     }
 }
 
-fn ts_to_clar_type(ts_type: &TSType) -> Result<TypeSignature> {
+pub fn ts_to_clar_type(ts_type: &TSType) -> Result<TypeSignature> {
     match ts_type {
         TSType::TSTypeReference(boxed_ref) => {
             let type_name = boxed_ref.type_name.get_identifier_reference();

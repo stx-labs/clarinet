@@ -20,8 +20,9 @@ fn test_counter() {
         }
 
         function add(n: Uint) {
-            print(n);
-            return count.get() + n;
+            const newCount = count.get() + n;
+            print(newCount);
+            return newCount;
         }
 
         export default { readOnly: { getCount }, public: { increment } } satisfies Contract
@@ -46,9 +47,9 @@ fn test_counter() {
               (var-set count (+ (var-get count) u1))
             )
             (define-private (add (n uint))
-              (begin
-                (print n)
-                (+ (var-get count) n)
+              (let ((new-count (+ (var-get count) n)))
+                (print new-count)
+                new-count
               )
             )
             "#

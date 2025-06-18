@@ -6,12 +6,13 @@ use clarity::vm::{
     ClarityName, Value as ClarityValue,
 };
 use oxc_allocator::{Allocator, CloneIn};
-use oxc_ast::ast::{self, Expression, Program};
+use oxc_ast::ast::{self, Expression};
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
-use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
+use oxc_traverse::{traverse_mut, Ancestor, Traverse, TraverseCtx};
 
 use crate::{
+    parser::ts_to_clar_type,
     parser::{IRFunction, IR},
     to_kebab_case,
 };
@@ -22,6 +23,7 @@ struct StatementConverter<'a> {
     expressions: Vec<PreSymbolicExpression>,
     lists_stack: Vec<PreSymbolicExpression>,
     current_context_type: Option<TypeSignature>,
+    current_bindings: Vec<(String, Option<TypeSignature>)>,
 }
 
 fn atom(name: &str) -> PreSymbolicExpression {
@@ -36,7 +38,41 @@ impl<'a> StatementConverter<'a> {
             expressions: Vec::new(),
             lists_stack: vec![],
             current_context_type: None,
+            current_bindings: vec![],
         }
+    }
+
+    fn add_binding(
+        &mut self,
+        variable_declarator: &ast::VariableDeclarator<'a>,
+    ) -> Option<TypeSignature> {
+        let type_annotation = if let ast::BindingPattern {
+            type_annotation: Some(boxed_type_annotation),
+            ..
+        } = &variable_declarator.id
+        {
+            Some(ts_to_clar_type(&boxed_type_annotation.type_annotation).unwrap())
+        } else {
+            // Type annotation is not always needed
+            // but this current approach probably isn't robust enough
+            println!("binding without type annotation");
+            None
+        };
+
+        let binding_name = if let ast::BindingPattern {
+            kind: ast::BindingPatternKind::BindingIdentifier(ident),
+            ..
+        } = &variable_declarator.id
+        {
+            ident.name.as_str()
+        } else {
+            return None;
+        };
+
+        self.current_bindings
+            .push((binding_name.to_string(), type_annotation.clone()));
+
+        type_annotation
     }
 
     /// Get the type signature for a parameter by name
@@ -69,12 +105,12 @@ impl<'a> StatementConverter<'a> {
 }
 
 impl<'a> Traverse<'a> for StatementConverter<'a> {
-    fn enter_program(&mut self, node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
-        // println!("enter_program: {:#?}", node);
+    fn enter_program(&mut self, _node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
+        // println!("enter_program: {:#?}", _node);
     }
 
     fn exit_program(&mut self, _node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
-        // ingsting remaining items in the stack
+        // ingesting remaining items in the stack
         // such as the one in the let binding
         while !self.lists_stack.is_empty() {
             self.ingest_last_stack_item();
@@ -102,9 +138,13 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
 
     fn enter_variable_declarator(
         &mut self,
-        _node: &mut ast::VariableDeclarator<'a>,
+        variable_declarator: &mut ast::VariableDeclarator<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
+        if let Some(type_annotation) = self.add_binding(variable_declarator) {
+            self.current_context_type = Some(type_annotation);
+        }
+
         self.lists_stack.push(PreSymbolicExpression::list(vec![]));
     }
 
@@ -113,23 +153,8 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         _node: &mut ast::VariableDeclarator<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
+        self.current_context_type = None;
         self.ingest_last_stack_item();
-    }
-
-    fn enter_binding_pattern(
-        &mut self,
-        _node: &mut ast::BindingPattern<'a>,
-        _ctx: &mut TraverseCtx<'a>,
-    ) {
-        // self.lists_stack.push(PreSymbolicExpression::list(vec![]));
-    }
-
-    fn exit_binding_pattern(
-        &mut self,
-        _node: &mut ast::BindingPattern<'a>,
-        _ctx: &mut TraverseCtx<'a>,
-    ) {
-        // self.ingest_last_stack_item();
     }
 
     fn enter_call_expression(
@@ -181,7 +206,8 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         node: &mut ast::BindingIdentifier<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
-        self.lists_stack.push(atom(node.name.as_str()));
+        self.lists_stack
+            .push(atom(to_kebab_case(node.name.as_str()).as_str()));
     }
 
     fn exit_binding_identifier(
@@ -215,25 +241,42 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         ident: &mut ast::IdentifierReference<'a>,
         ctx: &mut TraverseCtx<'a>,
     ) {
-        self.lists_stack.push(
-            if self
-                .ir
-                .functions
-                .iter()
-                .any(|f| f.name == ident.name.as_str())
-            {
-                atom(to_kebab_case(ident.name.as_str()).as_str())
-            } else {
-                atom(ident.name.as_str())
-            },
-        );
+        // If the identifier is a TypeReference, just ignore it
+        // We might need a more robust approach for this in the future and
+        // handle IdentifierReference in their parent enter/exit methods
+        if matches!(ctx.parent(), Ancestor::TSTypeReferenceTypeName(_)) {
+            return;
+        }
+
+        let ident_name = ident.name.as_str();
+        let matching_function = self.ir.functions.iter().any(|f| f.name == ident_name);
+        if matching_function {
+            self.lists_stack
+                .push(atom(to_kebab_case(ident_name).as_str()));
+            return;
+        }
+
+        let matching_data_var = self
+            .current_bindings
+            .iter()
+            .any(|(name, _)| name == ident_name);
+        if matching_data_var {
+            self.lists_stack
+                .push(atom(to_kebab_case(ident_name).as_str()));
+            return;
+        }
+
+        self.lists_stack.push(atom(ident.name.as_str()));
     }
 
     fn exit_identifier_reference(
         &mut self,
         _ident: &mut ast::IdentifierReference<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
+        if matches!(ctx.parent(), Ancestor::TSTypeReferenceTypeName(_)) {
+            return;
+        }
         self.ingest_last_stack_item();
     }
 
@@ -341,7 +384,7 @@ pub fn convert_function_body<'a>(
     ir: &IR,
     function: &IRFunction<'a>,
 ) -> Result<PreSymbolicExpression, anyhow::Error> {
-    let mut program = Program {
+    let mut program = ast::Program {
         span: oxc_span::Span::default(),
         source_type: SourceType::ts(),
         source_text: "",
@@ -401,6 +444,7 @@ mod test {
     }
 
     /// asserts the function body of the last function provided in the ts_src
+    #[track_caller]
     fn assert_last_function_body_eq(ts_src: &str, expected_clar_source: &str) {
         let expected_pse = get_expected_pse(expected_clar_source);
 
@@ -567,8 +611,8 @@ mod test {
         );
 
         let expected_clar_src = indoc!(
-            r#"(let ((myCount 1))
-              (print myCount)
+            r#"(let ((my-count 1))
+              (print my-count)
               true
             )"#
         );
@@ -576,20 +620,20 @@ mod test {
         assert_last_function_body_eq(ts_src, expected_clar_src);
     }
 
-    // #[test]
-    // fn test_variable_binding_type_casting() {
-    //     let ts_src = indoc!(
-    //         r#"function printCount() {
-    //             const myCount: Uint = 1;
-    //             return true;
-    //         }
-    //         "#
-    //     );
+    #[test]
+    fn test_variable_binding_type_casting() {
+        let ts_src = indoc!(
+            r#"function printCount() {
+                const myCount: Uint = 1;
+                return true;
+            }
+            "#
+        );
 
-    //     let expected_clar_src = "(let ((myCount u1)) true)";
+        let expected_clar_src = "(let ((my-count u1)) true)";
 
-    //     assert_last_function_body_eq(ts_src, expected_clar_src);
-    // }
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
 
     #[test]
     fn test_multiple_variable_bindings() {
@@ -601,12 +645,13 @@ mod test {
             "#
         );
 
-        let expected_clar_src = "(let ((myCount1 1) (myCount2 2)) true)";
+        let expected_clar_src = "(let ((my-count1 1) (my-count2 2)) true)";
 
         assert_last_function_body_eq(ts_src, expected_clar_src);
     }
 
     // #[test]
+    // there no real
     // fn test_nested_let() {
     //     // let ts_src = indoc!(
     //     //     r#"function printCount() {
