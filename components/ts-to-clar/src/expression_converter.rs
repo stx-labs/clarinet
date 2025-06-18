@@ -69,13 +69,67 @@ impl<'a> StatementConverter<'a> {
 }
 
 impl<'a> Traverse<'a> for StatementConverter<'a> {
-    fn exit_expression(&mut self, _node: &mut ast::Expression<'a>, _ctx: &mut TraverseCtx<'a>) {
-        match _node {
-            Expression::BinaryExpression(_bin) => {
-                // do nothing
-            }
-            _ => self.ingest_last_stack_item(),
+    fn enter_program(&mut self, node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
+        // println!("enter_program: {:#?}", node);
+    }
+
+    fn exit_program(&mut self, _node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
+        // ingsting remaining items in the stack
+        // such as the one in the let binding
+        while !self.lists_stack.is_empty() {
+            self.ingest_last_stack_item();
         }
+    }
+
+    fn enter_variable_declaration(
+        &mut self,
+        _node: &mut ast::VariableDeclaration<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        // two lists are pushed here, the first one will is the let expression list
+        let let_expr = PreSymbolicExpression::list(vec![atom("let")]);
+        self.lists_stack.push(let_expr);
+        self.lists_stack.push(PreSymbolicExpression::list(vec![]));
+    }
+
+    fn exit_variable_declaration(
+        &mut self,
+        _node: &mut ast::VariableDeclaration<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
+    }
+
+    fn enter_variable_declarator(
+        &mut self,
+        _node: &mut ast::VariableDeclarator<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(PreSymbolicExpression::list(vec![]));
+    }
+
+    fn exit_variable_declarator(
+        &mut self,
+        _node: &mut ast::VariableDeclarator<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
+    }
+
+    fn enter_binding_pattern(
+        &mut self,
+        _node: &mut ast::BindingPattern<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        // self.lists_stack.push(PreSymbolicExpression::list(vec![]));
+    }
+
+    fn exit_binding_pattern(
+        &mut self,
+        _node: &mut ast::BindingPattern<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        // self.ingest_last_stack_item();
     }
 
     fn enter_call_expression(
@@ -104,7 +158,38 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
             return;
         }
 
+        // let callee = match &call_expr.callee {
+        //     Expression::Identifier(ident) => atom(ident.name.as_str()),
+        //     _ => todo!(),
+        // };
+        // self.lists_stack
+        //     .push(PreSymbolicExpression::list(vec![callee]));
+
         self.lists_stack.push(PreSymbolicExpression::list(vec![]));
+    }
+
+    fn exit_call_expression(
+        &mut self,
+        _call_expr: &mut ast::CallExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
+    }
+
+    fn enter_binding_identifier(
+        &mut self,
+        node: &mut ast::BindingIdentifier<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(atom(node.name.as_str()));
+    }
+
+    fn exit_binding_identifier(
+        &mut self,
+        _node: &mut ast::BindingIdentifier<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
     }
 
     fn enter_static_member_expression(
@@ -115,6 +200,41 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         if let Expression::Identifier(ident) = &member_expr.object {
             self.lists_stack.push(atom(ident.name.as_str()));
         }
+    }
+
+    fn exit_static_member_expression(
+        &mut self,
+        _member_expr: &mut ast::StaticMemberExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
+    }
+
+    fn enter_identifier_reference(
+        &mut self,
+        ident: &mut ast::IdentifierReference<'a>,
+        ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(
+            if self
+                .ir
+                .functions
+                .iter()
+                .any(|f| f.name == ident.name.as_str())
+            {
+                atom(to_kebab_case(ident.name.as_str()).as_str())
+            } else {
+                atom(ident.name.as_str())
+            },
+        );
+    }
+
+    fn exit_identifier_reference(
+        &mut self,
+        _ident: &mut ast::IdentifierReference<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
     }
 
     fn enter_binary_expression(
@@ -190,23 +310,12 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         })
     }
 
-    fn enter_identifier_reference(
+    fn exit_numeric_literal(
         &mut self,
-        ident: &mut ast::IdentifierReference<'a>,
+        _node: &mut ast::NumericLiteral<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
-        self.lists_stack.push(
-            if self
-                .ir
-                .functions
-                .iter()
-                .any(|f| f.name == ident.name.as_str())
-            {
-                atom(to_kebab_case(ident.name.as_str()).as_str())
-            } else {
-                atom(ident.name.as_str())
-            },
-        );
+        self.ingest_last_stack_item();
     }
 
     fn enter_boolean_literal(
@@ -215,6 +324,14 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         _ctx: &mut TraverseCtx<'a>,
     ) {
         self.lists_stack.push(atom(node.value.to_string().as_str()));
+    }
+
+    fn exit_boolean_literal(
+        &mut self,
+        _node: &mut ast::BooleanLiteral,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
     }
 }
 
@@ -285,10 +402,11 @@ mod test {
 
     /// asserts the function body of the last function provided in the ts_src
     fn assert_last_function_body_eq(ts_src: &str, expected_clar_source: &str) {
+        let expected_pse = get_expected_pse(expected_clar_source);
+
         let allocator = Allocator::default();
         let ir = get_ir(&allocator, "tmp.clar.ts", ts_src);
         let result = convert_function_body(&allocator, &ir, ir.functions.last().unwrap()).unwrap();
-        let expected_pse = get_expected_pse(expected_clar_source);
         pretty_assertions::assert_eq!(result, expected_pse);
     }
 
@@ -436,4 +554,84 @@ mod test {
 
         assert_last_function_body_eq(ts_src, expected_clar_src);
     }
+
+    #[test]
+    fn test_variable_binding() {
+        let ts_src = indoc!(
+            r#"function printCount() {
+                const myCount = 1;
+                print(myCount);
+                return true;
+            }
+            "#
+        );
+
+        let expected_clar_src = indoc!(
+            r#"(let ((myCount 1))
+              (print myCount)
+              true
+            )"#
+        );
+
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
+
+    // #[test]
+    // fn test_variable_binding_type_casting() {
+    //     let ts_src = indoc!(
+    //         r#"function printCount() {
+    //             const myCount: Uint = 1;
+    //             return true;
+    //         }
+    //         "#
+    //     );
+
+    //     let expected_clar_src = "(let ((myCount u1)) true)";
+
+    //     assert_last_function_body_eq(ts_src, expected_clar_src);
+    // }
+
+    #[test]
+    fn test_multiple_variable_bindings() {
+        let ts_src = indoc!(
+            r#"function printCount() {
+                const myCount1 = 1, myCount2 = 2;
+                return true;
+            }
+            "#
+        );
+
+        let expected_clar_src = "(let ((myCount1 1) (myCount2 2)) true)";
+
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
+
+    // #[test]
+    // fn test_nested_let() {
+    //     // let ts_src = indoc!(
+    //     //     r#"function printCount() {
+    //     //         const myCount = 1;
+    //     //         return true;
+    //     //     }
+    //     //     "#
+    //     // );
+    //     // (define-read-only (test)
+    //     //   (let (
+    //     //     (val1 (let ((a 1) (b 2)) (+ a b)))
+    //     //     (val2 (let ((a 3) (b 4)) (+ a b)))
+    //     //   )
+    //     //     (+ val1 val2)
+    //     //   )
+    //     // )
+    //     let _expected_clar_src = indoc!(
+    //         r#"(let ((val1 (let ((a 1) (b 2)) (+ a b)))
+    //           (val2 (let ((a 3) (b 4)) (+ a b))))
+    //           (+ val1 val2)
+    //         )"#
+    //     );
+
+    //     // (define-read-only (test)
+    //     //   (let ((a (let ((a 1) (b 2)) (+ a b)))) a)
+    //     // )
+    // }
 }
