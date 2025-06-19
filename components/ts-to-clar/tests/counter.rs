@@ -3,32 +3,8 @@ use ts_to_clar::transpile;
 
 #[test]
 fn test_counter() {
-    let src = indoc! {
-        r#"const count = new DataVar<Uint>(0);
-
-        function printCount() {
-            print(count.get());
-        }
-
-        function getCount() {
-            printCount();
-            return count.get();
-        }
-
-        function increment() {
-            return count.set(count.get() + 1);
-        }
-
-        function add(n: Uint) {
-            const newCount = count.get() + n;
-            print(newCount);
-            return newCount;
-        }
-
-        export default { readOnly: { getCount }, public: { increment } } satisfies Contract
-        "#
-    };
-    let clarity_code = transpile("counter.clar.ts", src).unwrap();
+    let src = std::fs::read_to_string("tests/fixtures/contracts/counter.clar.ts").unwrap();
+    let clarity_code = transpile("counter.clar.ts", &src).unwrap();
 
     pretty_assertions::assert_eq!(
         clarity_code,
@@ -44,12 +20,12 @@ fn test_counter() {
               )
             )
             (define-public (increment)
-              (var-set count (+ (var-get count) u1))
+              (ok (var-set count (+ (var-get count) u1)))
             )
-            (define-private (add (n uint))
+            (define-public (add (n uint))
               (let ((new-count (+ (var-get count) n)))
                 (print new-count)
-                new-count
+                (ok new-count)
               )
             )
             "#

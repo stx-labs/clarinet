@@ -28,3 +28,7 @@ pretty_assertions = "1.4"
 [lib]
 name = "ts_to_clar"
 path = "src/lib.rs"
+
+[[bin]]
+name = "tsclar"
+path = "src/bin.rs"

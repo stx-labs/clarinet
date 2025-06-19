@@ -1,0 +1,8 @@
+[project]
+name = 'fixtures'
+
+
+[contracts.counter]
+path = 'contracts/counter.clar'
+clarity_version = 3
+epoch = 3.1
