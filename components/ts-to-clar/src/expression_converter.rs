@@ -334,6 +334,25 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         self.current_context_type = None;
     }
 
+    fn enter_conditional_expression(
+        &mut self,
+        node: &mut ast::ConditionalExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        if matches!(node.test, Expression::BinaryExpression(_)) {
+            self.lists_stack
+                .push(PreSymbolicExpression::list(vec![atom("if")]));
+        }
+    }
+
+    fn exit_conditional_expression(
+        &mut self,
+        _node: &mut ast::ConditionalExpression<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
+    }
+
     fn enter_numeric_literal(
         &mut self,
         node: &mut ast::NumericLiteral<'a>,
@@ -356,6 +375,24 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
     fn exit_numeric_literal(
         &mut self,
         _node: &mut ast::NumericLiteral<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.ingest_last_stack_item();
+    }
+
+    fn enter_string_literal(
+        &mut self,
+        node: &mut ast::StringLiteral<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        self.lists_stack.push(PreSymbolicExpression::atom_value(
+            ClarityValue::string_ascii_from_bytes(node.value.as_bytes().to_vec()).unwrap(),
+        ));
+    }
+
+    fn exit_string_literal(
+        &mut self,
+        _node: &mut ast::StringLiteral<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
         self.ingest_last_stack_item();
@@ -651,7 +688,6 @@ mod test {
     }
 
     // #[test]
-    // there no real
     // fn test_nested_let() {
     //     // let ts_src = indoc!(
     //     //     r#"function printCount() {
@@ -679,4 +715,30 @@ mod test {
     //     //   (let ((a (let ((a 1) (b 2)) (+ a b)))) a)
     //     // )
     // }
+
+    #[test]
+    fn test_ternary_operator() {
+        let ts_src = indoc!(
+            r#"function evenOrOdd(n: Int) {
+                return n % 2 === 0 ? 'even' : 'odd';
+            }
+            "#
+        );
+
+        let expected_clar_src = indoc!(r#"(if (is-eq (mod n 2) 0) "even" "odd")"#);
+
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+
+        // todo: uint casting when left or right is an expression
+        // let ts_src = indoc!(
+        //     r#"function evenOrOdd(n: Uint) {
+        //         return n % 2 === 0 ? 'even' : 'odd';
+        //     }
+        //     "#
+        // );
+
+        // let expected_clar_src = indoc!(r#"(if (is-eq (mod n u2) u0) "even" "odd")"#);
+
+        // assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
 }
