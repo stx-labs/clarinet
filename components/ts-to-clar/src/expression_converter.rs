@@ -12,9 +12,9 @@ use oxc_span::SourceType;
 use oxc_traverse::{traverse_mut, Ancestor, Traverse, TraverseCtx};
 
 use crate::{
-    parser::ts_to_clar_type,
     parser::{IRFunction, IR},
     to_kebab_case,
+    types::ts_to_clar_type,
 };
 
 struct StatementConverter<'a> {
@@ -23,11 +23,40 @@ struct StatementConverter<'a> {
     expressions: Vec<PreSymbolicExpression>,
     lists_stack: Vec<PreSymbolicExpression>,
     current_context_type: Option<TypeSignature>,
+    current_context_type_stack: Vec<Option<TypeSignature>>,
     current_bindings: Vec<(String, Option<TypeSignature>)>,
 }
 
 fn atom(name: &str) -> PreSymbolicExpression {
     PreSymbolicExpression::atom(ClarityName::from(name))
+}
+
+fn get_clarity_binary_operator(operator: &ast::BinaryOperator) -> &str {
+    use ast::BinaryOperator::*;
+    match operator {
+        Addition => "+",
+        Subtraction => "-",
+        Multiplication => "*",
+        Division => "/",
+        Remainder => "mod",
+        LessThan => "<",
+        GreaterThan => ">",
+        LessEqualThan => "<=",
+        GreaterEqualThan => ">=",
+        Equality => "is-eq",
+        StrictEquality => "is-eq",
+        BitwiseAnd => "bit-and",
+        BitwiseOR => "bit-or",
+        BitwiseXOR => "bit-xor",
+        ShiftLeft => "bit-shift-left",
+        ShiftRight => "bit-shift-right",
+        Inequality => todo!(),
+        StrictInequality => todo!(),
+        Exponential => todo!(),
+        ShiftRightZeroFill => todo!(),
+        In => todo!(),
+        Instanceof => todo!(),
+    }
 }
 
 impl<'a> StatementConverter<'a> {
@@ -38,6 +67,7 @@ impl<'a> StatementConverter<'a> {
             expressions: Vec::new(),
             lists_stack: vec![],
             current_context_type: None,
+            current_context_type_stack: vec![],
             current_bindings: vec![],
         }
     }
@@ -53,9 +83,8 @@ impl<'a> StatementConverter<'a> {
         {
             Some(ts_to_clar_type(&boxed_type_annotation.type_annotation).unwrap())
         } else {
-            // Type annotation is not always needed
+            // type annotation is not always needed
             // but this current approach probably isn't robust enough
-            println!("binding without type annotation");
             None
         };
 
@@ -75,7 +104,6 @@ impl<'a> StatementConverter<'a> {
         type_annotation
     }
 
-    /// Get the type signature for a parameter by name
     fn get_parameter_type(&self, param_name: &str) -> Option<&TypeSignature> {
         self.function
             .parameters
@@ -87,6 +115,74 @@ impl<'a> StatementConverter<'a> {
                     None
                 }
             })
+    }
+
+    fn infer_binary_expression_type(
+        &self,
+        operator: &str,
+        left_type: Option<&TypeSignature>,
+        right_type: Option<&TypeSignature>,
+    ) -> Option<TypeSignature> {
+        match operator {
+            "+" | "-" | "*" | "/" | "mod" => {
+                if left_type == Some(&TypeSignature::UIntType)
+                    || right_type == Some(&TypeSignature::UIntType)
+                {
+                    Some(TypeSignature::UIntType)
+                } else if left_type == Some(&TypeSignature::IntType)
+                    || right_type == Some(&TypeSignature::IntType)
+                {
+                    Some(TypeSignature::IntType)
+                } else {
+                    // todo: remove default once we have a more robust type inference system
+                    Some(TypeSignature::IntType)
+                }
+            }
+            "<" | ">" | "<=" | ">=" | "is-eq" => Some(TypeSignature::BoolType),
+            "bit-and" | "bit-or" | "bit-xor" | "bit-shift-left" | "bit-shift-right" => {
+                left_type.cloned().or_else(|| right_type.cloned())
+            }
+            _ => None,
+        }
+    }
+
+    fn get_expression_type(&self, expr: &Expression<'a>) -> Option<TypeSignature> {
+        match expr {
+            Expression::Identifier(ident) => {
+                if let Some(param_type) = self.get_parameter_type(ident.name.as_str()) {
+                    return Some(param_type.clone());
+                }
+
+                if let Some((_, binding_type)) = self
+                    .current_bindings
+                    .iter()
+                    .find(|(name, _)| name == ident.name.as_str())
+                {
+                    return binding_type.clone();
+                }
+
+                None
+            }
+            Expression::NumericLiteral(_) => {
+                // todo: remove default once we have a more robust type inference system
+                Some(TypeSignature::IntType)
+            }
+            Expression::CallExpression(_call_expr) => {
+                // todo: for function calls, we could potentially infer the return type
+                // for now,return None and let context determine
+                None
+            }
+            Expression::BinaryExpression(bin_expr) => {
+                // Recursively determine types of operands
+                let left_type = self.get_expression_type(&bin_expr.left);
+                let right_type = self.get_expression_type(&bin_expr.right);
+
+                let operator = get_clarity_binary_operator(&bin_expr.operator);
+
+                self.infer_binary_expression_type(operator, left_type.as_ref(), right_type.as_ref())
+            }
+            _ => None,
+        }
     }
 
     fn ingest_last_stack_item(&mut self) {
@@ -110,8 +206,7 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
     }
 
     fn exit_program(&mut self, _node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
-        // ingesting remaining items in the stack
-        // such as the one in the let binding
+        // ingesting remaining items in the stack such as the one in the let binding
         while !self.lists_stack.is_empty() {
             self.ingest_last_stack_item();
         }
@@ -286,39 +381,24 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         _ctx: &mut TraverseCtx<'a>,
     ) {
         self.lists_stack.push(PreSymbolicExpression::list(vec![]));
-        use oxc_ast::ast::BinaryOperator;
-        let operator = match bin_expr.operator {
-            BinaryOperator::Addition => "+",
-            BinaryOperator::Subtraction => "-",
-            BinaryOperator::Multiplication => "*",
-            BinaryOperator::Division => "/",
-            BinaryOperator::Remainder => "mod",
-            BinaryOperator::LessThan => "<",
-            BinaryOperator::GreaterThan => ">",
-            BinaryOperator::LessEqualThan => "<=",
-            BinaryOperator::GreaterEqualThan => ">=",
-            BinaryOperator::Equality => "is-eq",
-            BinaryOperator::StrictEquality => "is-eq",
-            BinaryOperator::BitwiseAnd => "bit-and",
-            BinaryOperator::BitwiseOR => "bit-or",
-            BinaryOperator::BitwiseXOR => "bit-xor",
-            BinaryOperator::ShiftLeft => "bit-shift-left",
-            BinaryOperator::ShiftRight => "bit-shift-right",
-            BinaryOperator::Inequality => todo!(),
-            BinaryOperator::StrictInequality => todo!(),
-            BinaryOperator::Exponential => todo!(),
-            BinaryOperator::ShiftRightZeroFill => todo!(),
-            BinaryOperator::In => todo!(),
-            BinaryOperator::Instanceof => todo!(),
-        };
+        let operator = get_clarity_binary_operator(&bin_expr.operator);
 
-        // Set the current context type based on the parameter type
-        if let Expression::Identifier(ident) = &bin_expr.left {
-            self.current_context_type = self.get_parameter_type(ident.name.as_str()).cloned();
-        } else if let Expression::Identifier(ident) = &bin_expr.right {
-            if self.current_context_type.is_none() {
-                self.current_context_type = self.get_parameter_type(ident.name.as_str()).cloned();
+        // Use the new type inference system to determine the result type
+        let left_type = self.get_expression_type(&bin_expr.left);
+        let right_type = self.get_expression_type(&bin_expr.right);
+
+        self.current_context_type =
+            self.infer_binary_expression_type(operator, left_type.as_ref(), right_type.as_ref());
+
+        if matches!(operator, "is-eq" | "<" | ">" | "<=" | ">=") {
+            self.current_context_type_stack
+                .push(self.current_context_type.clone());
+            if let Some(ref ltype) = left_type {
+                self.current_context_type = Some(ltype.clone());
             }
+        } else {
+            self.current_context_type_stack
+                .push(self.current_context_type.clone());
         }
 
         self.lists_stack.push(atom(operator));
@@ -331,7 +411,7 @@ impl<'a> Traverse<'a> for StatementConverter<'a> {
         _ctx: &mut TraverseCtx<'a>,
     ) {
         self.ingest_last_stack_item();
-        self.current_context_type = None;
+        self.current_context_type = self.current_context_type_stack.pop().unwrap_or(None);
     }
 
     fn enter_conditional_expression(
@@ -534,7 +614,19 @@ mod test {
     }
 
     #[test]
-    fn test_type_casting() {
+    fn test_ternary_operator() {
+        let ts_src = indoc!(
+            r#"function evenOrOdd(n: Int) {
+                return n % 2 === 0 ? 'even' : 'odd';
+            }
+            "#
+        );
+        let expected_clar_src = indoc!(r#"(if (is-eq (mod n 2) 0) "even" "odd")"#);
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_type_inference() {
         let ts_src = "function add1(a: Int) { return a + 1; }";
         assert_last_function_body_eq(ts_src, "(+ a 1)");
 
@@ -549,6 +641,32 @@ mod test {
     }
 
     #[test]
+    fn test_ternary_operator_with_type_inference() {
+        let ts_src = indoc!(
+            r#"function evenOrOdd(n: Uint) {
+                return n % 2 === 0 ? 'even' : 'odd';
+            }
+            "#
+        );
+        let expected_clar_src = indoc!(r#"(if (is-eq (mod n u2) u0) "even" "odd")"#);
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_data_var_type_inference() {
+        let ts_src = indoc!(
+            r#"const count = new DataVar<Uint>(0);
+            function increment() {
+                return count.set(count.get() + 1);
+            }
+            "#
+        );
+        let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) u1))"#);
+
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
     fn test_operator_chaining() {
         // todo: fix variadic operators
         // see a previous implementation for this here:
@@ -557,11 +675,11 @@ mod test {
         let ts_src = "function add3(a: Int) { return a + 1 + 2; }";
         assert_last_function_body_eq(ts_src, "(+ (+ a 1) 2)");
 
-        // let ts_src = "function add3(a: Uint) { return a + 1 + 2; }";
-        // assert_pses_eq(ts_src, "(+ (+ a u1) u2)");
+        let ts_src = "function add3(a: Uint) { return a + 1 + 2; }";
+        assert_last_function_body_eq(ts_src, "(+ (+ a u1) u2)");
 
         // let ts_src = "function add3(a: Uint) { return 1 + a + 2; }";
-        // assert_pses_eq(ts_src, "(+ u1 a u2)");
+        // assert_last_function_body_eq(ts_src, "(+ u1 a u2)");
 
         //     let ts_src = "function add3(a: Uint) { return 1 + 2 + a; }";
         //     assert_pses_eq(ts_src, "(+ u1 u2 a)");
@@ -606,20 +724,6 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) 1))"#);
-
-        assert_last_function_body_eq(ts_src, expected_clar_src);
-    }
-
-    #[test]
-    fn test_data_var_type_casting() {
-        let ts_src = indoc!(
-            r#"const count = new DataVar<Uint>(0);
-            function increment() {
-                return count.set(count.get() + 1);
-            }
-            "#
-        );
-        let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) u1))"#);
 
         assert_last_function_body_eq(ts_src, expected_clar_src);
     }
@@ -685,60 +789,5 @@ mod test {
         let expected_clar_src = "(let ((my-count1 1) (my-count2 2)) true)";
 
         assert_last_function_body_eq(ts_src, expected_clar_src);
-    }
-
-    // #[test]
-    // fn test_nested_let() {
-    //     // let ts_src = indoc!(
-    //     //     r#"function printCount() {
-    //     //         const myCount = 1;
-    //     //         return true;
-    //     //     }
-    //     //     "#
-    //     // );
-    //     // (define-read-only (test)
-    //     //   (let (
-    //     //     (val1 (let ((a 1) (b 2)) (+ a b)))
-    //     //     (val2 (let ((a 3) (b 4)) (+ a b)))
-    //     //   )
-    //     //     (+ val1 val2)
-    //     //   )
-    //     // )
-    //     let _expected_clar_src = indoc!(
-    //         r#"(let ((val1 (let ((a 1) (b 2)) (+ a b)))
-    //           (val2 (let ((a 3) (b 4)) (+ a b))))
-    //           (+ val1 val2)
-    //         )"#
-    //     );
-
-    //     // (define-read-only (test)
-    //     //   (let ((a (let ((a 1) (b 2)) (+ a b)))) a)
-    //     // )
-    // }
-
-    #[test]
-    fn test_ternary_operator() {
-        let ts_src = indoc!(
-            r#"function evenOrOdd(n: Int) {
-                return n % 2 === 0 ? 'even' : 'odd';
-            }
-            "#
-        );
-
-        let expected_clar_src = indoc!(r#"(if (is-eq (mod n 2) 0) "even" "odd")"#);
-
-        assert_last_function_body_eq(ts_src, expected_clar_src);
-
-        // todo: uint casting when left or right is an expression
-        // let ts_src = indoc!(
-        //     r#"function evenOrOdd(n: Uint) {
-        //         return n % 2 === 0 ? 'even' : 'odd';
-        //     }
-        //     "#
-        // );
-
-        // let expected_clar_src = indoc!(r#"(if (is-eq (mod n u2) u0) "even" "odd")"#);
-
-        // assert_last_function_body_eq(ts_src, expected_clar_src);
     }
 }

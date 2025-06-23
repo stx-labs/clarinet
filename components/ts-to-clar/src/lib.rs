@@ -2,6 +2,7 @@ mod converter;
 mod expression_converter;
 mod helper;
 mod parser;
+mod types;
 
 // This module provides a transpiler that converts TypeScript into Clarity code.
 // 1. It parses the TypeScript code into an Intermediate Representation (IR) using SWC
