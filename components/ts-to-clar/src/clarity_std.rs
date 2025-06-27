@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 pub static STD_PKG_NAME: &str = "@hirosystems/clarity-std";
 
+#[allow(dead_code)]
 pub fn get_std() -> Vec<String> {
     use NativeFunctions::*;
 
@@ -47,8 +48,9 @@ pub fn get_std() -> Vec<String> {
 
 static STD_FUNCTIONS: OnceLock<Vec<String>> = OnceLock::new();
 
+#[allow(dead_code)]
 pub fn get_std_functions() -> &'static Vec<String> {
-    STD_FUNCTIONS.get_or_init(|| get_std())
+    STD_FUNCTIONS.get_or_init(get_std)
 }
 
 #[cfg(test)]

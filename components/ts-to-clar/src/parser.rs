@@ -7,6 +7,8 @@
 //  - define-public
 //  - define-private
 
+use std::marker::PhantomData;
+
 use anyhow::{anyhow, Result};
 use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{
@@ -16,7 +18,7 @@ use oxc_ast::ast::{
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
-use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
+use oxc_traverse::{traverse_mut, Traverse};
 
 use clarity::vm::types::TypeSignature;
 
@@ -115,7 +117,15 @@ fn parse_function_params(
         .collect()
 }
 
-impl<'a> Traverse<'a> for IR<'a> {
+// introduced in oxc 0.75, not used yet
+// could be used to store additional state during traversal
+#[derive(Default)]
+pub struct ConverterState<'a> {
+    data: PhantomData<&'a ()>,
+}
+pub type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
+
+impl<'a> Traverse<'a, ConverterState<'a>> for IR<'a> {
     fn enter_import_declaration(
         &mut self,
         node: &mut ast::ImportDeclaration<'a>,
@@ -324,7 +334,9 @@ pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) ->
         .build(&module)
         .semantic
         .into_scoping();
-    traverse_mut(&mut ir, allocator, &mut module, scoping);
+
+    let state = ConverterState::default();
+    traverse_mut(&mut ir, allocator, &mut module, scoping, state);
 
     ir
 }

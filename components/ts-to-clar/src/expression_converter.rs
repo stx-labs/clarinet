@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::{cell::Cell, marker::PhantomData};
 
 use clarity::vm::{
     representations::{PreSymbolicExpression, PreSymbolicExpressionType},
@@ -9,7 +9,7 @@ use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{self, Expression};
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
-use oxc_traverse::{traverse_mut, Ancestor, Traverse, TraverseCtx};
+use oxc_traverse::{traverse_mut, Ancestor, Traverse};
 
 use crate::{
     parser::{IRFunction, IR},
@@ -200,7 +200,15 @@ impl<'a> StatementConverter<'a> {
     }
 }
 
-impl<'a> Traverse<'a> for StatementConverter<'a> {
+// introduced in oxc 0.75, not used yet
+// could be used to store additional state during traversal
+#[derive(Default)]
+pub struct ConverterState<'a> {
+    data: PhantomData<&'a ()>,
+}
+pub type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
+
+impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn enter_program(&mut self, _node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
         // println!("enter_program: {:#?}", _node);
     }
@@ -580,7 +588,8 @@ pub fn convert_function_body<'a>(
         .into_scoping();
 
     let mut converter = StatementConverter::new(ir, function);
-    traverse_mut(&mut converter, allocator, &mut program, scoping);
+    let state = ConverterState::default();
+    traverse_mut(&mut converter, allocator, &mut program, scoping, state);
 
     if converter.expressions.is_empty() {
         return Err(anyhow::anyhow!("No expressions found"));
