@@ -10,8 +10,8 @@
 use anyhow::{anyhow, Result};
 use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{
-    Expression, Function, ObjectPropertyKind, Program, PropertyKey, Statement, VariableDeclaration,
-    VariableDeclarator,
+    self, Expression, Function, ObjectPropertyKind, Program, PropertyKey, Statement,
+    VariableDeclaration, VariableDeclarator,
 };
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
@@ -20,7 +20,7 @@ use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
 
 use clarity::vm::types::TypeSignature;
 
-use crate::types::ts_to_clar_type;
+use crate::{clarity_std::STD_PKG_NAME, types::ts_to_clar_type};
 
 pub struct IRConstant<'a> {
     pub name: String,
@@ -51,11 +51,18 @@ pub struct IRFunction<'a> {
 
 pub struct IR<'a> {
     allocator: &'a Allocator,
+
+    pub std_namespace_import: Option<String>,
+    /// (import_name, alias)
+    pub std_specific_imports: Vec<(String, String)>,
+
     pub constants: Vec<IRConstant<'a>>,
     pub data_vars: Vec<IRDataVar<'a>>,
     pub data_maps: Vec<IRDataMap>,
-    pub functions: Vec<IRFunction<'a>>,
+
     pub top_level_exprs: Vec<Expression<'a>>,
+
+    pub functions: Vec<IRFunction<'a>>,
     pub read_only_functions: Vec<String>,
     pub public_functions: Vec<String>,
 }
@@ -109,12 +116,40 @@ fn parse_function_params(
 }
 
 impl<'a> Traverse<'a> for IR<'a> {
+    fn enter_import_declaration(
+        &mut self,
+        node: &mut ast::ImportDeclaration<'a>,
+        _ctx: &mut TraverseCtx<'a>,
+    ) {
+        use ast::ImportDeclarationSpecifier::*;
+        if node.source.value == STD_PKG_NAME {
+            if let Some(specifiers) = node.specifiers.as_ref() {
+                for specifier in specifiers {
+                    match specifier {
+                        ImportSpecifier(specifier) => {
+                            self.std_specific_imports.push((
+                                specifier.imported.name().to_string(),
+                                specifier.local.name.to_string(),
+                            ));
+                        }
+                        ImportNamespaceSpecifier(specifier) => {
+                            self.std_namespace_import = Some(specifier.local.name.to_string());
+                        }
+                        ImportDefaultSpecifier(_specifier) => {
+                            unreachable!()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn enter_variable_declaration(
         &mut self,
         node: &mut VariableDeclaration<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
-        if node.kind == oxc_ast::ast::VariableDeclarationKind::Const {
+        if node.kind == ast::VariableDeclarationKind::Const {
             for decl in &node.declarations {
                 let VariableDeclarator { id, init, .. } = decl;
                 let Some(init) = init else { continue };
@@ -275,6 +310,8 @@ pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) ->
 
     let mut ir = IR {
         allocator,
+        std_namespace_import: None,
+        std_specific_imports: Vec::new(),
         constants: Vec::new(),
         data_vars: Vec::new(),
         data_maps: Vec::new(),
@@ -295,6 +332,7 @@ pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) ->
 #[cfg(test)]
 mod test {
     use crate::{
+        clarity_std::STD_PKG_NAME,
         parser::{get_ir, IRConstant, IRDataMap, IRDataVar, IR},
         types::{get_ascii_type, get_utf8_type},
     };
@@ -306,7 +344,7 @@ mod test {
         },
         ClarityName,
     };
-    use indoc::indoc;
+    use indoc::{formatdoc, indoc};
     use oxc_allocator::{Allocator, Box, FromIn};
     use oxc_ast::{
         ast::{
@@ -734,5 +772,26 @@ mod test {
         let ir = get_tmp_ir(&allocator, ts_src);
         assert_eq!(ir.functions.len(), 1);
         assert_eq!(ir.public_functions, vec!["myfunc".to_string()]);
+    }
+
+    #[test]
+    fn test_import_std_lib() {
+        let src = formatdoc! {r#"
+            import {{ print }} from "{STD_PKG_NAME}";
+            import {{ atBlock, getBlockInfo }} from "{STD_PKG_NAME}";
+            import * as c from "{STD_PKG_NAME}";
+        "#};
+
+        let allocator = Allocator::default();
+        let ir = get_tmp_ir(&allocator, &src);
+        assert_eq!(ir.std_namespace_import, Some("c".to_string()));
+        assert_eq!(
+            ir.std_specific_imports,
+            vec![
+                ("print".to_string(), "print".to_string()),
+                ("atBlock".to_string(), "atBlock".to_string()),
+                ("getBlockInfo".to_string(), "getBlockInfo".to_string()),
+            ]
+        );
     }
 }
