@@ -372,6 +372,11 @@ mod test {
         get_ir(allocator, "tmp.clar.ts", src)
     }
 
+    fn expr_identifier<'a>(allocator: &'a Allocator, name: &'a str) -> Expression<'a> {
+        AstBuilder::new(allocator)
+            .expression_identifier(Span::empty(0), Atom::from_in(name.to_string(), allocator))
+    }
+
     fn expr_number<'a>(allocator: &'a Allocator, value: f64) -> Expression<'a> {
         AstBuilder::new(allocator).expression_numeric_literal(
             Span::empty(0),
@@ -425,6 +430,9 @@ mod test {
     fn assert_expr_eq(actual: &Expression, expected: &Expression) {
         use Expression::*;
         match (&actual, &expected) {
+            (Identifier(actual_id), Identifier(expected_id)) => {
+                assert_eq!(actual_id.name, expected_id.name);
+            }
             (NumericLiteral(actual_num), NumericLiteral(expected_num)) => {
                 assert_eq!(actual_num.value, expected_num.value);
             }
@@ -575,6 +583,33 @@ mod test {
             name: "isActive".to_string(),
             r#type: BoolType,
             expr: expr_bool(&allocator, true),
+        };
+        assert_data_var_eq(ir, &expected);
+    }
+
+    #[test]
+    fn test_data_var_principal_ir() {
+        let src =
+            "const owner = new DataVar<Principal>(\"ST3AM1A56AK2C1XAFJ4115ZSV26EB49BVQ10MGCS0\");";
+        let allocator = Allocator::default();
+        let ir = &get_tmp_ir(&allocator, src).data_vars[0];
+        let expected = IRDataVar {
+            name: "owner".to_string(),
+            r#type: PrincipalType,
+            expr: expr_string(&allocator, "ST3AM1A56AK2C1XAFJ4115ZSV26EB49BVQ10MGCS0"),
+        };
+        assert_data_var_eq(ir, &expected);
+    }
+
+    #[test]
+    fn test_data_var_tx_sender() {
+        let src = "const owner = new DataVar<Principal>(txSender);";
+        let allocator = Allocator::default();
+        let ir = &get_tmp_ir(&allocator, src).data_vars[0];
+        let expected = IRDataVar {
+            name: "owner".to_string(),
+            r#type: PrincipalType,
+            expr: expr_identifier(&allocator, "txSender"),
         };
         assert_data_var_eq(ir, &expected);
     }

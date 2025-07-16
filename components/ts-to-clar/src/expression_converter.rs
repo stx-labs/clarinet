@@ -33,6 +33,7 @@ fn atom(name: &str) -> PreSymbolicExpression {
 
 fn get_clarity_binary_operator(operator: &ast::BinaryOperator) -> &str {
     use ast::BinaryOperator::*;
+
     match operator {
         Addition => "+",
         Subtraction => "-",
@@ -61,6 +62,12 @@ fn get_clarity_binary_operator(operator: &ast::BinaryOperator) -> &str {
 
 impl<'a> StatementConverter<'a> {
     fn new(ir: &'a IR, function: &'a IRFunction<'a>) -> Self {
+        let current_bindings = function
+            .parameters
+            .iter()
+            .map(|(name, r#type)| (name.to_string(), Some(r#type.clone())))
+            .collect();
+
         Self {
             ir,
             function,
@@ -68,7 +75,7 @@ impl<'a> StatementConverter<'a> {
             lists_stack: vec![],
             current_context_type: None,
             current_context_type_stack: vec![],
-            current_bindings: vec![],
+            current_bindings,
         }
     }
 
@@ -384,6 +391,8 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         }
 
         let ident_name = ident.name.as_str();
+
+        // function call
         let matching_function = self.ir.functions.iter().any(|f| f.name == ident_name);
         if matching_function {
             self.lists_stack
@@ -391,6 +400,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             return;
         }
 
+        // data-var reference
         let matching_data_var = self
             .current_bindings
             .iter()
@@ -401,6 +411,9 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             return;
         }
 
+        //
+
+        // imports
         if let Some((_, name)) = self
             .ir
             .std_specific_imports
@@ -849,6 +862,16 @@ mod test {
         let ts_src =
             indoc!(r#"function printCount() { const myCount1 = 1, myCount2 = 2; return true; }"#);
         let expected_clar_src = "(let ((my-count1 1) (my-count2 2)) true)";
+        assert_last_function_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_function_arg_casing() {
+        let ts_src = indoc!(
+            r#"const addr = new DataVar<Principal>(txSender);
+            function updateAddr(newAddr: Principal) { return ok(addr.set(newAddr)); }"#
+        );
+        let expected_clar_src = "(ok (var-set addr new-addr))";
         assert_last_function_body_eq(ts_src, expected_clar_src);
     }
 }

@@ -9,12 +9,12 @@ license = "GPL-3.0"
 anyhow = "1.0.98"
 
 oxc_allocator = "0.75"
-oxc_ast = { version = "0.75", features = ["serialize"] }
+oxc_ast = { version = "0.75" }
 oxc_ast_visit = "0.75"
 oxc_parser = "0.75"
 oxc_span = "0.75"
 oxc_syntax = "0.75"
-oxc_traverse = "0.75"
+oxc_traverse = { version = "0.75" }
 oxc_semantic = "0.75"
 
 clarity = { workspace = true }

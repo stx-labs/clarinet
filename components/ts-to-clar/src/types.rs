@@ -40,6 +40,7 @@ fn extract_type(
         "Uint" => Ok(TypeSignature::UIntType),
         "Int" => Ok(TypeSignature::IntType),
         "Bool" => Ok(TypeSignature::BoolType),
+        "Principal" => Ok(TypeSignature::PrincipalType),
         "StringAscii" => extract_numeric_type_param(type_params).map(get_ascii_type),
         "StringUtf8" => extract_numeric_type_param(type_params).map(get_utf8_type),
         _ => Err(anyhow!("Unknown type: {}", type_ident)),

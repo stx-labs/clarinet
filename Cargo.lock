@@ -616,6 +616,7 @@ dependencies = [
  "tokio",
  "toml",
  "tower-lsp-server",
+ "ts-to-clar",
  "winapi 0.3.9",
 ]
 
@@ -882,7 +883,6 @@ dependencies = [
  "itoa",
  "rustversion",
  "ryu",
- "serde",
  "static_assertions",
 ]
 
@@ -2666,9 +2666,7 @@ dependencies = [
  "bumpalo",
  "hashbrown 0.15.5",
  "oxc_data_structures",
- "oxc_estree",
  "rustc-hash",
- "serde",
 ]
 
 [[package]]
@@ -2763,20 +2761,12 @@ name = "oxc_estree"
 version = "0.75.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4f30ee2c1758598f22bb6578c8cda33557a74ce7a53bdebac9b75a0aed909b5"
-dependencies = [
- "itoa",
- "oxc_data_structures",
- "ryu-js",
-]
 
 [[package]]
 name = "oxc_index"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fa07b0cfa997730afed43705766ef27792873fdf5215b1391949fec678d2392"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "oxc_parser"
@@ -2850,7 +2840,6 @@ dependencies = [
  "oxc_allocator",
  "oxc_ast_macros",
  "oxc_estree",
- "serde",
 ]
 
 [[package]]
@@ -2871,7 +2860,6 @@ dependencies = [
  "phf",
  "rustc-hash",
  "ryu-js",
- "serde",
  "unicode-id-start",
 ]
 

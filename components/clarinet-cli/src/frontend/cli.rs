@@ -91,6 +91,9 @@ enum Command {
     /// Subcommands for Devnet usage
     #[clap(subcommand, name = "devnet")]
     Devnet(Devnet),
+    /// Subcommands ts-to-clar transpiler usage
+    #[clap(name = "build", aliases = &["transpile"], bin_name = "build")]
+    Build(Build),
     /// Get Clarity autocompletion and inline errors from your code editor (VSCode, vim, emacs, etc)
     #[clap(name = "lsp", bin_name = "lsp")]
     LSP,
@@ -100,6 +103,12 @@ enum Command {
     /// Step by step debugging and breakpoints from your code editor (VSCode, vim, emacs, etc)
     #[clap(name = "dap", bin_name = "dap")]
     DAP,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+struct Build {
+    #[clap(long = "path", short = 'p')]
+    pub path: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1327,6 +1336,24 @@ pub fn main() {
             }
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
+        Command::Build(Build { path }) => {
+            let file_name = path.unwrap_or_else(|| {
+                eprintln!("No file path provided. Please specify a .clar.ts file.");
+                process::exit(1);
+            });
+            let file_path = std::path::Path::new(&file_name);
+            let extension = file_path.extension().unwrap_or_default();
+            assert_eq!(extension, "ts");
+            assert!(file_path.is_file());
+            assert!(file_name.ends_with(".clar.ts"));
+
+            let output_path = file_name.strip_suffix(".ts").unwrap();
+
+            let src = std::fs::read_to_string(file_path).unwrap();
+            let clarity_code = ts_to_clar::transpile(&file_name, &src).unwrap();
+            std::fs::write(output_path, clarity_code).unwrap();
+            println!("Transpiled {file_name} to {output_path}");
+        }
     };
 }
 

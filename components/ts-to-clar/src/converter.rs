@@ -4,7 +4,7 @@ use std::vec;
 
 use clarity::vm::{
     representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span},
-    types::{SequenceSubtype, StringSubtype, TypeSignature as ClarityTypeSignature},
+    types::{PrincipalData, SequenceSubtype, StringSubtype, TypeSignature as ClarityTypeSignature},
     ClarityName, Value as ClarityValue,
 };
 use oxc_allocator::Allocator;
@@ -23,6 +23,9 @@ fn type_signature_to_pse(
         ClarityTypeSignature::UIntType => PreSymbolicExpression::atom(ClarityName::from("uint")),
         ClarityTypeSignature::IntType => PreSymbolicExpression::atom(ClarityName::from("int")),
         ClarityTypeSignature::BoolType => PreSymbolicExpression::atom(ClarityName::from("bool")),
+        ClarityTypeSignature::PrincipalType => {
+            PreSymbolicExpression::atom(ClarityName::from("principal"))
+        }
         ClarityTypeSignature::SequenceType(seq_subtype) => match seq_subtype {
             SequenceSubtype::StringType(string_subtype) => match string_subtype {
                 StringSubtype::ASCII(len) => PreSymbolicExpression::list(vec![
@@ -80,6 +83,22 @@ fn convert_expression_with_type(
             }
             _ => return Err(anyhow::anyhow!("Invalid expression for Bool")),
         },
+        ClarityTypeSignature::PrincipalType => match &expr {
+            OxcExpression::StringLiteral(str) => PreSymbolicExpression::atom_value(
+                ClarityValue::Principal(PrincipalData::parse(str.value.as_str())?),
+            ),
+            OxcExpression::Identifier(ident) => {
+                if ident.name == "txSender" {
+                    PreSymbolicExpression::atom(ClarityName::from("tx-sender"))
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Invalid identifier for Principal: {}",
+                        ident.name
+                    ));
+                }
+            }
+            _ => return Err(anyhow::anyhow!("Invalid expression for Principal")),
+        },
         ClarityTypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
             _len,
         ))) => match &expr {
@@ -124,7 +143,7 @@ fn convert_expression_with_type(
 
             _ => return Err(anyhow::anyhow!("Unsupported expression for Tuple")),
         },
-        _ => return Err(anyhow::anyhow!("Unsupported type for constant")),
+        _ => return Err(anyhow::anyhow!("Unsupported type for variable")),
     })
 }
 
@@ -167,7 +186,7 @@ fn convert_function(
         .parameters
         .iter()
         .map(|(name, r#type)| {
-            let name = PreSymbolicExpression::atom(ClarityName::from(name.as_str()));
+            let name = PreSymbolicExpression::atom(ClarityName::from(to_kebab_case(name).as_str()));
             let r#type = type_signature_to_pse(r#type)?;
             Ok(vec![name, r#type])
         })
@@ -332,6 +351,19 @@ mod test {
     // build the expected PSEs from the Clarity source code.
 
     #[test]
+    fn test_principal_data_var() {
+        let ts_src =
+            "const owner = new DataVar<Principal>(\"ST3PF13W7Z0RRM42A8VZRVFQ75SV1K26RXEP8YGKJ\");";
+        assert_pses_eq(
+            ts_src,
+            r#"(define-data-var owner principal 'ST3PF13W7Z0RRM42A8VZRVFQ75SV1K26RXEP8YGKJ)"#,
+        );
+
+        let ts_src = "const owner = new DataVar<Principal>(txSender);";
+        assert_pses_eq(ts_src, r#"(define-data-var owner principal tx-sender)"#);
+    }
+
+    #[test]
     fn test_convert_tuple_type() {
         let ts_src = "const state = new DataVar<{ ok: Int }>({ ok: 1 });";
         assert_pses_eq(ts_src, r#"(define-data-var state { ok: int } { ok: 1 })"#);
@@ -415,5 +447,20 @@ mod test {
             "#
         };
         assert_pses_eq(ts_src, r#"(define-public (myfunc) (ok true))"#);
+    }
+
+    #[test]
+    fn test_function_arg_casing() {
+        let ts_src = indoc! {
+            r#"const addr = new DataVar<Principal>(txSender);
+            function updateAddr(newAddr: Principal) { return ok(addr.set(newAddr)); }"#
+        };
+        assert_pses_eq(
+            ts_src,
+            indoc! {
+                r#"(define-data-var addr principal tx-sender)
+                (define-private (update-addr (new-addr principal)) (ok (var-set addr new-addr)))"#
+            },
+        );
     }
 }
