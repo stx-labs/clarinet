@@ -1,7 +1,30 @@
-use clarity::vm::functions::NativeFunctions;
-use std::sync::OnceLock;
+use clarity::vm::{functions::NativeFunctions, types::TypeSignature};
+use std::{collections::HashMap, sync::LazyLock};
 
-pub static STD_PKG_NAME: &str = "@hirosystems/clarity-std";
+pub static STD_PKG_NAME: &str = "clarity";
+
+pub static KEYWORDS_TYPES: LazyLock<HashMap<&str, (&str, TypeSignature)>> = LazyLock::new(|| {
+    use clarity::vm::types::TypeSignature::*;
+    HashMap::from([
+        // chain
+        ("chainId", ("chain-id", UIntType)),
+        ("isInMainnet", ("is-in-mainnet", BoolType)),
+        ("isInRegtest", ("is-in-regtest", BoolType)),
+        // heights
+        ("burnBlockHeight", ("burn-block-height", UIntType)),
+        ("stacksBlockHeight", ("stacks-block-height", UIntType)),
+        ("tenureHeight", ("tenure-height", UIntType)),
+        // call er context
+        ("contractCaller", ("contract-caller", PrincipalType)),
+        ("txSender", ("tx-sender", PrincipalType)),
+        (
+            "txSponsor",
+            ("tx-sponsor?", OptionalType(PrincipalType.into())),
+        ),
+        // stx
+        ("stxLiquidSupply", ("stx-liquid-supply", UIntType)),
+    ])
+});
 
 #[allow(dead_code)]
 pub fn get_std() -> Vec<String> {
@@ -46,21 +69,139 @@ pub fn get_std() -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
-static STD_FUNCTIONS: OnceLock<Vec<String>> = OnceLock::new();
+/*
+std: [
+    // done
+    "to-int",
+    "to-uint",
+
+    // todo
+    "get-stacks-block-info?",
+    "get-tenure-info?",
+    "get-burn-block-info?",
+    "to-consensus-buff?",
+    "from-consensus-buff?",
+
+    // to consider
+    "buff-to-int-le",
+    "buff-to-uint-le",
+    "buff-to-int-be",
+    "buff-to-uint-be",
+    "sha256",
+    "sha512",
+    "sha512/256",
+    "keccak256",
+    "secp256k1-recover?",
+    "secp256k1-verify",
+    "print",
+
+    // not todo
+    "map",
+    "fold",
+    "append",
+    "concat",
+    "as-max-len?",
+    "len",
+    "element-at",
+    "index-of",
+    "is-standard",
+    "principal-destruct?",
+    "principal-construct?",
+    "string-to-int?",
+    "string-to-uint?",
+    "int-to-ascii",
+    "int-to-utf8",
+    "hash160",
+    "contract-call?",
+    "as-contract",
+    "contract-of",
+    "principal-of?",
+    "at-block",
+    "get-block-info?",
+    "err",
+    "ok",
+    "some",
+    "default-to",
+    "asserts!",
+    "unwrap!",
+    "unwrap-err!",
+    "unwrap-panic",
+    "unwrap-err-panic",
+    "match",
+    "try!",
+    "is-ok",
+    "is-none",
+    "is-err",
+    "is-some",
+    "filter",
+    "stx-get-balance",
+    "stx-transfer?",
+    "stx-transfer-memo?",
+    "stx-burn?",
+    "stx-account",
+    "bit-shift-left",
+    "bit-shift-right",
+    "bit-xor",
+    "slice?",
+    "replace-at?",
+] */
 
 #[allow(dead_code)]
-pub fn get_std_functions() -> &'static Vec<String> {
-    STD_FUNCTIONS.get_or_init(get_std)
+pub enum Parameter {
+    Any,
+    Value(TypeSignature),
+    Identifiers(Vec<String>),
 }
+
+pub struct StdFunction {
+    pub name: &'static str,
+    pub _parameters: Vec<Parameter>,
+    // return type might not be needed at all in transpiler at some point
+    // because the type might just be avaible in the ts ast
+    // making it Optional instead of overengineering it for now
+    pub _return_type: Option<TypeSignature>,
+}
+
+pub static FUNCTIONS: LazyLock<HashMap<&str, StdFunction>> = LazyLock::new(|| {
+    use NativeFunctions::*;
+    use TypeSignature::*;
+
+    HashMap::from([
+        (
+            "toInt",
+            StdFunction {
+                name: ToInt.get_name_str(),
+                _parameters: vec![Parameter::Value(UIntType)],
+                _return_type: Some(IntType),
+            },
+        ),
+        (
+            "toUint",
+            StdFunction {
+                name: ToUInt.get_name_str(),
+                _parameters: vec![Parameter::Value(IntType)],
+                _return_type: Some(UIntType),
+            },
+        ),
+        (
+            "print",
+            StdFunction {
+                name: Print.get_name_str(),
+                _parameters: vec![Parameter::Any],
+                _return_type: None,
+            },
+        ),
+    ])
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_get_std() {
-        let functions = get_std_functions();
-        // println!("std: {:#?}", functions);
-        assert_eq!(functions.len(), 66);
+    fn test_functions() {
+        // let functions = FUNCTIONS;
+
+        // println!("Functions: {:?}", FUNCTIONS.keys().collect::<Vec<_>>());
     }
 }

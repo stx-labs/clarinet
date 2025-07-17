@@ -12,6 +12,7 @@ use oxc_span::SourceType;
 use oxc_traverse::{traverse_mut, Ancestor, Traverse};
 
 use crate::{
+    clarity_std::{FUNCTIONS, KEYWORDS_TYPES},
     parser::{IRFunction, IR},
     to_kebab_case,
     types::ts_to_clar_type,
@@ -211,6 +212,7 @@ impl<'a> StatementConverter<'a> {
 // could be used to store additional state during traversal
 #[derive(Default)]
 pub struct ConverterState<'a> {
+    pub ingest_call_expression: bool,
     data: PhantomData<&'a ()>,
 }
 pub type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
@@ -270,57 +272,84 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn enter_call_expression(
         &mut self,
         call_expr: &mut ast::CallExpression<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
-        if let Expression::StaticMemberExpression(member_expr) = &call_expr.callee {
-            if let Expression::Identifier(ident) = &member_expr.object {
-                let data_var = self
-                    .ir
-                    .data_vars
-                    .iter()
-                    .find(|data_var| data_var.name == ident.name.as_str());
-                if let Some(data_var) = data_var {
-                    self.current_context_type = Some(data_var.r#type.clone());
-                    if member_expr.property.name == "get" {
+        match &call_expr.callee {
+            Expression::Identifier(ident) => {
+                let ident_name = ident.name.as_str();
+                if let Some(clar_func) = FUNCTIONS.get(ident_name) {
+                    let is_imported = self
+                        .ir
+                        .std_specific_imports
+                        .iter()
+                        .any(|(_, name)| name == ident_name);
+                    if is_imported {
                         self.lists_stack
-                            .push(PreSymbolicExpression::list(vec![atom("var-get")]));
-                    } else if member_expr.property.name == "set" {
-                        self.lists_stack
-                            .push(PreSymbolicExpression::list(vec![atom("var-set")]));
+                            .push(PreSymbolicExpression::list(vec![atom(clar_func.name)]));
+                        ctx.state.ingest_call_expression = true;
+                        return;
                     }
                 }
-
-                if self
-                    .ir
-                    .std_namespace_import
-                    .as_ref()
-                    .is_some_and(|n| n == ident.name.as_str())
-                {
-                    self.lists_stack.push(PreSymbolicExpression::list(vec![atom(
-                        member_expr.property.name.as_str(),
-                    )]));
-                    return;
-                }
             }
-            return;
+            Expression::StaticMemberExpression(member_expr) => {
+                if let Expression::Identifier(ident) = &member_expr.object {
+                    let data_var = self
+                        .ir
+                        .data_vars
+                        .iter()
+                        .find(|data_var| data_var.name == ident.name.as_str());
+                    if let Some(data_var) = data_var {
+                        self.current_context_type = Some(data_var.r#type.clone());
+                        if member_expr.property.name == "get" {
+                            self.lists_stack
+                                .push(PreSymbolicExpression::list(vec![atom("var-get")]));
+                            ctx.state.ingest_call_expression = true;
+                            return;
+                        } else if member_expr.property.name == "set" {
+                            self.lists_stack
+                                .push(PreSymbolicExpression::list(vec![atom("var-set")]));
+                            ctx.state.ingest_call_expression = true;
+                            return;
+                        }
+                    }
+
+                    if self
+                        .ir
+                        .std_namespace_import
+                        .as_ref()
+                        .is_some_and(|n| n == ident.name.as_str())
+                    {
+                        if let Some(clar_func) = FUNCTIONS.get(member_expr.property.name.as_str()) {
+                            self.lists_stack
+                                .push(PreSymbolicExpression::list(vec![atom(clar_func.name)]));
+                            ctx.state.ingest_call_expression = true;
+                        } else {
+                            // @todo: throw / handle error
+                            println!("Unknown std function: {}", member_expr.property.name);
+                        }
+                        return;
+                    }
+                }
+                return;
+            }
+            _ => {}
         }
 
-        // let callee = match &call_expr.callee {
-        //     Expression::Identifier(ident) => atom(ident.name.as_str()),
-        //     _ => todo!(),
-        // };
-        // self.lists_stack
-        //     .push(PreSymbolicExpression::list(vec![callee]));
-
+        // todo: handle (currnently) global functions like ok() or err()
+        // should probably be part of std
+        ctx.state.ingest_call_expression = true;
         self.lists_stack.push(PreSymbolicExpression::list(vec![]));
     }
 
     fn exit_call_expression(
         &mut self,
         _call_expr: &mut ast::CallExpression<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
-        self.ingest_last_stack_item();
+        if ctx.state.ingest_call_expression {
+            self.ingest_last_stack_item();
+            ctx.state.ingest_call_expression = false;
+        }
     }
 
     fn enter_binding_identifier(
@@ -392,6 +421,13 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
 
         let ident_name = ident.name.as_str();
 
+        // native keywords
+        let matching_keyword = KEYWORDS_TYPES.get(ident_name);
+        if let Some((clarity_name, _)) = matching_keyword {
+            self.lists_stack.push(atom(clarity_name));
+            return;
+        }
+
         // function call
         let matching_function = self.ir.functions.iter().any(|f| f.name == ident_name);
         if matching_function {
@@ -411,17 +447,14 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             return;
         }
 
-        //
-
         // imports
-        if let Some((_, name)) = self
+        if self
             .ir
             .std_specific_imports
             .iter()
             .find(|(_, name)| name == ident_name)
+            .is_some()
         {
-            // todo: get type_signature of the std func
-            self.lists_stack.push(atom(name.as_str()));
             return;
         }
 
@@ -448,6 +481,16 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             .std_namespace_import
             .as_ref()
             .is_some_and(|n| n == ident.name.as_str())
+        {
+            return;
+        }
+
+        if self
+            .ir
+            .std_specific_imports
+            .iter()
+            .find(|(_, name)| name == ident.name.as_str())
+            .is_some()
         {
             return;
         }
@@ -638,19 +681,16 @@ mod test {
         }
     }
 
-    fn get_expected_pse(expected_clar_source: &str) -> PreSymbolicExpression {
-        let mut expected_pse = clarity::vm::ast::parser::v2::parse(expected_clar_source).unwrap();
+    fn get_expected_pse(expected_clar_src: &str) -> PreSymbolicExpression {
+        let mut expected_pse = clarity::vm::ast::parser::v2::parse(expected_clar_src).unwrap();
         set_pse_span_to_0(&mut expected_pse);
         expected_pse.into_iter().next().unwrap()
     }
 
     /// asserts the function body of the last function provided in the ts_src
     #[track_caller]
-    fn assert_last_function_body_eq(ts_src: &str, expected_clar_source: &str) {
-        let expected_pse = get_expected_pse(expected_clar_source);
-
-        let import = format!(r#"import * as c from "{STD_PKG_NAME}";"#);
-        let ts_src = format!("{import}\n{ts_src}");
+    fn assert_body_eq(ts_src: &str, expected_clar_src: &str) {
+        let expected_pse = get_expected_pse(expected_clar_src);
 
         let allocator = Allocator::default();
         let ir = get_ir(&allocator, "tmp.clar.ts", &ts_src);
@@ -658,10 +698,19 @@ mod test {
         pretty_assertions::assert_eq!(result, expected_pse);
     }
 
+    /// include the std lib impact as `c`
+    #[track_caller]
+    fn assert_body_eq_with_std(ts_src: &str, expected_clar_src: &str) {
+        let import = format!(r#"import * as c from "{STD_PKG_NAME}";"#);
+        let ts_src = format!("{import}\n{ts_src}");
+
+        assert_body_eq(&ts_src, expected_clar_src);
+    }
+
     #[test]
     fn test_return_bool() {
         let ts_src = "function return_true() { return true; }";
-        assert_last_function_body_eq(ts_src, "true");
+        assert_body_eq(ts_src, "true");
     }
 
     #[test]
@@ -669,43 +718,45 @@ mod test {
         let ts_src = formatdoc! { r#"import {{ print }} from "{STD_PKG_NAME}";
             function printtrue() {{ return print(true); }}"#
         };
-        assert_last_function_body_eq(&ts_src, "(print true)");
+        assert_body_eq(&ts_src, "(print true)");
     }
 
     #[test]
     fn test_expression_multiple_statements() {
         let ts_src = "function printtrue() { c.print(true); return c.print(true); }";
-        assert_last_function_body_eq(ts_src, "(begin (print true) (print true))");
+        assert_body_eq_with_std(ts_src, "(begin (print true) (print true))");
     }
 
     #[test]
     fn test_expression_return_uint() {
-        let ts_src = "function printarg(arg: Uint) { return print(arg); }";
-        assert_last_function_body_eq(ts_src, "(print arg)");
+        let ts_src = formatdoc! { r#"import {{ print }} from "{STD_PKG_NAME}";
+            function printarg(arg: Uint) {{ return print(arg); }};"#
+        };
+        assert_body_eq_with_std(&ts_src, "(print arg)");
     }
 
     #[test]
     fn test_expression_return_ok() {
         let ts_src = "function okarg(arg: Uint) { return ok(arg); }";
-        assert_last_function_body_eq(ts_src, "(ok arg)");
+        assert_body_eq(ts_src, "(ok arg)");
     }
 
     #[test]
     fn test_operator() {
         let ts_src = "function add(a: Uint, b: Uint) { return a + b; }";
-        assert_last_function_body_eq(ts_src, "(+ a b)");
+        assert_body_eq(ts_src, "(+ a b)");
 
         let ts_src = "function sub(a: Uint, b: Uint) { return a - b; }";
-        assert_last_function_body_eq(ts_src, "(- a b)");
+        assert_body_eq(ts_src, "(- a b)");
 
         let ts_src = "function add1and1() { return 1 + 1; }";
-        assert_last_function_body_eq(ts_src, "(+ 1 1)");
+        assert_body_eq(ts_src, "(+ 1 1)");
 
         let ts_src = "function add1and2() { return 2 ** 3; }";
-        assert_last_function_body_eq(ts_src, "(pow 2 3)");
+        assert_body_eq(ts_src, "(pow 2 3)");
 
         let ts_src = "function add1and2() { return 2 % 3; }";
-        assert_last_function_body_eq(ts_src, "(mod 2 3)");
+        assert_body_eq(ts_src, "(mod 2 3)");
     }
 
     #[test]
@@ -717,22 +768,22 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(if (is-eq (mod n 2) 0) "even" "odd")"#);
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
     fn test_type_inference() {
         let ts_src = "function add1(a: Int) { return a + 1; }";
-        assert_last_function_body_eq(ts_src, "(+ a 1)");
+        assert_body_eq(ts_src, "(+ a 1)");
 
         let ts_src = "function add1(a: Uint) { return a + 1; }";
-        assert_last_function_body_eq(ts_src, "(+ a u1)");
+        assert_body_eq(ts_src, "(+ a u1)");
 
         let ts_src = "function add1(a: Int) { return 1 + a; }";
-        assert_last_function_body_eq(ts_src, "(+ 1 a)");
+        assert_body_eq(ts_src, "(+ 1 a)");
 
         let ts_src = "function add1(a: Uint) { return 1 + a; }";
-        assert_last_function_body_eq(ts_src, "(+ u1 a)");
+        assert_body_eq(ts_src, "(+ u1 a)");
     }
 
     #[test]
@@ -744,7 +795,7 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(if (is-eq (mod n u2) u0) "even" "odd")"#);
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -757,7 +808,7 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) u1))"#);
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -767,10 +818,10 @@ mod test {
         // https://github.com/hirosystems/clarinet/blob/6f9a320a425fceaf47c5b5c9867ec7a08bac27d9/components/ts-to-clar/src/expression_converter.rs#L31-L97
         // it wasn't kept because it was a recursive implementation instead of using the traverse pattern
         let ts_src = "function add3(a: Int) { return a + 1 + 2; }";
-        assert_last_function_body_eq(ts_src, "(+ (+ a 1) 2)");
+        assert_body_eq(ts_src, "(+ (+ a 1) 2)");
 
         let ts_src = "function add3(a: Uint) { return a + 1 + 2; }";
-        assert_last_function_body_eq(ts_src, "(+ (+ a u1) u2)");
+        assert_body_eq(ts_src, "(+ (+ a u1) u2)");
 
         // let ts_src = "function add3(a: Uint) { return 1 + a + 2; }";
         // assert_last_function_body_eq(ts_src, "(+ u1 a u2)");
@@ -791,7 +842,7 @@ mod test {
     #[test]
     fn test_ok_operator() {
         let ts_src = "function okarg(arg: Uint) { return ok(arg + 1); }";
-        assert_last_function_body_eq(ts_src, "(ok (+ arg u1))");
+        assert_body_eq(ts_src, "(ok (+ arg u1))");
     }
 
     #[test]
@@ -804,7 +855,7 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(var-get count)"#);
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -817,7 +868,7 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) 1))"#);
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -828,7 +879,7 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(print-bool true)"#);
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq_with_std(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -847,22 +898,21 @@ mod test {
               true
             )"#
         );
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq_with_std(ts_src, expected_clar_src);
     }
 
     #[test]
     fn test_variable_binding_type_casting() {
-        let ts_src = indoc!(r#"function printCount() { const myCount: Uint = 1; return true; }"#);
+        let ts_src = "function casting() { const myCount: Uint = 1; return true; }";
         let expected_clar_src = "(let ((my-count u1)) true)";
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
     fn test_multiple_variable_bindings() {
-        let ts_src =
-            indoc!(r#"function printCount() { const myCount1 = 1, myCount2 = 2; return true; }"#);
+        let ts_src = "function printCount() { const myCount1 = 1, myCount2 = 2; return true; }";
         let expected_clar_src = "(let ((my-count1 1) (my-count2 2)) true)";
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 
     #[test]
@@ -872,6 +922,28 @@ mod test {
             function updateAddr(newAddr: Principal) { return ok(addr.set(newAddr)); }"#
         );
         let expected_clar_src = "(ok (var-set addr new-addr))";
-        assert_last_function_body_eq(ts_src, expected_clar_src);
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_native_keywords_support() {
+        let ts_src = "function okTxSender() { return ok(txSender); }";
+        let expected_clar_src = "(ok tx-sender)";
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_native_functions_support() {
+        let ts_src = "function myToInt(n: Uint) { return c.toInt(n); }";
+        let expected_clar_src = "(to-int n)";
+        assert_body_eq_with_std(ts_src, expected_clar_src);
+
+        // test without the namespace import
+        let ts_src = formatdoc! {
+            r#" import {{ toInt }} from "{STD_PKG_NAME}";
+            function myToInt(n: Uint) {{ return toInt(n); }}"#
+        };
+        let expected_clar_src = "(to-int n)";
+        assert_body_eq(&ts_src, expected_clar_src);
     }
 }
