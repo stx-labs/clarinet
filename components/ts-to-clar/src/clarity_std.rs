@@ -1,4 +1,7 @@
-use clarity::vm::{functions::NativeFunctions, types::TypeSignature};
+use clarity::vm::{
+    functions::NativeFunctions,
+    types::{StacksBlockInfoProperty, TypeSignature},
+};
 use std::{collections::HashMap, sync::LazyLock};
 
 pub static STD_PKG_NAME: &str = "clarity";
@@ -74,6 +77,7 @@ std: [
     // done
     "to-int",
     "to-uint",
+    "print",
 
     // todo
     "get-stacks-block-info?",
@@ -93,7 +97,6 @@ std: [
     "keccak256",
     "secp256k1-recover?",
     "secp256k1-verify",
-    "print",
 
     // not todo
     "map",
@@ -150,12 +153,12 @@ std: [
 pub enum Parameter {
     Any,
     Value(TypeSignature),
-    Identifiers(Vec<String>),
+    Identifiers(&'static [&'static str]),
 }
 
 pub struct StdFunction {
     pub name: &'static str,
-    pub _parameters: Vec<Parameter>,
+    pub parameters: Vec<(&'static str, Parameter)>,
     // return type might not be needed at all in transpiler at some point
     // because the type might just be avaible in the ts ast
     // making it Optional instead of overengineering it for now
@@ -171,7 +174,7 @@ pub static FUNCTIONS: LazyLock<HashMap<&str, StdFunction>> = LazyLock::new(|| {
             "toInt",
             StdFunction {
                 name: ToInt.get_name_str(),
-                _parameters: vec![Parameter::Value(UIntType)],
+                parameters: vec![("u", Parameter::Value(UIntType))],
                 _return_type: Some(IntType),
             },
         ),
@@ -179,7 +182,7 @@ pub static FUNCTIONS: LazyLock<HashMap<&str, StdFunction>> = LazyLock::new(|| {
             "toUint",
             StdFunction {
                 name: ToUInt.get_name_str(),
-                _parameters: vec![Parameter::Value(IntType)],
+                parameters: vec![("i", Parameter::Value(IntType))],
                 _return_type: Some(UIntType),
             },
         ),
@@ -187,7 +190,21 @@ pub static FUNCTIONS: LazyLock<HashMap<&str, StdFunction>> = LazyLock::new(|| {
             "print",
             StdFunction {
                 name: Print.get_name_str(),
-                _parameters: vec![Parameter::Any],
+                parameters: vec![("expr", Parameter::Any)],
+                _return_type: None,
+            },
+        ),
+        (
+            "getStacksBlockInfo",
+            StdFunction {
+                name: GetStacksBlockInfo.get_name_str(),
+                parameters: vec![
+                    (
+                        "prop-name",
+                        Parameter::Identifiers(StacksBlockInfoProperty::ALL_NAMES),
+                    ),
+                    ("stacks-block-height", Parameter::Value(UIntType)),
+                ],
                 _return_type: None,
             },
         ),
@@ -200,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_functions() {
-        // let functions = FUNCTIONS;
+        assert!(FUNCTIONS.len() == 3)
 
         // println!("Functions: {:?}", FUNCTIONS.keys().collect::<Vec<_>>());
     }

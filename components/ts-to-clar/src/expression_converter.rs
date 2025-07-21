@@ -6,13 +6,13 @@ use clarity::vm::{
     ClarityName, Value as ClarityValue,
 };
 use oxc_allocator::{Allocator, CloneIn};
-use oxc_ast::ast::{self, Expression};
+use oxc_ast::ast::{self, Argument, Expression};
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use oxc_traverse::{traverse_mut, Ancestor, Traverse};
 
 use crate::{
-    clarity_std::{FUNCTIONS, KEYWORDS_TYPES},
+    clarity_std::{Parameter, FUNCTIONS, KEYWORDS_TYPES},
     parser::{IRFunction, IR},
     to_kebab_case,
     types::ts_to_clar_type,
@@ -169,6 +169,10 @@ impl<'a> StatementConverter<'a> {
                     return binding_type.clone();
                 }
 
+                if let Some((_, type_signature)) = KEYWORDS_TYPES.get(ident.name.as_str()) {
+                    return Some(type_signature.clone());
+                }
+
                 None
             }
             Expression::NumericLiteral(_) => {
@@ -177,7 +181,7 @@ impl<'a> StatementConverter<'a> {
             }
             Expression::CallExpression(_call_expr) => {
                 // todo: for function calls, we could potentially infer the return type
-                // for now,return None and let context determine
+                // for now, return None and let context determine
                 None
             }
             Expression::BinaryExpression(bin_expr) => {
@@ -191,6 +195,40 @@ impl<'a> StatementConverter<'a> {
             }
             _ => None,
         }
+    }
+
+    fn handle_std_function_call(
+        &mut self,
+        func_name: &str,
+        arguments: &oxc_allocator::Vec<'a, Argument<'a>>,
+        ctx: &mut TraverseCtx<'a>,
+    ) -> bool {
+        if let Some(clar_func) = FUNCTIONS.get(func_name) {
+            self.lists_stack
+                .push(PreSymbolicExpression::list(vec![atom(clar_func.name)]));
+
+            match func_name {
+                "getStacksBlockInfo" => {
+                    if let Some((_, Parameter::Identifiers(allowed_names))) = clar_func
+                        .parameters
+                        .iter()
+                        .find(|(name, _)| name == &"prop-name")
+                    {
+                        if let Some(Argument::StringLiteral(str)) = arguments.first().take() {
+                            if allowed_names.contains(&str.value.as_str()) {
+                                self.lists_stack
+                                    .push(atom(str.value.as_str().to_lowercase().as_str()));
+                                ctx.state.skip_next_string_argument = true;
+                                self.ingest_last_stack_item();
+                                return true;
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            }
+        }
+        return false;
     }
 
     fn ingest_last_stack_item(&mut self) {
@@ -208,11 +246,10 @@ impl<'a> StatementConverter<'a> {
     }
 }
 
-// introduced in oxc 0.75, not used yet
-// could be used to store additional state during traversal
 #[derive(Default)]
 pub struct ConverterState<'a> {
     pub ingest_call_expression: bool,
+    pub skip_next_string_argument: bool,
     data: PhantomData<&'a ()>,
 }
 pub type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
@@ -277,60 +314,67 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         match &call_expr.callee {
             Expression::Identifier(ident) => {
                 let ident_name = ident.name.as_str();
-                if let Some(clar_func) = FUNCTIONS.get(ident_name) {
-                    let is_imported = self
-                        .ir
-                        .std_specific_imports
-                        .iter()
-                        .any(|(_, name)| name == ident_name);
-                    if is_imported {
-                        self.lists_stack
-                            .push(PreSymbolicExpression::list(vec![atom(clar_func.name)]));
+                if self
+                    .ir
+                    .std_specific_imports
+                    .iter()
+                    .any(|(_, name)| name == ident_name)
+                {
+                    if self.handle_std_function_call(ident_name, &call_expr.arguments, ctx) {
                         ctx.state.ingest_call_expression = true;
+
+                        return;
+                    } else {
+                        println!("Unknown std function: {}", ident_name);
                         return;
                     }
                 }
             }
             Expression::StaticMemberExpression(member_expr) => {
-                if let Expression::Identifier(ident) = &member_expr.object {
-                    let data_var = self
-                        .ir
-                        .data_vars
-                        .iter()
-                        .find(|data_var| data_var.name == ident.name.as_str());
-                    if let Some(data_var) = data_var {
-                        self.current_context_type = Some(data_var.r#type.clone());
-                        if member_expr.property.name == "get" {
-                            self.lists_stack
-                                .push(PreSymbolicExpression::list(vec![atom("var-get")]));
-                            ctx.state.ingest_call_expression = true;
-                            return;
-                        } else if member_expr.property.name == "set" {
-                            self.lists_stack
-                                .push(PreSymbolicExpression::list(vec![atom("var-set")]));
-                            ctx.state.ingest_call_expression = true;
-                            return;
-                        }
-                    }
+                let Expression::Identifier(ident) = &member_expr.object else {
+                    return;
+                };
+                let ident_name = ident.name.as_str();
 
-                    if self
-                        .ir
-                        .std_namespace_import
-                        .as_ref()
-                        .is_some_and(|n| n == ident.name.as_str())
-                    {
-                        if let Some(clar_func) = FUNCTIONS.get(member_expr.property.name.as_str()) {
-                            self.lists_stack
-                                .push(PreSymbolicExpression::list(vec![atom(clar_func.name)]));
-                            ctx.state.ingest_call_expression = true;
-                        } else {
-                            // @todo: throw / handle error
-                            println!("Unknown std function: {}", member_expr.property.name);
-                        }
-                        return;
-                    }
+                // Handle data variable access
+                if let Some(data_var) = self
+                    .ir
+                    .data_vars
+                    .iter()
+                    .find(|data_var| data_var.name == ident_name)
+                {
+                    self.current_context_type = Some(data_var.r#type.clone());
+                    let atom_name = match member_expr.property.name.as_str() {
+                        "get" => "var-get",
+                        "set" => "var-set",
+                        _ => return,
+                    };
+                    self.lists_stack
+                        .push(PreSymbolicExpression::list(vec![atom(atom_name)]));
+                    ctx.state.ingest_call_expression = true;
+                    return;
                 }
-                return;
+
+                // Handle std namespace calls
+                if self
+                    .ir
+                    .std_namespace_import
+                    .as_ref()
+                    .is_some_and(|n| n == ident_name)
+                {
+                    if self.handle_std_function_call(
+                        &member_expr.property.name,
+                        &call_expr.arguments,
+                        ctx,
+                    ) {
+                        ctx.state.ingest_call_expression = true;
+                        return;
+                    } else {
+                        // @todo: throw / handle error
+                        println!("Unknown std function: {}", member_expr.property.name);
+                    }
+                    return;
+                }
             }
             _ => {}
         }
@@ -421,9 +465,27 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
 
         let ident_name = ident.name.as_str();
 
+        // imports are handled in enter_call_expression
+        if self
+            .ir
+            .std_specific_imports
+            .iter()
+            .find(|(_, name)| name == ident_name)
+            .is_some()
+        {
+            return;
+        }
+        if self
+            .ir
+            .std_namespace_import
+            .as_ref()
+            .is_some_and(|n| n == ident_name)
+        {
+            return;
+        }
+
         // native keywords
-        let matching_keyword = KEYWORDS_TYPES.get(ident_name);
-        if let Some((clarity_name, _)) = matching_keyword {
+        if let Some((clarity_name, _)) = KEYWORDS_TYPES.get(ident_name) {
             self.lists_stack.push(atom(clarity_name));
             return;
         }
@@ -444,26 +506,6 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         if matching_data_var {
             self.lists_stack
                 .push(atom(to_kebab_case(ident_name).as_str()));
-            return;
-        }
-
-        // imports
-        if self
-            .ir
-            .std_specific_imports
-            .iter()
-            .find(|(_, name)| name == ident_name)
-            .is_some()
-        {
-            return;
-        }
-
-        if self
-            .ir
-            .std_namespace_import
-            .as_ref()
-            .is_some_and(|n| n == ident_name)
-        {
             return;
         }
 
@@ -589,8 +631,11 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn enter_string_literal(
         &mut self,
         node: &mut ast::StringLiteral<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
+        if ctx.state.skip_next_string_argument {
+            return;
+        }
         self.lists_stack.push(PreSymbolicExpression::atom_value(
             ClarityValue::string_ascii_from_bytes(node.value.as_bytes().to_vec()).unwrap(),
         ));
@@ -599,8 +644,12 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn exit_string_literal(
         &mut self,
         _node: &mut ast::StringLiteral<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
+        if ctx.state.skip_next_string_argument {
+            ctx.state.skip_next_string_argument = false;
+            return;
+        }
         self.ingest_last_stack_item();
     }
 
@@ -933,6 +982,13 @@ mod test {
     }
 
     #[test]
+    fn test_native_keywords_type_inference() {
+        let ts_src = "function previousBlockHeight() { return stacksBlockHeight - 1; }";
+        let expected_clar_src = "(- stacks-block-height u1)";
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
     fn test_native_functions_support() {
         let ts_src = "function myToInt(n: Uint) { return c.toInt(n); }";
         let expected_clar_src = "(to-int n)";
@@ -945,5 +1001,16 @@ mod test {
         };
         let expected_clar_src = "(to-int n)";
         assert_body_eq(&ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_get_stacks_block_info() {
+        let ts_src = indoc! {
+            r#"function getTime() {
+                return c.getStacksBlockInfo("time", stacksBlockHeight);
+            }"#
+        };
+        let expected_clar_src = "(get-stacks-block-info? time stacks-block-height)";
+        assert_body_eq_with_std(ts_src, expected_clar_src);
     }
 }
