@@ -43,7 +43,14 @@ mod test {
 
         assert_eq!(
             clarity_code,
-            "(define-const OWNER_ROLE u1)\n(define-data-var count uint u0)\n(define-data-map msgs uint (string-ascii 16))"
+            indoc! {r#"
+                (define-const OWNER_ROLE u1)
+                (define-data-var count uint u0)
+                (define-map msgs
+                  uint
+                  (string-ascii 16)
+                )
+            "#}
         );
     }
 }

@@ -170,7 +170,7 @@ fn convert_data_var(data_var: &IRDataVar) -> Result<PreSymbolicExpression, anyho
 
 fn convert_data_map(data_map: &IRDataMap) -> Result<PreSymbolicExpression, anyhow::Error> {
     Ok(PreSymbolicExpression::list(vec![
-        PreSymbolicExpression::atom(ClarityName::from("define-data-map")),
+        PreSymbolicExpression::atom(ClarityName::from("define-map")),
         PreSymbolicExpression::atom(ClarityName::from(data_map.name.as_str())),
         type_signature_to_pse(&data_map.key_type)?,
         type_signature_to_pse(&data_map.value_type)?,
@@ -397,7 +397,7 @@ mod test {
     #[test]
     fn test_convert_data_map() {
         let ts_src = "const msgs = new DataMap<Uint, StringAscii<16>>();";
-        assert_pses_eq(ts_src, r#"(define-data-map msgs uint (string-ascii 16))"#);
+        assert_pses_eq(ts_src, r#"(define-map msgs uint (string-ascii 16))"#);
     }
 
     #[test]
@@ -405,7 +405,7 @@ mod test {
         let ts_src = "const state = new DataMap<{ ok: Uint }, { active: Bool }>();";
         assert_pses_eq(
             ts_src,
-            r#"(define-data-map state { ok: uint } { active: bool })"#,
+            r#"(define-map state { ok: uint } { active: bool })"#,
         );
     }
 

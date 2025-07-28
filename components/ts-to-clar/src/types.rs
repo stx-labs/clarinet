@@ -50,7 +50,10 @@ fn extract_type(
 pub fn ts_to_clar_type(ts_type: &ast::TSType) -> Result<TypeSignature> {
     match ts_type {
         ast::TSType::TSTypeReference(boxed_ref) => {
-            let type_name = boxed_ref.type_name.get_identifier_reference();
+            let type_name = boxed_ref
+                .type_name
+                .get_identifier_reference()
+                .ok_or_else(|| anyhow!("Expected identifier reference for type name"))?;
             extract_type(type_name.name.as_str(), boxed_ref.type_arguments.as_deref())
         }
         ast::TSType::TSTypeLiteral(boxed_lit) => {

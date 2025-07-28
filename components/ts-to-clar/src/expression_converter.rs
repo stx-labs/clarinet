@@ -208,25 +208,25 @@ impl<'a> StatementConverter<'a> {
                 .push(PreSymbolicExpression::list(vec![atom(clar_func.name)]));
 
             match func_name {
-                "getStacksBlockInfo" => {
-                    if let Some((_, Parameter::Identifiers(allowed_names))) = clar_func
+                "getStacksBlockInfo" | "getBurnBlockInfo" => {
+                    if let Some((_, Parameter::Identifiers(allowed_params))) = clar_func
                         .parameters
                         .iter()
                         .find(|(name, _)| name == &"prop-name")
                     {
                         if let Some(Argument::StringLiteral(str)) = arguments.first().take() {
-                            if allowed_names.contains(&str.value.as_str()) {
+                            if allowed_params.contains(&str.value.as_str()) {
                                 self.lists_stack
                                     .push(atom(str.value.as_str().to_lowercase().as_str()));
                                 ctx.state.skip_next_string_argument = true;
                                 self.ingest_last_stack_item();
-                                return true;
                             }
                         }
                     }
                 }
                 _ => (),
             }
+            return true;
         }
         return false;
     }
@@ -322,7 +322,6 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
                 {
                     if self.handle_std_function_call(ident_name, &call_expr.arguments, ctx) {
                         ctx.state.ingest_call_expression = true;
-
                         return;
                     } else {
                         println!("Unknown std function: {}", ident_name);
@@ -416,8 +415,21 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn enter_static_member_expression(
         &mut self,
         member_expr: &mut ast::StaticMemberExpression<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
+        // Check if this is property access (not a method call)
+        let is_method_call = matches!(ctx.parent(), Ancestor::CallExpressionCallee(_));
+
+        if !is_method_call {
+            // This is property access, start a clarity get expression with property name first
+            let property_name = to_kebab_case(member_expr.property.name.as_str());
+            self.lists_stack.push(PreSymbolicExpression::list(vec![
+                atom("get"),
+                atom(&property_name),
+            ]));
+            return;
+        }
+
         if let Expression::Identifier(ident) = &member_expr.object {
             if self
                 .ir
@@ -435,8 +447,17 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn exit_static_member_expression(
         &mut self,
         member_expr: &mut ast::StaticMemberExpression<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
+        // @todo: find a better, generic way to know if in `exit_*` if an expression need to be ingested
+        // could be through some sort of expression ids stack
+        let is_method_call = matches!(ctx.parent(), Ancestor::CallExpressionCallee(_));
+
+        if !is_method_call {
+            self.ingest_last_stack_item();
+            return;
+        }
+
         if let Expression::Identifier(ident) = &member_expr.object {
             if self
                 .ir
@@ -1012,5 +1033,26 @@ mod test {
         };
         let expected_clar_src = "(get-stacks-block-info? time stacks-block-height)";
         assert_body_eq_with_std(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_access_tuple_prop() {
+        let ts_src = indoc!(
+            r#"const count = new DataVar<{ currentValue: Uint }>({ currentValue: 0 });
+            function getCount() { return count.get().currentValue; }"#
+        );
+        let expected_clar_src = indoc!(r#"(get current-value (var-get count))"#);
+        assert_body_eq(ts_src, expected_clar_src);
+
+        let ts_src = indoc!(
+            r#"const count = new DataVar<{ currentValue: Uint }>({ currentValue: 0 });
+                function getCount() {
+                    const data = count.get();
+                    return data.currentValue;
+                };"#
+        );
+        let expected_clar_src =
+            indoc!(r#"(let ((data (var-get count))) (get current-value data))"#);
+        assert_body_eq(ts_src, expected_clar_src);
     }
 }

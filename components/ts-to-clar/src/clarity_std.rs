@@ -1,6 +1,6 @@
 use clarity::vm::{
     functions::NativeFunctions,
-    types::{StacksBlockInfoProperty, TypeSignature},
+    types::{BurnBlockInfoProperty, StacksBlockInfoProperty, TypeSignature},
 };
 use std::{collections::HashMap, sync::LazyLock};
 
@@ -208,6 +208,28 @@ pub static FUNCTIONS: LazyLock<HashMap<&str, StdFunction>> = LazyLock::new(|| {
                 _return_type: None,
             },
         ),
+        (
+            "getBurnBlockInfo",
+            StdFunction {
+                name: GetBurnBlockInfo.get_name_str(),
+                parameters: vec![
+                    (
+                        "prop-name",
+                        Parameter::Identifiers(BurnBlockInfoProperty::ALL_NAMES),
+                    ),
+                    ("burn-block-height", Parameter::Value(UIntType)),
+                ],
+                _return_type: None,
+            },
+        ),
+        (
+            "getTenureInfo",
+            StdFunction {
+                name: GetTenureInfo.get_name_str(),
+                parameters: vec![("tenure-height", Parameter::Value(UIntType))],
+                _return_type: None,
+            },
+        ),
     ])
 });
 
@@ -217,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_functions() {
-        assert!(FUNCTIONS.len() == 3)
+        assert_eq!(FUNCTIONS.len(), 6);
 
         // println!("Functions: {:?}", FUNCTIONS.keys().collect::<Vec<_>>());
     }
