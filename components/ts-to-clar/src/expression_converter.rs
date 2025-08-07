@@ -1,22 +1,19 @@
-use std::{cell::Cell, marker::PhantomData};
+use std::cell::Cell;
+use std::marker::PhantomData;
 
-use clarity::vm::{
-    representations::{PreSymbolicExpression, PreSymbolicExpressionType},
-    types::TypeSignature,
-    ClarityName, Value as ClarityValue,
-};
+use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType};
+use clarity::vm::types::TypeSignature;
+use clarity::vm::{ClarityName, Value as ClarityValue};
 use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{self, Argument, Expression};
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use oxc_traverse::{traverse_mut, Ancestor, Traverse};
 
-use crate::{
-    clarity_std::{Parameter, FUNCTIONS, KEYWORDS_TYPES},
-    parser::{IRFunction, IR},
-    to_kebab_case,
-    types::ts_to_clar_type,
-};
+use crate::clarity_std::{Parameter, FUNCTIONS, KEYWORDS_TYPES};
+use crate::parser::{IRFunction, IR};
+use crate::to_kebab_case;
+use crate::types::ts_to_clar_type;
 
 struct StatementConverter<'a> {
     ir: &'a IR<'a>,
@@ -238,8 +235,16 @@ impl<'a> StatementConverter<'a> {
             let last_stack_item = self.lists_stack.pop().unwrap();
 
             if let Some(last_pre_expr) = self.lists_stack.last_mut() {
-                if let PreSymbolicExpressionType::List(list) = &mut last_pre_expr.pre_expr {
-                    list.push(last_stack_item.clone());
+                match &mut last_pre_expr.pre_expr {
+                    PreSymbolicExpressionType::List(list) => {
+                        list.push(last_stack_item.clone());
+                    }
+                    PreSymbolicExpressionType::Tuple(tuple) => {
+                        tuple.push(last_stack_item.clone());
+                    }
+                    _ => {
+                        // For other types, we can't ingest
+                    }
                 }
             }
         }
@@ -250,6 +255,7 @@ impl<'a> StatementConverter<'a> {
 pub struct ConverterState<'a> {
     pub ingest_call_expression: bool,
     pub skip_next_string_argument: bool,
+    pub object_property_depth: u32,
     data: PhantomData<&'a ()>,
 }
 pub type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
@@ -264,6 +270,14 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         while !self.lists_stack.is_empty() {
             self.ingest_last_stack_item();
         }
+    }
+
+    fn enter_expression(
+        &mut self,
+        _node: &mut Expression<'a>,
+        _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        // Debug output can be added here if needed
     }
 
     fn enter_variable_declaration(
@@ -410,6 +424,63 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         _ctx: &mut TraverseCtx<'a>,
     ) {
         self.ingest_last_stack_item();
+    }
+
+    fn enter_object_expression(
+        &mut self,
+        _node: &mut ast::ObjectExpression<'a>,
+        _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        self.lists_stack.push(PreSymbolicExpression::tuple(vec![]));
+    }
+
+    fn exit_object_expression(
+        &mut self,
+        _node: &mut ast::ObjectExpression<'a>,
+        ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        // Only ingest if we're not inside an object property context
+        // If we are inside an object property, the exit_object_property handler will take care of ingestion
+        if ctx.state.object_property_depth == 0 {
+            self.ingest_last_stack_item();
+        }
+    }
+
+    fn enter_object_property(
+        &mut self,
+        node: &mut ast::ObjectProperty<'a>,
+        ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        ctx.state.object_property_depth += 1;
+
+        // Handle the property key (name)
+        if let ast::PropertyKey::StaticIdentifier(identifier) = &node.key {
+            let key_name = to_kebab_case(identifier.name.as_str());
+            self.lists_stack.push(atom(&key_name));
+        }
+    }
+
+    fn exit_object_property(
+        &mut self,
+        _node: &mut ast::ObjectProperty<'a>,
+        ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        ctx.state.object_property_depth -= 1;
+
+        // Stack order: tuple, key, value (top)
+        // We need to ingest both key and value into the tuple in the right order
+        // Pop the value first and store it
+        let value = self.lists_stack.pop().unwrap();
+        // Pop the key and store it
+        let key = self.lists_stack.pop().unwrap();
+
+        // Push them back in the correct order: key first, then value
+        if let Some(last_pre_expr) = self.lists_stack.last_mut() {
+            if let PreSymbolicExpressionType::Tuple(tuple) = &mut last_pre_expr.pre_expr {
+                tuple.push(key);
+                tuple.push(value);
+            }
+        }
     }
 
     fn enter_static_member_expression(
@@ -644,9 +715,11 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn exit_numeric_literal(
         &mut self,
         _node: &mut ast::NumericLiteral<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
     ) {
-        self.ingest_last_stack_item();
+        if ctx.state.object_property_depth == 0 {
+            self.ingest_last_stack_item();
+        }
     }
 
     fn enter_string_literal(
@@ -671,7 +744,9 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             ctx.state.skip_next_string_argument = false;
             return;
         }
-        self.ingest_last_stack_item();
+        if ctx.state.object_property_depth == 0 {
+            self.ingest_last_stack_item();
+        }
     }
 
     fn enter_boolean_literal(
@@ -682,12 +757,10 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         self.lists_stack.push(atom(node.value.to_string().as_str()));
     }
 
-    fn exit_boolean_literal(
-        &mut self,
-        _node: &mut ast::BooleanLiteral,
-        _ctx: &mut TraverseCtx<'a>,
-    ) {
-        self.ingest_last_stack_item();
+    fn exit_boolean_literal(&mut self, _node: &mut ast::BooleanLiteral, ctx: &mut TraverseCtx<'a>) {
+        if ctx.state.object_property_depth == 0 {
+            self.ingest_last_stack_item();
+        }
     }
 }
 
@@ -736,9 +809,9 @@ mod test {
     use indoc::{formatdoc, indoc};
     use oxc_allocator::Allocator;
 
-    use crate::{clarity_std::STD_PKG_NAME, parser::get_ir};
-
     use super::*;
+    use crate::clarity_std::STD_PKG_NAME;
+    use crate::parser::get_ir;
 
     fn set_pse_span_to_0(pse: &mut [PreSymbolicExpression]) {
         for expr in pse {
@@ -1053,6 +1126,34 @@ mod test {
         );
         let expected_clar_src =
             indoc!(r#"(let ((data (var-get count))) (get current-value data))"#);
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_handle_basic_tuple_expr() {
+        let ts_src = indoc! {
+            r#"function dataTrue() {
+                return {
+                    keyBool: true,
+                    keyInt: 1,
+                    keyString: "value"
+                };
+            }"#
+        };
+        let expected_clar_src = r#"{ key-bool: true, key-int: 1, key-string: "value" }"#;
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_handle_nested_tuple() {
+        let ts_src = indoc! {
+            r#"function dataTrue() {
+                return {
+                    keyTuple: { keyBool: true }
+                };
+            }"#
+        };
+        let expected_clar_src = r#"{ key-tuple: { key-bool: true } }"#;
         assert_body_eq(ts_src, expected_clar_src);
     }
 }

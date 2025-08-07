@@ -8,14 +8,14 @@ license = "GPL-3.0"
 [dependencies]
 anyhow = "1.0.98"
 
-oxc_allocator = "0.79"
-oxc_ast = { version = "0.79" }
-oxc_ast_visit = "0.79"
-oxc_parser = "0.79"
-oxc_span = "0.79"
-oxc_syntax = "0.79"
-oxc_traverse = { version = "0.79" }
-oxc_semantic = "0.79"
+oxc_allocator = "0.81"
+oxc_ast = { version = "0.81" }
+oxc_ast_visit = "0.81"
+oxc_parser = "0.81"
+oxc_span = "0.81"
+oxc_syntax = "0.81"
+oxc_traverse = { version = "0.81" }
+oxc_semantic = "0.81"
 
 clarity = { workspace = true }
 
