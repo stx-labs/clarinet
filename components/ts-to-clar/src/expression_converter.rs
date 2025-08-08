@@ -255,7 +255,9 @@ impl<'a> StatementConverter<'a> {
 pub struct ConverterState<'a> {
     pub ingest_call_expression: bool,
     pub skip_next_string_argument: bool,
-    pub object_property_depth: u32,
+    object_property_depth: u32,
+    array_depth: u32,
+
     data: PhantomData<&'a ()>,
 }
 pub type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
@@ -317,7 +319,47 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         _ctx: &mut TraverseCtx<'a>,
     ) {
         self.current_context_type = None;
-        self.ingest_last_stack_item();
+
+        // The declarator list should contain [variable_name, variable_value]
+        // We need to convert this into a binding pair (variable_name variable_value)
+        // and add that binding pair to the binding list
+
+        if self.lists_stack.len() >= 2 {
+            let declarator_list = self.lists_stack.pop().unwrap();
+
+            // Convert the declarator list into a binding pair
+            match declarator_list.pre_expr {
+                PreSymbolicExpressionType::List(declarator_items) => {
+                    if declarator_items.len() == 2 {
+                        // Create binding pair (variable_name variable_value)
+                        let binding_pair = PreSymbolicExpression::list(declarator_items);
+
+                        // Add the binding pair to the binding list
+                        if let Some(binding_list) = self.lists_stack.last_mut() {
+                            if let PreSymbolicExpressionType::List(bindings) =
+                                &mut binding_list.pre_expr
+                            {
+                                bindings.push(binding_pair);
+                            }
+                        }
+                    } else {
+                        // Fallback: use the old behavior
+                        let restored_list = PreSymbolicExpression {
+                            pre_expr: PreSymbolicExpressionType::List(declarator_items),
+                            id: declarator_list.id,
+                            span: declarator_list.span,
+                        };
+                        self.lists_stack.push(restored_list);
+                        self.ingest_last_stack_item();
+                    }
+                }
+                _ => {
+                    // Fallback: use the old behavior
+                    self.lists_stack.push(declarator_list);
+                    self.ingest_last_stack_item();
+                }
+            }
+        }
     }
 
     fn enter_call_expression(
@@ -426,6 +468,36 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         self.ingest_last_stack_item();
     }
 
+    fn enter_array_expression(
+        &mut self,
+        _node: &mut ast::ArrayExpression<'a>,
+        ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        ctx.state.array_depth += 1;
+        self.lists_stack
+            .push(PreSymbolicExpression::list(vec![atom("list")]));
+    }
+
+    fn enter_array_expression_element(
+        &mut self,
+        _node: &mut ast::ArrayExpressionElement<'a>,
+        _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+    }
+
+    fn exit_array_expression(
+        &mut self,
+        _node: &mut ast::ArrayExpression<'a>,
+        ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        ctx.state.array_depth -= 1;
+        // Always ingest arrays, but if we're inside an object property,
+        // it will be handled differently by the object property logic
+        if ctx.state.object_property_depth == 0 || ctx.state.array_depth > 0 {
+            self.ingest_last_stack_item();
+        }
+    }
+
     fn enter_object_expression(
         &mut self,
         _node: &mut ast::ObjectExpression<'a>,
@@ -466,6 +538,41 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
     ) {
         ctx.state.object_property_depth -= 1;
+
+        // Check if there's an unprocessed array on the stack that needs to be ingested first
+        // Arrays inside object properties don't get auto-ingested, so we need to handle them here
+        // Only do this for complex cases where we have nested structures
+        if self.lists_stack.len() >= 4 {
+            // More conservative - only for deeply nested cases
+            // Get the top item without removing it
+            if let Some(top_item) = self.lists_stack.last() {
+                // Check if it's a list (potential array)
+                if let PreSymbolicExpressionType::List(list) = &top_item.pre_expr {
+                    // Check if it starts with "list" atom (unprocessed array)
+                    if let Some(first) = list.first() {
+                        if let PreSymbolicExpressionType::Atom(clarity_name) = &first.pre_expr {
+                            // Create a ClarityName for "list" to compare
+                            let list_clarity_name = ClarityName::from("list");
+                            if clarity_name == &list_clarity_name {
+                                // Check if we have nested arrays by looking at the array contents
+                                let has_nested_arrays = list.iter().skip(1).any(|item| {
+                                    matches!(&item.pre_expr, PreSymbolicExpressionType::List(inner_list)
+                                        if inner_list.first().map_or(false, |first| {
+                                            matches!(&first.pre_expr, PreSymbolicExpressionType::Atom(name)
+                                                if name == &ClarityName::from("list"))
+                                        }))
+                                });
+
+                                // Only ingest for nested arrays, not simple arrays
+                                if has_nested_arrays {
+                                    self.ingest_last_stack_item();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Stack order: tuple, key, value (top)
         // We need to ingest both key and value into the tuple in the right order
@@ -717,7 +824,10 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         _node: &mut ast::NumericLiteral<'a>,
         ctx: &mut TraverseCtx<'a>,
     ) {
-        if ctx.state.object_property_depth == 0 {
+        // Ingest if:
+        // - Not inside any object property (object_property_depth == 0), OR
+        // - Inside an array (array_depth > 0), even if inside object property
+        if ctx.state.object_property_depth == 0 || ctx.state.array_depth > 0 {
             self.ingest_last_stack_item();
         }
     }
@@ -744,7 +854,10 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             ctx.state.skip_next_string_argument = false;
             return;
         }
-        if ctx.state.object_property_depth == 0 {
+        // Ingest if:
+        // - Not inside any object property (object_property_depth == 0), OR
+        // - Inside an array (array_depth > 0), even if inside object property
+        if ctx.state.object_property_depth == 0 || ctx.state.array_depth > 0 {
             self.ingest_last_stack_item();
         }
     }
@@ -758,7 +871,10 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     }
 
     fn exit_boolean_literal(&mut self, _node: &mut ast::BooleanLiteral, ctx: &mut TraverseCtx<'a>) {
-        if ctx.state.object_property_depth == 0 {
+        // Ingest if:
+        // - Not inside any object property (object_property_depth == 0), OR
+        // - Inside an array (array_depth > 0), even if inside object property
+        if ctx.state.object_property_depth == 0 || ctx.state.array_depth > 0 {
             self.ingest_last_stack_item();
         }
     }
@@ -1154,6 +1270,56 @@ mod test {
             }"#
         };
         let expected_clar_src = r#"{ key-tuple: { key-bool: true } }"#;
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_simple_list() {
+        let ts_src = "function returnList() { return [1, 2, 3]; }";
+        let expected_clar_src = "(list 1 2 3)";
+        assert_body_eq(ts_src, expected_clar_src);
+
+        let ts_src = "function returnList() { return [[true, false], [true, false]]; }";
+        let expected_clar_src = "(list (list true false) (list true false))";
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_simple_object_with_array() {
+        let ts_src = r#"function test() { return { list1: [1, 2, 3] }; }"#;
+        let expected_clar_src = r#"{ list1: (list 1 2 3) }"#;
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_variable_binding_with_array() {
+        let ts_src = r#"function test() { const data = [1, 2, 3]; return data; }"#;
+        let expected_clar_src = r#"(let ((data (list 1 2 3))) data)"#;
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_simple_object_variable() {
+        let ts_src = r#"function test() { const data = { key1: 1, key2: 2 }; return data; }"#;
+        let expected_clar_src = r#"(let ((data { key1: 1, key2: 2 })) data)"#;
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_object_with_single_array() {
+        let ts_src = r#"function test() { const data = { list1: [1, 2] }; return data; }"#;
+        let expected_clar_src = r#"(let ((data { list1: (list 1 2) })) data)"#;
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_object_with_nested_list() {
+        let ts_src = indoc! {
+            r#"function returnList() {
+                return { list: [[true, false]] };
+            }"#
+        };
+        let expected_clar_src = "{ list: (list (list true false)) }";
         assert_body_eq(ts_src, expected_clar_src);
     }
 }
