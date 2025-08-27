@@ -13,10 +13,9 @@ mod types;
 use clarinet_format::formatter::{self, ClarityFormatter};
 use oxc_allocator::Allocator;
 
+pub use self::helper::to_kebab_case;
 use crate::converter::convert;
 use crate::parser::get_ir;
-
-pub use self::helper::to_kebab_case;
 
 pub fn transpile(file_name: &str, src: &str) -> Result<String, anyhow::Error> {
     let allocator = Allocator::default();

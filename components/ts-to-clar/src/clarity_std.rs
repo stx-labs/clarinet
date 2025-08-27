@@ -1,8 +1,8 @@
-use clarity::vm::{
-    functions::NativeFunctions,
-    types::{BurnBlockInfoProperty, StacksBlockInfoProperty, TypeSignature},
-};
-use std::{collections::HashMap, sync::LazyLock};
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use clarity::vm::functions::NativeFunctions;
+use clarity::vm::types::{BurnBlockInfoProperty, StacksBlockInfoProperty, TypeSignature};
 
 pub static STD_PKG_NAME: &str = "clarity";
 

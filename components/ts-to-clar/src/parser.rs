@@ -10,6 +10,7 @@
 use std::marker::PhantomData;
 
 use anyhow::{anyhow, Result};
+use clarity::vm::types::TypeSignature;
 use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{
     self, Expression, Function, ObjectPropertyKind, Program, PropertyKey, Statement,
@@ -20,9 +21,8 @@ use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use oxc_traverse::{traverse_mut, Traverse};
 
-use clarity::vm::types::TypeSignature;
-
-use crate::{clarity_std::STD_PKG_NAME, types::ts_to_clar_type};
+use crate::clarity_std::STD_PKG_NAME;
+use crate::types::ts_to_clar_type;
 
 pub struct IRConstant<'a> {
     pub name: String,
@@ -343,29 +343,21 @@ pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) ->
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        clarity_std::STD_PKG_NAME,
-        parser::{get_ir, IRConstant, IRDataMap, IRDataVar, IR},
-        types::{get_ascii_type, get_utf8_type},
-    };
-
-    use clarity::vm::{
-        types::{
-            TupleTypeSignature,
-            TypeSignature::{self, *},
-        },
-        ClarityName,
-    };
+    use clarity::vm::types::TupleTypeSignature;
+    use clarity::vm::types::TypeSignature::{self, *};
+    use clarity::vm::ClarityName;
     use indoc::{formatdoc, indoc};
     use oxc_allocator::{Allocator, Box, FromIn};
-    use oxc_ast::{
-        ast::{
-            BinaryOperator, Expression, NumberBase, ObjectPropertyKind, PropertyKey, PropertyKind,
-            Statement,
-        },
-        AstBuilder,
+    use oxc_ast::ast::{
+        BinaryOperator, Expression, NumberBase, ObjectPropertyKind, PropertyKey, PropertyKind,
+        Statement,
     };
+    use oxc_ast::AstBuilder;
     use oxc_span::{Atom, Span};
+
+    use crate::clarity_std::STD_PKG_NAME;
+    use crate::parser::{get_ir, IRConstant, IRDataMap, IRDataVar, IR};
+    use crate::types::{get_ascii_type, get_utf8_type};
 
     #[track_caller]
     fn get_tmp_ir<'a>(allocator: &'a Allocator, src: &'a str) -> IR<'a> {

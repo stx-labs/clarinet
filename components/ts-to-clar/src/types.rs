@@ -4,14 +4,16 @@ use clarity::vm::ClarityName;
 use oxc_ast::ast;
 
 pub fn get_ascii_type(n: u32) -> TypeSignature {
-    use clarity::vm::types::{BufferLength, StringSubtype::ASCII};
+    use clarity::vm::types::BufferLength;
+    use clarity::vm::types::StringSubtype::ASCII;
     TypeSignature::SequenceType(SequenceSubtype::StringType(ASCII(
         BufferLength::try_from(n).unwrap(),
     )))
 }
 
 pub fn get_utf8_type(n: u32) -> TypeSignature {
-    use clarity::vm::types::{StringSubtype::UTF8, StringUTF8Length};
+    use clarity::vm::types::StringSubtype::UTF8;
+    use clarity::vm::types::StringUTF8Length;
     TypeSignature::SequenceType(SequenceSubtype::StringType(UTF8(
         StringUTF8Length::try_from(n).unwrap(),
     )))
