@@ -211,7 +211,7 @@ impl<'a> StatementConverter<'a> {
                         .iter()
                         .find(|(name, _)| name == &"prop-name")
                     {
-                        if let Some(Argument::StringLiteral(str)) = arguments.first().take() {
+                        if let Some(Argument::StringLiteral(str)) = arguments.first() {
                             if allowed_params.contains(&str.value.as_str()) {
                                 self.lists_stack
                                     .push(atom(str.value.as_str().to_lowercase().as_str()));
@@ -225,7 +225,7 @@ impl<'a> StatementConverter<'a> {
             }
             return true;
         }
-        return false;
+        false
     }
 
     fn ingest_last_stack_item(&mut self) {
@@ -446,7 +446,11 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         ctx: &mut TraverseCtx<'a>,
     ) {
         if ctx.state.ingest_call_expression {
-            self.ingest_last_stack_item();
+            // Don't ingest immediately if we're inside an object property
+            // Let the object property handler take care of it
+            if ctx.state.object_property_depth == 0 {
+                self.ingest_last_stack_item();
+            }
             ctx.state.ingest_call_expression = false;
         }
     }
@@ -557,7 +561,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
                                 // Check if we have nested arrays by looking at the array contents
                                 let has_nested_arrays = list.iter().skip(1).any(|item| {
                                     matches!(&item.pre_expr, PreSymbolicExpressionType::List(inner_list)
-                                        if inner_list.first().map_or(false, |first| {
+                                        if inner_list.first().is_some_and(|first| {
                                             matches!(&first.pre_expr, PreSymbolicExpressionType::Atom(name)
                                                 if name == &ClarityName::from("list"))
                                         }))
@@ -669,8 +673,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             .ir
             .std_specific_imports
             .iter()
-            .find(|(_, name)| name == ident_name)
-            .is_some()
+            .any(|(_, name)| name == ident_name)
         {
             return;
         }
@@ -730,8 +733,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             .ir
             .std_specific_imports
             .iter()
-            .find(|(_, name)| name == ident.name.as_str())
-            .is_some()
+            .any(|(_, name)| name == ident.name.as_str())
         {
             return;
         }
@@ -952,7 +954,7 @@ mod test {
         let expected_pse = get_expected_pse(expected_clar_src);
 
         let allocator = Allocator::default();
-        let ir = get_ir(&allocator, "tmp.clar.ts", &ts_src);
+        let ir = get_ir(&allocator, "tmp.clar.ts", ts_src);
         let result = convert_function_body(&allocator, &ir, ir.functions.last().unwrap()).unwrap();
         pretty_assertions::assert_eq!(result, expected_pse);
     }
@@ -1309,6 +1311,18 @@ mod test {
     fn test_object_with_single_array() {
         let ts_src = r#"function test() { const data = { list1: [1, 2] }; return data; }"#;
         let expected_clar_src = r#"(let ((data { list1: (list 1 2) })) data)"#;
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_get_var_in_tuple() {
+        let ts_src = indoc! {
+            r#"const count = new DataVar<Uint>(0);
+            function getCount() {
+                return { data: count.get() };
+            }"#
+        };
+        let expected_clar_src = "{ data: (var-get count) }";
         assert_body_eq(ts_src, expected_clar_src);
     }
 

@@ -2,19 +2,16 @@
 
 use std::vec;
 
-use clarity::vm::{
-    representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span},
-    types::{PrincipalData, SequenceSubtype, StringSubtype, TypeSignature as ClarityTypeSignature},
-    ClarityName, Value as ClarityValue,
+use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span};
+use clarity::vm::types::{
+    PrincipalData, SequenceSubtype, StringSubtype, TypeSignature as ClarityTypeSignature,
 };
+use clarity::vm::{ClarityName, Value as ClarityValue};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{Expression as OxcExpression, ObjectPropertyKind};
 
-use crate::{
-    expression_converter,
-    parser::{IRConstant, IRDataMap, IRDataVar, IRFunction, IR},
-    to_kebab_case,
-};
+use crate::parser::{IRConstant, IRDataMap, IRDataVar, IRFunction, IR};
+use crate::{expression_converter, to_kebab_case};
 
 fn type_signature_to_pse(
     type_signature: &ClarityTypeSignature,
@@ -254,16 +251,13 @@ pub fn convert(allocator: &Allocator, ir: IR) -> Result<Vec<PreSymbolicExpressio
 
 #[cfg(test)]
 mod test {
-    use clarity::vm::{
-        representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span},
-        ClarityName, Value as ClarityValue,
-    };
+    use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span};
+    use clarity::vm::{ClarityName, Value as ClarityValue};
     use indoc::indoc;
     use oxc_allocator::Allocator;
 
-    use crate::parser::get_ir;
-
     use super::*;
+    use crate::parser::get_ir;
 
     fn get_tmp_ir<'a>(allocator: &'a Allocator, ts_source: &'a str) -> IR<'a> {
         get_ir(allocator, "tmp.clar.ts", ts_source)
