@@ -47,7 +47,7 @@ pub struct IRDataMap {
 pub struct IRFunction<'a> {
     pub name: String,
     pub parameters: Vec<(String, TypeSignature)>,
-    pub _return_type: Option<TypeSignature>,
+    pub return_type: Option<TypeSignature>,
     pub body: oxc_allocator::Vec<'a, Statement<'a>>,
 }
 
@@ -247,7 +247,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for IR<'a> {
         self.functions.push(IRFunction {
             name,
             parameters: params,
-            _return_type: return_type,
+            return_type: return_type,
             body: body.statements.clone_in(self.allocator),
         });
     }
@@ -347,7 +347,7 @@ mod test {
     use clarity::vm::types::TypeSignature::{self, *};
     use clarity::vm::ClarityName;
     use indoc::{formatdoc, indoc};
-    use oxc_allocator::{Allocator, Box, FromIn};
+    use oxc_allocator::{Allocator, FromIn};
     use oxc_ast::ast::{
         BinaryOperator, Expression, NumberBase, ObjectPropertyKind, PropertyKey, PropertyKind,
         Statement,
@@ -378,6 +378,18 @@ mod test {
         )
     }
 
+    fn expr_error_uint<'a>(allocator: &'a Allocator, value: f64) -> Expression<'a> {
+        let func = expr_identifier(allocator, "err");
+        let arg = expr_number(allocator, value);
+        AstBuilder::new(allocator).expression_call(
+            Span::empty(0),
+            func,
+            None::<oxc_allocator::Box<'a, oxc_ast::ast::TSTypeParameterInstantiation<'a>>>,
+            oxc_allocator::Vec::from_array_in([arg.into()], allocator),
+            false,
+        )
+    }
+
     fn expr_string<'a>(allocator: &'a Allocator, value: &'a str) -> Expression<'a> {
         AstBuilder::new(allocator).expression_string_literal(
             Span::empty(0),
@@ -398,7 +410,7 @@ mod test {
     ) -> Expression<'a> {
         let expr =
             AstBuilder::new(allocator).binary_expression(Span::empty(0), left, operator, right);
-        Expression::BinaryExpression(Box::new_in(expr, allocator))
+        Expression::BinaryExpression(oxc_allocator::Box::new_in(expr, allocator))
     }
 
     fn simple_object_property<'a>(
@@ -418,7 +430,6 @@ mod test {
         )
     }
 
-    #[track_caller]
     fn assert_expr_eq(actual: &Expression, expected: &Expression) {
         use Expression::*;
         match (&actual, &expected) {
@@ -466,6 +477,17 @@ mod test {
                     }
                 }
             }
+            (CallExpression(actual_call), CallExpression(expected_call)) => {
+                assert_expr_eq(&actual_call.callee, &expected_call.callee);
+                assert_eq!(actual_call.arguments.len(), expected_call.arguments.len());
+                for (actual_arg, expected_arg) in actual_call
+                    .arguments
+                    .iter()
+                    .zip(expected_call.arguments.iter())
+                {
+                    assert_expr_eq(actual_arg.to_expression(), expected_arg.to_expression());
+                }
+            }
             _ => panic!("Expected matching expression types"),
         }
     }
@@ -510,6 +532,19 @@ mod test {
             expr: expr_string(&allocator, "World"),
         };
         assert_constant_eq(&constants[2], &expected);
+    }
+
+    #[test]
+    fn test_constant_err_ir() {
+        let allocator = Allocator::default();
+        let src = "const ERR_FORBIDDEN = new Constant<ClError<never, Uint>>(err(4003));";
+        let constants = get_tmp_ir(&allocator, src).constants;
+        let expected = IRConstant {
+            name: "ERR_FORBIDDEN".to_string(),
+            r#type: ResponseType(Box::new((NoType, UIntType))),
+            expr: expr_error_uint(&allocator, 4003.0),
+        };
+        assert_constant_eq(&constants[0], &expected);
     }
 
     #[test]
@@ -747,7 +782,7 @@ mod test {
         let expected_params = vec![("a".to_string(), IntType), ("b".to_string(), IntType)];
         assert_eq!(func.name, "add");
         assert_eq!(func.parameters, expected_params);
-        assert_eq!(func._return_type, Some(IntType));
+        assert_eq!(func.return_type, Some(IntType));
         assert_eq!(func.body.len(), 1);
         matches!(func.body[0], Statement::ReturnStatement(_));
     }
@@ -763,7 +798,7 @@ mod test {
         let func = &ir.functions[0];
         assert_eq!(func.name, "returntrue");
         assert_eq!(func.parameters, vec![]);
-        assert_eq!(func._return_type, None);
+        assert_eq!(func.return_type, None);
     }
 
     #[test]
@@ -782,7 +817,7 @@ mod test {
         assert_eq!(func.name, "setN");
         let expected_params = vec![("newValue".to_string(), IntType)];
         assert_eq!(func.parameters, expected_params);
-        assert_eq!(func._return_type, None);
+        assert_eq!(func.return_type, None);
     }
 
     #[test]

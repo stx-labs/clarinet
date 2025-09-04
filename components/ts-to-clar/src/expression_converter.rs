@@ -13,7 +13,7 @@ use oxc_traverse::{traverse_mut, Ancestor, Traverse};
 use crate::clarity_std::{Parameter, FUNCTIONS, KEYWORDS_TYPES};
 use crate::parser::{IRFunction, IR};
 use crate::to_kebab_case;
-use crate::types::ts_to_clar_type;
+use crate::types::{extract_type, ts_to_clar_type};
 
 struct StatementConverter<'a> {
     ir: &'a IR<'a>,
@@ -66,12 +66,14 @@ impl<'a> StatementConverter<'a> {
             .map(|(name, r#type)| (name.to_string(), Some(r#type.clone())))
             .collect();
 
+        let current_context_type = function.return_type.clone();
+
         Self {
             ir,
             function,
             expressions: Vec::new(),
             lists_stack: vec![],
-            current_context_type: None,
+            current_context_type,
             current_context_type_stack: vec![],
             current_bindings,
         }
@@ -88,9 +90,12 @@ impl<'a> StatementConverter<'a> {
         {
             Some(ts_to_clar_type(&boxed_type_annotation.type_annotation).unwrap())
         } else {
-            // type annotation is not always needed
-            // but this current approach probably isn't robust enough
-            None
+            // Try to infer type from initializer expression
+            if let Some(init_expr) = &variable_declarator.init {
+                self.infer_type_from_expression(init_expr)
+            } else {
+                None
+            }
         };
 
         let binding_name = if let ast::BindingPattern {
@@ -107,6 +112,53 @@ impl<'a> StatementConverter<'a> {
             .push((binding_name.to_string(), type_annotation.clone()));
 
         type_annotation
+    }
+
+    fn infer_type_from_expression(&self, expr: &Expression<'a>) -> Option<TypeSignature> {
+        match expr {
+            // Handle method call chains like: counts.get(txSender).defaultTo(0)
+            Expression::CallExpression(call_expr) => {
+                if let Expression::StaticMemberExpression(member_expr) = &call_expr.callee {
+                    if member_expr.property.name.as_str() == "defaultTo" {
+                        if let Some(root_type) = self.find_root_data_map_type(&member_expr.object) {
+                            return Some(root_type);
+                        }
+                    }
+                    // Handle data map get calls like: counts.get(txSender)
+                    else if member_expr.property.name.as_str() == "get" {
+                        if let Some(root_type) = self.find_root_data_map_type(&member_expr.object) {
+                            // For data map get, the type is Optional<T> where T is the value type
+                            // But for type inference purposes, we return T as the inner type
+                            return Some(root_type);
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn find_root_data_map_type(&self, expr: &Expression<'a>) -> Option<TypeSignature> {
+        match expr {
+            Expression::StaticMemberExpression(member_expr) => {
+                self.find_root_data_map_type(&member_expr.object)
+            }
+            Expression::CallExpression(call_expr) => {
+                self.find_root_data_map_type(&call_expr.callee)
+            }
+            Expression::Identifier(ident) => {
+                let var_name = ident.name.as_str();
+                self.ir.data_maps.iter().find_map(|data_map| {
+                    if data_map.name == var_name {
+                        Some(data_map.value_type.clone())
+                    } else {
+                        None
+                    }
+                })
+            }
+            _ => None,
+        }
     }
 
     fn get_parameter_type(&self, param_name: &str) -> Option<&TypeSignature> {
@@ -172,10 +224,7 @@ impl<'a> StatementConverter<'a> {
 
                 None
             }
-            Expression::NumericLiteral(_) => {
-                // todo: remove default once we have a more robust type inference system
-                Some(TypeSignature::IntType)
-            }
+            Expression::NumericLiteral(_) => self.current_context_type.clone(),
             Expression::CallExpression(_call_expr) => {
                 // todo: for function calls, we could potentially infer the return type
                 // for now, return None and let context determine
@@ -251,16 +300,14 @@ impl<'a> StatementConverter<'a> {
     }
 }
 
-#[derive(Default)]
-pub struct ConverterState<'a> {
-    pub ingest_call_expression: bool,
-    pub skip_next_string_argument: bool,
+struct ConverterState<'a> {
+    call_expression_to_ingest: u32,
+    skip_next_string_argument: bool,
     object_property_depth: u32,
     array_depth: u32,
-
     data: PhantomData<&'a ()>,
 }
-pub type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
+type TraverseCtx<'a> = oxc_traverse::TraverseCtx<'a, ConverterState<'a>>;
 
 impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
     fn enter_program(&mut self, _node: &mut ast::Program<'a>, _ctx: &mut TraverseCtx<'a>) {
@@ -279,7 +326,30 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         _node: &mut Expression<'a>,
         _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
     ) {
-        // Debug output can be added here if needed
+        // add debugging here if needed
+    }
+
+    fn enter_ts_as_expression(
+        &mut self,
+        node: &mut ast::TSAsExpression<'a>,
+        _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        if let ast::TSType::TSTypeReference(type_ref) = &node.type_annotation {
+            if let ast::TSTypeName::IdentifierReference(ident) = &type_ref.type_name {
+                let type_signature = extract_type(&ident.name, None).ok();
+                if let Some(type_sig) = type_signature {
+                    self.current_context_type = Some(type_sig);
+                }
+            }
+        }
+    }
+
+    fn exit_ts_as_expression(
+        &mut self,
+        _node: &mut ast::TSAsExpression<'a>,
+        _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+    ) {
+        self.current_context_type = None;
     }
 
     fn enter_variable_declaration(
@@ -377,7 +447,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
                     .any(|(_, name)| name == ident_name)
                 {
                     if self.handle_std_function_call(ident_name, &call_expr.arguments, ctx) {
-                        ctx.state.ingest_call_expression = true;
+                        ctx.state.call_expression_to_ingest += 1;
                         return;
                     } else {
                         println!("Unknown std function: {}", ident_name);
@@ -386,6 +456,23 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
                 }
             }
             Expression::StaticMemberExpression(member_expr) => {
+                if member_expr.property.name.as_str() == "defaultTo" {
+                    self.lists_stack
+                        .push(PreSymbolicExpression::list(vec![atom("default-to")]));
+
+                    if let Some(inner_type) = self.get_expression_type(&member_expr.object) {
+                        self.current_context_type = Some(inner_type);
+                    } else if let Some(inner_type) =
+                        self.find_root_data_map_type(&member_expr.object)
+                    {
+                        self.current_context_type = Some(inner_type);
+                    }
+
+                    self.current_context_type_stack
+                        .push(self.current_context_type.clone());
+                    return;
+                }
+
                 let Expression::Identifier(ident) = &member_expr.object else {
                     return;
                 };
@@ -406,7 +493,28 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
                     };
                     self.lists_stack
                         .push(PreSymbolicExpression::list(vec![atom(atom_name)]));
-                    ctx.state.ingest_call_expression = true;
+                    ctx.state.call_expression_to_ingest += 1;
+                    return;
+                }
+
+                // Handle data map access
+                if let Some(data_map) = self
+                    .ir
+                    .data_maps
+                    .iter()
+                    .find(|data_map| data_map.name == ident_name)
+                {
+                    self.current_context_type = Some(data_map.value_type.clone());
+                    let atom_name = match member_expr.property.name.as_str() {
+                        "get" => "map-get?",
+                        "insert" => "map-insert",
+                        "set" => "map-set",
+                        "delete" => "map-delete",
+                        _ => return,
+                    };
+                    self.lists_stack
+                        .push(PreSymbolicExpression::list(vec![atom(atom_name)]));
+                    ctx.state.call_expression_to_ingest += 1;
                     return;
                 }
 
@@ -422,7 +530,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
                         &call_expr.arguments,
                         ctx,
                     ) {
-                        ctx.state.ingest_call_expression = true;
+                        ctx.state.call_expression_to_ingest += 1;
                         return;
                     } else {
                         // @todo: throw / handle error
@@ -436,22 +544,37 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
 
         // todo: handle (currnently) global functions like ok() or err()
         // should probably be part of std
-        ctx.state.ingest_call_expression = true;
+        ctx.state.call_expression_to_ingest += 1;
         self.lists_stack.push(PreSymbolicExpression::list(vec![]));
     }
 
     fn exit_call_expression(
         &mut self,
-        _call_expr: &mut ast::CallExpression<'a>,
+        call_expr: &mut ast::CallExpression<'a>,
         ctx: &mut TraverseCtx<'a>,
     ) {
-        if ctx.state.ingest_call_expression {
+        if let Expression::StaticMemberExpression(member_expr) = &call_expr.callee {
+            if member_expr.property.name.as_str() == "defaultTo" {
+                // For defaultTo, we need to reorder arguments: (default-to default_value optional_expr)
+                if let Some(current_list) = self.lists_stack.last_mut() {
+                    if let PreSymbolicExpressionType::List(list) = &mut current_list.pre_expr {
+                        if list.len() == 3 {
+                            list.swap(1, 2);
+                        }
+                    }
+                }
+                self.ingest_last_stack_item();
+                return;
+            }
+        }
+
+        if ctx.state.call_expression_to_ingest > 0 {
             // Don't ingest immediately if we're inside an object property
             // Let the object property handler take care of it
             if ctx.state.object_property_depth == 0 {
                 self.ingest_last_stack_item();
             }
-            ctx.state.ingest_call_expression = false;
+            ctx.state.call_expression_to_ingest -= 1;
         }
     }
 
@@ -807,11 +930,34 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
         node: &mut ast::NumericLiteral<'a>,
         _ctx: &mut TraverseCtx<'a>,
     ) {
-        self.lists_stack.push(match &self.current_context_type {
-            Some(TypeSignature::UIntType) => {
+        let expected_type = match &self.current_context_type {
+            Some(r#type) => match r#type {
+                TypeSignature::IntType | TypeSignature::UIntType => r#type.clone(),
+                TypeSignature::ResponseType(boxed_type) => {
+                    let (ok_type, err_type) = boxed_type.as_ref();
+                    if ok_type == &TypeSignature::NoType {
+                        err_type.clone()
+                    } else {
+                        ok_type.clone()
+                    }
+                }
+                _ => {
+                    // Default to IntType if no context type is set
+                    // todo: when type inference is more robust, maybe panic
+                    TypeSignature::IntType
+                }
+            },
+            None => {
+                // Default to IntType if no context type is set
+                // todo: when type inference is more robust, maybe panic
+                TypeSignature::IntType
+            }
+        };
+        self.lists_stack.push(match expected_type {
+            TypeSignature::UIntType => {
                 PreSymbolicExpression::atom_value(ClarityValue::UInt(node.value as u128))
             }
-            Some(TypeSignature::IntType) => {
+            TypeSignature::IntType => {
                 PreSymbolicExpression::atom_value(ClarityValue::Int(node.value as i128))
             }
             _ => {
@@ -905,7 +1051,13 @@ pub fn convert_function_body<'a>(
         .into_scoping();
 
     let mut converter = StatementConverter::new(ir, function);
-    let state = ConverterState::default();
+    let state = ConverterState {
+        call_expression_to_ingest: 0,
+        skip_next_string_argument: false,
+        object_property_depth: 0,
+        array_depth: 0,
+        data: PhantomData,
+    };
     traverse_mut(&mut converter, allocator, &mut program, scoping, state);
 
     if converter.expressions.is_empty() {
@@ -1107,6 +1259,12 @@ mod test {
     }
 
     #[test]
+    fn test_err_operator() {
+        let ts_src = "function err1() { return err(1); }";
+        assert_body_eq(ts_src, "(err 1)");
+    }
+
+    #[test]
     fn test_data_var_get() {
         let ts_src = indoc!(
             r#"const count = new DataVar<Uint>(0);
@@ -1129,6 +1287,41 @@ mod test {
             "#
         );
         let expected_clar_src = indoc!(r#"(var-set count (+ (var-get count) 1))"#);
+        assert_body_eq(ts_src, expected_clar_src);
+
+        let ts_src = indoc!(
+            r#"const count = new DataVar<Int>(0);
+            function set1() {
+                return count.set(1);
+            }
+            "#
+        );
+        let expected_clar_src = indoc! {
+            r#"(var-set count 1)"#
+        };
+        assert_body_eq(ts_src, expected_clar_src);
+
+        let ts_src = indoc!(
+            r#"const count = new DataVar<Int>(0);
+            function increment() {
+                count.set(count.get() + 1);
+                return ok("alright");
+            }
+            "#
+        );
+        let expected_clar_src = indoc! {
+            r#"(begin
+                (var-set count (+ (var-get count) 1))
+                (ok "alright")
+            )"#
+        };
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_as_type_inference() {
+        let ts_src = "function returnU2() { return 2 as Uint; }";
+        let expected_clar_src = "u2";
         assert_body_eq(ts_src, expected_clar_src);
     }
 
@@ -1334,6 +1527,77 @@ mod test {
             }"#
         };
         let expected_clar_src = "{ list: (list (list true false)) }";
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_data_map_get() {
+        let ts_src = indoc! {
+            r#"const counts = new DataMap<Principal, Uint>();
+            function getMyCount() {
+                const count = counts.get(txSender);
+                return count;
+            }"#
+        };
+        let expected_clar_src = "(let ((count (map-get? counts tx-sender))) count)";
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_optional_default_to() {
+        let ts_src = indoc! {
+            r#"const counts = new DataMap<Principal, Uint>();
+            function getMyCount() {
+                return counts.get(txSender).defaultTo(0);
+            }"#
+        };
+        let expected_clar_src = "(default-to u0 (map-get? counts tx-sender))";
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_optional_default_to_on_let_binding() {
+        let ts_src = indoc! {
+            r#"const counts = new DataMap<Principal, Uint>();
+            function getMyCount() {
+                const count = counts.get(txSender);
+                return count.defaultTo(0);
+            }"#
+        };
+        let expected_clar_src = indoc! {
+            r#"(let ((count (map-get? counts tx-sender)))
+                (default-to u0 count)
+            )"#
+        };
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_optional_default_to_type_inference() {
+        let ts_src = indoc! {
+            r#"const counts = new DataMap<Principal, Uint>();
+            function getMyCountPlus1() {
+                return counts.get(txSender).defaultTo(0) + 1;
+            }"#
+        };
+        let expected_clar_src = "(+ (default-to u0 (map-get? counts tx-sender)) u1)";
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_variable_type_inference() {
+        let ts_src = indoc! {
+            r#"const counts = new DataMap<Principal, Uint>();
+            function getMyCountPlus1() {
+                const currentCount = counts.get(txSender).defaultTo(0);
+                return currentCount + 1;
+            }"#
+        };
+        let expected_clar_src = indoc! {
+            r#"(let ((current-count (default-to u0 (map-get? counts tx-sender))))
+                (+ current-count u1)
+            )"#
+        };
         assert_body_eq(ts_src, expected_clar_src);
     }
 }

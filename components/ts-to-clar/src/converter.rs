@@ -7,8 +7,9 @@ use clarity::vm::types::{
     PrincipalData, SequenceSubtype, StringSubtype, TypeSignature as ClarityTypeSignature,
 };
 use clarity::vm::{ClarityName, Value as ClarityValue};
-use oxc_allocator::Allocator;
+use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{Expression as OxcExpression, ObjectPropertyKind};
+use oxc_ast::AstBuilder;
 
 use crate::parser::{IRConstant, IRDataMap, IRDataVar, IRFunction, IR};
 use crate::{expression_converter, to_kebab_case};
@@ -58,9 +59,28 @@ fn type_signature_to_pse(
 }
 
 fn convert_expression_with_type(
+    allocator: &Allocator,
+    ir: &IR,
     expr: &OxcExpression,
     r#type: &ClarityTypeSignature,
 ) -> Result<PreSymbolicExpression, anyhow::Error> {
+    if expr.is_call_expression() || expr.is_call_like_expression() || expr.is_binaryish() {
+        // to convert top level expressions that are not inside a function body,
+        // wrap them in a temporary function and call convert_function_body
+        let builder = AstBuilder::new(allocator);
+        let function =
+            builder.statement_expression(oxc_span::Span::default(), expr.clone_in(allocator));
+
+        let temp_ir_function = IRFunction {
+            name: "temp".to_string(),
+            parameters: vec![],
+            return_type: Some(r#type.clone()),
+            body: oxc_allocator::Vec::from_array_in([function], allocator),
+        };
+
+        return expression_converter::convert_function_body(allocator, ir, &temp_ir_function);
+    }
+
     Ok(match r#type {
         ClarityTypeSignature::UIntType => match &expr {
             OxcExpression::NumericLiteral(num) => {
@@ -122,8 +142,12 @@ fn convert_expression_with_type(
                             let key = property.key.static_name().unwrap();
                             let key_name = ClarityName::from(key.to_string().as_str());
                             let prop_type = tuple_type.get_type_map().get(&key_name).unwrap();
-                            let value =
-                                convert_expression_with_type(&property.value, &prop_type.clone())?;
+                            let value = convert_expression_with_type(
+                                allocator,
+                                ir,
+                                &property.value,
+                                &prop_type.clone(),
+                            )?;
                             Ok(vec![PreSymbolicExpression::atom(key_name), value])
                         }
                         ObjectPropertyKind::SpreadProperty(_property) => {
@@ -140,26 +164,42 @@ fn convert_expression_with_type(
 
             _ => return Err(anyhow::anyhow!("Unsupported expression for Tuple")),
         },
-        _ => return Err(anyhow::anyhow!("Unsupported type for variable")),
+        ClarityTypeSignature::ResponseType(_boxed_types) => match &expr {
+            _ => return Err(anyhow::anyhow!("Invalid expression for Response type")),
+        },
+        _ => {
+            return Err(anyhow::anyhow!(format!(
+                "Unsupported type for variable with {:?} type",
+                r#type
+            )))
+        }
     })
 }
 
-fn convert_constant(constant: &IRConstant) -> Result<PreSymbolicExpression, anyhow::Error> {
+fn convert_constant(
+    allocator: &Allocator,
+    ir: &IR,
+    constant: &IRConstant,
+) -> Result<PreSymbolicExpression, anyhow::Error> {
     Ok(PreSymbolicExpression::list(vec![
-        PreSymbolicExpression::atom(ClarityName::from("define-const")),
+        PreSymbolicExpression::atom(ClarityName::from("define-constant")),
         PreSymbolicExpression::atom(ClarityName::from(constant.name.as_str())),
-        convert_expression_with_type(&constant.expr, &constant.r#type)?,
+        convert_expression_with_type(allocator, ir, &constant.expr, &constant.r#type)?,
     ]))
 }
 
-fn convert_data_var(data_var: &IRDataVar) -> Result<PreSymbolicExpression, anyhow::Error> {
+fn convert_data_var(
+    allocator: &Allocator,
+    ir: &IR,
+    data_var: &IRDataVar,
+) -> Result<PreSymbolicExpression, anyhow::Error> {
     Ok(PreSymbolicExpression {
         id: 0,
         pre_expr: PreSymbolicExpressionType::List(vec![
             PreSymbolicExpression::atom(ClarityName::from("define-data-var")),
             PreSymbolicExpression::atom(ClarityName::from(data_var.name.as_str())),
             type_signature_to_pse(&data_var.r#type)?,
-            convert_expression_with_type(&data_var.expr, &data_var.r#type)?,
+            convert_expression_with_type(allocator, ir, &data_var.expr, &data_var.r#type)?,
         ]),
         span: Span::zero(),
     })
@@ -215,20 +255,23 @@ fn convert_function(
     ]))
 }
 
-pub fn convert(allocator: &Allocator, ir: IR) -> Result<Vec<PreSymbolicExpression>, anyhow::Error> {
+pub fn convert(
+    allocator: &Allocator,
+    ir: &IR,
+) -> Result<Vec<PreSymbolicExpression>, anyhow::Error> {
     let mut pses = vec![];
 
     pses.extend(
         ir.constants
             .iter()
-            .map(convert_constant)
+            .map(|c| convert_constant(allocator, ir, c))
             .collect::<Result<Vec<_>, _>>()?,
     );
 
     pses.extend(
         ir.data_vars
             .iter()
-            .map(convert_data_var)
+            .map(|v| convert_data_var(allocator, ir, v))
             .collect::<Result<Vec<_>, _>>()?,
     );
 
@@ -281,7 +324,7 @@ mod test {
 
         let allocator = Allocator::default();
         let ir = get_tmp_ir(&allocator, ts_source);
-        let actual_pse = convert(&allocator, ir).expect("Failed to convert IR to PSE");
+        let actual_pse = convert(&allocator, &ir).expect("Failed to convert IR to PSE");
 
         pretty_assertions::assert_eq!(actual_pse, expected_pse);
     }
@@ -299,14 +342,14 @@ mod test {
     fn test_convert_constant() {
         let ts_src = "const OWNER_ROLE = new Constant<Uint>(1);";
         let expected_pse = PreSymbolicExpression::list(vec![
-            PreSymbolicExpression::atom(ClarityName::from("define-const")),
+            PreSymbolicExpression::atom(ClarityName::from("define-constant")),
             PreSymbolicExpression::atom(ClarityName::from("OWNER_ROLE")),
             PreSymbolicExpression::atom_value(ClarityValue::UInt(1)),
         ]);
 
         let allocator = Allocator::default();
         let ir = get_tmp_ir(&allocator, ts_src);
-        let pses = convert(&allocator, ir).unwrap();
+        let pses = convert(&allocator, &ir).unwrap();
         assert_eq!(pses, vec![expected_pse]);
     }
 
@@ -322,7 +365,7 @@ mod test {
 
         let allocator = Allocator::default();
         let ir = get_tmp_ir(&allocator, ts_src);
-        let pses = convert(&allocator, ir).unwrap();
+        let pses = convert(&allocator, &ir).unwrap();
         assert_eq!(pses, vec![expected_pse]);
 
         let ts_src = r#"const msg = new DataVar<StringAscii<16>>("hello");"#;
@@ -337,7 +380,7 @@ mod test {
             PreSymbolicExpression::atom_value(ascii_value("hello")),
         ]);
         let ir = get_tmp_ir(&allocator, ts_src);
-        let pses = convert(&allocator, ir).unwrap();
+        let pses = convert(&allocator, &ir).unwrap();
         pretty_assertions::assert_eq!(pses, vec![expected_pse]);
     }
 
@@ -355,6 +398,20 @@ mod test {
 
         let ts_src = "const owner = new DataVar<Principal>(txSender);";
         assert_pses_eq(ts_src, r#"(define-data-var owner principal tx-sender)"#);
+    }
+
+    #[test]
+    fn test_constant_with_expression() {
+        let ts_src = "const U2 = new Constant<Uint>(1 + 1);";
+        assert_pses_eq(ts_src, r#"(define-constant U2 (+ u1 u1))"#);
+    }
+
+    #[test]
+    fn test_constant_with_err_expression() {
+        let ts_src = "const ERR_INTERNAL = new Constant<ClError<never, Int>>(err(5000));";
+        assert_pses_eq(ts_src, r#"(define-constant ERR_INTERNAL (err 5000))"#);
+        // let ts_src = "const ERR_INTERNAL = new Constant<ClError<never, Uint>>(err(5001));";
+        // assert_pses_eq(ts_src, r#"(define-constant ERR_INTERNAL (err u5001))"#);
     }
 
     #[test]

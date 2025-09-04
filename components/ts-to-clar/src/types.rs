@@ -34,7 +34,7 @@ fn extract_numeric_type_param(
     Err(anyhow!("Expected numeric literal type parameter"))
 }
 
-fn extract_type(
+pub fn extract_type(
     type_ident: &str,
     type_params: Option<&ast::TSTypeParameterInstantiation>,
 ) -> Result<TypeSignature> {
@@ -43,8 +43,14 @@ fn extract_type(
         "Int" => Ok(TypeSignature::IntType),
         "Bool" => Ok(TypeSignature::BoolType),
         "Principal" => Ok(TypeSignature::PrincipalType),
+        "ClError" => {
+            let ok_type = ts_to_clar_type(&type_params.unwrap().params[0])?;
+            let err_type = ts_to_clar_type(&type_params.unwrap().params[1])?;
+            return Ok(TypeSignature::ResponseType(Box::new((ok_type, err_type))));
+        }
         "StringAscii" => extract_numeric_type_param(type_params).map(get_ascii_type),
         "StringUtf8" => extract_numeric_type_param(type_params).map(get_utf8_type),
+        "never" => Ok(TypeSignature::NoType),
         _ => Err(anyhow!("Unknown type: {}", type_ident)),
     }
 }
@@ -87,6 +93,7 @@ pub fn ts_to_clar_type(ts_type: &ast::TSType) -> Result<TypeSignature> {
                 members,
             )?))
         }
+        ast::TSType::TSNeverKeyword(_) => Ok(TypeSignature::NoType),
         _ => Err(anyhow!("Unexpected type: {:?}", ts_type)),
     }
 }
