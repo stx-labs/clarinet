@@ -1026,6 +1026,51 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
             self.ingest_last_stack_item();
         }
     }
+
+    fn enter_if_statement(&mut self, node: &mut ast::IfStatement<'a>, _ctx: &mut TraverseCtx<'a>) {
+        let is_early_return = match &node.consequent {
+            ast::Statement::ReturnStatement(_) => true,
+            ast::Statement::BlockStatement(block) => {
+                block.body.len() == 1
+                    && matches!(block.body.first(), Some(ast::Statement::ReturnStatement(_)))
+            }
+            _ => false,
+        };
+
+        if is_early_return {
+            // `if` with early return is treated as an `asserts!`
+            self.lists_stack
+                .push(PreSymbolicExpression::list(vec![atom("asserts!")]));
+        }
+    }
+
+    fn exit_if_statement(&mut self, node: &mut ast::IfStatement<'a>, _ctx: &mut TraverseCtx<'a>) {
+        // Check if this was an assert pattern (early return)
+        let is_early_return = match &node.consequent {
+            ast::Statement::ReturnStatement(_) => true,
+            ast::Statement::BlockStatement(block) => {
+                block.body.len() == 1
+                    && matches!(block.body.first(), Some(ast::Statement::ReturnStatement(_)))
+            }
+            _ => false,
+        };
+
+        if is_early_return {
+            // a `if` with early return is treated as an `asserts!`
+            // the condition (1st item) neeed to wraped in (not ...)
+            // the last item is the `asserts!`
+            self.lists_stack.last_mut().map(|item| {
+                if let PreSymbolicExpressionType::List(list) = &mut item.pre_expr {
+                    // the first item is the condition
+                    let condition = list.get_mut(1).cloned().unwrap_or(atom("true"));
+                    let not_condition = PreSymbolicExpression::list(vec![atom("not"), condition]);
+                    list[1] = not_condition;
+                }
+            });
+            //
+            self.ingest_last_stack_item();
+        }
+    }
 }
 
 /// Convert a TypeScript function to a Clarity expression
@@ -1596,6 +1641,57 @@ mod test {
         let expected_clar_src = indoc! {
             r#"(let ((current-count (default-to u0 (map-get? counts tx-sender))))
                 (+ current-count u1)
+            )"#
+        };
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_if_with_early_return() {
+        let ts_src = indoc! {
+            r#"function evenOrOdd(n: Uint) {
+                if (n % 2 == 0) return "even";
+                return "odd";
+            }"#
+        };
+        let expected_clar_src = indoc! {
+            r#"(begin
+                (asserts! (not (is-eq (mod n u2) u0)) "even")
+                "odd"
+            )"#
+        };
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_assert_with_error_code() {
+        let ts_src = indoc! {
+            r#"function validateAmount(amount: Uint) {
+                if (amount <= 0) return err(400 as Uint);
+                return ok(amount);
+            }"#
+        };
+        let expected_clar_src = indoc! {
+            r#"(begin
+                (asserts! (not (<= amount u0)) (err u400))
+                (ok amount)
+            )"#
+        };
+        assert_body_eq(ts_src, expected_clar_src);
+    }
+
+    #[test]
+    fn test_assert_simple_condition() {
+        let ts_src = indoc! {
+            r#"function requireAuth(authorized: Bool) {
+                if (!authorized) return err(403 as Uint);
+                return ok(true);
+            }"#
+        };
+        let expected_clar_src = indoc! {
+            r#"(begin
+                (asserts! (not authorized) (err u403))
+                (ok true)
             )"#
         };
         assert_body_eq(ts_src, expected_clar_src);
