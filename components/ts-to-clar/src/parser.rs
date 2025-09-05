@@ -13,8 +13,8 @@ use anyhow::{anyhow, Result};
 use clarity::vm::types::TypeSignature;
 use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{
-    self, Expression, Function, ObjectPropertyKind, Program, PropertyKey, Statement,
-    VariableDeclaration, VariableDeclarator,
+    self, BindingPattern, Expression, Function, NewExpression, ObjectPropertyKind, Program,
+    PropertyKey, Statement, VariableDeclaration, VariableDeclarator,
 };
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
@@ -69,52 +69,70 @@ pub struct IR<'a> {
     pub public_functions: Vec<String>,
 }
 
-pub fn parse_ts<'a>(
-    allocator: &'a Allocator,
-    file_name: &str,
-    src: &'a str,
-) -> Result<Program<'a>> {
-    let source_type = SourceType::from_path(file_name).unwrap_or_default();
-    let parser_return = Parser::new(allocator, src, source_type).parse();
-
-    if !parser_return.errors.is_empty() {
-        return Err(anyhow!("Parser errors: {:?}", parser_return.errors));
+impl IR<'_> {
+    fn handle_constant(&mut self, id: &BindingPattern, expr: &Expression) {
+        let Some(type_annotation) = id.type_annotation.as_ref() else {
+            return;
+        };
+        let Ok(r#type) = ts_to_clar_type(&type_annotation.type_annotation) else {
+            return;
+        };
+        let Some(identifier) = id.get_binding_identifier() else {
+            return;
+        };
+        self.constants.push(IRConstant {
+            name: identifier.name.to_string(),
+            r#type,
+            expr: expr.clone_in(self.allocator),
+        });
     }
 
-    Ok(parser_return.program)
-}
-
-fn extract_var_expr<'a>(
-    new_expr: &'a oxc_ast::ast::NewExpression<'a>,
-) -> Option<&'a Expression<'a>> {
-    let first_arg = new_expr.arguments.first();
-    first_arg.map(|arg| arg.to_expression())
-}
-
-fn parse_function_params(
-    params: &[oxc_ast::ast::FormalParameter],
-) -> Result<Vec<(String, TypeSignature)>> {
-    params
-        .iter()
-        .map(|param| {
-            if let Some(ident) = param.pattern.get_binding_identifier() {
-                let param_name = ident.name.to_string();
-
-                let param_type = param
-                    .pattern
-                    .type_annotation
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("Missing type annotation for param '{}'.", param_name))
-                    .and_then(|type_ann| {
-                        ts_to_clar_type(&type_ann.type_annotation)
-                            .map_err(|e| anyhow!("Invalid param type for '{}': {}", param_name, e))
-                    })?;
-                Ok((param_name, param_type))
-            } else {
-                Err(anyhow!("Expected identifier for parameter."))
+    /// Handle DataVar and DataMap declarations
+    fn handle_new_data_store(&mut self, id: &BindingPattern, new_expr: &NewExpression<'_>) {
+        let Some(callee_ident) = new_expr.callee.get_identifier_reference() else {
+            return;
+        };
+        let name = match id.get_binding_identifier() {
+            Some(n) => n.name.to_string(),
+            None => return,
+        };
+        match callee_ident.name.as_str() {
+            "DataVar" => {
+                let type_args = new_expr.type_arguments.as_ref().unwrap();
+                let r#type = ts_to_clar_type(&type_args.params[0]);
+                match r#type {
+                    Ok(r#type) => {
+                        let expr = extract_var_expr(new_expr).unwrap();
+                        self.data_vars.push(IRDataVar {
+                            name,
+                            r#type,
+                            // todo: explore if we can avoid cloning the expression
+                            expr: expr.clone_in(self.allocator),
+                        });
+                    }
+                    Err(e) => {
+                        println!("Error: {}", e);
+                    }
+                }
             }
-        })
-        .collect()
+            "DataMap" => {
+                let params = &new_expr.type_arguments.as_ref().unwrap().params;
+                let key_type = ts_to_clar_type(&params[0]).expect("Invalid key type");
+                let value_type = ts_to_clar_type(&params[1]).expect("Invalid value type");
+                self.data_maps.push(IRDataMap {
+                    name,
+                    key_type,
+                    value_type,
+                });
+            }
+            _ => {
+                println!(
+                    "Warning: Unhandled data store type '{}'",
+                    callee_ident.name.as_str()
+                );
+            }
+        }
+    }
 }
 
 // introduced in oxc 0.75, not used yet
@@ -162,65 +180,19 @@ impl<'a> Traverse<'a, ConverterState<'a>> for IR<'a> {
         if node.kind == ast::VariableDeclarationKind::Const {
             for decl in &node.declarations {
                 let VariableDeclarator { id, init, .. } = decl;
-                let Some(init) = init else { continue };
-                let Expression::NewExpression(new_expr) = init else {
-                    continue;
-                };
-                let Some(callee_ident) = new_expr.callee.get_identifier_reference() else {
-                    continue;
-                };
-                let name = match id.get_binding_identifier() {
-                    Some(n) => n.name.to_string(),
-                    None => continue,
-                };
-                match callee_ident.name.as_str() {
-                    "Constant" => {
-                        let type_args = new_expr.type_arguments.as_ref().unwrap();
-                        let r#type = ts_to_clar_type(&type_args.params[0]);
-                        match r#type {
-                            Ok(r#type) => {
-                                let expr = extract_var_expr(new_expr).unwrap();
-                                self.constants.push(IRConstant {
-                                    name,
-                                    r#type,
-                                    // todo: explore if we can avoid cloning the expression
-                                    expr: expr.clone_in(self.allocator),
-                                });
-                            }
-                            Err(e) => {
-                                println!("Error: {}", e);
-                            }
-                        }
+                match init {
+                    Some(Expression::NewExpression(new_expr)) => {
+                        self.handle_new_data_store(id, new_expr);
                     }
-                    "DataVar" => {
-                        let type_args = new_expr.type_arguments.as_ref().unwrap();
-                        let r#type = ts_to_clar_type(&type_args.params[0]);
-                        match r#type {
-                            Ok(r#type) => {
-                                let expr = extract_var_expr(new_expr).unwrap();
-                                self.data_vars.push(IRDataVar {
-                                    name,
-                                    r#type,
-                                    // todo: explore if we can avoid cloning the expression
-                                    expr: expr.clone_in(self.allocator),
-                                });
-                            }
-                            Err(e) => {
-                                println!("Error: {}", e);
-                            }
-                        }
+                    Some(expr) => {
+                        self.handle_constant(id, expr);
                     }
-                    "DataMap" => {
-                        let params = &new_expr.type_arguments.as_ref().unwrap().params;
-                        let key_type = ts_to_clar_type(&params[0]).expect("Invalid key type");
-                        let value_type = ts_to_clar_type(&params[1]).expect("Invalid value type");
-                        self.data_maps.push(IRDataMap {
-                            name,
-                            key_type,
-                            value_type,
-                        });
+                    _ => {
+                        println!(
+                            "Warning: Unhandled variable declaration for '{:?}'",
+                            id.get_identifier_name()
+                        );
                     }
-                    _ => {}
                 }
             }
         }
@@ -313,6 +285,50 @@ impl<'a> Traverse<'a, ConverterState<'a>> for IR<'a> {
             }
         }
     }
+}
+
+fn parse_ts<'a>(allocator: &'a Allocator, file_name: &str, src: &'a str) -> Result<Program<'a>> {
+    let source_type = SourceType::from_path(file_name).unwrap_or_default();
+    let parser_return = Parser::new(allocator, src, source_type).parse();
+
+    if !parser_return.errors.is_empty() {
+        return Err(anyhow!("Parser errors: {:?}", parser_return.errors));
+    }
+
+    Ok(parser_return.program)
+}
+
+fn extract_var_expr<'a>(
+    new_expr: &'a oxc_ast::ast::NewExpression<'a>,
+) -> Option<&'a Expression<'a>> {
+    let first_arg = new_expr.arguments.first();
+    first_arg.map(|arg| arg.to_expression())
+}
+
+fn parse_function_params(
+    params: &[oxc_ast::ast::FormalParameter],
+) -> Result<Vec<(String, TypeSignature)>> {
+    params
+        .iter()
+        .map(|param| {
+            if let Some(ident) = param.pattern.get_binding_identifier() {
+                let param_name = ident.name.to_string();
+
+                let param_type = param
+                    .pattern
+                    .type_annotation
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Missing type annotation for param '{}'.", param_name))
+                    .and_then(|type_ann| {
+                        ts_to_clar_type(&type_ann.type_annotation)
+                            .map_err(|e| anyhow!("Invalid param type for '{}': {}", param_name, e))
+                    })?;
+                Ok((param_name, param_type))
+            } else {
+                Err(anyhow!("Expected identifier for parameter."))
+            }
+        })
+        .collect()
 }
 
 pub fn get_ir<'a>(allocator: &'a Allocator, file_name: &str, source: &'a str) -> IR<'a> {
@@ -508,9 +524,9 @@ mod test {
     fn test_constant_ir() {
         let allocator = Allocator::default();
         let src = indoc!(
-            r#"const OWNER_ROLE = new Constant<Uint>(1);
-            const COST = new Constant<Int>(10);
-            const HELLO = new Constant<StringAscii<32>>("World");"#
+            r#"const OWNER_ROLE: Uint = 1;
+            const COST: Int = 10;
+            const HELLO: StringAscii<32> = "World";"#
         );
         let constants = get_tmp_ir(&allocator, src).constants;
         let expected = IRConstant {
@@ -537,7 +553,7 @@ mod test {
     #[test]
     fn test_constant_err_ir() {
         let allocator = Allocator::default();
-        let src = "const ERR_FORBIDDEN = new Constant<ClError<never, Uint>>(err(4003));";
+        let src = "const ERR_FORBIDDEN: ClError<never, Uint> = err(4003);";
         let constants = get_tmp_ir(&allocator, src).constants;
         let expected = IRConstant {
             name: "ERR_FORBIDDEN".to_string(),
@@ -657,7 +673,7 @@ mod test {
     #[test]
     fn test_multiple_var_types() {
         let src = indoc!(
-            "const a = new Constant<Uint>(12);
+            "const a: Uint = 12;
             const b = new DataVar<Uint>(100);
             const c = new DataMap<StringAscii<2>, StringUtf8<4>>();"
         );
@@ -713,7 +729,7 @@ mod test {
 
     #[test]
     fn test_tuple_type_constant_ir() {
-        let src = "const state = new Constant<{ active: Bool }>({ active: true });";
+        let src = "const state: { active: Bool } = { active: true };";
         let allocator = Allocator::default();
         assert_eq!(get_tmp_ir(&allocator, src).constants.len(), 1);
         let ir = &get_tmp_ir(&allocator, src).constants[0];

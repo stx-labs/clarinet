@@ -219,7 +219,7 @@ fn convert_function(
     ir: &IR,
     function: &IRFunction,
 ) -> Result<PreSymbolicExpression, anyhow::Error> {
-    let parameters: Vec<PreSymbolicExpression> = function
+    let parameters: Vec<Vec<PreSymbolicExpression>> = function
         .parameters
         .iter()
         .map(|(name, r#type)| {
@@ -229,7 +229,6 @@ fn convert_function(
         })
         .collect::<Result<Vec<_>, anyhow::Error>>()?
         .into_iter()
-        .flatten()
         .collect();
 
     let define_type = if ir.read_only_functions.contains(&function.name) {
@@ -245,7 +244,13 @@ fn convert_function(
     let name_and_parameters = if parameters.is_empty() {
         PreSymbolicExpression::list(vec![name_expr])
     } else {
-        PreSymbolicExpression::list(vec![name_expr, PreSymbolicExpression::list(parameters)])
+        let params: Vec<_> = parameters
+            .iter()
+            .map(|p| PreSymbolicExpression::list(p.clone()))
+            .collect();
+        let mut name_and_params = vec![name_expr];
+        name_and_params.extend(params);
+        PreSymbolicExpression::list(name_and_params)
     };
 
     Ok(PreSymbolicExpression::list(vec![
@@ -340,7 +345,7 @@ mod test {
 
     #[test]
     fn test_convert_constant() {
-        let ts_src = "const OWNER_ROLE = new Constant<Uint>(1);";
+        let ts_src = "const OWNER_ROLE: Uint = 1;";
         let expected_pse = PreSymbolicExpression::list(vec![
             PreSymbolicExpression::atom(ClarityName::from("define-constant")),
             PreSymbolicExpression::atom(ClarityName::from("OWNER_ROLE")),
@@ -402,16 +407,16 @@ mod test {
 
     #[test]
     fn test_constant_with_expression() {
-        let ts_src = "const U2 = new Constant<Uint>(1 + 1);";
+        let ts_src = "const U2: Uint = 1 + 1;";
         assert_pses_eq(ts_src, r#"(define-constant U2 (+ u1 u1))"#);
     }
 
     #[test]
     fn test_constant_with_err_expression() {
-        let ts_src = "const ERR_INTERNAL = new Constant<ClError<never, Int>>(err(5000));";
+        let ts_src = "const ERR_INTERNAL: ClError<never, Int> = err(5000);";
         assert_pses_eq(ts_src, r#"(define-constant ERR_INTERNAL (err 5000))"#);
-        // let ts_src = "const ERR_INTERNAL = new Constant<ClError<never, Uint>>(err(5001));";
-        // assert_pses_eq(ts_src, r#"(define-constant ERR_INTERNAL (err u5001))"#);
+        let ts_src = "const ERR_INTERNAL: ClError<never, Uint> = err(5001);";
+        assert_pses_eq(ts_src, r#"(define-constant ERR_INTERNAL (err u5001))"#);
     }
 
     #[test]
@@ -467,7 +472,7 @@ mod test {
     }
 
     #[test]
-    fn test_function_with_parameters() {
+    fn test_function_with_one_parameter() {
         let ts_src = "function printarg(arg: Uint) { return print(arg); }";
         assert_pses_eq(
             ts_src,
@@ -478,6 +483,12 @@ mod test {
             ts_src,
             r#"(define-private (printarg (arg (string-ascii 16))) (print arg))"#,
         );
+    }
+
+    #[test]
+    fn test_function_with_parameters() {
+        let ts_src = "function add(a: Uint, b: Uint) { return a + b; }";
+        assert_pses_eq(ts_src, "(define-private (add (a uint) (b uint)) (+ a b))");
     }
 
     #[test]

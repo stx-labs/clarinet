@@ -34,8 +34,8 @@ mod test {
     #[test]
     fn test_transpile_toplevel_data() {
         let src = indoc! {
-            "const OWNER_ROLE = new Constant<Uint>(1);
-            const ERR_FORBIDDEN = new Constant<ClError<never, Uint>>(err(4001));
+            "const OWNER_ROLE: Uint = 1;
+            const ERR_FORBIDDEN: ClError<never, Uint> = err(4001);
             const count = new DataVar<Uint>(0);
             const msgs = new DataMap<Uint, StringAscii<16>>();
         "};
