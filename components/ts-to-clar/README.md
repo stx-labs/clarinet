@@ -1,4 +1,10 @@
-# TypeScriptClarity
+# TypeScript to Clarity
+
+Write Stacks smart contract in TypeScript.
+
+## Documentation
+
+See [spec.md](./spec.md)
 
 ## Try it
 
