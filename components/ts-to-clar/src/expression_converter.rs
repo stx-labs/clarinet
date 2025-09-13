@@ -323,8 +323,8 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
 
     fn enter_expression(
         &mut self,
-        _node: &mut Expression<'a>,
-        _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
+        node: &mut Expression<'a>,
+        ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
     ) {
         // add debugging here if needed
     }
@@ -627,7 +627,7 @@ impl<'a> Traverse<'a, ConverterState<'a>> for StatementConverter<'a> {
 
     fn enter_object_expression(
         &mut self,
-        _node: &mut ast::ObjectExpression<'a>,
+        node: &mut ast::ObjectExpression<'a>,
         _ctx: &mut oxc_traverse::TraverseCtx<'a, ConverterState<'a>>,
     ) {
         self.lists_stack.push(PreSymbolicExpression::tuple(vec![]));
