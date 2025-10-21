@@ -2,8 +2,8 @@
 
 This component exposes Clarinet features to a JS interface through wasm-bindgen.
 It's built with wasm-pack.  
-It powers [@hirosystems/clarinet-sdk](https://npmjs.com/package/@hirosystems/clarinet-sdk) and
-[@hirosystems/clarinet-sdk-browser](https://npmjs.com/package/@hirosystems/clarinet-sdk-browser).
+It powers [@stacks/clarinet-sdk](https://npmjs.com/package/@stacks/clarinet-sdk) and
+[@stacks/clarinet-sdk-browser](https://npmjs.com/package/@stacks/clarinet-sdk-browser).
 
 ## Contributing
 
@@ -23,13 +23,13 @@ Alternatively, it's also possible to build the packages separately. It should on
 **Build for node**
 
 ```sh
-wasm-pack build --release --scope hirosystems --out-dir pkg-node --target nodejs
+wasm-pack build --release --scope stacks --out-dir pkg-node --target nodejs
 ```
 
 **Build for the browser**
 
 ```sh
-wasm-pack build --release --scope hirosystems --out-dir pkg-browser --target web
+wasm-pack build --release --scope stacks --out-dir pkg-browser --target web
 ```
 
 ### Release

@@ -1,8 +1,8 @@
 # The clarinet-sdk is published to npm when a release is created.
 # It's based on the npm workspace defined in the package.json at the root of the project.
-# Two packages are built with wasm-pack - @hirosystems/clarinet-sdk-wasm and @hirosystems/clarinet-sdk-wasm-browser
+# Two packages are built with wasm-pack - @stacks/clarinet-sdk-wasm and @stacks/clarinet-sdk-wasm-browser
 # They need to be built first
-# Then two packages are built with tsc - @hirosystems/clarinet-sdk and @hirosystems/clarinet-sdk-browser
+# Then two packages are built with tsc - @stacks/clarinet-sdk and @stacks/clarinet-sdk-browser
 
 
 name: Publish Clarinet SDK

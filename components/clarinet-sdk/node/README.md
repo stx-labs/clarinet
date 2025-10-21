@@ -2,7 +2,7 @@
 
 The Clarinet SDK allows to interact with the simnet in Node.js.
 
-If you want to use the Clarinet SDK in web browsers, try [@hirosystems/clarinet-sdk-browser](https://www.npmjs.com/package/@hirosystems/clarinet-sdk-browser).
+If you want to use the Clarinet SDK in web browsers, try [@stacks/clarinet-sdk-browser](https://www.npmjs.com/package/@stacks/clarinet-sdk-browser).
 
 Find the API references of the SDK in [our documentation](https://docs.hiro.so/stacks/clarinet-js-sdk).
 Learn more about unit testing Clarity smart contracts in [this guide](https://docs.hiro.so/stacks/clarinet-js-sdk).
@@ -18,13 +18,13 @@ You can use this SDK to:
 ## Installation
 
 ```sh
-npm install @hirosystems/clarinet-sdk
+npm install @stacks/clarinet-sdk
 ```
 
 ## Usage
 
 ```ts
-import { initSimnet } from "@hirosystems/clarinet-sdk";
+import { initSimnet } from "@stacks/clarinet-sdk";
 import { Cl } from "@stacks/transactions";
 
 async function main() {
@@ -87,6 +87,6 @@ Note: If you want to write your test in JavaScript but still have a certain leve
     "checkJs": true,
     "strict": true
   },
-  "include": ["node_modules/@hirosystems/clarinet-sdk/vitest-helpers/src", "unit-tests"]
+  "include": ["node_modules/@stacks/clarinet-sdk/vitest-helpers/src", "unit-tests"]
 }
 ```
