@@ -443,69 +443,6 @@ jobs:
           cargo login ${{ secrets.CARGO_CRATES_IO_API_KEY }}
           cargo publish
 
-  docker_images:
-    name: Create ${{ matrix.name }} Docker Image
-    runs-on: ubuntu-latest
-    needs:
-      - get_release_info
-      - sanity_check
-      - cargo_test
-      - dist_clarinet
-    permissions:
-      packages: write
-    outputs:
-      version: ${{ steps.docker_meta.outputs.version }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Clarinet
-            description: Clarinet is a simple, modern and opinionated runtime for testing, integrating and deploying Clarity smart contracts.
-            image: ghcr.io/${{ github.repository }}
-            artifact: clarinet-linux-x64-glibc
-            dockerfile: dockerfiles/components/clarinet-dev.dockerfile
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Generate Docker tags/labels
-        id: docker_meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ matrix.image }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}},value=${{ needs.get_release_info.outputs.tag }},enable=${{ needs.get_release_info.outputs.tag != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.get_release_info.outputs.tag }},enable=${{ needs.get_release_info.outputs.tag != '' }}
-          labels: |
-            org.opencontainers.image.title=${{ matrix.name }}
-            org.opencontainers.image.description=${{ matrix.description }}
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        # if: github.event_name != 'pull_request'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download pre-built dist
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-
-      - name: Untar pre-built dist
-        run: tar zxvf *.tar.gz
-
-      - name: Create Image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.docker_meta.outputs.tags }}
-          labels: ${{ steps.docker_meta.outputs.labels }}
 
   release:
     name: Release
@@ -516,7 +453,6 @@ jobs:
       - sanity_check
       - cargo_test
       - dist_clarity_repl
-      - docker_images
     permissions:
       actions: write
       contents: write
