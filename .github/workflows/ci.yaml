@@ -451,6 +451,8 @@ jobs:
       - sanity_check
       - cargo_test
       - dist_clarinet
+    permissions:
+      packages: write
     outputs:
       version: ${{ steps.docker_meta.outputs.version }}
     strategy:
