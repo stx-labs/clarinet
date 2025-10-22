@@ -62,25 +62,11 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
 
-      - name: Setup cache keys
-        shell: bash
-        run: |
-          RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
-          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_ENV
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Setup Rust cache
+        id: setup-rust-cache
+        uses: ./.github/actions/setup-rust-cache
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/
-            target/
-          key: ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-
-            ${{ runner.os }}-${{ github.job }}-
+          target-cache-key: ${{ runner.os }}-${{ github.job }}
 
       - name: Install dependencies
         run: cargo install cargo-audit || true
@@ -121,31 +107,15 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
 
-      - name: Setup cache keys
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            RUST_VERSION=$(rustc -vV | sha256sum | cut -d ' ' -f1)
-          else
-            RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
-          fi
-          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_ENV
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Setup Rust cache
+        id: setup-rust-cache
+        uses: ./.github/actions/setup-rust-cache
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/
+          target-cache-key: ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}
+          target-path: |
             target/debug/.fingerprint/
             target/debug/build/
             target/debug/deps/
-          key: ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}-${{ env.RUST_VERSION }}-
-            ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}-
 
       - name: Install dependencies
         uses: taiki-e/install-action@v2
@@ -224,32 +194,14 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
 
-      - name: Setup cache keys
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            RUST_VERSION=$(rustc -vV | sha256sum | cut -d ' ' -f1)
-          else
-            RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
-          fi
-          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_ENV
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Setup Rust cache
+        id: setup-rust-cache
+        uses: ./.github/actions/setup-rust-cache
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/
-            target/
-          key: ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}-${{ env.RUST_VERSION }}-
-            ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}-
+          target-cache-key: ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}
 
       - name: Install wix (Windows)
-        if: matrix.os == 'windows-latest' && steps.cache-cargo.outputs.cache-hit != 'true'
+        if: matrix.os == 'windows-latest' && steps.setup-rust-cache.outputs.cargo-cache-hit != 'true'
         run: cargo install cargo-wix || true
 
       # Set environment variables required from cross compiling from macos-x86_64 to macos-arm64
@@ -399,25 +351,11 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
 
-      - name: Setup cache keys
-        shell: bash
-        run: |
-          RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
-          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_ENV
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Setup Rust cache
+        id: setup-rust-cache
+        uses: ./.github/actions/setup-rust-cache
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/
-            target/
-          key: ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-
-            ${{ runner.os }}-${{ github.job }}-
+          target-cache-key: ${{ runner.os }}-${{ github.job }}
 
       - name: Configure artifact names
         run: |
