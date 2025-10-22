@@ -57,6 +57,7 @@ impl Settings {
     }
 }
 
+/// Allow different ways an
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(untagged)]
@@ -79,8 +80,9 @@ static ALL_PASSES: [Pass; 3] = [Pass::CheckChecker, Pass::CallChecker, Pass::Noo
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let passes = if let Some(file_passes) = from_file.passes {
-            match file_passes {
+        let passes = from_file
+            .passes
+            .map(|file_passes| match file_passes {
                 OneOrList::One(pass) => match pass {
                     Pass::All => ALL_PASSES.to_vec(),
                     pass => vec![pass],
@@ -92,21 +94,18 @@ impl From<SettingsFile> for Settings {
                         passes
                     }
                 }
-            }
-        } else {
-            vec![]
-        };
+            })
+            .unwrap_or_default();
 
         // Each pass that has its own settings should be included here.
-        let checker_settings = if let Some(checker_settings) = from_file.check_checker {
-            check_checker::Settings::from(checker_settings)
-        } else {
-            check_checker::Settings::default()
-        };
+        let check_checker = from_file
+            .check_checker
+            .map(check_checker::Settings::from)
+            .unwrap_or_default();
 
         Self {
             passes,
-            check_checker: checker_settings,
+            check_checker,
         }
     }
 }
