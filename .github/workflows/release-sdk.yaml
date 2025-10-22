@@ -36,7 +36,7 @@ jobs:
         run: npm run build:sdk-wasm
 
       - name: Publish sdk-wasm package
-        run: npm publish -w components/clarinet-sdk-wasm/pkg-node -w components/clarinet-sdk-wasm/pkg-browser --provenance --access public
+        run: npm publish -w components/clarinet-sdk-wasm/pkg-node -w components/clarinet-sdk-wasm/pkg-browser --access public
 
       - name: Install dependencies
         run: npm ci
@@ -45,4 +45,4 @@ jobs:
         run: npm run build:sdk
 
       - name: Publish sdk package
-        run: npm publish -w components/clarinet-sdk/node -w components/clarinet-sdk/browser --provenance --access public
+        run: npm publish -w components/clarinet-sdk/node -w components/clarinet-sdk/browser --access public

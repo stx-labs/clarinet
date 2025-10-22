@@ -459,7 +459,7 @@ jobs:
         include:
           - name: Clarinet
             description: Clarinet is a simple, modern and opinionated runtime for testing, integrating and deploying Clarity smart contracts.
-            image: ${{ github.repository }}
+            image: ghcr.io/${{ github.repository }}
             artifact: clarinet-linux-x64-glibc
             dockerfile: dockerfiles/components/clarinet-dev.dockerfile
     steps:
@@ -480,12 +480,13 @@ jobs:
             org.opencontainers.image.title=${{ matrix.name }}
             org.opencontainers.image.description=${{ matrix.description }}
 
-      - name: Login to Dockerhub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
         if: github.event_name != 'pull_request'
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download pre-built dist
         uses: actions/download-artifact@v4
