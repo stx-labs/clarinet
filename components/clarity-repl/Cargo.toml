@@ -13,8 +13,8 @@ edition = "2018"
 license = "GPL-3.0-only"
 keywords = ["stacks", "blockchain", "clarity", "smart-contract", "repl"]
 exclude = ["vs-client/**", ".husky", ".git*"]
-homepage = "https://hirosystems.github.io/clarity-repl/"
-repository = "https://github.com/hirosystems/clarity-repl"
+homepage = "https://stackslabs.com/clarinet"
+repository = "https://github.com/stx-labs/clarinet"
 categories = [
     "command-line-utilities",
     "development-tools",

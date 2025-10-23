@@ -6,7 +6,7 @@ import {
   ContractOptions,
   type SDK,
   type TransactionRes,
-} from "@hirosystems/clarinet-sdk-wasm-browser";
+} from "@stacks/clarinet-sdk-wasm-browser";
 
 import {
   parseEvents,

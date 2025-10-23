@@ -7,7 +7,7 @@ edition = "2018"
 readme = "README.md"
 license = "GPL-3.0-only"
 keywords = ["blockchain", "clarity", "smart-contract", "jupyter", "notebook"]
-repository = "https://github.com/hirosystems/clarinet/components/clarity-jupyter-kernel"
+repository = "https://github.com/stx-labs/clarinet"
 categories = [
   "command-line-utilities",
   "development-tools",

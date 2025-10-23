@@ -65,14 +65,14 @@ update_cargo_toml "./Cargo.toml" "$NEW_VERSION"
 # echo "Updating SDK wasm"
 # cd components/clarinet-sdk/node
 # update_package_json "package.json" "$NEW_VERSION"
-# npm install "@hirosystems/clarinet-sdk-wasm@$NEW_VERSION" --save
+# npm install "@stacks/clarinet-sdk-wasm@$NEW_VERSION" --save
 # npm i
 # cd "$ROOT_DIR"
 
 # echo "Updating SDK wasm browser"
 # cd components/clarinet-sdk/browser
 # update_package_json "package.json" "$NEW_VERSION"
-# npm install "@hirosystems/clarinet-sdk-wasm-browser@$NEW_VERSION" --save
+# npm install "@stacks/clarinet-sdk-wasm-browser@$NEW_VERSION" --save
 # npm i
 # cd "$ROOT_DIR"
 
@@ -89,7 +89,7 @@ echo "1. Manually edit CHANGELOG."
 echo "2. Push"
 echo "  - git commit -am 'chore: release $NEW_VERSION'"
 echo "  - git push origin release/next"
-echo "3. Open PR: https://github.com/hirosystems/clarinet/pulls"
+echo "3. Open PR: https://github.com/stx-labs/clarinet/pulls"
 
 # Clean up any backup files created by sed
 find . -name "*-e" -delete

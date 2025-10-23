@@ -152,5 +152,5 @@ Join our community and stay connected with the latest updates and discussions:
 
 - [Join our Discord community chat](https://discord.com/invite/pPwMzMx9k8) to engage with other
   users, ask questions, and participate in discussions.
-- [Visit hiro.so](https://www.hiro.so/) for updates and subscribing to the mailing list.
-- Follow [Hiro on X.](https://x.com/hirosystems)
+- [Visit stackslabs.com/](https://stackslabs.com) for updates and subscribing to the mailing list.
+- Follow [Stacks Labs on X.](https://x.com/stackslabs)

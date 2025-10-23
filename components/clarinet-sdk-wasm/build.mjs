@@ -21,7 +21,7 @@ async function build_wasm_sdk() {
       "build",
       "--release",
       "--scope",
-      "hirosystems",
+      "stacks",
       "--out-dir",
       "pkg-node",
       "--target",
@@ -31,7 +31,7 @@ async function build_wasm_sdk() {
       "build",
       "--release",
       "--scope",
-      "hirosystems",
+      "stacks",
       "--out-dir",
       "pkg-browser",
       "--target",
@@ -96,8 +96,8 @@ async function updatePackageName() {
 
   const fileData = await fs.readFile(filePath, "utf-8");
   const updatedData = fileData.replace(
-    '"name": "@hirosystems/clarinet-sdk-wasm"',
-    '"name": "@hirosystems/clarinet-sdk-wasm-browser"',
+    '"name": "@stacks/clarinet-sdk-wasm"',
+    '"name": "@stacks/clarinet-sdk-wasm-browser"',
   );
   await fs.writeFile(filePath, updatedData, "utf-8");
   console.log("✅ pkg-browser/package.json name updated");
