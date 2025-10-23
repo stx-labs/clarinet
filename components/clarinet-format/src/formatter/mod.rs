@@ -743,8 +743,7 @@ impl<'a> Aggregator<'a> {
         let mut iter = exprs[2..].iter().peekable();
         while let Some(branch) = iter.next() {
             let trailing = get_trailing_comment(branch, &mut iter);
-            let next_is_expr = iter.peek().is_some_and(|next| next.match_list().is_some());
-            let is_binding = branch.match_list().is_none() && next_is_expr;
+            let is_binding = branch.match_list().is_none() && iter.peek().is_some();
             acc.push_str(&space);
             acc.push_str(&self.format_source_exprs(slice::from_ref(branch), &space));
 
@@ -2256,6 +2255,20 @@ mod tests_formatter {
         assert_eq!(src, result);
 
         let src = ";; @format-ignore\n(+ u1 u1)\n;; @format-ignore\n(+ u1 u1)\n";
+        let result = format_with_default(src);
+
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_match_lining() {
+        let src = indoc!(
+            r#"
+        (match prior
+          ok-value result
+          err-value (err err-value)
+        )"#
+        );
         let result = format_with_default(src);
 
         assert_eq!(src, result);
