@@ -328,64 +328,6 @@ jobs:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.exe
 
-  dist_clarity_repl:
-    name: Build Clarity REPL Distribution
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: components/clarity-repl
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal
-
-      - name: Setup cache keys
-        shell: bash
-        run: |
-          RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
-          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_ENV
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/
-            target/
-          key: ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-
-            ${{ runner.os }}-${{ github.job }}-
-
-      - name: Configure artifact names
-        run: |
-          echo "SHORT_TARGET_NAME=linux-x64-glibc" >> $GITHUB_ENV
-          echo "PRE_GYP_TARGET_NAME=linux-x64-glibc" >> $GITHUB_ENV
-
-      - name: Build - Cargo
-        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
-
-      - name: Compress cargo artifact
-        working-directory: "."
-        run: tar -C target/x86_64-unknown-linux-gnu/release -zcvf clarity-repl-${{ env.SHORT_TARGET_NAME }}.tar.gz clarity-repl
-
-      - name: Upload cargo artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clarity-repl-${{ env.SHORT_TARGET_NAME }}
-          path: clarity-repl-${{ env.SHORT_TARGET_NAME }}.tar.gz
-
-      - name: Publish clarity-repl to crates.io
-        if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != ''
-        run: 4
-          cargo login ${{ secrets.CARGO_CRATES_IO_API_KEY }}
-          cargo publish
-
-
   release:
     name: Release
     runs-on: ubuntu-latest
@@ -395,7 +337,6 @@ jobs:
       - sanity_check
       - cargo_test
       - dist_clarinet
-      - dist_clarity_repl
     permissions:
       actions: write
       contents: write
