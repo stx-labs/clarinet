@@ -5,10 +5,11 @@ use clarity::vm::callables::FunctionIdentifier;
 use clarity::vm::contexts::{ContractContext, Environment, GlobalContext, LocalContext};
 use clarity::vm::errors::Error;
 use clarity::vm::representations::Span;
-use clarity::vm::types::{
-    PrincipalData, QualifiedContractIdentifier, SequenceData, StandardPrincipalData, Value,
-};
 use clarity::vm::{EvalHook, EvaluationResult, ExecutionResult, SymbolicExpression};
+use clarity_types::types::{
+    PrincipalData, QualifiedContractIdentifier, SequenceData, StandardPrincipalData,
+};
+use clarity_types::Value;
 use debug_types::events::*;
 use debug_types::requests::*;
 use debug_types::responses::*;

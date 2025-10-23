@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2021"
 
 [dependencies]
+clarity = { workspace = true }
 colored = { workspace = true }
 base64 = { workspace = true }
 serde = { workspace = true }
@@ -13,7 +14,6 @@ serde_yaml = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 rand = { workspace = true }
 reqwest = { workspace = true }
-clarity = { workspace = true, default-features = false }
 stacks-common = { workspace = true, default-features = false }
 
 clarity-repl = { path = "../clarity-repl", default-features = false }

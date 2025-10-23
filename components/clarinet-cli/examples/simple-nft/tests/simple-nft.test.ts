@@ -1,4 +1,4 @@
-import { Cl, cvToHex, serializeCVBytes } from "@stacks/transactions";
+import { Cl, cvToHex } from "@stacks/transactions";
 import { describe, expect, it } from "vitest";
 
 const accounts = simnet.getAccounts();
@@ -32,7 +32,7 @@ describe("nft basic features", () => {
     });
   });
 
-  it.only("Ensure that nft can be transferred form one account to another", () => {
+  it("Ensure that nft can be transferred form one account to another", () => {
     simnet.callPublicFn(
       "simple-nft",
       "test-mint",

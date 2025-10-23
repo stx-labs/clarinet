@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   test: {
+    silent: "passed-only",
     pool: "forks",
     poolOptions: {
       forks: { singleFork: true },

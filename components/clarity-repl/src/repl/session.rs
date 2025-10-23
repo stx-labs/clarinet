@@ -7,11 +7,12 @@ use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::{Diagnostic, Level};
-use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, Value};
 use clarity::vm::{
     ClarityVersion, CostSynthesis, EvalHook, EvaluationResult, ExecutionResult, ParsedContract,
     SymbolicExpression,
 };
+use clarity_types::types::{PrincipalData, QualifiedContractIdentifier};
+use clarity_types::Value;
 use colored::Colorize;
 use comfy_table::Table;
 
@@ -999,8 +1000,9 @@ impl Session {
             Some("3.0") => StacksEpochId::Epoch30,
             Some("3.1") => StacksEpochId::Epoch31,
             Some("3.2") => StacksEpochId::Epoch32,
+            Some("3.3") => StacksEpochId::Epoch33,
             _ => {
-                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2"
+                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3"
                     .red()
                     .to_string()
             }
@@ -1296,7 +1298,7 @@ fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
 #[cfg(test)]
 mod tests {
     use clarity::util::hash::hex_bytes;
-    use clarity::vm::types::TupleData;
+    use clarity_types::types::TupleData;
 
     use super::*;
     use crate::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};

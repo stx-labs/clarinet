@@ -77,6 +77,7 @@ pub async fn retrieve_contract(
         Some(1) => ClarityVersion::Clarity1,
         Some(2) => ClarityVersion::Clarity2,
         Some(3) => ClarityVersion::Clarity3,
+        Some(4) => ClarityVersion::Clarity4,
         Some(_) => {
             return Err("unable to parse clarity_version (can either be '1' or '2'".to_string())
         }

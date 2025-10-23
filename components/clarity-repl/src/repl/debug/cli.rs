@@ -1,8 +1,9 @@
 use clarity::vm::contexts::{Environment, LocalContext};
 use clarity::vm::errors::Error;
 use clarity::vm::representations::Span;
-use clarity::vm::types::{QualifiedContractIdentifier, Value};
 use clarity::vm::{ContractName, EvalHook, SymbolicExpression};
+use clarity_types::types::QualifiedContractIdentifier;
+use clarity_types::Value;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 

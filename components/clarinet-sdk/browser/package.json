@@ -1,6 +1,6 @@
 {
   "name": "@hirosystems/clarinet-sdk-browser",
-  "version": "3.7.0",
+  "version": "3.8.1",
   "description": "A SDK to interact with Clarity Smart Contracts in the browser",
   "homepage": "https://www.hiro.so/clarinet",
   "repository": {
@@ -28,7 +28,7 @@
   "license": "GPL-3.0",
   "readme": "./README.md",
   "dependencies": {
-    "@hirosystems/clarinet-sdk-wasm-browser": "3.7.0",
+    "@hirosystems/clarinet-sdk-wasm-browser": "3.8.1",
     "@stacks/transactions": "^7.0.6"
   }
 }

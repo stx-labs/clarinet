@@ -1,6 +1,6 @@
 {
   "name": "@hirosystems/clarinet-sdk",
-  "version": "3.7.0",
+  "version": "3.8.1",
   "description": "A SDK to interact with Clarity Smart Contracts in node.js",
   "homepage": "https://www.hiro.so/clarinet",
   "repository": {
@@ -45,8 +45,8 @@
     "build": "npm run clean && npm run compile && node ./scripts/prepare-esm-package.js",
     "prepare": "npm run build",
     "pretest": "tsc -b ./tsconfig.json",
-    "test": "vitest run --silent=passed-only",
-    "test:no-mxs": "vitest run --silent=passed-only --exclude=tests/remote-data.test.ts"
+    "test": "vitest run",
+    "test:no-mxs": "vitest run --exclude=tests/remote-data.test.ts"
   },
   "keywords": [
     "stacks",
@@ -58,7 +58,7 @@
   "license": "GPL-3.0",
   "readme": "./README.md",
   "dependencies": {
-    "@hirosystems/clarinet-sdk-wasm": "3.7.0",
+    "@hirosystems/clarinet-sdk-wasm": "3.8.1",
     "@stacks/transactions": "^7.0.6",
     "kolorist": "^1.8.0",
     "prompts": "^2.4.2",

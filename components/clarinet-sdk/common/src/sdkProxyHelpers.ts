@@ -35,7 +35,7 @@ export type CallFn = (
 ) => ParsedTransactionResult;
 
 export type DeployContractOptions = {
-  clarityVersion: 1 | 2 | 3;
+  clarityVersion: 1 | 2 | 3 | 4;
 };
 export type DeployContract = (
   name: string,

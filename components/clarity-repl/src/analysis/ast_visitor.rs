@@ -8,8 +8,8 @@ use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::SymbolicExpressionType::*;
 use clarity::vm::representations::{Span, TraitDefinition};
-use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, TraitIdentifier, Value};
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression, SymbolicExpressionType};
+use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, TraitIdentifier, Value};
 
 #[derive(Clone)]
 pub struct TypedVar<'a> {
@@ -619,6 +619,9 @@ pub trait ASTVisitor<'a> {
                         IntToAscii | IntToUtf8 => {
                             self.traverse_int_to_string(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
+                        ToAscii => {
+                            self.traverse_to_ascii(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
+                        }
                         GetBurnBlockInfo => self.traverse_get_burn_block_info(
                             expr,
                             args.get(0)
@@ -657,6 +660,9 @@ pub trait ASTVisitor<'a> {
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
                             args.get(1).unwrap_or(&DEFAULT_EXPR),
                         ),
+                        ContractHash => {
+                            self.traverse_contract_hash(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
+                        }
                     };
                 } else {
                     rv = self.traverse_call_user_defined(expr, function_name, args);
@@ -2390,6 +2396,22 @@ pub trait ASTVisitor<'a> {
         true
     }
 
+    fn traverse_to_ascii(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        input: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(input) && self.visit_to_ascii(expr, input)
+    }
+
+    fn visit_to_ascii(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        input: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
     fn traverse_stx_get_account(
         &mut self,
         expr: &'a SymbolicExpression,
@@ -2547,6 +2569,22 @@ pub trait ASTVisitor<'a> {
         func: NativeFunctions,
         input: &'a SymbolicExpression,
         shamt: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_contract_hash(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        input: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(input) && self.visit_contract_hash(expr, input)
+    }
+
+    fn visit_contract_hash(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        input: &'a SymbolicExpression,
     ) -> bool {
         true
     }

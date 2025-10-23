@@ -148,6 +148,7 @@ impl ContractOptions {
                 1 => ClarityVersion::Clarity1,
                 2 => ClarityVersion::Clarity2,
                 3 => ClarityVersion::Clarity3,
+                4 => ClarityVersion::Clarity4,
                 _ => {
                     log!("Invalid clarity version {v}. Using default version.");
                     DEFAULT_CLARITY_VERSION
@@ -634,6 +635,7 @@ impl SDK {
             "3.0" => StacksEpochId::Epoch30,
             "3.1" => StacksEpochId::Epoch31,
             "3.2" => StacksEpochId::Epoch32,
+            "3.3" => StacksEpochId::Epoch33,
             _ => {
                 log!("Invalid epoch {epoch}. Using default epoch");
                 DEFAULT_EPOCH

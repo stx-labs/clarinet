@@ -4,8 +4,8 @@ use std::io::Write;
 use clarity::vm::contexts::{Environment, LocalContext};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::errors::Error;
-use clarity::vm::types::{QualifiedContractIdentifier, Value};
 use clarity::vm::{EvalHook, SymbolicExpression, SymbolicExpressionType};
+use clarity_types::types::{QualifiedContractIdentifier, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CostField {

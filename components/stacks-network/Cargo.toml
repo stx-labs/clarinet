@@ -46,6 +46,9 @@ hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
 stacks-codec = { path = "../stacks-codec" }
 libc = "0.2.173"
 
+[target.'cfg(unix)'.dependencies]
+signal-hook = { version = "0.3", features = ["iterator"] }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }

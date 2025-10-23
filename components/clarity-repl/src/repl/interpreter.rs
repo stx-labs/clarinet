@@ -14,13 +14,12 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::events::*;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
 use clarity::vm::representations::{Span, SymbolicExpression};
-use clarity::vm::types::{
-    PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, Value,
-};
 use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
     EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult,
 };
+use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity_types::Value;
 
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
@@ -276,7 +275,7 @@ impl ClarityInterpreter {
             contract.clarity_version,
             true,
         )
-        .map_err(|(error, _)| error.diagnostic)?;
+        .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
         // Run REPL-only analyses
         let diagnostics = analysis::run_analysis(
@@ -936,8 +935,10 @@ impl ClarityInterpreter {
 mod tests {
     use clarity::types::chainstate::StacksAddress;
     use clarity::types::Address;
-    use clarity::vm::types::TupleData;
+    use clarity::util::hash::hex_bytes;
     use clarity::vm::{self, ClarityVersion};
+    use clarity_types::types::TupleData;
+    use indoc::indoc;
 
     use super::*;
     use crate::analysis::Settings as AnalysisSettings;
@@ -974,17 +975,22 @@ mod tests {
     }
 
     #[track_caller]
+    fn get_evaluation_result(result: Result<ExecutionResult, ContractCallError>) -> Value {
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        match result.result {
+            EvaluationResult::Contract(_) => unreachable!(),
+            EvaluationResult::Snippet(res) => res.result,
+        }
+    }
+
+    #[track_caller]
     fn assert_execution_result_value(
         result: Result<ExecutionResult, ContractCallError>,
         expected_value: Value,
     ) {
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        let result = match result.result {
-            EvaluationResult::Contract(_) => unreachable!(),
-            EvaluationResult::Snippet(res) => res,
-        };
-        assert_eq!(result.result, expected_value);
+        let result = get_evaluation_result(result);
+        assert_eq!(result, expected_value);
     }
 
     #[track_caller]
@@ -999,10 +1005,8 @@ mod tests {
             .clarity_version(clarity_version)
             .build();
         let deploy_result = deploy_contract(interpreter, &contract);
-        match deploy_result.unwrap().result {
-            EvaluationResult::Contract(_) => unreachable!(),
-            EvaluationResult::Snippet(res) => res.result,
-        }
+        assert!(deploy_result.is_ok());
+        get_evaluation_result(deploy_result)
     }
 
     #[test]
@@ -1947,5 +1951,125 @@ mod tests {
             }
             _ => panic!("Expected NoSuchFunction error"),
         }
+    }
+
+    #[test]
+    fn can_call_clarity_4_contract_hash() {
+        let mut interpreter = get_interpreter(None);
+        interpreter.set_current_epoch(StacksEpochId::Epoch33);
+
+        let dummy_contract = ClarityContractBuilder::default()
+            .name("dummy-contract")
+            .code_source("(define-read-only (oktrue) (ok true))".into())
+            .epoch(StacksEpochId::Epoch33)
+            .build();
+        let _ = deploy_contract(&mut interpreter, &dummy_contract);
+
+        let contract = ClarityContractBuilder::default()
+            .code_source("(define-read-only (get-hash) (contract-hash? .dummy-contract))".into())
+            .epoch(StacksEpochId::Epoch33)
+            .clarity_version(ClarityVersion::Clarity4)
+            .build();
+        let _ = deploy_contract(&mut interpreter, &contract);
+
+        let get_hash_result = interpreter.call_contract_fn(
+            &contract
+                .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
+            "get-hash",
+            &[],
+            StacksEpochId::Epoch33,
+            ClarityVersion::Clarity4,
+            false,
+            false,
+            vec![],
+        );
+
+        // this hash changes if the contract id or the block height at which it is deployed changes
+        let expected_hex = "ac2f50c3295fb458c70e141eaa36a3a4020fac270afd1504c475a48ab398545f";
+        let expected_bytes = hex_bytes(expected_hex).unwrap();
+        assert_execution_result_value(
+            get_hash_result,
+            Value::okay(Value::buff_from(expected_bytes).unwrap()).unwrap(),
+        );
+    }
+
+    #[test]
+    fn can_call_clarity_4_block_time() {
+        let mut interpreter = get_interpreter(None);
+        interpreter.set_current_epoch(StacksEpochId::Epoch33);
+        let _ = interpreter.advance_stacks_chain_tip(2);
+
+        let src = indoc!(
+            r#"(define-read-only (get-time) {
+                previous: (get-stacks-block-info? time (- stacks-block-height u1)),
+                current: stacks-block-time,
+            })"#
+        );
+        let contract = ClarityContractBuilder::default()
+            .code_source(src.into())
+            .epoch(StacksEpochId::Epoch33)
+            .clarity_version(ClarityVersion::Clarity4)
+            .build();
+        let _ = deploy_contract(&mut interpreter, &contract);
+
+        let get_time = interpreter.call_contract_fn(
+            &contract
+                .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
+            "get-time",
+            &[],
+            StacksEpochId::Epoch33,
+            ClarityVersion::Clarity4,
+            false,
+            false,
+            vec![],
+        );
+
+        let value = get_evaluation_result(get_time).expect_tuple().unwrap();
+        let previous = value
+            .data_map
+            .get("previous")
+            .and_then(|v| v.clone().expect_optional().unwrap())
+            .and_then(|v| v.clone().expect_u128().ok())
+            .expect("previous to be (some uint)");
+        let current = value
+            .data_map
+            .get("current")
+            .and_then(|v| v.clone().expect_u128().ok())
+            .expect("current to be uint");
+        assert_eq!(previous + 10, current);
+    }
+
+    #[test]
+    fn can_call_clarity_4_current_contract() {
+        let mut interpreter = get_interpreter(None);
+        interpreter.set_current_epoch(StacksEpochId::Epoch33);
+
+        let contract = ClarityContractBuilder::default()
+            .name("my-contract")
+            .code_source("(define-read-only (gcc) current-contract)".into())
+            .epoch(StacksEpochId::Epoch33)
+            .clarity_version(ClarityVersion::Clarity4)
+            .build();
+        let _ = deploy_contract(&mut interpreter, &contract);
+
+        let result = interpreter.call_contract_fn(
+            &contract
+                .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
+            "gcc",
+            &[],
+            StacksEpochId::Epoch33,
+            ClarityVersion::Clarity4,
+            false,
+            false,
+            vec![],
+        );
+
+        assert_execution_result_value(
+            result,
+            Value::Principal(PrincipalData::Contract(QualifiedContractIdentifier {
+                issuer: StandardPrincipalData::transient(),
+                name: "my-contract".into(),
+            })),
+        );
     }
 }

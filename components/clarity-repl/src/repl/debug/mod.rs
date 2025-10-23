@@ -8,8 +8,9 @@ use clarity::vm::diagnostic::Level;
 use clarity::vm::errors::Error;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{Span, SymbolicExpression};
-use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, Value};
 use clarity::vm::{eval, ClarityVersion, ContractName, SymbolicExpressionType};
+use clarity_types::types::{QualifiedContractIdentifier, StandardPrincipalData};
+use clarity_types::Value;
 
 use crate::repl::diagnostic::output_diagnostic;
 
@@ -589,8 +590,8 @@ pub fn extract_watch_variable<'a>(
         return Err(format!("{contract_id} does not exist"));
     };
 
-    if contract.contract_context.meta_data_var.get(name).is_none()
-        && contract.contract_context.meta_data_map.get(name).is_none()
+    if !contract.contract_context.meta_data_var.contains_key(name)
+        && !contract.contract_context.meta_data_map.contains_key(name)
     {
         return Err(format!("no such variable: {contract_id}.{name}"));
     }

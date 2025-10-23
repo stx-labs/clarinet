@@ -575,7 +575,7 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
 name = "clarinet-cli"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "clap",
  "clap_complete",
@@ -587,14 +587,17 @@ dependencies = [
  "colored",
  "crossbeam-channel",
  "crossterm",
+ "ctrlc",
  "hiro-system-kit",
  "indoc",
+ "libc",
  "mac_address",
  "nix 0.29.0",
  "ratatui",
  "segment",
  "serde",
  "serde_json",
+ "signal-hook",
  "similar",
  "stacks-network",
  "tempfile",
@@ -606,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-deployments"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "base58",
  "base64 0.22.1",
@@ -636,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-files"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "bitcoin",
  "clarinet-utils",
@@ -645,6 +648,7 @@ dependencies = [
  "dirs",
  "js-sys",
  "libsecp256k1",
+ "schemars 1.0.4",
  "serde",
  "serde-wasm-bindgen",
  "serde_derive",
@@ -669,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "clarinet-deployments",
  "clarinet-files",
@@ -700,9 +704,9 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#bc9adb35430a893ad1d56dc5234883d6d5147dbc"
+source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#483f1adef6b71657783b1c7dbd2c28f06a65e134"
 dependencies = [
- "hashbrown 0.15.5",
+ "clarity-types",
  "integer-sqrt",
  "lazy_static",
  "regex",
@@ -717,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-events"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "clap",
  "clarinet-files",
@@ -729,12 +733,14 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "clarinet-deployments",
  "clarinet-files",
  "clarinet-format",
+ "clarity",
  "clarity-repl",
+ "clarity-types",
  "console_error_panic_hook",
  "js-sys",
  "lsp-types",
@@ -749,13 +755,14 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "bytes",
  "chrono",
  "clarinet-deployments",
  "clarinet-files",
  "clarity",
+ "clarity-types",
  "colored",
  "comfy-table",
  "debug_types",
@@ -774,6 +781,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "rustyline",
+ "schemars 1.0.4",
  "serde",
  "serde-wasm-bindgen",
  "serde_derive",
@@ -785,6 +793,21 @@ dependencies = [
  "tokio-util",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "clarity-types"
+version = "0.0.1"
+source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#483f1adef6b71657783b1c7dbd2c28f06a65e134"
+dependencies = [
+ "lazy_static",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "slog",
+ "stacks-common",
 ]
 
 [[package]]
@@ -1122,7 +1145,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1244,7 +1267,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2142,6 +2165,7 @@ dependencies = [
  "base64 0.22.1",
  "digest 0.9.0",
  "hmac-drbg",
+ "lazy_static",
  "libsecp256k1-core",
  "libsecp256k1-gen-ecmult",
  "libsecp256k1-gen-genmult",
@@ -2194,7 +2218,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#bc9adb35430a893ad1d56dc5234883d6d5147dbc"
+source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#483f1adef6b71657783b1c7dbd2c28f06a65e134"
 dependencies = [
  "clarity",
  "secp256k1 0.24.3",
@@ -2615,7 +2639,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#bc9adb35430a893ad1d56dc5234883d6d5147dbc"
+source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#483f1adef6b71657783b1c7dbd2c28f06a65e134"
 dependencies = [
  "clarity",
  "slog",
@@ -3026,7 +3050,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3127,8 +3151,21 @@ checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33d020396d1d138dc19f1165df7545479dcd58d93810dc5d646a16e55abefa80"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn",
 ]
 
 [[package]]
@@ -3263,6 +3300,17 @@ name = "serde_derive"
 version = "1.0.225"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ea936adf78b1f766949a4977b91d2f5595825bd6ec079aa9543ad2685fc4516"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3587,7 +3635,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-codec"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "clarity",
  "serde",
@@ -3597,7 +3645,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#bc9adb35430a893ad1d56dc5234883d6d5147dbc"
+source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#483f1adef6b71657783b1c7dbd2c28f06a65e134"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -3625,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-network"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "base58",
  "bitcoincore-rpc",
@@ -3655,6 +3703,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_yaml",
+ "signal-hook",
  "stacks-codec",
  "stacks-common",
  "stacks-rpc-client",
@@ -3669,7 +3718,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "3.7.0"
+version = "3.8.1"
 dependencies = [
  "clarinet-utils",
  "clarity",
@@ -3686,11 +3735,10 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#bc9adb35430a893ad1d56dc5234883d6d5147dbc"
+source = "git+https://github.com/stacks-network/stacks-core.git?branch=develop#483f1adef6b71657783b1c7dbd2c28f06a65e134"
 dependencies = [
  "clarity",
  "ed25519-dalek",
- "hashbrown 0.15.5",
  "lazy_static",
  "libstackerdb",
  "mio 0.6.23",
@@ -3711,7 +3759,6 @@ dependencies = [
  "siphasher",
  "slog",
  "stacks-common",
- "tikv-jemallocator",
  "time",
  "toml",
  "url",
@@ -3837,7 +3884,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.8",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3846,7 +3893,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a43bddab41f8626c7bdaab872bbba75f8df5847b516d77c569c746e2ae5eb746"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3939,26 +3986,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if 1.0.3",
-]
-
-[[package]]
-name = "tikv-jemalloc-sys"
-version = "0.5.4+5.3.0-patched"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9402443cb8fd499b6f327e40565234ff34dbda27460c5b47db0db77443dd85d1"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
-name = "tikv-jemallocator"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "965fe0c26be5c56c94e38ba547249074803efd52adfb66de62107d95aab3eaca"
-dependencies = [
- "libc",
- "tikv-jemalloc-sys",
 ]
 
 [[package]]
@@ -4515,7 +4542,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

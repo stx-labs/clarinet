@@ -68,7 +68,7 @@ pub fn sign_transaction_payload(
     let signer_addr = compute_stacks_address(&keypair.public_key, wallet.mainnet);
 
     let spending_condition = TransactionSpendingCondition::Singlesig(SinglesigSpendingCondition {
-        signer: *signer_addr.bytes(),
+        signer: signer_addr.bytes().clone(),
         nonce,
         tx_fee,
         hash_mode: SinglesigHashMode::P2PKH,

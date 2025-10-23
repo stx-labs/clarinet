@@ -1,3 +1,27 @@
+# [3.8.1](https://github.com/hirosystems/clarinet/compare/v3.8.0...v3.8.1) (2025-10-10)
+
+##### Chores
+
+- Fix transaction spec contract publish (Clarity 4) (#2020) (8049deab)
+
+# [3.8.0](https://github.com/hirosystems/clarinet/compare/v3.7.0...v3.8.0) (2025-10-09)
+
+##### New Features
+
+- Update clarity-vm with Clarity 4 preview (#2013) (7e53dc5e)
+- Warn on some noop builtins (#2006) (248a1ac3)
+
+##### Bug Fixes
+
+- Contract id parsing (#2016) (4101e3a7)
+- Publish stacking orders regardless of snapshot (#2015) (7b2db50f)
+- Properly execute commands on windows (#2011) (62a32bfb)
+
+##### Chores
+
+- Upgrade stacks node and signer default docker images (#2017) (d36b760b)
+- Remove stacks-devnet-js (#2005) (3761eac0)
+
 # [3.7.0](https://github.com/hirosystems/clarinet/compare/v3.6.1...v3.7.0) (2025-09-23)
 
 ##### New Features

@@ -1,8 +1,8 @@
 use clarity::vm::contexts::{Environment, LocalContext};
 use clarity::vm::errors::Error;
 use clarity::vm::functions::NativeFunctions;
-use clarity::vm::types::Value;
 use clarity::vm::{EvalHook, ExecutionResult, SymbolicExpression, SymbolicExpressionType};
+use clarity_types::Value;
 
 use crate::repl::clarity_values::value_to_string;
 

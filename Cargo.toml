@@ -20,10 +20,11 @@ members = [
 default-members = ["components/clarinet-cli"]
 
 [workspace.package]
-version = "3.7.0"
+version = "3.8.1"
 
 [workspace.dependencies]
 clarity = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "clarity-types"}
 stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "stacks-common", default-features = false }
 pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "pox-locking", default-features = false }
 stackslib = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "stackslib", default-features = false}
@@ -47,6 +48,7 @@ reqwest = { version = "0.12.22", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
+schemars = "1.0.4"
 serde = "1.0.225"
 serde_json = "1.0.145"
 serde_derive = "1.0.225"
@@ -67,6 +69,7 @@ mockito = { version = "1.6", default-features = false }
 
 # [patch.'https://github.com/stacks-network/stacks-core.git']
 # clarity = { path = "../stacks-core/clarity" }
+# clarity-types = { path = "../stacks-core/clarity-types" }
 # stacks-common = { path = "../stacks-core/stacks-common" }
 # stackslib = { path = "../stacks-core/stackslib" }
 # pox-locking = { path = "../stacks-core/pox-locking" }

@@ -3,7 +3,7 @@ use clarity::types::chainstate::{
 };
 use clarity::types::StacksEpochId;
 use clarity::vm::errors::InterpreterResult;
-use clarity::vm::types::QualifiedContractIdentifier;
+use clarity_types::types::QualifiedContractIdentifier;
 use serde::de::{DeserializeOwned, Error as SerdeError};
 use serde::{Deserialize, Deserializer};
 
@@ -22,6 +22,7 @@ pub const MAINNET_25_START_HEIGHT: u32 = 147_290;
 pub const MAINNET_30_START_HEIGHT: u32 = 171_833;
 pub const MAINNET_31_START_HEIGHT: u32 = 340_555;
 pub const MAINNET_32_START_HEIGHT: u32 = 2_401_415;
+pub const MAINNET_33_START_HEIGHT: u32 = u32::MAX;
 
 // the current primary testnet starts directly in epoch 2.5 (pox-4 deployment)
 pub const TESTNET_20_START_HEIGHT: u32 = 1;
@@ -34,6 +35,7 @@ pub const TESTNET_25_START_HEIGHT: u32 = 1;
 pub const TESTNET_30_START_HEIGHT: u32 = 320;
 pub const TESTNET_31_START_HEIGHT: u32 = 814;
 pub const TESTNET_32_START_HEIGHT: u32 = 3_140_887;
+pub const TESTNET_33_START_HEIGHT: u32 = u32::MAX;
 
 pub fn epoch_for_height(is_mainnet: bool, height: u32) -> StacksEpochId {
     if is_mainnet {
@@ -62,8 +64,10 @@ fn epoch_for_mainnet_height(height: u32) -> StacksEpochId {
         StacksEpochId::Epoch30
     } else if height < MAINNET_32_START_HEIGHT {
         StacksEpochId::Epoch31
-    } else {
+    } else if height < MAINNET_33_START_HEIGHT {
         StacksEpochId::Epoch32
+    } else {
+        StacksEpochId::Epoch33
     }
 }
 
@@ -86,8 +90,10 @@ fn epoch_for_testnet_height(height: u32) -> StacksEpochId {
         StacksEpochId::Epoch30
     } else if height < TESTNET_32_START_HEIGHT {
         StacksEpochId::Epoch31
-    } else {
+    } else if height < TESTNET_33_START_HEIGHT {
         StacksEpochId::Epoch32
+    } else {
+        StacksEpochId::Epoch33
     }
 }
 
@@ -224,7 +230,6 @@ impl HttpClient {
         self.get::<Block>(url).unwrap()
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn fetch_clarity_data(&self, path: &str) -> InterpreterResult<Option<String>> {
         match self.get::<ClarityDataResponse>(path) {
             Ok(data) => Ok(Some(data.data.trim_start_matches("0x").to_string())),

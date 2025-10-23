@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::vec;
 
+use clarity::vm::types::{BlockInfoProperty, FunctionType, TypeSignatureExt};
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use clarity_repl::clarity::analysis::ContractAnalysis;
 use clarity_repl::clarity::docs::{
@@ -10,9 +11,9 @@ use clarity_repl::clarity::docs::{
 use clarity_repl::clarity::functions::define::DefineFunctions;
 use clarity_repl::clarity::functions::NativeFunctions;
 use clarity_repl::clarity::variables::NativeVariables;
-use clarity_repl::clarity::vm::types::{BlockInfoProperty, FunctionType, TypeSignature};
 use clarity_repl::clarity::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_repl::repl::DEFAULT_EPOCH;
+use clarity_types::types::TypeSignature;
 use lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
     Position,
@@ -27,6 +28,8 @@ static COMPLETION_ITEMS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_default_native_keywords_list(ClarityVersion::Clarity2));
 static COMPLETION_ITEMS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_default_native_keywords_list(ClarityVersion::Clarity3));
+static COMPLETION_ITEMS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
+    LazyLock::new(|| build_default_native_keywords_list(ClarityVersion::Clarity4));
 static VAR_FUNCTIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
     vec![
         NativeFunctions::SetVar.to_string(),
@@ -71,18 +74,26 @@ static VALID_MAP_FUNCTIONS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_map_valid_cb_completion_items(ClarityVersion::Clarity2));
 static VALID_MAP_FUNCTIONS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_map_valid_cb_completion_items(ClarityVersion::Clarity3));
+static VALID_MAP_FUNCTIONS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
+    LazyLock::new(|| build_map_valid_cb_completion_items(ClarityVersion::Clarity4));
+
 static VALID_FILTER_FUNCTIONS_CLARITY_1: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity1));
 static VALID_FILTER_FUNCTIONS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity2));
 static VALID_FILTER_FUNCTIONS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity3));
+static VALID_FILTER_FUNCTIONS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
+    LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity4));
+
 static VALID_FOLD_FUNCTIONS_CLARITY_1: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity1));
 static VALID_FOLD_FUNCTIONS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity2));
 static VALID_FOLD_FUNCTIONS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity3));
+static VALID_FOLD_FUNCTIONS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
+    LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity4));
 
 #[derive(Clone, Debug, Default)]
 pub struct ContractDefinedData {
@@ -398,6 +409,7 @@ pub fn build_completion_item_list(
         ClarityVersion::Clarity1 => COMPLETION_ITEMS_CLARITY_1.to_vec(),
         ClarityVersion::Clarity2 => COMPLETION_ITEMS_CLARITY_2.to_vec(),
         ClarityVersion::Clarity3 => COMPLETION_ITEMS_CLARITY_3.to_vec(),
+        ClarityVersion::Clarity4 => COMPLETION_ITEMS_CLARITY_4.to_vec(),
     };
     let placeholder_pattern = Regex::new(r" \$\{\d+:[\w-]+\}").unwrap();
 
@@ -776,6 +788,7 @@ fn get_iterator_cb_completion_item(version: &ClarityVersion, func: &str) -> Vec<
             ClarityVersion::Clarity1 => VALID_MAP_FUNCTIONS_CLARITY_1.to_vec(),
             ClarityVersion::Clarity2 => VALID_MAP_FUNCTIONS_CLARITY_2.to_vec(),
             ClarityVersion::Clarity3 => VALID_MAP_FUNCTIONS_CLARITY_3.to_vec(),
+            ClarityVersion::Clarity4 => VALID_MAP_FUNCTIONS_CLARITY_4.to_vec(),
         };
     }
     if func.to_string().eq(&NativeFunctions::Filter.to_string()) {
@@ -783,18 +796,20 @@ fn get_iterator_cb_completion_item(version: &ClarityVersion, func: &str) -> Vec<
             ClarityVersion::Clarity1 => VALID_FILTER_FUNCTIONS_CLARITY_1.to_vec(),
             ClarityVersion::Clarity2 => VALID_FILTER_FUNCTIONS_CLARITY_2.to_vec(),
             ClarityVersion::Clarity3 => VALID_FILTER_FUNCTIONS_CLARITY_3.to_vec(),
+            ClarityVersion::Clarity4 => VALID_FILTER_FUNCTIONS_CLARITY_4.to_vec(),
         };
     }
     match version {
         ClarityVersion::Clarity1 => VALID_FOLD_FUNCTIONS_CLARITY_1.to_vec(),
         ClarityVersion::Clarity2 => VALID_FOLD_FUNCTIONS_CLARITY_2.to_vec(),
         ClarityVersion::Clarity3 => VALID_FOLD_FUNCTIONS_CLARITY_3.to_vec(),
+        ClarityVersion::Clarity4 => VALID_FOLD_FUNCTIONS_CLARITY_4.to_vec(),
     }
 }
 
 #[cfg(test)]
 mod get_contract_global_data_tests {
-    use clarity_repl::clarity::ast::build_ast_with_rules;
+    use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
     use lsp_types::Position;
@@ -802,13 +817,12 @@ mod get_contract_global_data_tests {
     use super::ContractDefinedData;
 
     fn get_defined_data(source: &str) -> ContractDefinedData {
-        let contract_ast = build_ast_with_rules(
+        let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
             ClarityVersion::Clarity2,
             StacksEpochId::Epoch21,
-            clarity_repl::clarity::ast::ASTRules::Typical,
         )
         .unwrap();
         ContractDefinedData::new(&contract_ast.expressions, &Position::default())
@@ -843,7 +857,7 @@ mod get_contract_global_data_tests {
 
 #[cfg(test)]
 mod get_contract_local_data_tests {
-    use clarity_repl::clarity::ast::build_ast_with_rules;
+    use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
     use lsp_types::Position;
@@ -851,13 +865,12 @@ mod get_contract_local_data_tests {
     use super::ContractDefinedData;
 
     fn get_defined_data(source: &str, position: &Position) -> ContractDefinedData {
-        let contract_ast = build_ast_with_rules(
+        let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
             ClarityVersion::Clarity2,
             StacksEpochId::Epoch21,
-            clarity_repl::clarity::ast::ASTRules::Typical,
         )
         .unwrap();
         ContractDefinedData::new(&contract_ast.expressions, position)
@@ -898,7 +911,7 @@ mod get_contract_local_data_tests {
 
 #[cfg(test)]
 mod populate_snippet_with_options_tests {
-    use clarity_repl::clarity::ast::build_ast_with_rules;
+    use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
     use lsp_types::Position;
@@ -906,13 +919,12 @@ mod populate_snippet_with_options_tests {
     use super::ContractDefinedData;
 
     fn get_defined_data(source: &str) -> ContractDefinedData {
-        let contract_ast = build_ast_with_rules(
+        let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
             ClarityVersion::Clarity2,
             StacksEpochId::Epoch21,
-            clarity_repl::clarity::ast::ASTRules::Typical,
         )
         .unwrap();
         ContractDefinedData::new(&contract_ast.expressions, &Position::default())

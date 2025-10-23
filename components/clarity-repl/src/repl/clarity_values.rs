@@ -2,8 +2,8 @@ use std::fmt::Write;
 
 use clarity::codec::StacksMessageCodec;
 use clarity::util::hash;
-use clarity::vm::types::{CharType, SequenceData};
 use clarity::vm::Value;
+use clarity_types::types::{CharType, SequenceData};
 
 pub fn to_raw_value(value: &Value) -> String {
     let hex = value
@@ -74,12 +74,12 @@ pub fn value_to_string(value: &Value) -> String {
 mod tests {
     use std::convert::TryFrom;
 
-    use clarity::vm::types::{
+    use clarity::vm::{ClarityName, Value};
+    use clarity_types::types::{
         ASCIIData, CharType, ListData, ListTypeData, OptionalData, PrincipalData,
         QualifiedContractIdentifier, ResponseData, SequenceData, SequencedValue,
         StandardPrincipalData, TupleData, TypeSignature, UTF8Data, NONE,
     };
-    use clarity::vm::{ClarityName, Value};
 
     use super::value_to_string;
 

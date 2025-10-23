@@ -1,4 +1,4 @@
-import { Cl } from "@stacks/transactions";
+import { Cl, ClarityType } from "@stacks/transactions";
 import { describe, expect, it, beforeEach } from "vitest";
 
 // test the built package and not the source code
@@ -11,8 +11,8 @@ beforeEach(async () => {
   simnet = await initSimnet("tests/fixtures/Clarinet.toml");
 });
 
-describe("the sdk handle all clarity version", () => {
-  it("handle clarity 1", () => {
+describe("clarity 1", () => {
+  it("handles clarity 1", () => {
     simnet.setEpoch("2.05");
     let resOk = simnet.execute('(index-of "stacks" "s")');
     expect(resOk.result).toStrictEqual(Cl.some(Cl.uint(0)));
@@ -27,8 +27,10 @@ describe("the sdk handle all clarity version", () => {
       "error: use of unresolved variable 'tenure-height'",
     );
   });
+});
 
-  it("handle clarity 2", () => {
+describe("clarity 2", () => {
+  it("handles clarity 2", () => {
     simnet.setEpoch("2.4");
     // `index-of` is still available in clarity 2
     let resOk1 = simnet.execute('(index-of "stacks" "s")');
@@ -47,8 +49,10 @@ describe("the sdk handle all clarity version", () => {
       "error: use of unresolved variable 'tenure-height'",
     );
   });
+});
 
-  it("handle clarity 3", () => {
+describe("clarity 3", () => {
+  it("handles clarity 3", () => {
     simnet.setEpoch("3.0");
     // `index-of` is still available in clarity 2
     let resOk1 = simnet.execute('(index-of "stacks" "s")');
@@ -66,5 +70,40 @@ describe("the sdk handle all clarity version", () => {
     expect(() => simnet.execute("(print block-height)")).toThrowError(
       "error: use of unresolved variable 'block-height'",
     );
+  });
+});
+
+describe("clarity 4", () => {
+  it("handles `to-ascii`", () => {
+    simnet.setEpoch("3.3");
+
+    const src = `(define-public (convert (addr principal)) (to-ascii? addr))`;
+    simnet.deployContract("to-ascii-test", src, { clarityVersion: 4 }, simnet.deployer);
+
+    const { result } = simnet.callPublicFn(
+      "to-ascii-test",
+      "convert",
+      [Cl.contractPrincipal("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM", "counter")],
+      simnet.deployer,
+    );
+    expect(result).toStrictEqual(
+      Cl.ok(Cl.stringAscii("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter")),
+    );
+  });
+
+  // doesn't work atm, probably need to tweak the contract hash handling in the simnet datastore
+  it("handles `contract-hash?`", () => {
+    simnet.setEpoch("3.3");
+
+    const src = `(define-public (get-contract-hash-for (addr principal)) (contract-hash? 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter))`;
+    simnet.deployContract("get-contract-hash", src, { clarityVersion: 4 }, simnet.deployer);
+
+    const { result } = simnet.callPublicFn(
+      "get-contract-hash",
+      "get-contract-hash-for",
+      [Cl.contractPrincipal("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM", "counter")],
+      simnet.deployer,
+    );
+    expect(result.type).toBe(ClarityType.ResponseOk);
   });
 });

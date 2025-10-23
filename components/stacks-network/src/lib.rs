@@ -13,6 +13,7 @@ mod snapshot_extractor;
 mod ui;
 
 use std::sync::mpsc::{self, channel, Receiver, Sender};
+use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -46,6 +47,68 @@ where
 {
     let rt = hiro_system_kit::create_basic_runtime();
     rt.block_on(future)
+}
+
+/// Sets up signal handlers for SIGINT and SIGTERM on Unix systems
+/// On Unix: Handles both SIGINT (Ctrl+C) and SIGTERM (kill) gracefully
+/// On Windows: Handles Ctrl+C via ctrlc crate
+fn setup_signal_handlers(
+    orchestrator_terminator_tx: Sender<bool>,
+    observer_command_tx: Sender<ObserverCommand>,
+    mining_command_tx: Sender<BitcoinMiningCommand>,
+    devnet_events_tx: Sender<DevnetEvent>,
+) {
+    #[cfg(unix)]
+    {
+        thread::spawn(move || {
+            use signal_hook::consts::{SIGINT, SIGTERM};
+            use signal_hook::iterator::Signals;
+
+            let mut signals = match Signals::new([SIGINT, SIGTERM]) {
+                Ok(signals) => signals,
+                Err(e) => {
+                    eprintln!("Failed to setup signal handlers: {}", e);
+                    return;
+                }
+            };
+
+            for sig in signals.forever() {
+                match sig {
+                    SIGINT | SIGTERM => {
+                        let signal_name = if sig == SIGINT { "SIGINT" } else { "SIGTERM" };
+                        let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
+                            "{} received, initiating graceful shutdown...",
+                            signal_name
+                        )));
+
+                        // Trigger graceful shutdown
+                        let _ = orchestrator_terminator_tx.send(true);
+                        let _ = observer_command_tx.send(ObserverCommand::Terminate);
+                        let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
+                        sleep(Duration::from_secs(3));
+                        let _ = devnet_events_tx.send(DevnetEvent::Terminate);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    #[cfg(not(unix))]
+    {
+        // On Windows and other platforms, use ctrlc for SIGINT/Ctrl+C
+        let _ = ctrlc::set_handler(move || {
+            let _ = devnet_events_tx.send(DevnetEvent::warning(
+                "Ctrl+C received, initiating graceful shutdown...".into(),
+            ));
+            let _ = orchestrator_terminator_tx.send(true);
+            let _ = observer_command_tx.send(ObserverCommand::Terminate);
+            let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
+            sleep(Duration::from_secs(3));
+            let _ = devnet_events_tx.send(DevnetEvent::Terminate);
+        });
+    }
 }
 
 pub struct DevnetRunConfig {
@@ -230,10 +293,19 @@ async fn do_run_devnet(
             .expect("unable to retrieve join handle")
     };
 
+    // Set up signal handlers for graceful shutdown (SIGINT and SIGTERM)
+    setup_signal_handlers(
+        orchestrator_terminator_tx.clone(),
+        observer_command_tx,
+        mining_command_tx,
+        devnet_events_tx.clone(),
+    );
+
     if config.display_dashboard {
         config
             .ctx
             .try_log(|logger| slog::info!(logger, "Starting Devnet"));
+
         let moved_chains_coordinator_commands_tx = chains_coordinator_commands_tx.clone();
         ui::start_ui(
             devnet_events_tx,
@@ -258,58 +330,45 @@ async fn do_run_devnet(
                 return Err(*message);
             }
         }
-    } else {
-        let moved_orchestrator_terminator_tx = orchestrator_terminator_tx.clone();
-        let moved_observer_command_tx = observer_command_tx;
-        let moved_mining_command_tx = mining_command_tx;
-        let _ = ctrlc::set_handler(move || {
-            let _ = moved_orchestrator_terminator_tx.send(true);
-            let _ = moved_observer_command_tx.send(ObserverCommand::Terminate);
-            let _ = moved_mining_command_tx.send(BitcoinMiningCommand::Pause);
-            sleep(Duration::from_secs(3));
-            let _ = devnet_events_tx.send(DevnetEvent::Terminate);
-        });
-
-        if config.log_tx.is_none() {
-            loop {
-                match devnet_events_rx.recv() {
-                    Ok(DevnetEvent::Log(log)) => {
-                        if let Some(ref log_tx) = config.log_tx {
-                            let _ = log_tx.send(log.clone());
-                        } else {
-                            match log.level {
-                                LogLevel::Debug => config
-                                    .ctx
-                                    .try_log(|logger| slog::debug!(logger, "{}", log.message)),
-                                LogLevel::Info | LogLevel::Success => config
-                                    .ctx
-                                    .try_log(|logger| slog::info!(logger, "{}", log.message)),
-                                LogLevel::Warning => config
-                                    .ctx
-                                    .try_log(|logger| slog::warn!(logger, "{}", log.message)),
-                                LogLevel::Error => config
-                                    .ctx
-                                    .try_log(|logger| slog::error!(logger, "{}", log.message)),
-                            }
+    } else if config.log_tx.is_none() {
+        loop {
+            match devnet_events_rx.recv() {
+                Ok(DevnetEvent::Log(log)) => {
+                    if let Some(ref log_tx) = config.log_tx {
+                        let _ = log_tx.send(log.clone());
+                    } else {
+                        match log.level {
+                            LogLevel::Debug => config
+                                .ctx
+                                .try_log(|logger| slog::debug!(logger, "{}", log.message)),
+                            LogLevel::Info | LogLevel::Success => config
+                                .ctx
+                                .try_log(|logger| slog::info!(logger, "{}", log.message)),
+                            LogLevel::Warning => config
+                                .ctx
+                                .try_log(|logger| slog::warn!(logger, "{}", log.message)),
+                            LogLevel::Error => config
+                                .ctx
+                                .try_log(|logger| slog::error!(logger, "{}", log.message)),
                         }
                     }
-                    Ok(DevnetEvent::BootCompleted(bitcoin_mining_tx)) => {
-                        if !devnet_config.bitcoin_controller_automining_disabled {
-                            let _ = bitcoin_mining_tx.send(BitcoinMiningCommand::Start);
-                        }
-                    }
-                    Ok(DevnetEvent::FatalError(e)) => return Err(e),
-                    Ok(DevnetEvent::Terminate) => return Ok((None, None, None)),
-                    _ => {}
                 }
+                Ok(DevnetEvent::BootCompleted(bitcoin_mining_tx)) => {
+                    if !devnet_config.bitcoin_controller_automining_disabled {
+                        let _ = bitcoin_mining_tx.send(BitcoinMiningCommand::Start);
+                    }
+                }
+                Ok(DevnetEvent::FatalError(e)) => return Err(e),
+                Ok(DevnetEvent::Terminate) => return Ok((None, None, None)),
+                _ => {}
             }
-        } else {
-            return Ok((
-                Some(devnet_events_rx),
-                Some(orchestrator_terminator_tx),
-                Some(chains_coordinator_commands_tx),
-            ));
         }
+    } else {
+        return Ok((
+            Some(devnet_events_rx),
+            Some(orchestrator_terminator_tx),
+            Some(chains_coordinator_commands_tx),
+        ));
     }
 
     Ok((None, None, Some(chains_coordinator_commands_tx)))

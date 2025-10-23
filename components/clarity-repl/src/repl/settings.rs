@@ -6,7 +6,9 @@ use std::str::FromStr;
 
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::StacksEpochId;
-use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+#[cfg(feature = "json_schema")]
+use schemars::JsonSchema;
 
 use super::remote_data::HttpClient;
 use crate::analysis;
@@ -68,6 +70,7 @@ impl SessionSettings {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct ApiUrl(pub String);
 impl Default for ApiUrl {
     fn default() -> Self {
@@ -98,6 +101,7 @@ pub struct Settings {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     analysis: Option<analysis::SettingsFile>,
     remote_data: Option<RemoteDataSettingsFile>,
@@ -124,6 +128,7 @@ impl From<SettingsFile> for Settings {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct RemoteDataSettingsFile {
     enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -2,7 +2,19 @@ use js_sys::wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(typescript_custom_section)]
-const EPOCH_STRING: &'static str = r#"export type EpochString = "2.0" | "2.05" | "2.1" | "2.2" | "2.3" | "2.4" | "2.5" | "3.0" | "3.1" | "3.2""#;
+const EPOCH_STRING: &'static str = r#"export type EpochString =
+  | "2.0"
+  | "2.05"
+  | "2.1"
+  | "2.2"
+  | "2.3"
+  | "2.4"
+  | "2.5"
+  | "3.0"
+  | "3.1"
+  | "3.2"
+  | "3.3";
+"#;
 
 // CONTRACT AST
 
@@ -145,11 +157,12 @@ const STACKS_EPOCH_ID_STRING: &'static str = r#"export type StacksEpochId =
   | "Epoch25"
   | "Epoch30"
   | "Epoch31"
-  | "Epoch32";"#;
+  | "Epoch32"
+  | "Epoch33";"#;
 
 #[wasm_bindgen(typescript_custom_section)]
 const CLARITY_VERSION_STRING: &'static str =
-    r#"export type ClarityVersionString = "Clarity1" | "Clarity2" | "Clarity3";"#;
+    r#"export type ClarityVersionString = "Clarity1" | "Clarity2" | "Clarity3"| "Clarity4";"#;
 
 // To avoid collision with the Rust type ContractAST, prefix with the conventional typescript I
 #[wasm_bindgen(typescript_custom_section)]

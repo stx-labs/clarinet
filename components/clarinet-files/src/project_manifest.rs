@@ -7,12 +7,16 @@ use clarity::vm::ClarityVersion;
 use clarity_repl::repl;
 use clarity_repl::repl::boot::BOOT_CONTRACTS_NAMES;
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
+#[cfg(feature = "json_schema")]
+use schemars::JsonSchema;
 use serde::ser::SerializeMap;
 use serde::{Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
 use super::FileLocation;
+#[cfg(feature = "json_schema")]
+use crate::schema;
 use crate::FileAccessor;
 
 pub const INVALID_CLARITY_VERSION: &str =
@@ -27,25 +31,58 @@ pub struct ClarityContractMetadata {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[cfg_attr(feature = "json_schema", schemars(rename_all = "snake_case"))]
 pub struct ProjectConfigFile {
+    /// Name of the project
     name: String,
+    /// List of project authors
+    #[serde(default)]
     authors: Option<Vec<String>>,
+    /// Project description
+    #[serde(default)]
     description: Option<String>,
+    /// Enable or disable telemetry
+    #[serde(default)]
     telemetry: Option<bool>,
+    /// External contract dependencies
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "json_schema",
+        schemars(schema_with = "schema::requirements_schema")
+    )]
     requirements: Option<TomlValue>,
+    /// List of boot contracts to include
+    #[serde(default)]
     boot_contracts: Option<Vec<String>>,
+    /// Override default boot contract implementations
+    #[serde(default)]
     override_boot_contracts_source: Option<BTreeMap<String, String>>,
 
     // The fields below have been moved into repl above, but are kept here for
     // backwards compatibility.
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
     analysis: Option<Vec<clarity_repl::analysis::Pass>>,
+    /// Directory for caching build artifacts
+    #[serde(default)]
     cache_dir: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct ProjectManifestFile {
+    /// Project-level configuration
     project: ProjectConfigFile,
+    /// Contract definitions
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "json_schema",
+        schemars(schema_with = "schema::contracts_schema")
+    )]
     contracts: Option<TomlValue>,
+    /// REPL and analysis settings
+    #[serde(default)]
+    #[cfg_attr(feature = "json_schema", schemars(schema_with = "schema::repl_schema"))]
     repl: Option<repl::SettingsFile>,
 }
 
@@ -181,7 +218,9 @@ impl Serialize for ProjectConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct RequirementConfig {
+    /// Contract identifier (e.g., SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait)
     pub contract_id: String,
 }
 
@@ -449,8 +488,9 @@ fn get_epoch_and_clarity_version(
                 "3" | "3.0" => StacksEpochId::Epoch30,
                 "3.1" => StacksEpochId::Epoch31,
                 "3.2" => StacksEpochId::Epoch32,
+                "3.3" => StacksEpochId::Epoch33,
                 _ => return Err(
-                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 3.0, 3.1, 3.2, latest)"
+                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 3.0, 3.1, 3.2, 3.3 latest)"
                         .into(),
                 ),
             };
@@ -561,15 +601,22 @@ mod tests {
 
     #[test]
     fn test_latest_epoch_and_clarity_version() {
-        let latest_clarity_version = ClarityVersion::latest();
+        let expected_current_clarity_version = ClarityVersion::Clarity3;
         let result = get_epoch_and_clarity_version(
             Some("latest"),
             // Replace "Clarity N" to "N" for clarity version
-            Some(&latest_clarity_version.to_string().replace("Clarity ", "")),
+            Some(
+                &expected_current_clarity_version
+                    .to_string()
+                    .replace("Clarity ", ""),
+            ),
         );
         assert_eq!(
             result,
-            Ok((clarity_repl::repl::Epoch::Latest, latest_clarity_version))
+            Ok((
+                clarity_repl::repl::Epoch::Latest,
+                expected_current_clarity_version
+            ))
         );
     }
 

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::vec;
 
 use clarity::types::chainstate::{
     BlockHeaderHash, BurnchainHeaderHash, ConsensusHash, SortitionId, StacksAddress, StacksBlockId,
@@ -10,17 +11,18 @@ use clarity::types::chainstate::{
 use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
-use clarity::vm::ast::build_ast_with_rules;
+use clarity::vm::ast::build_ast;
 use clarity::vm::contracts::Contract as ContractContextResponse;
 use clarity::vm::database::clarity_db::ContractDataVarName;
+use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
-    BurnStateDB, ClarityBackingStore, ClarityDatabase, HeadersDB, StoreType,
+    BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
 use clarity::vm::errors::{InterpreterError, InterpreterResult as Result};
-use clarity::vm::types::{
+use clarity::vm::{ContractContext, StacksEpoch};
+use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };
-use clarity::vm::{ContractContext, StacksEpoch};
 use pox_locking::handle_contract_call_special_cases;
 use sha2::{Digest, Sha512_256};
 
@@ -29,6 +31,9 @@ use super::remote_data::fs::{get_file_from_cache, write_file_to_cache};
 use super::remote_data::{epoch_for_height, Block, HttpClient, Sortition};
 use super::settings::RemoteNetworkInfo;
 use crate::repl::remote_data::context;
+
+// todo: export it from clarity
+const CLARITY_STORAGE_BLOCK_TIME_KEY: &str = "_stx-data::clarity_storage::block_time";
 
 const SECONDS_BETWEEN_BURN_BLOCKS: u64 = 600;
 const SECONDS_BETWEEN_STACKS_BLOCKS: u64 = 10;
@@ -47,6 +52,7 @@ fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
         StacksEpochId::Epoch30 => PEER_VERSION_EPOCH_3_0,
         StacksEpochId::Epoch31 => PEER_VERSION_EPOCH_3_1,
         StacksEpochId::Epoch32 => PEER_VERSION_EPOCH_3_2,
+        StacksEpochId::Epoch33 => PEER_VERSION_EPOCH_3_3,
     }
 }
 
@@ -74,9 +80,9 @@ impl Clone for ClarityDatastore {
         // for performance optimization, a simnet session can be stored and cached
         // when cloning the session (and the datastore), we do not want to keep the
         // current_chain_tip RefCell value, but rather sync it with the open_chain_tip
-        *self.current_chain_tip.borrow_mut() = self.open_chain_tip;
+        *self.current_chain_tip.borrow_mut() = self.open_chain_tip.clone();
         Self {
-            open_chain_tip: self.open_chain_tip,
+            open_chain_tip: self.open_chain_tip.clone(),
             current_chain_tip: Rc::clone(&self.current_chain_tip),
             store: self.store.clone(),
             metadata: self.metadata.clone(),
@@ -208,12 +214,12 @@ impl ClarityDatastore {
             .join("datastore");
 
         Self {
-            open_chain_tip: id,
-            current_chain_tip: Rc::new(RefCell::new(id)),
+            open_chain_tip: id.clone(),
+            current_chain_tip: Rc::new(RefCell::new(id.clone())),
             store: HashMap::new(),
             metadata: HashMap::new(),
-            height_at_chain_tip: HashMap::from([(id, height)]),
-            chain_tip_at_height: HashMap::from([(height, id)]),
+            height_at_chain_tip: HashMap::from([(id.clone(), height)]),
+            chain_tip_at_height: HashMap::from([(height, id.clone())]),
 
             remote_network_info: None,
             remote_block_info_cache: Rc::new(RefCell::new(HashMap::new())),
@@ -230,7 +236,7 @@ impl ClarityDatastore {
         let path = format!("/extended/v2/blocks/{height}");
         let block = client.fetch_block(&path);
         let sortition = client.fetch_sortition(block.burn_block_height);
-        let block_cache = HashMap::from([(block.index_block_hash, block.clone())]);
+        let block_cache = HashMap::from([(block.index_block_hash.clone(), block.clone())]);
         let sortition_cache = HashMap::from([(block.burn_block_hash, sortition)]);
         let fs_cache_location = remote_network_info
             .cache_location
@@ -241,12 +247,12 @@ impl ClarityDatastore {
         let id = block.index_block_hash;
 
         Self {
-            open_chain_tip: id,
-            current_chain_tip: Rc::new(RefCell::new(id)),
+            open_chain_tip: id.clone(),
+            current_chain_tip: Rc::new(RefCell::new(id.clone())),
             store: HashMap::new(),
             metadata: HashMap::new(),
-            height_at_chain_tip: HashMap::from([(id, height)]),
-            chain_tip_at_height: HashMap::from([(height, id)]),
+            height_at_chain_tip: HashMap::from([(id.clone(), height)]),
+            chain_tip_at_height: HashMap::from([(height, id.clone())]),
             remote_network_info: Some(remote_network_info),
             remote_block_info_cache: Rc::new(RefCell::new(block_cache)),
             remote_sortition_cache: Rc::new(RefCell::new(sortition_cache)),
@@ -332,11 +338,11 @@ impl ClarityDatastore {
         let block = self.client.fetch_block(url);
         self.remote_block_info_cache
             .borrow_mut()
-            .insert(block.index_block_hash, block.clone());
+            .insert(block.index_block_hash.clone(), block.clone());
         self.height_at_chain_tip
-            .insert(block.index_block_hash, block.height);
+            .insert(block.index_block_hash.clone(), block.height);
         self.chain_tip_at_height
-            .insert(block.height, block.index_block_hash);
+            .insert(block.height, block.index_block_hash.clone());
 
         if self
             .remote_sortition_cache
@@ -347,7 +353,7 @@ impl ClarityDatastore {
             let sortition = self.client.fetch_sortition(block.burn_block_height);
             self.remote_sortition_cache
                 .borrow_mut()
-                .insert(block.burn_block_hash, sortition);
+                .insert(block.burn_block_hash.clone(), sortition);
         }
 
         block
@@ -374,7 +380,6 @@ impl ClarityDatastore {
         block_info.index_block_hash.to_string()
     }
 
-    #[allow(clippy::result_large_err)]
     fn fetch_clarity_marf_value(&mut self, key: &str) -> Result<Option<String>> {
         let key_hash = TrieHash::from_key(key);
         let tip = self.get_remote_chaintip();
@@ -382,7 +387,6 @@ impl ClarityDatastore {
         self.client.fetch_clarity_data(&url)
     }
 
-    #[allow(clippy::result_large_err)]
     fn populate_context_functions(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
@@ -421,13 +425,12 @@ impl ClarityDatastore {
                 })
             })?;
 
-        let contract_ast = build_ast_with_rules(
+        let contract_ast = build_ast(
             contract_id,
             &contract_src,
             &mut (),
             analysis.clarity_version,
             analysis.epoch,
-            clarity::vm::ast::ASTRules::Typical,
         )?;
 
         context::set_functions_in_contract_context(
@@ -439,7 +442,6 @@ impl ClarityDatastore {
         Ok(contract_context)
     }
 
-    #[allow(clippy::result_large_err)]
     fn fetch_clarity_metadata(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
@@ -568,13 +570,15 @@ impl ClarityBackingStore for ClarityDatastore {
     ///   used to implement time-shifted evaluation.
     /// returns the previous block header hash on success
     fn set_block_hash(&mut self, bhh: StacksBlockId) -> Result<StacksBlockId> {
-        let prior_tip = self.open_chain_tip;
+        let prior_tip = self.open_chain_tip.clone();
         if self.remote_network_info.is_some() {
             #[allow(clippy::map_entry)]
             if !self.height_at_chain_tip.contains_key(&bhh) {
                 let block_info = self.get_remote_block_info_from_hash(&bhh);
-                self.height_at_chain_tip.insert(bhh, block_info.height);
-                self.chain_tip_at_height.insert(block_info.height, bhh);
+                self.height_at_chain_tip
+                    .insert(bhh.clone(), block_info.height);
+                self.chain_tip_at_height
+                    .insert(block_info.height, bhh.clone());
             }
         }
         *self.current_chain_tip.borrow_mut() = bhh;
@@ -588,14 +592,14 @@ impl ClarityBackingStore for ClarityDatastore {
                 return Some(block_info.index_block_hash);
             }
         }
-        self.chain_tip_at_height.get(&height).copied()
+        self.chain_tip_at_height.get(&height).cloned()
     }
 
     /// this function returns the current block height, as viewed by this marfed-kv structure,
     ///  i.e., it changes on time-shifted evaluation. the open_chain_tip functions always
     ///   return data about the chain tip that is currently open for writing.
     fn get_current_block_height(&mut self) -> u32 {
-        let current_chain_tip = *self.current_chain_tip.borrow();
+        let current_chain_tip = self.current_chain_tip.borrow().clone();
         if let Some(&height) = self.height_at_chain_tip.get(&current_chain_tip) {
             return height;
         }
@@ -618,13 +622,7 @@ impl ClarityBackingStore for ClarityDatastore {
     }
 
     fn get_open_chain_tip(&mut self) -> StacksBlockId {
-        self.open_chain_tip
-    }
-
-    /// The contract commitment is the hash of the contract, plus the block height in
-    ///   which the contract was initialized.
-    fn make_contract_commitment(&mut self, _contract_hash: Sha512Trunc256Sum) -> String {
-        "".to_string()
+        self.open_chain_tip.clone()
     }
 
     fn insert_metadata(
@@ -677,6 +675,14 @@ impl ClarityBackingStore for ClarityDatastore {
         Some(&handle_contract_call_special_cases)
     }
 
+    fn make_contract_commitment(&mut self, contract_hash: Sha512Trunc256Sum) -> String {
+        ContractCommitment {
+            hash: contract_hash,
+            block_height: self.get_open_chain_tip_height(),
+        }
+        .serialize()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn get_side_store(&mut self) -> &rusqlite::Connection {
         panic!("Datastore cannot get_side_store")
@@ -700,7 +706,7 @@ impl Datastore {
         let genesis_time = chrono::Utc::now().timestamp() as u64;
 
         let burn_block_hashes = BurnBlockHashes::from_height(burn_chain_height);
-        let burn_block_header_hash = burn_block_hashes.header_hash;
+        let burn_block_header_hash = burn_block_hashes.header_hash.clone();
 
         let burn_block = BurnBlockInfo {
             consensus_hash: burn_block_hashes.consensus_hash,
@@ -712,17 +718,22 @@ impl Datastore {
 
         let stacks_block = StacksBlockInfo {
             block_header_hash: BlockHeaderHash(bytes),
-            burn_block_header_hash: burn_block_hashes.header_hash,
+            burn_block_header_hash: burn_block_hashes.header_hash.clone(),
             stacks_block_time: genesis_time + SECONDS_BETWEEN_STACKS_BLOCKS,
         };
 
-        let sortition_lookup = HashMap::from([(burn_block.sortition_id, burn_block_header_hash)]);
-        let consensus_hash_lookup =
-            HashMap::from([(burn_block.consensus_hash, burn_block.sortition_id)]);
+        let sortition_lookup = HashMap::from([(
+            burn_block.sortition_id.clone(),
+            burn_block_header_hash.clone(),
+        )]);
+        let consensus_hash_lookup = HashMap::from([(
+            burn_block.consensus_hash.clone(),
+            burn_block.sortition_id.clone(),
+        )]);
         let tenure_height_at_stacks_height = HashMap::from([(0, 0)]);
         let stacks_height_at_tenure_height = HashMap::from([(0, 0)]);
-        let burn_blocks = HashMap::from([(burn_block_header_hash, burn_block)]);
-        let stacks_blocks = HashMap::from([(id, stacks_block)]);
+        let burn_blocks = HashMap::from([(burn_block_header_hash.clone(), burn_block.clone())]);
+        let stacks_blocks = HashMap::from([(id.clone(), stacks_block)]);
 
         Datastore {
             genesis_id: id,
@@ -775,11 +786,11 @@ impl Datastore {
             .is_mainnet;
 
         let burn_chain_height = block.burn_block_height;
-        let id = block.index_block_hash;
-        let burn_block_header_hash = block.burn_block_hash;
+        let id = block.index_block_hash.clone();
+        let burn_block_header_hash = block.burn_block_hash.clone();
         let block_header_hash = block.hash;
 
-        let sortition_id = sortition.sortition_id;
+        let sortition_id = sortition.sortition_id.clone();
         let consensus_hash = sortition.consensus_hash;
 
         let vrf_seed = sortition.vrf_seed.unwrap_or_else(|| {
@@ -790,25 +801,27 @@ impl Datastore {
         let burn_block = BurnBlockInfo {
             consensus_hash,
             vrf_seed,
-            sortition_id,
+            sortition_id: sortition_id.clone(),
             burn_block_time: block.burn_block_time,
             burn_chain_height,
         };
 
         let stacks_block = StacksBlockInfo {
             block_header_hash,
-            burn_block_header_hash,
+            burn_block_header_hash: burn_block_header_hash.clone(),
             stacks_block_time: block.block_time,
         };
 
-        let sortition_lookup = HashMap::from([(sortition_id, burn_block_header_hash)]);
-        let consensus_hash_lookup = HashMap::from([(burn_block.consensus_hash, sortition_id)]);
+        let sortition_lookup =
+            HashMap::from([(sortition_id.clone(), burn_block_header_hash.clone())]);
+        let consensus_hash_lookup =
+            HashMap::from([(burn_block.consensus_hash.clone(), sortition_id)]);
         let tenure_height_at_stacks_height =
             HashMap::from([(*stacks_chain_height, block.tenure_height)]);
         let stacks_height_at_tenure_height =
             HashMap::from([(block.tenure_height, *stacks_chain_height)]);
-        let burn_blocks = HashMap::from([(burn_block_header_hash, burn_block)]);
-        let stacks_blocks = HashMap::from([(id, stacks_block)]);
+        let burn_blocks = HashMap::from([(burn_block_header_hash.clone(), burn_block)]);
+        let stacks_blocks = HashMap::from([(id.clone(), stacks_block)]);
 
         Datastore {
             genesis_id: id,
@@ -883,7 +896,7 @@ impl Datastore {
 
         StacksBlockInfo {
             block_header_hash,
-            burn_block_header_hash: self.burn_chain_tip,
+            burn_block_header_hash: self.burn_chain_tip.clone(),
             stacks_block_time,
         }
     }
@@ -926,7 +939,7 @@ impl Datastore {
             let previous_height = self.burn_chain_height;
             let next_height = previous_height + 1;
             let burn_block_hashes = BurnBlockHashes::from_height(next_height);
-            let burn_block_header_hash = burn_block_hashes.header_hash;
+            let burn_block_header_hash = burn_block_hashes.header_hash.clone();
 
             let burn_block = BurnBlockInfo {
                 consensus_hash: burn_block_hashes.consensus_hash,
@@ -936,12 +949,17 @@ impl Datastore {
                 burn_chain_height: next_height,
             };
 
-            self.consensus_hash_lookup
-                .insert(burn_block.consensus_hash, burn_block.sortition_id);
-            self.sortition_lookup
-                .insert(burn_block.sortition_id, burn_block_header_hash);
-            self.burn_chain_tip = burn_block_header_hash;
-            self.burn_blocks.insert(burn_block_header_hash, burn_block);
+            self.consensus_hash_lookup.insert(
+                burn_block.consensus_hash.clone(),
+                burn_block.sortition_id.clone(),
+            );
+            self.sortition_lookup.insert(
+                burn_block.sortition_id.clone(),
+                burn_block_header_hash.clone(),
+            );
+            self.burn_chain_tip = burn_block_header_hash.clone();
+            self.burn_blocks
+                .insert(burn_block_header_hash, burn_block.clone());
             self.burn_chain_height = next_height;
             self.tenure_height += 1;
             self.advance_stacks_chain_tip(clarity_datastore, 1);
@@ -963,18 +981,28 @@ impl Datastore {
             let bytes = height_to_hashed_bytes(self.stacks_chain_height);
             let id = StacksBlockId(bytes);
             let block_info = self.build_next_stacks_block(clarity_datastore);
-            self.stacks_blocks.insert(id, block_info);
+
+            if self.current_epoch.uses_marfed_block_time() {
+                clarity_datastore
+                    .put_all_data(vec![(
+                        CLARITY_STORAGE_BLOCK_TIME_KEY.to_string(),
+                        format!("{}", block_info.stacks_block_time),
+                    )])
+                    .expect("failed to update vm-epoch::block-height");
+            }
+            self.stacks_blocks.insert(id.clone(), block_info);
+
             self.tenure_height_at_stacks_height
                 .insert(self.stacks_chain_height, self.tenure_height);
             clarity_datastore
                 .height_at_chain_tip
-                .entry(id)
+                .entry(id.clone())
                 .or_insert(self.stacks_chain_height);
             clarity_datastore
                 .chain_tip_at_height
                 .entry(self.stacks_chain_height)
-                .or_insert(id);
-            clarity_datastore.open_chain_tip = id;
+                .or_insert(id.clone());
+            clarity_datastore.open_chain_tip = id.clone();
             *clarity_datastore.current_chain_tip.borrow_mut() = id;
         }
 
@@ -1009,7 +1037,7 @@ impl HeadersDB for Datastore {
         if let Some(hash) = self
             .stacks_blocks
             .get(id_bhh)
-            .map(|id| id.block_header_hash)
+            .map(|id| id.block_header_hash.clone())
         {
             return Some(hash);
         };
@@ -1017,7 +1045,7 @@ impl HeadersDB for Datastore {
         self.remote_block_info_cache
             .borrow()
             .get(id_bhh)
-            .map(|block| block.hash)
+            .map(|block| block.hash.clone())
     }
 
     fn get_burn_header_hash_for_block(
@@ -1027,7 +1055,7 @@ impl HeadersDB for Datastore {
         if let Some(hash) = self
             .stacks_blocks
             .get(id_bhh)
-            .map(|block| block.burn_block_header_hash)
+            .map(|block| block.burn_block_header_hash.clone())
         {
             return Some(hash);
         }
@@ -1037,7 +1065,7 @@ impl HeadersDB for Datastore {
                 .remote_block_info_cache
                 .borrow()
                 .get(id_bhh)
-                .map(|block| block.burn_block_hash);
+                .map(|block| block.burn_block_hash.clone());
         }
 
         None
@@ -1049,7 +1077,7 @@ impl HeadersDB for Datastore {
         _epoch_id: &StacksEpochId,
     ) -> Option<ConsensusHash> {
         let bbh = self.get_burn_header_hash_for_block(id_bhh)?;
-        if let Some(consensus_hash) = self.burn_blocks.get(&bbh).map(|b| b.consensus_hash) {
+        if let Some(consensus_hash) = self.burn_blocks.get(&bbh).map(|b| b.consensus_hash.clone()) {
             return Some(consensus_hash);
         }
         if self.remote_network_info.is_some() {
@@ -1057,7 +1085,7 @@ impl HeadersDB for Datastore {
                 .remote_sortition_cache
                 .borrow()
                 .get(&bbh)
-                .map(|s| s.consensus_hash);
+                .map(|s| s.consensus_hash.clone());
         }
         None
     }
@@ -1068,7 +1096,7 @@ impl HeadersDB for Datastore {
         _epoch_id: &StacksEpochId,
     ) -> Option<VRFSeed> {
         let bbh = self.get_burn_header_hash_for_block(id_bhh)?;
-        if let Some(vrf_seed) = self.burn_blocks.get(&bbh).map(|b| b.vrf_seed) {
+        if let Some(vrf_seed) = self.burn_blocks.get(&bbh).map(|b| b.vrf_seed.clone()) {
             return Some(vrf_seed);
         }
         if self.remote_network_info.is_some() {
@@ -1076,7 +1104,7 @@ impl HeadersDB for Datastore {
                 .remote_sortition_cache
                 .borrow()
                 .get(&bbh)
-                .and_then(|s| s.vrf_seed);
+                .and_then(|s| s.vrf_seed.clone());
         }
         None
     }
@@ -1238,9 +1266,9 @@ impl BurnStateDB for Datastore {
                     .get(&current_chain_tip)
                     .map(|block| block.burn_block_height)
             }
-            // preserve the 3.0 -> 3.2 special behavior of burn-block-height
+            // preserve the 3.0 -> 3.3 special behavior of burn-block-height
             // https://github.com/stacks-network/stacks-core/pull/5524
-            Epoch30 | Epoch31 | Epoch32 => Some(self.burn_chain_height),
+            Epoch30 | Epoch31 | Epoch32 | Epoch33 => Some(self.burn_chain_height),
         }
     }
 
@@ -1248,7 +1276,7 @@ impl BurnStateDB for Datastore {
         let current_chain_tip = self.current_chain_tip.borrow();
         self.get_burn_header_hash_for_block(&current_chain_tip)
             .and_then(|hash| self.burn_blocks.get(&hash))
-            .map(|block| block.sortition_id)
+            .map(|block| block.sortition_id.clone())
     }
 
     /// Returns the *burnchain block height* for the `sortition_id` is associated with.
@@ -1305,7 +1333,7 @@ impl BurnStateDB for Datastore {
         &self,
         consensus_hash: &ConsensusHash,
     ) -> Option<SortitionId> {
-        self.consensus_hash_lookup.get(consensus_hash).copied()
+        self.consensus_hash_lookup.get(consensus_hash).cloned()
     }
 
     /// The epoch is defined as by a start and end height. This returns
@@ -1335,10 +1363,6 @@ impl BurnStateDB for Datastore {
         } else {
             None
         }
-    }
-
-    fn get_ast_rules(&self, _height: u32) -> clarity::vm::ast::ASTRules {
-        clarity::vm::ast::ASTRules::PrecheckSize
     }
 }
 
@@ -1545,18 +1569,18 @@ mod tests {
     fn test_clarity_datastore_caching() {
         let (mut clarity_datastore, mut datastore) = get_datastores();
 
-        let initial_tip = *clarity_datastore.current_chain_tip.borrow();
+        let initial_tip = clarity_datastore.current_chain_tip.borrow().clone();
 
         let cache = clarity_datastore.clone();
 
         datastore.advance_burn_chain_tip(&mut clarity_datastore, 10);
 
-        let current_tip = *clarity_datastore.current_chain_tip.borrow();
+        let current_tip = clarity_datastore.current_chain_tip.borrow().clone();
         assert_ne!(current_tip, initial_tip);
 
         #[allow(clippy::redundant_clone)]
         let clarity_datastore = cache.clone();
-        let current_tip = *clarity_datastore.current_chain_tip.borrow();
+        let current_tip = clarity_datastore.current_chain_tip.borrow().clone();
         assert_eq!(current_tip, initial_tip);
     }
 }

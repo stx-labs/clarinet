@@ -17,9 +17,9 @@ use std::convert::TryInto;
 use std::fmt::Display;
 use std::path::PathBuf;
 
-use ::clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::types::StacksEpochId;
 use clarity::vm::ClarityVersion;
+use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 pub use interpreter::ClarityInterpreter;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 pub use session::Session;
@@ -167,6 +167,9 @@ impl Serialize for ClarityContract {
             }
             ClarityVersion::Clarity3 => {
                 map.serialize_entry("clarity_version", &3)?;
+            }
+            ClarityVersion::Clarity4 => {
+                map.serialize_entry("clarity_version", &4)?;
             }
         }
         map.serialize_entry("epoch", &self.epoch)?;

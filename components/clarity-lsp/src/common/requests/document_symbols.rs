@@ -481,7 +481,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
 
 #[cfg(test)]
 mod tests {
-    use clarity_repl::clarity::ast::{build_ast_with_rules, ASTRules};
+    use clarity::vm::ast::build_ast;
     use clarity_repl::clarity::representations::Span;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
@@ -539,13 +539,12 @@ mod tests {
     }
 
     fn get_ast(source: &str) -> Vec<SymbolicExpression> {
-        let contract_ast = build_ast_with_rules(
+        let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
             ClarityVersion::Clarity1,
             StacksEpochId::Epoch21,
-            ASTRules::PrecheckSize,
         )
         .unwrap();
 

@@ -26,6 +26,7 @@ chrono = { workspace = true }
 colored = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
+schemars = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_derive = { workspace = true }
 serde_json = { workspace = true, features = ["unbounded_depth"] }
@@ -33,6 +34,7 @@ sha2 = "0.10"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clarity = { workspace = true, default-features = false, features = ["rusqlite", "developer-mode", "devtools"] }
+clarity-types = { workspace = true, default-features = false, features = ["developer-mode"] }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 pox-locking = { workspace = true, default-features = true }
 
@@ -53,6 +55,7 @@ memchr = { version = "2.4.1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 clarity = { workspace = true, default-features = false, features = ["developer-mode", "devtools", "wasm-web"] }
+clarity-types = { workspace = true, default-features = false, features = ["developer-mode", "wasm-web"] }
 pox-locking = { workspace = true, default-features = false }
 
 comfy-table = { version = "=7.1.4", default-features = false }
@@ -85,6 +88,7 @@ harness = false
 
 [features]
 default = ["dap"]
+json_schema = ["schemars"]
 dap = [
     "tokio",
     "tokio-util",

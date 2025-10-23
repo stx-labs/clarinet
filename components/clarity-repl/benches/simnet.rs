@@ -1,11 +1,11 @@
 use std::hint::black_box;
 
-use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::{EvaluationResult, ExecutionResult, SymbolicExpression, Value as ClarityValue};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
     DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
 };
+use clarity_types::types::QualifiedContractIdentifier;
 use divan::Bencher;
 
 fn init_session() -> Session {

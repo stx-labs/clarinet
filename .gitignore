@@ -20,3 +20,4 @@ npm-debug.log*
 *.lcov
 *.info
 *.profraw
+components/clarinet-files/clarinet-manifest.schema.json

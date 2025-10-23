@@ -9,6 +9,8 @@ pub mod clarinetrc;
 pub mod devnet_diff;
 mod network_manifest;
 mod project_manifest;
+#[cfg(feature = "json_schema")]
+pub mod schema;
 
 pub use network_manifest::{BitcoinNetwork, StacksNetwork};
 

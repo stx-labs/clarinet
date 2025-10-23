@@ -656,7 +656,7 @@ pub fn get_public_function_and_trait_definitions(
 mod definitions_visitor_tests {
     use std::collections::HashMap;
 
-    use clarity_repl::clarity::ast::build_ast_with_rules;
+    use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
     use lsp_types::{Position, Range};
@@ -664,13 +664,12 @@ mod definitions_visitor_tests {
     use super::{DefinitionLocation, Definitions};
 
     fn get_ast(source: &str) -> Vec<SymbolicExpression> {
-        let contract_ast = build_ast_with_rules(
+        let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
             ClarityVersion::Clarity1,
             StacksEpochId::Epoch21,
-            clarity_repl::clarity::ast::ASTRules::Typical,
         )
         .unwrap();
         contract_ast.expressions

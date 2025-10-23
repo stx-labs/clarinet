@@ -871,10 +871,8 @@ pub async fn generate_default_deployment(
     dependencies.extend(requirements_deps);
 
     let ordered_contracts_ids =
-        match ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs) {
-            Ok(ordered_contracts_ids) => ordered_contracts_ids,
-            Err(e) => return Err(e.err.to_string()),
-        };
+        ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs)
+            .map_err(|e| e.to_string())?;
 
     // Track the latest epoch that a contract is deployed in, so that we can
     // ensure that all contracts are deployed after their dependencies.

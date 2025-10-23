@@ -1,6 +1,6 @@
-use clarity::vm::types::StandardPrincipalData;
 use clarity_repl::repl::boot::BOOT_CONTRACTS_DATA;
 use clarity_repl::repl::{ClarityInterpreter, Settings};
+use clarity_types::types::StandardPrincipalData;
 
 #[test]
 fn can_run_boot_contracts() {

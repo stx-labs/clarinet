@@ -80,7 +80,7 @@ fn sign_transaction_payload(
     let signer_addr = get_stacks_address(&public_key, network);
 
     let spending_condition = TransactionSpendingCondition::Singlesig(SinglesigSpendingCondition {
-        signer: *signer_addr.bytes(),
+        signer: signer_addr.bytes().clone(),
         nonce,
         tx_fee,
         hash_mode: SinglesigHashMode::P2PKH,
@@ -743,6 +743,12 @@ pub fn apply_on_chain_deployment(
                 EpochSpec::Epoch3_0 => network_manifest.devnet.as_ref().unwrap().epoch_3_0,
                 EpochSpec::Epoch3_1 => network_manifest.devnet.as_ref().unwrap().epoch_3_1,
                 EpochSpec::Epoch3_2 => network_manifest.devnet.as_ref().unwrap().epoch_3_2,
+                EpochSpec::Epoch3_3 => network_manifest
+                    .devnet
+                    .as_ref()
+                    .unwrap()
+                    .epoch_3_3
+                    .unwrap_or(u64::MAX),
             };
             let mut epoch_transition_successful =
                 current_bitcoin_block_height > after_bitcoin_block;
