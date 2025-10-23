@@ -14,6 +14,7 @@ use clarity::vm::diagnostic::Diagnostic;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
+use strum::VariantArray;
 
 use self::call_checker::CallChecker;
 use self::check_checker::CheckChecker;
@@ -22,11 +23,10 @@ use crate::analysis::annotation::Annotation;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, VariantArray)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Pass {
-    All,
     CallChecker,
     CheckChecker,
     NoopChecker,
@@ -41,59 +41,47 @@ pub struct Settings {
 
 impl Settings {
     pub fn enable_all_passes(&mut self) {
-        self.passes = ALL_PASSES.to_vec();
+        self.passes = Pass::VARIANTS.to_vec();
     }
 
     pub fn set_passes(&mut self, passes: Vec<Pass>) {
-        for pass in passes {
-            match pass {
-                Pass::All => {
-                    self.passes = ALL_PASSES.to_vec();
-                    return;
-                }
-                pass => self.passes.push(pass),
-            };
-        }
+        self.passes = passes;
+    }
+
+    pub fn add_passes(&mut self, passes: &[Pass]) {
+        self.passes.extend_from_slice(passes);
     }
 }
 
-/// Allow different ways an
+/// Allow different methods to specify elements of a set of type `T`
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(untagged)]
-pub enum OneOrList<T> {
+pub enum SetElementSpecifier<T> {
     /// Allow `T` as shorthand for `[T]` in the TOML
     One(T),
     /// Allow more than one `T` in the TOML
     List(Vec<T>),
+    /// All elements in the set
+    All(bool),
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
-    passes: Option<OneOrList<Pass>>,
+    passes: Option<SetElementSpecifier<Pass>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
-
-// Each new pass should be included in this list
-static ALL_PASSES: [Pass; 3] = [Pass::CheckChecker, Pass::CallChecker, Pass::NoopChecker];
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
         let passes = from_file
             .passes
             .map(|file_passes| match file_passes {
-                OneOrList::One(pass) => match pass {
-                    Pass::All => ALL_PASSES.to_vec(),
-                    pass => vec![pass],
-                },
-                OneOrList::List(passes) => {
-                    if passes.contains(&Pass::All) {
-                        ALL_PASSES.to_vec()
-                    } else {
-                        passes
-                    }
-                }
+                SetElementSpecifier::All(true) => Pass::VARIANTS.to_vec(),
+                SetElementSpecifier::All(false) => vec![],
+                SetElementSpecifier::One(pass) => vec![pass],
+                SetElementSpecifier::List(passes) => passes,
             })
             .unwrap_or_default();
 
@@ -140,7 +128,6 @@ pub fn run_analysis(
             Pass::CheckChecker => passes.push(CheckChecker::run_pass),
             Pass::CallChecker => passes.push(CallChecker::run_pass),
             Pass::NoopChecker => passes.push(NoopChecker::run_pass),
-            Pass::All => panic!("unexpected All in list of passes"),
         }
     }
 
