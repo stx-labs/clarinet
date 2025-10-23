@@ -1,5 +1,5 @@
 {
-  "name": "billboard-tests",
+  "name": "@stacks/example-billboard-tests",
   "version": "1.0.0",
   "description": "Run unit tests on this project.",
   "type": "module",
@@ -12,10 +12,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@hirosystems/clarinet-sdk": "^3.0.2",
-    "@stacks/transactions": "^7.0.6",
-    "chokidar-cli": "^3.0.0",
-    "vitest": "^3.1.3",
-    "vitest-environment-clarinet": "^2.3.0"
+    "@hirosystems/clarinet-sdk": "3.8.1",
+    "@stacks/transactions": "7.2.0",
+    "chokidar-cli": "3.0.0",
+    "vitest": "4.0.1",
+    "vitest-environment-clarinet": "2.6.0"
   }
 }

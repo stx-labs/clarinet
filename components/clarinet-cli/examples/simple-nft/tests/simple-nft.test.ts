@@ -24,7 +24,7 @@ describe("nft basic features", () => {
       event: "nft_mint_event",
       data: {
         asset_identifier: `${simnet.deployer}.simple-nft::nft`,
-        raw_value: `0x${Buffer.from(Cl.serialize(Cl.uint(1))).toString("hex")}`,
+        raw_value: cvToHex(Cl.uint(1)),
         recipient: address1,
         // we can use asymmetric for clarity values
         value: expect.toBeUint(1),
@@ -88,7 +88,7 @@ describe("nft basic features", () => {
       event: "nft_burn_event",
       data: {
         asset_identifier: `${simnet.deployer}.simple-nft::nft`,
-        raw_value: `0x${Buffer.from(Cl.serialize(Cl.uint(1))).toString("hex")}`,
+        raw_value: cvToHex(Cl.uint(1)),
         sender: address1,
         value: expect.toBeUint(1),
       },
