@@ -1,5 +1,5 @@
 {
-  "rust-analyzer.check.command": "clippy",
+  // "rust-analyzer.check.command": "clippy",
   // rust-analyzer hack:
   // manually set --workspace in extraArgs so that it's always set only one time
   "rust-analyzer.check.workspace": false,

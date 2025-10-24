@@ -16,6 +16,7 @@ members = [
     "components/stacks-codec",
     "components/stacks-network",
     "components/stacks-rpc-client",
+    "components/ts-to-clar"
 ]
 default-members = ["components/clarinet-cli"]
 
