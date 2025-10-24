@@ -87,7 +87,7 @@ export type Tx =
   | {
       callPublicFn?: never;
       callPrivateFn?: never;
-      deployContradct?: never;
+      deployContract?: never;
       transferSTX: { amount: number; recipient: string; sender: string };
     };
 
