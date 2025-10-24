@@ -79,6 +79,10 @@ impl Settings {
         self.lints = Lint::VARIANTS.to_vec();
     }
 
+    pub fn disable_all_lints(&mut self) {
+        self.lints = vec![];
+    }
+
     pub fn set_lints(&mut self, lints: Vec<Lint>) {
         self.lints = lints;
     }
