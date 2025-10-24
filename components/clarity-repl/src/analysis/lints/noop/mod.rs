@@ -150,14 +150,14 @@ impl AnalysisPass for NoopChecker<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::analysis::Pass;
+    use crate::analysis::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
     #[test]
     fn single_operand_equals() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::NoopChecker];
+        settings.repl_settings.analysis.lints = vec![Lint::Noop];
         let mut session = Session::new(settings);
         let snippet = "
 (define-public (test-func)
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn single_operand_add() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::NoopChecker];
+        settings.repl_settings.analysis.lints = vec![Lint::Noop];
         let mut session = Session::new(settings);
         let snippet = "
 (define-public (test-func)
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn single_operand_logical() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::NoopChecker];
+        settings.repl_settings.analysis.lints = vec![Lint::Noop];
         let mut session = Session::new(settings);
         let snippet = "
 (define-public (test-func)
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn allow_noop_annotation() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::NoopChecker];
+        settings.repl_settings.analysis.lints = vec![Lint::Noop];
         let mut session = Session::new(settings);
         let snippet = "
 (define-public (test-func)

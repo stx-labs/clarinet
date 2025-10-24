@@ -6,19 +6,19 @@ pub mod check_checker;
 pub mod coverage;
 #[cfg(test)]
 mod coverage_tests;
-pub mod native_func_noop;
+pub mod lints;
 
+use call_checker::CallChecker;
+use check_checker::CheckChecker;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
+use lints::noop::NoopChecker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
 use strum::VariantArray;
 
-use self::call_checker::CallChecker;
-use self::check_checker::CheckChecker;
-use self::native_func_noop::NoopChecker;
 use crate::analysis::annotation::Annotation;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
@@ -27,30 +27,84 @@ pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Pass {
+    All,
     CallChecker,
     CheckChecker,
-    NoopChecker,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+// Each new pass should be included in this list
+static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
+
+/// New
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, VariantArray)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Lint {
+    Noop,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: Vec<Pass>,
+    lints: Vec<Lint>,
     check_checker: check_checker::Settings,
 }
 
 impl Settings {
+    pub fn empty() -> Self {
+        Self {
+            passes: vec![],
+            lints: vec![],
+            check_checker: check_checker::Settings::default(),
+        }
+    }
     pub fn enable_all_passes(&mut self) {
-        self.passes = Pass::VARIANTS.to_vec();
+        self.passes = ALL_PASSES.to_vec();
     }
 
     pub fn set_passes(&mut self, passes: Vec<Pass>) {
-        self.passes = passes;
+        for pass in passes {
+            match pass {
+                Pass::All => {
+                    self.passes = ALL_PASSES.to_vec();
+                    return;
+                }
+                pass => self.passes.push(pass),
+            };
+        }
     }
 
-    pub fn add_passes(&mut self, passes: &[Pass]) {
-        self.passes.extend_from_slice(passes);
+    pub fn enable_all_lints(&mut self) {
+        self.lints = Lint::VARIANTS.to_vec();
     }
+
+    pub fn set_lints(&mut self, lints: Vec<Lint>) {
+        self.lints = lints;
+    }
+
+    pub fn add_lints(&mut self, lints: &[Lint]) {
+        self.lints.extend_from_slice(lints);
+    }
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            lints: Lint::VARIANTS.to_vec(),
+            ..Self::empty()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(untagged)]
+pub enum OneOrList<T> {
+    /// Allow `T` as shorthand for `[T]` in the TOML
+    One(T),
+    /// Allow more than one `T` in the TOML
+    List(Vec<T>),
 }
 
 /// Allow different methods to specify elements of a set of type `T`
@@ -69,19 +123,35 @@ pub enum SetElementSpecifier<T> {
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
-    passes: Option<SetElementSpecifier<Pass>>,
+    passes: Option<OneOrList<Pass>>,
+    lints: Option<SetElementSpecifier<Lint>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
+        let lints = from_file
+            .lints
+            .map(|specifier| match specifier {
+                SetElementSpecifier::All(true) => Lint::VARIANTS.to_vec(),
+                SetElementSpecifier::All(false) => vec![],
+                SetElementSpecifier::One(lint) => vec![lint],
+                SetElementSpecifier::List(lints) => lints,
+            })
+            .unwrap_or_default();
+
         let passes = from_file
             .passes
             .map(|file_passes| match file_passes {
-                SetElementSpecifier::All(true) => Pass::VARIANTS.to_vec(),
-                SetElementSpecifier::All(false) => vec![],
-                SetElementSpecifier::One(pass) => vec![pass],
-                SetElementSpecifier::List(passes) => passes,
+                OneOrList::One(pass) => vec![pass],
+                OneOrList::List(passes) => passes,
+            })
+            .map(|passes| {
+                if passes.contains(&Pass::All) {
+                    ALL_PASSES.to_vec()
+                } else {
+                    passes
+                }
             })
             .unwrap_or_default();
 
@@ -92,6 +162,7 @@ impl From<SettingsFile> for Settings {
             .unwrap_or_default();
 
         Self {
+            lints,
             passes,
             check_checker,
         }
@@ -127,7 +198,13 @@ pub fn run_analysis(
         match pass {
             Pass::CheckChecker => passes.push(CheckChecker::run_pass),
             Pass::CallChecker => passes.push(CallChecker::run_pass),
-            Pass::NoopChecker => passes.push(NoopChecker::run_pass),
+            Pass::All => panic!("unexpected All in list of passes"),
+        }
+    }
+
+    for lint in &settings.lints {
+        match lint {
+            Lint::Noop => passes.push(NoopChecker::run_pass),
         }
     }
 
