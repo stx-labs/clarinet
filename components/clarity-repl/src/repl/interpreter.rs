@@ -18,7 +18,9 @@ use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
     EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult,
 };
-use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity_types::types::{
+    AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
+};
 use clarity_types::Value;
 
 use super::datastore::StacksConstants;
@@ -817,6 +819,66 @@ impl ClarityInterpreter {
         Ok(format!("→ {recipient}: {final_balance} µSTX"))
     }
 
+    pub fn mint_ft_balance(
+        &mut self,
+        recipient: &PrincipalData,
+        asset_identifier: &AssetIdentifier,
+        amount: u64,
+    ) -> Result<String, String> {
+        let contract_identifier = asset_identifier.contract_identifier.clone();
+        let token_name = asset_identifier.asset_name.to_string();
+        let final_balance = {
+            let mut global_context = self.get_global_context(DEFAULT_EPOCH, false)?;
+
+            global_context.begin();
+
+            let metadata = global_context
+                .database
+                .load_ft(&contract_identifier, &token_name)
+                .map_err(|e| {
+                    format!("failed to load_ft for {contract_identifier}.{token_name}: {e:?}")
+                })?;
+
+            let cur_balance = global_context
+                .database
+                .get_ft_balance(&contract_identifier, &token_name, recipient, Some(&metadata))
+                .map_err(|e| format!("failed to get_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
+
+            global_context.database.set_ft_balance(
+                &contract_identifier,
+                &token_name,
+                recipient,
+                cur_balance + amount as u128,
+            ).map_err(|e| format!("failed to set_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
+
+            let final_balance = global_context
+                .database
+                .get_ft_balance(&contract_identifier, &token_name, recipient, Some(&metadata))
+                .map_err(|e| format!("failed to get_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
+
+            global_context
+                .database
+                .checked_increase_token_supply(
+                    &contract_identifier,
+                    &token_name,
+                    amount as u128,
+                    &metadata,
+                )
+                .map_err(|e| format!("failed to increase token supply for {contract_identifier}.{token_name}: {e:?}"))?;
+
+            global_context
+                .commit()
+                .map_err(|e| format!("failed to commit ctx: {e:?}"))?;
+            final_balance
+        };
+        self.credit_token(
+            recipient.to_string(),
+            asset_identifier.sugared(),
+            amount.into(),
+        );
+        Ok(format!("→ {recipient}: {final_balance} {token_name}"))
+    }
+
     pub fn set_tx_sender(&mut self, tx_sender: StandardPrincipalData) {
         self.tx_sender = tx_sender;
     }
@@ -1171,6 +1233,115 @@ mod tests {
 
         let balance = interpreter.get_balance_for_account(&recipient.to_string(), "STX");
         assert_eq!(balance, amount.into());
+    }
+
+    #[test]
+    fn test_mint_ft_balance() {
+        let mut interpreter = get_interpreter(None);
+        let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
+        let token_name = "ctb";
+        let contract = ClarityContractBuilder::default()
+            .code_source(
+                [
+                    &format!("(define-fungible-token {token_name})"),
+                    "(define-private (test-mint)",
+                    "  (ft-mint? ctb u100 tx-sender))",
+                    "(define-private (test-burn)",
+                    "  (ft-burn? ctb u10 tx-sender))",
+                    "(define-private (test-transfer)",
+                    "  (ft-transfer? ctb u10 tx-sender (as-contract tx-sender)))",
+                    "(define-private (test-transfer-1000)",
+                    "  (ft-transfer? ctb u1000 tx-sender (as-contract tx-sender)))",
+                    "(define-private (test-burn-1000)",
+                    "  (ft-burn? ctb u1000 tx-sender))",
+                    "(test-mint)",
+                    "(test-burn)",
+                    "(test-transfer)",
+                    "(test-transfer-1000)",
+                    "(test-burn-1000)",
+                ]
+                .join("\n"),
+            )
+            .build();
+
+        let deploy_result = deploy_contract(&mut interpreter, &contract);
+        assert!(deploy_result.is_ok());
+        let ExecutionResult {
+            diagnostics,
+            events,
+            result,
+            ..
+        } = deploy_result.unwrap();
+        assert!(diagnostics.is_empty());
+        assert_eq!(events.len(), 3);
+        assert!(matches!(
+            events[0],
+            StacksTransactionEvent::FTEvent(FTEventType::FTMintEvent(_))
+        ));
+        assert!(matches!(
+            events[1],
+            StacksTransactionEvent::FTEvent(FTEventType::FTBurnEvent(_))
+        ));
+        assert!(matches!(
+            events[2],
+            StacksTransactionEvent::FTEvent(FTEventType::FTTransferEvent(_))
+        ));
+
+        let contract_identifier_string =
+            if let EvaluationResult::Contract(contract_evaluation_result) = result {
+                contract_evaluation_result
+                    .contract
+                    .contract_identifier
+                    .clone()
+            } else {
+                panic!("didn't get EvaluationResult::Contract");
+            };
+
+        let contract_identifier =
+            QualifiedContractIdentifier::parse(&contract_identifier_string).unwrap();
+        let asset_identifier = AssetIdentifier {
+            contract_identifier: contract_identifier.clone(),
+            asset_name: token_name.into(),
+        };
+
+        let amount = 1000;
+
+        let result = interpreter.mint_ft_balance(&recipient.clone(), &asset_identifier, amount);
+        assert!(result.is_ok());
+
+        // in the contract we minted 100, burned 10, then transferred 10 to as-contract
+        // in the interpreter we minted 1000
+        // this should leave 1080 for recipient
+        let balance = interpreter
+            .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared());
+        assert_eq!(balance, 1080);
+
+        let mut global_context = interpreter
+            .get_global_context(DEFAULT_EPOCH, false)
+            .unwrap();
+
+        global_context.begin();
+
+        let supply = global_context
+            .database
+            .get_ft_supply(&contract_identifier, token_name)
+            .expect("failed to get ft supply");
+
+        // in the contract we minted 100 and burned 10
+        // in the interpreter we minted 1000
+        // this should leave 1090 total supply
+        assert_eq!(supply, 1090);
+
+        // if we used the correct token names everywhere the interpreter and db
+        // balances should match
+        let db_balance = global_context
+            .database
+            .get_ft_balance(&contract_identifier, token_name, &recipient, None)
+            .expect("failed to get ft balance");
+
+        assert_eq!(balance, db_balance);
+
+        global_context.commit().unwrap();
     }
 
     #[test]
