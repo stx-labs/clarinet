@@ -51,6 +51,17 @@ pub enum AssetIdentifierParseError {
     NoPrefixPeriod,
 }
 
+impl std::fmt::Display for AssetIdentifierParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoPeriod => write!(f, "no period"),
+            Self::EndsWithPeriod => write!(f, "ends with period"),
+            Self::ContractIdentifierParseError => write!(f, "error parsing ContractIdentifier"),
+            Self::NoPrefixPeriod => write!(f, "no period in the prefix of the asset name"),
+        }
+    }
+}
+
 fn set_up_accounts(accounts: &[Account], interpreter: &mut ClarityInterpreter) {
     for account in accounts {
         let Ok(recipient) = PrincipalData::parse(&account.address) else {
@@ -1213,6 +1224,7 @@ impl Session {
             Err(err) => err.red().to_string(),
         }
     }
+
 
     fn parse_asset_identifier(
         default_deployer: &str,
