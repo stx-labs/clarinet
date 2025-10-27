@@ -22,8 +22,7 @@
   (match (index-of? (contract-call? .pool-reserve-data get-borroweable-isolated-read)
     asset
   )
-    res
-    true
+    res true
     false
   )
 )

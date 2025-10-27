@@ -120,6 +120,13 @@ export function getSessionProxy() {
                 },
               };
             }
+            if (tx.deployContract) {
+              return {
+                deployContract: {
+                  ...tx.deployContract,
+                },
+              };
+            }
             return tx;
           });
 

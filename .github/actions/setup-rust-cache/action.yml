@@ -1,0 +1,52 @@
+name: 'Setup Rust Cache'
+description: 'Sets up Rust cargo registry and target directory caching'
+inputs:
+  target-cache-key:
+    description: 'Target-specific cache key (e.g., matrix.os-matrix.target-github.job)'
+    required: true
+  target-path:
+    description: 'Target directory path to cache'
+    required: false
+    default: 'target/'
+outputs:
+  cargo-cache-hit:
+    description: 'Whether cargo registry cache was hit'
+    value: ${{ steps.cache-cargo-registry.outputs.cache-hit }}
+  target-cache-hit:
+    description: 'Whether target cache was hit'
+    value: ${{ steps.cache-target.outputs.cache-hit }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup cache keys
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          RUST_VERSION=$(rustc -vV | sha256sum | cut -d ' ' -f1)
+        else
+          RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
+        fi
+        echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_ENV
+
+    - name: Cache cargo registry
+      id: cache-cargo-registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/
+        key: cargo-registry-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
+        restore-keys: |
+          cargo-registry-${{ env.RUST_VERSION }}-
+          cargo-registry-
+
+    - name: Cache target directory
+      id: cache-target
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.target-path }}
+        key: ${{ inputs.target-cache-key }}-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
+        restore-keys: |
+          ${{ inputs.target-cache-key }}-${{ env.RUST_VERSION }}-
+          ${{ inputs.target-cache-key }}-
