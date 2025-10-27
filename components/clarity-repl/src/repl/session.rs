@@ -1212,7 +1212,10 @@ impl Session {
         }
     }
 
-    fn parse_asset_identifier(s: &str) -> Result<AssetIdentifier, AssetIdentifierParseError> {
+    fn parse_asset_identifier(
+        s: &str,
+        default_sender: Option<String>,
+    ) -> Result<AssetIdentifier, AssetIdentifierParseError> {
         // parse asset identifier `contract_identifier.asset_name` into it's parts
         let Some(index) = s.rfind('.') else {
             return Err(AssetIdentifierParseError::NoPeriod);
@@ -1224,13 +1227,32 @@ impl Session {
 
         let (contract_identifier_str, asset_name_str) = s.split_at(index);
 
-        let Ok(contract_identifier) = QualifiedContractIdentifier::parse(contract_identifier_str)
-        else {
-            return Err(AssetIdentifierParseError::ContractIdentifierParseError);
+        let contract_identifier = if let Ok(contract_identifier) =
+            QualifiedContractIdentifier::parse(contract_identifier_str)
+        {
+            contract_identifier
+        } else {
+            //if we have a default sender try prepending that then parsing
+            if let Some(tx_sender) = default_sender {
+                if contract_identifier_str.find(".") == Some(0) {
+                    let id = format!("{tx_sender}{contract_identifier_str}");
+                    if let Ok(contract_identifier) = QualifiedContractIdentifier::parse(&id) {
+                        contract_identifier
+                    } else {
+                        return Err(AssetIdentifierParseError::ContractIdentifierParseError);
+                    }
+                } else {
+                    return Err(AssetIdentifierParseError::ContractIdentifierParseError);
+                }
+            } else {
+                return Err(AssetIdentifierParseError::ContractIdentifierParseError);
+            }
         };
+
         let Some(asset_name) = asset_name_str.strip_prefix('.') else {
             return Err(AssetIdentifierParseError::NoPrefixPeriod);
         };
+
         Ok(AssetIdentifier {
             contract_identifier,
             asset_name: asset_name.into(),
@@ -1246,7 +1268,10 @@ impl Session {
                 .to_string();
         }
 
-        let asset_identifier = match Self::parse_asset_identifier(args[1]) {
+        let asset_identifier = match Self::parse_asset_identifier(
+            args[1],
+            Some(self.interpreter.get_tx_sender().to_string()),
+        ) {
             Ok(asset_identifier) => asset_identifier,
             Err(err) => {
                 return format!("Unable to parse the asset identifier: {err:?}")
@@ -2045,23 +2070,47 @@ mod tests {
         // S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb
         assert_eq!(
             Err(AssetIdentifierParseError::NoPeriod),
-            Session::parse_asset_identifier("S1G2081040G2081040G2081040G208105NK8PE5")
+            Session::parse_asset_identifier("S1G2081040G2081040G2081040G208105NK8PE5", None)
         );
 
         assert_eq!(
             Err(AssetIdentifierParseError::ContractIdentifierParseError),
-            Session::parse_asset_identifier("S1G2081040G2081040G2081040G208105NK8PE5.contract")
+            Session::parse_asset_identifier(
+                "S1G2081040G2081040G2081040G208105NK8PE5.contract",
+                None
+            )
         );
+
+        assert_eq!(
+            Err(AssetIdentifierParseError::ContractIdentifierParseError),
+            Session::parse_asset_identifier(".contract.ctb", None)
+        );
+
+        assert_eq!(
+            Err(AssetIdentifierParseError::ContractIdentifierParseError),
+            Session::parse_asset_identifier(
+                "contract.ctb",
+                Some("S1G2081040G2081040G2081040G208105NK8PE5".to_string())
+            ),
+        );
+
+        assert!(Session::parse_asset_identifier(
+            ".contract.ctb",
+            Some("S1G2081040G2081040G2081040G208105NK8PE5".to_string())
+        )
+        .is_ok());
 
         assert_eq!(
             Err(AssetIdentifierParseError::EndsWithPeriod),
             Session::parse_asset_identifier(
-                "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb."
+                "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb.",
+                None,
             )
         );
 
         assert!(Session::parse_asset_identifier(
-            "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb"
+            "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb",
+            None,
         )
         .is_ok());
     }
@@ -2110,13 +2159,18 @@ mod tests {
         let result = session.handle_command(&cmd);
         println!("{result}");
 
-        // unable to parse recipient address
+        // unable to parse asset identifier
         let cmd = format!("::mint_ft ._-{asset_identifier} {recipient} 1000");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
-        // unable to parse asset identifier
+        // unable to parse recipient address
         let cmd = format!("::mint_ft {asset_identifier} {recipient}. 1000");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        // unable to parse recipient address
+        let cmd = format!("::mint_ft {asset_identifier} {recipient}XXX 1000");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
@@ -2125,22 +2179,24 @@ mod tests {
         let result = session.handle_command(&cmd);
         println!("{result}");
 
-        // no such fungible token
-        let cmd = format!("::mint_ft {asset_identifier} {recipient}XXX 1000");
-        let result = session.handle_command(&cmd);
-        println!("{result}");
-
         let cmd = format!("::mint_ft {asset_identifier} {recipient} 1000");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
-        let asset_identifier = Session::parse_asset_identifier(&asset_identifier).unwrap();
+        // we should be able to skip the deployer part of the contract identifier
+        let index = asset_identifier.find('.').unwrap();
+        let (_, short_asset_identifier) = asset_identifier.split_at(index);
+        let cmd = format!("::mint_ft {short_asset_identifier} {recipient} 10000");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
 
-        // we minted 100 when we deployed the contract and 1000 in the session cmd
+        let asset_identifier = Session::parse_asset_identifier(&asset_identifier, None).unwrap();
+
+        // we minted 100 when we deployed the contract then 1000 + 10000 in the session cmd
         // if any of the expected failures succeeded, this will fail
         let balance = session
             .interpreter
             .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared());
-        assert_eq!(balance, 1100);
+        assert_eq!(balance, 11100);
     }
 }
