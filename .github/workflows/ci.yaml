@@ -201,7 +201,7 @@ jobs:
           target-cache-key: ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}
 
       - name: Install wix (Windows)
-        if: matrix.os == 'windows-latest' && steps.setup-rust-cache.outputs.cargo-cache-hit != 'true'
+        if: matrix.os == 'windows-latest'
         run: cargo install cargo-wix || true
 
       # Set environment variables required from cross compiling from macos-x86_64 to macos-arm64
