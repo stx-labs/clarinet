@@ -1237,16 +1237,12 @@ impl Session {
         let args: Vec<_> = command.split(' ').collect();
 
         if args.len() != 4 {
-            return "Usage: ::mint_ft <recipient address> <assert identifier> <amount>"
+            return "Usage: ::mint_ft <asset identifier> <recipient address> <amount>"
                 .red()
                 .to_string();
         }
 
-        let Ok(recipient) = PrincipalData::parse(args[1]) else {
-            return "Unable to parse the recipient address".red().to_string();
-        };
-
-        let asset_identifier = match Self::parse_asset_identifier(args[2]) {
+        let asset_identifier = match Self::parse_asset_identifier(args[1]) {
             Ok(asset_identifier) => asset_identifier,
             Err(err) => {
                 return format!("Unable to parse the asset identifier: {err:?}")
@@ -1255,13 +1251,17 @@ impl Session {
             }
         };
 
+        let Ok(recipient) = PrincipalData::parse(args[2]) else {
+            return "Unable to parse the recipient address".red().to_string();
+        };
+
         let Ok(amount) = args[3].parse::<u64>() else {
             return "Unable to parse the amount".red().to_string();
         };
 
         match self
             .interpreter
-            .mint_ft_balance(&recipient, &asset_identifier, amount)
+            .mint_ft_balance(&asset_identifier, &recipient, amount)
         {
             Ok(msg) => msg.green().to_string(),
             Err(err) => err.red().to_string(),
@@ -2102,31 +2102,31 @@ mod tests {
         let recipient = contract_identifier.issuer.to_string();
 
         // more than 4 tokens
-        let cmd = format!("::mint_ft {recipient} {asset_identifier} 1000 foo");
+        let cmd = format!("::mint_ft {asset_identifier} {recipient} 1000 foo");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
         // unable to parse recipient address
-        let cmd = format!("::mint_ft ._-{recipient} {asset_identifier} 1000");
+        let cmd = format!("::mint_ft ._-{asset_identifier} {recipient} 1000");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
         // unable to parse asset identifier
-        let cmd = format!("::mint_ft {recipient} {asset_identifier}. 1000");
+        let cmd = format!("::mint_ft {asset_identifier} {recipient}. 1000");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
         // unable to parse amount
-        let cmd = format!("::mint_ft {recipient} {asset_identifier} -1");
+        let cmd = format!("::mint_ft {asset_identifier} {recipient} -1");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
         // no such fungible token
-        let cmd = format!("::mint_ft {recipient} {asset_identifier}XXX 1000");
+        let cmd = format!("::mint_ft {asset_identifier} {recipient}XXX 1000");
         let result = session.handle_command(&cmd);
         println!("{result}");
 
-        let cmd = format!("::mint_ft {recipient} {asset_identifier} 1000");
+        let cmd = format!("::mint_ft {asset_identifier} {recipient} 1000");
         let result = session.handle_command(&cmd);
         println!("{result}");
 

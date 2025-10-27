@@ -821,8 +821,8 @@ impl ClarityInterpreter {
 
     pub fn mint_ft_balance(
         &mut self,
-        recipient: &PrincipalData,
         asset_identifier: &AssetIdentifier,
+        recipient: &PrincipalData,
         amount: u64,
     ) -> Result<String, String> {
         let contract_identifier = asset_identifier.contract_identifier.clone();
@@ -1306,7 +1306,7 @@ mod tests {
 
         let amount = 1000;
 
-        let result = interpreter.mint_ft_balance(&recipient.clone(), &asset_identifier, amount);
+        let result = interpreter.mint_ft_balance(&asset_identifier, &recipient.clone(), amount);
         assert!(result.is_ok());
 
         // in the contract we minted 100, burned 10, then transferred 10 to as-contract
