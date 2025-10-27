@@ -774,6 +774,10 @@ impl Session {
         ));
         output.push(format!(
             "{}",
+            "::mint_ft <asset identifier> <principal> <amount>\t\tMint FT balance for a given asset (CONTRACT_IDENTIFIER.ASSET_NAME) and principal".yellow()
+        ));
+        output.push(format!(
+            "{}",
             "::set_tx_sender <principal>\t\tSet tx-sender variable to principal".yellow()
         ));
         output.push(format!(
