@@ -1397,6 +1397,7 @@ fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
 mod tests {
     use clarity::util::hash::hex_bytes;
     use clarity_types::types::TupleData;
+    use indoc::formatdoc;
 
     use super::*;
     use crate::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
@@ -2122,17 +2123,15 @@ mod tests {
         session.update_epoch(DEFAULT_EPOCH);
 
         let token_name = "ctb";
-        let contract = ClarityContractBuilder::default()
-            .code_source(
-                [
-                    &format!("(define-fungible-token {token_name})"),
-                    "(define-private (test-mint)",
-                    "  (ft-mint? ctb u100 tx-sender))",
-                    "(test-mint)",
-                ]
-                .join("\n"),
+        let src = formatdoc!(
+            r#"
+            (define-fungible-token {token_name})
+            (define-private (test-mint)
+                (ft-mint? ctb u100 tx-sender)
             )
-            .build();
+            (test-mint)"#
+        );
+        let contract = ClarityContractBuilder::default().code_source(src).build();
         let deploy_result = session.deploy_contract(&contract, false, None);
         assert!(deploy_result.is_ok());
         let ExecutionResult { result, .. } = deploy_result.unwrap();

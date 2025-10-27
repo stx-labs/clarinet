@@ -1000,7 +1000,7 @@ mod tests {
     use clarity::util::hash::hex_bytes;
     use clarity::vm::{self, ClarityVersion};
     use clarity_types::types::TupleData;
-    use indoc::indoc;
+    use indoc::{formatdoc, indoc};
 
     use super::*;
     use crate::analysis::Settings as AnalysisSettings;
@@ -1240,30 +1240,27 @@ mod tests {
         let mut interpreter = get_interpreter(None);
         let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
         let token_name = "ctb";
-        let contract = ClarityContractBuilder::default()
-            .code_source(
-                [
-                    &format!("(define-fungible-token {token_name})"),
-                    "(define-private (test-mint)",
-                    "  (ft-mint? ctb u100 tx-sender))",
-                    "(define-private (test-burn)",
-                    "  (ft-burn? ctb u10 tx-sender))",
-                    "(define-private (test-transfer)",
-                    "  (ft-transfer? ctb u10 tx-sender (as-contract tx-sender)))",
-                    "(define-private (test-transfer-1000)",
-                    "  (ft-transfer? ctb u1000 tx-sender (as-contract tx-sender)))",
-                    "(define-private (test-burn-1000)",
-                    "  (ft-burn? ctb u1000 tx-sender))",
-                    "(test-mint)",
-                    "(test-burn)",
-                    "(test-transfer)",
-                    "(test-transfer-1000)",
-                    "(test-burn-1000)",
-                ]
-                .join("\n"),
-            )
-            .build();
+        let src = formatdoc!(
+            r#"
+            (define-fungible-token {token_name})
+            (define-private (test-mint)
+                (ft-mint? ctb u100 tx-sender))
+            (define-private (test-burn)
+                (ft-burn? ctb u10 tx-sender))
+            (define-private (test-transfer)
+                (ft-transfer? ctb u10 tx-sender (as-contract tx-sender)))
+            (define-private (test-burn-1000)
+                (ft-burn? ctb u1000 tx-sender))
+            (define-private (test-transfer-1000)
+                (ft-transfer? ctb u1000 tx-sender (as-contract tx-sender)))
+            (test-mint)
+            (test-burn)
+            (test-transfer)
+            (test-burn-1000)
+            (test-transfer-1000)"#
+        );
 
+        let contract = ClarityContractBuilder::default().code_source(src).build();
         let deploy_result = deploy_contract(&mut interpreter, &contract);
         assert!(deploy_result.is_ok());
         let ExecutionResult {
