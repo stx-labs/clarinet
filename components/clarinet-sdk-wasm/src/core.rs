@@ -133,30 +133,31 @@ impl CallFnArgs {
     }
 }
 
+fn clarity_version_from_u32(v: Option<u32>) -> ClarityVersion {
+    match v {
+        Some(1) => ClarityVersion::Clarity1,
+        Some(2) => ClarityVersion::Clarity2,
+        Some(3) => ClarityVersion::Clarity3,
+        Some(4) => ClarityVersion::Clarity4,
+        Some(v) => {
+            log!("Invalid clarity version {v}. Using default version.");
+            DEFAULT_CLARITY_VERSION
+        }
+        None => DEFAULT_CLARITY_VERSION,
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[wasm_bindgen]
 pub struct ContractOptions {
-    clarity_version: ClarityVersion,
+    #[serde(rename = "clarityVersion")]
+    clarity_version: Option<u32>,
 }
 
 #[wasm_bindgen]
 impl ContractOptions {
     #[wasm_bindgen(constructor)]
     pub fn new(clarity_version: Option<u32>) -> Self {
-        let clarity_version = match clarity_version {
-            Some(v) => match v {
-                1 => ClarityVersion::Clarity1,
-                2 => ClarityVersion::Clarity2,
-                3 => ClarityVersion::Clarity3,
-                4 => ClarityVersion::Clarity4,
-                _ => {
-                    log!("Invalid clarity version {v}. Using default version.");
-                    DEFAULT_CLARITY_VERSION
-                }
-            },
-            _ => DEFAULT_CLARITY_VERSION,
-        };
-
         Self { clarity_version }
     }
 }
@@ -166,7 +167,7 @@ impl ContractOptions {
 pub struct DeployContractArgs {
     name: String,
     content: String,
-    options: ContractOptions,
+    options: Option<ContractOptions>,
     sender: String,
 }
 #[wasm_bindgen]
@@ -176,7 +177,7 @@ impl DeployContractArgs {
         Self {
             name,
             content,
-            options,
+            options: Some(options),
             sender,
         }
     }
@@ -910,11 +911,15 @@ impl SDK {
             }
             let current_epoch = session.interpreter.datastore.get_current_epoch();
 
+            let clarity_version = clarity_version_from_u32(
+                args.options.as_ref().and_then(|opts| opts.clarity_version),
+            );
+
             let contract = ClarityContract {
                 code_source: ClarityCodeSource::ContractInMemory(args.content.clone()),
                 name: args.name.clone(),
                 deployer: ContractDeployer::Address(args.sender.to_string()),
-                clarity_version: args.options.clarity_version,
+                clarity_version,
                 epoch: Epoch::Specific(current_epoch),
             };
 

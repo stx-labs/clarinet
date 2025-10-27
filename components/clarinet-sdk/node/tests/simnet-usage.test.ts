@@ -475,6 +475,40 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(contract3Interface.epoch).toBe("Epoch25");
     expect(contract3Interface.clarity_version).toBe("Clarity1");
   });
+
+  it("can deploy contract with clarity_version in mineBlock", () => {
+    simnet.setEpoch("3.0");
+    const source = "(define-public (get-height) (ok burn-block-height))";
+
+    const [deployRes] = simnet.mineBlock([
+      tx.deployContract("oktrue", source, { clarityVersion: 3 }, simnet.deployer),
+    ]);
+
+    expect(deployRes.result).toStrictEqual(Cl.bool(true));
+
+    const contractInterface = simnet.getContractsInterfaces().get(`${simnet.deployer}.oktrue`)!;
+    expect(contractInterface.clarity_version).toBe("Clarity3");
+
+    const { result } = simnet.callPublicFn("oktrue", "get-height", [], address1);
+    expect(result.type).toBe(Cl.ok(Cl.uint(0)).type);
+  });
+
+  it("can deploy contract with null options in mineBlock", () => {
+    simnet.setEpoch("3.0");
+    const source = "(define-public (test) (ok true))";
+
+    const [deployRes] = simnet.mineBlock([
+      tx.deployContract("test-null", source, null, simnet.deployer),
+    ]);
+
+    expect(deployRes.result).toStrictEqual(Cl.bool(true));
+
+    const contractInterface = simnet.getContractsInterfaces().get(`${simnet.deployer}.test-null`)!;
+    expect(contractInterface).toBeDefined();
+
+    const { result } = simnet.callPublicFn("test-null", "test", [], address1);
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  });
 });
 
 describe("simnet can transfer stx", () => {
