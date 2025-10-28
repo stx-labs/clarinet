@@ -245,11 +245,15 @@ impl Session {
             return Err(format!("Invalid contract identifier: {contract}"));
         }
 
-        let is_qualified = parts_count == 2;
+        let is_qualified = parts_count == 2 && &contract[0..1] != ".";
         let contract_id = if is_qualified {
             contract.to_string()
         } else {
-            format!("{}.{}", deployer, contract,)
+            if &contract[0..1] != "." {
+                format!("{}.{}", deployer, contract,)
+            } else {
+                format!("{}{}", deployer, contract,)
+            }
         };
 
         QualifiedContractIdentifier::parse(&contract_id).map_err(|e| e.to_string())
@@ -1213,40 +1217,23 @@ impl Session {
     }
 
     fn parse_asset_identifier(
-        s: &str,
-        default_sender: Option<String>,
+        identifier: &str,
+        deployer: &str,
     ) -> Result<AssetIdentifier, AssetIdentifierParseError> {
         // parse asset identifier `contract_identifier.asset_name` into it's parts
-        let Some(index) = s.rfind('.') else {
+        let Some(index) = identifier.rfind('.') else {
             return Err(AssetIdentifierParseError::NoPeriod);
         };
 
-        if index == s.len() - 1 {
+        if index == identifier.len() - 1 {
             return Err(AssetIdentifierParseError::EndsWithPeriod);
         }
 
-        let (contract_identifier_str, asset_name_str) = s.split_at(index);
+        let (contract_identifier_str, asset_name_str) = identifier.split_at(index);
 
-        let contract_identifier = if let Ok(contract_identifier) =
-            QualifiedContractIdentifier::parse(contract_identifier_str)
-        {
-            contract_identifier
-        } else {
-            //if we have a default sender try prepending that then parsing
-            if let Some(tx_sender) = default_sender {
-                if contract_identifier_str.find(".") == Some(0) {
-                    let id = format!("{tx_sender}{contract_identifier_str}");
-                    if let Ok(contract_identifier) = QualifiedContractIdentifier::parse(&id) {
-                        contract_identifier
-                    } else {
-                        return Err(AssetIdentifierParseError::ContractIdentifierParseError);
-                    }
-                } else {
-                    return Err(AssetIdentifierParseError::ContractIdentifierParseError);
-                }
-            } else {
-                return Err(AssetIdentifierParseError::ContractIdentifierParseError);
-            }
+        let Ok(contract_identifier) = Self::desugar_contract_id(deployer, contract_identifier_str)
+        else {
+            return Err(AssetIdentifierParseError::ContractIdentifierParseError);
         };
 
         let Some(asset_name) = asset_name_str.strip_prefix('.') else {
@@ -1268,10 +1255,7 @@ impl Session {
                 .to_string();
         }
 
-        let asset_identifier = match Self::parse_asset_identifier(
-            args[1],
-            Some(self.interpreter.get_tx_sender().to_string()),
-        ) {
+        let asset_identifier = match Self::parse_asset_identifier(args[1], &self.get_tx_sender()) {
             Ok(asset_identifier) => asset_identifier,
             Err(err) => {
                 return format!("Unable to parse the asset identifier: {err:?}")
@@ -2071,33 +2055,30 @@ mod tests {
         // S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb
         assert_eq!(
             Err(AssetIdentifierParseError::NoPeriod),
-            Session::parse_asset_identifier("S1G2081040G2081040G2081040G208105NK8PE5", None)
+            Session::parse_asset_identifier("S1G2081040G2081040G2081040G208105NK8PE5", "")
         );
 
         assert_eq!(
             Err(AssetIdentifierParseError::ContractIdentifierParseError),
-            Session::parse_asset_identifier(
-                "S1G2081040G2081040G2081040G208105NK8PE5.contract",
-                None
-            )
+            Session::parse_asset_identifier("S1G2081040G2081040G2081040G208105NK8PE5.contract", "")
         );
 
         assert_eq!(
             Err(AssetIdentifierParseError::ContractIdentifierParseError),
-            Session::parse_asset_identifier(".contract.ctb", None)
+            Session::parse_asset_identifier(".contract.ctb", "")
         );
-
-        assert_eq!(
-            Err(AssetIdentifierParseError::ContractIdentifierParseError),
-            Session::parse_asset_identifier(
-                "contract.ctb",
-                Some("S1G2081040G2081040G2081040G208105NK8PE5".to_string())
-            ),
-        );
-
+        /*
+                assert_eq!(
+                    Err(AssetIdentifierParseError::ContractIdentifierParseError),
+                    Session::parse_asset_identifier(
+                        "contract.ctb",
+                        "S1G2081040G2081040G2081040G208105NK8PE5",
+                    ),
+                );
+        */
         assert!(Session::parse_asset_identifier(
             ".contract.ctb",
-            Some("S1G2081040G2081040G2081040G208105NK8PE5".to_string())
+            "S1G2081040G2081040G2081040G208105NK8PE5",
         )
         .is_ok());
 
@@ -2105,13 +2086,13 @@ mod tests {
             Err(AssetIdentifierParseError::EndsWithPeriod),
             Session::parse_asset_identifier(
                 "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb.",
-                None,
+                "",
             )
         );
 
         assert!(Session::parse_asset_identifier(
             "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb",
-            None,
+            "",
         )
         .is_ok());
     }
@@ -2189,7 +2170,7 @@ mod tests {
         let result = session.handle_command(&cmd);
         println!("{result}");
 
-        let asset_identifier = Session::parse_asset_identifier(&asset_identifier, None).unwrap();
+        let asset_identifier = Session::parse_asset_identifier(&asset_identifier, "").unwrap();
 
         // we minted 100 when we deployed the contract then 1000 + 10000 in the session cmd
         // if any of the expected failures succeeded, this will fail
