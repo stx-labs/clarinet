@@ -11,7 +11,7 @@ use clarity::vm::{
     ClarityVersion, CostSynthesis, EvalHook, EvaluationResult, ExecutionResult, ParsedContract,
     SymbolicExpression,
 };
-use clarity_types::types::{PrincipalData, QualifiedContractIdentifier};
+use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier};
 use clarity_types::Value;
 use colored::Colorize;
 use comfy_table::Table;
@@ -41,6 +41,14 @@ pub struct CostsReport {
     pub method: String,
     pub args: Vec<String>,
     pub cost_result: CostSynthesis,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AssetIdentifierParseError {
+    NoPeriod,
+    EndsWithPeriod,
+    ContractIdentifierParseError,
+    NoPrefixPeriod,
 }
 
 fn set_up_accounts(accounts: &[Account], interpreter: &mut ClarityInterpreter) {
@@ -201,6 +209,7 @@ impl Session {
             cmd if cmd.starts_with("::toggle_timings") => self.toggle_timings(),
 
             cmd if cmd.starts_with("::mint_stx") => self.mint_stx(cmd),
+            cmd if cmd.starts_with("::mint_ft") => self.mint_ft(cmd),
             cmd if cmd.starts_with("::set_tx_sender") => self.parse_and_set_tx_sender(cmd),
             cmd if cmd.starts_with("::get_assets_maps") => {
                 self.get_accounts().unwrap_or("No account found".into())
@@ -228,7 +237,7 @@ impl Session {
     }
 
     pub fn desugar_contract_id(
-        deployer: &str,
+        default_deployer: &str,
         contract: &str,
     ) -> Result<QualifiedContractIdentifier, String> {
         let parts_count = contract.split('.').count();
@@ -236,11 +245,13 @@ impl Session {
             return Err(format!("Invalid contract identifier: {contract}"));
         }
 
-        let is_qualified = parts_count == 2;
+        let is_qualified = parts_count == 2 && &contract[0..1] != ".";
         let contract_id = if is_qualified {
             contract.to_string()
+        } else if &contract[0..1] != "." {
+            format!("{}.{}", default_deployer, contract,)
         } else {
-            format!("{}.{}", deployer, contract,)
+            format!("{}{}", default_deployer, contract,)
         };
 
         QualifiedContractIdentifier::parse(&contract_id).map_err(|e| e.to_string())
@@ -765,6 +776,10 @@ impl Session {
         ));
         output.push(format!(
             "{}",
+            "::mint_ft <asset identifier> <principal> <amount>\t\tMint FT balance for a given asset (CONTRACT_IDENTIFIER.ASSET_NAME) and principal".yellow()
+        ));
+        output.push(format!(
+            "{}",
             "::set_tx_sender <principal>\t\tSet tx-sender variable to principal".yellow()
         ));
         output.push(format!(
@@ -1199,6 +1214,72 @@ impl Session {
         }
     }
 
+    fn parse_asset_identifier(
+        default_deployer: &str,
+        identifier: &str,
+    ) -> Result<AssetIdentifier, AssetIdentifierParseError> {
+        // parse asset identifier `contract_identifier.asset_name` into it's parts
+        let Some(index) = identifier.rfind('.') else {
+            return Err(AssetIdentifierParseError::NoPeriod);
+        };
+
+        if index == identifier.len() - 1 {
+            return Err(AssetIdentifierParseError::EndsWithPeriod);
+        }
+
+        let (contract_identifier_str, asset_name_str) = identifier.split_at(index);
+
+        let Ok(contract_identifier) =
+            Self::desugar_contract_id(default_deployer, contract_identifier_str)
+        else {
+            return Err(AssetIdentifierParseError::ContractIdentifierParseError);
+        };
+
+        let Some(asset_name) = asset_name_str.strip_prefix('.') else {
+            return Err(AssetIdentifierParseError::NoPrefixPeriod);
+        };
+
+        Ok(AssetIdentifier {
+            contract_identifier,
+            asset_name: asset_name.into(),
+        })
+    }
+
+    fn mint_ft(&mut self, command: &str) -> String {
+        let args: Vec<_> = command.split(' ').collect();
+
+        if args.len() != 4 {
+            return "Usage: ::mint_ft <asset identifier> <recipient address> <amount>"
+                .red()
+                .to_string();
+        }
+
+        let asset_identifier = match Self::parse_asset_identifier(&self.get_tx_sender(), args[1]) {
+            Ok(asset_identifier) => asset_identifier,
+            Err(err) => {
+                return format!("Unable to parse the asset identifier: {err:?}")
+                    .red()
+                    .to_string()
+            }
+        };
+
+        let Ok(recipient) = PrincipalData::parse(args[2]) else {
+            return "Unable to parse the recipient address".red().to_string();
+        };
+
+        let Ok(amount) = args[3].parse::<u64>() else {
+            return "Unable to parse the amount".red().to_string();
+        };
+
+        match self
+            .interpreter
+            .mint_ft_balance(&asset_identifier, &recipient, amount)
+        {
+            Ok(msg) => msg.green().to_string(),
+            Err(err) => err.red().to_string(),
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn display_functions(&self) -> String {
         use crate::repl::docs::CLARITY_STD_INDEX;
@@ -1299,6 +1380,7 @@ fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
 mod tests {
     use clarity::util::hash::hex_bytes;
     use clarity_types::types::TupleData;
+    use indoc::formatdoc;
 
     use super::*;
     use crate::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
@@ -1965,5 +2047,126 @@ mod tests {
                 session.get_tx_sender()
             )
         );
+    }
+
+    #[test]
+    fn test_parse_asset_identifier() {
+        // S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb
+        assert_eq!(
+            Err(AssetIdentifierParseError::NoPeriod),
+            Session::parse_asset_identifier("", "S1G2081040G2081040G2081040G208105NK8PE5")
+        );
+
+        assert_eq!(
+            Err(AssetIdentifierParseError::ContractIdentifierParseError),
+            Session::parse_asset_identifier("", "S1G2081040G2081040G2081040G208105NK8PE5.contract")
+        );
+
+        assert_eq!(
+            Err(AssetIdentifierParseError::ContractIdentifierParseError),
+            Session::parse_asset_identifier("", ".contract.ctb")
+        );
+        assert!(Session::parse_asset_identifier(
+            "S1G2081040G2081040G2081040G208105NK8PE5",
+            ".contract.ctb",
+        )
+        .is_ok());
+
+        assert_eq!(
+            Err(AssetIdentifierParseError::EndsWithPeriod),
+            Session::parse_asset_identifier(
+                "",
+                "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb.",
+            )
+        );
+
+        assert!(Session::parse_asset_identifier(
+            "",
+            "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb",
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_mint_ft() {
+        let settings = SessionSettings::default();
+        let mut session = Session::new(settings);
+        session.update_epoch(DEFAULT_EPOCH);
+
+        let token_name = "ctb";
+        let src = formatdoc!(
+            r#"
+            (define-fungible-token {token_name})
+            (define-private (test-mint)
+                (ft-mint? ctb u100 tx-sender)
+            )
+            (test-mint)"#
+        );
+        let contract = ClarityContractBuilder::default().code_source(src).build();
+        let deploy_result = session.deploy_contract(&contract, false, None);
+        assert!(deploy_result.is_ok());
+        let ExecutionResult { result, .. } = deploy_result.unwrap();
+
+        let contract_identifier_str =
+            if let EvaluationResult::Contract(contract_evaluation_result) = result {
+                contract_evaluation_result
+                    .contract
+                    .contract_identifier
+                    .clone()
+            } else {
+                panic!("didn't get EvaluationResult::Contract");
+            };
+
+        let contract_identifier = QualifiedContractIdentifier::parse(&contract_identifier_str)
+            .expect("failed to parse QualifiedContractIdentifier from {contract_identifier_str}");
+
+        let asset_identifier = format!("{contract_identifier_str}.{token_name}");
+
+        let recipient = contract_identifier.issuer.to_string();
+
+        // more than 4 tokens
+        let cmd = format!("::mint_ft {asset_identifier} {recipient} 1000 foo");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        // unable to parse asset identifier
+        let cmd = format!("::mint_ft ._-{asset_identifier} {recipient} 1000");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        // unable to parse recipient address
+        let cmd = format!("::mint_ft {asset_identifier} {recipient}. 1000");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        // unable to parse recipient address
+        let cmd = format!("::mint_ft {asset_identifier} {recipient}XXX 1000");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        // unable to parse amount
+        let cmd = format!("::mint_ft {asset_identifier} {recipient} -1");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        let cmd = format!("::mint_ft {asset_identifier} {recipient} 1000");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        // we should be able to skip the deployer part of the contract identifier
+        let index = asset_identifier.find('.').unwrap();
+        let (_, short_asset_identifier) = asset_identifier.split_at(index);
+        let cmd = format!("::mint_ft {short_asset_identifier} {recipient} 10000");
+        let result = session.handle_command(&cmd);
+        println!("{result}");
+
+        let asset_identifier = Session::parse_asset_identifier("", &asset_identifier).unwrap();
+
+        // we minted 100 when we deployed the contract then 1000 + 10000 in the session cmd
+        // if any of the expected failures succeeded, this will fail
+        let balance = session
+            .interpreter
+            .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared());
+        assert_eq!(balance, 11100);
     }
 }
