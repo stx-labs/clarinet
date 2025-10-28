@@ -1229,7 +1229,8 @@ impl Session {
 
         let (contract_identifier_str, asset_name_str) = identifier.split_at(index);
 
-        let Ok(contract_identifier) = Self::desugar_contract_id(deployer, contract_identifier_str)
+        let Ok(contract_identifier) =
+            Self::desugar_contract_id(default_deployer, contract_identifier_str)
         else {
             return Err(AssetIdentifierParseError::ContractIdentifierParseError);
         };
