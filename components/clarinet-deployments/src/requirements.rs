@@ -61,32 +61,22 @@ pub async fn retrieve_contract(
     let is_mainnet = StacksAddress::from_string(&contract_deployer)
         .unwrap()
         .is_mainnet();
-    let stacks_node_addr = if is_mainnet {
-        "https://api.hiro.so".to_string()
-    } else {
-        "https://api.testnet.hiro.so".to_string()
-    };
 
-    let request_url = format!(
-        "{stacks_node_addr}/v2/contracts/source/{contract_deployer}/{contract_name}?proof=0"
-    );
+    let contract = fetch_contract(is_mainnet, &contract_deployer, &contract_name).await?;
 
-    let contract = fetch_contract(request_url).await?;
-    let epoch = epoch_for_height(is_mainnet, contract.publish_height);
+    let epoch = epoch_for_height(is_mainnet, contract.block_height);
     let clarity_version = match contract.clarity_version {
         Some(1) => ClarityVersion::Clarity1,
         Some(2) => ClarityVersion::Clarity2,
         Some(3) => ClarityVersion::Clarity3,
         Some(4) => ClarityVersion::Clarity4,
-        Some(_) => {
-            return Err("unable to parse clarity_version (can either be '1' or '2'".to_string())
-        }
+        Some(v) => return Err(format!("Unsupported clarity_version: {v}")),
         None => ClarityVersion::default_for_epoch(epoch),
     };
 
     match file_accessor {
         None => {
-            contract_location.write_content(contract.source.as_bytes())?;
+            contract_location.write_content(contract.source_code.as_bytes())?;
             metadata_location.write_content(
                 serde_json::to_string_pretty(&ContractMetadata {
                     epoch,
@@ -98,7 +88,10 @@ pub async fn retrieve_contract(
         }
         Some(file_accessor) => {
             file_accessor
-                .write_file(contract_location.to_string(), contract.source.as_bytes())
+                .write_file(
+                    contract_location.to_string(),
+                    contract.source_code.as_bytes(),
+                )
                 .await?;
             file_accessor
                 .write_file(
@@ -114,31 +107,41 @@ pub async fn retrieve_contract(
         }
     };
 
-    Ok((contract.source, epoch, clarity_version, contract_location))
+    Ok((
+        contract.source_code,
+        epoch,
+        clarity_version,
+        contract_location,
+    ))
 }
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug, Default, Clone)]
 struct Contract {
-    source: String,
-    publish_height: u32,
+    source_code: String,
+    block_height: u32,
     clarity_version: Option<u8>,
 }
 
-async fn fetch_contract(request_url: String) -> Result<Contract, String> {
-    let response = reqwest::get(&request_url)
+async fn fetch_contract(is_mainnet: bool, deployer: &str, name: &str) -> Result<Contract, String> {
+    let base_url = if is_mainnet {
+        "https://api.hiro.so"
+    } else {
+        "https://api.testnet.hiro.so"
+    };
+
+    let url = format!("{base_url}/extended/v1/contract/{deployer}.{name}");
+    let response = reqwest::get(&url)
         .await
-        .map_err(|e| format!("Unable to retrieve contract {request_url}: {e}"))?;
+        .map_err(|e| format!("Unable to retrieve contract {url}: {e}"))?;
 
     let status = response.status();
     if !status.is_success() {
-        return Err(format!(
-            "Unable to retrieve contract {request_url}: {status}"
-        ));
+        return Err(format!("Unable to retrieve contract {url}: {status}"));
     }
 
     response
         .json()
         .await
-        .map_err(|e| format!("Unable to parse contract json data {request_url}: {e}"))
+        .map_err(|e| format!("Unable to parse contract json data {url}: {e}"))
 }
