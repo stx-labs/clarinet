@@ -237,7 +237,7 @@ impl Session {
     }
 
     pub fn desugar_contract_id(
-        deployer: &str,
+        default_deployer: &str,
         contract: &str,
     ) -> Result<QualifiedContractIdentifier, String> {
         let parts_count = contract.split('.').count();
@@ -249,9 +249,9 @@ impl Session {
         let contract_id = if is_qualified {
             contract.to_string()
         } else if &contract[0..1] != "." {
-            format!("{}.{}", deployer, contract,)
+            format!("{}.{}", default_deployer, contract,)
         } else {
-            format!("{}{}", deployer, contract,)
+            format!("{}{}", default_deployer, contract,)
         };
 
         QualifiedContractIdentifier::parse(&contract_id).map_err(|e| e.to_string())
@@ -1215,7 +1215,7 @@ impl Session {
     }
 
     fn parse_asset_identifier(
-        deployer: &str,
+        default_deployer: &str,
         identifier: &str,
     ) -> Result<AssetIdentifier, AssetIdentifierParseError> {
         // parse asset identifier `contract_identifier.asset_name` into it's parts
