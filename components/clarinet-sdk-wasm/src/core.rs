@@ -1144,7 +1144,12 @@ impl SDK {
         let session = self.get_session_mut();
 
         let default_deployer = session.get_tx_sender();
-        let asset_identifier = Session::parse_asset_identifier(&default_deployer, &token).map_err(|e| format!("Expected asset identifier format 'contract_id.asset_name', got '{token}': {err}"))?;
+        let asset_identifier =
+            Session::parse_asset_identifier(&default_deployer, &token).map_err(|e| {
+                format!(
+                    "Expected asset identifier format 'contract_id.asset_name', got '{token}': {e}"
+                )
+            })?;
 
         session.interpreter.mint_ft_balance(
             &asset_identifier,
