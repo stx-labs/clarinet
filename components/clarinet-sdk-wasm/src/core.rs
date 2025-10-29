@@ -1144,10 +1144,7 @@ impl SDK {
         let session = self.get_session_mut();
 
         let default_deployer = session.get_tx_sender();
-        let asset_identifier = match Session::parse_asset_identifier(&default_deployer, &token) {
-            Ok(asset_identifier) => asset_identifier,
-            Err(err) => return Err(format!("Invalid asset identifier '{token}': {err}")),
-        };
+        let asset_identifier = Session::parse_asset_identifier(&default_deployer, &token).map_err(|e| format!("Expected asset identifier format 'contract_id.asset_name', got '{token}': {err}"))?;
 
         session.interpreter.mint_ft_balance(
             &asset_identifier,
