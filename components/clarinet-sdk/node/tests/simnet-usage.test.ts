@@ -577,9 +577,9 @@ describe("the simnet can execute commands", () => {
     expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
     const result = simnet.executeCommand(
-      `::mint_ft ${deployerAddr}.peppermint.pmnt ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 1000`,
+      `::mint_ft ${deployerAddr}.peppermint.pmnt ${deployerAddr} 1000`,
     );
-    expect(result).toBe("→ ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM: 1100 pmnt");
+    expect(result).toBe(`→ ${deployerAddr}: 1100 pmnt`);
   })
 
   it("can get_assets_maps", () => {
