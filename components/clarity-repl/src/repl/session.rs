@@ -6,6 +6,8 @@ use std::num::ParseIntError;
 use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
+use clarity::vm::costs::cost_functions::ClarityCostFunction;
+use clarity::vm::database::ClarityDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::{
     ClarityVersion, CostSynthesis, EvalHook, EvaluationResult, ExecutionResult, ParsedContract,
@@ -15,6 +17,7 @@ use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIden
 use clarity_types::Value;
 use colored::Colorize;
 use comfy_table::Table;
+use serde::Serialize;
 
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
@@ -25,7 +28,10 @@ use super::{
     SessionSettings,
 };
 use crate::analysis::coverage::CoverageHook;
-use crate::repl::boot;
+use crate::repl::boot::{
+    self, get_boot_contract_epoch_and_clarity_version, BOOT_MAINNET_PRINCIPAL,
+    BOOT_TESTNET_PRINCIPAL,
+};
 use crate::repl::clarity_values::value_to_string;
 use crate::repl::hooks::tracer::TracerHook;
 use crate::repl::settings::Account;
@@ -88,7 +94,120 @@ fn deploy_boot_contracts(
         }
         boot_contracts.insert(contract_id, result);
     }
+
+    // If a costs-4 override is present, also deploy a dummy contract with a different name
+    // so the cost tracker can reference it
+    //
+    // Note: We have to basically trick the cost tracker into using custom costs contracts instead of referencing compiled cost functions in clarity vm
+    if let Some(custom_costs4_path) = settings.override_boot_contracts_source.get("costs-4") {
+        deploy_custom_costs4_dummy_contract(interpreter, &mut boot_contracts, custom_costs4_path);
+    }
     boot_contracts
+}
+
+fn deploy_custom_costs4_dummy_contract(
+    interpreter: &mut ClarityInterpreter,
+    boot_contracts: &mut ExecutionResultMap,
+    custom_costs4_path: &str,
+) {
+    let is_mainnet = interpreter.repl_settings.remote_data.use_mainnet_wallets;
+
+    // Try reading the custom source from disk
+    if let Ok(custom_source) = std::fs::read_to_string(custom_costs4_path) {
+        let (epoch, clarity_version) = get_boot_contract_epoch_and_clarity_version("costs-4");
+        let deployer = if is_mainnet {
+            BOOT_MAINNET_PRINCIPAL.to_address()
+        } else {
+            BOOT_TESTNET_PRINCIPAL.to_address()
+        };
+
+        let dummy = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(custom_source),
+            deployer: ContractDeployer::Address(deployer),
+            name: "custom-costs-4".to_string(),
+            epoch: Epoch::Specific(epoch),
+            clarity_version,
+        };
+
+        let (dummy_ast, _, _) = interpreter.build_ast(&dummy);
+        let result = interpreter.run(&dummy, Some(&dummy_ast), false, None);
+        if let Err(errs) = &result {
+            for e in errs {
+                ueprint!(
+                    "Error deploying dummy costs contract custom-costs-4: {}",
+                    e.message
+                );
+            }
+        }
+        let dummy_id = dummy.expect_resolved_contract_identifier(None);
+        let target_contract_id = dummy_id.clone();
+        boot_contracts.insert(dummy_id, result);
+
+        // Preload cost-voting state summary to map all cost functions to the dummycontract
+        {
+            #[derive(Serialize)]
+            struct RefOut<'a> {
+                contract_id: &'a QualifiedContractIdentifier,
+                function_name: String,
+            }
+            #[derive(Serialize)]
+            struct SummaryOut<'a> {
+                contract_call_circuits: Vec<((QualifiedContractIdentifier, String), RefOut<'a>)>,
+                cost_function_references: Vec<(ClarityCostFunction, RefOut<'a>)>,
+            }
+
+            let refs: Vec<(ClarityCostFunction, RefOut)> = ClarityCostFunction::ALL
+                .iter()
+                .map(|f| {
+                    (
+                        f.clone(),
+                        RefOut {
+                            contract_id: &target_contract_id,
+                            function_name: f.get_name(),
+                        },
+                    )
+                })
+                .collect();
+
+            let summary = SummaryOut {
+                contract_call_circuits: vec![],
+                cost_function_references: refs,
+            };
+
+            if let Ok(serialized) = serde_json::to_string(&summary) {
+                let current_epoch = interpreter.datastore.get_current_epoch();
+                let current_height = interpreter.get_block_height() as u128;
+                let mut conn = ClarityDatabase::new(
+                    &mut interpreter.clarity_datastore,
+                    &interpreter.datastore,
+                    &interpreter.datastore,
+                );
+                conn.begin();
+                let _ = conn.set_clarity_epoch_version(current_epoch);
+                let _ = conn.put_value(
+                    "vm-costs::last-processed-at-height",
+                    Value::UInt(current_height),
+                    &current_epoch,
+                );
+                let _ = conn.put_value(
+                    "vm-costs::last_processed_count",
+                    Value::UInt(0),
+                    &current_epoch,
+                );
+
+                let boot_addr = if is_mainnet {
+                    crate::repl::boot::BOOT_MAINNET_ADDRESS
+                } else {
+                    crate::repl::boot::BOOT_TESTNET_ADDRESS
+                };
+                let cost_voting_id =
+                    QualifiedContractIdentifier::parse(&format!("{}.cost-voting", boot_addr))
+                        .expect("failed to make cost-voting id");
+                let _ = conn.set_metadata(&cost_voting_id, "::state_summary", &serialized);
+                let _ = conn.commit();
+            }
+        }
+    }
 }
 
 #[derive(Clone)]

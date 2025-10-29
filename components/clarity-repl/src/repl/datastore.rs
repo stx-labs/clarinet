@@ -665,10 +665,13 @@ impl ClarityBackingStore for ClarityDatastore {
     fn get_metadata_manual(
         &mut self,
         _at_height: u32,
-        _contract: &QualifiedContractIdentifier,
-        _key: &str,
+        contract: &QualifiedContractIdentifier,
+        key: &str,
     ) -> Result<Option<String>> {
-        panic!("Datastore cannot get_metadata_manual")
+        Ok(self
+            .metadata
+            .get(&(contract.to_string(), key.to_string()))
+            .cloned())
     }
 
     fn get_cc_special_cases_handler(&self) -> Option<clarity::vm::database::SpecialCaseHandler> {

@@ -216,6 +216,10 @@ pub fn get_boot_contracts_data_with_overrides(
             continue;
         }
 
+        eprintln!(
+            "Loading custom boot contract override '{}' from '{}'",
+            contract_name, file_path
+        );
         let custom_source = match load_custom_boot_contract(file_path) {
             Ok(source) => source,
             Err(e) => {
@@ -223,6 +227,8 @@ pub fn get_boot_contracts_data_with_overrides(
                 continue;
             }
         };
+
+        eprintln!("Loaded custom boot contract '{}'", contract_name,);
 
         // Use standard epoch/version mapping for known boot contracts
         let (epoch, clarity_version) =

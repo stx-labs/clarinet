@@ -355,7 +355,7 @@ impl ClarityInterpreter {
             .map_err(|e| e.to_string())?;
         conn.commit().map_err(|e| e.to_string())?;
         let cost_tracker = if cost_track {
-            LimitedCostTracker::new(
+            LimitedCostTracker::new_mid_block(
                 is_mainnet,
                 chain_id,
                 BLOCK_LIMIT_MAINNET.clone(),
