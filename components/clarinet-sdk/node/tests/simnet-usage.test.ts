@@ -570,6 +570,18 @@ describe("the simnet can execute commands", () => {
     expect(result).toBe("→ ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM: 100000000001000 µSTX");
   });
 
+  it("can mint_ft", () => {
+    simnet.setEpoch("3.0");
+    const source = "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
+    const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
+    expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+
+    const result = simnet.executeCommand(
+      `::mint_ft ${deployerAddr}.peppermint.pmnt ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 1000`,
+    );
+    expect(result).toBe("→ ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM: 1100 pmnt");
+  })
+
   it("can get_assets_maps", () => {
     simnet.executeCommand("::mint_stx ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 1000");
     let result = simnet.executeCommand("::get_assets_maps");
