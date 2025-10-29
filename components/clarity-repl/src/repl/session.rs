@@ -1225,8 +1225,7 @@ impl Session {
         }
     }
 
-
-    fn parse_asset_identifier(
+    pub fn parse_asset_identifier(
         default_deployer: &str,
         identifier: &str,
     ) -> Result<AssetIdentifier, AssetIdentifierParseError> {
