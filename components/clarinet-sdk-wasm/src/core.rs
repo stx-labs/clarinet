@@ -1133,8 +1133,8 @@ impl SDK {
     #[wasm_bindgen(js_name=mintFT)]
     pub fn mint_ft(
         &mut self,
-        recipient: String,
         token: String,
+        recipient: String,
         amount: u64,
     ) -> Result<String, String> {
         if PrincipalData::parse(&recipient).is_err() {

@@ -522,6 +522,29 @@ describe("simnet can transfer stx", () => {
   });
 });
 
+describe("simnet can mint stx", () => {
+  it("can mint stx", () => {
+    simnet.mintSTX(address1, BigInt(1000));
+    const stxBalances = simnet.getAssetsMap().get("STX");
+    const stxAddress1 = stxBalances?.get(address1);
+    expect(stxAddress1).toBe(100000000001000n);
+  });
+});
+
+describe("simnet can mint ft", () => {
+  it("can mint ft", () => {
+    simnet.setEpoch("3.0");
+    const source = "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
+    const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
+    expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+
+    simnet.mintFT(".peppermint.pmnt", address1, BigInt(1000));
+    const stxBalances = simnet.getAssetsMap().get(".peppermint.pmnt");
+    const stxAddress1 = stxBalances?.get(address1);
+    expect(stxAddress1).toBe(1000n);
+  });
+});
+
 describe("prints logs", () => {
   it("can log events in successful function calls", () => {
     const consoleSpy = vi.spyOn(console, "log");
