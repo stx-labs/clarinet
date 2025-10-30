@@ -1373,6 +1373,7 @@ mod tests {
     fn and_tainted() {
         let mut settings = SessionSettings::default();
         settings.repl_settings.analysis.passes = vec![Pass::CheckChecker];
+        settings.repl_settings.analysis.disable_all_lints();
         let mut session = Session::new(settings);
         let snippet = "
 (define-public (and-tainted (amount uint))
@@ -1474,6 +1475,7 @@ mod tests {
     fn or_tainted() {
         let mut settings = SessionSettings::default();
         settings.repl_settings.analysis.passes = vec![Pass::CheckChecker];
+        settings.repl_settings.analysis.disable_all_lints();
         let mut session = Session::new(settings);
         let snippet = "
 (define-public (or-tainted (amount uint))
