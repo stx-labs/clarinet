@@ -27,6 +27,8 @@ pub static DEFAULT_EXPR: LazyLock<SymbolicExpression> =
     LazyLock::new(|| SymbolicExpression::atom(DEFAULT_NAME.clone()));
 
 pub trait ASTVisitor<'a> {
+    fn get_clarity_version(&self) -> &ClarityVersion;
+
     fn traverse_expr(&mut self, expr: &'a SymbolicExpression) -> bool {
         match &expr.expr {
             AtomValue(value) => self.visit_atom_value(expr, value),
@@ -161,7 +163,7 @@ pub trait ASTVisitor<'a> {
                     };
                 } else if let Some(native_function) = NativeFunctions::lookup_by_name_at_version(
                     function_name,
-                    &ClarityVersion::latest(), // FIXME(brice): this should probably be passed in
+                    self.get_clarity_version(),
                 ) {
                     use clarity::vm::functions::NativeFunctions::*;
                     rv = match native_function {
@@ -269,12 +271,15 @@ pub trait ASTVisitor<'a> {
                                 .unwrap_or(&DEFAULT_EXPR)
                                 .match_atom()
                                 .unwrap_or(&DEFAULT_NAME);
-                            let key = match_tuple(args.get(1).unwrap_or(&DEFAULT_EXPR))
-                                .unwrap_or_else(|| {
-                                    let mut tuple_map = HashMap::new();
-                                    tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
-                                    tuple_map
-                                });
+                            let key = match_tuple(
+                                self.get_clarity_version(),
+                                args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut tuple_map = HashMap::new();
+                                tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
+                                tuple_map
+                            });
                             self.traverse_map_get(expr, name, &key)
                         }
                         SetEntry => {
@@ -283,18 +288,24 @@ pub trait ASTVisitor<'a> {
                                 .unwrap_or(&DEFAULT_EXPR)
                                 .match_atom()
                                 .unwrap_or(&DEFAULT_NAME);
-                            let key = match_tuple(args.get(1).unwrap_or(&DEFAULT_EXPR))
-                                .unwrap_or_else(|| {
-                                    let mut tuple_map = HashMap::new();
-                                    tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
-                                    tuple_map
-                                });
-                            let value = match_tuple(args.get(2).unwrap_or(&DEFAULT_EXPR))
-                                .unwrap_or_else(|| {
-                                    let mut tuple_map = HashMap::new();
-                                    tuple_map.insert(None, args.get(2).unwrap_or(&DEFAULT_EXPR));
-                                    tuple_map
-                                });
+                            let key = match_tuple(
+                                self.get_clarity_version(),
+                                args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut tuple_map = HashMap::new();
+                                tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
+                                tuple_map
+                            });
+                            let value = match_tuple(
+                                self.get_clarity_version(),
+                                args.get(2).unwrap_or(&DEFAULT_EXPR),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut tuple_map = HashMap::new();
+                                tuple_map.insert(None, args.get(2).unwrap_or(&DEFAULT_EXPR));
+                                tuple_map
+                            });
                             self.traverse_map_set(expr, name, &key, &value)
                         }
                         InsertEntry => {
@@ -303,18 +314,24 @@ pub trait ASTVisitor<'a> {
                                 .unwrap_or(&DEFAULT_EXPR)
                                 .match_atom()
                                 .unwrap_or(&DEFAULT_NAME);
-                            let key = match_tuple(args.get(1).unwrap_or(&DEFAULT_EXPR))
-                                .unwrap_or_else(|| {
-                                    let mut tuple_map = HashMap::new();
-                                    tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
-                                    tuple_map
-                                });
-                            let value = match_tuple(args.get(2).unwrap_or(&DEFAULT_EXPR))
-                                .unwrap_or_else(|| {
-                                    let mut tuple_map = HashMap::new();
-                                    tuple_map.insert(None, args.get(2).unwrap_or(&DEFAULT_EXPR));
-                                    tuple_map
-                                });
+                            let key = match_tuple(
+                                self.get_clarity_version(),
+                                args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut tuple_map = HashMap::new();
+                                tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
+                                tuple_map
+                            });
+                            let value = match_tuple(
+                                self.get_clarity_version(),
+                                args.get(2).unwrap_or(&DEFAULT_EXPR),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut tuple_map = HashMap::new();
+                                tuple_map.insert(None, args.get(2).unwrap_or(&DEFAULT_EXPR));
+                                tuple_map
+                            });
                             self.traverse_map_insert(expr, name, &key, &value)
                         }
                         DeleteEntry => {
@@ -323,17 +340,21 @@ pub trait ASTVisitor<'a> {
                                 .unwrap_or(&DEFAULT_EXPR)
                                 .match_atom()
                                 .unwrap_or(&DEFAULT_NAME);
-                            let key = match_tuple(args.get(1).unwrap_or(&DEFAULT_EXPR))
-                                .unwrap_or_else(|| {
-                                    let mut tuple_map = HashMap::new();
-                                    tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
-                                    tuple_map
-                                });
+                            let key = match_tuple(
+                                self.get_clarity_version(),
+                                args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut tuple_map = HashMap::new();
+                                tuple_map.insert(None, args.get(1).unwrap_or(&DEFAULT_EXPR));
+                                tuple_map
+                            });
                             self.traverse_map_delete(expr, name, &key)
                         }
-                        TupleCons => {
-                            self.traverse_tuple(expr, &match_tuple(expr).unwrap_or_default())
-                        }
+                        TupleCons => self.traverse_tuple(
+                            expr,
+                            &match_tuple(self.get_clarity_version(), expr).unwrap_or_default(),
+                        ),
                         TupleGet => self.traverse_get(
                             expr,
                             args.get(0)
@@ -2594,16 +2615,15 @@ pub fn traverse<'a>(visitor: &mut impl ASTVisitor<'a>, exprs: &'a [SymbolicExpre
     exprs.iter().all(|expr| visitor.traverse_expr(expr))
 }
 
-fn match_tuple(
-    expr: &SymbolicExpression,
-) -> Option<HashMap<Option<&ClarityName>, &SymbolicExpression>> {
+fn match_tuple<'a>(
+    clarity_version: &ClarityVersion,
+    expr: &'a SymbolicExpression,
+) -> Option<HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>> {
     if let Some(list) = expr.match_list() {
         if let Some((function_name, args)) = list.split_first() {
             if let Some(function_name) = function_name.match_atom() {
-                if NativeFunctions::lookup_by_name_at_version(
-                    function_name,
-                    &clarity::vm::ClarityVersion::latest(),
-                ) == Some(NativeFunctions::TupleCons)
+                if NativeFunctions::lookup_by_name_at_version(function_name, clarity_version)
+                    == Some(NativeFunctions::TupleCons)
                 {
                     let mut tuple_map = HashMap::new();
                     for element in args {
