@@ -231,6 +231,9 @@ impl Session {
             cmd if cmd.starts_with("::set_epoch") => self.set_epoch(cmd),
             cmd if cmd.starts_with("::encode") => self.encode(cmd),
             cmd if cmd.starts_with("::decode") => self.decode(cmd),
+            cmd if cmd.starts_with("::get_constant") => self.get_constant(cmd),
+            cmd if cmd.starts_with("::get_data_var") => self.get_data_var(cmd),
+            cmd if cmd.starts_with("::get_map_val") => self.get_map_val(cmd),
 
             _ => "Invalid command. Try `::help`".yellow().to_string(),
         }
@@ -857,6 +860,18 @@ impl Session {
             "{}",
             "::decode <bytes>\t\t\tDecode a Clarity Value bytes representation".yellow()
         ));
+        output.push(format!(
+            "{}",
+            "::get_constant <contract> <constant>\tGet constant value from a contract".yellow()
+        ));
+        output.push(format!(
+            "{}",
+            "::get_data_var <contract> <var>\t\tGet data variable value from a contract".yellow()
+        ));
+        output.push(format!(
+            "{}",
+            "::get_map_val <contract> <map> <key>\tGet map value from a contract".yellow()
+        ));
 
         output.join("\n")
     }
@@ -1088,6 +1103,168 @@ impl Session {
         };
 
         format!("{}", value_to_string(&value).green())
+    }
+
+    pub fn get_constant(&mut self, cmd: &str) -> String {
+        let args: Vec<_> = cmd.split_whitespace().skip(1).collect();
+
+        if args.len() != 2 {
+            return format!("{}", "Usage: ::get_constant <contract> <constant>".red());
+        }
+
+        let contract_name = args[0];
+        let constant_name = args[1];
+
+        let default_deployer = self.settings.initial_deployer.as_ref()
+            .map(|account| account.address.clone())
+            .unwrap_or_else(|| "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".to_string());
+
+        let contract_id = match Self::desugar_contract_id(&default_deployer, contract_name) {
+            Ok(id) => id,
+            Err(e) => return format!("{} {}", "Invalid contract identifier:".red(), e),
+        };
+
+        let contract = match self.contracts.get(&contract_id) {
+            Some(contract) => contract,
+            None => return format!("{} {}", "Contract not found:".red(), contract_id),
+        };
+
+        // Search for constant in the contract's AST
+        for function_definition in &contract.ast.expressions {
+            if let Some(expr) = function_definition.match_list() {
+                if expr.len() >= 3 {
+                    if let Some(name_expr) = expr.get(1) {
+                        if let Some(name) = name_expr.match_atom() {
+                            if name.as_str() == constant_name && expr.len() >= 3 {
+                                let expr_str = format!("{}", expr[2]);
+                                return format!("{} {}\n{} {}\n{} {}",
+                                    "Contract:".yellow(),
+                                    contract_id.to_string().green(),
+                                    "Constant:".yellow(),
+                                    name.green(),
+                                    "Value:".yellow(),
+                                    expr_str.green()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        format!("{} {} {} {}",
+            "Constant:".red(),
+            constant_name.red(),
+            "not found in contract:".red(),
+            contract_id.to_string().red()
+        )
+    }
+
+    pub fn get_data_var(&mut self, cmd: &str) -> String {
+        let args: Vec<_> = cmd.split_whitespace().skip(1).collect();
+
+        if args.len() != 2 {
+            return format!("{}", "Usage: ::get_data_var <contract> <var>".red());
+        }
+
+        let contract_name = args[0];
+        let var_name = args[1];
+
+        let default_deployer = self.settings.initial_deployer.as_ref()
+            .map(|account| account.address.clone())
+            .unwrap_or_else(|| "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".to_string());
+
+        let contract_id = match Self::desugar_contract_id(&default_deployer, contract_name) {
+            Ok(id) => id,
+            Err(e) => return format!("{} {}", "Invalid contract identifier:".red(), e),
+        };
+
+        let call_expr = format!("(contract-call? '{}.{} var-get {})",
+            contract_id.name, contract_id.issuer, var_name);
+
+        match self.eval_with_hooks(call_expr, None, false) {
+            Ok(result) => {
+                match &result.result {
+                    EvaluationResult::Snippet(snippet_result) => {
+                        format!("{} {}\n{} {}\n{} {}",
+                            "Contract:".yellow(),
+                            contract_id.to_string().green(),
+                            "Data var:".yellow(),
+                            var_name.green(),
+                            "Value:".yellow(),
+                            value_to_string(&snippet_result.result).green()
+                        )
+                    }
+                    _ => format!("{} {} {} {}",
+                        "Unable to retrieve data var:".red(),
+                        var_name.red(),
+                        "from contract:".red(),
+                        contract_id.to_string().red()
+                    )
+                }
+            }
+            Err(diagnostics) => {
+                let error_msg = diagnostics.first()
+                    .map(|d| d.message.as_str())
+                    .unwrap_or("Unknown error");
+                format!("{} {}", error_msg.red(), contract_id.to_string().red())
+            }
+        }
+    }
+
+    pub fn get_map_val(&mut self, cmd: &str) -> String {
+        let args: Vec<_> = cmd.split_whitespace().skip(1).collect();
+
+        if args.len() < 3 {
+            return format!("{}", "Usage: ::get_map_val <contract> <map> <key>".red());
+        }
+
+        let contract_name = args[0];
+        let map_name = args[1];
+        let key_expr = args[2..].join(" ");
+
+        let default_deployer = self.settings.initial_deployer.as_ref()
+            .map(|account| account.address.clone())
+            .unwrap_or_else(|| "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".to_string());
+
+        let contract_id = match Self::desugar_contract_id(&default_deployer, contract_name) {
+            Ok(id) => id,
+            Err(e) => return format!("{} {}", "Invalid contract identifier:".red(), e),
+        };
+
+        let call_expr = format!("(contract-call? '{}.{} map-get {} {})",
+            contract_id.name, contract_id.issuer, map_name, key_expr);
+
+        match self.eval_with_hooks(call_expr, None, false) {
+            Ok(result) => {
+                match &result.result {
+                    EvaluationResult::Snippet(snippet_result) => {
+                        format!("{} {}\n{} {}\n{} {}\n{} {}",
+                            "Contract:".yellow(),
+                            contract_id.to_string().green(),
+                            "Map:".yellow(),
+                            map_name.green(),
+                            "Key:".yellow(),
+                            key_expr.green(),
+                            "Value:".yellow(),
+                            value_to_string(&snippet_result.result).green()
+                        )
+                    }
+                    _ => format!("{} {} {} {}",
+                        "Unable to retrieve map value:".red(),
+                        map_name.red(),
+                        "from contract:".red(),
+                        contract_id.to_string().red()
+                    )
+                }
+            }
+            Err(diagnostics) => {
+                let error_msg = diagnostics.first()
+                    .map(|d| d.message.as_str())
+                    .unwrap_or("Unknown error");
+                format!("{} {}", error_msg.red(), contract_id.to_string().red())
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
