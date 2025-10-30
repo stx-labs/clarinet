@@ -62,7 +62,7 @@ impl ActiveContractData {
                 clarity_version,
                 epoch,
                 issuer: issuer.clone(),
-                definitions: Some(get_definitions(&ast.expressions, issuer)),
+                definitions: Some(get_definitions(clarity_version, &ast.expressions, issuer)),
                 expressions: Some(ast.expressions),
                 diagnostic: None,
                 source,
@@ -109,7 +109,11 @@ impl ActiveContractData {
 
     pub fn update_definitions(&mut self) {
         if let Some(expressions) = &self.expressions {
-            self.definitions = Some(get_definitions(expressions, self.issuer.clone()));
+            self.definitions = Some(get_definitions(
+                self.clarity_version,
+                expressions,
+                self.issuer.clone(),
+            ));
         }
     }
 
@@ -309,8 +313,11 @@ impl EditorState {
             .unwrap_or_default();
 
         let expressions = active_contract.expressions.as_ref();
-        let active_contract_defined_data =
-            ContractDefinedData::new(expressions.unwrap_or(&vec![]), position);
+        let active_contract_defined_data = ContractDefinedData::new(
+            active_contract.clarity_version,
+            expressions.unwrap_or(&vec![]),
+            position,
+        );
         let should_wrap = match self.settings.completion_smart_parenthesis_wrap {
             true => check_if_should_wrap(&active_contract.source, position),
             false => true,
@@ -342,7 +349,7 @@ impl EditorState {
             return vec![];
         };
 
-        let ast_symbols = ASTSymbols::new();
+        let ast_symbols = ASTSymbols::new(active_contract.clarity_version);
         ast_symbols.get_symbols(expressions)
     }
 
@@ -362,7 +369,11 @@ impl EditorState {
         // Use holder variable to make sure temporary definitions live long enough
         let mut definitions_holder = None;
         let definitions = contract.definitions.as_ref().unwrap_or_else(|| {
-            definitions_holder.insert(get_definitions(expressions, contract.issuer.clone()))
+            definitions_holder.insert(get_definitions(
+                contract.clarity_version,
+                expressions,
+                contract.issuer.clone(),
+            ))
         });
 
         match definitions.get(&position_hash)? {

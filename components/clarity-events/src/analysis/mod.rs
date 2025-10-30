@@ -9,14 +9,15 @@ use clarity_repl::clarity::vm::types::{
     SequenceSubtype, StringSubtype, TypeSignature, Value,
 };
 use clarity_repl::clarity::vm::{ClarityName, SymbolicExpression};
-use clarity_repl::clarity::SymbolicExpressionType;
+use clarity_repl::clarity::{ClarityVersion, SymbolicExpressionType};
 use clarity_repl::repl::clarity_values::value_to_string;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
-#[derive(Default)]
-pub struct Settings {}
+pub struct Settings {
+    pub clarity_version: ClarityVersion,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StacksTransactionEvent {
@@ -600,6 +601,10 @@ pub fn serialize_type_signature(
 }
 
 impl ASTVisitor<'_> for EventCollector<'_, '_> {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.settings.clarity_version
+    }
+
     fn visit_define_public(
         &mut self,
         _expr: &SymbolicExpression,

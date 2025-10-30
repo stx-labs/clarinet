@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use clarity::vm::ClarityVersion;
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor};
 use clarity_repl::clarity::representations::Span;
 use clarity_repl::clarity::{ClarityName, SymbolicExpression, SymbolicExpressionType};
@@ -62,11 +63,13 @@ fn build_symbol(
 pub struct ASTSymbols {
     pub symbols: Vec<DocumentSymbol>,
     pub children_map: HashMap<u64, Vec<DocumentSymbol>>,
+    clarity_version: ClarityVersion,
 }
 
 impl ASTSymbols {
-    pub fn new() -> ASTSymbols {
+    pub fn new(clarity_version: ClarityVersion) -> ASTSymbols {
         Self {
+            clarity_version,
             symbols: Vec::new(),
             children_map: HashMap::new(),
         }
@@ -79,6 +82,10 @@ impl ASTSymbols {
 }
 
 impl<'a> ASTVisitor<'a> for ASTSymbols {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.clarity_version
+    }
+
     fn visit_impl_trait(
         &mut self,
         expr: &'a SymbolicExpression,
@@ -553,7 +560,7 @@ mod tests {
 
     fn get_symbols(source: &str) -> Vec<DocumentSymbol> {
         let expr = get_ast(source);
-        let ast_symbols = ASTSymbols::new();
+        let ast_symbols = ASTSymbols::new(ClarityVersion::Clarity1);
         ast_symbols.get_symbols(&expr)
     }
 

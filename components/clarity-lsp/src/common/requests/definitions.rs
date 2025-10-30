@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use clarity::vm::ClarityVersion;
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use clarity_repl::clarity::functions::define::DefineFunctions;
 use clarity_repl::clarity::vm::types::{
@@ -22,19 +23,23 @@ pub enum DefinitionLocation {
 // `global` holds all of the top-level user-defined keywords that are available in the global scope
 // `local` holds the locally user-defined keywords: function parameters, let and match bindings
 // when a user-defined keyword is used in the code, its position and definition location are stored in `tokens`
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Definitions {
     pub tokens: HashMap<(u32, u32), DefinitionLocation>,
+    clarity_version: ClarityVersion,
     global: HashMap<ClarityName, Range>,
     local: HashMap<u64, HashMap<ClarityName, Range>>,
     deployer: Option<StandardPrincipalData>,
 }
 
 impl Definitions {
-    pub fn new(deployer: Option<StandardPrincipalData>) -> Self {
+    pub fn new(clarity_version: ClarityVersion, deployer: Option<StandardPrincipalData>) -> Self {
         Self {
             deployer,
-            ..Default::default()
+            clarity_version,
+            tokens: HashMap::new(),
+            global: HashMap::new(),
+            local: HashMap::new(),
         }
     }
 
@@ -92,6 +97,10 @@ impl Definitions {
 }
 
 impl<'a> ASTVisitor<'a> for Definitions {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.clarity_version
+    }
+
     fn traverse_expr(&mut self, expr: &'a SymbolicExpression) -> bool {
         use clarity_repl::clarity::vm::representations::SymbolicExpressionType::*;
         match &expr.expr {
@@ -588,10 +597,11 @@ impl<'a> ASTVisitor<'a> for Definitions {
 }
 
 pub fn get_definitions(
+    clarity_verison: ClarityVersion,
     expressions: &[SymbolicExpression],
     issuer: Option<StandardPrincipalData>,
 ) -> HashMap<(u32, u32), DefinitionLocation> {
-    let mut definitions_visitor = Definitions::new(issuer);
+    let mut definitions_visitor = Definitions::new(clarity_verison, issuer);
     definitions_visitor.run(expressions);
     definitions_visitor.tokens
 }
@@ -677,7 +687,10 @@ mod definitions_visitor_tests {
 
     fn get_tokens(sources: &str) -> HashMap<(u32, u32), DefinitionLocation> {
         let ast = get_ast(sources);
-        let mut definitions_visitor = Definitions::new(Some(StandardPrincipalData::transient()));
+        let mut definitions_visitor = Definitions::new(
+            ClarityVersion::Clarity1,
+            Some(StandardPrincipalData::transient()),
+        );
         definitions_visitor.run(&ast);
         definitions_visitor.tokens
     }

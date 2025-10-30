@@ -67,7 +67,9 @@ pub fn main() {
                 let mut analysis_db = session.interpreter.clarity_datastore.as_analysis_db();
                 let cost_track = LimitedCostTracker::new_free();
                 let type_checker = TypeChecker::new(&mut analysis_db, cost_track, true);
-                let settings = Settings::default();
+                let settings = Settings {
+                    clarity_version: contract_analysis.clarity_version,
+                };
                 let mut event_collector = EventCollector::new(settings, type_checker);
                 let event_map = event_collector.run(&mut contract_analysis);
                 for (key, events) in event_map.iter() {

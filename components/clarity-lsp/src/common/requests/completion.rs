@@ -95,8 +95,9 @@ static VALID_FOLD_FUNCTIONS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
 static VALID_FOLD_FUNCTIONS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
     LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity4));
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ContractDefinedData {
+    clarity_version: ClarityVersion,
     position: Position,
     consts: Vec<(String, String)>,
     locals: Vec<(String, String)>,
@@ -108,10 +109,21 @@ pub struct ContractDefinedData {
 }
 
 impl ContractDefinedData {
-    pub fn new(expressions: &[SymbolicExpression], position: &Position) -> Self {
+    pub fn new(
+        clarity_version: ClarityVersion,
+        expressions: &[SymbolicExpression],
+        position: &Position,
+    ) -> Self {
         let mut defined_data = ContractDefinedData {
+            clarity_version,
             position: *position,
-            ..Default::default()
+            consts: vec![],
+            locals: vec![],
+            vars: vec![],
+            maps: vec![],
+            fts: vec![],
+            nfts: vec![],
+            functions_completion_items: vec![],
         };
         traverse(&mut defined_data, expressions);
         defined_data
@@ -208,6 +220,10 @@ impl ContractDefinedData {
 }
 
 impl<'a> ASTVisitor<'a> for ContractDefinedData {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.clarity_version
+    }
+
     fn visit_define_constant(
         &mut self,
         _expr: &'a SymbolicExpression,
@@ -817,15 +833,20 @@ mod get_contract_global_data_tests {
     use super::ContractDefinedData;
 
     fn get_defined_data(source: &str) -> ContractDefinedData {
+        let clarity_version = ClarityVersion::Clarity2;
         let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
-            ClarityVersion::Clarity2,
+            clarity_version,
             StacksEpochId::Epoch21,
         )
         .unwrap();
-        ContractDefinedData::new(&contract_ast.expressions, &Position::default())
+        ContractDefinedData::new(
+            clarity_version,
+            &contract_ast.expressions,
+            &Position::default(),
+        )
     }
 
     #[test]
@@ -865,15 +886,16 @@ mod get_contract_local_data_tests {
     use super::ContractDefinedData;
 
     fn get_defined_data(source: &str, position: &Position) -> ContractDefinedData {
+        let clarity_version = ClarityVersion::Clarity2;
         let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
-            ClarityVersion::Clarity2,
+            clarity_version,
             StacksEpochId::Epoch21,
         )
         .unwrap();
-        ContractDefinedData::new(&contract_ast.expressions, position)
+        ContractDefinedData::new(clarity_version, &contract_ast.expressions, position)
     }
 
     #[test]
@@ -919,15 +941,20 @@ mod populate_snippet_with_options_tests {
     use super::ContractDefinedData;
 
     fn get_defined_data(source: &str) -> ContractDefinedData {
+        let clarity_version = ClarityVersion::Clarity2;
         let contract_ast = build_ast(
             &QualifiedContractIdentifier::transient(),
             source,
             &mut (),
-            ClarityVersion::Clarity2,
+            clarity_version,
             StacksEpochId::Epoch21,
         )
         .unwrap();
-        ContractDefinedData::new(&contract_ast.expressions, &Position::default())
+        ContractDefinedData::new(
+            clarity_version,
+            &contract_ast.expressions,
+            &Position::default(),
+        )
     }
 
     #[test]
