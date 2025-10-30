@@ -12,7 +12,7 @@ use clarity_repl::clarity::functions::define::DefineFunctions;
 use clarity_repl::clarity::functions::NativeFunctions;
 use clarity_repl::clarity::variables::NativeVariables;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, SymbolicExpression};
-use clarity_repl::repl::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
+use clarity_repl::repl::DEFAULT_EPOCH;
 use clarity_types::types::TypeSignature;
 use lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
@@ -108,22 +108,6 @@ pub struct ContractDefinedData {
     pub functions_completion_items: Vec<CompletionItem>,
 }
 
-impl Default for ContractDefinedData {
-    fn default() -> Self {
-        Self {
-            clarity_version: DEFAULT_CLARITY_VERSION,
-            position: Position::default(),
-            consts: vec![],
-            locals: vec![],
-            vars: vec![],
-            maps: vec![],
-            fts: vec![],
-            nfts: vec![],
-            functions_completion_items: vec![],
-        }
-    }
-}
-
 impl ContractDefinedData {
     pub fn new(
         clarity_version: ClarityVersion,
@@ -133,7 +117,13 @@ impl ContractDefinedData {
         let mut defined_data = ContractDefinedData {
             clarity_version,
             position: *position,
-            ..Default::default()
+            consts: vec![],
+            locals: vec![],
+            vars: vec![],
+            maps: vec![],
+            fts: vec![],
+            nfts: vec![],
+            functions_completion_items: vec![],
         };
         traverse(&mut defined_data, expressions);
         defined_data
