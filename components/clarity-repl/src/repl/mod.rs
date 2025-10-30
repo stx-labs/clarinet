@@ -217,7 +217,7 @@ impl ClarityContract {
                 PrincipalData::parse_standard_principal(address).expect("unable to parse address")
             }
             ContractDeployer::DefaultDeployer => default_deployer
-                .expect("default provider should have been provided")
+                .expect("default deployer should have been provided")
                 .clone(),
             _ => panic!("deployer expected to be resolved"),
         };
