@@ -1,0 +1,34 @@
+[package]
+name = "ts-to-clar"
+version.workspace = true
+edition = "2021"
+description = "Transpile TypeScript to Clarity."
+license = "GPL-3.0"
+
+[dependencies]
+anyhow = "1.0.98"
+
+oxc_allocator = "0.87"
+oxc_ast = { version = "0.87" }
+oxc_ast_visit = "0.87"
+oxc_parser = "0.87"
+oxc_span = "0.87"
+oxc_syntax = "0.87"
+oxc_traverse = { version = "0.87" }
+oxc_semantic = "0.87"
+
+clarity = { workspace = true }
+
+clarinet-format = { path = "../clarinet-format" }
+
+[dev-dependencies]
+indoc = "2.0.6"
+pretty_assertions = "1.4"
+
+[lib]
+name = "ts_to_clar"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tsclar"
+path = "src/bin.rs"
