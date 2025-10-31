@@ -77,3 +77,46 @@ fn can_init_console_with_mxs() {
     assert_eq!(output[1], "false");
     assert_eq!(output[2], "true");
 }
+
+#[test]
+fn test_get_constant_command() {
+    let output = run_console_command(
+        &["-m", "tests/fixtures/mxs/Clarinet.toml"],
+        &[
+            "::get_constant counter MISSING_CONSTANT",
+        ],
+    );
+
+    assert!(!output.is_empty());
+    let first_line = &output[0];
+    assert!(!first_line.is_empty());
+}
+
+#[test]
+fn test_get_data_var_command() {
+    let output = run_console_command(
+        &["-m", "tests/fixtures/mxs/Clarinet.toml"],
+        &[
+            "::get_data_var counter count",
+        ],
+    );
+
+    assert!(!output.is_empty());
+
+    let first_line = &output[0];
+    assert!(!first_line.is_empty());
+}
+
+#[test]
+fn test_get_map_val_command() {
+    let output = run_console_command(
+        &["-m", "tests/fixtures/mxs/Clarinet.toml"],
+        &[
+            "::get_map_val counter MISSING_MAP { key: 1 }",
+        ],
+    );
+
+    assert!(!output.is_empty());
+    let first_line = &output[0];
+    assert!(!first_line.is_empty());
+}
