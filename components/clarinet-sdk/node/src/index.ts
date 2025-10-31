@@ -1,5 +1,3 @@
-import { SDKOptions } from "@hirosystems/clarinet-sdk-wasm";
-
 export {
   tx,
   type ClarityEvent,
@@ -14,7 +12,7 @@ import { Simnet, getSessionProxy } from "./sdkProxy.js";
 
 export { type Simnet } from "./sdkProxy.js";
 
-const wasmModule = import("@hirosystems/clarinet-sdk-wasm");
+const wasmModule = import("@stacks/clarinet-sdk-wasm");
 
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt#use_within_json
 // @ts-ignore
@@ -30,7 +28,7 @@ type Options = {
 
 export async function getSDK(options?: Options): Promise<Simnet> {
   const module = await wasmModule;
-  let sdkOptions = new SDKOptions(
+  let sdkOptions = new module.SDKOptions(
     !!options?.trackCosts,
     !!options?.trackCoverage,
     !!options?.trackPerformance,

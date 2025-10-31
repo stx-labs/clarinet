@@ -44,7 +44,7 @@ export function getClarinetVitestsArgv() {
 
 // ensure vitest helpers can be imported even in workspace setup
 // import.meta.resolve return an url like "file:///absolute/path/to/clarinet-sdk/dist/esm/index.js"
-const sdkURL = import.meta.resolve("@hirosystems/clarinet-sdk");
+const sdkURL = import.meta.resolve("@stacks/clarinet-sdk");
 const sdkPath = url.fileURLToPath(sdkURL);
 const sdkDir = path.dirname(sdkPath);
 

@@ -57,11 +57,6 @@ disable_stacks_api = false
 # postgres_username = "postgres"
 # postgres_password = "postgres"
 # postgres_database = "postgres"
-# bitcoin_node_image_url = "quay.io/hirosystems/bitcoind:devnet-v2"
-# stacks_node_image_url = "localhost:5000/stacks-node:devnet-v2"
-# stacks_api_image_url = "hirosystems/stacks-blockchain-api:latest"
-# stacks_explorer_image_url = "hirosystems/explorer:latest"
-# bitcoin_explorer_image_url = "quay.io/hirosystems/bitcoin-explorer:devnet"
 # postgres_image_url = "postgres:14"
 
 # For testing in epoch 2.1 / using Clarity2

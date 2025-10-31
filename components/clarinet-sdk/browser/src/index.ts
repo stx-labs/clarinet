@@ -1,4 +1,4 @@
-import init, { SDK } from "@hirosystems/clarinet-sdk-wasm-browser";
+import init, { SDK } from "@stacks/clarinet-sdk-wasm-browser";
 
 import { Simnet, getSessionProxy } from "./sdkProxy.js";
 import { defaultVfs } from "./defaultVfs.js";

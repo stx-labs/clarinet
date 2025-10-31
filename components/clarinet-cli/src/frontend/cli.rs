@@ -48,9 +48,6 @@ use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
 use crate::lsp::run_lsp;
 /// Clarinet is a command line tool for Clarity smart contract development.
-///
-/// For Clarinet documentation, refer to https://docs.hiro.so/clarinet/introduction.
-/// Report any issues here https://github.com/hirosystems/clarinet/issues/new.
 #[derive(Parser, PartialEq, Clone, Debug)]
 #[clap(version = env!("CARGO_PKG_VERSION"), name = "clarinet", bin_name = "clarinet")]
 struct Opts {
@@ -73,9 +70,6 @@ enum Command {
     /// Interact with contracts deployed on Mainnet
     #[clap(subcommand, name = "requirements", aliases = &["requirement"])]
     Requirements(Requirements),
-    /// Subcommands for working with chainhooks (deprecated)
-    #[clap(name = "chainhooks", aliases = &["chainhook"])]
-    Chainhooks,
     /// Manage contracts deployments on Simnet/Devnet/Testnet/Mainnet
     #[clap(subcommand, name = "deployments", aliases = &["deployment"])]
     Deployments(Deployments),
@@ -619,8 +613,8 @@ pub fn main() {
                     match clarinetrc.enable_telemetry {
                         Some(enable) => enable,
                         _ => {
-                            println!("{}", yellow!("Send usage data to Hiro."));
-                            println!("{}", yellow!("Help Hiro improve its products and services by automatically sending diagnostics and usage data."));
+                            println!("{}", yellow!("Send usage data to Stacks Labs."));
+                            println!("{}", yellow!("Help Stacks Labs improve its products and services by automatically sending diagnostics and usage data."));
                             println!("{}", yellow!("Only high level usage information, and no information identifying you or your project are collected."));
                             println!("{}",
                                 yellow!("Enable or disable clarinet telemetry globally with this command:")
@@ -951,11 +945,6 @@ pub fn main() {
                 }
             }
         },
-        Command::Chainhooks => {
-            let message = "This command is deprecated. Use the chainhooks library instead (https://github.com/hirosystems/chainhook)";
-            eprintln!("{}", format_err!(message));
-            std::process::exit(1);
-        }
         Command::Contracts(subcommand) => match subcommand {
             Contracts::NewContract(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);

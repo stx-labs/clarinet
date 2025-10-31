@@ -47,7 +47,7 @@ When a contract is opened or saved, the extension will notify you if errors are 
 
 The debugging feature allows you to run Clarity code, line-by-line, so you can better understand what happens when it runs.
 
-**Note: This feature currently only runs on the desktop and requires a local [installation of Clarinet](https://github.com/hirosystems/clarinet#installation).**
+**Note: This feature currently only runs on the desktop and requires a local [installation of Clarinet](https://github.com/stx-labs/clarinet#installation).**
 
 For more information on how debugging works, and how you can debug smart contracts, please see the [How to Debug Your Smart Contracts With Clarinet](https://www.hiro.so/blog/how-to-debug-your-smart-contracts-with-clarinet) blog post.
 
@@ -59,15 +59,11 @@ This extension works in VS Code on Desktop along with support for [vscode.dev](h
 
 When a contract implements a trait (such as the NFT of FT trait – SIPs 009 and 010), the extensions will show and errors if the trait implementation is incomplete (for example, if the trait expects a function which is not implemented, or if the function signature does not match the trait definition).
 
-### Handle Requirements
-
-If your Clarity project relies on specific requirements (eg: SIPs 009 or 010) for [interacting with contracts on mainnet](https://github.com/hirosystems/clarinet#interacting-with-contracts-deployed-on-mainnet), the extension will automatically detect and cached the required contracts.
-
 ---
 
 ## Contributing to this Extension
 
-Hiro welcomes feedback, comments and suggestions to improve this extension over time. 
+Hiro welcomes feedback, comments and suggestions to improve this extension over time.
 
 ### Run the extension locally
 
@@ -79,6 +75,7 @@ From the `./components/clarity-vscode`, run `npm install` to install the depende
 
 The LSP has two main parts: the client and the server.
 These two parts will run in different environments:
+
 - VSCode Web (Web Worker)
 - VSCode Desktop (Node.js)
 

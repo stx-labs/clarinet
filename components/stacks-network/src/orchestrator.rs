@@ -2806,7 +2806,7 @@ db_path = "stacks-signer-{signer_id}.sqlite"
 
             // Spawn a background thread to stream logs
             // TODO: use tokio::spawn instead
-            // https://github.com/hirosystems/clarinet/issues/1905
+            // https://github.com/stx-labs/clarinet/issues/1905
             std::thread::spawn(move || {
                 // Create a dedicated runtime for the Docker client to ensure stable connections
                 let rt = tokio::runtime::Builder::new_current_thread()
