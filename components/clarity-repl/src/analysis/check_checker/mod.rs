@@ -106,6 +106,7 @@ struct FunctionInfo {
 }
 
 pub struct CheckChecker<'a> {
+    clarity_version: ClarityVersion,
     settings: Settings,
     taint_sources: HashMap<Node<'a>, TaintSource<'a>>,
     tainted_nodes: HashMap<Node<'a>, TaintedNode<'a>>,
@@ -123,8 +124,13 @@ pub struct CheckChecker<'a> {
 }
 
 impl<'a> CheckChecker<'a> {
-    fn new(annotations: &'a Vec<Annotation>, settings: Settings) -> CheckChecker<'a> {
+    fn new(
+        clarity_version: ClarityVersion,
+        annotations: &'a Vec<Annotation>,
+        settings: Settings,
+    ) -> CheckChecker<'a> {
         Self {
+            clarity_version,
             settings,
             taint_sources: HashMap::new(),
             tainted_nodes: HashMap::new(),
@@ -324,6 +330,10 @@ impl<'a> CheckChecker<'a> {
 }
 
 impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.clarity_version
+    }
+
     fn traverse_expr(&mut self, expr: &'a SymbolicExpression) -> bool {
         self.process_annotations(&expr.span);
         // If this expression is annotated to allow unchecked data, no need to
@@ -854,7 +864,11 @@ impl AnalysisPass for CheckChecker<'_> {
         annotations: &Vec<Annotation>,
         settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let checker = CheckChecker::new(annotations, settings.check_checker);
+        let checker = CheckChecker::new(
+            contract_analysis.clarity_version,
+            annotations,
+            settings.check_checker,
+        );
         checker.run(contract_analysis)
     }
 }

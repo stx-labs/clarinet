@@ -20,7 +20,7 @@ use clarity_types::types::{
 
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::repl::DEFAULT_EPOCH;
+use crate::repl::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 
 pub static DEFAULT_NAME: LazyLock<ClarityName> = LazyLock::new(|| ClarityName::from("placeholder"));
 
@@ -485,6 +485,11 @@ impl<'a> ASTDependencyDetector<'a> {
 }
 
 impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        self.current_clarity_version
+            .unwrap_or(&DEFAULT_CLARITY_VERSION)
+    }
+
     // For the following traverse_define_* functions, we just want to store a
     // map of the parameter types, to be used to extract the trait type in a
     // dynamic contract call.
@@ -751,6 +756,11 @@ struct PreloadedVisitor<'a, 'b> {
     current_contract: Option<&'a QualifiedContractIdentifier>,
 }
 impl<'a> ASTVisitor<'a> for PreloadedVisitor<'a, '_> {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        self.current_clarity_version
+            .unwrap_or(&DEFAULT_CLARITY_VERSION)
+    }
+
     fn traverse_define_read_only(
         &mut self,
         expr: &'a SymbolicExpression,

@@ -5,13 +5,14 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::Span;
-use clarity::vm::SymbolicExpression;
+use clarity::vm::{ClarityVersion, SymbolicExpression};
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
 
 pub struct NoopChecker<'a> {
+    clarity_version: ClarityVersion,
     // Map expression ID to a generated diagnostic
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
     annotations: &'a Vec<Annotation>,
@@ -19,8 +20,9 @@ pub struct NoopChecker<'a> {
 }
 
 impl<'a> NoopChecker<'a> {
-    fn new(annotations: &'a Vec<Annotation>) -> NoopChecker<'a> {
+    fn new(clarity_version: ClarityVersion, annotations: &'a Vec<Annotation>) -> NoopChecker<'a> {
         Self {
+            clarity_version,
             diagnostics: HashMap::new(),
             annotations,
             active_annotation: None,
@@ -99,6 +101,10 @@ impl<'a> NoopChecker<'a> {
 }
 
 impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.clarity_version
+    }
+
     fn visit_comparison(
         &mut self,
         expr: &'a SymbolicExpression,
@@ -137,7 +143,7 @@ impl AnalysisPass for NoopChecker<'_> {
         annotations: &Vec<Annotation>,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let checker = NoopChecker::new(annotations);
+        let checker = NoopChecker::new(contract_analysis.clarity_version, annotations);
         checker.run(contract_analysis)
     }
 }

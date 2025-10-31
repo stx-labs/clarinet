@@ -4,14 +4,15 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 pub use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::SymbolicExpression;
-use clarity::vm::ClarityName;
 use clarity::vm::SymbolicExpressionType::List;
+use clarity::vm::{ClarityName, ClarityVersion};
 
 use crate::analysis::annotation::Annotation;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::{AnalysisPass, AnalysisResult, Settings};
 
 pub struct CallChecker<'a> {
+    clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
     // For each user-defined function, record the parameter count.
     user_funcs: HashMap<&'a ClarityName, usize>,
@@ -21,8 +22,9 @@ pub struct CallChecker<'a> {
 }
 
 impl<'a> CallChecker<'a> {
-    fn new() -> CallChecker<'a> {
+    fn new(clarity_version: ClarityVersion) -> CallChecker<'a> {
         Self {
+            clarity_version,
             diagnostics: Vec::new(),
             user_funcs: HashMap::new(),
             user_calls: Vec::new(),
@@ -89,6 +91,10 @@ impl<'a> CallChecker<'a> {
 }
 
 impl<'a> ASTVisitor<'a> for CallChecker<'a> {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.clarity_version
+    }
+
     fn visit_define_private(
         &mut self,
         _expr: &'a SymbolicExpression,
@@ -196,7 +202,7 @@ impl AnalysisPass for CallChecker<'_> {
         _annotations: &Vec<Annotation>,
         _settings: &Settings,
     ) -> AnalysisResult {
-        let tc = CallChecker::new();
+        let tc = CallChecker::new(contract_analysis.clarity_version);
         tc.run(contract_analysis)
     }
 }

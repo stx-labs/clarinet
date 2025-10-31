@@ -1130,6 +1130,32 @@ impl SDK {
         )
     }
 
+    #[wasm_bindgen(js_name=mintFT)]
+    pub fn mint_ft(
+        &mut self,
+        token: String,
+        recipient: String,
+        amount: u64,
+    ) -> Result<String, String> {
+        if PrincipalData::parse(&recipient).is_err() {
+            return Err(format!("Invalid recipient address '{recipient}'."));
+        }
+
+        let session = self.get_session_mut();
+
+        let default_deployer = session.get_tx_sender();
+        let asset_identifier = Session::parse_asset_identifier(&default_deployer, &token)
+            .map_err(|e| format!("Expected 'contract_id.asset_name', got '{token}': {e}"))?;
+
+        session.interpreter.mint_ft_balance(
+            &asset_identifier,
+            &PrincipalData::Standard(StandardPrincipalData::from(
+                StacksAddress::from_string(&recipient).unwrap(),
+            )),
+            amount,
+        )
+    }
+
     #[wasm_bindgen(js_name=setCurrentTestName)]
     pub fn set_current_test_name(&mut self, test_name: String) {
         let session = self.get_session_mut();
