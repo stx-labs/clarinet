@@ -344,6 +344,15 @@ impl<'a> Aggregator<'a> {
                             | NativeFunctions::ReplaceAt
                             | NativeFunctions::GetStacksBlockInfo
                             | NativeFunctions::GetTenureInfo
+                            // @todo: RestrictAssets will likely need formatting rework
+                            | NativeFunctions::RestrictAssets
+                            | NativeFunctions::AsContractSafe
+                            | NativeFunctions::AllowanceAll
+                            | NativeFunctions::AllowanceWithStacking
+                            | NativeFunctions::AllowanceWithStx
+                            | NativeFunctions::AllowanceWithFt
+                            | NativeFunctions::AllowanceWithNft
+                            | NativeFunctions::Secp256r1Verify
                             | NativeFunctions::ContractHash
                             | NativeFunctions::ToAscii => {
                                 let inner_content =
