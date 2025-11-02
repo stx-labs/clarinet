@@ -453,11 +453,20 @@ impl<'a> Aggregator<'a> {
         // name
         acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), previous_indentation));
         acc.push_str(" (");
+
+        // methods
+        let methods = exprs[2].match_list().unwrap();
+
+        // if there are no methods, keep it on one line (no whitespace)
+        if methods.is_empty() {
+            acc.push_str("))");
+            return acc;
+        }
+
         acc.push('\n');
         acc.push_str(&space);
 
-        // methods
-        let mut iter = exprs[2].match_list().unwrap().iter().peekable();
+        let mut iter = methods.iter().peekable();
         while let Some(expr) = iter.next() {
             let trailing = get_trailing_comment(expr, &mut iter);
 
@@ -2280,6 +2289,13 @@ mod tests_formatter {
         );
         let result = format_with_default(src);
 
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_empty_trait() {
+        let src = "(define-trait my-trait ())\n";
+        let result = format_with_default(src);
         assert_eq!(src, result);
     }
 }
