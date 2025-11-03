@@ -413,7 +413,7 @@ pub trait ASTVisitor<'a> {
                                 )
                             }
                         }
-                        AsContract => {
+                        AsContract | AsContractSafe => {
                             self.traverse_as_contract(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
                         ContractOf => {
@@ -683,6 +683,27 @@ pub trait ASTVisitor<'a> {
                         ),
                         ContractHash => {
                             self.traverse_contract_hash(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
+                        }
+                        Secp256r1Verify => self.traverse_secp256r1_verify(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                            args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            args.get(2).unwrap_or(&DEFAULT_EXPR),
+                        ),
+                        RestrictAssets => {
+                            let owner = args.get(0).unwrap_or(&DEFAULT_EXPR);
+                            let allowances = match_pairs(args.get(0).unwrap_or(&DEFAULT_EXPR))
+                                .unwrap_or_default();
+                            let body = if args.len() >= 2 { &args[2..] } else { &[] };
+
+                            self.traverse_restrict_assets(expr, owner, &allowances, body)
+                        }
+                        AllowanceWithStx
+                        | AllowanceWithFt
+                        | AllowanceWithNft
+                        | AllowanceWithStacking
+                        | AllowanceAll => {
+                            self.traverse_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
                     };
                 } else {
@@ -2606,6 +2627,75 @@ pub trait ASTVisitor<'a> {
         &mut self,
         expr: &'a SymbolicExpression,
         input: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_secp256r1_verify(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        message_hash: &'a SymbolicExpression,
+        signature: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(message_hash)
+            && self.traverse_expr(signature)
+            && self.traverse_expr(public_key)
+            && self.visit_secp256r1_verify(expr, message_hash, signature, public_key)
+    }
+
+    fn visit_secp256r1_verify(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        message_hash: &'a SymbolicExpression,
+        signature: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_restrict_assets(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        owner: &'a SymbolicExpression,
+        allowance: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        body: &'a [SymbolicExpression],
+    ) -> bool {
+        for value in allowance.values() {
+            if !self.traverse_expr(value) {
+                return false;
+            }
+        }
+        for expr in body {
+            if !self.traverse_expr(expr) {
+                return false;
+            }
+        }
+        self.visit_restrict_assets(expr, owner, allowance, body)
+    }
+
+    fn visit_restrict_assets(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        owner: &'a SymbolicExpression,
+        allowance: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        body: &'a [SymbolicExpression],
+    ) -> bool {
+        true
+    }
+
+    fn traverse_allowance(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        amount: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(amount) && self.visit_allowance(expr, amount)
+    }
+
+    fn visit_allowance(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        amount: &'a SymbolicExpression,
     ) -> bool {
         true
     }
