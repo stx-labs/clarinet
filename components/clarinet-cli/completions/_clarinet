@@ -102,7 +102,7 @@ _arguments "${_arguments_options[@]}" \
 '::file -- If specified, check this file:' \
 && ret=0
 ;;
-(publish)
+(deployments)
 _arguments "${_arguments_options[@]}" \
 '--manifest-path=[Path to Clarinet.toml]:MANIFEST_PATH: ' \
 '--help[Print help information]' \
@@ -157,7 +157,7 @@ _clarinet_commands() {
 'console:Load contracts in a REPL for an interactive session' \
 'test:Execute test suite' \
 'check:Check syntax of your contracts' \
-'publish:Publish contracts on chain' \
+'deployments:Deploy contracts on chain' \
 'run:Execute Clarinet extension' \
 'integrate:Start devnet environment for integration testing' \
 'lsp:Start an LSP server (for integration with editors)' \
@@ -209,10 +209,10 @@ _new_commands() {
     local commands; commands=()
     _describe -t commands 'new commands' commands "$@"
 }
-(( $+functions[_publish_commands] )) ||
-_publish_commands() {
+(( $+functions[_deployments_commands] )) ||
+_deployments_commands() {
     local commands; commands=()
-    _describe -t commands 'publish commands' commands "$@"
+    _describe -t commands 'deployments commands' commands "$@"
 }
 (( $+functions[_requirement_commands] )) ||
 _requirement_commands() {

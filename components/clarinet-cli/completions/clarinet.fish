@@ -5,7 +5,7 @@ complete -c clarinet -n "__fish_use_subcommand" -f -a "contract" -d 'Subcommands
 complete -c clarinet -n "__fish_use_subcommand" -f -a "console" -d 'Load contracts in a REPL for an interactive session'
 complete -c clarinet -n "__fish_use_subcommand" -f -a "test" -d 'Execute test suite'
 complete -c clarinet -n "__fish_use_subcommand" -f -a "check" -d 'Check syntax of your contracts'
-complete -c clarinet -n "__fish_use_subcommand" -f -a "publish" -d 'Publish contracts on chain'
+complete -c clarinet -n "__fish_use_subcommand" -f -a "deployments" -d 'Deploy contracts on chain'
 complete -c clarinet -n "__fish_use_subcommand" -f -a "run" -d 'Execute Clarinet extension'
 complete -c clarinet -n "__fish_use_subcommand" -f -a "integrate" -d 'Start devnet environment for integration testing'
 complete -c clarinet -n "__fish_use_subcommand" -f -a "lsp" -d 'Start an LSP server (for integration with editors)'
@@ -39,12 +39,12 @@ complete -c clarinet -n "__fish_seen_subcommand_from test" -l watch -d 'Relaunch
 complete -c clarinet -n "__fish_seen_subcommand_from check" -l manifest-path -d 'Path to Clarinet.toml' -r
 complete -c clarinet -n "__fish_seen_subcommand_from check" -l help -d 'Print help information'
 complete -c clarinet -n "__fish_seen_subcommand_from check" -l version -d 'Print version information'
-complete -c clarinet -n "__fish_seen_subcommand_from publish" -l manifest-path -d 'Path to Clarinet.toml' -r
-complete -c clarinet -n "__fish_seen_subcommand_from publish" -l help -d 'Print help information'
-complete -c clarinet -n "__fish_seen_subcommand_from publish" -l version -d 'Print version information'
-complete -c clarinet -n "__fish_seen_subcommand_from publish" -l devnet -d 'Deploy contracts on devnet, using settings/Devnet.toml'
-complete -c clarinet -n "__fish_seen_subcommand_from publish" -l testnet -d 'Deploy contracts on testnet, using settings/Testnet.toml'
-complete -c clarinet -n "__fish_seen_subcommand_from publish" -l mainnet -d 'Deploy contracts on mainnet, using settings/Mainnet.toml'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l manifest-path -d 'Path to Clarinet.toml' -r
+complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l help -d 'Print help information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l version -d 'Print version information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l devnet -d 'Deploy contracts on devnet, using settings/Devnet.toml'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l testnet -d 'Deploy contracts on testnet, using settings/Testnet.toml'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l mainnet -d 'Deploy contracts on mainnet, using settings/Mainnet.toml'
 complete -c clarinet -n "__fish_seen_subcommand_from run" -l manifest-path -d 'Path to Clarinet.toml' -r
 complete -c clarinet -n "__fish_seen_subcommand_from run" -l help -d 'Print help information'
 complete -c clarinet -n "__fish_seen_subcommand_from run" -l version -d 'Print version information'
