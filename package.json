@@ -2,7 +2,7 @@
   "name": "@stacks/clarinet-sdk-workspace",
   "private": true,
   "description": "Workspace hosting the Clarinet SDK for Node.js and Browser",
-  "author": "stacks-labs",
+  "author": "Stacks Labs",
   "license": "GPL-3.0",
   "workspaces": [
     "components/clarinet-sdk-wasm/pkg-node",

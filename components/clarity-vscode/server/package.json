@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "hhttps://github.com/stx-labs/clarinet"
+    "url": "https://github.com/stx-labs/clarinet"
   },
   "dependencies": {
     "node-fetch": "^3.2.10",

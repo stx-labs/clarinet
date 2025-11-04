@@ -5,8 +5,12 @@
   "author": "Stacks Labs",
   "publisher": "stackslabs",
   "icon": "assets/images/clarity-logo.png",
-  "homepage": "https://github.com/stx-labs/clarinet",
+  "homepage": "https://stackslabs.com/clarinet",
   "bugs": "https://github.com/stx-labs/clarinet/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stx-labs/clarinet"
+  },
   "license": "GPL-3.0-only",
   "version": "3.8.1",
   "private": true,
@@ -15,10 +19,6 @@
     "server",
     "debug"
   ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/stx-labs/clarinet"
-  },
   "scripts": {
     "clean": "rimraf .vscode-test-web ./debug/dist ./client/dist ./server/dist ./server/src/clarity-lsp-*",
     "pretest": "NODE_ENV=test concurrently \"webpack -c ./webpack.config.dev.js\" \"swc --config-file .runTests.swcrc ./client/tests/runTests.ts -o ./client/dist/tests/runTests.js\"",
@@ -129,11 +129,6 @@
             "type": "boolean",
             "default": false,
             "description": "Log LSP requests performances."
-          },
-          "clarity-lsp.misc.showDevSurveyQ2-23-1": {
-            "type": "boolean",
-            "default": false,
-            "description": "n/a"
           }
         }
       }

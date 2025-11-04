@@ -38,7 +38,6 @@ web = [
 
 # DEV
 [profile.dev]
-inherits = "release"
 opt-level = 3
 debug = false
 debug-assertions = false

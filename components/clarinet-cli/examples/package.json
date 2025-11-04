@@ -1,8 +1,8 @@
 {
-  "name": "@hirosystems/clarinet-examples",
+  "name": "@stacks/clarinet-examples",
   "private": true,
   "description": "Basic workspace to easily manage the example dependencies",
-  "author": "hirosystems",
+  "author": "Stacks Labs",
   "license": "GPL-3.0",
   "workspaces": [
     "./billboard",

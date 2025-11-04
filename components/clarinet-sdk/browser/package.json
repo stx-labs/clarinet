@@ -1,11 +1,12 @@
 {
   "name": "@stacks/clarinet-sdk-browser",
   "version": "3.8.1",
+  "author": "Stacks Labs",
   "description": "A SDK to interact with Clarity Smart Contracts in the browser",
   "homepage": "https://stackslabs.com/clarinet",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/stx-labs/clarinet.git"
+    "url": "git+https://github.com/stx-labs/clarinet"
   },
   "files": [
     "dist"
@@ -24,7 +25,6 @@
     "clarinet",
     "tests"
   ],
-  "author": "stacks-labs",
   "license": "GPL-3.0",
   "readme": "./README.md",
   "dependencies": {

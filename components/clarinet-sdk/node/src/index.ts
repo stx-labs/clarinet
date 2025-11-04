@@ -1,5 +1,3 @@
-import { SDKOptions } from "@stacks/clarinet-sdk-wasm";
-
 export {
   tx,
   type ClarityEvent,
@@ -30,7 +28,7 @@ type Options = {
 
 export async function getSDK(options?: Options): Promise<Simnet> {
   const module = await wasmModule;
-  let sdkOptions = new SDKOptions(
+  let sdkOptions = new module.SDKOptions(
     !!options?.trackCosts,
     !!options?.trackCoverage,
     !!options?.trackPerformance,

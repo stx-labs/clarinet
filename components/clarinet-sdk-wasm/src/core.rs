@@ -544,7 +544,7 @@ impl SDK {
     ) -> Result<(), String> {
         // we must manually update the location of the contracts in the deployment plan to be relative to the project root
         // because the serialize function is not able to get project_root location in wasm, so it falls back to the full path
-        // https://github.com/hirosystems/clarinet/blob/7a41c0c312148b3a5f0eee28a95bebf2766d2e8d/components/clarinet-files/src/lib.rs#L379
+        // https://github.com/stx-labs/clarinet/blob/7a41c0c312148b3a5f0eee28a95bebf2766d2e8d/components/clarinet-files/src/lib.rs#L379
         let mut deployment_plan_with_relative_paths = deployment_plan.clone();
         deployment_plan_with_relative_paths
             .plan

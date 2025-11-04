@@ -17,7 +17,7 @@ The clarinet-sdk requires a few steps to be built and tested locally.
 Clone the clarinet repo and `cd` into it:
 
 ```sh
-git clone git@github.com:stacks/clarinet.git
+git clone git@github.com:stx-labs/clarinet.git
 cd clarinet
 ```
 

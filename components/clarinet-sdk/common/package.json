@@ -2,6 +2,6 @@
   "name": "@stacks/clarinet-sdk-common",
   "description": "Common helpers used in the Clarinet SDK for the node.js and the browser version",
   "private": true,
-  "author": "stacks-labs",
+  "author": "Stacks Labs",
   "license": "GPL-3.0"
 }
