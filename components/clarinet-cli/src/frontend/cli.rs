@@ -879,22 +879,40 @@ pub fn main() {
                     get_initial_transactions_trackers(&deployment)
                 };
                 let network_moved = network.clone();
+                let manifest = manifest_moved;
+                let res = NetworkManifest::from_project_manifest_location(
+                    &manifest.location,
+                    &network_moved.get_networks(),
+                    manifest.use_mainnet_wallets(),
+                    Some(&manifest.project.cache_location),
+                    None,
+                );
+                let mut network_manifest = match res {
+                    Ok(network_manifest) => network_manifest,
+                    Err(e) => {
+                        let _ = event_tx.send(DeploymentEvent::Interrupted(e));
+                        return;
+                    }
+                };
+
+                // decrypt any encrypted mnemonics
+
+                for (name, account) in network_manifest.accounts.iter_mut() {
+                    if !account.encrypted_mnemonic.is_empty() {
+                        println!(
+                            "Found encrypted mnemonic in account {name}: {}",
+                            account.encrypted_mnemonic
+                        );
+                        let cipher = account.encrypted_mnemonic.from_base58().unwrap();
+                        let password =
+                            scanpw!("Enter password for encrypted_mnemonic in account {name}: ");
+                        let key = wsts::util::ansi_x963_derive_key(password.as_bytes(), b"");
+                        let mnemonic = wsts::util::decrypt(&key, &cipher).unwrap();
+                        println!("Decrypted mnemonic in account {name:?} to {mnemonic:?}");
+                    }
+                }
+
                 std::thread::spawn(move || {
-                    let manifest = manifest_moved;
-                    let res = NetworkManifest::from_project_manifest_location(
-                        &manifest.location,
-                        &network_moved.get_networks(),
-                        manifest.use_mainnet_wallets(),
-                        Some(&manifest.project.cache_location),
-                        None,
-                    );
-                    let network_manifest = match res {
-                        Ok(network_manifest) => network_manifest,
-                        Err(e) => {
-                            let _ = event_tx.send(DeploymentEvent::Interrupted(e));
-                            return;
-                        }
-                    };
                     apply_on_chain_deployment(
                         network_manifest,
                         deployment,
