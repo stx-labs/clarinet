@@ -73,7 +73,7 @@ npm install
 npm test
 ```
 
-Visit the [clarity starter project](https://github.com/hirosystems/clarity-starter) to see the testing framework in action.
+Visit the [clarity starter project](https://github.com/stx-labs/clarity-starter) to see the testing framework in action.
 
 ### Type checking
 
