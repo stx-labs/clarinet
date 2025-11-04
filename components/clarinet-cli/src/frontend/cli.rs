@@ -4,6 +4,7 @@ use std::io::prelude::*;
 use std::io::{self};
 use std::{env, process};
 
+use base58::{FromBase58, ToBase58};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Generator, Shell};
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
@@ -22,6 +23,7 @@ use clarinet_files::{
     RequirementConfig, StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
+use clarinet_utils::mnemonic_from_phrase;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
 use clarity_repl::clarity::vm::costs::LimitedCostTracker;
@@ -32,6 +34,7 @@ use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_EPOCH};
 use clarity_repl::{analysis, repl};
+use scanpw::scanpw;
 use stacks_network::{self, DevnetOrchestrator};
 use toml;
 
@@ -215,6 +218,9 @@ enum Deployments {
     /// Apply deployment
     #[clap(name = "apply", bin_name = "apply")]
     ApplyDeployment(ApplyDeployment),
+    /// Encrypt deployment mnemonic
+    #[clap(name = "encrypt", bin_name = "encrypt")]
+    EncryptDeployment,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -943,6 +949,29 @@ pub fn main() {
                         }
                     }
                 }
+            }
+            Deployments::EncryptDeployment => {
+                println!("{}", yellow!("Input mnemonic to encrypt:"));
+                let mut buffer = String::new();
+                std::io::stdin().read_line(&mut buffer).unwrap();
+
+                let mnemonic = match mnemonic_from_phrase(&buffer) {
+                    Ok(result) => result.to_string(),
+                    Err(e) => {
+                        eprintln!("Failed to parse mnemonic from phrase: {e}");
+                        std::process::exit(1);
+                    }
+                };
+                let password = scanpw!("Password: ");
+                let key = wsts::util::ansi_x963_derive_key(password.as_bytes(), b"");
+
+                let ciphertext =
+                    wsts::util::encrypt(&key, mnemonic.as_bytes(), &mut rand::thread_rng())
+                        .unwrap();
+
+                let encrypted_mnemonic = ciphertext.to_base58();
+                println!("Encrypted mnemonic: {encrypted_mnemonic}");
+                std::process::exit(0);
             }
         },
         Command::Contracts(subcommand) => match subcommand {

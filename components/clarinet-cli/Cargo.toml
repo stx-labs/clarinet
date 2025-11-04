@@ -16,6 +16,8 @@ categories = [
 ]
 
 [dependencies]
+base58 = { workspace = true }
+scanpw = { workspace = true }
 colored = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -26,12 +28,15 @@ ratatui = { workspace = true }
 similar = "2.1.0"
 crossbeam-channel = "0.5.6"
 ctrlc = "3.1.9"
+rand = { workspace = true }
+wsts = { workspace = true }
 
 clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
 clarinet-files = { path = "../clarinet-files" }
 clarity-lsp = { path = "../clarity-lsp" }
 clarinet-format = { path = "../clarinet-format" }
 clarinet-deployments = { path = "../clarinet-deployments" }
+clarinet-utils = { path = "../clarinet-utils" }
 hiro-system-kit = { path = "../hiro-system-kit" }
 stacks-network = { path = "../stacks-network" }
 
