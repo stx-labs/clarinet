@@ -1188,6 +1188,18 @@ impl<'a> Aggregator<'a> {
                 clarity::vm::types::Value::Principal(c) => {
                     format!("'{c}")
                 }
+                clarity::vm::types::Value::Sequence(ref seq) => match seq {
+                    clarity::vm::types::SequenceData::String(ref string_data) => {
+                        match string_data {
+                            clarity::vm::types::CharType::ASCII(ascii_data) => {
+                                let content = String::from_utf8_lossy(&ascii_data.data);
+                                format!("\"{}\"", content)
+                            }
+                            clarity::vm::types::CharType::UTF8(_utf8_data) => value.to_string(),
+                        }
+                    }
+                    _ => value.to_string(),
+                },
                 // Fill in these explicitly
                 _ => value.to_string(),
             },
@@ -2427,5 +2439,21 @@ mod tests_formatter {
         );
         let result = format_with_default(src);
         assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_quote_escaping() {
+        let src = "(ok \"'\")";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+
+        let src = "(ok u\"hello\")";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+
+        let src = "(ok u\"\u{6E05}\u{6670}\")";
+        println!("{}", format!("src: {}", src));
+        let result = format_with_default(src);
+        assert_eq!(result, src);
     }
 }
