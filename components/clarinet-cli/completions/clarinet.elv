@@ -25,7 +25,7 @@ set edit:completion:arg-completer[clarinet] = {|@words|
             cand console 'Load contracts in a REPL for an interactive session'
             cand test 'Execute test suite'
             cand check 'Check syntax of your contracts'
-            cand publish 'Publish contracts on chain'
+            cand deployments 'Deploy contracts on chain'
             cand run 'Execute Clarinet extension'
             cand integrate 'Start devnet environment for integration testing'
             cand lsp 'Start an LSP server (for integration with editors)'
@@ -76,7 +76,7 @@ set edit:completion:arg-completer[clarinet] = {|@words|
             cand --help 'Print help information'
             cand --version 'Print version information'
         }
-        &'clarinet;publish'= {
+        &'clarinet;deployments'= {
             cand --manifest-path 'Path to Clarinet.toml'
             cand --help 'Print help information'
             cand --version 'Print version information'

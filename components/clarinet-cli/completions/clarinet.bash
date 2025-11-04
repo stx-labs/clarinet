@@ -36,8 +36,8 @@ _clarinet() {
             new)
                 cmd+="__new"
                 ;;
-            publish)
-                cmd+="__publish"
+            deployments)
+                cmd+="__deployments"
                 ;;
             requirement)
                 cmd+="__requirement"
@@ -55,7 +55,7 @@ _clarinet() {
 
     case "${cmd}" in
         clarinet)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -69,7 +69,7 @@ _clarinet() {
             return 0
             ;;
         check)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -83,7 +83,7 @@ _clarinet() {
             return 0
             ;;
         completions)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -97,7 +97,7 @@ _clarinet() {
             return 0
             ;;
         console)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -111,7 +111,7 @@ _clarinet() {
             return 0
             ;;
         contract)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -125,7 +125,7 @@ _clarinet() {
             return 0
             ;;
         fork)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -139,7 +139,7 @@ _clarinet() {
             return 0
             ;;
         integrate)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -153,7 +153,7 @@ _clarinet() {
             return 0
             ;;
         lsp)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -167,7 +167,7 @@ _clarinet() {
             return 0
             ;;
         new)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -181,7 +181,7 @@ _clarinet() {
             return 0
             ;;
         new)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -194,8 +194,8 @@ _clarinet() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        publish)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+        deployments)
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -209,7 +209,7 @@ _clarinet() {
             return 0
             ;;
         requirement)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -223,7 +223,7 @@ _clarinet() {
             return 0
             ;;
         run)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -237,7 +237,7 @@ _clarinet() {
             return 0
             ;;
         test)
-            opts="--help --version new contract console test check publish run integrate lsp completions"
+            opts="--help --version new contract console test check deployments run integrate lsp completions"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
