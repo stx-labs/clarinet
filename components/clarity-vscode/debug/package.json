@@ -1,10 +1,11 @@
 {
-  "name": "clarity-dap",
+  "name": "@stacks/clarity-dap",
   "version": "1.0.0",
+  "private": true,
   "description": "",
   "main": "debug.js",
   "scripts": {},
-  "author": "",
+  "author": "Stacks Labs",
   "license": "MIT",
   "dependencies": {
     "lookpath": "^1.2.2"
