@@ -5,7 +5,6 @@ This directory contains the setup files used in the `vitest.config.js` of a Clar
 This mean that these file are not directly part of the clarinet-sdk code and not compiled.
 Instead, they are directly loaded by `vitest.config.js`, following the path exposed in `@stacks/clarinet-sdk/vitest`
 
-
 ### Contributing
 
 This directory contains its own tests that are run in the parent directory (`clarinet-sdk`).

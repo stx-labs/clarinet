@@ -6,8 +6,8 @@ They respectively rely on `@stacks/clarinet-sdk-wasm` and `@stacks/clarinet-sdk-
 
 Because of the way the wasm packages are build, with wasm-pack, it made sense to have two different
 packages for Node.js and the browsers, but it has some caveats. Especially, some of the code is
-duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the future, we hope to 
-be able to simplify this build, it would require some breaking changes so it could be part of 
+duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the future, we hope to
+be able to simplify this build, it would require some breaking changes so it could be part of
 Clarinet 3.x.
 
 ## Contributing

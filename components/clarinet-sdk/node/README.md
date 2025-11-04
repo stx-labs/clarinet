@@ -4,8 +4,7 @@ The Clarinet SDK allows to interact with the simnet in Node.js.
 
 If you want to use the Clarinet SDK in web browsers, try [@stacks/clarinet-sdk-browser](https://www.npmjs.com/package/@stacks/clarinet-sdk-browser).
 
-Find the API references of the SDK in [our documentation](https://docs.hiro.so/stacks/clarinet-js-sdk).
-Learn more about unit testing Clarity smart contracts in [this guide](https://docs.hiro.so/stacks/clarinet-js-sdk).
+Find the API references of the SDK in [our documentation](https://docs.stacks.co/reference/clarinet-js-sdk/overview).
 
 You can use this SDK to:
 

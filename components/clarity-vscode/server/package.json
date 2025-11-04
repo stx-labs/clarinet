@@ -2,7 +2,7 @@
   "name": "@stacks/clarity-lsp-server",
   "description": "Example implementation of a language server in a web extension.",
   "version": "1.0.0",
-  "author": "Hugo <hugo@hiro.so>",
+  "author": "Stacks Labs",
   "license": "MIT",
   "engines": {
     "node": "*"

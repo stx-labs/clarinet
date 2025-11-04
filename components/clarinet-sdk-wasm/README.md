@@ -1,7 +1,7 @@
 # Clarity SDK WASM
 
-This component exposes Clarinet features to a JS interface through wasm-bindgen.
-It's built with wasm-pack.  
+This component exposes Clarinet features to a JS interface through wasm-bindgen. It's built with
+wasm-pack.  
 It powers [@stacks/clarinet-sdk](https://npmjs.com/package/@stacks/clarinet-sdk) and
 [@stacks/clarinet-sdk-browser](https://npmjs.com/package/@stacks/clarinet-sdk-browser).
 
@@ -11,14 +11,15 @@ It powers [@stacks/clarinet-sdk](https://npmjs.com/package/@stacks/clarinet-sdk)
 
 Install [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/).
 
-In the root directory of Clarinet, run the following command to build the packages for Node.js and the browser.
-Under the hood, it will run `wasm-pack build` twice, once for each target.
+In the root directory of Clarinet, run the following command to build the packages for Node.js and
+the browser. Under the hood, it will run `wasm-pack build` twice, once for each target.
 
 ```sh
 npm run build:sdk-wasm
 ```
 
-Alternatively, it's also possible to build the packages separately. It should only be done for development purpose.
+Alternatively, it's also possible to build the packages separately. It should only be done for
+development purpose.
 
 **Build for node**
 
@@ -43,7 +44,7 @@ npm run build:sdk-wasm
 ```
 
 Once built, the packages can be released by running the following command. Note that by default we
-release with the beta tag. 
+release with the beta tag.
 
 ```sh
 npm run publish:sdk-wasm

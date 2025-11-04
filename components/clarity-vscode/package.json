@@ -1,6 +1,6 @@
 {
-  "name": "clarity-lsp",
-  "displayName": "Clarity",
+  "name": "clarity-stacks",
+  "displayName": "Clarity - Stacks Labs",
   "description": "Syntax highlighting, code completion, documentation, and debugging for Clarity smart contracts. Build decentralized applications on Stacks.",
   "author": "Stacks Labs",
   "publisher": "stackslabs",
@@ -35,7 +35,9 @@
   "categories": [
     "Programming Languages",
     "Linters",
-    "Debuggers"
+    "Debuggers",
+    "Formatters",
+    "Testing"
   ],
   "keywords": [
     "clarity",
@@ -49,7 +51,7 @@
     "color": "#242424",
     "theme": "dark"
   },
-  "qna": "https://docs.hiro.so/",
+  "qna": "https://github.com/stx-labs/clarinet/issues",
   "engines": {
     "vscode": "^1.64.0"
   },
