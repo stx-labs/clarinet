@@ -4,7 +4,6 @@ use std::io::prelude::*;
 use std::io::{self};
 use std::{env, process};
 
-use base58::{FromBase58, ToBase58};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Generator, Shell};
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
@@ -903,12 +902,28 @@ pub fn main() {
                             "Found encrypted mnemonic in account {name}: {}",
                             account.encrypted_mnemonic
                         );
-                        let cipher = account.encrypted_mnemonic.from_base58().unwrap();
+                        let cipher = bs58::decode(&account.encrypted_mnemonic)
+                            .into_vec()
+                            .unwrap();
                         let password =
                             scanpw!("Enter password for encrypted_mnemonic in account {name}: ");
                         let key = wsts::util::ansi_x963_derive_key(password.as_bytes(), b"");
-                        let mnemonic = wsts::util::decrypt(&key, &cipher).unwrap();
-                        println!("Decrypted mnemonic in account {name:?} to {mnemonic:?}");
+                        let plain = wsts::util::decrypt(&key, &cipher).unwrap();
+                        let phrase = match str::from_utf8(&plain) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                panic!("Failed to convert decrypted bytes to UTF8 string: {e}");
+                            }
+                        };
+                        println!("Decrypted mnemonic in account {name:?} to {phrase:?}");
+                        let mnemonic = match mnemonic_from_phrase(phrase) {
+                            Ok(result) => result.to_string(),
+                            Err(e) => {
+                                panic!("Decrypted mnemonic phrase {phrase} is invalid: {e}");
+                            }
+                        };
+
+                        account.mnemonic = mnemonic.to_string();
                     }
                 }
 
@@ -972,8 +987,9 @@ pub fn main() {
                 println!("{}", yellow!("Input mnemonic to encrypt:"));
                 let mut buffer = String::new();
                 std::io::stdin().read_line(&mut buffer).unwrap();
+                let phrase = buffer.trim();
 
-                let mnemonic = match mnemonic_from_phrase(&buffer) {
+                let _mnemonic = match mnemonic_from_phrase(phrase) {
                     Ok(result) => result.to_string(),
                     Err(e) => {
                         eprintln!("Failed to parse mnemonic from phrase: {e}");
@@ -984,11 +1000,12 @@ pub fn main() {
                 let key = wsts::util::ansi_x963_derive_key(password.as_bytes(), b"");
 
                 let ciphertext =
-                    wsts::util::encrypt(&key, mnemonic.as_bytes(), &mut rand::thread_rng())
-                        .unwrap();
+                    wsts::util::encrypt(&key, phrase.as_bytes(), &mut rand::thread_rng()).unwrap();
 
-                let encrypted_mnemonic = ciphertext.to_base58();
+                let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
                 println!("Encrypted mnemonic: {encrypted_mnemonic}");
+                let decoded_ciphertext = bs58::decode(encrypted_mnemonic).into_vec().unwrap();
+                assert_eq!(ciphertext, decoded_ciphertext);
                 std::process::exit(0);
             }
         },

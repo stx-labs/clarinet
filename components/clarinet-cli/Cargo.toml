@@ -16,7 +16,7 @@ categories = [
 ]
 
 [dependencies]
-base58 = { workspace = true }
+bs58 = { workspace = true }
 scanpw = { workspace = true }
 colored = { workspace = true }
 toml = { workspace = true }
