@@ -414,7 +414,7 @@ btc_address = "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7"
     "@types/node": "^24.4.0",
     "chokidar-cli": "^3.0.0",
     "vitest": "^3.2.4",
-    "vitest-environment-clarinet": "^2.3.0"
+    "vitest-environment-clarinet": "^3.0.0"
   }}
 }}
 "#,
