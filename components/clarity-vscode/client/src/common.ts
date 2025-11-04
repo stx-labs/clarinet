@@ -125,7 +125,7 @@ export async function initClient(
     if (config.misc[surveyConfig] && now >= surveyStart && now <= surveyEnd) {
       window
         .showInformationMessage(
-          "Help us improve Hiro products by telling us about your experience in a short 10 minute survey.",
+          "Help us improve Clarinet by telling us about your experience in a short 10 minute survey.",
           { title: "Take the survey", action: "open-survey" },
           { title: "No thanks", action: "hide" },
         )

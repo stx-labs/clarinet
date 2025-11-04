@@ -1,12 +1,12 @@
 {
-  "name": "clarity-lsp",
-  "displayName": "Clarity",
+  "name": "clarity-stacks",
+  "displayName": "Clarity - Stacks Labs",
   "description": "Syntax highlighting, code completion, documentation, and debugging for Clarity smart contracts. Build decentralized applications on Stacks.",
-  "author": "Hiro Systems",
-  "publisher": "hirosystems",
+  "author": "Stacks Labs",
+  "publisher": "stackslabs",
   "icon": "assets/images/clarity-logo.png",
-  "homepage": "https://github.com/hirosystems/clarinet",
-  "bugs": "https://github.com/hirosystems/clarinet/issues",
+  "homepage": "https://github.com/stx-labs/clarinet",
+  "bugs": "https://github.com/stx-labs/clarinet/issues",
   "license": "GPL-3.0-only",
   "version": "3.8.1",
   "private": true,
@@ -17,7 +17,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/hirosystems/clarinet/"
+    "url": "https://github.com/stx-labs/clarinet"
   },
   "scripts": {
     "clean": "rimraf .vscode-test-web ./debug/dist ./client/dist ./server/dist ./server/src/clarity-lsp-*",
@@ -35,7 +35,9 @@
   "categories": [
     "Programming Languages",
     "Linters",
-    "Debuggers"
+    "Debuggers",
+    "Formatters",
+    "Testing"
   ],
   "keywords": [
     "clarity",
@@ -49,7 +51,7 @@
     "color": "#242424",
     "theme": "dark"
   },
-  "qna": "https://docs.hiro.so/",
+  "qna": "https://github.com/stx-labs/clarinet/issues",
   "engines": {
     "vscode": "^1.64.0"
   },
@@ -131,7 +133,7 @@
           "clarity-lsp.misc.showDevSurveyQ2-23-1": {
             "type": "boolean",
             "default": false,
-            "description": "Show link to https://survey.hiro.so"
+            "description": "n/a"
           }
         }
       }

@@ -3,8 +3,8 @@ name = "clarinet-sdk-wasm"
 version.workspace = true
 edition = "2021"
 license = "GPL-3.0"
-repository = "https://github.com/hirosystems/clarinet"
-description = "The core lib that powers @hirosystems/clarinet-sdk"
+repository = "https://github.com/stx-labs/clarinet"
+description = "The core lib that powers @stacks/clarinet-sdk"
 
 [lib]
 crate-type = ["cdylib"]
