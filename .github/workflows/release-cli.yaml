@@ -51,7 +51,7 @@ jobs:
 
       - name: Download release asset
         env:
-          GH_TOKEN: ${{ github.TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
         run: |
           gh release download $TAG --pattern "clarinet-linux-x64-glibc.tar.gz"
