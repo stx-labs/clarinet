@@ -2394,6 +2394,7 @@ mod tests_formatter {
               () ;; empty
             )
             "#
+        );
         let result = format_with_default(src);
         assert_eq!(src, result);
     }

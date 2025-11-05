@@ -413,7 +413,7 @@ btc_address = "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7"
     "@stacks/transactions": "^7.2.0",
     "@types/node": "^24.4.0",
     "chokidar-cli": "^3.0.0",
-    "vitest": "^3.2.4",
+    "vitest": "^4.0.7",
     "vitest-environment-clarinet": "^3.0.0"
   }}
 }}
