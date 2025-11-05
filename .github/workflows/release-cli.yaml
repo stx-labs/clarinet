@@ -2,14 +2,8 @@
 
 name: Release CLI
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "The tag of the release."
-        required: true
-  repository_dispatch:
-    types:
-      - released
+  release:
+    types: [published]
 
 jobs:
   docker_image:
@@ -27,7 +21,7 @@ jobs:
         id: docker_meta
         uses: docker/metadata-action@v5
         env:
-          TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
+          TAG: ${{ github.event.client_payload.tag }}
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -52,7 +46,7 @@ jobs:
       - name: Download release asset
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
+          TAG: ${{ github.event.client_payload.tag }}
         run: |
           gh release download $TAG --pattern "clarinet-linux-x64-glibc.tar.gz"
 
@@ -94,7 +88,7 @@ jobs:
         env:
           HOMEBREW_GITHUB_API_TOKEN: ${{ steps.generate-token.outputs.token }}
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
+          TAG: ${{ github.event.client_payload.tag }}
           GIT_AUTHOR_NAME: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}
           GIT_AUTHOR_EMAIL: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}@users.noreply.github.com
         run: |
@@ -137,7 +131,7 @@ jobs:
   #     - name: Winget version bump
   #       env:
   #         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-  #         TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
+  #         TAG: ${{ github.event.client_payload.tag }}
   #         GIT_AUTHOR_NAME: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}
   #         GIT_AUTHOR_EMAIL: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}@users.noreply.github.com
   #       run: |

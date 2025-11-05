@@ -7,9 +7,8 @@
 
 name: Publish Clarinet SDK
 on:
-  repository_dispatch:
-    types:
-      - released
+  release:
+    types: [published]
 jobs:
   build:
     runs-on: ubuntu-latest
