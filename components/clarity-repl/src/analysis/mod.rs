@@ -13,17 +13,17 @@ use check_checker::CheckChecker;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
+use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 use lints::noop::NoopChecker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
-use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, VariantArray)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Pass {
@@ -35,30 +35,55 @@ pub enum Pass {
 // Each new pass should be included in this list
 static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 
-/// New
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, VariantArray)]
+/// Wrapper around `clarity_types::diagnostic::Level` which adds option to ignore
+#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum Lint {
-    Noop,
+#[serde(untagged)]
+pub enum LintLevel {
+    #[default]
+    Ignore,
+    Enabled(ClarityDiagnosticLevel),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
+    fn from(level: LintLevel) -> Self {
+        match level {
+            LintLevel::Ignore => None,
+            LintLevel::Enabled(l) => Some(l),
+        }
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub struct LinterSettingsFile {
+    noop: Option<LintLevel>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+pub struct LinterSettings {
+    noop: Option<ClarityDiagnosticLevel>,
+}
+
+impl From<LinterSettingsFile> for LinterSettings {
+    fn from(from_file: LinterSettingsFile) -> Self {
+        Self {
+            noop: from_file.noop.and_then(LintLevel::into),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: Vec<Pass>,
-    lints: Vec<Lint>,
+    linter: LinterSettings,
     check_checker: check_checker::Settings,
 }
 
 impl Settings {
-    pub fn empty() -> Self {
-        Self {
-            passes: vec![],
-            lints: vec![],
-            check_checker: check_checker::Settings::default(),
-        }
-    }
     pub fn enable_all_passes(&mut self) {
         self.passes = ALL_PASSES.to_vec();
     }
@@ -74,30 +99,14 @@ impl Settings {
             };
         }
     }
-
-    pub fn enable_all_lints(&mut self) {
-        self.lints = Lint::VARIANTS.to_vec();
+    pub fn set_all_lints(&mut self, level: Option<ClarityDiagnosticLevel>) {
+        self.linter = LinterSettings { noop: level }
     }
-
+    pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
+        self.set_all_lints(Some(level));
+    }
     pub fn disable_all_lints(&mut self) {
-        self.lints = vec![];
-    }
-
-    pub fn set_lints(&mut self, lints: Vec<Lint>) {
-        self.lints = lints;
-    }
-
-    pub fn add_lints(&mut self, lints: &[Lint]) {
-        self.lints.extend_from_slice(lints);
-    }
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            lints: Lint::VARIANTS.to_vec(),
-            ..Self::empty()
-        }
+        self.set_all_lints(None);
     }
 }
 
@@ -111,37 +120,19 @@ pub enum OneOrList<T> {
     List(Vec<T>),
 }
 
-/// Allow different methods to specify elements of a set of type `T`
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(untagged)]
-pub enum SetElementSpecifier<T> {
-    /// Allow `T` as shorthand for `[T]` in the TOML
-    One(T),
-    /// Allow more than one `T` in the TOML
-    List(Vec<T>),
-    /// All elements in the set
-    All(bool),
-}
-
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    lints: Option<SetElementSpecifier<Lint>>,
+    linter: Option<LinterSettingsFile>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let lints = from_file
-            .lints
-            .map(|specifier| match specifier {
-                SetElementSpecifier::All(true) => Lint::VARIANTS.to_vec(),
-                SetElementSpecifier::All(false) => vec![],
-                SetElementSpecifier::One(lint) => vec![lint],
-                SetElementSpecifier::List(lints) => lints,
-            })
+        let linter = from_file
+            .linter
+            .map(LinterSettings::from)
             .unwrap_or_default();
 
         let passes = from_file
@@ -166,7 +157,7 @@ impl From<SettingsFile> for Settings {
             .unwrap_or_default();
 
         Self {
-            lints,
+            linter,
             passes,
             check_checker,
         }
@@ -203,12 +194,6 @@ pub fn run_analysis(
             Pass::CheckChecker => passes.push(CheckChecker::run_pass),
             Pass::CallChecker => passes.push(CallChecker::run_pass),
             Pass::All => panic!("unexpected All in list of passes"),
-        }
-    }
-
-    for lint in &settings.lints {
-        match lint {
-            Lint::Noop => passes.push(NoopChecker::run_pass),
         }
     }
 

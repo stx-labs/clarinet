@@ -11,18 +11,33 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub struct NoopCheckerSettings {
+    level: Level,
+}
+
+impl NoopCheckerSettings {
+    fn new(level: Level) -> Self {
+        Self { level }
+    }
+}
+
 pub struct NoopChecker<'a> {
     clarity_version: ClarityVersion,
     // Map expression ID to a generated diagnostic
+    settings: NoopCheckerSettings,
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
 }
 
 impl<'a> NoopChecker<'a> {
-    fn new(clarity_version: ClarityVersion, annotations: &'a Vec<Annotation>) -> NoopChecker<'a> {
+    fn new(clarity_version: ClarityVersion, annotations: &'a Vec<Annotation>, settings: NoopCheckerSettings) -> NoopChecker<'a> {
         Self {
             clarity_version,
+            settings,
             diagnostics: HashMap::new(),
             annotations,
             active_annotation: None,
@@ -68,7 +83,7 @@ impl<'a> NoopChecker<'a> {
 
     fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: &str) {
         let diagnostic = Diagnostic {
-            level: Level::Warning,
+            level: self.settings.level.clone(),
             message: message.to_string(),
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
@@ -141,10 +156,18 @@ impl AnalysisPass for NoopChecker<'_> {
         contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
-        _settings: &analysis::Settings,
+        settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let checker = NoopChecker::new(contract_analysis.clarity_version, annotations);
-        checker.run(contract_analysis)
+        settings
+            .linter
+            .noop
+            .as_ref()
+            .map(|level| {
+                let settings = NoopCheckerSettings::new(level.clone());
+                let checker = NoopChecker::new(contract_analysis.clarity_version, annotations, settings);
+                checker.run(contract_analysis)
+            })
+            .unwrap_or_else(|| Ok(vec![]))
     }
 }
 
