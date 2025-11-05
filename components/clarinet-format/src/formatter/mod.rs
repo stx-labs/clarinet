@@ -451,12 +451,39 @@ impl<'a> Aggregator<'a> {
 
         // name
         acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), previous_indentation));
+
+        // methods
+        let methods = exprs[2].match_list().unwrap();
+
+        if methods.is_empty() {
+            let is_multiline = exprs[1].span().end_line != exprs[2].span().start_line;
+
+            if is_multiline {
+                // Preserve multiline format with potential trailing comments
+                acc.push('\n');
+                acc.push_str(&space);
+                acc.push_str(&self.display_pse(&exprs[2], &space));
+
+                // Check for trailing comments after the empty methods list
+                if exprs.len() > 3 && is_comment(&exprs[3]) {
+                    acc.push(' ');
+                    acc.push_str(&self.display_pse(&exprs[3], previous_indentation));
+                }
+
+                acc.push('\n');
+            } else {
+                acc.push_str(" ()");
+            }
+
+            acc.push(')');
+            return acc;
+        }
+
         acc.push_str(" (");
         acc.push('\n');
         acc.push_str(&space);
 
-        // methods
-        let mut iter = exprs[2].match_list().unwrap().iter().peekable();
+        let mut iter = methods.iter().peekable();
         while let Some(expr) = iter.next() {
             let trailing = get_trailing_comment(expr, &mut iter);
 
@@ -2342,6 +2369,33 @@ mod tests_formatter {
         );
         let result = format_with_default(src);
 
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_empty_trait() {
+        let src = "(define-trait my-trait ())\n";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_empty_trait_with_comment() {
+        let src = "(define-trait my-trait ()) ;; empty\n";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_empty_trait_with_multiline_comment() {
+        let src = indoc!(
+            r#"
+            (define-trait my-trait
+              () ;; empty
+            )
+            "#
+        );
+        let result = format_with_default(src);
         assert_eq!(src, result);
     }
 
