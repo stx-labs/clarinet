@@ -301,11 +301,18 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: Tag and Release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2.4.1
+        env:
+          GH_TOKEN: ${{ github.token }}
         with:
-          artifacts: "**/*.tar.gz,**/*.exe"
-          tag: ${{ needs.get_release_info.outputs.tag }}
-          commit: ${{ env.GITHUB_SHA }}
+          name: "${{ needs.get_release_info.outputs.tag }}"
+          tag_name: ${{ needs.get_release_info.outputs.tag }}
+          draft: true
+          fail_on_unmatched_files: true
+          target_commitish: ${{ env.GITHUB_SHA }}
+          generate_release_notes: false
+          files: |
+            **/*.tar.gz
 
       - name: Trigger pkg-version-bump workflow
         uses: peter-evans/repository-dispatch@v1
