@@ -1,3 +1,38 @@
+# [3.9.0](https://github.com/stx-labs/clarinet/compare/v3.8.1...v3.9.0) (2025-11-05)
+
+This release has full support for Epoch 3.3 and Clarity 4. It still defaults to Epoch 3.2 and
+Clarity 3. A version 3.10.0 will be released shortly to default the the newer versions.
+
+The Clarinet JS SDK pacakges are now publised in the `@stacks` GitHub organization. Clarinet rojects
+will need to migrate the project to use:
+
+- `@stacks/clarinet-sdk@3.9.0` instead of `@stacks/clarinet-sdk@3.x`
+- `vitest-environment-clarinet@3.0.1` instead `vitest-environement-clarinet@2.x`
+
+##### New Features
+
+- Clarity 4 support (#2038) (66d6dfef)
+
+##### Chores
+
+- Stacks-labs migrations (#2026) (bc786f3d)
+- Rename npm packages and vscode extension (#2049) (cb87feb5)
+
+##### Continuous Integration
+
+- Improve caching strategy (#2027) (06109fd7)
+
+##### Bug Fixes
+
+- Use clarity_version in ast visitor (#2040) (65b29857)
+- Requirements fetching (#2031) (329c6bd7)
+- Broken Tx helper deployContract (#2024) (5799464a)
+
+##### Other Changes
+
+- Clarinet.toml JSON Schema (#2014) (bc259407)
+- **devnet:** implement graceful shutdown for SIGTERM signals (#2002) (4aa43948)
+
 # [3.8.1](https://github.com/stx-labs/clarinet/compare/v3.8.0...v3.8.1) (2025-10-10)
 
 ##### Chores
