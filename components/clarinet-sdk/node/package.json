@@ -1,6 +1,6 @@
 {
   "name": "@stacks/clarinet-sdk",
-  "version": "3.9.0",
+  "version": "3.9.1",
   "author": "Stacks Labs",
   "description": "A SDK to interact with Clarity Smart Contracts in node.js",
   "homepage": "https://stackslabs.com/clarinet",
@@ -58,7 +58,7 @@
   "license": "GPL-3.0",
   "readme": "./README.md",
   "dependencies": {
-    "@stacks/clarinet-sdk-wasm": "3.9.0",
+    "@stacks/clarinet-sdk-wasm": "3.9.1",
     "@stacks/transactions": "^7.0.6",
     "kolorist": "^1.8.0",
     "prompts": "^2.4.2",

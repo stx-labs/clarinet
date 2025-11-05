@@ -1,3 +1,10 @@
+# [3.9.1(https://github.com/stx-labs/clarinet/compare/v3.9.0...v3.9.1) (2025-11-05)
+
+##### Continuous Integration
+
+- Upload release as draft (#2056) (2e2e6af2)
+- Update github token in docker image release job (#2057) (f268144a)
+
 # [3.9.0](https://github.com/stx-labs/clarinet/compare/v3.8.1...v3.9.0) (2025-11-05)
 
 This release has full support for Epoch 3.3 and Clarity 4. It still defaults to Epoch 3.2 and
