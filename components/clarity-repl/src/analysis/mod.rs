@@ -8,6 +8,8 @@ pub mod coverage;
 mod coverage_tests;
 pub mod lints;
 
+use std::collections::HashMap;
+
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
@@ -18,6 +20,7 @@ use lints::noop::NoopChecker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
+use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
 
@@ -32,10 +35,18 @@ pub enum Pass {
     CheckChecker,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Lint {
+    Noop,
+}
+
 // Each new pass should be included in this list
 static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 
 /// Wrapper around `clarity_types::diagnostic::Level` which adds option to ignore
+/// TODO: Wouldn't need this if there's some way for serde to skip deserializing `lint_name = "ignore"`` to a map entry
 #[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(untagged)]
@@ -48,29 +59,8 @@ pub enum LintLevel {
 impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
     fn from(level: LintLevel) -> Self {
         match level {
-            LintLevel::Ignore => None,
             LintLevel::Enabled(l) => Some(l),
-        }
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub struct LinterSettingsFile {
-    noop: Option<LintLevel>,
-}
-
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-pub struct LinterSettings {
-    noop: Option<ClarityDiagnosticLevel>,
-}
-
-impl From<LinterSettingsFile> for LinterSettings {
-    fn from(from_file: LinterSettingsFile) -> Self {
-        Self {
-            noop: from_file.noop.and_then(LintLevel::into),
+            LintLevel::Ignore => None,
         }
     }
 }
@@ -79,7 +69,7 @@ impl From<LinterSettingsFile> for LinterSettings {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: Vec<Pass>,
-    linter: LinterSettings,
+    lints: HashMap<Lint, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
 }
 
@@ -99,14 +89,25 @@ impl Settings {
             };
         }
     }
-    pub fn set_all_lints(&mut self, level: Option<ClarityDiagnosticLevel>) {
-        self.linter = LinterSettings { noop: level }
+
+    pub fn enable_lint(
+        &mut self,
+        lint: Lint,
+        level: ClarityDiagnosticLevel,
+    ) -> Option<ClarityDiagnosticLevel> {
+        self.lints.insert(lint, level)
     }
+
     pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
-        self.set_all_lints(Some(level));
+        self.lints = Lint::VARIANTS
+            .iter()
+            .cloned()
+            .map(|lint| (lint, level.clone()))
+            .collect();
     }
+
     pub fn disable_all_lints(&mut self) {
-        self.set_all_lints(None);
+        self.lints.clear();
     }
 }
 
@@ -124,16 +125,19 @@ pub enum OneOrList<T> {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    linter: Option<LinterSettingsFile>,
+    lints: HashMap<Lint, LintLevel>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let linter = from_file
-            .linter
-            .map(LinterSettings::from)
-            .unwrap_or_default();
+        let lints = from_file
+            .lints
+            .into_iter()
+            .filter_map(|(lint, level)| {
+                Into::<Option<ClarityDiagnosticLevel>>::into(level).map(|l| (lint, l))
+            })
+            .collect();
 
         let passes = from_file
             .passes
@@ -157,7 +161,7 @@ impl From<SettingsFile> for Settings {
             .unwrap_or_default();
 
         Self {
-            linter,
+            lints,
             passes,
             check_checker,
         }
@@ -194,6 +198,12 @@ pub fn run_analysis(
             Pass::CheckChecker => passes.push(CheckChecker::run_pass),
             Pass::CallChecker => passes.push(CallChecker::run_pass),
             Pass::All => panic!("unexpected All in list of passes"),
+        }
+    }
+
+    for lint in settings.lints.keys() {
+        match lint {
+            Lint::Noop => passes.push(NoopChecker::run_pass),
         }
     }
 
