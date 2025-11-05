@@ -18,6 +18,9 @@ concurrency:
   group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   get_release_info:
     name: Get Release Info
@@ -301,14 +304,13 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: Tag and Release
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2.4.1
         env:
-          GITHUB_TOKEN: ${{ github.TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           name: "${{ needs.get_release_info.outputs.tag }}"
           tag_name: ${{ needs.get_release_info.outputs.tag }}
           draft: true
-          prerelease: true
           fail_on_unmatched_files: true
           target_commitish: ${{ env.GITHUB_SHA }}
           generate_release_notes: false
