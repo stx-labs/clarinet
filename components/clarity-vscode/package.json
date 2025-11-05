@@ -12,7 +12,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "license": "GPL-3.0-only",
-  "version": "3.9.0",
+  "version": "3.9.1",
   "private": true,
   "workspaces": [
     "client",
