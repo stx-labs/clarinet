@@ -3,8 +3,8 @@
 This release has full support for Epoch 3.3 and Clarity 4. It still defaults to Epoch 3.2 and
 Clarity 3. A version 3.10.0 will be released shortly to default the the newer versions.
 
-The Clarinet JS SDK pacakges are now publised in the `@stacks` GitHub organization. Clarinet rojects
-will need to migrate the project to use:
+The Clarinet JS SDK packages are now publised in the `@stacks` GitHub organization. Clarinet
+projects will need to migrate the project to use:
 
 - `@stacks/clarinet-sdk@3.9.0` instead of `@stacks/clarinet-sdk@3.x`
 - `vitest-environment-clarinet@3.0.1` instead `vitest-environement-clarinet@2.x`
