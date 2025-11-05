@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, afterEach, afterAll, beforeAll } from
 // makes it simpler to handle wasm build
 import { getSDK, initSimnet } from "..";
 
-const api_url = "https://api.testnet.hiro.so";
+const api_url = "https://api.testnet.stg.hiro.so";
 const counterAddress = "STJCAB2T9TR2EJM7YS4DM2CGBBVTF7BV237Y8KNV.counter";
 const sender = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
@@ -145,7 +145,6 @@ describe("repl settings", async () => {
     expect([...accounts.values()].every((v) => v.startsWith("SP"))).toBe(true);
     expect(simnet.deployer).toBe("SP1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRCBGD7R");
     const interfaces = simnet.getContractsInterfaces();
-    console.log(interfaces);
     expect([...interfaces.keys()].every((v) => v.startsWith(simnet.deployer))).toBe(true);
   });
 });

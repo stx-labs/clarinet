@@ -1,13 +1,13 @@
 # Clarinet SDK Workspace
 
 This workspace regroups
-`@hirosystems/clarinet-sdk` for node.js and `@hirosystems/clarinet-sdk-browser` for web browsers.  
-They respectively rely on `@hirosystems/clarinet-sdk-wasm` and `@hirosystems/clarinet-sdk-browser-wasm`.
+`@stacks/clarinet-sdk` for node.js and `@stacks/clarinet-sdk-browser` for web browsers.  
+They respectively rely on `@stacks/clarinet-sdk-wasm` and `@stacks/clarinet-sdk-browser-wasm`.
 
 Because of the way the wasm packages are build, with wasm-pack, it made sense to have two different
 packages for Node.js and the browsers, but it has some caveats. Especially, some of the code is
-duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the future, we hope to 
-be able to simplify this build, it would require some breaking changes so it could be part of 
+duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the future, we hope to
+be able to simplify this build, it would require some breaking changes so it could be part of
 Clarinet 3.x.
 
 ## Contributing
@@ -17,7 +17,7 @@ The clarinet-sdk requires a few steps to be built and tested locally.
 Clone the clarinet repo and `cd` into it:
 
 ```sh
-git clone git@github.com:hirosystems/clarinet.git
+git clone git@github.com:stx-labs/clarinet.git
 cd clarinet
 ```
 

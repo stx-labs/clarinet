@@ -154,6 +154,9 @@ jobs:
   dist_clarinet:
     name: Build Clarinet Distributions
     runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -200,10 +203,6 @@ jobs:
         with:
           target-cache-key: ${{ matrix.os }}-${{ matrix.target }}-${{ github.job }}
 
-      - name: Install wix (Windows)
-        if: matrix.os == 'windows-latest'
-        run: cargo install cargo-wix || true
-
       # Set environment variables required from cross compiling from macos-x86_64 to macos-arm64
       - name: Configure macos-arm64 cross compile config
         if: matrix.target == 'aarch64-apple-darwin'
@@ -234,213 +233,53 @@ jobs:
       - name: Build - Cargo
         run: cargo build --release --features=telemetry --locked --target ${{ matrix.target }}
 
-      # Steps for Windows Code Signing with DigiCert
-      - name: Windows - Setup Certificate
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-        run: |
-          echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > /d/Certificate_pkcs12.p12
-          cat  /d/Certificate_pkcs12.p12
-        shell: bash
-
-      - name: Windows - Set variables
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-        id: variables
-        run: |
-          dir
-          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          echo "KEYPAIR_NAME=gt-standard-keypair" >> $GITHUB_OUTPUT
-          echo "CERTIFICATE_NAME=gt-certificate" >> $GITHUB_OUTPUT
-          echo "SM_HOST=${{ secrets.SM_HOST }}" >> "$GITHUB_ENV"
-          echo "SM_API_KEY=${{ secrets.SM_API_KEY }}" >> "$GITHUB_ENV"
-          echo "SM_CLIENT_CERT_FILE=D:\\Certificate_pkcs12.p12" >> "$GITHUB_ENV"
-          echo "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}" >> "$GITHUB_ENV"
-          echo "C:\Program Files (x86)\Windows Kits\10\App Certification Kit" >> $GITHUB_PATH
-          echo "C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.8 Tools" >> $GITHUB_PATH
-          echo "C:\Program Files\DigiCert\DigiCert Keylocker Tools" >> $GITHUB_PATH
-        shell: bash
-
-      - name: Windows - Setup Keylocker KSP
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-        run: |
-          curl -X GET  https://one.digicert.com/signingmanager/api-ui/v1/releases/Keylockertools-windows-x64.msi/download -H "x-api-key:%SM_API_KEY%" -o Keylockertools-windows-x64.msi
-          msiexec /i Keylockertools-windows-x64.msi /quiet /qn
-          smksp_registrar.exe list
-          smctl.exe keypair ls
-          C:\Windows\System32\certutil.exe -csp "DigiCert Signing Manager KSP" -key -user
-        shell: cmd
-
-      - name: Windows - Certificates Sync
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-        run: |
-          smctl windows certsync
-        shell: cmd
-
-      - name: Code sign bin (Windows)
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-        run: |
-          $signtool_path = ((Resolve-Path -Path "${env:ProgramFiles(x86)}/Windows Kits/10/bin/10*/x86").Path[-1]) + "/signtool.exe"
-          $bin_path = (Resolve-Path -Path "target/${{ matrix.target }}/release/clarinet.exe").Path
-
-          & ${signtool_path} sign `
-            /d "Clarinet is a clarity runtime packaged as a command line tool, designed to facilitate smart contract understanding, development, testing and deployment." `
-            /du "https://github.com/hirosystems/clarinet" `
-            /tr http://timestamp.digicert.com `
-            /sha1 "${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}" `
-            /td sha256 `
-            /fd sha256 `
-            "${bin_path}"
-
-          & ${signtool_path} verify /v /pa "${bin_path}"
-
-      - name: Build Installer (Windows)
-        if: matrix.os == 'windows-latest'
-        run: cargo wix -v --no-build --nocapture -p clarinet-cli
-
-      - name: Code sign installed (Windows)
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-        run: |
-          $signtool_path = ((Resolve-Path -Path "${env:ProgramFiles(x86)}/Windows Kits/10/bin/10*/x86").Path[-1]) + "/signtool.exe"
-          $msi_path = (Resolve-Path -Path "target/wix/*.msi").Path
-
-          & ${signtool_path} sign `
-            /d "Clarinet is a clarity runtime packaged as a command line tool, designed to facilitate smart contract understanding, development, testing and deployment." `
-            /du "https://github.com/hirosystems/clarinet" `
-            /tr http://timestamp.digicert.com `
-            /sha1 "${{ secrets.SM_CODE_SIGNING_CERT_SHA1_HASH }}" `
-            /td sha256 `
-            /fd sha256 `
-            "${msi_path}"
-
-          & ${signtool_path} verify /v /pa "${msi_path}"
-
       # Don't compress for Windows because winget can't yet unzip files
-      - name: Compress cargo artifact (Linux)
+      - name: Compress cargo artifact (Linux and macOS)
         if: matrix.os != 'windows-latest'
         run: tar -C target/${{ matrix.target }}/release -zcvf clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz clarinet
 
-      - name: Rename cargo artifact (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: mv target/wix/*.msi clarinet-${{ env.SHORT_TARGET_NAME }}.msi
-
       # Separate uploads to prevent paths from being preserved
-      - name: Upload cargo artifacts (Linux)
+      - name: Upload cargo artifacts (Linux and macOS)
         if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz
 
-      - name: Upload cargo artifact (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clarinet-${{ env.SHORT_TARGET_NAME }}
-          path: clarinet-${{ env.SHORT_TARGET_NAME }}.msi
+      # Steps for Windows Code Signing with Azure Trusted Signing (OIDC)
+      # - name: Azure OIDC Login
+      #   if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+      #   uses: azure/login@v2
+      #   with:
+      #     tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-  dist_clarity_repl:
-    name: Build Clarity REPL Distribution
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: components/clarity-repl
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      # - name: Code sign bin (Windows)
+      #   if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+      #   uses: azure/trusted-signing-action@v0.4.0
+      #   with:
+      #     endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      #     trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      #     certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
+      #     files-folder: target/${{ matrix.target }}/release
+      #     files-folder-filter: exe
+      #     file-digest: SHA256
+      #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
+      #     timestamp-digest: SHA256
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal
 
-      - name: Setup Rust cache
-        id: setup-rust-cache
-        uses: ./.github/actions/setup-rust-cache
-        with:
-          target-cache-key: ${{ runner.os }}-${{ github.job }}
+      # - name: Rename cargo artifact (Windows)
+      #   if: matrix.os == 'windows-latest'
+      #   shell: bash
+      #   run: cp target/${{ matrix.target }}/release/clarinet.exe clarinet-${{ env.SHORT_TARGET_NAME }}.exe
 
-      - name: Configure artifact names
-        run: |
-          echo "SHORT_TARGET_NAME=linux-x64-glibc" >> $GITHUB_ENV
-          echo "PRE_GYP_TARGET_NAME=linux-x64-glibc" >> $GITHUB_ENV
-
-      - name: Build - Cargo
-        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
-
-      - name: Compress cargo artifact
-        working-directory: "."
-        run: tar -C target/x86_64-unknown-linux-gnu/release -zcvf clarity-repl-${{ env.SHORT_TARGET_NAME }}.tar.gz clarity-repl
-
-      - name: Upload cargo artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clarity-repl-${{ env.SHORT_TARGET_NAME }}
-          path: clarity-repl-${{ env.SHORT_TARGET_NAME }}.tar.gz
-
-      - name: Publish clarity-repl to crates.io
-        if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != ''
-        run: 4
-          cargo login ${{ secrets.CARGO_CRATES_IO_API_KEY }}
-          cargo publish
-
-  docker_images:
-    name: Create ${{ matrix.name }} Docker Image
-    runs-on: ubuntu-latest
-    needs:
-      - get_release_info
-      - sanity_check
-      - cargo_test
-      - dist_clarinet
-    outputs:
-      version: ${{ steps.docker_meta.outputs.version }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Clarinet
-            description: Clarinet is a simple, modern and opinionated runtime for testing, integrating and deploying Clarity smart contracts.
-            image: ${{ github.repository }}
-            artifact: clarinet-linux-x64-glibc
-            dockerfile: dockerfiles/components/clarinet-dev.dockerfile
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Generate Docker tags/labels
-        id: docker_meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ matrix.image }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}},value=${{ needs.get_release_info.outputs.tag }},enable=${{ needs.get_release_info.outputs.tag != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.get_release_info.outputs.tag }},enable=${{ needs.get_release_info.outputs.tag != '' }}
-          labels: |
-            org.opencontainers.image.title=${{ matrix.name }}
-            org.opencontainers.image.description=${{ matrix.description }}
-
-      - name: Login to Dockerhub
-        uses: docker/login-action@v2
-        if: github.event_name != 'pull_request'
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Download pre-built dist
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-
-      - name: Untar pre-built dist
-        run: tar zxvf *.tar.gz
-
-      - name: Create Image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.docker_meta.outputs.tags }}
-          labels: ${{ steps.docker_meta.outputs.labels }}
+      # - name: Upload cargo artifact (Windows)
+      #   if: matrix.os == 'windows-latest'
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: clarinet-${{ env.SHORT_TARGET_NAME }}
+      #     path: clarinet-${{ env.SHORT_TARGET_NAME }}.exe
 
   release:
     name: Release
@@ -450,8 +289,7 @@ jobs:
       - get_release_info
       - sanity_check
       - cargo_test
-      - dist_clarity_repl
-      - docker_images
+      - dist_clarinet
     permissions:
       actions: write
       contents: write
@@ -465,7 +303,7 @@ jobs:
       - name: Tag and Release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "**/*.tar.gz,**/*.msi"
+          artifacts: "**/*.tar.gz,**/*.exe"
           tag: ${{ needs.get_release_info.outputs.tag }}
           commit: ${{ env.GITHUB_SHA }}
 

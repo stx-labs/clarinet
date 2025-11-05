@@ -409,12 +409,12 @@ btc_address = "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7"
   "author": "",
   "license": "ISC",
   "dependencies": {{
-    "@hirosystems/clarinet-sdk": "^3.6.0",
-    "@types/node": "^24.4.0",
+    "@stacks/clarinet-sdk": "^3.9.0",
     "@stacks/transactions": "^7.2.0",
+    "@types/node": "^24.4.0",
     "chokidar-cli": "^3.0.0",
     "vitest": "^3.2.4",
-    "vitest-environment-clarinet": "^2.3.0"
+    "vitest-environment-clarinet": "^3.0.0"
   }}
 }}
 "#,
@@ -448,7 +448,7 @@ btc_address = "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7"
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "node_modules/@hirosystems/clarinet-sdk/vitest-helpers/src",
+    "node_modules/@stacks/clarinet-sdk/vitest-helpers/src",
     "tests"
   ]
 }
@@ -465,7 +465,7 @@ btc_address = "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7"
 /// <reference types="vitest" />
 
 import { defineConfig } from "vite";
-import { vitestSetupFilePath, getClarinetVitestsArgv } from "@hirosystems/clarinet-sdk/vitest";
+import { vitestSetupFilePath, getClarinetVitestsArgv } from "@stacks/clarinet-sdk/vitest";
 
 /*
   In this file, Vitest is configured so that it works seamlessly with Clarinet and the Simnet.
@@ -473,7 +473,7 @@ import { vitestSetupFilePath, getClarinetVitestsArgv } from "@hirosystems/clarin
   The `vitest-environment-clarinet` will initialise the clarinet-sdk
   and make the `simnet` object available globally in the test files.
 
-  `vitestSetupFilePath` points to a file in the `@hirosystems/clarinet-sdk` package that does two things:
+  `vitestSetupFilePath` points to a file in the `@stacks/clarinet-sdk` package that does two things:
     - run `before` hooks to initialize the simnet and `after` hooks to collect costs and coverage reports.
     - load custom vitest matchers to work with Clarity values (such as `expect(...).toBeUint()`)
 

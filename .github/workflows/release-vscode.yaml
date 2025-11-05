@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
+          node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Rust
@@ -36,11 +36,11 @@ jobs:
         run: npm ci
 
       - name: Build vsix
-        run: npx vsce package --out clarity-lsp.vsix
+        run: npx vsce package --out clarity.vsix
 
       - name: Publish to VSCode Marketplace
         continue-on-error: true
-        run: npx vsce publish --packagePath clarity-lsp.vsix --pat ${{ secrets.VSCE_TOKEN }}
+        run: npx vsce publish --packagePath clarity.vsix --pat ${{ secrets.VSCE_TOKEN }}
 
       - name: Publish to Open VSX
-        run: npx ovsx publish --packagePath clarity-lsp.vsix --pat ${{ secrets.OVSX_TOKEN }}
+        run: npx ovsx publish --packagePath clarity.vsix --pat ${{ secrets.OVSX_TOKEN }}

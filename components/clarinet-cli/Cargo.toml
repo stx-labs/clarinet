@@ -5,10 +5,10 @@ edition = "2021"
 description = "Clarinet is a simple, modern and opinionated runtime for testing, integrating and deploying Clarity smart contracts."
 readme = "README.md"
 license = "GPL-3.0"
-keywords = ["blockstack", "blockchain", "clarity", "smart-contract", "repl"]
+keywords = ["stacks", "blockchain", "clarity", "smart-contract", "repl"]
 exclude = ["examples/**"]
-homepage = "https://github.com/hirosystems/clarinet"
-repository = "https://github.com/hirosystems/clarinet"
+homepage = "https://stackslabs.com/clarinet"
+repository = "https://github.com/stx-labs/clarinet"
 categories = [
     "command-line-utilities",
     "development-tools",

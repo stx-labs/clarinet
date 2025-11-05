@@ -28,7 +28,7 @@ Register-ArgumentCompleter -Native -CommandName 'clarinet' -ScriptBlock {
             [CompletionResult]::new('console', 'console', [CompletionResultType]::ParameterValue, 'Load contracts in a REPL for an interactive session')
             [CompletionResult]::new('test', 'test', [CompletionResultType]::ParameterValue, 'Execute test suite')
             [CompletionResult]::new('check', 'check', [CompletionResultType]::ParameterValue, 'Check syntax of your contracts')
-            [CompletionResult]::new('publish', 'publish', [CompletionResultType]::ParameterValue, 'Publish contracts on chain')
+            [CompletionResult]::new('deployments', 'deployments', [CompletionResultType]::ParameterValue, 'Deploy contracts on chain')
             [CompletionResult]::new('run', 'run', [CompletionResultType]::ParameterValue, 'Execute Clarinet extension')
             [CompletionResult]::new('integrate', 'integrate', [CompletionResultType]::ParameterValue, 'Start devnet environment for integration testing')
             [CompletionResult]::new('lsp', 'lsp', [CompletionResultType]::ParameterValue, 'Start an LSP server (for integration with editors)')
@@ -88,7 +88,7 @@ Register-ArgumentCompleter -Native -CommandName 'clarinet' -ScriptBlock {
             [CompletionResult]::new('--version', 'version', [CompletionResultType]::ParameterName, 'Print version information')
             break
         }
-        'clarinet;publish' {
+        'clarinet;deployments' {
             [CompletionResult]::new('--manifest-path', 'manifest-path', [CompletionResultType]::ParameterName, 'Path to Clarinet.toml')
             [CompletionResult]::new('--help', 'help', [CompletionResultType]::ParameterName, 'Print help information')
             [CompletionResult]::new('--version', 'version', [CompletionResultType]::ParameterName, 'Print version information')

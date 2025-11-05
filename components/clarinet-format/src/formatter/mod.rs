@@ -241,6 +241,7 @@ impl<'a> Aggregator<'a> {
 
                             NativeFunctions::ListCons => self.format_list(list, previous_indentation),
 
+                            | NativeFunctions::RestrictAssets => self.format_restrict_assets(list, previous_indentation),
                             // everything else that's not special cased
                             NativeFunctions::Add
                             | NativeFunctions::Subtract
@@ -344,8 +345,6 @@ impl<'a> Aggregator<'a> {
                             | NativeFunctions::ReplaceAt
                             | NativeFunctions::GetStacksBlockInfo
                             | NativeFunctions::GetTenureInfo
-                            // @todo: RestrictAssets will likely need formatting rework
-                            | NativeFunctions::RestrictAssets
                             | NativeFunctions::AsContractSafe
                             | NativeFunctions::AllowanceAll
                             | NativeFunctions::AllowanceWithStacking
@@ -893,6 +892,69 @@ impl<'a> Aggregator<'a> {
         acc.push(')');
         acc
     }
+
+    fn format_restrict_assets(
+        &self,
+        exprs: &[PreSymbolicExpression],
+        previous_indentation: &str,
+    ) -> String {
+        let mut acc = "(restrict-assets? ".to_string();
+        let indentation = &self.settings.indentation.to_string();
+        let space = format!("{previous_indentation}{indentation}");
+
+        // asset-owner
+        acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), previous_indentation));
+
+        // allowances
+        if let Some(allowances_list) = exprs.get(2) {
+            if let Some(allowances) = allowances_list.match_list() {
+                if allowances.len() == 1 {
+                    // Single allowance, format on single line
+                    acc.push(' ');
+                    acc.push_str(&self.format_source_exprs(
+                        slice::from_ref(allowances_list),
+                        previous_indentation,
+                    ));
+                } else {
+                    // Multiple allowances, format like let bind
+                    acc.push(' ');
+                    acc.push('(');
+                    let mut iter = allowances.iter().peekable();
+                    while let Some(allowance) = iter.next() {
+                        let trailing = get_trailing_comment(allowance, &mut iter);
+                        let double_indent = format!("{space}{indentation}");
+                        acc.push_str(&format!(
+                            "\n{}{}",
+                            double_indent,
+                            self.format_source_exprs(slice::from_ref(allowance), &double_indent)
+                        ));
+                        if let Some(comment) = trailing {
+                            acc.push(' ');
+                            acc.push_str(&self.display_pse(comment, previous_indentation));
+                        }
+                    }
+                    acc.push_str(&format!("\n{space})"));
+                }
+            }
+        }
+
+        // body expressions
+        let mut prev_end_line = None;
+        for e in exprs.get(3..).unwrap_or_default() {
+            push_blank_lines(&mut acc, prev_end_line, e.span().start_line);
+
+            acc.push_str(&format!(
+                "\n{}{}",
+                space,
+                self.format_source_exprs(slice::from_ref(e), &space)
+            ));
+
+            prev_end_line = Some(e.span().end_line);
+        }
+        acc.push_str(&format!("\n{previous_indentation})"));
+        acc
+    }
+
     fn format_list(&self, exprs: &[PreSymbolicExpression], previous_indentation: &str) -> String {
         let indentation = &self.settings.indentation.to_string();
         let space = format!("{previous_indentation}{indentation}");
@@ -2332,6 +2394,35 @@ mod tests_formatter {
               () ;; empty
             )
             "#
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_restrict_assets_single_arg() {
+        let src = indoc!(
+            r#"
+            (restrict-assets? asset-owner ((with-stx u10000))
+              (+ u1 u2)
+            )"#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+    #[test]
+    fn test_restrict_assets_multi_arg() {
+        let src = indoc!(
+            r#"
+            (restrict-assets? asset-owner (
+                (with-stx u10000)
+                (with-ft (contract-of token-trait) "stackaroo" u50)
+              )
+              (try! (contract-call? token-trait transfer u100 tx-sender
+                'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM none
+              ))
+              (try! (stx-transfer? u1000000 tx-sender 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM))
+              (print u1)
+            )"#
         );
         let result = format_with_default(src);
         assert_eq!(src, result);

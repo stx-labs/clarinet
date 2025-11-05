@@ -12,6 +12,67 @@ on:
       - released
 
 jobs:
+  docker_image:
+    name: Create Clarinet Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    outputs:
+      version: ${{ steps.docker_meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate Docker tags/labels
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        env:
+          TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=Clarinet
+            org.opencontainers.image.description=Clarinet is a simple, modern and opinionated runtime for testing, integrating and deploying Clarity smart contracts.
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.TAG }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
+        run: |
+          gh release download $TAG --pattern "clarinet-linux-x64-glibc.tar.gz"
+
+      - name: Untar pre-built dist
+        run: tar zxvf clarinet-linux-x64-glibc.tar.gz
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfiles/components/clarinet-dev.dockerfile
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   homebrew:
     name: Homebrew
     runs-on: macos-latest
@@ -54,46 +115,46 @@ jobs:
             --version "${VERSION}" \
             clarinet
 
-  winget:
-    name: Winget
-    runs-on: windows-latest
-    steps:
-      - name: Generate release bot app token
-        id: generate-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_PEM }}
+  # winget:
+  #   name: Winget
+  #   runs-on: windows-latest
+  #   steps:
+  #     - name: Generate release bot app token
+  #       id: generate-token
+  #       uses: actions/create-github-app-token@v1
+  #       with:
+  #         app-id: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_ID }}
+  #         private-key: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_PEM }}
 
-      - name: Get bot user ID
-        id: get-user-id
-        run: |
-          $userId = $(gh api "/users/${{ steps.generate-token.outputs.app-slug }}[bot]" --jq .id)
-          echo "user-id=$userId" >> $env:GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+  #     - name: Get bot user ID
+  #       id: get-user-id
+  #       run: |
+  #         $userId = $(gh api "/users/${{ steps.generate-token.outputs.app-slug }}[bot]" --jq .id)
+  #         echo "user-id=$userId" >> $env:GITHUB_OUTPUT
+  #       env:
+  #         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
 
-      - name: Winget version bump
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
-          GIT_AUTHOR_NAME: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}
-          GIT_AUTHOR_EMAIL: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}@users.noreply.github.com
-        run: |
-          # Get version info
-          $VERSION=${env:TAG}.substring(1)
+  #     - name: Winget version bump
+  #       env:
+  #         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+  #         TAG: ${{ github.event.client_payload.tag || github.event.inputs.tag }}
+  #         GIT_AUTHOR_NAME: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}
+  #         GIT_AUTHOR_EMAIL: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}@users.noreply.github.com
+  #       run: |
+  #         # Get version info
+  #         $VERSION=${env:TAG}.substring(1)
 
-          # Configure git configs
-          git config --global user.name "${env:GIT_AUTHOR_NAME}"
-          git config --global user.email "${env:GIT_AUTHOR_EMAIL}"
+  #         # Configure git configs
+  #         git config --global user.name "${env:GIT_AUTHOR_NAME}"
+  #         git config --global user.email "${env:GIT_AUTHOR_EMAIL}"
 
-          # Get wingetcreate
-          iwr https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+  #         # Get wingetcreate
+  #         iwr https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
 
-          # Update manifest and submit PR
-          ./wingetcreate.exe update `
-            --urls https://github.com/${{ github.repository }}/releases/download/${env:TAG}/clarinet-windows-x64.msi `
-            --version ${VERSION} `
-            --token ${{ steps.generate-token.outputs.token }} `
-            --submit `
-            HiroSystems.Clarinet
+  #         # Update manifest and submit PR
+  #         ./wingetcreate.exe update `
+  #           --urls https://github.com/${{ github.repository }}/releases/download/${env:TAG}/clarinet-windows-x64.msi `
+  #           --version ${VERSION} `
+  #           --token ${{ steps.generate-token.outputs.token }} `
+  #           --submit `
+  #           HiroSystems.Clarinet

@@ -118,29 +118,6 @@ export async function initClient(
   try {
     await client.start();
 
-    const now = new Date();
-    const surveyStart = new Date("2023-05-12");
-    const surveyEnd = new Date("2023-05-31");
-    const surveyConfig = "showDevSurveyQ2-23-1";
-    if (config.misc[surveyConfig] && now >= surveyStart && now <= surveyEnd) {
-      window
-        .showInformationMessage(
-          "Help us improve Hiro products by telling us about your experience in a short 10 minute survey.",
-          { title: "Take the survey", action: "open-survey" },
-          { title: "No thanks", action: "hide" },
-        )
-        .then((v) => {
-          if (v?.action === "hide" || v?.action === "open-survey") {
-            console.log(v);
-            config.update(`misc.${surveyConfig}`, false, true);
-          }
-          if (v?.action === "open-survey") {
-            const surveyUri = vscode.Uri.parse("https://survey.hiro.so");
-            vscode.commands.executeCommand("vscode.open", surveyUri);
-          }
-        });
-    }
-
     if (config.panels["insights-panel"]) {
       if (window.activeTextEditor) {
         const { document } = window.activeTextEditor;
