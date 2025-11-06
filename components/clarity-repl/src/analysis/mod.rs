@@ -36,6 +36,9 @@ pub enum Pass {
     CheckChecker,
 }
 
+// Each new pass should be included in this list
+static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
+
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case", try_from = "String")]
@@ -52,9 +55,6 @@ impl TryFrom<String> for Lint {
         Lint::try_from(s.as_str())
     }
 }
-
-// Each new pass should be included in this list
-static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 
 /// Wrapper around `clarity_types::diagnostic::Level` which adds option to ignore
 /// TODO: Wouldn't need this if there's some way for serde to skip deserializing `lint_name = "ignore"`` to a map entry

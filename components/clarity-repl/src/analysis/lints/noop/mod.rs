@@ -11,10 +11,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::{self, AnalysisPass, AnalysisResult, Lint};
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub struct NoopCheckerSettings {
+struct NoopCheckerSettings {
     level: Level,
 }
 
