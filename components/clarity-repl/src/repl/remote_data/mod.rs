@@ -35,7 +35,7 @@ pub const TESTNET_25_START_HEIGHT: u32 = 1;
 pub const TESTNET_30_START_HEIGHT: u32 = 320;
 pub const TESTNET_31_START_HEIGHT: u32 = 814;
 pub const TESTNET_32_START_HEIGHT: u32 = 3_140_887;
-pub const TESTNET_33_START_HEIGHT: u32 = u32::MAX;
+pub const TESTNET_33_START_HEIGHT: u32 = 3_640_102;
 
 pub fn epoch_for_height(is_mainnet: bool, height: u32) -> StacksEpochId {
     if is_mainnet {

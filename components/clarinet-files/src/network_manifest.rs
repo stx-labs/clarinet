@@ -13,8 +13,8 @@ use super::{FileAccessor, FileLocation};
 
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
-pub const DEFAULT_STACKS_NODE_IMAGE: &str = "blockstack/stacks-blockchain:3.2.0.0.2-alpine";
-pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "blockstack/stacks-signer:3.2.0.0.2.0-alpine";
+pub const DEFAULT_STACKS_NODE_IMAGE: &str = "blockstack/stacks-blockchain:3.3.0.0.0-alpine";
+pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "blockstack/stacks-signer:3.3.0.0.0.0-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
@@ -45,7 +45,7 @@ pub const DEFAULT_EPOCH_2_5: u64 = 108;
 pub const DEFAULT_EPOCH_3_0: u64 = 142;
 pub const DEFAULT_EPOCH_3_1: u64 = 144;
 pub const DEFAULT_EPOCH_3_2: u64 = 146;
-// pub const DEFAULT_EPOCH_3_3: u64 = 100_000_000;
+pub const DEFAULT_EPOCH_3_3: u64 = 148;
 
 // Currently, the pox-4 contract has these values hardcoded:
 // https://github.com/stacks-network/stacks-core/blob/e09ab931e2f15ff70f3bb5c2f4d7afb[…]42bd7bec6/stackslib/src/chainstate/stacks/boot/pox-testnet.clar
@@ -312,9 +312,7 @@ pub struct DevnetConfig {
     pub epoch_3_0: u64,
     pub epoch_3_1: u64,
     pub epoch_3_2: u64,
-    // keep epoch 3.3 optional for now while it's not enabled on the default image
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub epoch_3_3: Option<u64>,
+    pub epoch_3_3: u64,
     pub use_docker_gateway_routing: bool,
     pub docker_platform: Option<String>,
 }
@@ -932,7 +930,7 @@ impl NetworkManifest {
                 epoch_3_0: devnet_config.epoch_3_0.unwrap_or(DEFAULT_EPOCH_3_0),
                 epoch_3_1: devnet_config.epoch_3_1.unwrap_or(DEFAULT_EPOCH_3_1),
                 epoch_3_2: devnet_config.epoch_3_2.unwrap_or(DEFAULT_EPOCH_3_2),
-                epoch_3_3: devnet_config.epoch_3_3,
+                epoch_3_3: devnet_config.epoch_3_3.unwrap_or(DEFAULT_EPOCH_3_3),
                 stacks_node_env_vars: devnet_config
                     .stacks_node_env_vars
                     .take()
@@ -1060,7 +1058,7 @@ impl Default for DevnetConfig {
             epoch_3_0: DEFAULT_EPOCH_3_0,
             epoch_3_1: DEFAULT_EPOCH_3_1,
             epoch_3_2: DEFAULT_EPOCH_3_2,
-            epoch_3_3: None,
+            epoch_3_3: DEFAULT_EPOCH_3_3,
             use_docker_gateway_routing: false,
             docker_platform: None,
         }

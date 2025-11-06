@@ -25,8 +25,8 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 pub use session::Session;
 pub use settings::{SessionSettings, Settings, SettingsFile};
 
-pub const DEFAULT_CLARITY_VERSION: ClarityVersion = ClarityVersion::Clarity3;
-pub const DEFAULT_EPOCH: StacksEpochId = StacksEpochId::Epoch32;
+pub const DEFAULT_CLARITY_VERSION: ClarityVersion = ClarityVersion::Clarity4;
+pub const DEFAULT_EPOCH: StacksEpochId = StacksEpochId::Epoch33;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Epoch {
