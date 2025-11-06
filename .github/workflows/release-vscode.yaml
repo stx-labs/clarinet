@@ -3,9 +3,8 @@
 
 name: Publish VSCode Extension
 on:
-  repository_dispatch:
-    types:
-      - released
+  release:
+    types: [published]
 
 defaults:
   run:
