@@ -56,8 +56,7 @@ impl TryFrom<String> for Lint {
     }
 }
 
-/// Wrapper around `clarity_types::diagnostic::Level` which adds option to ignore
-/// TODO: Wouldn't need this if there's some way for serde to skip deserializing `lint_name = "ignore"`` to a map entry
+/// Map user intput to `clarity_types::diagnostic::Level` or ignore
 #[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
