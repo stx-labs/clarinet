@@ -9,6 +9,7 @@ mod coverage_tests;
 pub mod lints;
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
@@ -20,7 +21,7 @@ use lints::noop::NoopChecker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
-use strum::VariantArray;
+use strum::{EnumString, VariantArray};
 
 use crate::analysis::annotation::Annotation;
 
@@ -35,11 +36,21 @@ pub enum Pass {
     CheckChecker,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", try_from = "String")]
+#[strum(serialize_all = "snake_case")]
 pub enum Lint {
     Noop,
+}
+
+/// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
+impl TryFrom<String> for Lint {
+    type Error = strum::ParseError;
+
+    fn try_from(s: String) -> Result<Lint, Self::Error> {
+        Lint::try_from(s.as_str())
+    }
 }
 
 // Each new pass should be included in this list
@@ -49,18 +60,26 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 /// TODO: Wouldn't need this if there's some way for serde to skip deserializing `lint_name = "ignore"`` to a map entry
 #[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(untagged)]
+#[serde(rename_all = "snake_case")]
 pub enum LintLevel {
     #[default]
+    #[serde(alias = "allow", alias = "none", alias = "false", alias = "off")]
     Ignore,
-    Enabled(ClarityDiagnosticLevel),
+    #[serde(alias = "note")]
+    Notice,
+    #[serde(alias = "warn")]
+    Warning,
+    #[serde(alias = "err")]
+    Error,
 }
 
 impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
     fn from(level: LintLevel) -> Self {
         match level {
-            LintLevel::Enabled(l) => Some(l),
             LintLevel::Ignore => None,
+            LintLevel::Notice => Some(ClarityDiagnosticLevel::Note),
+            LintLevel::Warning => Some(ClarityDiagnosticLevel::Warning),
+            LintLevel::Error => Some(ClarityDiagnosticLevel::Error),
         }
     }
 }
@@ -125,7 +144,7 @@ pub enum OneOrList<T> {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    lints: HashMap<Lint, LintLevel>,
+    lints: Option<HashMap<Lint, LintLevel>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
@@ -133,6 +152,7 @@ impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
         let lints = from_file
             .lints
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|(lint, level)| {
                 Into::<Option<ClarityDiagnosticLevel>>::into(level).map(|l| (lint, l))
