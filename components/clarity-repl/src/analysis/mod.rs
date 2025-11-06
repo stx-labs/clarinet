@@ -151,8 +151,9 @@ impl From<SettingsFile> for Settings {
             .lints
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|(lint, level)| {
-                Into::<Option<ClarityDiagnosticLevel>>::into(level).map(|l| (lint, l))
+            .filter_map(|(lint, lint_level)| {
+                let clarity_level: Option<ClarityDiagnosticLevel> = lint_level.into();
+                clarity_level.map(|level| (lint, level))
             })
             .collect();
 
