@@ -117,11 +117,9 @@ impl Settings {
     }
 
     pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
-        self.lints = Lint::VARIANTS
-            .iter()
-            .cloned()
-            .map(|lint| (lint, level.clone()))
-            .collect();
+        for lint in Lint::VARIANTS {
+            self.enable_lint(lint.clone(), level.clone());
+        }
     }
 
     pub fn disable_all_lints(&mut self) {
