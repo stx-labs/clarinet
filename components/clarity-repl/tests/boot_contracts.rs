@@ -4,11 +4,12 @@ use clarity_types::types::StandardPrincipalData;
 
 #[test]
 fn can_run_boot_contracts() {
-    let mut interpreter = ClarityInterpreter::new(
-        StandardPrincipalData::transient(),
-        Settings::default(),
-        None,
-    );
+    // Turn off lints, which currently result in diagnostics
+    let mut repl_settings = Settings::default();
+    repl_settings.analysis.disable_all_lints();
+
+    let mut interpreter =
+        ClarityInterpreter::new(StandardPrincipalData::transient(), repl_settings, None);
     let boot_contracts_data = BOOT_CONTRACTS_DATA.clone();
 
     for (_, (boot_contract, ast)) in boot_contracts_data {

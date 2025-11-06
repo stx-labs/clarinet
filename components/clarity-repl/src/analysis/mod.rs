@@ -6,18 +6,23 @@ pub mod check_checker;
 pub mod coverage;
 #[cfg(test)]
 mod coverage_tests;
-pub mod native_func_noop;
+pub mod lints;
 
+use std::collections::HashMap;
+use std::convert::TryFrom;
+
+use call_checker::CallChecker;
+use check_checker::CheckChecker;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
+use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use lints::noop::NoopChecker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
+use strum::{EnumString, VariantArray};
 
-use self::call_checker::CallChecker;
-use self::check_checker::CheckChecker;
-use self::native_func_noop::NoopChecker;
 use crate::analysis::annotation::Annotation;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
@@ -29,13 +34,60 @@ pub enum Pass {
     All,
     CallChecker,
     CheckChecker,
-    NoopChecker,
+}
+
+// Each new pass should be included in this list
+static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case", try_from = "String")]
+#[strum(serialize_all = "snake_case")]
+pub enum Lint {
+    Noop,
+}
+
+/// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
+impl TryFrom<String> for Lint {
+    type Error = strum::ParseError;
+
+    fn try_from(s: String) -> Result<Lint, Self::Error> {
+        Lint::try_from(s.as_str())
+    }
+}
+
+/// Map user intput to `clarity_types::diagnostic::Level` or ignore
+#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum LintLevel {
+    #[default]
+    #[serde(alias = "allow", alias = "false", alias = "off", alias = "none")]
+    Ignore,
+    #[serde(alias = "note")]
+    Notice,
+    #[serde(alias = "warn", alias = "true", alias = "on")]
+    Warning,
+    #[serde(alias = "err")]
+    Error,
+}
+
+impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
+    fn from(level: LintLevel) -> Self {
+        match level {
+            LintLevel::Ignore => None,
+            LintLevel::Notice => Some(ClarityDiagnosticLevel::Note),
+            LintLevel::Warning => Some(ClarityDiagnosticLevel::Warning),
+            LintLevel::Error => Some(ClarityDiagnosticLevel::Error),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: Vec<Pass>,
+    lints: HashMap<Lint, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
 }
 
@@ -55,6 +107,24 @@ impl Settings {
             };
         }
     }
+
+    pub fn enable_lint(
+        &mut self,
+        lint: Lint,
+        level: ClarityDiagnosticLevel,
+    ) -> Option<ClarityDiagnosticLevel> {
+        self.lints.insert(lint, level)
+    }
+
+    pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
+        for lint in Lint::VARIANTS {
+            self.enable_lint(lint.clone(), level.clone());
+        }
+    }
+
+    pub fn disable_all_lints(&mut self) {
+        self.lints.clear();
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -71,42 +141,47 @@ pub enum OneOrList<T> {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
+    lints: Option<HashMap<Lint, LintLevel>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
-// Each new pass should be included in this list
-static ALL_PASSES: [Pass; 3] = [Pass::CheckChecker, Pass::CallChecker, Pass::NoopChecker];
-
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let passes = if let Some(file_passes) = from_file.passes {
-            match file_passes {
-                OneOrList::One(pass) => match pass {
-                    Pass::All => ALL_PASSES.to_vec(),
-                    pass => vec![pass],
-                },
-                OneOrList::List(passes) => {
-                    if passes.contains(&Pass::All) {
-                        ALL_PASSES.to_vec()
-                    } else {
-                        passes
-                    }
+        let lints = from_file
+            .lints
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(lint, lint_level)| {
+                let clarity_level: Option<ClarityDiagnosticLevel> = lint_level.into();
+                clarity_level.map(|level| (lint, level))
+            })
+            .collect();
+
+        let passes = from_file
+            .passes
+            .map(|file_passes| match file_passes {
+                OneOrList::One(pass) => vec![pass],
+                OneOrList::List(passes) => passes,
+            })
+            .map(|passes| {
+                if passes.contains(&Pass::All) {
+                    ALL_PASSES.to_vec()
+                } else {
+                    passes
                 }
-            }
-        } else {
-            vec![]
-        };
+            })
+            .unwrap_or_default();
 
         // Each pass that has its own settings should be included here.
-        let checker_settings = if let Some(checker_settings) = from_file.check_checker {
-            check_checker::Settings::from(checker_settings)
-        } else {
-            check_checker::Settings::default()
-        };
+        let check_checker = from_file
+            .check_checker
+            .map(check_checker::Settings::from)
+            .unwrap_or_default();
 
         Self {
+            lints,
             passes,
-            check_checker: checker_settings,
+            check_checker,
         }
     }
 }
@@ -140,8 +215,13 @@ pub fn run_analysis(
         match pass {
             Pass::CheckChecker => passes.push(CheckChecker::run_pass),
             Pass::CallChecker => passes.push(CallChecker::run_pass),
-            Pass::NoopChecker => passes.push(NoopChecker::run_pass),
             Pass::All => panic!("unexpected All in list of passes"),
+        }
+    }
+
+    for lint in settings.lints.keys() {
+        match lint {
+            Lint::Noop => passes.push(NoopChecker::run_pass),
         }
     }
 
