@@ -62,11 +62,11 @@ impl TryFrom<String> for Lint {
 #[serde(rename_all = "snake_case")]
 pub enum LintLevel {
     #[default]
-    #[serde(alias = "allow", alias = "none", alias = "false", alias = "off")]
+    #[serde(alias = "allow", alias = "false", alias = "off", alias = "none")]
     Ignore,
     #[serde(alias = "note")]
     Notice,
-    #[serde(alias = "warn")]
+    #[serde(alias = "warn", alias = "true", alias = "on")]
     Warning,
     #[serde(alias = "err")]
     Error,
