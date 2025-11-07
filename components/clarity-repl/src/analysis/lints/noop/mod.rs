@@ -82,10 +82,10 @@ impl<'a> NoopChecker<'a> {
         false
     }
 
-    fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: &str) {
+    fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: String) {
         let diagnostic = Diagnostic {
             level: self.settings.level.clone(),
-            message: message.to_string(),
+            message,
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
         };
@@ -107,7 +107,7 @@ impl<'a> NoopChecker<'a> {
         if operands.len() < 2 {
             self.add_noop_diagnostic(
                 expr,
-                &format!(
+                format!(
                     "`{}` with fewer than 2 operands has no effect",
                     func.get_name()
                 ),

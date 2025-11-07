@@ -17,7 +17,6 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
-use lints::noop::NoopChecker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -26,6 +25,43 @@ use strum::{EnumString, VariantArray};
 use crate::analysis::annotation::Annotation;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
+pub type AnalysisPassFn = fn(
+    &mut ContractAnalysis,
+    &mut AnalysisDatabase,
+    &Vec<Annotation>,
+    settings: &Settings,
+) -> AnalysisResult;
+
+pub trait AnalysisPass {
+    #[allow(clippy::ptr_arg)]
+    fn run_pass(
+        contract_analysis: &mut ContractAnalysis,
+        analysis_db: &mut AnalysisDatabase,
+        annotations: &Vec<Annotation>,
+        settings: &Settings,
+    ) -> AnalysisResult;
+}
+
+impl From<&Lint> for AnalysisPassFn {
+    fn from(lint: &Lint) -> AnalysisPassFn {
+        match lint {
+            Lint::Noop => lints::NoopChecker::run_pass,
+            Lint::UnusedConst => lints::UnusedConst::run_pass,
+        }
+    }
+}
+
+impl TryFrom<&Pass> for AnalysisPassFn {
+    type Error = &'static str;
+
+    fn try_from(pass: &Pass) -> Result<AnalysisPassFn, Self::Error> {
+        match pass {
+            Pass::CheckChecker => Ok(CheckChecker::run_pass),
+            Pass::CallChecker => Ok(CallChecker::run_pass),
+            Pass::All => Err("Unexpected 'All' in list of passes"),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
@@ -45,7 +81,10 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 #[strum(serialize_all = "snake_case")]
 pub enum Lint {
     Noop,
+    UnusedConst,
 }
+
+impl Lint {}
 
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
 impl TryFrom<String> for Lint {
@@ -186,43 +225,22 @@ impl From<SettingsFile> for Settings {
     }
 }
 
-pub trait AnalysisPass {
-    #[allow(clippy::ptr_arg)]
-    fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
-        analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
-        settings: &Settings,
-    ) -> AnalysisResult;
-}
-
 pub fn run_analysis(
     contract_analysis: &mut ContractAnalysis,
     analysis_db: &mut AnalysisDatabase,
     annotations: &Vec<Annotation>,
     settings: &Settings,
 ) -> AnalysisResult {
-    let mut errors: Vec<Diagnostic> = Vec::new();
-    let mut passes: Vec<
-        fn(
-            &mut ContractAnalysis,
-            &mut AnalysisDatabase,
-            &Vec<Annotation>,
-            settings: &Settings,
-        ) -> AnalysisResult,
-    > = vec![];
+    let mut errors: Vec<Diagnostic> = vec![];
+    let mut passes: Vec<AnalysisPassFn> = vec![];
+
     for pass in &settings.passes {
-        match pass {
-            Pass::CheckChecker => passes.push(CheckChecker::run_pass),
-            Pass::CallChecker => passes.push(CallChecker::run_pass),
-            Pass::All => panic!("unexpected All in list of passes"),
-        }
+        let f = AnalysisPassFn::try_from(pass).unwrap();
+        passes.push(f);
     }
 
     for lint in settings.lints.keys() {
-        match lint {
-            Lint::Noop => passes.push(NoopChecker::run_pass),
-        }
+        passes.push(AnalysisPassFn::from(lint));
     }
 
     execute(analysis_db, |database| {
