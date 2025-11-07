@@ -1201,16 +1201,10 @@ impl<'a> Aggregator<'a> {
                             // note: we could just apply this to both utf8
                             // and ascii but format! is much faster than
                             // using extract_expr_source
-                            if let Some(source) = self.source {
-                                let extracted = extract_expr_source(pse, source);
-                                if !extracted.is_empty() {
-                                    extracted
-                                } else {
-                                    value.to_string()
-                                }
-                            } else {
-                                value.to_string()
-                            }
+                            self.source
+                                .map(|source| extract_expr_source(pse, source))
+                                .filter(|extracted| !extracted.is_empty())
+                                .unwrap_or_else(|| value.to_string())
                         }
                     }
                 }
