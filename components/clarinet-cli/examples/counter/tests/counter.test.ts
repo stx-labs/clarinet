@@ -43,3 +43,28 @@ it("Ensure that counter can be incremented multiples times per block, across mul
   );
   expect(result).toBeOk(Cl.uint(31));
 });
+
+it("Prevents underflow when decrementing below zero", () => {
+  const block = simnet.mineBlock([
+    tx.callPublicFn("counter", "decrement", [Cl.uint(10)], address1),
+  ]);
+
+  // Should fail with error u2 (underflow protection)
+  expect(block[0].result).toBeErr(Cl.uint(2));
+});
+
+it("Prevents overflow when incrementing", () => {
+  const maxUint = 340282366920938463463374607431768211455n; // u128 max
+  
+  // First set counter to a high value by incrementing
+  const block1 = simnet.mineBlock([
+    tx.callPublicFn("counter", "increment", [Cl.uint(maxUint - 10n)], address1),
+  ]);
+  expect(block1[0].result).toBeOk(Cl.uint(maxUint - 9n));
+
+  // Try to increment beyond max, should fail with error u1
+  const block2 = simnet.mineBlock([
+    tx.callPublicFn("counter", "increment", [Cl.uint(20)], address1),
+  ]);
+  expect(block2[0].result).toBeErr(Cl.uint(1));
+});
