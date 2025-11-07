@@ -385,6 +385,8 @@ describe("simnet can read contracts data vars and maps", () => {
 });
 
 describe("simnet can get contracts info and deploy contracts", () => {
+  const epoch = "3.3";
+
   it("can get contract interfaces", () => {
     const contractInterfaces = simnet.getContractsInterfaces();
     expect(contractInterfaces).toHaveLength(nbOfBootContracts + 5);
@@ -428,7 +430,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contracts as snippets", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(epoch);
     const res = simnet.deployContract("temp", "(+ 24 18)", null, deployerAddr);
     expect(res.result).toStrictEqual(Cl.int(42));
 
@@ -437,7 +439,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contracts", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(epoch);
     const source = "(define-public (add (a uint) (b uint)) (ok (+ a b)))\n";
     const deployRes = simnet.deployContract("op", source, null, deployerAddr);
     expect(deployRes.result).toStrictEqual(Cl.bool(true));
@@ -477,7 +479,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contract with clarity_version in mineBlock", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(epoch);
     const source = "(define-public (get-height) (ok burn-block-height))";
 
     const [deployRes] = simnet.mineBlock([
@@ -494,7 +496,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contract with null options in mineBlock", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(epoch);
     const source = "(define-public (test) (ok true))";
 
     const [deployRes] = simnet.mineBlock([
@@ -533,7 +535,7 @@ describe("simnet can mint stx", () => {
 
 describe("simnet can mint ft", () => {
   it("can mint ft", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch("3.3");
     const source =
       "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
     const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
@@ -595,7 +597,7 @@ describe("the simnet can execute commands", () => {
   });
 
   it("can mint_ft", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch("3.3");
     const source =
       "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
     const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
