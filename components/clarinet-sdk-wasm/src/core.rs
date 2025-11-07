@@ -14,15 +14,14 @@ use clarinet_deployments::{
 use clarinet_files::{
     FileAccessor, FileLocation, ProjectManifest, StacksNetwork, WASMFileSystemAccessor,
 };
+use clarity::types::{Address, StacksEpochId};
+use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::clarity::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
 };
 use clarity_repl::clarity::chainstate::StacksAddress;
 use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
-};
-use clarity_repl::clarity::{
-    Address, ClarityVersion, EvaluationResult, ExecutionResult, StacksEpochId, SymbolicExpression,
 };
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
