@@ -44,8 +44,8 @@ describe("basic simnet interactions", () => {
   });
 
   it("can run command", () => {
-    const r = simnet.executeCommand("::set_epoch 3.1");
-    expect(r).toBe("Epoch updated to: 3.1");
+    const r = simnet.executeCommand("::set_epoch 3.3");
+    expect(r).toBe("Epoch updated to: 3.3");
   });
 
   it("can mine empty blocks", () => {
@@ -89,7 +89,7 @@ describe("basic simnet interactions", () => {
     // "0" is an invalid epoch
     // it logs that 0 is invalid and defaults to latest
     simnet.setEpoch("0");
-    expect(simnet.currentEpoch).toBe("3.2");
+    expect(simnet.currentEpoch).toBe("3.3");
   });
 
   it("can get default clarity version for current epoch", () => {
@@ -534,7 +534,8 @@ describe("simnet can mint stx", () => {
 describe("simnet can mint ft", () => {
   it("can mint ft", () => {
     simnet.setEpoch("3.0");
-    const source = "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
+    const source =
+      "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
     const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
     expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
@@ -595,7 +596,8 @@ describe("the simnet can execute commands", () => {
 
   it("can mint_ft", () => {
     simnet.setEpoch("3.0");
-    const source = "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
+    const source =
+      "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
     const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
     expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
@@ -603,7 +605,7 @@ describe("the simnet can execute commands", () => {
       `::mint_ft ${deployerAddr}.peppermint.pmnt ${deployerAddr} 1000`,
     );
     expect(result).toBe(`→ ${deployerAddr}: 1100 pmnt`);
-  })
+  });
 
   it("can get_assets_maps", () => {
     simnet.executeCommand("::mint_stx ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 1000");
