@@ -74,12 +74,22 @@ impl<'a> App<'a> {
     }
 
     pub fn display_service_status_update(&mut self, service_update: ServiceStatusData) {
-        let insertion_index = service_update.order;
-        if insertion_index == self.services.items.len() {
-            self.services.items.push(service_update)
+        let existing_index = self
+            .services
+            .items
+            .iter()
+            .position(|s| s.name == service_update.name);
+
+        if let Some(index) = existing_index {
+            self.services.items[index] = service_update;
         } else {
-            self.services.items.remove(insertion_index);
-            self.services.items.insert(insertion_index, service_update)
+            let insertion_index = self
+                .services
+                .items
+                .iter()
+                .position(|s| s.order > service_update.order)
+                .unwrap_or(self.services.items.len());
+            self.services.items.insert(insertion_index, service_update);
         }
     }
 
