@@ -1194,7 +1194,7 @@ impl<'a> Aggregator<'a> {
                     match string_data {
                         clarity::vm::types::CharType::ASCII(ascii_data) => {
                             let content = String::from_utf8_lossy(&ascii_data.data);
-                            format!("\"{}\"", content)
+                            format!("\"{content}\"")
                         }
                         clarity::vm::types::CharType::UTF8(_) => {
                             // utf8 strings use the original source to preserve formatting
