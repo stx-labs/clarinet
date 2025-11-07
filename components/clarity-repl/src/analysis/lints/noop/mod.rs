@@ -173,6 +173,7 @@ impl AnalysisPass for NoopChecker<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::diagnostic::Level;
+    use indoc::indoc;
 
     use crate::analysis::Lint;
     use crate::repl::session::Session;
@@ -186,15 +187,18 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        (is-eq true)
-        (ok true)
-    )
-)
-"
+        let snippet = indoc!(
+            "
+            (define-public (test-func)
+                (begin
+                    (is-eq true)
+                    (ok true)
+                )
+            )
+        "
+        )
         .to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 1);
@@ -213,15 +217,18 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        (+ u1)
-        (ok true)
-    )
-)
-"
+        let snippet = indoc!(
+            "
+            (define-public (test-func)
+                (begin
+                    (+ u1)
+                    (ok true)
+                )
+            )
+        "
+        )
         .to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 1);
@@ -240,15 +247,18 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        (and true)
-        (ok true)
-    )
-)
-"
+        let snippet = indoc!(
+            "
+            (define-public (test-func)
+                (begin
+                    (and true)
+                    (ok true)
+                )
+            )
+        "
+        )
         .to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 1);
@@ -267,16 +277,19 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        ;; #[allow(noop)]
-        (is-eq true)
-        (ok true)
-    )
-)
-"
+        let snippet = indoc!(
+            "
+            (define-public (test-func)
+                (begin
+                    ;; #[allow(noop)]
+                    (is-eq true)
+                    (ok true)
+                )
+            )
+        "
+        )
         .to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
