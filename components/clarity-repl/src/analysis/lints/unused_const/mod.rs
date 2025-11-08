@@ -166,14 +166,20 @@ mod tests {
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    #[test]
-    fn const_used() {
+    fn get_session() -> Session {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
             .enable_lint(Lint::UnusedConst, Level::Warning);
-        let mut session = Session::new(settings);
+
+        Session::new(settings)
+    }
+
+    #[test]
+    fn const_used() {
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -192,12 +198,7 @@ mod tests {
 
     #[test]
     fn const_used_before_declaration() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_lint(Lint::UnusedConst, Level::Warning);
-        let mut session = Session::new(settings);
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -216,12 +217,7 @@ mod tests {
 
     #[test]
     fn const_not_used() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_lint(Lint::UnusedConst, Level::Warning);
-        let mut session = Session::new(settings);
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -246,12 +242,7 @@ mod tests {
 
     #[test]
     fn allow_with_comment() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_lint(Lint::UnusedConst, Level::Warning);
-        let mut session = Session::new(settings);
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
