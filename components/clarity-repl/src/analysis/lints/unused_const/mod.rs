@@ -10,7 +10,6 @@ use clarity_types::ClarityName;
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::{self, AnalysisPass, AnalysisResult, Lint};
-use crate::repl::diagnostic;
 
 struct UnusedConstSettings {
     level: Level,
@@ -85,6 +84,10 @@ impl<'a> UnusedConst<'a> {
             .unwrap_or(false)
     }
 
+    fn make_diagnostic_message(name: &ClarityName) -> String {
+        format!("constant `{name}` never used")
+    }
+
     fn make_diagnostic(&self, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
         Diagnostic {
             level: self.settings.level.clone(),
@@ -98,7 +101,7 @@ impl<'a> UnusedConst<'a> {
         let mut diagnostics = vec![];
 
         for (name, expr) in &self.unused_constants {
-            let message = format!("constant `{name}` never used");
+            let message = Self::make_diagnostic_message(name);
             let diagnostic = self.make_diagnostic(expr, message);
             diagnostics.push(diagnostic);
         }
@@ -158,61 +161,87 @@ mod tests {
     use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
+    use crate::analysis::lints::UnusedConst;
     use crate::analysis::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
     #[test]
-    fn no_unused_const() {
+    fn const_used() {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
             .analysis
             .enable_lint(Lint::UnusedConst, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = indoc!(
-            "
-            ;; #[allow(noop)]
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-constant MINUTES_PER_HOUR u60)
 
-            (define-public (hours-to-minutes (hours uint))
+            (define-read-only (hours-to-minutes (hours uint))
                 (* hours MINUTES_PER_HOUR))
-        "
-        )
-        .to_string();
-
-        let res =
-            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
-        let (output, result) = res.expect("Invalid code snippet");
-
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
-        assert!(output[0].contains("constant `MINUTES_PER_HOUR` never used"));
-    }
-
-    #[test]
-    fn unused_const() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_lint(Lint::UnusedConst, Level::Warning);
-        let mut session = Session::new(settings);
-        let snippet = indoc!(
-            "
-            (define-constant MINUTES_PER_HOUR u60)
-
-            (define-public (hours-to-minutes (hours uint))
-                (* hours u60))
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let res =
             session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
         let (_, result) = res.expect("Invalid code snippet");
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn const_used_before_declaration() {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(Lint::UnusedConst, Level::Warning);
+        let mut session = Session::new(settings);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (hours-to-minutes (hours uint))
+                (* hours MINUTES_PER_HOUR))
+
+            (define-constant MINUTES_PER_HOUR u60)
+        ").to_string();
+
+        let res =
+            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
+        let (_, result) = res.expect("Invalid code snippet");
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn const_not_used() {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(Lint::UnusedConst, Level::Warning);
+        let mut session = Session::new(settings);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant MINUTES_PER_HOUR u60)
+
+            (define-read-only (hours-to-minutes (hours uint))
+                (* hours u60))
+        ").to_string();
+
+        let res =
+            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
+        let (output, result) = res.expect("Invalid code snippet");
+
+        let const_name = "MINUTES_PER_HOUR";
+        let expected_message = UnusedConst::make_diagnostic_message(&const_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(const_name));
+        assert!(output[0].contains(&expected_message));
     }
 
     #[test]
@@ -223,16 +252,15 @@ mod tests {
             .analysis
             .enable_lint(Lint::UnusedConst, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = indoc!(
-            "
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
             ;; #[allow(unused_const)]
             (define-constant MINUTES_PER_HOUR u60)
 
-            (define-public (hours-to-minutes (hours uint))
+            (define-read-only (hours-to-minutes (hours uint))
                 (* hours u60))
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let res =
             session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);

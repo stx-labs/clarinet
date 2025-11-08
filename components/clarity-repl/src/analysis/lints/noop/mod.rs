@@ -187,17 +187,16 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = indoc!(
-            "
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-public (test-func)
                 (begin
                     (is-eq true)
                     (ok true)
                 )
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
@@ -217,17 +216,16 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = indoc!(
-            "
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-public (test-func)
                 (begin
                     (+ u1)
                     (ok true)
                 )
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
@@ -247,17 +245,16 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = indoc!(
-            "
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-public (test-func)
                 (begin
                     (and true)
                     (ok true)
                 )
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
@@ -277,8 +274,9 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = indoc!(
-            "
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-public (test-func)
                 (begin
                     ;; #[allow(noop)]
@@ -286,9 +284,7 @@ mod tests {
                     (ok true)
                 )
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
