@@ -183,9 +183,9 @@ mod tests {
                 (* hours MINUTES_PER_HOUR))
         ").to_string();
 
-        let res =
-            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
-        let (_, result) = res.expect("Invalid code snippet");
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
 
         assert_eq!(result.diagnostics.len(), 0);
     }
@@ -207,9 +207,9 @@ mod tests {
             (define-constant MINUTES_PER_HOUR u60)
         ").to_string();
 
-        let res =
-            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
-        let (_, result) = res.expect("Invalid code snippet");
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
 
         assert_eq!(result.diagnostics.len(), 0);
     }
@@ -231,9 +231,9 @@ mod tests {
                 (* hours u60))
         ").to_string();
 
-        let res =
-            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
-        let (output, result) = res.expect("Invalid code snippet");
+        let (output, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
 
         let const_name = "MINUTES_PER_HOUR";
         let expected_message = UnusedConst::make_diagnostic_message(&const_name.into());
@@ -262,9 +262,9 @@ mod tests {
                 (* hours u60))
         ").to_string();
 
-        let res =
-            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
-        let (_, result) = res.expect("Invalid code snippet");
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
 
         assert_eq!(result.diagnostics.len(), 0);
     }
