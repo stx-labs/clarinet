@@ -23,7 +23,6 @@ impl UnusedConstSettings {
 
 pub struct UnusedConst<'a> {
     clarity_version: ClarityVersion,
-    /// Map expression ID to a generated diagnostic
     settings: UnusedConstSettings,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
