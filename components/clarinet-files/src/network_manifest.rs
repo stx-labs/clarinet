@@ -13,8 +13,8 @@ use super::{FileAccessor, FileLocation};
 
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
-pub const DEFAULT_STACKS_NODE_IMAGE: &str = "blockstack/stacks-blockchain:3.3.0.0.0-alpine";
-pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "blockstack/stacks-signer:3.3.0.0.0.0-alpine";
+pub const DEFAULT_STACKS_NODE_IMAGE: &str = "blockstack/stacks-blockchain:3.3.0.0.1-alpine";
+pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "blockstack/stacks-signer:3.3.0.0.1.0-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
