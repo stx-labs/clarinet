@@ -15,6 +15,7 @@ use crate::analysis::annotation::Annotation;
 pub enum LintName {
     Noop,
     UnusedConst,
+    UnusedDataVar,
 }
 
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s

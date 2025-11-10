@@ -168,8 +168,8 @@ mod tests {
     use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
-    use crate::analysis::lints::UnusedConst;
-    use crate::analysis::LintName;
+    use super::UnusedConst;
+    use crate::analysis::linter::LintPass;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -179,7 +179,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(LintName::UnusedConst, Level::Warning);
+            .enable_lint(UnusedConst::get_lint_name(), Level::Warning);
 
         Session::new(settings)
     }

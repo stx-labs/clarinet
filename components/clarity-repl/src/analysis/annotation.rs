@@ -55,6 +55,7 @@ pub enum WarningKind {
     UncheckedParams,
     Noop,
     UnusedConst,
+    UnusedDataVar,
 }
 
 impl std::str::FromStr for WarningKind {
@@ -66,6 +67,7 @@ impl std::str::FromStr for WarningKind {
             "unchecked_params" => Ok(WarningKind::UncheckedParams),
             "noop" => Ok(WarningKind::Noop),
             "unused_const" => Ok(WarningKind::UnusedConst),
+            "unused_data_var" => Ok(WarningKind::UnusedDataVar),
             _ => Err(format!("'{s}' is not a valid warning identifier")),
         }
     }
