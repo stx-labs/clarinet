@@ -83,7 +83,7 @@ fn test_new_project() {
         ".gitattributes",
         "package.json",
         "tsconfig.json",
-        "vitest.config.js",
+        "vitest.config.ts",
     ];
     for file in expected_files.iter() {
         let file_path = project_path.join(file);
