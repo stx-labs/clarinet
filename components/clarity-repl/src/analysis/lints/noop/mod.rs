@@ -9,7 +9,7 @@ use clarity::vm::{ClarityVersion, SymbolicExpression};
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::analysis::{self, AnalysisPass, AnalysisResult, Lint};
+use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct NoopCheckerSettings {
     level: Level,
@@ -161,7 +161,7 @@ impl AnalysisPass for NoopChecker<'_> {
     ) -> AnalysisResult {
         let level = settings
             .lints
-            .get(&Lint::Noop)
+            .get(&LintName::Noop)
             .cloned()
             .unwrap_or(Level::Warning);
         let settings = NoopCheckerSettings::new(level);
@@ -175,7 +175,7 @@ mod tests {
     use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
-    use crate::analysis::Lint;
+    use crate::analysis::LintName;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -185,7 +185,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
+            .enable_lint(LintName::Noop, Level::Warning);
         let mut session = Session::new(settings);
 
         #[rustfmt::skip]
@@ -214,7 +214,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
+            .enable_lint(LintName::Noop, Level::Warning);
         let mut session = Session::new(settings);
 
         #[rustfmt::skip]
@@ -243,7 +243,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
+            .enable_lint(LintName::Noop, Level::Warning);
         let mut session = Session::new(settings);
 
         #[rustfmt::skip]
@@ -272,7 +272,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
+            .enable_lint(LintName::Noop, Level::Warning);
         let mut session = Session::new(settings);
 
         #[rustfmt::skip]

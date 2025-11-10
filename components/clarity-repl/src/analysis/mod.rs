@@ -6,6 +6,7 @@ pub mod check_checker;
 pub mod coverage;
 #[cfg(test)]
 mod coverage_tests;
+pub mod linter;
 pub mod lints;
 
 use std::collections::HashMap;
@@ -17,10 +18,11 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use linter::{LintLevel, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
-use strum::{EnumString, VariantArray};
+use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
 
@@ -42,11 +44,11 @@ pub trait AnalysisPass {
     ) -> AnalysisResult;
 }
 
-impl From<&Lint> for AnalysisPassFn {
-    fn from(lint: &Lint) -> AnalysisPassFn {
+impl From<&LintName> for AnalysisPassFn {
+    fn from(lint: &LintName) -> AnalysisPassFn {
         match lint {
-            Lint::Noop => lints::NoopChecker::run_pass,
-            Lint::UnusedConst => lints::UnusedConst::run_pass,
+            LintName::Noop => lints::NoopChecker::run_pass,
+            LintName::UnusedConst => lints::UnusedConst::run_pass,
         }
     }
 }
@@ -75,58 +77,11 @@ pub enum Pass {
 // Each new pass should be included in this list
 static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case", try_from = "String")]
-#[strum(serialize_all = "snake_case")]
-pub enum Lint {
-    Noop,
-    UnusedConst,
-}
-
-impl Lint {}
-
-/// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
-impl TryFrom<String> for Lint {
-    type Error = strum::ParseError;
-
-    fn try_from(s: String) -> Result<Lint, Self::Error> {
-        Lint::try_from(s.as_str())
-    }
-}
-
-/// Map user intput to `clarity_types::diagnostic::Level` or ignore
-#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum LintLevel {
-    #[default]
-    #[serde(alias = "allow", alias = "off", alias = "none")]
-    Ignore,
-    #[serde(alias = "note")]
-    Notice,
-    #[serde(alias = "warn", alias = "on")]
-    Warning,
-    #[serde(alias = "err")]
-    Error,
-}
-
-impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
-    fn from(level: LintLevel) -> Self {
-        match level {
-            LintLevel::Ignore => None,
-            LintLevel::Notice => Some(ClarityDiagnosticLevel::Note),
-            LintLevel::Warning => Some(ClarityDiagnosticLevel::Warning),
-            LintLevel::Error => Some(ClarityDiagnosticLevel::Error),
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: Vec<Pass>,
-    lints: HashMap<Lint, ClarityDiagnosticLevel>,
+    lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
 }
 
@@ -149,14 +104,14 @@ impl Settings {
 
     pub fn enable_lint(
         &mut self,
-        lint: Lint,
+        lint: LintName,
         level: ClarityDiagnosticLevel,
     ) -> Option<ClarityDiagnosticLevel> {
         self.lints.insert(lint, level)
     }
 
     pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
-        for lint in Lint::VARIANTS {
+        for lint in LintName::VARIANTS {
             self.enable_lint(lint.clone(), level.clone());
         }
     }
@@ -198,7 +153,7 @@ impl From<BoolOr<Self>> for LintLevel {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    lints: Option<HashMap<Lint, BoolOr<LintLevel>>>,
+    lints: Option<HashMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 

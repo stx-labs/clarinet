@@ -9,7 +9,7 @@ use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::analysis::{self, AnalysisPass, AnalysisResult, Lint};
+use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
     level: Level,
@@ -146,7 +146,7 @@ impl AnalysisPass for UnusedConst<'_> {
     ) -> AnalysisResult {
         let level = settings
             .lints
-            .get(&Lint::UnusedConst)
+            .get(&LintName::UnusedConst)
             .cloned()
             .unwrap_or(Level::Warning);
         let settings = UnusedConstSettings::new(level);
@@ -161,7 +161,7 @@ mod tests {
     use indoc::indoc;
 
     use crate::analysis::lints::UnusedConst;
-    use crate::analysis::Lint;
+    use crate::analysis::LintName;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -171,7 +171,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(Lint::UnusedConst, Level::Warning);
+            .enable_lint(LintName::UnusedConst, Level::Warning);
 
         Session::new(settings)
     }
