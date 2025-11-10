@@ -10,7 +10,7 @@ use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType};
 use helpers::t;
-use ignored::ignored_exprs;
+use ignored::{extract_expr_source, ignored_exprs};
 
 pub enum Indentation {
     Space(usize),
@@ -1188,7 +1188,27 @@ impl<'a> Aggregator<'a> {
                 clarity::vm::types::Value::Principal(c) => {
                     format!("'{c}")
                 }
-                // Fill in these explicitly
+                clarity::vm::types::Value::Sequence(clarity::vm::types::SequenceData::String(
+                    ref string_data,
+                )) => {
+                    match string_data {
+                        clarity::vm::types::CharType::ASCII(ascii_data) => {
+                            let content = String::from_utf8_lossy(&ascii_data.data);
+                            format!("\"{content}\"")
+                        }
+                        clarity::vm::types::CharType::UTF8(_) => {
+                            // utf8 strings use the original source to preserve formatting
+                            // note: we could just apply this to both utf8
+                            // and ascii but format! is much faster than
+                            // using extract_expr_source
+                            self.source
+                                .map(|source| extract_expr_source(pse, source))
+                                .filter(|extracted| !extracted.is_empty())
+                                .unwrap_or_else(|| value.to_string())
+                        }
+                    }
+                }
+                clarity::vm::types::Value::Sequence(_) => value.to_string(),
                 _ => value.to_string(),
             },
             PreSymbolicExpressionType::List(ref items) => {
@@ -2427,5 +2447,20 @@ mod tests_formatter {
         );
         let result = format_with_default(src);
         assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_quote_escaping() {
+        let src = "(ok \"'\")";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+
+        let src = "(ok u\"hello\")";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+
+        let src = "(ok u\"\\u{6e05}\\u{6670}\")";
+        let result = format_with_default(src);
+        assert_eq!(result, src);
     }
 }
