@@ -149,7 +149,7 @@ node_modules
 
     fn create_gitattributes(&mut self) {
         let content = r#"tests/** linguist-vendored
-vitest.config.js linguist-vendored
+vitest.config.ts linguist-vendored
 * text=lf
 "#
         .into();
@@ -462,10 +462,11 @@ btc_address = "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7"
     fn create_vitest_config(&mut self) {
         let content =
             r#"
-/// <reference types="vitest" />
-
-import { defineConfig } from "vite";
-import { vitestSetupFilePath, getClarinetVitestsArgv } from "@stacks/clarinet-sdk/vitest";
+import { defineConfig } from "vitest/config";
+import {
+  vitestSetupFilePath,
+  getClarinetVitestsArgv,
+} from "@stacks/clarinet-sdk/vitest";
 
 /*
   In this file, Vitest is configured so that it works seamlessly with Clarinet and the Simnet.
@@ -484,12 +485,12 @@ import { vitestSetupFilePath, getClarinetVitestsArgv } from "@stacks/clarinet-sd
 
 export default defineConfig({
   test: {
-    environment: "clarinet", // use vitest-environment-clarinet
+    // use vitest-environment-clarinet
+    environment: "clarinet",
     pool: "forks",
-    poolOptions: {
-      threads: { singleThread: true },
-      forks: { singleFork: true },
-    },
+    // clarinet handles test isolation by resetting the simnet between tests
+    isolate: false,
+    maxWorkers: 1,
     setupFiles: [
       vitestSetupFilePath,
       // custom setup files can be added here
@@ -504,7 +505,7 @@ export default defineConfig({
 });
 
 "#.into();
-        let name = "vitest.config.js".into();
+        let name = "vitest.config.ts".into();
         self.changes
             .push(self.get_changes_for_new_file(name, content))
     }
