@@ -146,7 +146,7 @@ impl AnalysisPass for UnusedConst<'_> {
     ) -> AnalysisResult {
         let level = settings
             .lints
-            .get(&Lint::Noop)
+            .get(&Lint::UnusedConst)
             .cloned()
             .unwrap_or(Level::Warning);
         let settings = UnusedConstSettings::new(level);
