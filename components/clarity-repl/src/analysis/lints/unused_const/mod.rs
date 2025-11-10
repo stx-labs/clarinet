@@ -9,6 +9,7 @@ use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::linter::LintPass;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
@@ -74,12 +75,7 @@ impl<'a> UnusedConst<'a> {
     // Check if the expression is annotated with `allow(<lint_name>)`
     fn allow(&self) -> bool {
         self.active_annotation
-            .map(|idx| {
-                matches!(
-                    self.annotations[idx].kind,
-                    AnnotationKind::Allow(WarningKind::UnusedConst)
-                )
-            })
+            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
             .unwrap_or(false)
     }
 
@@ -146,12 +142,24 @@ impl AnalysisPass for UnusedConst<'_> {
     ) -> AnalysisResult {
         let level = settings
             .lints
-            .get(&LintName::UnusedConst)
+            .get(&Self::get_lint_name())
             .cloned()
             .unwrap_or(Level::Warning);
         let settings = UnusedConstSettings::new(level);
         let lint = UnusedConst::new(contract_analysis.clarity_version, annotations, settings);
         lint.run(contract_analysis)
+    }
+}
+
+impl LintPass for UnusedConst<'_> {
+    fn get_lint_name() -> LintName {
+        LintName::UnusedConst
+    }
+    fn match_allow_annotation(annotation: &Annotation) -> bool {
+        matches!(
+            annotation.kind,
+            AnnotationKind::Allow(WarningKind::UnusedConst)
+        )
     }
 }
 

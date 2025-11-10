@@ -6,6 +6,8 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use strum::{EnumString, VariantArray};
 
+use crate::analysis::annotation::Annotation;
+
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case", try_from = "String")]
@@ -49,4 +51,9 @@ impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
             LintLevel::Error => Some(ClarityDiagnosticLevel::Error),
         }
     }
+}
+
+pub trait LintPass {
+    fn get_lint_name() -> LintName;
+    fn match_allow_annotation(annotation: &Annotation) -> bool;
 }
