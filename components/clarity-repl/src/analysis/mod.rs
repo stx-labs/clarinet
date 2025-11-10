@@ -101,11 +101,11 @@ impl TryFrom<String> for Lint {
 #[serde(rename_all = "snake_case")]
 pub enum LintLevel {
     #[default]
-    #[serde(alias = "allow", alias = "false", alias = "off", alias = "none")]
+    #[serde(alias = "allow", alias = "off", alias = "none")]
     Ignore,
     #[serde(alias = "note")]
     Notice,
-    #[serde(alias = "warn", alias = "true", alias = "on")]
+    #[serde(alias = "warn", alias = "on")]
     Warning,
     #[serde(alias = "err")]
     Error,
@@ -176,11 +176,29 @@ pub enum OneOrList<T> {
     List(Vec<T>),
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[serde(untagged)]
+pub enum BoolOr<T> {
+    Bool(bool),
+    Value(T),
+}
+
+impl From<BoolOr<Self>> for LintLevel {
+    fn from(val: BoolOr<Self>) -> Self {
+        match val {
+            BoolOr::Bool(true) => Self::Warning,
+            BoolOr::Bool(false) => Self::Ignore,
+            BoolOr::Value(v) => v,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    lints: Option<HashMap<Lint, LintLevel>>,
+    lints: Option<HashMap<Lint, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
@@ -190,9 +208,9 @@ impl From<SettingsFile> for Settings {
             .lints
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|(lint, lint_level)| {
-                let clarity_level: Option<ClarityDiagnosticLevel> = lint_level.into();
-                clarity_level.map(|level| (lint, level))
+            .filter_map(|(lint, value)| {
+                let diag_level: Option<ClarityDiagnosticLevel> = LintLevel::from(value).into();
+                diag_level.map(|level| (lint, level))
             })
             .collect();
 
