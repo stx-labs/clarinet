@@ -1,4 +1,4 @@
-# [3.9.2(https://github.com/stx-labs/clarinet/compare/v3.9.1...v3.9.2) (2025-11-10)
+# [3.9.2](https://github.com/stx-labs/clarinet/compare/v3.9.1...v3.9.2) (2025-11-10)
 
 ##### Continuous Integration
 
@@ -16,7 +16,7 @@
 
 *  Analysis cleanup (#2032) (f9cb6807)
 
-# [3.9.1(https://github.com/stx-labs/clarinet/compare/v3.9.0...v3.9.1) (2025-11-05)
+# [3.9.1](https://github.com/stx-labs/clarinet/compare/v3.9.0...v3.9.1) (2025-11-05)
 
 ##### Continuous Integration
 
