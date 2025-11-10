@@ -55,26 +55,26 @@ echo "Updating root files..."
 update_cargo_toml "./Cargo.toml" "$NEW_VERSION"
 
 # # Build SDK WASM
-# echo "Building SDK WASM..."
-# npm run build:sdk-wasm
+echo "Building SDK WASM..."
+npm run build:sdk-wasm
 
 # # Update Clarinet SDK packages
-# echo "Updating Clarinet SDK packages..."
+echo "Updating Clarinet SDK packages..."
 
 # # SDK wasm
-# echo "Updating SDK wasm"
-# cd components/clarinet-sdk/node
-# update_package_json "package.json" "$NEW_VERSION"
-# npm install "@stacks/clarinet-sdk-wasm@$NEW_VERSION" --save
-# npm i
-# cd "$ROOT_DIR"
+echo "Updating SDK wasm"
+cd components/clarinet-sdk/node
+update_package_json "package.json" "$NEW_VERSION"
+npm install "@stacks/clarinet-sdk-wasm@$NEW_VERSION" --save
+npm i
+cd "$ROOT_DIR"
 
 # echo "Updating SDK wasm browser"
-# cd components/clarinet-sdk/browser
-# update_package_json "package.json" "$NEW_VERSION"
-# npm install "@stacks/clarinet-sdk-wasm-browser@$NEW_VERSION" --save
-# npm i
-# cd "$ROOT_DIR"
+cd components/clarinet-sdk/browser
+update_package_json "package.json" "$NEW_VERSION"
+npm install "@stacks/clarinet-sdk-wasm-browser@$NEW_VERSION" --save
+npm i
+cd "$ROOT_DIR"
 
 echo "Updating clarity-vscode..."
 cd components/clarity-vscode
