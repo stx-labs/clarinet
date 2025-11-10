@@ -53,7 +53,7 @@ fn test_new_project() {
         "Created file .gitattributes",
         "Created file package.json",
         "Created file tsconfig.json",
-        "Created file vitest.config.js",
+        "Created file vitest.config.ts",
     ];
     let stdout = String::from_utf8_lossy(&cmd.stdout);
     let stdout_lines: Vec<_> = stdout.lines().map(str::trim).collect();
