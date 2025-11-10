@@ -19,7 +19,7 @@ use clarity_repl::repl::boot::{
     BOOT_CONTRACTS_NAMES, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_CONTRACTS_NAMES,
     SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
 };
-use clarity_repl::repl::{Session, SessionSettings};
+use clarity_repl::repl::{Session, SessionSettings, DEFAULT_EPOCH};
 use libsecp256k1::PublicKey;
 use reqwest::Url;
 use stacks_codec::codec::{
@@ -116,7 +116,7 @@ fn sign_transaction_payload(
     Ok(signed_tx)
 }
 
-pub fn encode_contract_call(
+fn encode_contract_call(
     contract_id: &QualifiedContractIdentifier,
     function_name: ClarityName,
     function_args: Vec<Value>,
@@ -142,7 +142,7 @@ pub fn encode_contract_call(
     )
 }
 
-pub fn encode_stx_transfer(
+fn encode_stx_transfer(
     recipient: PrincipalData,
     amount: u64,
     memo: [u8; 34],
@@ -156,7 +156,7 @@ pub fn encode_stx_transfer(
     sign_transaction_payload(account, payload, nonce, tx_fee, anchor_mode, network)
 }
 
-pub fn encode_contract_publish(
+fn encode_contract_publish(
     contract_name: &ContractName,
     source: &str,
     clarity_version: Option<ClarityVersion>,
@@ -330,14 +330,10 @@ pub fn apply_on_chain_deployment(
     let mut accounts_cached_nonces: BTreeMap<String, u64> = BTreeMap::new();
     let mut stx_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
     let mut btc_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
-    let mut default_epoch = EpochSpec::Epoch2_05;
     if !fetch_initial_nonces {
         for (_, account) in network_manifest.accounts.iter() {
             accounts_cached_nonces.insert(account.stx_address.clone(), 0);
         }
-        if network_manifest.devnet.is_some() {
-            default_epoch = EpochSpec::Epoch2_1;
-        };
     }
 
     for (_, account) in network_manifest.accounts.iter() {
@@ -385,7 +381,7 @@ pub fn apply_on_chain_deployment(
     }
 
     for batch_spec in deployment.plan.batches.iter() {
-        let epoch = batch_spec.epoch.unwrap_or(default_epoch);
+        let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
         let mut batch = Vec::new();
         for transaction in batch_spec.transactions.iter() {
             let tracker = match transaction {
