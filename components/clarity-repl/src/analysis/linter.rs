@@ -54,7 +54,7 @@ impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
     }
 }
 
-pub trait LintPass {
+pub trait Lint {
     fn get_lint_name() -> LintName;
     fn match_allow_annotation(annotation: &Annotation) -> bool;
 }

@@ -7,9 +7,9 @@ use clarity::vm::representations::Span;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::analysis::linter::LintPass;
+use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
@@ -57,19 +57,8 @@ impl<'a> UnusedConst<'a> {
     }
 
     // Check for annotations that should be attached to the given span
-    fn process_annotations(&mut self, span: &Span) {
-        self.active_annotation = None;
-
-        for (i, annotation) in self.annotations.iter().enumerate() {
-            if annotation.span.start_line == (span.start_line - 1) {
-                self.active_annotation = Some(i);
-                return;
-            } else if annotation.span.start_line >= span.start_line {
-                // The annotations are ordered by span, so if we have passed
-                // the target line, return.
-                return;
-            }
-        }
+    fn set_active_annotation(&mut self, span: &Span) {
+        self.active_annotation = get_index_of_span(self.annotations, span);
     }
 
     // Check if the expression is annotated with `allow(<lint_name>)`
@@ -118,7 +107,7 @@ impl<'a> ASTVisitor<'a> for UnusedConst<'a> {
         name: &'a ClarityName,
         _value: &'a SymbolicExpression,
     ) -> bool {
-        self.process_annotations(&expr.span);
+        self.set_active_annotation(&expr.span);
 
         if !self.allow() {
             self.unused_constants.insert(name, expr);
@@ -151,7 +140,7 @@ impl AnalysisPass for UnusedConst<'_> {
     }
 }
 
-impl LintPass for UnusedConst<'_> {
+impl Lint for UnusedConst<'_> {
     fn get_lint_name() -> LintName {
         LintName::UnusedConst
     }
@@ -169,7 +158,7 @@ mod tests {
     use indoc::indoc;
 
     use super::UnusedConst;
-    use crate::analysis::linter::LintPass;
+    use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 

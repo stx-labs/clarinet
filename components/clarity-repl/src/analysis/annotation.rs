@@ -79,6 +79,21 @@ pub struct Annotation {
     pub span: Span,
 }
 
+/// Returns the index in `annotations` for `span`
+/// Assumes `annotations` is sorted by `span.start_line`
+pub fn get_index_of_span(annotations: &[Annotation], span: &Span) -> Option<usize> {
+    for (i, annotation) in annotations.iter().enumerate() {
+        if annotation.span.start_line == (span.start_line - 1) {
+            return Some(i);
+        } else if annotation.span.start_line >= span.start_line {
+            // The annotations are ordered by span, so if we have passed
+            // the target line, return.
+            break;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
