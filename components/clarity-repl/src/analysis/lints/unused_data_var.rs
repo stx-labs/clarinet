@@ -22,13 +22,31 @@ impl UnusedDataVarSettings {
     }
 }
 
+/// Data associated with a `define-data-var` variable
+struct DataVarData<'a> {
+    expr: &'a SymbolicExpression,
+    /// Has this variable been written to?
+    pub written_to: bool,
+    /// Has this variable been read from?
+    pub read_from: bool,
+}
+
+impl<'a> DataVarData<'a> {
+    fn new(expr: &'a SymbolicExpression) -> Self {
+        Self {
+            expr,
+            written_to: false,
+            read_from: false,
+        }
+    }
+}
+
 pub struct UnusedDataVar<'a> {
     clarity_version: ClarityVersion,
     settings: UnusedDataVarSettings,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
-    /// Map of constants not yet used
-    unused_data_vars: HashMap<&'a ClarityName, &'a SymbolicExpression>,
+    data_vars: HashMap<&'a ClarityName, DataVarData<'a>>,
 }
 
 impl<'a> UnusedDataVar<'a> {
@@ -42,7 +60,7 @@ impl<'a> UnusedDataVar<'a> {
             settings,
             annotations,
             active_annotation: None,
-            unused_data_vars: HashMap::new(),
+            data_vars: HashMap::new(),
         }
     }
 
@@ -79,25 +97,60 @@ impl<'a> UnusedDataVar<'a> {
             .unwrap_or(false)
     }
 
-    fn make_diagnostic_message(name: &ClarityName) -> String {
-        format!("data variable `{name}` never modified")
+    /// Make diagnostic message and suggestion for variable which is never written to
+    fn make_diagnostic_strings_unset(name: &ClarityName) -> (String, Option<String>) {
+        (
+            format!("data variable `{name}` never modified"),
+            Some("Declare using `declare-constant`".to_string()),
+        )
     }
 
-    fn make_diagnostic(&self, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
+    /// Make diagnostic message and suggestion for variable which is never read from
+    fn make_diagnostic_strings_unread(name: &ClarityName) -> (String, Option<String>) {
+        (
+            format!("data variable `{name}` never read"),
+            Some("Remove this expression".to_string()),
+        )
+    }
+
+    /// Make diagnostic message and suggestion for variable which is never used
+    fn make_diagnostic_strings_unused(name: &ClarityName) -> (String, Option<String>) {
+        (
+            format!("data variable `{name}` never used"),
+            Some("Remove this expression".to_string()),
+        )
+    }
+
+    fn make_diagnostic(
+        &self,
+        expr: &'a SymbolicExpression,
+        message: String,
+        suggestion: Option<String>,
+    ) -> Diagnostic {
         Diagnostic {
             level: self.settings.level.clone(),
             message,
             spans: vec![expr.span.clone()],
-            suggestion: Some("Remove variable or declare as constant".to_string()),
+            suggestion,
         }
     }
 
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (name, expr) in &self.unused_data_vars {
-            let message = Self::make_diagnostic_message(name);
-            let diagnostic = self.make_diagnostic(expr, message);
+        for (name, data) in &self.data_vars {
+            if data.written_to && data.read_from {
+                // Variable used
+                continue;
+            }
+            let (message, suggestion) = if data.read_from && !data.written_to {
+                Self::make_diagnostic_strings_unset(name)
+            } else if !data.read_from && data.written_to {
+                Self::make_diagnostic_strings_unread(name)
+            } else {
+                Self::make_diagnostic_strings_unused(name)
+            };
+            let diagnostic = self.make_diagnostic(data.expr, message, suggestion);
             diagnostics.push(diagnostic);
         }
 
@@ -122,7 +175,7 @@ impl<'a> ASTVisitor<'a> for UnusedDataVar<'a> {
         self.process_annotations(&expr.span);
 
         if !self.allow() {
-            self.unused_data_vars.insert(name, expr);
+            self.data_vars.insert(name, DataVarData::new(expr));
         }
 
         true
@@ -134,7 +187,18 @@ impl<'a> ASTVisitor<'a> for UnusedDataVar<'a> {
         name: &'a ClarityName,
         _value: &'a SymbolicExpression,
     ) -> bool {
-        self.unused_data_vars.remove(name);
+        _ = self
+            .data_vars
+            .get_mut(name)
+            .map(|data| data.written_to = true);
+        true
+    }
+
+    fn visit_var_get(&mut self, _expr: &'a SymbolicExpression, name: &'a ClarityName) -> bool {
+        _ = self
+            .data_vars
+            .get_mut(name)
+            .map(|data| data.read_from = true);
         true
     }
 }
@@ -191,34 +255,15 @@ mod tests {
     }
 
     #[test]
-    fn data_var_set() {
+    fn data_var_used() {
         let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
 
-            (define-public (set (val uint))
-                (ok (var-set counter val)))
-        ").to_string();
-
-        let (_, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
-
-        assert_eq!(result.diagnostics.len(), 0);
-    }
-
-    #[test]
-    fn data_var_set_before_declaration() {
-        let mut session = get_session();
-
-        #[rustfmt::skip]
-        let snippet = indoc!("
-            (define-public (set (val uint))
-                (ok (var-set counter val)))
-
-            (define-data-var counter uint u0)
+            (define-public (increment)
+                (ok (var-set counter (+ (var-get counter) u1))))
         ").to_string();
 
         let (_, result) = session
@@ -245,7 +290,32 @@ mod tests {
             .expect("Invalid code snippet");
 
         let var_name = "counter";
-        let expected_message = UnusedDataVar::make_diagnostic_message(&var_name.into());
+        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unset(&var_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(var_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
+    fn data_var_not_read() {
+        let mut session = get_session();
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+
+            (define-public (set (val uint))
+                (ok (var-set counter val)))
+        ").to_string();
+
+        let (output, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+
+        let var_name = "counter";
+        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unread(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -270,7 +340,7 @@ mod tests {
             .expect("Invalid code snippet");
 
         let var_name = "counter";
-        let expected_message = UnusedDataVar::make_diagnostic_message(&var_name.into());
+        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unused(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
