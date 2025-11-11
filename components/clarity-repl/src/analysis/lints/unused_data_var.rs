@@ -139,16 +139,11 @@ impl<'a> UnusedDataVar<'a> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.data_vars {
-            if data.written_to && data.read_from {
-                // Variable used
-                continue;
-            }
-            let (message, suggestion) = if data.read_from && !data.written_to {
-                Self::make_diagnostic_strings_unset(name)
-            } else if !data.read_from && data.written_to {
-                Self::make_diagnostic_strings_unread(name)
-            } else {
-                Self::make_diagnostic_strings_unused(name)
+            let (message, suggestion) = match (data.read_from, data.written_to) {
+                (true, true) => continue,
+                (true, false) => Self::make_diagnostic_strings_unset(name),
+                (false, true) => Self::make_diagnostic_strings_unread(name),
+                (false, false) => Self::make_diagnostic_strings_unused(name),
             };
             let diagnostic = self.make_diagnostic(data.expr, message, suggestion);
             diagnostics.push(diagnostic);
