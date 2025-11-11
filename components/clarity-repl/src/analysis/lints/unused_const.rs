@@ -131,7 +131,7 @@ impl AnalysisPass for UnusedConst<'_> {
     ) -> AnalysisResult {
         let level = settings
             .lints
-            .get(&Self::get_lint_name())
+            .get(&Self::get_name())
             .cloned()
             .unwrap_or(Level::Warning);
         let settings = UnusedConstSettings::new(level);
@@ -141,7 +141,7 @@ impl AnalysisPass for UnusedConst<'_> {
 }
 
 impl Lint for UnusedConst<'_> {
-    fn get_lint_name() -> LintName {
+    fn get_name() -> LintName {
         LintName::UnusedConst
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
@@ -168,7 +168,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(UnusedConst::get_lint_name(), Level::Warning);
+            .enable_lint(UnusedConst::get_name(), Level::Warning);
 
         Session::new(settings)
     }

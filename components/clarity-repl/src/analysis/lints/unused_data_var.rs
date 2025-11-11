@@ -196,7 +196,7 @@ impl AnalysisPass for UnusedDataVar<'_> {
     ) -> AnalysisResult {
         let level = settings
             .lints
-            .get(&Self::get_lint_name())
+            .get(&Self::get_name())
             .cloned()
             .unwrap_or(Level::Warning);
         let settings = UnusedDataVarSettings::new(level);
@@ -206,7 +206,7 @@ impl AnalysisPass for UnusedDataVar<'_> {
 }
 
 impl Lint for UnusedDataVar<'_> {
-    fn get_lint_name() -> LintName {
+    fn get_name() -> LintName {
         LintName::UnusedDataVar
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
@@ -233,7 +233,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(UnusedDataVar::get_lint_name(), Level::Warning);
+            .enable_lint(UnusedDataVar::get_name(), Level::Warning);
 
         Session::new(settings)
     }

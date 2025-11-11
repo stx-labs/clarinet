@@ -149,7 +149,7 @@ impl AnalysisPass for NoopChecker<'_> {
     ) -> AnalysisResult {
         let level = settings
             .lints
-            .get(&Self::get_lint_name())
+            .get(&Self::get_name())
             .cloned()
             .unwrap_or(Level::Warning);
         let settings = NoopCheckerSettings::new(level);
@@ -159,7 +159,7 @@ impl AnalysisPass for NoopChecker<'_> {
 }
 
 impl Lint for NoopChecker<'_> {
-    fn get_lint_name() -> LintName {
+    fn get_name() -> LintName {
         LintName::Noop
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
@@ -183,7 +183,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(NoopChecker::get_lint_name(), Level::Warning);
+            .enable_lint(NoopChecker::get_name(), Level::Warning);
 
         Session::new(settings)
     }
