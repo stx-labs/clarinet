@@ -20,7 +20,7 @@ use crate::schema;
 use crate::FileAccessor;
 
 pub const INVALID_CLARITY_VERSION: &str =
-    "clarity_version field invalid (value supported: 1, 2, 3)";
+    "clarity_version field invalid (value supported: 1, 2, 3, 4)";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ClarityContractMetadata {
@@ -490,7 +490,7 @@ fn get_epoch_and_clarity_version(
                 "3.2" => StacksEpochId::Epoch32,
                 "3.3" => StacksEpochId::Epoch33,
                 _ => return Err(
-                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 3.0, 3.1, 3.2, 3.3 latest)"
+                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 3.0, 3.1, 3.2, 3.3, latest)"
                         .into(),
                 ),
             };
