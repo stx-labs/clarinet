@@ -110,23 +110,26 @@ pub struct CheckChecker<'a> {
     settings: Settings,
     taint_sources: HashMap<Node<'a>, TaintSource<'a>>,
     tainted_nodes: HashMap<Node<'a>, TaintedNode<'a>>,
-    // Map expression ID to a generated diagnostic
+    /// Map expression ID to a generated diagnostic
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
-    // Record all public functions defined
+    /// Record all public functions defined
     public_funcs: HashSet<&'a ClarityName>,
-    // For each user-defined function, record which parameters are allowed
-    // to be unchecked (tainted)
+    /// For each user-defined function, record which parameters are allowed
+    /// to be unchecked (tainted)
     user_funcs: HashMap<&'a ClarityName, FunctionInfo>,
-    // True if currently traversing within an `as-contract` node
+    /// True if currently traversing within an `as-contract` node
     in_as_contract: bool,
+    /// Clarity diagnostic level
+    level: Level,
 }
 
 impl<'a> CheckChecker<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        level: Level,
         settings: Settings,
     ) -> CheckChecker<'a> {
         Self {
@@ -136,6 +139,7 @@ impl<'a> CheckChecker<'a> {
             tainted_nodes: HashMap::new(),
             diagnostics: HashMap::new(),
             annotations,
+            level,
             active_annotation: None,
             public_funcs: HashSet::new(),
             user_funcs: HashMap::new(),
@@ -290,7 +294,7 @@ impl<'a> CheckChecker<'a> {
     fn generate_diagnostics(&self, expr: &SymbolicExpression) -> Vec<Diagnostic> {
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
         let diagnostic = Diagnostic {
-            level: Level::Warning,
+            level: self.level.clone(),
             message: "use of potentially unchecked data".to_string(),
             spans: vec![expr.span.clone()],
             suggestion: None,
@@ -851,11 +855,13 @@ impl AnalysisPass for CheckChecker<'_> {
         contract_analysis: &mut ContractAnalysis,
         analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
+        level: Level,
         settings: &analysis::Settings,
     ) -> AnalysisResult {
         let checker = CheckChecker::new(
             contract_analysis.clarity_version,
             annotations,
+            level,
             settings.check_checker,
         );
         checker.run(contract_analysis)

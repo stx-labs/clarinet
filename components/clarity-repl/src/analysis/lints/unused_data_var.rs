@@ -13,12 +13,12 @@ use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedDataVarSettings {
-    level: Level,
+    // TODO
 }
 
 impl UnusedDataVarSettings {
-    fn new(level: Level) -> Self {
-        Self { level }
+    fn new() -> Self {
+        Self {}
     }
 }
 
@@ -43,9 +43,10 @@ impl<'a> DataVarData<'a> {
 
 pub struct UnusedDataVar<'a> {
     clarity_version: ClarityVersion,
-    settings: UnusedDataVarSettings,
+    _settings: UnusedDataVarSettings,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
+    level: Level,
     data_vars: HashMap<&'a ClarityName, DataVarData<'a>>,
 }
 
@@ -53,11 +54,13 @@ impl<'a> UnusedDataVar<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        level: Level,
         settings: UnusedDataVarSettings,
     ) -> UnusedDataVar<'a> {
         Self {
             clarity_version,
-            settings,
+            _settings: settings,
+            level,
             annotations,
             active_annotation: None,
             data_vars: HashMap::new(),
@@ -117,7 +120,7 @@ impl<'a> UnusedDataVar<'a> {
         suggestion: Option<String>,
     ) -> Diagnostic {
         Diagnostic {
-            level: self.settings.level.clone(),
+            level: self.level.clone(),
             message,
             spans: vec![expr.span.clone()],
             suggestion,
@@ -192,15 +195,16 @@ impl AnalysisPass for UnusedDataVar<'_> {
         contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
-        settings: &analysis::Settings,
+        level: Level,
+        _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let level = settings
-            .lints
-            .get(&Self::get_name())
-            .cloned()
-            .unwrap_or(Level::Warning);
-        let settings = UnusedDataVarSettings::new(level);
-        let lint = UnusedDataVar::new(contract_analysis.clarity_version, annotations, settings);
+        let settings = UnusedDataVarSettings::new();
+        let lint = UnusedDataVar::new(
+            contract_analysis.clarity_version,
+            annotations,
+            level,
+            settings,
+        );
         lint.run(contract_analysis)
     }
 }

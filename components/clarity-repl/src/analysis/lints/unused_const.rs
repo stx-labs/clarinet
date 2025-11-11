@@ -13,33 +13,37 @@ use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
-    level: Level,
+    // TODO
 }
 
 impl UnusedConstSettings {
-    fn new(level: Level) -> Self {
-        Self { level }
+    fn new() -> Self {
+        Self {}
     }
 }
 
 pub struct UnusedConst<'a> {
     clarity_version: ClarityVersion,
-    settings: UnusedConstSettings,
+    _settings: UnusedConstSettings,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
     /// Map of constants not yet used
     unused_constants: HashMap<&'a ClarityName, &'a SymbolicExpression>,
+    /// Clarity diagnostic level
+    level: Level,
 }
 
 impl<'a> UnusedConst<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        level: Level,
         settings: UnusedConstSettings,
     ) -> UnusedConst<'a> {
         Self {
             clarity_version,
-            settings,
+            _settings: settings,
+            level,
             annotations,
             active_annotation: None,
             unused_constants: HashMap::new(),
@@ -74,7 +78,7 @@ impl<'a> UnusedConst<'a> {
 
     fn make_diagnostic(&self, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
         Diagnostic {
-            level: self.settings.level.clone(),
+            level: self.level.clone(),
             message,
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
@@ -127,15 +131,16 @@ impl AnalysisPass for UnusedConst<'_> {
         contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
-        settings: &analysis::Settings,
+        level: Level,
+        _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let level = settings
-            .lints
-            .get(&Self::get_name())
-            .cloned()
-            .unwrap_or(Level::Warning);
-        let settings = UnusedConstSettings::new(level);
-        let lint = UnusedConst::new(contract_analysis.clarity_version, annotations, settings);
+        let settings = UnusedConstSettings::new();
+        let lint = UnusedConst::new(
+            contract_analysis.clarity_version,
+            annotations,
+            level,
+            settings,
+        );
         lint.run(contract_analysis)
     }
 }

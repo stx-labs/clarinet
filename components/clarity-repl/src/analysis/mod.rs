@@ -31,6 +31,7 @@ pub type AnalysisPassFn = fn(
     &mut ContractAnalysis,
     &mut AnalysisDatabase,
     &Vec<Annotation>,
+    level: ClarityDiagnosticLevel,
     settings: &Settings,
 ) -> AnalysisResult;
 
@@ -40,6 +41,7 @@ pub trait AnalysisPass {
         contract_analysis: &mut ContractAnalysis,
         analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
+        level: ClarityDiagnosticLevel,
         settings: &Settings,
     ) -> AnalysisResult;
 }
@@ -73,6 +75,16 @@ pub enum Pass {
     All,
     CallChecker,
     CheckChecker,
+}
+
+impl Pass {
+    fn default_level(&self) -> ClarityDiagnosticLevel {
+        match self {
+            Self::All => panic!("Cannot call this function on `All`"),
+            Self::CallChecker => ClarityDiagnosticLevel::Error,
+            Self::CheckChecker => ClarityDiagnosticLevel::Warning,
+        }
+    }
 }
 
 // Each new pass should be included in this list
@@ -206,21 +218,22 @@ pub fn run_analysis(
     settings: &Settings,
 ) -> AnalysisResult {
     let mut errors: Vec<Diagnostic> = vec![];
-    let mut passes: Vec<AnalysisPassFn> = vec![];
+    let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel)> = vec![];
 
     for pass in &settings.passes {
         let f = AnalysisPassFn::try_from(pass).unwrap();
-        passes.push(f);
+        passes.push((f, pass.default_level()));
     }
 
-    for lint in settings.lints.keys() {
-        passes.push(AnalysisPassFn::from(lint));
+    for (name, level) in &settings.lints {
+        let lint = AnalysisPassFn::from(name);
+        passes.push((lint, level.clone()));
     }
 
     execute(analysis_db, |database| {
-        for pass in passes {
+        for (pass, level) in passes {
             // Collect warnings and continue, or if there is an error, return.
-            match pass(contract_analysis, database, annotations, settings) {
+            match pass(contract_analysis, database, annotations, level, settings) {
                 Ok(mut w) => errors.append(&mut w),
                 Err(mut e) => {
                     errors.append(&mut e);

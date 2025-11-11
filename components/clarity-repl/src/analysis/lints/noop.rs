@@ -13,21 +13,23 @@ use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct NoopCheckerSettings {
-    level: Level,
+    // TODO
 }
 
 impl NoopCheckerSettings {
-    fn new(level: Level) -> Self {
-        Self { level }
+    fn new() -> Self {
+        Self {}
     }
 }
 
 pub struct NoopChecker<'a> {
     clarity_version: ClarityVersion,
-    // Map expression ID to a generated diagnostic
-    settings: NoopCheckerSettings,
+    /// Map expression ID to a generated diagnostic
+    _settings: NoopCheckerSettings,
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
     annotations: &'a Vec<Annotation>,
+    /// Clarity diagnostic level
+    level: Level,
     active_annotation: Option<usize>,
 }
 
@@ -35,11 +37,13 @@ impl<'a> NoopChecker<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        level: Level,
         settings: NoopCheckerSettings,
     ) -> NoopChecker<'a> {
         Self {
             clarity_version,
-            settings,
+            _settings: settings,
+            level,
             diagnostics: HashMap::new(),
             annotations,
             active_annotation: None,
@@ -72,7 +76,7 @@ impl<'a> NoopChecker<'a> {
 
     fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: String) {
         let diagnostic = Diagnostic {
-            level: self.settings.level.clone(),
+            level: self.level.clone(),
             message,
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
@@ -145,15 +149,16 @@ impl AnalysisPass for NoopChecker<'_> {
         contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
-        settings: &analysis::Settings,
+        level: Level,
+        _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let level = settings
-            .lints
-            .get(&Self::get_name())
-            .cloned()
-            .unwrap_or(Level::Warning);
-        let settings = NoopCheckerSettings::new(level);
-        let checker = NoopChecker::new(contract_analysis.clarity_version, annotations, settings);
+        let settings = NoopCheckerSettings::new();
+        let checker = NoopChecker::new(
+            contract_analysis.clarity_version,
+            annotations,
+            level,
+            settings,
+        );
         checker.run(contract_analysis)
     }
 }
