@@ -80,7 +80,7 @@ impl<'a> UnusedDataVar<'a> {
     }
 
     fn make_diagnostic_message(name: &ClarityName) -> String {
-        format!("constant `{name}` never used")
+        format!("data variable `{name}` never modified")
     }
 
     fn make_diagnostic(&self, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
@@ -88,7 +88,7 @@ impl<'a> UnusedDataVar<'a> {
             level: self.settings.level.clone(),
             message,
             spans: vec![expr.span.clone()],
-            suggestion: Some("Remove this expression".to_string()),
+            suggestion: Some("Remove variable or declare as constant".to_string()),
         }
     }
 
@@ -127,6 +127,16 @@ impl<'a> ASTVisitor<'a> for UnusedDataVar<'a> {
 
         true
     }
+
+    fn visit_var_set(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        _value: &'a SymbolicExpression,
+    ) -> bool {
+        self.unused_data_vars.remove(name);
+        true
+    }
 }
 
 impl AnalysisPass for UnusedDataVar<'_> {
@@ -149,12 +159,12 @@ impl AnalysisPass for UnusedDataVar<'_> {
 
 impl LintPass for UnusedDataVar<'_> {
     fn get_lint_name() -> LintName {
-        LintName::UnusedConst
+        LintName::UnusedDataVar
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
         matches!(
             annotation.kind,
-            AnnotationKind::Allow(WarningKind::UnusedConst)
+            AnnotationKind::Allow(WarningKind::UnusedDataVar)
         )
     }
 }
@@ -181,15 +191,15 @@ mod tests {
     }
 
     #[test]
-    fn data_var_used() {
+    fn data_var_set() {
         let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter u0)
+            (define-data-var counter uint u0)
 
-            (define-public (read-counter)
-                (ok (var-get counter)))
+            (define-public (set (val uint))
+                (ok (var-set counter val)))
         ").to_string();
 
         let (_, result) = session
@@ -200,15 +210,15 @@ mod tests {
     }
 
     #[test]
-    fn data_var_used_before_declaration() {
+    fn data_var_set_before_declaration() {
         let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-public (read-counter)
-                (ok (var-get counter)))
+            (define-public (set (val uint))
+                (ok (var-set counter val)))
 
-            (define-data-var counter u0)
+            (define-data-var counter uint u0)
         ").to_string();
 
         let (_, result) = session
@@ -216,6 +226,31 @@ mod tests {
             .expect("Invalid code snippet");
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn data_var_not_set() {
+        let mut session = get_session();
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+
+            (define-public (read-counter)
+                (ok (var-get counter)))
+        ").to_string();
+
+        let (output, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+
+        let var_name = "counter";
+        let expected_message = UnusedDataVar::make_diagnostic_message(&var_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(var_name));
+        assert!(output[0].contains(&expected_message));
     }
 
     #[test]
@@ -224,7 +259,7 @@ mod tests {
 
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter u0)
+            (define-data-var counter uint u0)
 
             (define-public (read-counter)
                 (ok u5))
@@ -234,12 +269,12 @@ mod tests {
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
             .expect("Invalid code snippet");
 
-        let const_name = "MINUTES_PER_HOUR";
-        let expected_message = UnusedDataVar::make_diagnostic_message(&const_name.into());
+        let var_name = "counter";
+        let expected_message = UnusedDataVar::make_diagnostic_message(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains(const_name));
+        assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }
 
@@ -250,7 +285,7 @@ mod tests {
         #[rustfmt::skip]
         let snippet = indoc!("
             ;; #[allow(unused_data_var)]
-            (define-data-var counter u0)
+            (define-data-var counter uint u0)
 
             (define-public (read-counter)
                 (ok u5))
