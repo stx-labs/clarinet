@@ -16,7 +16,7 @@ use clarity_types::types::TypeSignature;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 
-use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
 use crate::repl::DEFAULT_EPOCH;
@@ -242,19 +242,8 @@ impl<'a> CheckChecker<'a> {
     }
 
     // Check for annotations that should be attached to the given span
-    fn process_annotations(&mut self, span: &Span) {
-        self.active_annotation = None;
-
-        for (i, annotation) in self.annotations.iter().enumerate() {
-            if annotation.span.start_line == (span.start_line - 1) {
-                self.active_annotation = Some(i);
-                return;
-            } else if annotation.span.start_line >= span.start_line {
-                // The annotations are ordered by span, so if we have passed
-                // the target line, return.
-                return;
-            }
-        }
+    fn set_active_annotation(&mut self, span: &Span) {
+        self.active_annotation = get_index_of_span(self.annotations, span);
     }
 
     // Check if the expression is annotated with `allow(unchecked_data)`
@@ -335,7 +324,7 @@ impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
     }
 
     fn traverse_expr(&mut self, expr: &'a SymbolicExpression) -> bool {
-        self.process_annotations(&expr.span);
+        self.set_active_annotation(&expr.span);
         // If this expression is annotated to allow unchecked data, no need to
         // traverse it.
         if self.allow_unchecked_data() {
