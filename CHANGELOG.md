@@ -1,3 +1,10 @@
+# [3.10.0](https://github.com/stx-labs/clarinet/compare/v3.9.2...v3.10.0) (2025-11-12)
+
+##### New Features
+
+* Default to epoch 3.3 (#2063) (8aa982ee)
+* **linter:**  Add `unused_const` lint (#2066) (a36fc9a3)
+
 # [3.9.2](https://github.com/stx-labs/clarinet/compare/v3.9.1...v3.9.2) (2025-11-10)
 
 ##### Continuous Integration
