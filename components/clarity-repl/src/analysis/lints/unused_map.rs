@@ -267,6 +267,7 @@ impl Lint for UnusedMap<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::diagnostic::Level;
+    use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
     use super::UnusedMap;
@@ -274,7 +275,7 @@ mod tests {
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    fn get_session() -> Session {
+    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
         let mut settings = SessionSettings::default();
         settings.repl_settings.analysis.disable_all_lints();
         settings
@@ -283,44 +284,58 @@ mod tests {
             .enable_lint(UnusedMap::get_name(), Level::Warning);
 
         Session::new(settings)
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet")
     }
 
     #[test]
-    fn data_var_used() {
-        let mut session = get_session();
-
+    fn map_used_by_insert() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter uint u0)
+            (define-map consumed-messages (buff 32) bool)
 
-            (define-public (increment)
-                (ok (var-set counter (+ (var-get counter) u1))))
+            (define-public (consume-message (hash (buff 32)))
+                (if (map-insert consumed-messages hash true)
+                    (ok true)
+                    (err u1)))
         ").to_string();
 
-        let (_, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
     }
 
     #[test]
-    fn data_var_not_set() {
-        let mut session = get_session();
-
+    fn map_used_by_set_and_get() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter uint u0)
+            (define-map admins principal bool)
 
-            (define-public (read-counter)
-                (ok (var-get counter)))
+            (define-public (set-admin (p principal))
+                (ok (map-set admins p true)))
+
+            (define-read-only (is-admin (p principal))
+                (default-to false (map-get? admins p)))
         ").to_string();
 
-        let (output, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (_, result) = run_snippet(snippet);
 
-        let var_name = "counter";
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn map_not_set() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map admins principal bool)
+
+            (define-read-only (is-admin (p principal))
+                (default-to false (map-get? admins p)))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let var_name = "admins";
         let (expected_message, _) = UnusedMap::make_diagnostic_strings_unset(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
@@ -330,22 +345,18 @@ mod tests {
     }
 
     #[test]
-    fn data_var_not_read() {
-        let mut session = get_session();
-
+    fn map_not_read() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter uint u0)
+            (define-map admins principal bool)
 
-            (define-public (set (val uint))
-                (ok (var-set counter val)))
+            (define-public (set-admin (p principal))
+                (ok (map-set admins p true)))
         ").to_string();
 
-        let (output, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (output, result) = run_snippet(snippet);
 
-        let var_name = "counter";
+        let var_name = "admins";
         let (expected_message, _) = UnusedMap::make_diagnostic_strings_unread(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
@@ -355,22 +366,18 @@ mod tests {
     }
 
     #[test]
-    fn data_var_not_used() {
-        let mut session = get_session();
-
+    fn map_not_used() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter uint u0)
+            (define-map admins principal bool)
 
-            (define-public (read-counter)
-                (ok u5))
+            (define-read-only (is-admin (p principal))
+                true)
         ").to_string();
 
-        let (output, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (output, result) = run_snippet(snippet);
 
-        let var_name = "counter";
+        let var_name = "admins";
         let (expected_message, _) = UnusedMap::make_diagnostic_strings_unused(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
@@ -381,20 +388,16 @@ mod tests {
 
     #[test]
     fn allow_with_comment() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
-            ;; #[allow(unused_data_var)]
-            (define-data-var counter uint u0)
+            ;; #[allow(unused_map)]
+            (define-map admins principal bool)
 
-            (define-public (read-counter)
-                (ok u5))
+            (define-read-only (is-admin (p principal))
+                true)
         ").to_string();
 
-        let (_, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
     }
