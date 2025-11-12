@@ -1,4 +1,22 @@
-# [3.9.1(https://github.com/stx-labs/clarinet/compare/v3.9.0...v3.9.1) (2025-11-05)
+# [3.9.2](https://github.com/stx-labs/clarinet/compare/v3.9.1...v3.9.2) (2025-11-10)
+
+##### Continuous Integration
+
+*  Fix release dispatch (#2059) (d3e16d45)
+
+##### Bug Fixes
+
+*  Formatter string escapes (#2051) (5543a2fe)
+*  Adapt Vitest config to v4 (#2067) (0d48147b)
+*  Service status update indexing (#2062) (f5541a51)
+*  Default epoch in deployments (#2068) (24e7e4c8)
+*  Empty trait format bug (#2045) (3f5870b2)
+
+##### Refactors
+
+*  Analysis cleanup (#2032) (f9cb6807)
+
+# [3.9.1](https://github.com/stx-labs/clarinet/compare/v3.9.0...v3.9.1) (2025-11-05)
 
 ##### Continuous Integration
 

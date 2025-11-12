@@ -82,10 +82,10 @@ impl<'a> NoopChecker<'a> {
         false
     }
 
-    fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: &str) {
+    fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: String) {
         let diagnostic = Diagnostic {
             level: self.settings.level.clone(),
-            message: message.to_string(),
+            message,
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
         };
@@ -107,7 +107,7 @@ impl<'a> NoopChecker<'a> {
         if operands.len() < 2 {
             self.add_noop_diagnostic(
                 expr,
-                &format!(
+                format!(
                     "`{}` with fewer than 2 operands has no effect",
                     func.get_name()
                 ),
@@ -173,6 +173,7 @@ impl AnalysisPass for NoopChecker<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::diagnostic::Level;
+    use indoc::indoc;
 
     use crate::analysis::Lint;
     use crate::repl::session::Session;
@@ -186,15 +187,17 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        (is-eq true)
-        (ok true)
-    )
-)
-"
-        .to_string();
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (test-func)
+                (begin
+                    (is-eq true)
+                    (ok true)
+                )
+            )
+        ").to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 1);
@@ -213,15 +216,17 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        (+ u1)
-        (ok true)
-    )
-)
-"
-        .to_string();
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (test-func)
+                (begin
+                    (+ u1)
+                    (ok true)
+                )
+            )
+        ").to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 1);
@@ -240,15 +245,17 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        (and true)
-        (ok true)
-    )
-)
-"
-        .to_string();
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (test-func)
+                (begin
+                    (and true)
+                    (ok true)
+                )
+            )
+        ").to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 1);
@@ -267,16 +274,18 @@ mod tests {
             .analysis
             .enable_lint(Lint::Noop, Level::Warning);
         let mut session = Session::new(settings);
-        let snippet = "
-(define-public (test-func)
-    (begin
-        ;; #[allow(noop)]
-        (is-eq true)
-        (ok true)
-    )
-)
-"
-        .to_string();
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (test-func)
+                (begin
+                    ;; #[allow(noop)]
+                    (is-eq true)
+                    (ok true)
+                )
+            )
+        ").to_string();
+
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
