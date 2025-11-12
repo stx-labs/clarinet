@@ -52,6 +52,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::Noop => lints::NoopChecker::run_pass,
             LintName::UnusedConst => lints::UnusedConst::run_pass,
             LintName::UnusedDataVar => lints::UnusedDataVar::run_pass,
+            LintName::UnusedMap => lints::UnusedMap::run_pass,
         }
     }
 }
