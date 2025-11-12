@@ -139,9 +139,12 @@ impl<'a> UnusedMap<'a> {
     /// For example, it might track unique hashes using `map-insert` and fail if the same hash is used twice
     /// So the conditions we will use to determine if a map is used:
     ///  - `map-insert` is called
-    ///  - `map-set` and `map-get?` are called
+    ///  - `map-set` and either `map-delete` or `map-get?` are called
+    ///
+    /// TODO: If the `bool` return value from `map-insert` or `map-delete` is not bound to a variable or returned from a function,
+    ///       the map may still be unused
     fn is_map_used(map_data: &MapData) -> bool {
-        map_data.map_insert || (map_data.map_set && map_data.map_get)
+        map_data.map_insert || (map_data.map_set && (map_data.map_get || map_data.map_delete))
     }
 
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
