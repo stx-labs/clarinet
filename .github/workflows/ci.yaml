@@ -258,7 +258,15 @@ jobs:
           output-artifact-directory: ./signed
 
       - name: Compress cargo artifact (Linux and macOS)
+        if: matrix.os != 'windows-latest'
         run: tar -C target/${{ matrix.target }}/release -zcvf clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz clarinet
+
+      - name: Compress signed cargo artifact (Windows - main branch)
+        # if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "./signed/clarinet.exe" -DestinationPath "clarinet-${{ env.SHORT_TARGET_NAME }}.zip"
 
       - name: Upload cargo artifacts (Linux and macOS)
         if: matrix.os != 'windows-latest'
@@ -267,6 +275,12 @@ jobs:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz
 
+      - name: Upload cargo artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clarinet-${{ env.SHORT_TARGET_NAME }}
+          path: clarinet-${{ env.SHORT_TARGET_NAME }}.zip
 
   release:
     name: Release
