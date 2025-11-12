@@ -63,7 +63,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
 
       - name: Install cargo binstall
-        uses: cargo-bins/cargo-binstall@1.15.11
+        uses: cargo-bins/cargo-binstall@v1.15.11
 
       - name: Install cargo audit
         run: cargo binstall cargo-audit@0.22.0 --no-confirm --locked
