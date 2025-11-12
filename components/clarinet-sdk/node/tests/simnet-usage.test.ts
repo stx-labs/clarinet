@@ -14,6 +14,7 @@ const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 let simnet: Simnet;
 
 const nbOfBootContracts = 26;
+const latestEpochStr = "3.3";
 
 const deploymentPlanPath = path.join(
   process.cwd(),
@@ -44,8 +45,8 @@ describe("basic simnet interactions", () => {
   });
 
   it("can run command", () => {
-    const r = simnet.executeCommand("::set_epoch 3.1");
-    expect(r).toBe("Epoch updated to: 3.1");
+    const r = simnet.executeCommand(`::set_epoch ${latestEpochStr}`);
+    expect(r).toBe(`Epoch updated to: ${latestEpochStr}`);
   });
 
   it("can mine empty blocks", () => {
@@ -89,7 +90,7 @@ describe("basic simnet interactions", () => {
     // "0" is an invalid epoch
     // it logs that 0 is invalid and defaults to latest
     simnet.setEpoch("0");
-    expect(simnet.currentEpoch).toBe("3.2");
+    expect(simnet.currentEpoch).toBe(latestEpochStr);
   });
 
   it("can get default clarity version for current epoch", () => {
@@ -428,7 +429,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contracts as snippets", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(latestEpochStr);
     const res = simnet.deployContract("temp", "(+ 24 18)", null, deployerAddr);
     expect(res.result).toStrictEqual(Cl.int(42));
 
@@ -437,7 +438,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contracts", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(latestEpochStr);
     const source = "(define-public (add (a uint) (b uint)) (ok (+ a b)))\n";
     const deployRes = simnet.deployContract("op", source, null, deployerAddr);
     expect(deployRes.result).toStrictEqual(Cl.bool(true));
@@ -477,7 +478,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contract with clarity_version in mineBlock", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(latestEpochStr);
     const source = "(define-public (get-height) (ok burn-block-height))";
 
     const [deployRes] = simnet.mineBlock([
@@ -494,7 +495,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
   });
 
   it("can deploy contract with null options in mineBlock", () => {
-    simnet.setEpoch("3.0");
+    simnet.setEpoch(latestEpochStr);
     const source = "(define-public (test) (ok true))";
 
     const [deployRes] = simnet.mineBlock([
@@ -533,8 +534,9 @@ describe("simnet can mint stx", () => {
 
 describe("simnet can mint ft", () => {
   it("can mint ft", () => {
-    simnet.setEpoch("3.0");
-    const source = "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
+    simnet.setEpoch(latestEpochStr);
+    const source =
+      "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
     const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
     expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
@@ -594,8 +596,9 @@ describe("the simnet can execute commands", () => {
   });
 
   it("can mint_ft", () => {
-    simnet.setEpoch("3.0");
-    const source = "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
+    simnet.setEpoch(latestEpochStr);
+    const source =
+      "(define-fungible-token pmnt)\n(define-private (test-mint)\n    (ft-mint? pmnt u100 tx-sender)\n)\n(test-mint)\n";
     const deployRes = simnet.deployContract("peppermint", source, null, deployerAddr);
     expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
@@ -603,7 +606,7 @@ describe("the simnet can execute commands", () => {
       `::mint_ft ${deployerAddr}.peppermint.pmnt ${deployerAddr} 1000`,
     );
     expect(result).toBe(`→ ${deployerAddr}: 1100 pmnt`);
-  })
+  });
 
   it("can get_assets_maps", () => {
     simnet.executeCommand("::mint_stx ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 1000");
