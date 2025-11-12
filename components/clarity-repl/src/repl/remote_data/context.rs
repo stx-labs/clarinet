@@ -1,10 +1,11 @@
 use clarity::types::StacksEpochId;
 use clarity::vm::callables::{DefineType, DefinedFunction};
 use clarity::vm::costs::LimitedCostTracker;
-use clarity::vm::errors::{CheckErrors, InterpreterResult as Result, SyntaxBindingErrorType};
+use clarity::vm::errors::SyntaxBindingErrorType;
 use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::types::parse_name_type_pairs;
 use clarity::vm::{ClarityName, ContractContext, SymbolicExpression};
+use clarity_types::errors::analysis::{CheckErrorKind, StaticCheckError};
 
 fn handle_function(
     epoch_id: &StacksEpochId,
@@ -13,14 +14,14 @@ fn handle_function(
     define_type: DefineType,
     context_name: &str,
     cost_tracker: &mut LimitedCostTracker,
-) -> Result<(ClarityName, DefinedFunction)> {
+) -> Result<(ClarityName, DefinedFunction), StaticCheckError> {
     let (function_symbol, arg_symbols) = signature
         .split_first()
-        .ok_or(CheckErrors::DefineFunctionBadSignature)?;
+        .ok_or(CheckErrorKind::DefineFunctionBadSignature)?;
     let function_name = function_symbol
         .match_atom()
-        .ok_or(CheckErrors::ExpectedName)?;
-    let arguments = parse_name_type_pairs::<_, CheckErrors>(
+        .ok_or(CheckErrorKind::ExpectedName)?;
+    let arguments = parse_name_type_pairs::<_, StaticCheckError>(
         *epoch_id,
         arg_symbols,
         SyntaxBindingErrorType::Eval,
@@ -38,7 +39,7 @@ pub fn set_functions_in_contract_context(
     expressions: &[SymbolicExpression],
     contract_context: &mut ContractContext,
     epoch_id: &StacksEpochId,
-) -> Result<()> {
+) -> Result<(), StaticCheckError> {
     let context_name = contract_context.contract_identifier.to_string();
     let mut ct = LimitedCostTracker::Free;
 
