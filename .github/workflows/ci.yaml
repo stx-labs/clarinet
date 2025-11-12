@@ -257,25 +257,9 @@ jobs:
           wait-for-completion: true
           output-artifact-directory: ./signed
 
-      # Compress cargo artifacts for all platforms (winget supports ZIP since v1.4)
       - name: Compress cargo artifact (Linux and macOS)
-        if: matrix.os != 'windows-latest'
         run: tar -C target/${{ matrix.target }}/release -zcvf clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz clarinet
 
-      - name: Compress signed cargo artifact (Windows - main branch)
-        # if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "./signed/clarinet.exe" -DestinationPath "clarinet-${{ env.SHORT_TARGET_NAME }}.zip"
-
-      - name: Compress unsigned cargo artifact (Windows - PR/dev)
-        if: "!startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'"
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/clarinet.exe" -DestinationPath "clarinet-${{ env.SHORT_TARGET_NAME }}.zip"
-
-      # Upload compressed artifacts
       - name: Upload cargo artifacts (Linux and macOS)
         if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
@@ -283,12 +267,6 @@ jobs:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz
 
-      - name: Upload cargo artifact (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clarinet-${{ env.SHORT_TARGET_NAME }}
-          path: clarinet-${{ env.SHORT_TARGET_NAME }}.zip
 
   release:
     name: Release
