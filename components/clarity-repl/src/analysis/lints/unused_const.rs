@@ -7,38 +7,43 @@ use clarity::vm::representations::Span;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::analysis::{self, AnalysisPass, AnalysisResult, Lint};
+use crate::analysis::linter::Lint;
+use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
-    level: Level,
+    // TODO
 }
 
 impl UnusedConstSettings {
-    fn new(level: Level) -> Self {
-        Self { level }
+    fn new() -> Self {
+        Self {}
     }
 }
 
 pub struct UnusedConst<'a> {
     clarity_version: ClarityVersion,
-    settings: UnusedConstSettings,
+    _settings: UnusedConstSettings,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
     /// Map of constants not yet used
     unused_constants: HashMap<&'a ClarityName, &'a SymbolicExpression>,
+    /// Clarity diagnostic level
+    level: Level,
 }
 
 impl<'a> UnusedConst<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        level: Level,
         settings: UnusedConstSettings,
     ) -> UnusedConst<'a> {
         Self {
             clarity_version,
-            settings,
+            _settings: settings,
+            level,
             annotations,
             active_annotation: None,
             unused_constants: HashMap::new(),
@@ -56,30 +61,14 @@ impl<'a> UnusedConst<'a> {
     }
 
     // Check for annotations that should be attached to the given span
-    fn process_annotations(&mut self, span: &Span) {
-        self.active_annotation = None;
-
-        for (i, annotation) in self.annotations.iter().enumerate() {
-            if annotation.span.start_line == (span.start_line - 1) {
-                self.active_annotation = Some(i);
-                return;
-            } else if annotation.span.start_line >= span.start_line {
-                // The annotations are ordered by span, so if we have passed
-                // the target line, return.
-                return;
-            }
-        }
+    fn set_active_annotation(&mut self, span: &Span) {
+        self.active_annotation = get_index_of_span(self.annotations, span);
     }
 
     // Check if the expression is annotated with `allow(<lint_name>)`
     fn allow(&self) -> bool {
         self.active_annotation
-            .map(|idx| {
-                matches!(
-                    self.annotations[idx].kind,
-                    AnnotationKind::Allow(WarningKind::UnusedConst)
-                )
-            })
+            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
             .unwrap_or(false)
     }
 
@@ -89,7 +78,7 @@ impl<'a> UnusedConst<'a> {
 
     fn make_diagnostic(&self, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
         Diagnostic {
-            level: self.settings.level.clone(),
+            level: self.level.clone(),
             message,
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
@@ -122,7 +111,7 @@ impl<'a> ASTVisitor<'a> for UnusedConst<'a> {
         name: &'a ClarityName,
         _value: &'a SymbolicExpression,
     ) -> bool {
-        self.process_annotations(&expr.span);
+        self.set_active_annotation(&expr.span);
 
         if !self.allow() {
             self.unused_constants.insert(name, expr);
@@ -142,16 +131,29 @@ impl AnalysisPass for UnusedConst<'_> {
         contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
-        settings: &analysis::Settings,
+        level: Level,
+        _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let level = settings
-            .lints
-            .get(&Lint::UnusedConst)
-            .cloned()
-            .unwrap_or(Level::Warning);
-        let settings = UnusedConstSettings::new(level);
-        let lint = UnusedConst::new(contract_analysis.clarity_version, annotations, settings);
+        let settings = UnusedConstSettings::new();
+        let lint = UnusedConst::new(
+            contract_analysis.clarity_version,
+            annotations,
+            level,
+            settings,
+        );
         lint.run(contract_analysis)
+    }
+}
+
+impl Lint for UnusedConst<'_> {
+    fn get_name() -> LintName {
+        LintName::UnusedConst
+    }
+    fn match_allow_annotation(annotation: &Annotation) -> bool {
+        matches!(
+            annotation.kind,
+            AnnotationKind::Allow(WarningKind::UnusedConst)
+        )
     }
 }
 
@@ -160,8 +162,8 @@ mod tests {
     use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
-    use crate::analysis::lints::UnusedConst;
-    use crate::analysis::Lint;
+    use super::UnusedConst;
+    use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -171,7 +173,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(Lint::UnusedConst, Level::Warning);
+            .enable_lint(UnusedConst::get_name(), Level::Warning);
 
         Session::new(settings)
     }
