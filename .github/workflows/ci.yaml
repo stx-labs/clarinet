@@ -233,6 +233,13 @@ jobs:
       - name: Build - Cargo
         run: cargo build --release --features=telemetry --locked --target ${{ matrix.target }}
 
+      # Create zip for SignPath (SignPath expects specific zip structure)
+      - name: Create zip for SignPath
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/clarinet.exe" -DestinationPath "unsigned-clarinet.zip"
+
       # Upload unsigned Windows binary for signing
       - name: Upload unsigned Windows binary for SignPath
         id: upload-unsigned-windows
@@ -241,7 +248,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unsigned-clarinet-${{ env.SHORT_TARGET_NAME }}
-          path: target/${{ matrix.target }}/release/clarinet.exe
+          path: unsigned-clarinet.zip
 
       # Code signing for Windows using SignPath
       - name: Code sign Windows binary
@@ -256,7 +263,6 @@ jobs:
           github-artifact-id: ${{ steps.upload-unsigned-windows.outputs.artifact-id }}
           wait-for-completion: true
           output-artifact-directory: ./signed
-          timestamp-server: http://timestamp.sectigo.com
 
       # Compress cargo artifacts for all platforms (winget supports ZIP since v1.4)
       - name: Compress cargo artifact (Linux and macOS)
