@@ -249,8 +249,8 @@ jobs:
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          project-slug: "clarinet"
+          signing-policy-slug: "test-signing"
           github-artifact-id: ${{ steps.upload-unsigned-windows.outputs.artifact-id }}
           wait-for-completion: true
           output-artifact-directory: ./signed
