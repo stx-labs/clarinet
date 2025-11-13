@@ -56,6 +56,7 @@ pub enum WarningKind {
     Noop,
     UnusedConst,
     UnusedDataVar,
+    UnusedMap,
 }
 
 impl std::str::FromStr for WarningKind {
@@ -68,6 +69,7 @@ impl std::str::FromStr for WarningKind {
             "noop" => Ok(WarningKind::Noop),
             "unused_const" => Ok(WarningKind::UnusedConst),
             "unused_data_var" => Ok(WarningKind::UnusedDataVar),
+            "unused_map" => Ok(WarningKind::UnusedMap),
             _ => Err(format!("'{s}' is not a valid warning identifier")),
         }
     }
