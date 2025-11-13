@@ -44,6 +44,8 @@ pub fn get_bip32_keys_from_mnemonic(
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EncryptionError {
+    /// Wrapped bs58::decode::Error
+    Bs58Decode(bs58::decode::Error),
     /// Wrapped aes_gcm::Error
     AesGcm(AesGcmError),
     /// Wrapped argon2::Error
@@ -56,10 +58,6 @@ pub enum EncryptionError {
     MissingNonce,
     /// Wrapped bip39::Error
     Mnemonic(MnemonicError),
-    /// Wrapped bs58::decode::Error
-    Bs58Decode(bs58::decode::Error),
-    /// Wrapped bs58::encode::Error
-    Bs58Encode(bs58::encode::Error),
     /// Wrapped std::str::Utf8Error
     Utf8(std::str::Utf8Error),
 }
@@ -85,12 +83,6 @@ impl From<MnemonicError> for EncryptionError {
 impl From<bs58::decode::Error> for EncryptionError {
     fn from(e: bs58::decode::Error) -> Self {
         Self::Bs58Decode(e)
-    }
-}
-
-impl From<bs58::encode::Error> for EncryptionError {
-    fn from(e: bs58::encode::Error) -> Self {
-        Self::Bs58Encode(e)
     }
 }
 
@@ -147,11 +139,11 @@ pub fn decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> 
 }
 
 pub fn encrypt_mnemonic_phrase(phrase: &str, password: &str) -> Result<String, EncryptionError> {
-    let _ = Mnemonic::parse_in(Language::English, phrase).map_err(EncryptionError::Mnemonic)?;
+    let _ = Mnemonic::parse_in(Language::English, phrase)?;
     let ciphertext = encrypt(phrase.as_bytes(), password)?;
 
     let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
-    let decoded_ciphertext = bs58::decode(&encrypted_mnemonic).into_vec().unwrap();
+    let decoded_ciphertext = bs58::decode(&encrypted_mnemonic).into_vec()?;
 
     if ciphertext != decoded_ciphertext {
         return Err(EncryptionError::DecodingMismatch);
@@ -167,8 +159,7 @@ pub fn decrypt_mnemonic_phrase(
     let cipher = bs58::decode(encrypted_mnemonic).into_vec()?;
     let plain = decrypt(&cipher, password)?;
     let phrase = str::from_utf8(&plain)?;
-    let mnemonic =
-        Mnemonic::parse_in(Language::English, phrase).map_err(EncryptionError::Mnemonic)?;
+    let mnemonic = Mnemonic::parse_in(Language::English, phrase)?;
 
     Ok(mnemonic)
 }
