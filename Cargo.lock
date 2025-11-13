@@ -776,6 +776,7 @@ dependencies = [
  "argon2",
  "bip32",
  "bip39",
+ "bs58",
  "libsecp256k1",
  "rand 0.8.5",
 ]

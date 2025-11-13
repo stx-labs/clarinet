@@ -22,7 +22,6 @@ use clarinet_files::{
     RequirementConfig, StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
-use clarinet_utils::mnemonic_from_phrase;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
 use clarity_repl::clarity::vm::costs::LimitedCostTracker;
@@ -902,25 +901,13 @@ pub fn main() {
                             "Found encrypted mnemonic in account {name}: {}",
                             account.encrypted_mnemonic
                         );
-                        let cipher = bs58::decode(&account.encrypted_mnemonic)
-                            .into_vec()
-                            .unwrap();
                         let password =
                             scanpw!("Enter password for encrypted_mnemonic in account {name}: ");
-                        let plain = clarinet_utils::decrypt(&cipher, password.as_bytes()).unwrap();
-                        let phrase = match str::from_utf8(&plain) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                panic!("Failed to convert decrypted bytes to UTF8 string: {e}");
-                            }
-                        };
-                        println!("Decrypted mnemonic in account {name:?} to {phrase:?}");
-                        let mnemonic = match mnemonic_from_phrase(phrase) {
-                            Ok(result) => result.to_string(),
-                            Err(e) => {
-                                panic!("Decrypted mnemonic phrase {phrase} is invalid: {e}");
-                            }
-                        };
+                        let mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
+                            &account.encrypted_mnemonic,
+                            &password,
+                        )
+                        .unwrap();
 
                         account.mnemonic = mnemonic.to_string();
                     }
@@ -987,22 +974,10 @@ pub fn main() {
                 let mut buffer = String::new();
                 std::io::stdin().read_line(&mut buffer).unwrap();
                 let phrase = buffer.trim();
-
-                let _mnemonic = match mnemonic_from_phrase(phrase) {
-                    Ok(result) => result.to_string(),
-                    Err(e) => {
-                        eprintln!("Failed to parse mnemonic from phrase: {e}");
-                        std::process::exit(1);
-                    }
-                };
                 let password = scanpw!("Password: ");
-                let ciphertext =
-                    clarinet_utils::encrypt(phrase.as_bytes(), password.as_bytes()).unwrap();
-
-                let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
+                let encrypted_mnemonic =
+                    clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
                 println!("Encrypted mnemonic: {encrypted_mnemonic}");
-                let decoded_ciphertext = bs58::decode(encrypted_mnemonic).into_vec().unwrap();
-                assert_eq!(ciphertext, decoded_ciphertext);
                 std::process::exit(0);
             }
         },

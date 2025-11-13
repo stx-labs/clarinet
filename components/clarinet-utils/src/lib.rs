@@ -3,7 +3,7 @@ use std::str::FromStr;
 use aes_gcm::{aead::Aead, Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
 use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
-use bip39::{Language, Mnemonic};
+use bip39::{Error as MnemonicError, Language, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
 use rand::{rngs::OsRng, RngCore};
 
@@ -42,14 +42,24 @@ pub fn get_bip32_keys_from_mnemonic(
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EncryptionError {
-    /// AES nonce was missing from the buffer
-    MissingNonce,
-    /// AES data was missing from the buffer
-    MissingData,
-    /// Wrapped argon2::Error
-    Argon2(Argon2Error),
     /// Wrapped aes_gcm::Error
     AesGcm(AesGcmError),
+    /// Wrapped argon2::Error
+    Argon2(Argon2Error),
+    /// Decoding mismatch
+    DecodingMismatch,
+    /// AES data was missing from the buffer
+    MissingData,
+    /// AES nonce was missing from the buffer
+    MissingNonce,
+    /// Wrapped bip39::Error
+    Mnemonic(MnemonicError),
+    /// Wrapped bs58::decode::Error
+    Bs58Decode(bs58::decode::Error),
+    /// Wrapped bs58::encode::Error
+    Bs58Encode(bs58::encode::Error),
+    /// Wrapped std::str::Utf8Error
+    Utf8(std::str::Utf8Error),
 }
 
 impl From<Argon2Error> for EncryptionError {
@@ -61,6 +71,30 @@ impl From<Argon2Error> for EncryptionError {
 impl From<AesGcmError> for EncryptionError {
     fn from(e: AesGcmError) -> Self {
         Self::AesGcm(e)
+    }
+}
+
+impl From<MnemonicError> for EncryptionError {
+    fn from(e: MnemonicError) -> Self {
+        Self::Mnemonic(e)
+    }
+}
+
+impl From<bs58::decode::Error> for EncryptionError {
+    fn from(e: bs58::decode::Error) -> Self {
+        Self::Bs58Decode(e)
+    }
+}
+
+impl From<bs58::encode::Error> for EncryptionError {
+    fn from(e: bs58::encode::Error) -> Self {
+        Self::Bs58Encode(e)
+    }
+}
+
+impl From<std::str::Utf8Error> for EncryptionError {
+    fn from(e: std::str::Utf8Error) -> Self {
+        Self::Utf8(e)
     }
 }
 
@@ -107,6 +141,35 @@ pub fn decrypt(data: &[u8], password: &[u8]) -> Result<Vec<u8>, EncryptionError>
     let cipher = Aes256Gcm::new((&key).into());
 
     Ok(cipher.decrypt(nonce, cipher_data)?)
+}
+
+pub fn encrypt_mnemonic_phrase(phrase: &str, password: &str) -> Result<String, EncryptionError> {
+    let _ =
+        Mnemonic::parse_in(Language::English, phrase).map_err(|e| EncryptionError::Mnemonic(e))?;
+    let ciphertext = encrypt(phrase.as_bytes(), password.as_bytes())?;
+
+    let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
+    println!("Encrypted mnemonic: {encrypted_mnemonic}");
+    let decoded_ciphertext = bs58::decode(&encrypted_mnemonic).into_vec().unwrap();
+
+    if ciphertext != decoded_ciphertext {
+        return Err(EncryptionError::DecodingMismatch);
+    }
+
+    Ok(encrypted_mnemonic)
+}
+
+pub fn decrypt_mnemonic_phrase(
+    encrypted_mnemonic: &str,
+    password: &str,
+) -> Result<Mnemonic, EncryptionError> {
+    let cipher = bs58::decode(encrypted_mnemonic).into_vec()?;
+    let plain = decrypt(&cipher, password.as_bytes())?;
+    let phrase = str::from_utf8(&plain)?;
+    let mnemonic =
+        Mnemonic::parse_in(Language::English, phrase).map_err(|e| EncryptionError::Mnemonic(e))?;
+
+    Ok(mnemonic)
 }
 
 #[cfg(test)]
