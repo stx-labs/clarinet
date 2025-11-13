@@ -44,18 +44,24 @@ pub fn get_bip32_keys_from_mnemonic(
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EncryptionError {
-    /// Wrapped bs58::decode::Error
-    Bs58Decode(bs58::decode::Error),
     /// Wrapped aes_gcm::Error
     AesGcm(AesGcmError),
     /// Wrapped argon2::Error
     Argon2(Argon2Error),
-    /// Decoding mismatch
-    DecodingMismatch,
     /// AES data was missing from the buffer
     MissingData,
     /// AES nonce was missing from the buffer
     MissingNonce,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MnemonicEncryptionError {
+    /// Wrapped encryption error
+    Encryption(EncryptionError),
+    /// Wrapped bs58::decode::Error
+    Bs58Decode(bs58::decode::Error),
+    /// Decoding mismatch
+    DecodingMismatch,
     /// Wrapped bip39::Error
     Mnemonic(MnemonicError),
     /// Wrapped std::str::Utf8Error
@@ -74,19 +80,25 @@ impl From<AesGcmError> for EncryptionError {
     }
 }
 
-impl From<MnemonicError> for EncryptionError {
+impl From<EncryptionError> for MnemonicEncryptionError {
+    fn from(e: EncryptionError) -> Self {
+        Self::Encryption(e)
+    }
+}
+
+impl From<MnemonicError> for MnemonicEncryptionError {
     fn from(e: MnemonicError) -> Self {
         Self::Mnemonic(e)
     }
 }
 
-impl From<bs58::decode::Error> for EncryptionError {
+impl From<bs58::decode::Error> for MnemonicEncryptionError {
     fn from(e: bs58::decode::Error) -> Self {
         Self::Bs58Decode(e)
     }
 }
 
-impl From<std::str::Utf8Error> for EncryptionError {
+impl From<std::str::Utf8Error> for MnemonicEncryptionError {
     fn from(e: std::str::Utf8Error) -> Self {
         Self::Utf8(e)
     }
@@ -138,15 +150,17 @@ pub fn decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> 
     Ok(cipher.decrypt(nonce, cipher_data)?)
 }
 
-pub fn encrypt_mnemonic_phrase(phrase: &str, password: &str) -> Result<String, EncryptionError> {
+pub fn encrypt_mnemonic_phrase(
+    phrase: &str,
+    password: &str,
+) -> Result<String, MnemonicEncryptionError> {
     let _ = Mnemonic::parse_in(Language::English, phrase)?;
     let ciphertext = encrypt(phrase.as_bytes(), password)?;
-
     let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
     let decoded_ciphertext = bs58::decode(&encrypted_mnemonic).into_vec()?;
 
     if ciphertext != decoded_ciphertext {
-        return Err(EncryptionError::DecodingMismatch);
+        return Err(MnemonicEncryptionError::DecodingMismatch);
     }
 
     Ok(encrypted_mnemonic)
@@ -155,7 +169,7 @@ pub fn encrypt_mnemonic_phrase(phrase: &str, password: &str) -> Result<String, E
 pub fn decrypt_mnemonic_phrase(
     encrypted_mnemonic: &str,
     password: &str,
-) -> Result<Mnemonic, EncryptionError> {
+) -> Result<Mnemonic, MnemonicEncryptionError> {
     let cipher = bs58::decode(encrypted_mnemonic).into_vec()?;
     let plain = decrypt(&cipher, password)?;
     let phrase = str::from_utf8(&plain)?;
@@ -274,14 +288,14 @@ mod tests {
         let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
         assert!(matches!(
             encrypt_mnemonic_phrase(bad_phrase, password),
-            Err(EncryptionError::Mnemonic(_))
+            Err(MnemonicEncryptionError::Mnemonic(_))
         ));
 
         let mut bad_bs58 = encrypted.clone();
         bad_bs58.push('?');
         assert!(matches!(
             decrypt_mnemonic_phrase(&bad_bs58, password),
-            Err(EncryptionError::Bs58Decode(_))
+            Err(MnemonicEncryptionError::Bs58Decode(_))
         ));
     }
 }
