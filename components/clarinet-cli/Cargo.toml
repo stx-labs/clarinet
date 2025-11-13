@@ -29,7 +29,6 @@ similar = "2.1.0"
 crossbeam-channel = "0.5.6"
 ctrlc = "3.1.9"
 rand = { workspace = true }
-wsts = { workspace = true }
 
 clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
 clarinet-files = { path = "../clarinet-files" }

@@ -29,6 +29,8 @@ stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", bra
 pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "pox-locking", default-features = false }
 stackslib = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "stackslib", default-features = false}
 
+aes-gcm = "0.10"
+argon2 = "0.5.3"
 bs58 = "0.5"
 base58 = "0.2.0"
 base64 = "0.22.1"
@@ -64,7 +66,6 @@ tokio-util = { version = "0.7.16", features = ["codec"] }
 wasm-bindgen = { version = "0.2.103" }
 wasm-bindgen-futures = { version = "0.4.53" }
 web-sys = { version = "0.3.80" }
-wsts = "14.0.2"
 indoc = "2.0.3"
 
 # dev dependencies

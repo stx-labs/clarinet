@@ -1,9 +1,14 @@
 use std::str::FromStr;
 
+use aes_gcm::{aead::Aead, Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
+use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
 use bip39::{Language, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
+
+/// Size of the AES-GCM nonce
+pub const AES_GCM_NONCE_SIZE: usize = 12;
 
 pub fn mnemonic_from_phrase(phrase: &str) -> Result<Mnemonic, String> {
     Mnemonic::parse_in(Language::English, phrase).map_err(|e| e.to_string())
@@ -33,6 +38,75 @@ pub fn get_bip32_keys_from_mnemonic(
     let secret_key = SecretKey::parse_slice(&secret_bytes).unwrap();
     let public_key = PublicKey::from_secret_key(&secret_key);
     Ok((secret_bytes.to_vec(), public_key))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EncryptionError {
+    /// AES nonce was missing from the buffer
+    MissingNonce,
+    /// AES data was missing from the buffer
+    MissingData,
+    /// Wrapped argon2::Error
+    Argon2(Argon2Error),
+    /// Wrapped aes_gcm::Error
+    AesGcm(AesGcmError),
+}
+
+impl From<Argon2Error> for EncryptionError {
+    fn from(e: Argon2Error) -> Self {
+        Self::Argon2(e)
+    }
+}
+
+impl From<AesGcmError> for EncryptionError {
+    fn from(e: AesGcmError) -> Self {
+        Self::AesGcm(e)
+    }
+}
+
+pub fn derive_key(password: &[u8]) -> Result<[u8; 32], EncryptionError> {
+    let mut key = [0u8; 32];
+    let salt = b"clarinet_utils-derive_key_salt";
+
+    Argon2::default().hash_password_into(password, salt, &mut key)?;
+
+    Ok(key)
+}
+
+pub fn encrypt(data: &[u8], password: &[u8]) -> Result<Vec<u8>, EncryptionError> {
+    let key = derive_key(password)?;
+    let mut rng = OsRng;
+    let mut nonce_bytes = [0u8; AES_GCM_NONCE_SIZE];
+
+    rng.fill_bytes(&mut nonce_bytes);
+
+    let nonce_vec = nonce_bytes.to_vec();
+    let nonce = Nonce::from_slice(&nonce_vec);
+    let cipher = Aes256Gcm::new((&key).into());
+    let cipher_vec = cipher.encrypt(nonce, data.to_vec().as_ref())?;
+    let mut bytes = Vec::new();
+
+    bytes.extend_from_slice(&nonce_vec);
+    bytes.extend_from_slice(&cipher_vec);
+
+    Ok(bytes)
+}
+
+pub fn decrypt(data: &[u8], password: &[u8]) -> Result<Vec<u8>, EncryptionError> {
+    let key = derive_key(password)?;
+    let Some(nonce_data) = data.get(..AES_GCM_NONCE_SIZE) else {
+        return Err(EncryptionError::MissingNonce);
+    };
+    let Some(cipher_data) = data.get(AES_GCM_NONCE_SIZE..) else {
+        return Err(EncryptionError::MissingData);
+    };
+    if cipher_data.is_empty() {
+        return Err(EncryptionError::MissingData);
+    }
+    let nonce = Nonce::from_slice(nonce_data);
+    let cipher = Aes256Gcm::new((&key).into());
+
+    Ok(cipher.decrypt(nonce, cipher_data)?)
 }
 
 #[cfg(test)]

@@ -907,8 +907,7 @@ pub fn main() {
                             .unwrap();
                         let password =
                             scanpw!("Enter password for encrypted_mnemonic in account {name}: ");
-                        let key = wsts::util::ansi_x963_derive_key(password.as_bytes(), b"");
-                        let plain = wsts::util::decrypt(&key, &cipher).unwrap();
+                        let plain = clarinet_utils::decrypt(&cipher, password.as_bytes()).unwrap();
                         let phrase = match str::from_utf8(&plain) {
                             Ok(s) => s,
                             Err(e) => {
@@ -997,10 +996,8 @@ pub fn main() {
                     }
                 };
                 let password = scanpw!("Password: ");
-                let key = wsts::util::ansi_x963_derive_key(password.as_bytes(), b"");
-
                 let ciphertext =
-                    wsts::util::encrypt(&key, phrase.as_bytes(), &mut rand::thread_rng()).unwrap();
+                    clarinet_utils::encrypt(phrase.as_bytes(), password.as_bytes()).unwrap();
 
                 let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
                 println!("Encrypted mnemonic: {encrypted_mnemonic}");
