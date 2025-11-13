@@ -897,12 +897,8 @@ pub fn main() {
 
                 for (name, account) in network_manifest.accounts.iter_mut() {
                     if !account.encrypted_mnemonic.is_empty() {
-                        println!(
-                            "Found encrypted mnemonic in account {name}: {}",
-                            account.encrypted_mnemonic
-                        );
                         let password =
-                            scanpw!("Enter password for encrypted_mnemonic in account {name}: ");
+                            scanpw!("Enter password to decrypt mnemonic for account {name}: ");
                         let mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
                             &account.encrypted_mnemonic,
                             &password,
@@ -970,11 +966,11 @@ pub fn main() {
                 }
             }
             Deployments::EncryptDeployment => {
-                println!("{}", yellow!("Input mnemonic to encrypt:"));
+                println!("{}", yellow!("Enter mnemonic to encrypt:"));
                 let mut buffer = String::new();
                 std::io::stdin().read_line(&mut buffer).unwrap();
                 let phrase = buffer.trim();
-                let password = scanpw!("Password: ");
+                let password = scanpw!("Enter password: ");
                 let encrypted_mnemonic =
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
                 println!("Encrypted mnemonic: {encrypted_mnemonic}");
