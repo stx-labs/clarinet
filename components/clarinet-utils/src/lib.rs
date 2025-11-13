@@ -1,11 +1,13 @@
 use std::str::FromStr;
 
-use aes_gcm::{aead::Aead, Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
+use aes_gcm::aead::Aead;
+use aes_gcm::{Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
 use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
 use bip39::{Error as MnemonicError, Language, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
-use rand::{rngs::OsRng, RngCore};
+use rand::rngs::OsRng;
+use rand::RngCore;
 
 /// Size of the AES-GCM nonce
 pub const AES_GCM_NONCE_SIZE: usize = 12;
