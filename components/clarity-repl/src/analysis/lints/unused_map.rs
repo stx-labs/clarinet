@@ -12,6 +12,13 @@ use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
+enum Usage {
+    Unused,
+    Unset,
+    Unread,
+    Used,
+}
+
 struct UnusedMapSettings {
     // TODO
 }
@@ -23,6 +30,7 @@ impl UnusedMapSettings {
 }
 
 /// Data associated with a `define-map` variable
+#[derive(Debug)]
 struct MapData<'a> {
     expr: &'a SymbolicExpression,
     /// Has `map-insert` been called on map?
@@ -147,20 +155,30 @@ impl<'a> UnusedMap<'a> {
         map_data.map_insert || (map_data.map_set && (map_data.map_get || map_data.map_delete))
     }
 
+    fn compute_map_usage(map_data: &MapData) -> Usage {
+        if Self::is_map_used(map_data) {
+            Usage::Used
+        } else if map_data.map_get && !map_data.map_set {
+            Usage::Unset
+        } else if !map_data.map_get && map_data.map_set {
+            Usage::Unread
+        } else if !map_data.map_get && !map_data.map_set {
+            Usage::Unused
+        } else {
+            unreachable!("Unhandled usage pattern: {:?}", map_data)
+        }
+    }
+
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.maps {
-            if Self::is_map_used(data) {
-                continue;
-            }
-
             // Map is unused, now decide which message/suggestion to show user
-            let (message, suggestion) = match (data.map_set, data.map_get) {
-                (true, true) => unreachable!("Map should have been flagged as used already"),
-                (false, true) => Self::make_diagnostic_strings_unset(name),
-                (true, false) => Self::make_diagnostic_strings_unread(name),
-                (false, false) => Self::make_diagnostic_strings_unused(name),
+            let (message, suggestion) = match Self::compute_map_usage(data) {
+                Usage::Used => continue,
+                Usage::Unset => Self::make_diagnostic_strings_unset(name),
+                Usage::Unread => Self::make_diagnostic_strings_unread(name),
+                Usage::Unused => Self::make_diagnostic_strings_unused(name),
             };
             let diagnostic = self.make_diagnostic(data.expr, message, suggestion);
             diagnostics.push(diagnostic);
