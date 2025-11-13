@@ -145,8 +145,7 @@ pub fn decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> 
 }
 
 pub fn encrypt_mnemonic_phrase(phrase: &str, password: &str) -> Result<String, EncryptionError> {
-    let _ =
-        Mnemonic::parse_in(Language::English, phrase).map_err(|e| EncryptionError::Mnemonic(e))?;
+    let _ = Mnemonic::parse_in(Language::English, phrase).map_err(EncryptionError::Mnemonic)?;
     let ciphertext = encrypt(phrase.as_bytes(), password)?;
 
     let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
@@ -167,7 +166,7 @@ pub fn decrypt_mnemonic_phrase(
     let plain = decrypt(&cipher, password)?;
     let phrase = str::from_utf8(&plain)?;
     let mnemonic =
-        Mnemonic::parse_in(Language::English, phrase).map_err(|e| EncryptionError::Mnemonic(e))?;
+        Mnemonic::parse_in(Language::English, phrase).map_err(EncryptionError::Mnemonic)?;
 
     Ok(mnemonic)
 }
