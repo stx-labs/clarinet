@@ -173,7 +173,6 @@ impl<'a> UnusedMap<'a> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.maps {
-            // Map is unused, now decide which message/suggestion to show user
             let (message, suggestion) = match Self::compute_map_usage(data) {
                 Usage::Used => continue,
                 Usage::Unset => Self::make_diagnostic_strings_unset(name),
