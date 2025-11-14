@@ -1,3 +1,17 @@
+# [3.10.0](https://github.com/stx-labs/clarinet/compare/v3.9.2...v3.10.0) (2025-11-13)
+
+##### New Features
+
+* Default to epoch 3.3 (#2063) (8aa982ee)
+* **Linter:**
+  *  Add `unused_map` lint (#2077) (a2e2e70f)
+  *  Add `unused_data_var` lint (#2070) (bd0a5939)
+  *  Add `unused_const` lint (#2066) (a36fc9a3)
+
+##### Chores
+
+*  New vscode extension logo (#2079) (d995f7cc)
+
 # [3.9.2](https://github.com/stx-labs/clarinet/compare/v3.9.1...v3.9.2) (2025-11-10)
 
 ##### Continuous Integration
