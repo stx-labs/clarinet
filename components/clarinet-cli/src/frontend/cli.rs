@@ -32,7 +32,6 @@ use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_EPOCH};
 use clarity_repl::{analysis, repl};
-use scanpw::scanpw;
 use stacks_network::{self, DevnetOrchestrator};
 use toml;
 
@@ -897,8 +896,10 @@ pub fn main() {
 
                 for (name, account) in network_manifest.accounts.iter_mut() {
                     if !account.encrypted_mnemonic.is_empty() {
-                        let password =
-                            scanpw!("Enter password to decrypt mnemonic for account {name}: ");
+                        let password = rpassword::prompt_password(format!(
+                            "Enter password to decrypt mnemonic for account {name}: "
+                        ))
+                        .unwrap();
                         let mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
                             &account.encrypted_mnemonic,
                             &password,
@@ -970,7 +971,7 @@ pub fn main() {
                 let mut buffer = String::new();
                 std::io::stdin().read_line(&mut buffer).unwrap();
                 let phrase = buffer.trim();
-                let password = scanpw!("Enter password: ");
+                let password = rpassword::prompt_password("Enter password: ").unwrap();
                 let encrypted_mnemonic =
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
                 println!("Encrypted mnemonic: {encrypted_mnemonic}");
