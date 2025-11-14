@@ -892,8 +892,6 @@ pub fn main() {
                     }
                 };
 
-                // decrypt any encrypted mnemonics
-
                 for (name, account) in network_manifest.accounts.iter_mut() {
                     if !account.encrypted_mnemonic.is_empty() {
                         let password = rpassword::prompt_password(format!(
