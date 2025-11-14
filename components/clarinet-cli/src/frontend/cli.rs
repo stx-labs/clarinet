@@ -215,6 +215,9 @@ enum Deployments {
     /// Apply deployment
     #[clap(name = "apply", bin_name = "apply")]
     ApplyDeployment(ApplyDeployment),
+    /// Encrypt deployment mnemonic
+    #[clap(name = "encrypt", bin_name = "encrypt")]
+    EncryptDeployment,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -873,22 +876,39 @@ pub fn main() {
                     get_initial_transactions_trackers(&deployment)
                 };
                 let network_moved = network.clone();
+                let manifest = manifest_moved;
+                let res = NetworkManifest::from_project_manifest_location(
+                    &manifest.location,
+                    &network_moved.get_networks(),
+                    manifest.use_mainnet_wallets(),
+                    Some(&manifest.project.cache_location),
+                    None,
+                );
+                let mut network_manifest = match res {
+                    Ok(network_manifest) => network_manifest,
+                    Err(e) => {
+                        let _ = event_tx.send(DeploymentEvent::Interrupted(e));
+                        return;
+                    }
+                };
+
+                for (name, account) in network_manifest.accounts.iter_mut() {
+                    if !account.encrypted_mnemonic.is_empty() {
+                        let password = rpassword::prompt_password(format!(
+                            "Enter password to decrypt mnemonic for account {name}: "
+                        ))
+                        .unwrap();
+                        let mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
+                            &account.encrypted_mnemonic,
+                            &password,
+                        )
+                        .unwrap();
+
+                        account.mnemonic = mnemonic.to_string();
+                    }
+                }
+
                 std::thread::spawn(move || {
-                    let manifest = manifest_moved;
-                    let res = NetworkManifest::from_project_manifest_location(
-                        &manifest.location,
-                        &network_moved.get_networks(),
-                        manifest.use_mainnet_wallets(),
-                        Some(&manifest.project.cache_location),
-                        None,
-                    );
-                    let network_manifest = match res {
-                        Ok(network_manifest) => network_manifest,
-                        Err(e) => {
-                            let _ = event_tx.send(DeploymentEvent::Interrupted(e));
-                            return;
-                        }
-                    };
                     apply_on_chain_deployment(
                         network_manifest,
                         deployment,
@@ -943,6 +963,17 @@ pub fn main() {
                         }
                     }
                 }
+            }
+            Deployments::EncryptDeployment => {
+                println!("{}", yellow!("Enter mnemonic to encrypt:"));
+                let mut buffer = String::new();
+                std::io::stdin().read_line(&mut buffer).unwrap();
+                let phrase = buffer.trim();
+                let password = rpassword::prompt_password("Enter password: ").unwrap();
+                let encrypted_mnemonic =
+                    clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
+                println!("Encrypted mnemonic: {encrypted_mnemonic}");
+                std::process::exit(0);
             }
         },
         Command::Contracts(subcommand) => match subcommand {

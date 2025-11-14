@@ -330,6 +330,7 @@ pub struct PoxStackingOrder {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AccountConfig {
     pub label: String,
+    pub encrypted_mnemonic: String,
     pub mnemonic: String,
     pub derivation: String,
     pub balance: u64,
@@ -456,6 +457,11 @@ impl NetworkManifest {
                         _ => random_mnemonic().to_string(),
                     };
 
+                    let encrypted_mnemonic = match account_settings.get("encrypted_mnemonic") {
+                        Some(Value::String(cipher)) => cipher.clone(),
+                        _ => "".to_string(),
+                    };
+
                     let derivation = match account_settings.get("derivation") {
                         Some(Value::String(derivation)) => derivation.to_string(),
                         _ => DEFAULT_DERIVATION_PATH.to_string(),
@@ -474,6 +480,7 @@ impl NetworkManifest {
                         AccountConfig {
                             label: account_name.to_string(),
                             mnemonic: mnemonic.to_string(),
+                            encrypted_mnemonic,
                             derivation,
                             balance,
                             sbtc_balance,
@@ -758,6 +765,7 @@ impl NetworkManifest {
                 AccountConfig {
                     label: "stacker".to_string(),
                     mnemonic: stacker_mnemonic.clone(),
+                    encrypted_mnemonic: "".to_string(),
                     derivation: stacker_derivation_path.clone(),
                     balance: 100_000_000_000_000,
                     sbtc_balance: 1_000_000_000,
