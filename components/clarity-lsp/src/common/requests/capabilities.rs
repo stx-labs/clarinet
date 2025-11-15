@@ -76,6 +76,9 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             }),
             false => None,
         },
+        code_lens_provider: Some(ls_types::CodeLensOptions {
+            resolve_provider: Some(false),
+        }),
         ..ServerCapabilities::default()
     }
 }

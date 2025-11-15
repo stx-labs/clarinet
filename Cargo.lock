@@ -809,7 +809,6 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=68c67034326bfcc4565d74e659c8c6144f5adebf#68c67034326bfcc4565d74e659c8c6144f5adebf"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -905,7 +904,6 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=68c67034326bfcc4565d74e659c8c6144f5adebf#68c67034326bfcc4565d74e659c8c6144f5adebf"
 dependencies = [
  "lazy_static",
  "regex",
@@ -2453,7 +2451,6 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=68c67034326bfcc4565d74e659c8c6144f5adebf#68c67034326bfcc4565d74e659c8c6144f5adebf"
 dependencies = [
  "clarity",
  "serde",
@@ -2954,7 +2951,6 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=68c67034326bfcc4565d74e659c8c6144f5adebf#68c67034326bfcc4565d74e659c8c6144f5adebf"
 dependencies = [
  "clarity",
  "slog",
@@ -4037,7 +4033,6 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=68c67034326bfcc4565d74e659c8c6144f5adebf#68c67034326bfcc4565d74e659c8c6144f5adebf"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4129,7 +4124,6 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=68c67034326bfcc4565d74e659c8c6144f5adebf#68c67034326bfcc4565d74e659c8c6144f5adebf"
 dependencies = [
  "clarity",
  "ed25519-dalek",

@@ -77,9 +77,9 @@ indoc = "2.0.3"
 # dev dependencies
 mockito = { version = "1.7", default-features = false }
 
-# [patch.'https://github.com/stacks-network/stacks-core.git']
-# clarity = { path = "../stacks-core/clarity" }
-# clarity-types = { path = "../stacks-core/clarity-types" }
-# stacks-common = { path = "../stacks-core/stacks-common" }
-# stackslib = { path = "../stacks-core/stackslib" }
-# pox-locking = { path = "../stacks-core/pox-locking" }
+[patch.'https://github.com/stacks-network/stacks-core.git']
+clarity = { path = "../stacks-core/clarity" }
+clarity-types = { path = "../stacks-core/clarity-types" }
+stacks-common = { path = "../stacks-core/stacks-common" }
+stackslib = { path = "../stacks-core/stackslib" }
+pox-locking = { path = "../stacks-core/pox-locking" }
