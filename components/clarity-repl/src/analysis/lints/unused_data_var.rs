@@ -224,6 +224,7 @@ impl Lint for UnusedDataVar<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::diagnostic::Level;
+    use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
     use super::UnusedDataVar;
@@ -231,7 +232,7 @@ mod tests {
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    fn get_session() -> Session {
+    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
         let mut settings = SessionSettings::default();
         settings.repl_settings.analysis.disable_all_lints();
         settings
@@ -240,12 +241,12 @@ mod tests {
             .enable_lint(UnusedDataVar::get_name(), Level::Warning);
 
         Session::new(settings)
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet")
     }
 
     #[test]
     fn data_var_used() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
@@ -254,17 +255,13 @@ mod tests {
                 (ok (var-set counter (+ (var-get counter) u1))))
         ").to_string();
 
-        let (_, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
     }
 
     #[test]
     fn data_var_not_set() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
@@ -273,9 +270,7 @@ mod tests {
                 (ok (var-get counter)))
         ").to_string();
 
-        let (output, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (output, result) = run_snippet(snippet);
 
         let var_name = "counter";
         let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unset(&var_name.into());
@@ -288,8 +283,6 @@ mod tests {
 
     #[test]
     fn data_var_not_read() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
@@ -298,9 +291,7 @@ mod tests {
                 (ok (var-set counter val)))
         ").to_string();
 
-        let (output, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (output, result) = run_snippet(snippet);
 
         let var_name = "counter";
         let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unread(&var_name.into());
@@ -313,8 +304,6 @@ mod tests {
 
     #[test]
     fn data_var_not_used() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
@@ -323,9 +312,7 @@ mod tests {
                 (ok u5))
         ").to_string();
 
-        let (output, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (output, result) = run_snippet(snippet);
 
         let var_name = "counter";
         let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unused(&var_name.into());
@@ -338,8 +325,6 @@ mod tests {
 
     #[test]
     fn allow_with_comment() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             ;; #[allow(unused_data_var)]
@@ -349,9 +334,7 @@ mod tests {
                 (ok u5))
         ").to_string();
 
-        let (_, result) = session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet");
+        let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
     }

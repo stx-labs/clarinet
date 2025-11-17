@@ -175,6 +175,7 @@ impl Lint for NoopChecker<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::diagnostic::Level;
+    use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
     use super::NoopChecker;
@@ -182,7 +183,7 @@ mod tests {
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    fn get_session() -> Session {
+    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
         let mut settings = SessionSettings::default();
         settings.repl_settings.analysis.disable_all_lints();
         settings
@@ -191,12 +192,12 @@ mod tests {
             .enable_lint(NoopChecker::get_name(), Level::Warning);
 
         Session::new(settings)
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet")
     }
 
     #[test]
     fn single_operand_equals() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (test-func)
@@ -207,20 +208,15 @@ mod tests {
             )
         ").to_string();
 
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((output, result)) => {
-                assert_eq!(result.diagnostics.len(), 1);
-                assert!(output[0].contains("warning:"));
-                assert!(output[0].contains("`is-eq` with fewer than 2 operands has no effect"));
-            }
-            _ => panic!("Expected warning"),
-        };
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("`is-eq` with fewer than 2 operands has no effect"));
     }
 
     #[test]
     fn single_operand_add() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (test-func)
@@ -231,20 +227,15 @@ mod tests {
             )
         ").to_string();
 
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((output, result)) => {
-                assert_eq!(result.diagnostics.len(), 1);
-                assert!(output[0].contains("warning:"));
-                assert!(output[0].contains("`+` with fewer than 2 operands has no effect"));
-            }
-            _ => panic!("Expected warning"),
-        };
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("`+` with fewer than 2 operands has no effect"));
     }
 
     #[test]
     fn single_operand_logical() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (test-func)
@@ -255,20 +246,15 @@ mod tests {
             )
         ").to_string();
 
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((output, result)) => {
-                assert_eq!(result.diagnostics.len(), 1);
-                assert!(output[0].contains("warning:"));
-                assert!(output[0].contains("`and` with fewer than 2 operands has no effect"));
-            }
-            _ => panic!("Expected warning"),
-        };
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("`and` with fewer than 2 operands has no effect"));
     }
 
     #[test]
     fn allow_noop_annotation() {
-        let mut session = get_session();
-
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (test-func)
@@ -280,11 +266,8 @@ mod tests {
             )
         ").to_string();
 
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected warning"),
-        };
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
     }
 }
