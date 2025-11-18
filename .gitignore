@@ -21,3 +21,4 @@ npm-debug.log*
 *.info
 *.profraw
 components/clarinet-files/clarinet-manifest.schema.json
+result
