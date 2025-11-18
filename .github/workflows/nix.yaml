@@ -1,8 +1,16 @@
 name: Nix
 on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**/CHANGELOG.md"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/CHANGELOG.md"
   workflow_dispatch:
-  schedule:
-    - cron: '42 5 * * *'
 
 concurrency:
   group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
