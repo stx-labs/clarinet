@@ -124,6 +124,13 @@ impl<'a> UnusedPrivateFn<'a> {
         diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
+
+    fn set_called(&mut self, func: &ClarityName) {
+        _ = self
+            .private_fns
+            .get_mut(func)
+            .map(|data| data.called = true);
+    }
 }
 
 impl<'a> ASTVisitor<'a> for UnusedPrivateFn<'a> {
@@ -153,10 +160,38 @@ impl<'a> ASTVisitor<'a> for UnusedPrivateFn<'a> {
         name: &'a ClarityName,
         _args: &'a [SymbolicExpression],
     ) -> bool {
-        _ = self
-            .private_fns
-            .get_mut(name)
-            .map(|data| data.called = true);
+        self.set_called(name);
+        true
+    }
+
+    fn visit_filter(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequence: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_called(func);
+        true
+    }
+
+    fn visit_fold(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequence: &'a SymbolicExpression,
+        _initial: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_called(func);
+        true
+    }
+
+    fn visit_map(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequences: &'a [SymbolicExpression],
+    ) -> bool {
+        self.set_called(func);
         true
     }
 }
@@ -225,6 +260,22 @@ mod tests {
 
             (define-read-only (cube (x uint))
                 (* x (square x)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn private_fn_used_in_filter() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (is-even (x int))
+                (is-eq (mod x 2) 0))
+
+            (define-read-only (even-ints-below-ten)
+                (filter is-even (list 0 1 2 3 4 5 6 7 8 9)))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
