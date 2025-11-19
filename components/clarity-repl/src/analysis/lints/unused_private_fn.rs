@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn private_fn_used() {
+    fn used() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (square (x uint))
@@ -268,13 +268,13 @@ mod tests {
     }
 
     #[test]
-    fn private_fn_used_in_filter() {
+    fn used_in_filter() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (is-even (x int))
                 (is-eq (mod x 2) 0))
 
-            (define-read-only (even-ints-below-ten)
+            (define-read-only (even-ints-to-ten)
                 (filter is-even (list 0 1 2 3 4 5 6 7 8 9)))
         ").to_string();
 
@@ -284,7 +284,39 @@ mod tests {
     }
 
     #[test]
-    fn private_fn_not_used() {
+    fn used_in_fold() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (sum (x int) (y int))
+                (+ x y))
+
+            (define-read-only (sum-to-ten)
+                (fold sum (list 0 1 2 3 4 5 6 7 8 9) 0))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_in_map() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (square (x int))
+                (* x x))
+
+            (define-read-only (squares-to-ten)
+                (map square (list 0 1 2 3 4 5 6 7 8 9)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn not_used() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (square (x uint))
