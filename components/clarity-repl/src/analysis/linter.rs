@@ -17,6 +17,7 @@ pub enum LintName {
     UnusedConst,
     UnusedDataVar,
     UnusedMap,
+    UnusedPrivateFn,
 }
 
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s

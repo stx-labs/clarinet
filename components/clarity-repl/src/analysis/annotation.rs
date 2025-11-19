@@ -1,6 +1,7 @@
 use clarity::vm::representations::Span;
 use clarity::vm::ClarityName;
 use regex::Regex;
+use strum::EnumString;
 
 #[derive(Debug)]
 pub enum AnnotationKind {
@@ -49,7 +50,8 @@ impl std::str::FromStr for AnnotationKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumString)]
+#[strum(serialize_all = "snake_case")]
 pub enum WarningKind {
     UncheckedData,
     UncheckedParams,
@@ -57,22 +59,7 @@ pub enum WarningKind {
     UnusedConst,
     UnusedDataVar,
     UnusedMap,
-}
-
-impl std::str::FromStr for WarningKind {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "unchecked_data" => Ok(WarningKind::UncheckedData),
-            "unchecked_params" => Ok(WarningKind::UncheckedParams),
-            "noop" => Ok(WarningKind::Noop),
-            "unused_const" => Ok(WarningKind::UnusedConst),
-            "unused_data_var" => Ok(WarningKind::UnusedDataVar),
-            "unused_map" => Ok(WarningKind::UnusedMap),
-            _ => Err(format!("'{s}' is not a valid warning identifier")),
-        }
-    }
+    UnusedPrivateFn,
 }
 
 #[derive(Debug)]
