@@ -31,7 +31,10 @@ struct PrivateFnData<'a> {
 
 impl<'a> PrivateFnData<'a> {
     fn new(expr: &'a SymbolicExpression) -> Self {
-        Self { expr, called: true }
+        Self {
+            expr,
+            called: false,
+        }
     }
 }
 
@@ -64,14 +67,6 @@ impl<'a> UnusedPrivateFn<'a> {
     fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
         // Traverse the entire AST
         traverse(&mut self, &contract_analysis.expressions);
-
-        /*
-        let msg = self.private_fns.iter()
-            .map(|(k, v)| format!("  {k}({v})", v=v.called))
-            .collect::<Vec<_>>()
-            .join("\n");
-        panic!("Function map:\n{}", msg);
-        */
 
         // Process hashmap of unused constants and generate diagnostics
         let diagnostics = self.generate_diagnostics();
