@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_with_comment() {
+    fn allow_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
             ;; #[allow(unused_private_fn)]

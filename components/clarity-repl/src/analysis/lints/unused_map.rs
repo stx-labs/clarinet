@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn map_used_by_insert() {
+    fn used_by_insert() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-map consumed-messages (buff 32) bool)
@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn map_used_by_set_and_get() {
+    fn used_by_set_and_get() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-map admins principal bool)
@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn map_not_set() {
+    fn not_set() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-map admins principal bool)
@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn map_not_read() {
+    fn not_read() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-map admins principal bool)
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn map_not_used() {
+    fn not_used() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-map admins principal bool)
@@ -407,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_with_comment() {
+    fn allow_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
             ;; #[allow(unused_map)]

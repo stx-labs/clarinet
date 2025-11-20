@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn const_used() {
+    fn used() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant MINUTES_PER_HOUR u60)
@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn const_used_before_declaration() {
+    fn used_before_declaration() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-read-only (hours-to-minutes (hours uint))
@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn const_not_used() {
+    fn not_used() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant MINUTES_PER_HOUR u60)
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_with_comment() {
+    fn allow_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
             ;; #[allow(unused_const)]

@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_noop_annotation() {
+    fn allow_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (test-func)
