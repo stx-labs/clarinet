@@ -25,6 +25,7 @@ use serde::Serialize;
 use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
+use crate::analysis::linter::LintGroup;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
@@ -127,7 +128,7 @@ impl Settings {
 
     pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
         for lint in LintName::VARIANTS {
-            self.enable_lint(lint.clone(), level.clone());
+            self.enable_lint(*lint, level.clone());
         }
     }
 
@@ -168,18 +169,31 @@ impl From<BoolOr<Self>> for LintLevel {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
+    lint_groups: Option<HashMap<LintGroup, BoolOr<LintLevel>>>,
     lints: Option<HashMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let lints = from_file
-            .lints
-            .unwrap_or_default()
+        let max_size = LintName::VARIANTS.len();
+        let mut lints = HashMap::with_capacity(max_size);
+
+        // Process lint groups first
+        for (group, val) in from_file.lint_groups.unwrap_or_default() {
+            group.insert_into(&mut lints, LintLevel::from(val));
+        }
+
+        // Individual lints can override group settings
+        for (lint, val) in from_file.lints.unwrap_or_default() {
+            lints.insert(lint, LintLevel::from(val));
+        }
+
+        // Filter out explicitly disabled lints
+        let lints = lints
             .into_iter()
-            .filter_map(|(lint, value)| {
-                let diag_level: Option<ClarityDiagnosticLevel> = LintLevel::from(value).into();
+            .filter_map(|(lint, lint_level)| {
+                let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
                 diag_level.map(|level| (lint, level))
             })
             .collect();
