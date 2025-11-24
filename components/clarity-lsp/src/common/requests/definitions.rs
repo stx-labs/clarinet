@@ -663,11 +663,10 @@ pub fn get_public_function_and_trait_definitions(
 
 #[cfg(test)]
 mod definitions_visitor_tests {
-    use std::collections::HashMap;
-
     use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
+    use hashbrown::HashMap;
     use lsp_types::{Position, Range};
 
     use super::{DefinitionLocation, Definitions};
