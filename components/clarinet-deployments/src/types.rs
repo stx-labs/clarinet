@@ -650,9 +650,10 @@ pub mod qualified_contract_identifier_serde {
 }
 
 pub mod remap_principals_serde {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use clarity_repl::clarity::vm::types::{PrincipalData, StandardPrincipalData};
+    use hashbrown::HashMap;
     use serde::ser::SerializeMap;
     use serde::{Deserializer, Serializer};
 
@@ -897,12 +898,13 @@ pub struct DeploymentSpecification {
 }
 
 pub mod contracts_serde {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use base64::engine::general_purpose::STANDARD as b64;
     use base64::Engine as _;
     use clarinet_files::FileLocation;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
+    use hashbrown::HashMap;
     use serde::ser::SerializeSeq;
     use serde::{Deserializer, Serializer};
 
