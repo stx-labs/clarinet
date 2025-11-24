@@ -1,5 +1,5 @@
 use std::borrow::BorrowMut;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::vec;
 
 use clarinet_deployments::{
@@ -16,6 +16,7 @@ use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrin
 use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::{ContractDeployer, DEFAULT_CLARITY_VERSION};
+use hashbrown::{HashMap, HashSet};
 use lsp_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
 };

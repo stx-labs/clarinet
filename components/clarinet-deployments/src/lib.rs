@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
+
+use hashbrown::HashMap;
 
 extern crate serde;
 
@@ -687,7 +689,7 @@ pub async fn generate_default_deployment(
             if matches!(network, StacksNetwork::Simnet) {
                 for contract_id in ordered_contracts_ids.iter() {
                     let data = emulated_contracts_publish
-                        .remove(contract_id)
+                        .remove(*contract_id)
                         .unwrap_or_else(|| panic!("unable to retrieve contract: {contract_id}"));
                     let tx = TransactionSpecification::EmulatedContractPublish(data);
                     add_transaction_to_epoch(
@@ -699,7 +701,7 @@ pub async fn generate_default_deployment(
             } else if matches!(network, StacksNetwork::Devnet | StacksNetwork::Testnet) {
                 for contract_id in ordered_contracts_ids.iter() {
                     let data = requirements_publish
-                        .remove(contract_id)
+                        .remove(*contract_id)
                         .unwrap_or_else(|| panic!("unable to retrieve contract: {contract_id}"));
                     let tx = TransactionSpecification::RequirementPublish(data);
                     add_transaction_to_epoch(

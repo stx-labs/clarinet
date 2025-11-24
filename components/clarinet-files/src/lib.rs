@@ -17,13 +17,13 @@ pub use network_manifest::{BitcoinNetwork, StacksNetwork};
 #[cfg(target_arch = "wasm32")]
 mod wasm_fs_accessor;
 use std::borrow::BorrowMut;
-use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::str::FromStr;
 
+use hashbrown::HashMap;
 pub use network_manifest::{
     compute_addresses, AccountConfig, DevnetConfig, DevnetConfigFile, NetworkManifest,
     NetworkManifestFile, PoxStackingOrder, DEFAULT_BITCOIN_EXPLORER_IMAGE,
