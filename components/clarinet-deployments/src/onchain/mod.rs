@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -20,6 +20,7 @@ use clarity_repl::repl::boot::{
     SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
 };
 use clarity_repl::repl::{Session, SessionSettings, DEFAULT_EPOCH};
+use hashbrown::HashSet;
 use libsecp256k1::PublicKey;
 use reqwest::Url;
 use stacks_codec::codec::{
