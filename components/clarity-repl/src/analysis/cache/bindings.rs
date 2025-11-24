@@ -1,7 +1,6 @@
 //! Builds `HashMap` of all bindings (`let` bindings and function args) in a contract
 
-use std::collections::HashMap;
-use std::hash::Hash;
+use hashbrown::HashMap;
 
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::representations::Span;

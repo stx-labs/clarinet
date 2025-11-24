@@ -1,7 +1,5 @@
 #![allow(unused_variables)]
 
-use std::collections::{HashMap, HashSet};
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{DiagnosableError, Diagnostic, Level};
@@ -12,6 +10,7 @@ use clarity::vm::representations::SymbolicExpressionType::*;
 use clarity::vm::types::TypeSignatureExt;
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_types::types::TypeSignature;
+use hashbrown::{HashMap, HashSet};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 

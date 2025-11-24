@@ -2,7 +2,7 @@
 //!
 //! Tokens are considered unused if declared but never minted
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;

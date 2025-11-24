@@ -486,7 +486,7 @@ pub async fn generate_default_deployment(
 
     let mut queue = VecDeque::new();
 
-    let mut contract_epochs = HashMap::new();
+    let mut contract_epochs = hashbrown::HashMap::new();
 
     // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
     if let Some(ref requirements) = manifest.project.requirements {
@@ -693,7 +693,7 @@ pub async fn generate_default_deployment(
                     add_transaction_to_epoch(
                         &mut transactions,
                         tx,
-                        &contract_epochs[contract_id].into(),
+                        &contract_epochs[*contract_id].into(),
                     );
                 }
             } else if matches!(network, StacksNetwork::Devnet | StacksNetwork::Testnet) {
@@ -705,7 +705,7 @@ pub async fn generate_default_deployment(
                     add_transaction_to_epoch(
                         &mut transactions,
                         tx,
-                        &contract_epochs[contract_id].into(),
+                        &contract_epochs[*contract_id].into(),
                     );
                 }
             }

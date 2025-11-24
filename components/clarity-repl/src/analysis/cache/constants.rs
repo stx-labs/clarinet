@@ -1,6 +1,6 @@
 //! Builds `HashMap` of all constants in a contract
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::{ClarityVersion, SymbolicExpression};

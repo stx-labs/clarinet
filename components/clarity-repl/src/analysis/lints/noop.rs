@@ -1,13 +1,12 @@
 //! Lint to find expressions that have no effect (noops)
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::Span;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
+use hashbrown::HashMap;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
