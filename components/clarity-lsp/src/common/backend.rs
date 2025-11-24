@@ -615,11 +615,11 @@ pub fn process_mutating_request(
 
 #[cfg(test)]
 mod lsp_tests {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use clarinet_files::FileLocation;
     use clarity_repl::clarity::ClarityVersion;
+    use hashbrown::HashMap;
     use lsp_types::{
         DocumentRangeFormattingParams, FormattingOptions, Position, Range, TextDocumentIdentifier,
         WorkDoneProgressParams,
