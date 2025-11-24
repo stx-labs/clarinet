@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use clarity::vm::ClarityVersion;
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use clarity_repl::clarity::functions::define::DefineFunctions;
@@ -7,6 +5,7 @@ use clarity_repl::clarity::vm::types::{
     QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
 };
 use clarity_repl::clarity::{ClarityName, SymbolicExpression};
+use hashbrown::HashMap;
 use lsp_types::Range;
 
 use super::helpers::span_to_range;

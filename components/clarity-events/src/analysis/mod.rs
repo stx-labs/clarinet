@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use clarity_repl::clarity::analysis::type_checker::v2_05::TypeChecker;
@@ -11,6 +11,7 @@ use clarity_repl::clarity::vm::types::{
 use clarity_repl::clarity::vm::{ClarityName, SymbolicExpression};
 use clarity_repl::clarity::{ClarityVersion, SymbolicExpressionType};
 use clarity_repl::repl::clarity_values::value_to_string;
+use hashbrown::HashMap;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use serde_json::Value as JsonValue;

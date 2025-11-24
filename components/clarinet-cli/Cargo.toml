@@ -21,6 +21,7 @@ colored = { workspace = true }
 crossbeam-channel = "0.5.6"
 crossterm = { workspace = true }
 ctrlc = "3.1.9"
+hashbrown = { workspace = true, features = ["serde"] }
 indoc = { workspace = true }
 rand = { workspace = true }
 ratatui = { workspace = true }

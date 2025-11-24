@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::vec;
 
@@ -14,6 +13,7 @@ use clarity_repl::clarity::variables::NativeVariables;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_repl::repl::DEFAULT_EPOCH;
 use clarity_types::types::TypeSignature;
+use hashbrown::HashMap;
 use lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
     Position,

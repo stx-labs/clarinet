@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use clarinet_files::{DevnetConfig, FileAccessor, FileLocation, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
@@ -11,6 +11,7 @@ use clarity_repl::clarity::vm::types::{
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
 use clarity_repl::repl::{Session, DEFAULT_CLARITY_VERSION};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 use strum::{EnumIter, IntoEnumIterator};
