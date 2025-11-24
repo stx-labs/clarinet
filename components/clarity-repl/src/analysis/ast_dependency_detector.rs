@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
@@ -16,6 +16,7 @@ use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceSubtype, TraitIdentifier, TypeSignature,
     Value,
 };
+use hashbrown::{HashMap, HashSet};
 
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};

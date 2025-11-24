@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use clarity::vm::ast::ContractAST;
 use clarity::vm::errors::VmExecutionError;
@@ -6,6 +6,7 @@ use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::functions::NativeFunctions::{self, Filter, Fold, Map};
 use clarity::vm::{EvalHook, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
+use hashbrown::{HashMap, HashSet};
 
 type ExprCoverage = HashMap<u64, u64>;
 type ExecutableLines = HashMap<u32, Vec<u64>>;
@@ -106,7 +107,7 @@ impl CoverageHook {
                     let mut branch_execution_counts = BTreeMap::new();
 
                     for report in test_reports {
-                        if let Some(coverage) = report.coverage.get(contract_id) {
+                        if let Some(coverage) = report.coverage.get(*contract_id) {
                             let mut local_function_hits = BTreeSet::new();
 
                             for (line, expr_ids) in executable_lines.iter() {

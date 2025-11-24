@@ -6,6 +6,7 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
+use hashbrown::HashMap;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::constants::ConstantData;

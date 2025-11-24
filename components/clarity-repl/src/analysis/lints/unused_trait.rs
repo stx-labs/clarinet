@@ -2,7 +2,7 @@
 //!
 //! A trait is considered unused if there is no public or read-only function parameter with the trait type
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
