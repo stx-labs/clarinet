@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use hashbrown::HashMap;
 use js_sys::{Function as JsFunction, Promise};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value as decode_from_js, to_value as encode_to_js};
