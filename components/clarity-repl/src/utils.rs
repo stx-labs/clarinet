@@ -1,6 +1,13 @@
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
+use clarity::vm::errors::Error as VmExecutionError;
 
 use crate::repl::clarity_values::value_to_string;
+
+// this was removed from stacks-core (https://github.com/stacks-network/stacks-core/commit/3ba954dd0b231adc1f6406f5ef8b4ec22e5768cb#diff-236aa49dfd8ede88d351e87f5df9ee9918a246a8e6a4a48136190385853503feL210)
+// We're adding it back to avoid a huge diff for changing all our uses of InterpreterResult
+// what used to be Error is now called VmExecutionError (https://github.com/stacks-network/stacks-core/commit/3ba954dd0b231adc1f6406f5ef8b4ec22e5768cb#diff-236aa49dfd8ede88d351e87f5df9ee9918a246a8e6a4a48136190385853503feR52-R78)
+// and has slightly different types. When we update to the newer stacks-core we'll have to change this.
+pub type InterpreterResult<R> = Result<R, VmExecutionError>;
 
 pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     match event {

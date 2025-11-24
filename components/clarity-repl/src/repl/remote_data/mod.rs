@@ -2,12 +2,12 @@ use clarity::types::chainstate::{
     BlockHeaderHash, BurnchainHeaderHash, ConsensusHash, SortitionId, StacksBlockId, VRFSeed,
 };
 use clarity::types::StacksEpochId;
-use clarity::vm::errors::InterpreterResult;
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::de::{DeserializeOwned, Error as SerdeError};
 use serde::{Deserialize, Deserializer};
 
 use crate::repl::settings::ApiUrl;
+use crate::utils::InterpreterResult;
 
 pub mod context;
 pub mod fs;
