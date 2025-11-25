@@ -1462,6 +1462,7 @@ mod test_rpc_client {
         let deployer = AccountConfig {
             label: "deployer".to_string(),
             mnemonic: "cycle puppy glare enroll cost improve round trend wrist mushroom scorpion tower claim oppose clever elephant dinosaur eight problem before frozen dune wagon high".to_string(),
+            encrypted_mnemonic: "".to_string(),
             derivation: DEFAULT_DERIVATION_PATH.to_string(),
             balance: 10000000,
             sbtc_balance: 100000000,

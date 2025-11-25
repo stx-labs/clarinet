@@ -7,26 +7,29 @@ use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::Span;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 
-use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::analysis::{self, AnalysisPass, AnalysisResult, Lint};
+use crate::analysis::linter::Lint;
+use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct NoopCheckerSettings {
-    level: Level,
+    // TODO
 }
 
 impl NoopCheckerSettings {
-    fn new(level: Level) -> Self {
-        Self { level }
+    fn new() -> Self {
+        Self {}
     }
 }
 
 pub struct NoopChecker<'a> {
     clarity_version: ClarityVersion,
-    // Map expression ID to a generated diagnostic
-    settings: NoopCheckerSettings,
+    /// Map expression ID to a generated diagnostic
+    _settings: NoopCheckerSettings,
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
     annotations: &'a Vec<Annotation>,
+    /// Clarity diagnostic level
+    level: Level,
     active_annotation: Option<usize>,
 }
 
@@ -34,11 +37,13 @@ impl<'a> NoopChecker<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        level: Level,
         settings: NoopCheckerSettings,
     ) -> NoopChecker<'a> {
         Self {
             clarity_version,
-            settings,
+            _settings: settings,
+            level,
             diagnostics: HashMap::new(),
             annotations,
             active_annotation: None,
@@ -58,33 +63,20 @@ impl<'a> NoopChecker<'a> {
     }
 
     // Check for annotations that should be attached to the given span
-    fn process_annotations(&mut self, span: &Span) {
-        self.active_annotation = None;
-
-        for (i, annotation) in self.annotations.iter().enumerate() {
-            if annotation.span.start_line == (span.start_line - 1) {
-                self.active_annotation = Some(i);
-                return;
-            } else if annotation.span.start_line >= span.start_line {
-                // The annotations are ordered by span, so if we have passed
-                // the target line, return.
-                return;
-            }
-        }
+    fn set_active_annotation(&mut self, span: &Span) {
+        self.active_annotation = get_index_of_span(self.annotations, span);
     }
 
     // Check if the expression is annotated with `allow(noop)`
-    fn allow_noop(&self) -> bool {
-        if let Some(idx) = self.active_annotation {
-            let annotation = &self.annotations[idx];
-            return matches!(annotation.kind, AnnotationKind::Allow(WarningKind::Noop));
-        }
-        false
+    fn allow(&self) -> bool {
+        self.active_annotation
+            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+            .unwrap_or(false)
     }
 
     fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: String) {
         let diagnostic = Diagnostic {
-            level: self.settings.level.clone(),
+            level: self.level.clone(),
             message,
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
@@ -98,9 +90,9 @@ impl<'a> NoopChecker<'a> {
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) {
-        self.process_annotations(&expr.span);
+        self.set_active_annotation(&expr.span);
 
-        if self.allow_noop() {
+        if self.allow() {
             return;
         }
 
@@ -157,16 +149,26 @@ impl AnalysisPass for NoopChecker<'_> {
         contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
-        settings: &analysis::Settings,
+        level: Level,
+        _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let level = settings
-            .lints
-            .get(&Lint::Noop)
-            .cloned()
-            .unwrap_or(Level::Warning);
-        let settings = NoopCheckerSettings::new(level);
-        let checker = NoopChecker::new(contract_analysis.clarity_version, annotations, settings);
+        let settings = NoopCheckerSettings::new();
+        let checker = NoopChecker::new(
+            contract_analysis.clarity_version,
+            annotations,
+            level,
+            settings,
+        );
         checker.run(contract_analysis)
+    }
+}
+
+impl Lint for NoopChecker<'_> {
+    fn get_name() -> LintName {
+        LintName::Noop
+    }
+    fn match_allow_annotation(annotation: &Annotation) -> bool {
+        matches!(annotation.kind, AnnotationKind::Allow(WarningKind::Noop))
     }
 }
 
@@ -175,18 +177,25 @@ mod tests {
     use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
-    use crate::analysis::Lint;
+    use super::NoopChecker;
+    use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    #[test]
-    fn single_operand_equals() {
+    fn get_session() -> Session {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
-        let mut session = Session::new(settings);
+            .enable_lint(NoopChecker::get_name(), Level::Warning);
+
+        Session::new(settings)
+    }
+
+    #[test]
+    fn single_operand_equals() {
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -210,12 +219,7 @@ mod tests {
 
     #[test]
     fn single_operand_add() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
-        let mut session = Session::new(settings);
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -239,12 +243,7 @@ mod tests {
 
     #[test]
     fn single_operand_logical() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
-        let mut session = Session::new(settings);
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -268,12 +267,7 @@ mod tests {
 
     #[test]
     fn allow_noop_annotation() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_lint(Lint::Noop, Level::Warning);
-        let mut session = Session::new(settings);
+        let mut session = get_session();
 
         #[rustfmt::skip]
         let snippet = indoc!("

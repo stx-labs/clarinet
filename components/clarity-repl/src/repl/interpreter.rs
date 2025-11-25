@@ -1248,11 +1248,11 @@ mod tests {
             (define-private (test-burn)
                 (ft-burn? ctb u10 tx-sender))
             (define-private (test-transfer)
-                (ft-transfer? ctb u10 tx-sender (as-contract tx-sender)))
+                (ft-transfer? ctb u10 tx-sender current-contract))
             (define-private (test-burn-1000)
                 (ft-burn? ctb u1000 tx-sender))
             (define-private (test-transfer-1000)
-                (ft-transfer? ctb u1000 tx-sender (as-contract tx-sender)))
+                (ft-transfer? ctb u1000 tx-sender current-contract))
             (test-mint)
             (test-burn)
             (test-transfer)
@@ -1511,7 +1511,7 @@ mod tests {
             .code_source(
                 [
                     "(define-public (test-transfer)",
-                    "  (ok (stx-transfer? u10 tx-sender (as-contract tx-sender))))",
+                    "  (ok (stx-transfer? u10 tx-sender current-contract)))",
                     "(define-public (test-burn)",
                     "  (ok (stx-burn? u10 tx-sender)))",
                     "(test-transfer)",
@@ -1564,7 +1564,7 @@ mod tests {
                     "(define-private (test-burn)",
                     "  (ft-burn? ctb u10 tx-sender))",
                     "(define-private (test-transfer)",
-                    "  (ft-transfer? ctb u10 tx-sender (as-contract tx-sender)))",
+                    "  (ft-transfer? ctb u10 tx-sender current-contract))",
                     "(test-mint)",
                     "(test-burn)",
                     "(test-transfer)",
@@ -1609,7 +1609,7 @@ mod tests {
                     "(define-private (test-burn)",
                     "  (nft-burn? nftest u1 tx-sender))",
                     "(define-private (test-transfer)",
-                    "  (nft-transfer? nftest u2 tx-sender (as-contract  tx-sender)))",
+                    "  (nft-transfer? nftest u2 tx-sender current-contract))",
                     "(test-burn)",
                     "(test-transfer)",
                 ]

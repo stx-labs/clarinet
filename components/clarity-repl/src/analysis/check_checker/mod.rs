@@ -16,7 +16,7 @@ use clarity_types::types::TypeSignature;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 
-use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
 use crate::repl::DEFAULT_EPOCH;
@@ -110,23 +110,26 @@ pub struct CheckChecker<'a> {
     settings: Settings,
     taint_sources: HashMap<Node<'a>, TaintSource<'a>>,
     tainted_nodes: HashMap<Node<'a>, TaintedNode<'a>>,
-    // Map expression ID to a generated diagnostic
+    /// Map expression ID to a generated diagnostic
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
-    // Record all public functions defined
+    /// Record all public functions defined
     public_funcs: HashSet<&'a ClarityName>,
-    // For each user-defined function, record which parameters are allowed
-    // to be unchecked (tainted)
+    /// For each user-defined function, record which parameters are allowed
+    /// to be unchecked (tainted)
     user_funcs: HashMap<&'a ClarityName, FunctionInfo>,
-    // True if currently traversing within an `as-contract` node
+    /// True if currently traversing within an `as-contract` node
     in_as_contract: bool,
+    /// Clarity diagnostic level
+    level: Level,
 }
 
 impl<'a> CheckChecker<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        level: Level,
         settings: Settings,
     ) -> CheckChecker<'a> {
         Self {
@@ -136,6 +139,7 @@ impl<'a> CheckChecker<'a> {
             tainted_nodes: HashMap::new(),
             diagnostics: HashMap::new(),
             annotations,
+            level,
             active_annotation: None,
             public_funcs: HashSet::new(),
             user_funcs: HashMap::new(),
@@ -242,19 +246,8 @@ impl<'a> CheckChecker<'a> {
     }
 
     // Check for annotations that should be attached to the given span
-    fn process_annotations(&mut self, span: &Span) {
-        self.active_annotation = None;
-
-        for (i, annotation) in self.annotations.iter().enumerate() {
-            if annotation.span.start_line == (span.start_line - 1) {
-                self.active_annotation = Some(i);
-                return;
-            } else if annotation.span.start_line >= span.start_line {
-                // The annotations are ordered by span, so if we have passed
-                // the target line, return.
-                return;
-            }
-        }
+    fn set_active_annotation(&mut self, span: &Span) {
+        self.active_annotation = get_index_of_span(self.annotations, span);
     }
 
     // Check if the expression is annotated with `allow(unchecked_data)`
@@ -301,7 +294,7 @@ impl<'a> CheckChecker<'a> {
     fn generate_diagnostics(&self, expr: &SymbolicExpression) -> Vec<Diagnostic> {
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
         let diagnostic = Diagnostic {
-            level: Level::Warning,
+            level: self.level.clone(),
             message: "use of potentially unchecked data".to_string(),
             spans: vec![expr.span.clone()],
             suggestion: None,
@@ -335,7 +328,7 @@ impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
     }
 
     fn traverse_expr(&mut self, expr: &'a SymbolicExpression) -> bool {
-        self.process_annotations(&expr.span);
+        self.set_active_annotation(&expr.span);
         // If this expression is annotated to allow unchecked data, no need to
         // traverse it.
         if self.allow_unchecked_data() {
@@ -862,11 +855,13 @@ impl AnalysisPass for CheckChecker<'_> {
         contract_analysis: &mut ContractAnalysis,
         analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
+        level: Level,
         settings: &analysis::Settings,
     ) -> AnalysisResult {
         let checker = CheckChecker::new(
             contract_analysis.clarity_version,
             annotations,
+            level,
             settings.check_checker,
         );
         checker.run(contract_analysis)
