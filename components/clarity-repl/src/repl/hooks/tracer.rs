@@ -1,11 +1,11 @@
 use clarity::vm::contexts::{Environment, LocalContext};
-use clarity::vm::errors::Error;
 use clarity::vm::events::StacksTransactionEvent;
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::{
     eval, ClarityVersion, EvalHook, EvaluationResult, SymbolicExpression, SymbolicExpressionType,
 };
+use clarity_types::errors::VmExecutionError;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, Value,
 };
@@ -202,7 +202,7 @@ impl EvalHook for TracerHook {
         env: &mut Environment,
         _context: &LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, Error>,
+        res: &Result<Value, VmExecutionError>,
     ) {
         if let Err(e) = res {
             if self.error.is_none() {

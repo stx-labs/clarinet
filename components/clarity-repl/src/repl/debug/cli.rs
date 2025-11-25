@@ -1,7 +1,7 @@
 use clarity::vm::contexts::{Environment, LocalContext};
-use clarity::vm::errors::Error;
 use clarity::vm::representations::Span;
 use clarity::vm::{ContractName, EvalHook, SymbolicExpression};
+use clarity_types::errors::VmExecutionError;
 use clarity_types::types::QualifiedContractIdentifier;
 use clarity_types::Value;
 use rustyline::error::ReadlineError;
@@ -479,7 +479,7 @@ impl EvalHook for CLIDebugger {
         env: &mut Environment,
         context: &LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, Error>,
+        res: &Result<Value, VmExecutionError>,
     ) {
         if self.state.did_finish_eval(env, context, expr, res) {
             match res {

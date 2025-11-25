@@ -5,10 +5,10 @@ use clarity::vm::ast::build_ast_with_diagnostics;
 use clarity::vm::contexts::{Environment, LocalContext};
 use clarity::vm::contracts::Contract;
 use clarity::vm::diagnostic::Level;
-use clarity::vm::errors::Error;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{eval, ClarityVersion, ContractName, SymbolicExpressionType};
+use clarity_types::errors::VmExecutionError;
 use clarity_types::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity_types::Value;
 
@@ -517,7 +517,7 @@ impl DebugState {
         _env: &mut Environment,
         _context: &LocalContext,
         expr: &SymbolicExpression,
-        _res: &Result<Value, Error>,
+        _res: &Result<Value, VmExecutionError>,
     ) -> bool {
         let state = self.stack.pop().unwrap();
         assert_eq!(state.id, expr.id);
