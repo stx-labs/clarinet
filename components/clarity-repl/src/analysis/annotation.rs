@@ -61,6 +61,7 @@ pub enum WarningKind {
     UnusedMap,
     UnusedPrivateFn,
     UnusedToken,
+    UnusedTrait,
 }
 
 #[derive(Debug)]
