@@ -266,14 +266,67 @@ mod tests {
     }
 
     #[test]
-    fn allow_with_annotation() {
+    fn allow_ft_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
             ;; #[allow(unused_token)]
             (define-fungible-token sbtc)
 
             (define-public (mint (amount uint) (recipient principal))
-                (ft-mint? sbtc amount recipient))
+                (err u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn nft_used() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token hashes (buff 32))
+
+            (define-public (mint (hash (buff 32)) (recipient principal))
+                (nft-mint? hashes hash recipient))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn nft_not_used() {
+        let nft_name = "hashes";
+
+        #[rustfmt::skip]
+        let snippet = formatdoc!("
+            (define-non-fungible-token {nft_name} (buff 32))
+
+            (define-public (mint (hash (buff 32)) (recipient principal))
+                (err u1))
+        ");
+
+        let (output, result) = run_snippet(snippet);
+
+        let expected_message = UnusedToken::make_diagnostic_message_nft(&nft_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(nft_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
+    fn allow_nft_with_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unused_token)]
+            (define-non-fungible-token hashes (buff 32))
+
+            (define-public (mint (hash (buff 32)) (recipient principal))
+                (err u1))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
