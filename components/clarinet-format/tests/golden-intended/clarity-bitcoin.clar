@@ -131,7 +131,9 @@
   (let (
       (ptr (get index ctx))
       (tx (get txbuff ctx))
-      (byte (buff-to-uint-le (unwrap! (element-at tx ptr) (err ERR-OUT-OF-BOUNDS))))
+      (byte (buff-to-uint-le (unwrap! (element-at tx ptr)
+        (err ERR-OUT-OF-BOUNDS)
+      )))
     )
     (if (<= byte u252)
       ;; given byte is the varint
@@ -236,7 +238,9 @@
       (target-index (+ u32 slice-start))
       (txbuff (get txbuff old-ctx))
       (hash-le (unwrap-panic (as-max-len?
-        (unwrap! (slice? txbuff slice-start target-index) (err ERR-OUT-OF-BOUNDS))
+        (unwrap!
+          (slice? txbuff slice-start target-index) (err ERR-OUT-OF-BOUNDS)
+        )
         u32
       )))
     )
@@ -368,12 +372,13 @@
       ctx: new-ctx,
       txouts: (unwrap!
         (as-max-len?
-          (append (get txouts state) {
-            value: (get uint64 parsed-value),
-            scriptPubKey: (unwrap! (as-max-len? (get varslice parsed-script) u128)
-              (err ERR-VARSLICE-TOO-LONG)
-            ),
-          })
+          (append (get txouts state)
+            {
+              value: (get uint64 parsed-value),
+              scriptPubKey: (unwrap! (as-max-len? (get varslice parsed-script) u128)
+                (err ERR-VARSLICE-TOO-LONG)
+              ),
+            })
           u8
         )
         (err ERR-TOO-MANY-TXOUTS)
@@ -445,13 +450,14 @@
 ;; Read the next witness data, and update the index in ctx to point to the next witness.
 (define-read-only (read-next-witness
     (ignored bool)
-    (result (response {
-      ctx: {
-        txbuff: (buff 4096),
-        index: uint,
-      },
-      witnesses: (list 8 (list 8 (buff 128))),
-    }
+    (result (response
+      {
+        ctx: {
+          txbuff: (buff 4096),
+          index: uint,
+        },
+        witnesses: (list 8 (list 8 (buff 128))),
+      }
       uint
     ))
   )
@@ -566,7 +572,8 @@
       ins: (get txins parsed-txins),
       outs: (get txouts parsed-txouts),
       txid: (if calculate-txid
-        (some (reverse-buff32 (sha256 (sha256 (concat (unwrap-panic (slice? tx u0 u4))
+        (some (reverse-buff32 (sha256 (sha256 (concat
+          (unwrap-panic (slice? tx u0 u4))
           (concat
             (unwrap-panic (slice? tx (get index (get ctx parsed-segwit-version))
               (get index (get ctx parsed-txouts))
@@ -789,14 +796,15 @@
       (fold inner-merkle-proof-verify
         (unwrap-panic (slice? (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13) u0
           (get tree-depth proof)
-        )) {
-        path: (+ (pow u2 (get tree-depth proof)) (get tx-index proof)),
-        root-hash: merkle-root,
-        proof-hashes: (get hashes proof),
-        cur-hash: reversed-txid,
-        tree-depth: (get tree-depth proof),
-        verified: false,
-      })
+        ))
+        {
+          path: (+ (pow u2 (get tree-depth proof)) (get tx-index proof)),
+          root-hash: merkle-root,
+          proof-hashes: (get hashes proof),
+          cur-hash: reversed-txid,
+          tree-depth: (get tree-depth proof),
+          verified: false,
+        })
     ))
   )
 )
@@ -959,11 +967,12 @@
       )
       ;; verify witness merkle tree
       (asserts!
-        (try! (verify-merkle-proof reversed-wtxid witness-merkle-root {
-          tx-index: tx-index,
-          hashes: wproof,
-          tree-depth: tree-depth,
-        }))
+        (try! (verify-merkle-proof reversed-wtxid witness-merkle-root
+          {
+            tx-index: tx-index,
+            hashes: wproof,
+            tree-depth: tree-depth,
+          }))
         (err ERR-WITNESS-TX-NOT-IN-COMMITMENT)
       )
       (ok wtxid)
