@@ -1,7 +1,7 @@
 use clarity::vm::contexts::{Environment, LocalContext};
-use clarity::vm::errors::Error;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::{EvalHook, ExecutionResult, SymbolicExpression, SymbolicExpressionType};
+use clarity_types::errors::VmExecutionError;
 use clarity_types::Value;
 
 use crate::repl::clarity_values::value_to_string;
@@ -23,7 +23,7 @@ impl EvalHook for LoggerHook {
         env: &mut Environment,
         _context: &LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, Error>,
+        res: &Result<Value, VmExecutionError>,
     ) {
         let SymbolicExpressionType::List(list) = &expr.expr else {
             return;

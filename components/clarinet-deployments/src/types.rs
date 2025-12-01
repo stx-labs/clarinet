@@ -109,8 +109,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_0 => Some(config.epoch_3_0),
                     EpochSpec::Epoch3_1 => Some(config.epoch_3_1),
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
-                    // epoch 3.3 is optional while it's not enabled on the default image
-                    EpochSpec::Epoch3_3 => config.epoch_3_3,
+                    EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
                 };
                 start_height.map(|start_height| EpochConfig {
                     epoch_name: epoch,
@@ -1492,74 +1491,7 @@ mod tests {
             epoch_3_0: 8,
             epoch_3_1: 9,
             epoch_3_2: 10,
-            epoch_3_3: None,
-            ..Default::default()
-        };
-
-        let epoch_config = BurnchainEpochConfig::from(&devnet_config);
-        let epoch_config_toml = toml::to_string(&epoch_config).unwrap();
-
-        assert_eq!(
-            epoch_config_toml,
-            indoc! { r#"
-                [[burnchain.epochs]]
-                epoch_name = "2.0"
-                start_height = 1
-
-                [[burnchain.epochs]]
-                epoch_name = "2.05"
-                start_height = 2
-
-                [[burnchain.epochs]]
-                epoch_name = "2.1"
-                start_height = 3
-
-                [[burnchain.epochs]]
-                epoch_name = "2.2"
-                start_height = 4
-
-                [[burnchain.epochs]]
-                epoch_name = "2.3"
-                start_height = 5
-
-                [[burnchain.epochs]]
-                epoch_name = "2.4"
-                start_height = 6
-
-                [[burnchain.epochs]]
-                epoch_name = "2.5"
-                start_height = 7
-
-                [[burnchain.epochs]]
-                epoch_name = "3.0"
-                start_height = 8
-
-                [[burnchain.epochs]]
-                epoch_name = "3.1"
-                start_height = 9
-
-                [[burnchain.epochs]]
-                epoch_name = "3.2"
-                start_height = 10
-                "#
-            }
-        );
-    }
-
-    #[test]
-    fn test_epoch_config_with_optional_3_3() {
-        let devnet_config = DevnetConfig {
-            epoch_2_0: 1,
-            epoch_2_05: 2,
-            epoch_2_1: 3,
-            epoch_2_2: 4,
-            epoch_2_3: 5,
-            epoch_2_4: 6,
-            epoch_2_5: 7,
-            epoch_3_0: 8,
-            epoch_3_1: 9,
-            epoch_3_2: 10,
-            epoch_3_3: Some(11),
+            epoch_3_3: 11,
             ..Default::default()
         };
 

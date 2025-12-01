@@ -1,6 +1,7 @@
 use clarity::vm::representations::Span;
 use clarity::vm::ClarityName;
 use regex::Regex;
+use strum::EnumString;
 
 #[derive(Debug)]
 pub enum AnnotationKind {
@@ -49,32 +50,37 @@ impl std::str::FromStr for AnnotationKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumString)]
+#[strum(serialize_all = "snake_case")]
 pub enum WarningKind {
     UncheckedData,
     UncheckedParams,
     Noop,
     UnusedConst,
-}
-
-impl std::str::FromStr for WarningKind {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "unchecked_data" => Ok(WarningKind::UncheckedData),
-            "unchecked_params" => Ok(WarningKind::UncheckedParams),
-            "noop" => Ok(WarningKind::Noop),
-            "unused_const" => Ok(WarningKind::UnusedConst),
-            _ => Err(format!("'{s}' is not a valid warning identifier")),
-        }
-    }
+    UnusedDataVar,
+    UnusedMap,
+    UnusedPrivateFn,
 }
 
 #[derive(Debug)]
 pub struct Annotation {
     pub kind: AnnotationKind,
     pub span: Span,
+}
+
+/// Returns the index in `annotations` for `span`
+/// Assumes `annotations` is sorted by `span.start_line`
+pub fn get_index_of_span(annotations: &[Annotation], span: &Span) -> Option<usize> {
+    for (i, annotation) in annotations.iter().enumerate() {
+        if annotation.span.start_line == (span.start_line - 1) {
+            return Some(i);
+        } else if annotation.span.start_line >= span.start_line {
+            // The annotations are ordered by span, so if we have passed
+            // the target line, return.
+            break;
+        }
+    }
+    None
 }
 
 #[cfg(test)]

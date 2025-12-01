@@ -19,7 +19,7 @@
     "@types/webpack-env": "^1.18.8"
   },
   "dependencies": {
-    "@vscode/test-web": "^0.0.73",
+    "@vscode/test-web": "^0.0.75",
     "chai": "^6.0.1",
     "mocha": "^11.2.2",
     "vscode-languageclient": "^9.0.1"

@@ -18,8 +18,9 @@ use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
-use clarity::vm::errors::{InterpreterError, InterpreterResult as Result};
+use clarity::vm::errors::InterpreterResult as Result;
 use clarity::vm::{ContractContext, StacksEpoch};
+use clarity_types::errors::VmInternalError;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };
@@ -398,17 +399,17 @@ impl ClarityDatastore {
         );
         let contract_src =
             self.get_metadata(contract_id, &contract_src_key)?
-                .ok_or(InterpreterError::Expect(format!(
+                .ok_or(VmInternalError::Expect(format!(
                     "No contract source found for contract: {contract_id}",
                 )))?;
 
         let mut contract_context = context_str
-            .ok_or(InterpreterError::Expect(format!(
+            .ok_or(VmInternalError::Expect(format!(
                 "No contract context found for contract: {contract_id}",
             )))
             .and_then(|s| {
                 serde_json::from_str::<ContractContextResponse>(&s).map_err(|e| {
-                    InterpreterError::Expect(format!("Failed to parse contract context: {e}"))
+                    VmInternalError::Expect(format!("Failed to parse contract context: {e}"))
                 })
             })?
             .contract_context;
@@ -416,12 +417,12 @@ impl ClarityDatastore {
 
         let analysis = self
             .get_metadata(contract_id, AnalysisDatabase::storage_key())?
-            .ok_or(InterpreterError::Expect(format!(
+            .ok_or(VmInternalError::Expect(format!(
                 "No analysis metadata found for contract: {contract_id}",
             )))
             .and_then(|s| {
                 serde_json::from_str::<ContractAnalysis>(&s).map_err(|e| {
-                    InterpreterError::Expect(format!("Failed to parse analysis metadata: {e}"))
+                    VmInternalError::Expect(format!("Failed to parse analysis metadata: {e}"))
                 })
             })?;
 
@@ -437,7 +438,8 @@ impl ClarityDatastore {
             &contract_ast.expressions,
             &mut contract_context,
             &analysis.epoch,
-        )?;
+        )
+        .map_err(|e| VmInternalError::Expect(e.to_string()))?;
 
         Ok(contract_context)
     }
@@ -480,7 +482,7 @@ impl ClarityDatastore {
             let contract_context_response = ContractContextResponse { contract_context };
             Some(
                 serde_json::to_string(&contract_context_response).map_err(|e| {
-                    InterpreterError::Expect(format!("Failed to serialize contract context: {e}"))
+                    VmInternalError::Expect(format!("Failed to serialize contract context: {e}"))
                 })?,
             )
         } else {

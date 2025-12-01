@@ -62,14 +62,17 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
 
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@ae04fb5e853ae6cd3ad7de4a1d554a8b646d12aa # v1.15.11
+
+      - name: Install cargo audit
+        run: cargo binstall cargo-audit@0.22.0 --no-confirm --locked
+
       - name: Setup Rust cache
         id: setup-rust-cache
         uses: ./.github/actions/setup-rust-cache
         with:
           target-cache-key: ${{ runner.os }}-${{ github.job }}
-
-      - name: Install dependencies
-        run: cargo install cargo-audit || true
 
       - name: Run audit
         run: cargo audit --ignore RUSTSEC-2022-0028

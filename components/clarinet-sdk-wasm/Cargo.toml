@@ -12,6 +12,7 @@ name = "clarinet_sdk"
 path = "src/lib.rs"
 
 [dependencies]
+clarity = { workspace = true, default-features = false }
 console_error_panic_hook = { version = "0.1" }
 gloo-utils = { version = "0.2.0", features = ["serde"] }
 js-sys = { workspace = true }
@@ -28,7 +29,6 @@ clarinet-deployments = { path = "../clarinet-deployments", default-features = fa
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.0"
-clarity = { workspace = true, default-features = false }
 
 [features]
 default = []

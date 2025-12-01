@@ -3,8 +3,8 @@ use std::io::Write;
 
 use clarity::vm::contexts::{Environment, LocalContext};
 use clarity::vm::costs::ExecutionCost;
-use clarity::vm::errors::Error;
 use clarity::vm::{EvalHook, SymbolicExpression, SymbolicExpressionType};
+use clarity_types::errors::VmExecutionError;
 use clarity_types::types::{QualifiedContractIdentifier, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -275,7 +275,7 @@ impl EvalHook for PerfHook {
         env: &mut Environment,
         _context: &LocalContext,
         expr: &SymbolicExpression,
-        _res: &Result<Value, Error>,
+        _res: &Result<Value, VmExecutionError>,
     ) {
         // Get the full call stack as a string
         let call_stack = self

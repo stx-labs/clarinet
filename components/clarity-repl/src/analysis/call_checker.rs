@@ -19,15 +19,18 @@ pub struct CallChecker<'a> {
     // For each call of a user-defined function which has not been defined yet,
     // record the argument count, to check later.
     user_calls: Vec<(&'a ClarityName, &'a SymbolicExpression, usize)>,
+    /// Clarity diagnostic level
+    level: Level,
 }
 
 impl<'a> CallChecker<'a> {
-    fn new(clarity_version: ClarityVersion) -> CallChecker<'a> {
+    fn new(clarity_version: ClarityVersion, level: Level) -> CallChecker<'a> {
         Self {
             clarity_version,
             diagnostics: Vec::new(),
             user_funcs: HashMap::new(),
             user_calls: Vec::new(),
+            level,
         }
     }
 
@@ -80,7 +83,7 @@ impl<'a> CallChecker<'a> {
         got: usize,
     ) -> Diagnostic {
         Diagnostic {
-            level: Level::Error,
+            level: self.level.clone(),
             message: format!(
                 "incorrect number of arguments in call to '{name}' (expected {expected} got {got})"
             ),
@@ -200,9 +203,10 @@ impl AnalysisPass for CallChecker<'_> {
         contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
         _annotations: &Vec<Annotation>,
+        level: Level,
         _settings: &Settings,
     ) -> AnalysisResult {
-        let tc = CallChecker::new(contract_analysis.clarity_version);
+        let tc = CallChecker::new(contract_analysis.clarity_version, level);
         tc.run(contract_analysis)
     }
 }

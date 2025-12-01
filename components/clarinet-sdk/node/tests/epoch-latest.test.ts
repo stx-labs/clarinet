@@ -33,6 +33,6 @@ describe("basic simnet interactions", () => {
     const contractInterfaces = simnet.getContractsInterfaces();
     const counterContract = contractInterfaces.get(`${simnet.deployer}.counter`);
 
-    expect(counterContract?.epoch).toBe("Epoch32");
+    expect(counterContract?.epoch).toBe("Epoch33");
   });
 });

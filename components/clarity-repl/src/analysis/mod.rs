@@ -6,6 +6,7 @@ pub mod check_checker;
 pub mod coverage;
 #[cfg(test)]
 mod coverage_tests;
+pub mod linter;
 pub mod lints;
 
 use std::collections::HashMap;
@@ -17,18 +18,21 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use linter::{LintLevel, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
-use strum::{EnumString, VariantArray};
+use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
+use crate::analysis::linter::LintGroup;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
     &mut ContractAnalysis,
     &mut AnalysisDatabase,
     &Vec<Annotation>,
+    level: ClarityDiagnosticLevel,
     settings: &Settings,
 ) -> AnalysisResult;
 
@@ -38,15 +42,19 @@ pub trait AnalysisPass {
         contract_analysis: &mut ContractAnalysis,
         analysis_db: &mut AnalysisDatabase,
         annotations: &Vec<Annotation>,
+        level: ClarityDiagnosticLevel,
         settings: &Settings,
     ) -> AnalysisResult;
 }
 
-impl From<&Lint> for AnalysisPassFn {
-    fn from(lint: &Lint) -> AnalysisPassFn {
+impl From<&LintName> for AnalysisPassFn {
+    fn from(lint: &LintName) -> AnalysisPassFn {
         match lint {
-            Lint::Noop => lints::NoopChecker::run_pass,
-            Lint::UnusedConst => lints::UnusedConst::run_pass,
+            LintName::Noop => lints::NoopChecker::run_pass,
+            LintName::UnusedConst => lints::UnusedConst::run_pass,
+            LintName::UnusedDataVar => lints::UnusedDataVar::run_pass,
+            LintName::UnusedMap => lints::UnusedMap::run_pass,
+            LintName::UnusedPrivateFn => lints::UnusedPrivateFn::run_pass,
         }
     }
 }
@@ -72,61 +80,24 @@ pub enum Pass {
     CheckChecker,
 }
 
-// Each new pass should be included in this list
-static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
-
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case", try_from = "String")]
-#[strum(serialize_all = "snake_case")]
-pub enum Lint {
-    Noop,
-    UnusedConst,
-}
-
-impl Lint {}
-
-/// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
-impl TryFrom<String> for Lint {
-    type Error = strum::ParseError;
-
-    fn try_from(s: String) -> Result<Lint, Self::Error> {
-        Lint::try_from(s.as_str())
-    }
-}
-
-/// Map user intput to `clarity_types::diagnostic::Level` or ignore
-#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum LintLevel {
-    #[default]
-    #[serde(alias = "allow", alias = "off", alias = "none")]
-    Ignore,
-    #[serde(alias = "note")]
-    Notice,
-    #[serde(alias = "warn", alias = "on")]
-    Warning,
-    #[serde(alias = "err")]
-    Error,
-}
-
-impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
-    fn from(level: LintLevel) -> Self {
-        match level {
-            LintLevel::Ignore => None,
-            LintLevel::Notice => Some(ClarityDiagnosticLevel::Note),
-            LintLevel::Warning => Some(ClarityDiagnosticLevel::Warning),
-            LintLevel::Error => Some(ClarityDiagnosticLevel::Error),
+impl Pass {
+    fn default_level(&self) -> ClarityDiagnosticLevel {
+        match self {
+            Self::All => panic!("Cannot call this function on `All`"),
+            Self::CallChecker => ClarityDiagnosticLevel::Error,
+            Self::CheckChecker => ClarityDiagnosticLevel::Warning,
         }
     }
 }
+
+// Each new pass should be included in this list
+static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: Vec<Pass>,
-    lints: HashMap<Lint, ClarityDiagnosticLevel>,
+    lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
 }
 
@@ -149,15 +120,15 @@ impl Settings {
 
     pub fn enable_lint(
         &mut self,
-        lint: Lint,
+        lint: LintName,
         level: ClarityDiagnosticLevel,
     ) -> Option<ClarityDiagnosticLevel> {
         self.lints.insert(lint, level)
     }
 
     pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
-        for lint in Lint::VARIANTS {
-            self.enable_lint(lint.clone(), level.clone());
+        for lint in LintName::VARIANTS {
+            self.enable_lint(*lint, level.clone());
         }
     }
 
@@ -198,18 +169,31 @@ impl From<BoolOr<Self>> for LintLevel {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    lints: Option<HashMap<Lint, BoolOr<LintLevel>>>,
+    lint_groups: Option<HashMap<LintGroup, BoolOr<LintLevel>>>,
+    lints: Option<HashMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let lints = from_file
-            .lints
-            .unwrap_or_default()
+        let max_size = LintName::VARIANTS.len();
+        let mut lints = HashMap::with_capacity(max_size);
+
+        // Process lint groups first
+        for (group, val) in from_file.lint_groups.unwrap_or_default() {
+            group.insert_into(&mut lints, LintLevel::from(val));
+        }
+
+        // Individual lints can override group settings
+        for (lint, val) in from_file.lints.unwrap_or_default() {
+            lints.insert(lint, LintLevel::from(val));
+        }
+
+        // Filter out explicitly disabled lints
+        let lints = lints
             .into_iter()
-            .filter_map(|(lint, value)| {
-                let diag_level: Option<ClarityDiagnosticLevel> = LintLevel::from(value).into();
+            .filter_map(|(lint, lint_level)| {
+                let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
                 diag_level.map(|level| (lint, level))
             })
             .collect();
@@ -250,21 +234,22 @@ pub fn run_analysis(
     settings: &Settings,
 ) -> AnalysisResult {
     let mut errors: Vec<Diagnostic> = vec![];
-    let mut passes: Vec<AnalysisPassFn> = vec![];
+    let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel)> = vec![];
 
     for pass in &settings.passes {
         let f = AnalysisPassFn::try_from(pass).unwrap();
-        passes.push(f);
+        passes.push((f, pass.default_level()));
     }
 
-    for lint in settings.lints.keys() {
-        passes.push(AnalysisPassFn::from(lint));
+    for (name, level) in &settings.lints {
+        let lint = AnalysisPassFn::from(name);
+        passes.push((lint, level.clone()));
     }
 
     execute(analysis_db, |database| {
-        for pass in passes {
+        for (pass, level) in passes {
             // Collect warnings and continue, or if there is an error, return.
-            match pass(contract_analysis, database, annotations, settings) {
+            match pass(contract_analysis, database, annotations, level, settings) {
                 Ok(mut w) => errors.append(&mut w),
                 Err(mut e) => {
                     errors.append(&mut e);
