@@ -16,7 +16,7 @@ fi
 NEW_VERSION=$1
 ROOT_DIR=$(pwd)
 
-# Function to update version in package.json
+# update version in package.json
 update_package_json() {
     local file=$1
     local version=$2
@@ -28,12 +28,16 @@ update_package_json() {
     # If this is a SDK package, also update the wasm dependency
     if [[ $file == *"clarinet-sdk"* ]]; then
         sed -i'' -e "s/\"@clarinet\/sdk-wasm\": \".*\"/\"@clarinet\/sdk-wasm\": \"$version\"/" "$file"
+        # Update @stacks/clarinet-sdk-wasm dependency for node package
+        sed -i'' -e "s/\"@stacks\/clarinet-sdk-wasm\": \".*\"/\"@stacks\/clarinet-sdk-wasm\": \"$version\"/" "$file"
+        # Update @stacks/clarinet-sdk-wasm-browser dependency for browser package
+        sed -i'' -e "s/\"@stacks\/clarinet-sdk-wasm-browser\": \".*\"/\"@stacks\/clarinet-sdk-wasm-browser\": \"$version\"/" "$file"
     fi
 
     echo "Updated version in $file to $version"
 }
 
-# Function to update version in Cargo.toml
+# update version in Cargo.toml
 update_cargo_toml() {
     local file=$1
     local version=$2
@@ -54,33 +58,36 @@ echo "Starting version updates to $NEW_VERSION..."
 echo "Updating root files..."
 update_cargo_toml "./Cargo.toml" "$NEW_VERSION"
 
-# # Build SDK WASM
+# Build SDK WASM
 echo "Building SDK WASM..."
 npm run build:sdk-wasm
 
-# # Update Clarinet SDK packages
+# Update Clarinet SDK packages
 echo "Updating Clarinet SDK packages..."
 
-# # SDK wasm
-echo "Updating SDK wasm"
-cd components/clarinet-sdk/node
-update_package_json "package.json" "$NEW_VERSION"
-npm install "@stacks/clarinet-sdk-wasm@$NEW_VERSION" --save
-npm i
-cd "$ROOT_DIR"
+# Update WASM package versions first
+echo "Updating SDK wasm package versions..."
+update_package_json "components/clarinet-sdk-wasm/pkg-node/package.json" "$NEW_VERSION"
+update_package_json "components/clarinet-sdk-wasm/pkg-browser/package.json" "$NEW_VERSION"
 
-# echo "Updating SDK wasm browser"
-cd components/clarinet-sdk/browser
-update_package_json "package.json" "$NEW_VERSION"
-npm install "@stacks/clarinet-sdk-wasm-browser@$NEW_VERSION" --save
-npm i
-cd "$ROOT_DIR"
+# Update SDK node package
+echo "Updating SDK node package..."
+update_package_json "components/clarinet-sdk/node/package.json" "$NEW_VERSION"
 
+# Update SDK browser package
+echo "Updating SDK browser package..."
+update_package_json "components/clarinet-sdk/browser/package.json" "$NEW_VERSION"
+
+# Update clarity-vscode
 echo "Updating clarity-vscode..."
+update_package_json "components/clarity-vscode/package.json" "$NEW_VERSION"
 cd components/clarity-vscode
-update_package_json "package.json" "$NEW_VERSION"
 npm i
 cd "$ROOT_DIR"
+
+# Install all deps from root to properly handle workspaces
+echo "Installing deps from root..."
+npm i
 
 echo "All updates completed successfully!"
 
