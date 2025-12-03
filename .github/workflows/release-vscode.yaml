@@ -50,7 +50,8 @@ jobs:
 
       - name: Publish to VSCode Marketplace
         continue-on-error: true
-        run: npx vsce publish --packagePath clarity.vsix --azure-credential
+        run: npx @vscode/vsce verify-pat StacksLabs --azure-credential
+        #npx vsce publish --packagePath clarity.vsix --azure-credential
 
-      - name: Publish to Open VSX
-        run: npx ovsx publish --packagePath clarity.vsix --pat ${{ secrets.OVSX_TOKEN }}
+      # - name: Publish to Open VSX
+      #   run: npx ovsx publish --packagePath clarity.vsix --pat ${{ secrets.OVSX_TOKEN }}
