@@ -1,34 +1,50 @@
+# [3.11.0](https://github.com/stx-labs/clarinet/compare/v3.10.0...v3.11.0) (2025-12-03)
+
+##### New Features
+
+- Implement support for encrypted mnemonics (#2052) (7ff149f)
+- Add lint groups to enable/disable multiple lints (#2088) (21518fa7)
+- **Linter:** Add `unused_private_fn` lint (#2086) (5a6509c5)
+
+##### Chores
+
+- upgrade npm dependencies (#2085) (5afe6eb0)
+
+##### Continuous Integration
+
+- add flake.nix to enable nix builds (#2084) (bc639b00)
+
 # [3.10.0](https://github.com/stx-labs/clarinet/compare/v3.9.2...v3.10.0) (2025-11-13)
 
 ##### New Features
 
-* Default to epoch 3.3 (#2063) (8aa982ee)
-* **Linter:**
-  *  Add `unused_map` lint (#2077) (a2e2e70f)
-  *  Add `unused_data_var` lint (#2070) (bd0a5939)
-  *  Add `unused_const` lint (#2066) (a36fc9a3)
+- Default to epoch 3.3 (#2063) (8aa982ee)
+- **Linter:**
+  - Add `unused_map` lint (#2077) (a2e2e70f)
+  - Add `unused_data_var` lint (#2070) (bd0a5939)
+  - Add `unused_const` lint (#2066) (a36fc9a3)
 
 ##### Chores
 
-*  New vscode extension logo (#2079) (d995f7cc)
+- New vscode extension logo (#2079) (d995f7cc)
 
 # [3.9.2](https://github.com/stx-labs/clarinet/compare/v3.9.1...v3.9.2) (2025-11-10)
 
 ##### Continuous Integration
 
-*  Fix release dispatch (#2059) (d3e16d45)
+- Fix release dispatch (#2059) (d3e16d45)
 
 ##### Bug Fixes
 
-*  Formatter string escapes (#2051) (5543a2fe)
-*  Adapt Vitest config to v4 (#2067) (0d48147b)
-*  Service status update indexing (#2062) (f5541a51)
-*  Default epoch in deployments (#2068) (24e7e4c8)
-*  Empty trait format bug (#2045) (3f5870b2)
+- Formatter string escapes (#2051) (5543a2fe)
+- Adapt Vitest config to v4 (#2067) (0d48147b)
+- Service status update indexing (#2062) (f5541a51)
+- Default epoch in deployments (#2068) (24e7e4c8)
+- Empty trait format bug (#2045) (3f5870b2)
 
 ##### Refactors
 
-*  Analysis cleanup (#2032) (f9cb6807)
+- Analysis cleanup (#2032) (f9cb6807)
 
 # [3.9.1](https://github.com/stx-labs/clarinet/compare/v3.9.0...v3.9.1) (2025-11-05)
 
