@@ -120,13 +120,12 @@ pub fn encrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> 
     derive_key(password, &mut key)?;
     rng.fill_bytes(&mut nonce_bytes);
 
-    let nonce_vec = nonce_bytes.to_vec();
-    let nonce = Nonce::from_slice(&nonce_vec);
+    let nonce = Nonce::from(nonce_bytes);
     let cipher = Aes256Gcm::new((&key).into());
-    let cipher_vec = cipher.encrypt(nonce, data.to_vec().as_ref())?;
+    let cipher_vec = cipher.encrypt(&nonce, data.to_vec().as_ref())?;
     let mut bytes = Vec::new();
 
-    bytes.extend_from_slice(&nonce_vec);
+    bytes.extend_from_slice(&nonce_bytes);
     bytes.extend_from_slice(&cipher_vec);
 
     Ok(bytes)
@@ -144,10 +143,13 @@ pub fn decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> 
     if cipher_data.is_empty() {
         return Err(EncryptionError::MissingData);
     }
-    let nonce = Nonce::from_slice(nonce_data);
+    let nonce_array: [u8; AES_GCM_NONCE_SIZE] = nonce_data
+        .try_into()
+        .map_err(|_| EncryptionError::MissingNonce)?;
+    let nonce = Nonce::from(nonce_array);
     let cipher = Aes256Gcm::new((&key).into());
 
-    Ok(cipher.decrypt(nonce, cipher_data)?)
+    Ok(cipher.decrypt(&nonce, cipher_data)?)
 }
 
 pub fn encrypt_mnemonic_phrase(
