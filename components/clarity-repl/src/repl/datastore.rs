@@ -18,7 +18,7 @@ use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
-use clarity::vm::errors::InterpreterResult as Result;
+use clarity::vm::errors::VmExecutionError;
 use clarity::vm::{ContractContext, StacksEpoch};
 use clarity_types::errors::VmInternalError;
 use clarity_types::types::{
@@ -38,6 +38,8 @@ const CLARITY_STORAGE_BLOCK_TIME_KEY: &str = "_stx-data::clarity_storage::block_
 
 const SECONDS_BETWEEN_BURN_BLOCKS: u64 = 600;
 const SECONDS_BETWEEN_STACKS_BLOCKS: u64 = 10;
+
+type Result<T> = std::result::Result<T, VmExecutionError>;
 
 fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
     use clarity::consts::*;

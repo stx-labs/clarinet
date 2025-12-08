@@ -2,7 +2,7 @@ use clarity::types::chainstate::{
     BlockHeaderHash, BurnchainHeaderHash, ConsensusHash, SortitionId, StacksBlockId, VRFSeed,
 };
 use clarity::types::StacksEpochId;
-use clarity::vm::errors::InterpreterResult;
+use clarity::vm::errors::VmExecutionError;
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::de::{DeserializeOwned, Error as SerdeError};
 use serde::{Deserialize, Deserializer};
@@ -36,6 +36,8 @@ pub const TESTNET_30_START_HEIGHT: u32 = 320;
 pub const TESTNET_31_START_HEIGHT: u32 = 814;
 pub const TESTNET_32_START_HEIGHT: u32 = 3_140_887;
 pub const TESTNET_33_START_HEIGHT: u32 = 3_640_102;
+
+type InterpreterResult<T> = std::result::Result<T, VmExecutionError>;
 
 pub fn epoch_for_height(is_mainnet: bool, height: u32) -> StacksEpochId {
     if is_mainnet {
