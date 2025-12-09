@@ -38,8 +38,6 @@ const CLARITY_STORAGE_BLOCK_TIME_KEY: &str = "_stx-data::clarity_storage::block_
 const SECONDS_BETWEEN_BURN_BLOCKS: u64 = 600;
 const SECONDS_BETWEEN_STACKS_BLOCKS: u64 = 10;
 
-type Result<T> = std::result::Result<T, VmExecutionError>;
-
 fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
     use clarity::consts::*;
     match epoch {

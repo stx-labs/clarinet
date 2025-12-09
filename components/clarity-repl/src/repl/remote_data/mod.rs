@@ -37,8 +37,6 @@ pub const TESTNET_31_START_HEIGHT: u32 = 814;
 pub const TESTNET_32_START_HEIGHT: u32 = 3_140_887;
 pub const TESTNET_33_START_HEIGHT: u32 = 3_640_102;
 
-type InterpreterResult<T> = std::result::Result<T, VmExecutionError>;
-
 pub fn epoch_for_height(is_mainnet: bool, height: u32) -> StacksEpochId {
     if is_mainnet {
         epoch_for_mainnet_height(height)
