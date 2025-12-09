@@ -1687,6 +1687,12 @@ pub enum TenureChangeCause {
     BlockFound = 0,
     /// The next burnchain block is taking too long, so extend the runtime budget
     Extended = 1,
+    /// SIP-034: extend specific dimensions
+    ExtendedRuntime = 2,
+    ExtendedReadCount = 3,
+    ExtendedReadLength = 4,
+    ExtendedWriteCount = 5,
+    ExtendedWriteLength = 6,
 }
 
 impl TryFrom<u8> for TenureChangeCause {
@@ -1696,6 +1702,11 @@ impl TryFrom<u8> for TenureChangeCause {
         match num {
             0 => Ok(Self::BlockFound),
             1 => Ok(Self::Extended),
+            2 => Ok(Self::ExtendedRuntime),
+            3 => Ok(Self::ExtendedReadCount),
+            4 => Ok(Self::ExtendedReadLength),
+            5 => Ok(Self::ExtendedWriteCount),
+            6 => Ok(Self::ExtendedWriteLength),
             _ => Err(()),
         }
     }
@@ -1831,6 +1842,11 @@ impl TransactionPayload {
             TransactionPayload::TenureChange(payload) => match payload.cause {
                 TenureChangeCause::BlockFound => "TenureChange(BlockFound)",
                 TenureChangeCause::Extended => "TenureChange(Extension)",
+                TenureChangeCause::ExtendedRuntime => "TenureChange(ExtendRuntime)",
+                TenureChangeCause::ExtendedReadCount => "TenureChange(ExtendReadCount)",
+                TenureChangeCause::ExtendedReadLength => "TenureChange(ExtendReadLength)",
+                TenureChangeCause::ExtendedWriteCount => "TenureChange(ExtendWriteCount)",
+                TenureChangeCause::ExtendedWriteLength => "TenureChange(ExtendWriteLength)",
             },
         }
     }
