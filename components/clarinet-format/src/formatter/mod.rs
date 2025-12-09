@@ -944,54 +944,156 @@ impl<'a> Aggregator<'a> {
         acc
     }
 
+    /// Check if an expression represents a signed integer (for list type size detection)
+    /// Only signed integers are valid for list type signatures: (list 10 <type>)
+    /// Unsigned integers like u10 would be list elements, not type signatures
+    fn is_integer_expr(&self, expr: &PreSymbolicExpression) -> bool {
+        match &expr.pre_expr {
+            PreSymbolicExpressionType::AtomValue(ref value) => {
+                matches!(value, clarity::vm::types::Value::Int(_))
+            }
+            PreSymbolicExpressionType::Atom(ref atom) => {
+                // Check if it's a plain signed number (not unsigned)
+                atom.as_str().parse::<i128>().is_ok()
+            }
+            _ => false,
+        }
+    }
+
+    /// Detect if this is a list type signature: (list <integer> <type>)
+    fn detect_list_type_signature(
+        &self,
+        exprs: &[PreSymbolicExpression],
+        is_list_cons: bool,
+    ) -> bool {
+        is_list_cons && exprs.len() == 3 && self.is_integer_expr(&exprs[1])
+    }
+
+    /// Estimate the length of a list if formatted on a single line
+    fn estimate_list_length(
+        &self,
+        exprs: &[PreSymbolicExpression],
+        start_index: usize,
+        prefix_len: usize,
+    ) -> usize {
+        let mut estimated_len = prefix_len;
+        for item in &exprs[start_index..] {
+            let display = self.display_pse(item, "");
+            estimated_len += display.len() + 1; // display + space
+        }
+        estimated_len + 1 // closing paren
+    }
+
+    /// Format the size value for a list type signature, keeping it on the same line as "list"
+    fn format_list_type_size(
+        &self,
+        size_expr: &PreSymbolicExpression,
+        acc: &mut String,
+        previous_indentation: &str,
+        trailing_comment: Option<&PreSymbolicExpression>,
+    ) {
+        // Use display_pse directly to avoid preserving source line breaks
+        let size_value = self.display_pse(size_expr, previous_indentation);
+        // Ensure no newlines in the size value (defensive, but display_pse should be clean)
+        let size_value_clean = size_value.trim().replace('\n', " ").replace('\r', "");
+        acc.push_str(&size_value_clean);
+
+        // Handle trailing comment
+        if let Some(comment) = trailing_comment {
+            let count = comment
+                .span()
+                .start_column
+                .saturating_sub(size_expr.span().end_column + 1);
+            let spaces = " ".repeat(count as usize);
+            acc.push_str(&spaces);
+            acc.push_str(&self.display_pse(comment, previous_indentation));
+        }
+    }
+
+    /// Helper to wrap an item to a new line if needed
+    fn maybe_wrap_item(
+        &self,
+        item: &PreSymbolicExpression,
+        iter: &mut Peekable<slice::Iter<'a, PreSymbolicExpression>>,
+        acc: &mut String,
+        space: &str,
+    ) {
+        let current_line_len = chars_since_last_newline(acc);
+        let item_display = self.display_pse(item, "");
+        let item_len = item_display.len();
+
+        // Check if adding this item and the next would exceed max_line_length
+        if let Some(next) = iter.peek() {
+            let next_display = self.display_pse(next, "");
+            let next_len = next_display.len();
+            // current line + space + this item + space + next item
+            let would_exceed =
+                (current_line_len + 1 + item_len + 1 + next_len) > self.settings.max_line_length;
+            if would_exceed {
+                acc.push('\n');
+                acc.push_str(space);
+            } else {
+                acc.push(' ');
+            }
+        } else {
+            // Last item, see if it fits
+            if (current_line_len + 1 + item_len) > self.settings.max_line_length {
+                acc.push('\n');
+                acc.push_str(space);
+            } else {
+                acc.push(' ');
+            }
+        }
+    }
+
     fn format_list(&self, exprs: &[PreSymbolicExpression], previous_indentation: &str) -> String {
         let indentation = &self.settings.indentation.to_string();
         let space = format!("{previous_indentation}{indentation}");
         let mut start_index = 0;
         let mut acc = "(".to_string();
+
         let is_list_cons = self.display_pse(&exprs[0], previous_indentation) == "list";
         if is_list_cons {
             start_index = 1;
             acc.push_str("list");
         }
 
-        // TODO: This is a hack until we have a multi-pass formatter
+        // Detect list type signature: (list <integer> <type>)
+        let is_list_type_sig = self.detect_list_type_signature(exprs, is_list_cons);
+
         // Determine if list should be multiline based on if it fits on one line
-        // Format all lists consistently - no special casing for type definitions vs list cons
         let is_multiline = if is_list_cons && exprs.len() > start_index {
-            // Estimate single-line length: "(list " + items + ")"
-            let mut estimated_len = 6; // "(list "
-            for item in &exprs[start_index..] {
-                let display = self.display_pse(item, "");
-                estimated_len += display.len() + 1; // display + space
-            }
-            estimated_len += 1; // closing paren
-            let total_len = previous_indentation.len() + estimated_len;
-            total_len > self.settings.max_line_length
+            let estimated_len = self.estimate_list_length(exprs, start_index, 6); // "(list "
+            previous_indentation.len() + estimated_len > self.settings.max_line_length
         } else {
-            // For non-list-cons, estimate if all elements would fit on one line
-            let mut estimated_len = 1; // opening paren
-            for item in &exprs[start_index..] {
-                let display = self.display_pse(item, "");
-                estimated_len += display.len() + 1; // display + space
-            }
-            estimated_len += 1; // closing paren
-            let total_len = previous_indentation.len() + estimated_len;
-            total_len > self.settings.max_line_length
+            let estimated_len = self.estimate_list_length(exprs, start_index, 1); // opening paren
+            previous_indentation.len() + estimated_len > self.settings.max_line_length
         };
 
         // Add space or newline after "list" or opening paren
-        if is_multiline {
+        if is_multiline && !is_list_type_sig {
+            // For regular multiline lists, break after "list"
             acc.push('\n');
         } else if is_list_cons && exprs.len() > 1 {
+            // For single-line or type signatures, add space after "list"
             acc.push(' ');
         }
 
         let mut iter = exprs[start_index..].iter().peekable();
         let mut is_first_item = true;
+
         while let Some(item) = iter.next() {
             let trailing = get_trailing_comment(item, &mut iter);
 
+            // Special handling for first item in type signatures: keep "list" and size together
+            if is_multiline && is_first_item && is_list_type_sig {
+                // We already added a space after "list", so just add the size value directly
+                self.format_list_type_size(item, &mut acc, previous_indentation, trailing);
+                is_first_item = false;
+                continue;
+            }
+
+            // Normal handling for all other items
             let spacing = if is_multiline {
                 &space
             } else {
@@ -1002,35 +1104,16 @@ impl<'a> Aggregator<'a> {
             // In multiline mode, check if we need to wrap to a new line before this item
             if is_multiline {
                 if is_first_item {
-                    // we already added newline after "list", just add spacing
+                    // We already added newline after "list", just add spacing
                     acc.push_str(&space);
                 } else {
-                    // Check if we need to wrap before this item
-                    let current_line_len = chars_since_last_newline(&acc);
-                    let item_display = self.display_pse(item, "");
-                    let item_len = item_display.len();
-
-                    // Check if adding this item and the next would exceed max_line_length
-                    if let Some(next) = iter.peek() {
-                        let next_display = self.display_pse(next, "");
-                        let next_len = next_display.len();
-                        // current line + space + this item + space + next item
-                        let would_exceed = (current_line_len + 1 + item_len + 1 + next_len)
-                            > self.settings.max_line_length;
-                        if would_exceed {
-                            acc.push('\n');
-                            acc.push_str(&space);
-                        } else {
-                            acc.push(' ');
-                        }
+                    // For type signatures, always break before the type
+                    if is_list_type_sig {
+                        acc.push('\n');
+                        acc.push_str(&space);
                     } else {
-                        // Last item, see if it fits
-                        if (current_line_len + 1 + item_len) > self.settings.max_line_length {
-                            acc.push('\n');
-                            acc.push_str(&space);
-                        } else {
-                            acc.push(' ');
-                        }
+                        // Check if we need to wrap before this item
+                        self.maybe_wrap_item(item, &mut iter, &mut acc, &space);
                     }
                 }
             } else if !is_first_item {
