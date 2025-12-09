@@ -18,9 +18,8 @@ use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
-use clarity::vm::errors::VmExecutionError;
 use clarity::vm::{ContractContext, StacksEpoch};
-use clarity_types::errors::VmInternalError;
+use clarity_types::errors::{VmExecutionError, VmInternalError};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };
@@ -383,7 +382,7 @@ impl ClarityDatastore {
         block_info.index_block_hash.to_string()
     }
 
-    fn fetch_clarity_marf_value(&mut self, key: &str) -> Result<Option<String>> {
+    fn fetch_clarity_marf_value(&mut self, key: &str) -> Result<Option<String>, VmExecutionError> {
         let key_hash = TrieHash::from_key(key);
         let tip = self.get_remote_chaintip();
         let url = format!("/v2/clarity/marf/{key_hash}?tip={tip}&proof=false");
@@ -394,7 +393,7 @@ impl ClarityDatastore {
         &mut self,
         contract_id: &QualifiedContractIdentifier,
         context_str: Option<String>,
-    ) -> Result<ContractContext> {
+    ) -> Result<ContractContext, VmExecutionError> {
         let contract_src_key = ClarityDatabase::make_metadata_key(
             StoreType::Contract,
             ContractDataVarName::ContractSrc.as_str(),
@@ -450,7 +449,7 @@ impl ClarityDatastore {
         &mut self,
         contract_id: &QualifiedContractIdentifier,
         key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         let addr = contract_id.issuer.to_string();
         let contract = contract_id.name.to_string();
         let tip = self.get_remote_chaintip();
@@ -504,7 +503,7 @@ impl ClarityDatastore {
 }
 
 impl ClarityBackingStore for ClarityDatastore {
-    fn put_all_data(&mut self, items: Vec<(String, String)>) -> Result<()> {
+    fn put_all_data(&mut self, items: Vec<(String, String)>) -> Result<(), VmExecutionError> {
         for (key, value) in items {
             self.put(&key, &value);
         }
@@ -512,7 +511,7 @@ impl ClarityBackingStore for ClarityDatastore {
     }
 
     /// fetch K-V out of the committed datastore
-    fn get_data(&mut self, key: &str) -> Result<Option<String>> {
+    fn get_data(&mut self, key: &str) -> Result<Option<String>, VmExecutionError> {
         let current_height = self.get_current_block_height();
         let fetch_remote_data =
             self.remote_network_info.is_some() && !self.is_key_from_local_account(key);
@@ -551,29 +550,32 @@ impl ClarityBackingStore for ClarityDatastore {
         }))
     }
 
-    fn get_data_from_path(&mut self, _hash: &TrieHash) -> Result<Option<String>> {
+    fn get_data_from_path(&mut self, _hash: &TrieHash) -> Result<Option<String>, VmExecutionError> {
         unreachable!()
     }
 
-    fn get_data_with_proof(&mut self, _key: &str) -> Result<Option<(String, Vec<u8>)>> {
+    fn get_data_with_proof(
+        &mut self,
+        _key: &str,
+    ) -> Result<Option<(String, Vec<u8>)>, VmExecutionError> {
         Ok(None)
     }
 
     fn get_data_with_proof_from_path(
         &mut self,
         _hash: &TrieHash,
-    ) -> Result<Option<(String, Vec<u8>)>> {
+    ) -> Result<Option<(String, Vec<u8>)>, VmExecutionError> {
         unreachable!()
     }
 
-    fn has_entry(&mut self, key: &str) -> Result<bool> {
+    fn has_entry(&mut self, key: &str) -> Result<bool, VmExecutionError> {
         Ok(self.get_data(key)?.is_some())
     }
 
     /// change the current MARF context to service reads from a different chain_tip
     ///   used to implement time-shifted evaluation.
     /// returns the previous block header hash on success
-    fn set_block_hash(&mut self, bhh: StacksBlockId) -> Result<StacksBlockId> {
+    fn set_block_hash(&mut self, bhh: StacksBlockId) -> Result<StacksBlockId, VmExecutionError> {
         let prior_tip = self.open_chain_tip.clone();
         if self.remote_network_info.is_some() {
             #[allow(clippy::map_entry)]
@@ -634,7 +636,7 @@ impl ClarityBackingStore for ClarityDatastore {
         contract: &QualifiedContractIdentifier,
         key: &str,
         value: &str,
-    ) -> Result<()> {
+    ) -> Result<(), VmExecutionError> {
         self.metadata
             .insert((contract.to_string(), key.to_string()), value.to_string());
         Ok(())
@@ -644,7 +646,7 @@ impl ClarityBackingStore for ClarityDatastore {
         &mut self,
         contract: &QualifiedContractIdentifier,
         key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         let metadata = self.metadata.get(&(contract.to_string(), key.to_string()));
         if metadata.is_some() {
             return Ok(metadata.cloned());
@@ -662,7 +664,7 @@ impl ClarityBackingStore for ClarityDatastore {
     fn get_contract_hash(
         &mut self,
         _contract: &QualifiedContractIdentifier,
-    ) -> Result<(StacksBlockId, Sha512Trunc256Sum)> {
+    ) -> Result<(StacksBlockId, Sha512Trunc256Sum), VmExecutionError> {
         panic!("Datastore cannot get_contract_hash")
     }
 
@@ -671,7 +673,7 @@ impl ClarityBackingStore for ClarityDatastore {
         _at_height: u32,
         _contract: &QualifiedContractIdentifier,
         _key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         panic!("Datastore cannot get_metadata_manual")
     }
 

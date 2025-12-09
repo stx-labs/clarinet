@@ -2,7 +2,7 @@ use clarity::types::chainstate::{
     BlockHeaderHash, BurnchainHeaderHash, ConsensusHash, SortitionId, StacksBlockId, VRFSeed,
 };
 use clarity::types::StacksEpochId;
-use clarity::vm::errors::VmExecutionError;
+use clarity_types::errors::VmExecutionError;
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::de::{DeserializeOwned, Error as SerdeError};
 use serde::{Deserialize, Deserializer};
@@ -232,7 +232,7 @@ impl HttpClient {
         self.get::<Block>(url).unwrap()
     }
 
-    pub fn fetch_clarity_data(&self, path: &str) -> InterpreterResult<Option<String>> {
+    pub fn fetch_clarity_data(&self, path: &str) -> Result<Option<String>, VmExecutionError> {
         match self.get::<ClarityDataResponse>(path) {
             Ok(data) => Ok(Some(data.data.trim_start_matches("0x").to_string())),
             Err(_) => Ok(None),
