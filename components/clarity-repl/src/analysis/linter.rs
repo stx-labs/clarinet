@@ -22,6 +22,7 @@ pub enum LintName {
     UnusedDataVar,
     UnusedMap,
     UnusedPrivateFn,
+    UnusedToken,
 }
 
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
@@ -70,6 +71,7 @@ impl LintGroup {
                 map.insert(LintName::UnusedDataVar, value);
                 map.insert(LintName::UnusedMap, value);
                 map.insert(LintName::UnusedPrivateFn, value);
+                map.insert(LintName::UnusedToken, value);
             }
             Perf => {
                 map.insert(LintName::Noop, value);
