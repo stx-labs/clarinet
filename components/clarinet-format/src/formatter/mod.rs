@@ -839,17 +839,6 @@ impl<'a> Aggregator<'a> {
         acc
     }
 
-    fn needs_break(
-        &self,
-        current_column: usize,
-        acc: &str,
-        next_expr: &PreSymbolicExpression,
-    ) -> bool {
-        let length = chars_since_last_newline(acc);
-        let next_expr_len = self.display_pse(next_expr, "").len();
-        (current_column + length + next_expr_len) > self.settings.max_line_length
-    }
-
     // strictly used for display_pse. Sort of a dumbed down version of format_list
     fn display_list(&self, exprs: &[PreSymbolicExpression], previous_indentation: &str) -> String {
         let indentation = &self.settings.indentation.to_string();
@@ -960,34 +949,97 @@ impl<'a> Aggregator<'a> {
         let space = format!("{previous_indentation}{indentation}");
         let mut start_index = 0;
         let mut acc = "(".to_string();
-        let is_multiline = differing_lines(exprs);
-        let mut first_break = true; // hack to account for accumulation before the list
-                                    // used for breaking lines over max length
-        if self.display_pse(&exprs[0], previous_indentation) == "list" {
+        let is_list_cons = self.display_pse(&exprs[0], previous_indentation) == "list";
+        if is_list_cons {
             start_index = 1;
             acc.push_str("list");
-            if !is_multiline && exprs.len() > 1 {
-                acc.push(' ');
-            }
         }
 
+        // TODO: This is a hack until we have a multi-pass formatter
+        // Determine if list should be multiline based on if it fits on one line
+        // Format all lists consistently - no special casing for type definitions vs list cons
+        let is_multiline = if is_list_cons && exprs.len() > start_index {
+            // Estimate single-line length: "(list " + items + ")"
+            let mut estimated_len = 6; // "(list "
+            for item in &exprs[start_index..] {
+                let display = self.display_pse(item, "");
+                estimated_len += display.len() + 1; // display + space
+            }
+            estimated_len += 1; // closing paren
+            let total_len = previous_indentation.len() + estimated_len;
+            total_len > self.settings.max_line_length
+        } else {
+            // For non-list-cons, estimate if all elements would fit on one line
+            let mut estimated_len = 1; // opening paren
+            for item in &exprs[start_index..] {
+                let display = self.display_pse(item, "");
+                estimated_len += display.len() + 1; // display + space
+            }
+            estimated_len += 1; // closing paren
+            let total_len = previous_indentation.len() + estimated_len;
+            total_len > self.settings.max_line_length
+        };
+
+        // Add space or newline after "list" or opening paren
         if is_multiline {
             acc.push('\n');
+        } else if is_list_cons && exprs.len() > 1 {
+            acc.push(' ');
         }
+
         let mut iter = exprs[start_index..].iter().peekable();
+        let mut is_first_item = true;
         while let Some(item) = iter.next() {
             let trailing = get_trailing_comment(item, &mut iter);
-            if is_multiline {
-                acc.push_str(&space)
-            }
+
             let spacing = if is_multiline {
                 &space
             } else {
                 previous_indentation
             };
             let value = self.format_source_exprs(slice::from_ref(item), spacing);
-            let start_line = item.span().start_line;
+
+            // In multiline mode, check if we need to wrap to a new line before this item
+            if is_multiline {
+                if is_first_item {
+                    // we already added newline after "list", just add spacing
+                    acc.push_str(&space);
+                } else {
+                    // Check if we need to wrap before this item
+                    let current_line_len = chars_since_last_newline(&acc);
+                    let item_display = self.display_pse(item, "");
+                    let item_len = item_display.len();
+
+                    // Check if adding this item and the next would exceed max_line_length
+                    if let Some(next) = iter.peek() {
+                        let next_display = self.display_pse(next, "");
+                        let next_len = next_display.len();
+                        // current line + space + this item + space + next item
+                        let would_exceed = (current_line_len + 1 + item_len + 1 + next_len)
+                            > self.settings.max_line_length;
+                        if would_exceed {
+                            acc.push('\n');
+                            acc.push_str(&space);
+                        } else {
+                            acc.push(' ');
+                        }
+                    } else {
+                        // Last item, see if it fits
+                        if (current_line_len + 1 + item_len) > self.settings.max_line_length {
+                            acc.push('\n');
+                            acc.push_str(&space);
+                        } else {
+                            acc.push(' ');
+                        }
+                    }
+                }
+            } else if !is_first_item {
+                // Single-line
+                acc.push(' ');
+            }
+
             acc.push_str(&value.to_string());
+            is_first_item = false;
 
             if let Some(comment) = trailing {
                 let count = comment
@@ -998,25 +1050,8 @@ impl<'a> Aggregator<'a> {
                 acc.push_str(&spaces);
                 acc.push_str(&self.display_pse(comment, previous_indentation));
             }
-            let padding = if first_break {
-                // ideally we'd be able to inspect the previously formatted accumulator value
-                // TODO this is slightly wrong. We probably need a 2-pass formatter to handle these breaks better
-                previous_indentation.len()
-            } else {
-                0
-            };
-            if let Some(next) = iter.peek() {
-                if start_line != next.span().start_line {
-                    acc.push('\n')
-                } else if self.needs_break(padding, &acc, next) {
-                    first_break = false;
-                    acc.push('\n');
-                    acc.push_str(&space);
-                } else {
-                    acc.push(' ')
-                }
-            }
         }
+
         if is_multiline {
             acc.push('\n');
             acc.push_str(previous_indentation);
@@ -2319,11 +2354,43 @@ mod tests_formatter {
         let expected = indoc!(
             r#"
             {
-              buckets: (list p-func-b1 p-func-b2 p-func-b3 p-func-b4 p-func-b5 p-func-b6 p-func-b7
-                p-func-b8 p-func-b9 p-func-b10 p-func-b11 p-func-b12 p-func-b13 p-func-b14
-                p-func-b15 p-func-b16),
+              buckets: (list
+                p-func-b1 p-func-b2 p-func-b3 p-func-b4 p-func-b5 p-func-b6
+                p-func-b7 p-func-b8 p-func-b9 p-func-b10 p-func-b11 p-func-b12
+                p-func-b13 p-func-b14 p-func-b15 p-func-b16
+              ),
               something: u1,
             }"#
+        );
+        let result = format_with_default(src);
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn list_spacing_simple_atoms_should_collapse_to_single_line() {
+        // multiline (list ...) with simple atom values should collapses to single line if it fits
+
+        let src = indoc!(
+            r#"
+            (fold sorted-fold-step
+              (list
+                u0               u1               u2               u3
+                u4               u5               u6               u7
+                u8               u9
+                u10               u11               u12               u13               u14
+                u15               u16               u17               u18
+                u19
+              )
+              {
+                sorted: true,
+              }
+            )"#
+        );
+        let expected = indoc!(
+            r#"
+            (fold sorted-fold-step
+              (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18 u19) { sorted: true }
+            )"#
         );
         let result = format_with_default(src);
         assert_eq!(expected, result);
