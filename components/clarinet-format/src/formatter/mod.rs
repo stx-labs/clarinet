@@ -952,21 +952,17 @@ impl<'a> Aggregator<'a> {
             PreSymbolicExpressionType::AtomValue(ref value) => {
                 matches!(value, clarity::vm::types::Value::Int(_))
             }
-            PreSymbolicExpressionType::Atom(ref atom) => {
-                // Check if it's a plain signed number (not unsigned)
-                atom.as_str().parse::<i128>().is_ok()
-            }
             _ => false,
         }
     }
 
     /// Detect if this is a list type signature: (list <integer> <type>)
-    fn detect_list_type_signature(
-        &self,
-        exprs: &[PreSymbolicExpression],
-        is_list_cons: bool,
-    ) -> bool {
-        is_list_cons && exprs.len() == 3 && self.is_integer_expr(&exprs[1])
+    fn is_list_type_signature(&self, exprs: &[PreSymbolicExpression]) -> bool {
+        // the 1st item is a different type than the 2nd
+        exprs.len() >= 3
+            && exprs[0].match_atom() == Some(&clarity::vm::ClarityName::from("list"))
+            && self.is_integer_expr(&exprs[1])
+            && !self.is_integer_expr(&exprs[2])
     }
 
     /// Estimate the length of a list if formatted on a single line
@@ -1058,8 +1054,7 @@ impl<'a> Aggregator<'a> {
             acc.push_str("list");
         }
 
-        // Detect list type signature: (list <integer> <type>)
-        let is_list_type_sig = self.detect_list_type_signature(exprs, is_list_cons);
+        let is_list_type_sig = self.is_list_type_signature(exprs);
 
         // Determine if list should be multiline based on if it fits on one line
         let is_multiline = if is_list_cons && exprs.len() > start_index {
@@ -1631,7 +1626,7 @@ mod tests_formatter {
     use indoc::indoc;
 
     use super::{ClarityFormatter, Settings};
-    use crate::formatter::Indentation;
+    use crate::formatter::{Aggregator, Indentation};
     #[macro_export]
     macro_rules! assert_eq {
         ($($arg:tt)*) => {
@@ -2612,5 +2607,21 @@ mod tests_formatter {
         let src = "(ok u\"\\u{6e05}\\u{6670}\")";
         let result = format_with_default(src);
         assert_eq!(result, src);
+    }
+
+    #[test]
+    fn test_list_type_signature() {
+        fn assert_list_type_signature(src: &str, expected: bool) {
+            let settings = Settings::default();
+            let exprs = clarity::vm::ast::parser::v2::parse(src).unwrap();
+            let aggregator = Aggregator::new(&settings, &exprs, Some(src));
+            let list_exprs = exprs[0].match_list().unwrap();
+            assert_eq!(aggregator.is_list_type_signature(list_exprs), expected);
+        }
+        assert_list_type_signature("(list 1 2 3)", false);
+
+        assert_list_type_signature("(list 1)", false);
+
+        assert_list_type_signature("(list 12 (buff 24))", true);
     }
 }
