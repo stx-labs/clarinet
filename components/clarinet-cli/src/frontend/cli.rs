@@ -956,7 +956,7 @@ pub fn main() {
                 let password = rpassword::prompt_password("Enter password: ").unwrap();
                 let encrypted_mnemonic =
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
-                println!("Encrypted mnemonic: {encrypted_mnemonic}");
+                println!("encrypted_mnemonic = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
             }
         },
