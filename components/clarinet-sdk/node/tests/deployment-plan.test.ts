@@ -4,7 +4,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 // test the built package and not the source code
 // makes it simpler to handle wasm build
-import { initSimnet } from "..";
+import { initSimnet, generateDeployement } from "..";
 import { Cl } from "@stacks/transactions";
 
 const nbOfBootContracts = 26;
@@ -33,7 +33,17 @@ afterEach(() => {
   deleteExistingDeploymentPlan();
 });
 
-describe("deployment plans test", async () => {
+describe("generate deployment plans test", async () => {
+  it("generates deployment plan without starting a session", async () => {
+    expect(fs.existsSync(deploymentPlanPath)).toBe(false);
+    const success = await generateDeployement("tests/fixtures/Clarinet.toml");
+    expect(success).toBe(true);
+    expect(fs.existsSync(deploymentPlanPath)).toBe(true);
+  })
+});
+
+describe("initSiment deployment plans test", async () => {
+
   it("simnet deployment plan is created if it does not exist", async () => {
     expect(fs.existsSync(deploymentPlanPath)).toBe(false);
 
