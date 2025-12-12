@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
-    DeploymentSpecification, DeploymentSpecificationFile, EmulatedContractPublishSpecification,
-    TransactionSpecification,
+    DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
+    EmulatedContractPublishSpecification, TransactionSpecification,
 };
 use clarinet_deployments::{
     generate_default_deployment, initiate_session_from_manifest,
@@ -69,6 +69,12 @@ macro_rules! log {
     ( $( $t:tt )* ) => {
         web_sys::console::log_1(&format!( $( $t )* ).into());
     }
+}
+
+struct DeploymentArtifacts {
+    artifacts: DeploymentGenerationArtifacts,
+    deployment: DeploymentSpecification,
+    manifest: ProjectManifest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -367,10 +373,10 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=initSession)]
-    pub async fn init_session(&mut self, cwd: String, manifest_path: String) -> Result<(), String> {
+    pub async fn init_session(&mut self, cwd: &str, manifest_path: &str) -> Result<(), String> {
         let cwd_path = PathBuf::from(cwd);
         let cwd_root = FileLocation::FileSystem { path: cwd_path };
-        let manifest_location = FileLocation::try_parse(&manifest_path, Some(&cwd_root))
+        let manifest_location = FileLocation::try_parse(manifest_path, Some(&cwd_root))
             .ok_or("Failed to parse manifest location")?;
 
         let ProjectCache {
@@ -380,7 +386,7 @@ impl SDK {
             accounts,
         } = match self.cache.get(&manifest_location) {
             Some(cache) => cache.clone(),
-            None => self.setup_session(&manifest_location).await?,
+            None => self.setup_session(cwd, manifest_path).await?,
         };
 
         self.deployer = session.interpreter.get_tx_sender().to_string();
@@ -393,74 +399,23 @@ impl SDK {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name=clearCache)]
+    pub fn clear_cach(&mut self) {
+        self.cache.clear();
+    }
+
     async fn setup_session(
         &mut self,
-        manifest_location: &FileLocation,
+        cwd: &str,
+        manifest_path: &str,
     ) -> Result<ProjectCache, String> {
-        let manifest =
-            ProjectManifest::from_file_accessor(manifest_location, true, &*self.file_accessor)
-                .await?;
-        let project_root = manifest_location.get_parent_location()?;
-        let deployment_plan_location =
-            FileLocation::try_parse("deployments/default.simnet-plan.yaml", Some(&project_root))
-                .ok_or("Failed to parse default deployment location")?;
-
-        let (mut deployment, artifacts) = generate_default_deployment(
-            &manifest,
-            &StacksNetwork::Simnet,
-            false,
-            Some(&*self.file_accessor),
-            Some(StacksEpochId::Epoch21),
-        )
-        .await?;
-
-        if !artifacts.success {
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-            if diags_digest.errors > 0 {
-                return Err(diags_digest.message);
-            }
-        }
-
-        if self
-            .file_accessor
-            .file_exists(deployment_plan_location.to_string())
-            .await?
-        {
-            let spec_file_content = self
-                .file_accessor
-                .read_file(deployment_plan_location.to_string())
-                .await?;
-
-            let mut spec_file = DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
-
-            // the contract publish txs are managed by the manifest
-            // keep the user added txs and merge them with the default deployment plan
-            if let Some(ref mut plan) = spec_file.plan {
-                for batch in plan.batches.iter_mut() {
-                    batch.remove_publish_transactions()
-                }
-            }
-
-            let existing_deployment = DeploymentSpecification::from_specifications(
-                &spec_file,
-                &StacksNetwork::Simnet,
-                &project_root,
-                None,
-            )?;
-
-            deployment.merge_batches(existing_deployment.plan.batches);
-
-            self.write_deployment_plan(
-                &deployment,
-                &project_root,
-                &deployment_plan_location,
-                Some(&spec_file_content),
-            )
+        let DeploymentArtifacts {
+            deployment,
+            manifest,
+            artifacts,
+        } = self
+            .generate_deployment_plan_internal(cwd, manifest_path)
             .await?;
-        } else {
-            self.write_deployment_plan(&deployment, &project_root, &deployment_plan_location, None)
-                .await?;
-        }
 
         let mut session = initiate_session_from_manifest(&manifest);
         if self.options.track_coverage {
@@ -525,13 +480,101 @@ impl SDK {
             contracts_locations,
             session,
         };
-        self.cache.insert(manifest_location.clone(), cache.clone());
+        self.cache.insert(manifest.location.clone(), cache.clone());
         Ok(cache)
     }
 
-    #[wasm_bindgen(js_name=clearCache)]
-    pub fn clear_cach(&mut self) {
-        self.cache.clear();
+    async fn generate_deployment_plan_internal(
+        &self,
+        cwd: &str,
+        manifest_path: &str,
+    ) -> Result<DeploymentArtifacts, String> {
+        let cwd_path = PathBuf::from(cwd);
+        let cwd_root = FileLocation::FileSystem { path: cwd_path };
+        let manifest_location = FileLocation::try_parse(manifest_path, Some(&cwd_root))
+            .ok_or("Failed to parse manifest location")?;
+        let manifest =
+            ProjectManifest::from_file_accessor(&manifest_location, true, &*self.file_accessor)
+                .await?;
+        let project_root = manifest_location.get_parent_location()?;
+        let deployment_plan_location =
+            FileLocation::try_parse("deployments/default.simnet-plan.yaml", Some(&project_root))
+                .ok_or("Failed to parse default deployment location")?;
+
+        let (mut deployment, artifacts) = generate_default_deployment(
+            &manifest,
+            &StacksNetwork::Simnet,
+            false,
+            Some(&*self.file_accessor),
+            Some(StacksEpochId::Epoch21),
+        )
+        .await?;
+
+        if !artifacts.success {
+            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+            if diags_digest.errors > 0 {
+                return Err(diags_digest.message);
+            }
+        }
+        let project_root = manifest.location.get_parent_location()?;
+
+        if self
+            .file_accessor
+            .file_exists(deployment_plan_location.to_string())
+            .await?
+        {
+            let spec_file_content = self
+                .file_accessor
+                .read_file(deployment_plan_location.to_string())
+                .await?;
+
+            let mut spec_file = DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
+
+            // the contract publish txs are managed by the manifest
+            // keep the user added txs and merge them with the default deployment plan
+            if let Some(ref mut plan) = spec_file.plan {
+                for batch in plan.batches.iter_mut() {
+                    batch.remove_publish_transactions()
+                }
+            }
+
+            let existing_deployment = DeploymentSpecification::from_specifications(
+                &spec_file,
+                &StacksNetwork::Simnet,
+                &project_root,
+                None,
+            )?;
+
+            deployment.merge_batches(existing_deployment.plan.batches);
+
+            self.write_deployment_plan(
+                &deployment,
+                &project_root,
+                &deployment_plan_location,
+                Some(&spec_file_content),
+            )
+            .await?;
+        } else {
+            self.write_deployment_plan(&deployment, &project_root, &deployment_plan_location, None)
+                .await?;
+        }
+
+        Ok(DeploymentArtifacts {
+            artifacts,
+            deployment,
+            manifest,
+        })
+    }
+
+    #[wasm_bindgen(js_name=generateDeploymentPlan)]
+    pub async fn generate_deployment_plan(
+        &self,
+        cwd: &str,
+        manifest_path: &str,
+    ) -> Result<(), String> {
+        self.generate_deployment_plan_internal(cwd, manifest_path)
+            .await?;
+        Ok(())
     }
 
     async fn write_deployment_plan(

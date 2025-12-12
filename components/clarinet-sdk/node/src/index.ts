@@ -38,6 +38,19 @@ export async function getSDK(options?: Options): Promise<Simnet> {
   return simnet;
 }
 
+// wrapper around `simnet.generateDeploymentPlan()` that loads wasm and pass process.cwd()
+export async function generateDeployement(manifestPath = "./Clarinet.toml") {
+  const simnet = await getSDK();
+
+  try {
+    await simnet.generateDeploymentPlan(process.cwd(), manifestPath);
+    return true;
+  } catch (e) {
+    console.warn(e)
+    return false;
+  }
+}
+
 // load wasm only once and memoize it
 function memoizedInit() {
   let simnet: Simnet | null = null;
@@ -61,5 +74,7 @@ function memoizedInit() {
     return simnet;
   };
 }
+
+
 
 export const initSimnet = memoizedInit();
