@@ -747,6 +747,7 @@ dependencies = [
  "dirs",
  "js-sys",
  "libsecp256k1",
+ "rpassword",
  "schemars 1.1.0",
  "serde",
  "serde-wasm-bindgen",
