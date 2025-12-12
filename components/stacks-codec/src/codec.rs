@@ -17,10 +17,7 @@ use clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData, Value,
 };
 use clarity::vm::{ClarityName, ClarityVersion, ContractName};
-use clarity::{
-    impl_array_hexstring_fmt, impl_array_newtype, impl_byte_array_message_codec,
-    impl_byte_array_serde,
-};
+use clarity::{impl_array_hexstring_fmt, impl_byte_array_serde};
 use serde::{Deserialize, Serialize};
 use stacks_common::address::{
     AddressHashMode, C32_ADDRESS_VERSION_MAINNET_MULTISIG, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
