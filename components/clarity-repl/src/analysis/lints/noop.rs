@@ -106,6 +106,12 @@ impl<'a> NoopChecker<'a> {
             );
         }
     }
+
+    /// Some arithmetic functions take a single operand
+    /// Do not generate warnings for these!
+    fn is_single_op_arithmetic(func: NativeFunctions) -> bool {
+        matches!(func, NativeFunctions::Sqrti | NativeFunctions::Log2)
+    }
 }
 
 impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
@@ -129,7 +135,9 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) -> bool {
-        self.check_bin_op(expr, func, operands);
+        if !Self::is_single_op_arithmetic(func) {
+            self.check_bin_op(expr, func, operands);
+        }
         true
     }
 
@@ -251,6 +259,48 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
         assert!(output[0].contains("`and` with fewer than 2 operands has no effect"));
+    }
+
+    /// Shoult NOT warn on `log2`, whcih expects single arg
+    #[test]
+    fn single_operand_log2() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (log4 (x uint))
+              (/ (log2 x) u2))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Shoult NOT warn on `sqrti`, whcih expects single arg
+    #[test]
+    fn single_operand_sqrti() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (root4 (x uint))
+              (sqrti (sqrti x)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Shoult NOT warn on `not`, whcih expects single arg
+    #[test]
+    fn single_operand_not() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (invert (b bool))
+              (not b))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
     }
 
     #[test]
