@@ -509,9 +509,7 @@ impl SDK {
         }
 
         let deployment_file = self.file_accessor.read_file(deployment_plan_path).await?;
-
         let spec_file = DeploymentSpecificationFile::from_file_content(&deployment_file)?;
-
         let deployment = DeploymentSpecification::from_specifications(
             &spec_file,
             &StacksNetwork::Simnet,
@@ -556,10 +554,7 @@ impl SDK {
             let deployment = existing_deployment
                 .map(|(_, deployment)| deployment)
                 .ok_or_else(|| {
-                    format!(
-                        "Deployment plan not found at {}",
-                        deployment_plan_location.to_string()
-                    )
+                    format!("Deployment plan not found at {deployment_plan_location}")
                 })?;
 
             return Ok(DeploymentArtifacts {
