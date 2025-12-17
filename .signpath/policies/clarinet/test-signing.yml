@@ -1,0 +1,15 @@
+github-policies:
+  runners:
+    allowed_groups:
+      - 'GitHub Actions'
+  build:
+    disallow_reruns: true
+  branch_rulesets:
+    - condition:
+        rules:
+        - block_force_pushes:
+        - require_pull_request:
+            min_required_approvals: 1
+            require_code_owner_review: true
+      allow_bypass_actors: false
+      enforced_from: EARLIEST
