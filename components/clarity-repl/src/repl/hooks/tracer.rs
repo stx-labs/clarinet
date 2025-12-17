@@ -219,7 +219,7 @@ impl EvalHook for TracerHook {
             .global_context
             .event_batches
             .iter()
-            .flat_map(|b| &b.events)
+            .flat_map(|b| &b.0.events)
             .collect::<Vec<_>>();
         if emitted_events.len() > self.nb_of_emitted_events {
             for event in emitted_events.iter().skip(self.nb_of_emitted_events) {

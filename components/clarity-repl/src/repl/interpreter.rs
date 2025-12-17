@@ -492,7 +492,7 @@ impl ClarityInterpreter {
         let mut emitted_events = global_context
             .event_batches
             .iter()
-            .flat_map(|b| b.events.clone())
+            .flat_map(|b| b.0.events.clone())
             .collect::<Vec<_>>();
 
         let contract_saved =
@@ -645,7 +645,7 @@ impl ClarityInterpreter {
         let mut emitted_events = global_context
             .event_batches
             .iter()
-            .flat_map(|b| b.events.clone())
+            .flat_map(|b| b.0.events.clone())
             .collect::<Vec<_>>();
 
         let eval_result = match value {
