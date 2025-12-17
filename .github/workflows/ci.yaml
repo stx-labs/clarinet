@@ -236,12 +236,36 @@ jobs:
       - name: Build - Cargo
         run: cargo build --release --features=telemetry --locked --target ${{ matrix.target }}
 
-      # Don't compress for Windows because winget can't yet unzip files
+      - name: Upload unsigned Windows binary for SignPath
+        id: upload-unsigned-windows
+        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-clarinet-${{ env.SHORT_TARGET_NAME }}
+          path: target/${{ matrix.target }}/release/clarinet.exe
+
+      - name: Code sign Windows binary with SignPath
+        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: "clarinet"
+          signing-policy-slug: "release-signing"
+          github-artifact-id: ${{ steps.upload-unsigned-windows.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ./signed
+
       - name: Compress cargo artifact (Linux and macOS)
         if: matrix.os != 'windows-latest'
         run: tar -C target/${{ matrix.target }}/release -zcvf clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz clarinet
 
-      # Separate uploads to prevent paths from being preserved
+      - name: Compress signed cargo artifact (Windows - main branch)
+        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "./signed/clarinet.exe" -DestinationPath "clarinet-${{ env.SHORT_TARGET_NAME }}.zip"
+
       - name: Upload cargo artifacts (Linux and macOS)
         if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
@@ -249,40 +273,12 @@ jobs:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz
 
-      # Steps for Windows Code Signing with Azure Trusted Signing (OIDC)
-      # - name: Azure OIDC Login
-      #   if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-      #   uses: azure/login@v2
-      #   with:
-      #     tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-      #     client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      #     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      # - name: Code sign bin (Windows)
-      #   if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
-      #   uses: azure/trusted-signing-action@v0.4.0
-      #   with:
-      #     endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-      #     trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-      #     certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
-      #     files-folder: target/${{ matrix.target }}/release
-      #     files-folder-filter: exe
-      #     file-digest: SHA256
-      #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
-      #     timestamp-digest: SHA256
-
-
-      # - name: Rename cargo artifact (Windows)
-      #   if: matrix.os == 'windows-latest'
-      #   shell: bash
-      #   run: cp target/${{ matrix.target }}/release/clarinet.exe clarinet-${{ env.SHORT_TARGET_NAME }}.exe
-
-      # - name: Upload cargo artifact (Windows)
-      #   if: matrix.os == 'windows-latest'
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: clarinet-${{ env.SHORT_TARGET_NAME }}
-      #     path: clarinet-${{ env.SHORT_TARGET_NAME }}.exe
+      - name: Upload cargo artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clarinet-${{ env.SHORT_TARGET_NAME }}
+          path: clarinet-${{ env.SHORT_TARGET_NAME }}.zip
 
   release:
     name: Release
@@ -316,6 +312,7 @@ jobs:
           generate_release_notes: false
           files: |
             **/*.tar.gz
+            **/*.zip
 
       - name: Trigger pkg-version-bump workflow
         uses: peter-evans/repository-dispatch@v1
