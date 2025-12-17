@@ -349,10 +349,11 @@
                 (caller-allowed
                     ;; if not in the caller map, return false
                     (unwrap!
-                        (map-get? allowance-contract-callers {
-                            sender: tx-sender,
-                            contract-caller: contract-caller,
-                        })
+                        (map-get? allowance-contract-callers
+                            {
+                                sender: tx-sender,
+                                contract-caller: contract-caller,
+                            })
                         false
                     ))
                 (expires-at
@@ -390,7 +391,8 @@
 ;; Used internally by the Stacks node, which filters out the entries
 ;; in this map to select PoX addresses with enough STX.
 (define-read-only (get-reward-set-size (reward-cycle uint))
-    (default-to u0
+    (default-to
+        u0
         (get len
             (map-get? reward-cycle-pox-address-list-len { reward-cycle: reward-cycle })
         ))
@@ -411,23 +413,29 @@
         (signer (buff 33))
     )
     (let ((sz (get-reward-set-size reward-cycle)))
-        (map-set reward-cycle-pox-address-list {
-            reward-cycle: reward-cycle,
-            index: sz,
-        } {
-            pox-addr: pox-addr,
-            total-ustx: amount-ustx,
-            stacker: stacker,
-            signer: signer,
-        })
-        (map-set reward-cycle-pox-address-list-len { reward-cycle: reward-cycle } { len: (+ u1 sz) })
+        (map-set reward-cycle-pox-address-list
+            {
+                reward-cycle: reward-cycle,
+                index: sz,
+            }
+            {
+                pox-addr: pox-addr,
+                total-ustx: amount-ustx,
+                stacker: stacker,
+                signer: signer,
+            })
+        (map-set reward-cycle-pox-address-list-len
+            { reward-cycle: reward-cycle }
+            { len: (+ u1 sz) }
+        )
         sz
     )
 )
 
 ;; How many uSTX are stacked?
 (define-read-only (get-total-ustx-stacked (reward-cycle uint))
-    (default-to u0
+    (default-to
+        u0
         (get total-ustx
             (map-get? reward-cycle-total-stacked { reward-cycle: reward-cycle })
         ))
@@ -478,13 +486,19 @@
                         (total-ustx (get-total-ustx-stacked reward-cycle))
                         (reward-index
                             ;; record how many uSTX this pox-addr will stack for in the given reward cycle
-                            (append-reward-cycle-pox-addr (get pox-addr params)
-                                reward-cycle (get amount-ustx params)
-                                (get stacker params) (get signer params)
+                            (append-reward-cycle-pox-addr
+                                (get pox-addr params)
+                                reward-cycle
+                                (get amount-ustx params)
+                                (get stacker params)
+                                (get signer params)
                             ))
                     )
                     ;; update running total
-                    (map-set reward-cycle-total-stacked { reward-cycle: reward-cycle } { total-ustx: (+ (get amount-ustx params) total-ustx) })
+                    (map-set reward-cycle-total-stacked
+                        { reward-cycle: reward-cycle }
+                        { total-ustx: (+ (get amount-ustx params) total-ustx) }
+                    )
                     (some reward-index)
                 )
                 none
@@ -526,16 +540,17 @@
     )
     (let (
             (cycle-indexes (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11))
-            (results (fold add-pox-addr-to-ith-reward-cycle cycle-indexes {
-                pox-addr: pox-addr,
-                first-reward-cycle: first-reward-cycle,
-                num-cycles: num-cycles,
-                reward-set-indexes: (list),
-                amount-ustx: amount-ustx,
-                i: u0,
-                stacker: (some stacker),
-                signer: signer,
-            }))
+            (results (fold add-pox-addr-to-ith-reward-cycle cycle-indexes
+                {
+                    pox-addr: pox-addr,
+                    first-reward-cycle: first-reward-cycle,
+                    num-cycles: num-cycles,
+                    reward-set-indexes: (list),
+                    amount-ustx: amount-ustx,
+                    i: u0,
+                    stacker: (some stacker),
+                    signer: signer,
+                }))
             (reward-set-indexes (get reward-set-indexes results))
         )
         ;; For safety, add up the number of times (add-principal-to-ith-reward-cycle) returns 1.
@@ -580,11 +595,13 @@
                 ;; do not add to cycles >= cycle-index
                 false
                 ;; otherwise, add to the partial-stacked-by-cycle
-                (map-set partial-stacked-by-cycle {
-                    sender: tx-sender,
-                    pox-addr: pox-addr,
-                    reward-cycle: reward-cycle,
-                } { stacked-amount: (+ amount-ustx current-amount) }
+                (map-set partial-stacked-by-cycle
+                    {
+                        sender: tx-sender,
+                        pox-addr: pox-addr,
+                        reward-cycle: reward-cycle,
+                    }
+                    { stacked-amount: (+ amount-ustx current-amount) }
                 )
             )
             ;; produce the next params tuple
@@ -611,12 +628,13 @@
         (amount-ustx uint)
     )
     (let ((cycle-indexes (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11)))
-        (fold add-pox-partial-stacked-to-ith-cycle cycle-indexes {
-            pox-addr: pox-addr,
-            reward-cycle: first-reward-cycle,
-            num-cycles: num-cycles,
-            amount-ustx: amount-ustx,
-        })
+        (fold add-pox-partial-stacked-to-ith-cycle cycle-indexes
+            {
+                pox-addr: pox-addr,
+                reward-cycle: first-reward-cycle,
+                num-cycles: num-cycles,
+                amount-ustx: amount-ustx,
+            })
         true
     )
 )
@@ -692,7 +710,9 @@
     )
     (begin
         ;; amount must be valid
-        (asserts! (> amount-ustx u0) (err ERR_STACKING_INVALID_AMOUNT))
+        (asserts! (> amount-ustx u0)
+            (err ERR_STACKING_INVALID_AMOUNT)
+        )
 
         ;; lock period must be in acceptable range.
         (asserts! (check-pox-lock-period num-cycles)
@@ -741,10 +761,12 @@
         (asserts! (is-eq tx-sender contract-caller)
             (err ERR_STACKING_PERMISSION_DENIED)
         )
-        (ok (map-set allowance-contract-callers {
-            sender: tx-sender,
-            contract-caller: caller,
-        } { until-burn-ht: until-burn-ht }
+        (ok (map-set allowance-contract-callers
+            {
+                sender: tx-sender,
+                contract-caller: caller,
+            }
+            { until-burn-ht: until-burn-ht }
         ))
     )
 )
@@ -793,7 +815,9 @@
         )
 
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+        (asserts! (check-caller-allowed)
+            (err ERR_STACKING_PERMISSION_DENIED)
+        )
 
         ;; tx-sender principal must not be stacking
         (asserts! (is-none (get-stacker-info tx-sender))
@@ -824,13 +848,15 @@
                 lock-period amount-ustx tx-sender signer-key
             ))))
             ;; add stacker record
-            (map-set stacking-state { stacker: tx-sender } {
-                pox-addr: pox-addr,
-                reward-set-indexes: reward-set-indexes,
-                first-reward-cycle: first-reward-cycle,
-                lock-period: lock-period,
-                delegated-to: none,
-            })
+            (map-set stacking-state
+                { stacker: tx-sender }
+                {
+                    pox-addr: pox-addr,
+                    reward-set-indexes: reward-set-indexes,
+                    first-reward-cycle: first-reward-cycle,
+                    lock-period: lock-period,
+                    delegated-to: none,
+                })
 
             ;; return the lock-up information, so the node can actually carry out the lock.
             (ok {
@@ -849,7 +875,9 @@
 (define-public (revoke-delegate-stx)
     (let ((last-delegation-state (get-check-delegation tx-sender)))
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+        (asserts! (check-caller-allowed)
+            (err ERR_STACKING_PERMISSION_DENIED)
+        )
         (asserts! (is-some last-delegation-state)
             (err ERR_DELEGATION_ALREADY_REVOKED)
         )
@@ -878,7 +906,9 @@
     )
     (begin
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+        (asserts! (check-caller-allowed)
+            (err ERR_STACKING_PERMISSION_DENIED)
+        )
 
         ;; delegate-stx no longer requires the delegator to not currently
         ;; be stacking.
@@ -912,12 +942,14 @@
         )
 
         ;; add delegation record
-        (map-set delegation-state { stacker: tx-sender } {
-            amount-ustx: amount-ustx,
-            delegated-to: delegate-to,
-            until-burn-ht: until-burn-ht,
-            pox-addr: pox-addr,
-        })
+        (map-set delegation-state
+            { stacker: tx-sender }
+            {
+                amount-ustx: amount-ustx,
+                delegated-to: delegate-to,
+                until-burn-ht: until-burn-ht,
+                pox-addr: pox-addr,
+            })
 
         (ok true)
     )
@@ -938,7 +970,8 @@
         (max-amount uint)
         (auth-id uint)
     )
-    (sha256 (concat SIP018_MSG_PREFIX
+    (sha256 (concat
+        SIP018_MSG_PREFIX
         (concat
             (sha256 (unwrap-panic (to-consensus-buff? {
                 name: "pox-4-signer",
@@ -1030,15 +1063,16 @@
             ;; `signer-sig` is not present, verify that an authorization was previously added for this key
             (ok (asserts!
                 (default-to false
-                    (map-get? signer-key-authorizations {
-                        signer-key: signer-key,
-                        reward-cycle: reward-cycle,
-                        period: period,
-                        topic: topic,
-                        pox-addr: pox-addr,
-                        auth-id: auth-id,
-                        max-amount: max-amount,
-                    })
+                    (map-get? signer-key-authorizations
+                        {
+                            signer-key: signer-key,
+                            reward-cycle: reward-cycle,
+                            period: period,
+                            topic: topic,
+                            pox-addr: pox-addr,
+                            auth-id: auth-id,
+                            max-amount: max-amount,
+                        })
                 )
                 (err ERR_NOT_ALLOWED)
             ))
@@ -1074,15 +1108,16 @@
         ))
         ;; update the `used-signer-key-authorizations` map
         (asserts!
-            (map-insert used-signer-key-authorizations {
-                signer-key: signer-key,
-                reward-cycle: reward-cycle,
-                topic: topic,
-                period: period,
-                pox-addr: pox-addr,
-                auth-id: auth-id,
-                max-amount: max-amount,
-            }
+            (map-insert used-signer-key-authorizations
+                {
+                    signer-key: signer-key,
+                    reward-cycle: reward-cycle,
+                    topic: topic,
+                    period: period,
+                    pox-addr: pox-addr,
+                    auth-id: auth-id,
+                    max-amount: max-amount,
+                }
                 true
             )
             (err ERR_SIGNER_AUTH_USED)
@@ -1125,7 +1160,9 @@
                 (err ERR_STACKING_NO_SUCH_PRINCIPAL)
             )))
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+        (asserts! (check-caller-allowed)
+            (err ERR_STACKING_PERMISSION_DENIED)
+        )
         (let ((amount-ustx (get stacked-amount partial-stacked)))
             (try! (consume-signer-key-authorization pox-addr reward-cycle "agg-commit"
                 u1 signer-sig signer-key amount-ustx max-amount auth-id
@@ -1134,16 +1171,18 @@
             ;; Add the pox addr to the reward cycle, and extract the index of the PoX address
             ;; so the delegator can later use it to call stack-aggregation-increase.
             (let (
-                    (add-pox-addr-info (add-pox-addr-to-ith-reward-cycle u0 {
-                        pox-addr: pox-addr,
-                        first-reward-cycle: reward-cycle,
-                        num-cycles: u1,
-                        reward-set-indexes: (list),
-                        stacker: none,
-                        signer: signer-key,
-                        amount-ustx: amount-ustx,
-                        i: u0,
-                    }))
+                    (add-pox-addr-info (add-pox-addr-to-ith-reward-cycle
+                        u0
+                        {
+                            pox-addr: pox-addr,
+                            first-reward-cycle: reward-cycle,
+                            num-cycles: u1,
+                            reward-set-indexes: (list),
+                            stacker: none,
+                            signer: signer-key,
+                            amount-ustx: amount-ustx,
+                            i: u0,
+                        }))
                     (pox-addr-index (unwrap-panic (element-at (get reward-set-indexes add-pox-addr-info) u0)))
                 )
                 ;; don't update the stacking-state map,
@@ -1245,7 +1284,9 @@
                 (err ERR_STACKING_NO_SUCH_PRINCIPAL)
             )))
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+        (asserts! (check-caller-allowed)
+            (err ERR_STACKING_PERMISSION_DENIED)
+        )
 
         ;; reward-cycle must be in the future
         (asserts! (> reward-cycle (current-pox-reward-cycle))
@@ -1305,18 +1346,23 @@
             ))
 
             ;; update the pox-address list -- bump the total-ustx
-            (map-set reward-cycle-pox-address-list {
-                reward-cycle: reward-cycle,
-                index: reward-cycle-index,
-            } {
-                pox-addr: pox-addr,
-                total-ustx: increased-entry-total,
-                stacker: none,
-                signer: signer-key,
-            })
+            (map-set reward-cycle-pox-address-list
+                {
+                    reward-cycle: reward-cycle,
+                    index: reward-cycle-index,
+                }
+                {
+                    pox-addr: pox-addr,
+                    total-ustx: increased-entry-total,
+                    stacker: none,
+                    signer: signer-key,
+                })
 
             ;; update the total ustx in this cycle
-            (map-set reward-cycle-total-stacked { reward-cycle: reward-cycle } { total-ustx: increased-cycle-total })
+            (map-set reward-cycle-total-stacked
+                { reward-cycle: reward-cycle }
+                { total-ustx: increased-cycle-total }
+            )
 
             ;; don't update the stacking-state map,
             ;;  because it _already has_ this stacker's state
@@ -1365,7 +1411,9 @@
         )
 
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+        (asserts! (check-caller-allowed)
+            (err ERR_STACKING_PERMISSION_DENIED)
+        )
 
         ;; stacker must have delegated to the caller
         (let ((delegation-info (unwrap! (get-check-delegation stacker)
@@ -1390,7 +1438,9 @@
             ;; delegation must not expire before lock period
             (asserts!
                 (match (get until-burn-ht delegation-info)
-                    until-burn-ht (>= until-burn-ht unlock-burn-height)
+                    until-burn-ht (>= until-burn-ht
+                        unlock-burn-height
+                    )
                     true
                 )
                 (err ERR_DELEGATION_EXPIRES_DURING_LOCK)
@@ -1419,13 +1469,15 @@
         )
 
         ;; add stacker record
-        (map-set stacking-state { stacker: stacker } {
-            pox-addr: pox-addr,
-            first-reward-cycle: first-reward-cycle,
-            reward-set-indexes: (list),
-            lock-period: lock-period,
-            delegated-to: (some tx-sender),
-        })
+        (map-set stacking-state
+            { stacker: stacker }
+            {
+                pox-addr: pox-addr,
+                first-reward-cycle: first-reward-cycle,
+                reward-set-indexes: (list),
+                lock-period: lock-period,
+                delegated-to: (some tx-sender),
+            })
 
         ;; return the lock-up information, so the node can actually carry out the lock.
         (ok {
@@ -1495,18 +1547,23 @@
                 ;; signer-key must match
                 (asserts! (is-eq existing-signer-key passed-signer-key) none)
                 ;; update the pox-address list
-                (map-set reward-cycle-pox-address-list {
-                    reward-cycle: reward-cycle,
-                    index: reward-cycle-index,
-                } {
-                    pox-addr: (get pox-addr existing-entry),
-                    ;; This addresses the bug in pox-2 (see SIP-022)
-                    total-ustx: (+ (get total-ustx existing-entry) add-amount),
-                    stacker: (some (get stacker data)),
-                    signer: (get signer existing-entry),
-                })
+                (map-set reward-cycle-pox-address-list
+                    {
+                        reward-cycle: reward-cycle,
+                        index: reward-cycle-index,
+                    }
+                    {
+                        pox-addr: (get pox-addr existing-entry),
+                        ;; This addresses the bug in pox-2 (see SIP-022)
+                        total-ustx: (+ (get total-ustx existing-entry) add-amount),
+                        stacker: (some (get stacker data)),
+                        signer: (get signer existing-entry),
+                    })
                 ;; update the total
-                (map-set reward-cycle-total-stacked { reward-cycle: reward-cycle } { total-ustx: total-ustx })
+                (map-set reward-cycle-total-stacked
+                    { reward-cycle: reward-cycle }
+                    { total-ustx: total-ustx }
+                )
                 (some {
                     first-cycle: first-cycle,
                     reward-cycle: (+ u1 reward-cycle),
@@ -1540,22 +1597,31 @@
             (unlock-height (get unlock-height stacker-info))
             (cur-cycle (current-pox-reward-cycle))
             (first-increased-cycle (+ cur-cycle u1))
-            (stacker-state (unwrap! (map-get? stacking-state { stacker: tx-sender })
+            (stacker-state (unwrap!
+                (map-get? stacking-state
+                    { stacker: tx-sender }
+                )
                 (err ERR_STACK_INCREASE_NOT_LOCKED)
             ))
             (cur-pox-addr (get pox-addr stacker-state))
             (cur-period (get lock-period stacker-state))
         )
         ;; tx-sender must be currently locked
-        (asserts! (> amount-stacked u0) (err ERR_STACK_INCREASE_NOT_LOCKED))
+        (asserts! (> amount-stacked u0)
+            (err ERR_STACK_INCREASE_NOT_LOCKED)
+        )
         ;; must be called with positive `increase-by`
-        (asserts! (>= increase-by u1) (err ERR_STACKING_INVALID_AMOUNT))
+        (asserts! (>= increase-by u1)
+            (err ERR_STACKING_INVALID_AMOUNT)
+        )
         ;; stacker must have enough stx to lock
         (asserts! (>= amount-unlocked increase-by)
             (err ERR_STACKING_INSUFFICIENT_FUNDS)
         )
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+        (asserts! (check-caller-allowed)
+            (err ERR_STACKING_PERMISSION_DENIED)
+        )
         ;; stacker must be directly stacking
         (asserts! (> (len (get reward-set-indexes stacker-state)) u0)
             (err ERR_STACKING_IS_DELEGATED)
@@ -1635,7 +1701,9 @@
             ))
         )
         ;; must be called with positive extend-count
-        (asserts! (>= extend-count u1) (err ERR_STACKING_INVALID_LOCK_PERIOD))
+        (asserts! (>= extend-count u1)
+            (err ERR_STACKING_INVALID_LOCK_PERIOD)
+        )
 
         ;; stacker must be directly stacking
         (asserts! (> (len (get reward-set-indexes stacker-state)) u0)
@@ -1665,10 +1733,14 @@
             (asserts! (> lock-period u0) (err ERR_STACKING_INVALID_LOCK_PERIOD))
 
             ;; must be called directly by the tx-sender or by an allowed contract-caller
-            (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+            (asserts! (check-caller-allowed)
+                (err ERR_STACKING_PERMISSION_DENIED)
+            )
 
             ;; tx-sender must be locked
-            (asserts! (> amount-ustx u0) (err ERR_STACK_EXTEND_NOT_LOCKED))
+            (asserts! (> amount-ustx u0)
+                (err ERR_STACK_EXTEND_NOT_LOCKED)
+            )
 
             ;; tx-sender must not be delegating
             (asserts! (is-none (get-check-delegation tx-sender))
@@ -1705,13 +1777,15 @@
                         ))
                 )
                 ;; update stacker record
-                (map-set stacking-state { stacker: tx-sender } {
-                    pox-addr: pox-addr,
-                    reward-set-indexes: reward-set-indexes,
-                    first-reward-cycle: first-reward-cycle,
-                    lock-period: lock-period,
-                    delegated-to: none,
-                })
+                (map-set stacking-state
+                    { stacker: tx-sender }
+                    {
+                        pox-addr: pox-addr,
+                        reward-set-indexes: reward-set-indexes,
+                        first-reward-cycle: first-reward-cycle,
+                        lock-period: lock-period,
+                        delegated-to: none,
+                    })
 
                 ;; return lock-up information
                 (ok {
@@ -1743,7 +1817,9 @@
             (unlock-height (get unlock-height stacker-info))
         )
         ;; must be called with positive `increase-by`
-        (asserts! (>= increase-by u1) (err ERR_STACKING_INVALID_AMOUNT))
+        (asserts! (>= increase-by u1)
+            (err ERR_STACKING_INVALID_AMOUNT)
+        )
 
         (let (
                 (unlock-in-cycle (burn-height-to-reward-cycle unlock-height))
@@ -1760,7 +1836,9 @@
                 ))
             )
             ;; must be called directly by the tx-sender or by an allowed contract-caller
-            (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+            (asserts! (check-caller-allowed)
+                (err ERR_STACKING_PERMISSION_DENIED)
+            )
 
             ;; stacker must not be directly stacking
             (asserts! (is-eq (len (get reward-set-indexes stacker-state)) u0)
@@ -1779,7 +1857,9 @@
             )
 
             ;; stacker must be currently locked
-            (asserts! (> existing-lock u0) (err ERR_STACK_INCREASE_NOT_LOCKED))
+            (asserts! (> existing-lock u0)
+                (err ERR_STACK_INCREASE_NOT_LOCKED)
+            )
 
             ;; stacker must have enough stx to lock
             (asserts! (>= available-stx increase-by)
@@ -1874,7 +1954,9 @@
             ))
         )
         ;; must be called with positive extend-count
-        (asserts! (>= extend-count u1) (err ERR_STACKING_INVALID_LOCK_PERIOD))
+        (asserts! (>= extend-count u1)
+            (err ERR_STACKING_INVALID_LOCK_PERIOD)
+        )
 
         (let (
                 (last-extend-cycle (- (+ first-extend-cycle extend-count) u1))
@@ -1889,7 +1971,9 @@
             (asserts! (> lock-period u0) (err ERR_STACKING_INVALID_LOCK_PERIOD))
 
             ;; must be called directly by the tx-sender or by an allowed contract-caller
-            (asserts! (check-caller-allowed) (err ERR_STACKING_PERMISSION_DENIED))
+            (asserts! (check-caller-allowed)
+                (err ERR_STACKING_PERMISSION_DENIED)
+            )
 
             ;; stacker must not be directly stacking
             (asserts! (is-eq (len (get reward-set-indexes stacker-state)) u0)
@@ -1913,7 +1997,9 @@
             )
 
             ;; stacker must be currently locked
-            (asserts! (> amount-ustx u0) (err ERR_STACK_EXTEND_NOT_LOCKED))
+            (asserts! (> amount-ustx u0)
+                (err ERR_STACK_EXTEND_NOT_LOCKED)
+            )
 
             ;; stacker must have delegated to the caller
             (let ((delegation-info (unwrap! (get-check-delegation stacker)
@@ -1938,7 +2024,9 @@
                 ;; delegation must not expire before lock period
                 (asserts!
                     (match (get until-burn-ht delegation-info)
-                        until-burn-ht (>= until-burn-ht new-unlock-ht)
+                        until-burn-ht (>= until-burn-ht
+                            new-unlock-ht
+                        )
                         true
                     )
                     (err ERR_DELEGATION_EXPIRES_DURING_LOCK)
@@ -1956,13 +2044,15 @@
                 amount-ustx
             )
 
-            (map-set stacking-state { stacker: stacker } {
-                pox-addr: pox-addr,
-                reward-set-indexes: (list),
-                first-reward-cycle: first-reward-cycle,
-                lock-period: lock-period,
-                delegated-to: (some tx-sender),
-            })
+            (map-set stacking-state
+                { stacker: stacker }
+                {
+                    pox-addr: pox-addr,
+                    reward-set-indexes: (list),
+                    first-reward-cycle: first-reward-cycle,
+                    lock-period: lock-period,
+                    delegated-to: (some tx-sender),
+                })
 
             ;; return the lock-up information, so the node can actually carry out the lock.
             (ok {
@@ -2004,7 +2094,9 @@
     )
     (begin
         ;; must be called directly by the tx-sender or by an allowed contract-caller
-        (asserts! (check-caller-allowed) (err ERR_NOT_ALLOWED))
+        (asserts! (check-caller-allowed)
+            (err ERR_NOT_ALLOWED)
+        )
         ;; Validate that `tx-sender` has the same pubkey hash as `signer-key`
         (asserts!
             (is-eq
