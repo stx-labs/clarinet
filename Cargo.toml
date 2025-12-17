@@ -20,14 +20,14 @@ members = [
 default-members = ["components/clarinet-cli"]
 
 [workspace.package]
-version = "3.10.0"
+version = "3.11.0"
 
 [workspace.dependencies]
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "clarity-types"}
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "stackslib", default-features = false}
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cf8d6858d997b747e3b40b6c6bdbf3f7ece29203", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cf8d6858d997b747e3b40b6c6bdbf3f7ece29203", package = "clarity-types" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cf8d6858d997b747e3b40b6c6bdbf3f7ece29203", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cf8d6858d997b747e3b40b6c6bdbf3f7ece29203", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cf8d6858d997b747e3b40b6c6bdbf3f7ece29203", package = "stackslib", default-features = false }
 
 aes-gcm = "0.10"
 argon2 = "0.5.3"
@@ -45,7 +45,9 @@ js-sys = "0.3.80"
 libsecp256k1 = "0.7.2"
 pretty_assertions = "1.4"
 rand = "0.8.5"
-ratatui = { version = "0.29.0", default-features = false, features = ["crossterm"] }
+ratatui = { version = "0.29.0", default-features = false, features = [
+    "crossterm",
+] }
 regex = "1.11.2"
 reqwest = { version = "0.12.22", default-features = false, features = [
     "json",

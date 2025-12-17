@@ -1,6 +1,6 @@
 {
   "name": "@stacks/clarinet-sdk-browser",
-  "version": "3.10.0",
+  "version": "3.11.0",
   "author": "Stacks Labs",
   "description": "A SDK to interact with Clarity Smart Contracts in the browser",
   "homepage": "https://stackslabs.com/clarinet",
@@ -28,7 +28,7 @@
   "license": "GPL-3.0",
   "readme": "./README.md",
   "dependencies": {
-    "@stacks/clarinet-sdk-wasm-browser": "3.10.0",
+    "@stacks/clarinet-sdk-wasm-browser": "3.11.0",
     "@stacks/transactions": "^7.0.6"
   }
 }

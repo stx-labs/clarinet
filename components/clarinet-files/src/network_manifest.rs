@@ -444,7 +444,7 @@ impl NetworkManifest {
                         _ => 1_000_000_000, // mint 10 sBTC by default
                     };
 
-                    let mnemonic = match account_settings.get("mnemonic") {
+                    let mut mnemonic = match account_settings.get("mnemonic") {
                         Some(Value::String(phrase)) => match mnemonic_from_phrase(phrase) {
                             Ok(result) => result.to_string(),
                             Err(e) => {
@@ -461,6 +461,17 @@ impl NetworkManifest {
                         Some(Value::String(cipher)) => cipher.clone(),
                         _ => "".to_string(),
                     };
+
+                    if !encrypted_mnemonic.is_empty() {
+                        let password = rpassword::prompt_password(format!(
+                            "Enter password to decrypt mnemonic for account {account_name}: "
+                        ))
+                        .unwrap();
+                        mnemonic =
+                            clarinet_utils::decrypt_mnemonic_phrase(&encrypted_mnemonic, &password)
+                                .unwrap()
+                                .to_string();
+                    }
 
                     let derivation = match account_settings.get("derivation") {
                         Some(Value::String(derivation)) => derivation.to_string(),

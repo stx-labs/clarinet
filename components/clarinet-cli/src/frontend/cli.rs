@@ -884,29 +884,13 @@ pub fn main() {
                     Some(&manifest.project.cache_location),
                     None,
                 );
-                let mut network_manifest = match res {
+                let network_manifest = match res {
                     Ok(network_manifest) => network_manifest,
                     Err(e) => {
                         let _ = event_tx.send(DeploymentEvent::Interrupted(e));
                         return;
                     }
                 };
-
-                for (name, account) in network_manifest.accounts.iter_mut() {
-                    if !account.encrypted_mnemonic.is_empty() {
-                        let password = rpassword::prompt_password(format!(
-                            "Enter password to decrypt mnemonic for account {name}: "
-                        ))
-                        .unwrap();
-                        let mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
-                            &account.encrypted_mnemonic,
-                            &password,
-                        )
-                        .unwrap();
-
-                        account.mnemonic = mnemonic.to_string();
-                    }
-                }
 
                 std::thread::spawn(move || {
                     apply_on_chain_deployment(
@@ -972,7 +956,7 @@ pub fn main() {
                 let password = rpassword::prompt_password("Enter password: ").unwrap();
                 let encrypted_mnemonic =
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
-                println!("Encrypted mnemonic: {encrypted_mnemonic}");
+                println!("encrypted_mnemonic = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
             }
         },
