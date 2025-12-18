@@ -370,7 +370,7 @@ mod tests {
         let snippet = indoc!("
             (use-trait token-trait .token-trait.token-trait)
 
-            (define-read-only (get-token-amount (token <token-trait>) (p principal))
+            (define-read-only (get-token-balance (token <token-trait>) (p principal))
                 (contract-call? token get-balance p))
         ").to_string();
 
@@ -385,7 +385,7 @@ mod tests {
         let snippet = indoc!("
             (use-trait token-trait .token-trait.token-trait)
 
-            (define-public (get-token-amount (token <token-trait>) (p principal))
+            (define-public (get-token-balance (token <token-trait>) (p principal))
                 (contract-call? token get-balance p))
         ").to_string();
 
@@ -394,14 +394,14 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
-    /// If trait is used *only* in private function, it's unreachable, so consider it unused
+    /// If trait is used *only* in an unused private function, it's unreachable, so consider it unused
     #[test]
-    fn used_in_private_fn() {
+    fn used_in_unused_private_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (use-trait token-trait .token-trait.token-trait)
 
-            (define-private (get-token-amount (token <token-trait>) (p principal))
+            (define-private (get-token-balance (token <token-trait>) (p principal))
                 (contract-call? token get-balance p))
         ").to_string();
 
@@ -416,7 +416,32 @@ mod tests {
         assert!(output[0].contains(&expected_message));
     }
 
-    /// If trait is used *only* in private function, it's unreachable, so consider it unused
+    /// If trait is used *only* in private function, even if the private function is called by a public function, it's still unusable
+    #[test]
+    fn used_in_used_private_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait token-trait .token-trait.token-trait)
+
+            (define-public (get-token-balance (p principal))
+                (get-token-balance-private none p))
+
+            (define-private (get-token-balance-private (token-opt (optional <token-trait>)) (p principal))
+                (let ((token (unwrap! token-opt (err u1))))
+                  (ok u100))) ;; We can't actually do `contract-call? token ...`, is this a bug?
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let trait_name = "token-trait";
+        let (expected_message, _) = UnusedTrait::make_diagnostic_strings(&trait_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(trait_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
     #[test]
     fn not_used() {
         #[rustfmt::skip]
