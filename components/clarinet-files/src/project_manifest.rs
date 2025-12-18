@@ -329,7 +329,7 @@ impl ProjectManifest {
 
         // Check for deprecated settings
         if let Some(passes) = project_manifest_file.project.analysis {
-            repl_settings.analysis.set_passes(passes);
+            repl_settings.analysis.enable_passes(&passes);
         }
 
         let project_name = project_manifest_file.project.name;

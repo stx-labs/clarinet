@@ -29,6 +29,7 @@ similar = "2.1.0"
 crossbeam-channel = "0.5.6"
 ctrlc = "3.1.9"
 rand = { workspace = true }
+indoc = { workspace = true }
 
 clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
 clarinet-files = { path = "../clarinet-files" }
@@ -69,7 +70,6 @@ winapi = { version = "0.3.9", features = [
 
 [dev-dependencies]
 tempfile = { workspace = true }
-indoc = { workspace = true }
 
 [package.metadata.winres]
 OriginalFilename = "clarinet.exe"

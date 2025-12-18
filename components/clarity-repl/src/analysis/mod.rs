@@ -9,8 +9,9 @@ mod coverage_tests;
 pub mod linter;
 pub mod lints;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::iter::FromIterator;
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
@@ -72,7 +73,7 @@ impl TryFrom<&Pass> for AnalysisPassFn {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Pass {
@@ -97,24 +98,24 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
-    passes: Vec<Pass>,
+    passes: HashSet<Pass>,
     lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
 }
 
 impl Settings {
     pub fn enable_all_passes(&mut self) {
-        self.passes = ALL_PASSES.to_vec();
+        self.passes = HashSet::from(ALL_PASSES)
     }
 
-    pub fn set_passes(&mut self, passes: Vec<Pass>) {
+    pub fn enable_passes(&mut self, passes: &[Pass]) {
         for pass in passes {
             match pass {
                 Pass::All => {
-                    self.passes = ALL_PASSES.to_vec();
+                    self.enable_all_passes();
                     return;
                 }
-                pass => self.passes.push(pass),
+                pass => self.passes.insert(*pass),
             };
         }
     }
@@ -199,20 +200,23 @@ impl From<SettingsFile> for Settings {
             })
             .collect();
 
-        let passes = from_file
+        let mut passes = from_file
             .passes
             .map(|file_passes| match file_passes {
-                OneOrList::One(pass) => vec![pass],
-                OneOrList::List(passes) => passes,
+                OneOrList::One(pass) => HashSet::from([pass]),
+                OneOrList::List(passes) => HashSet::from_iter(passes),
             })
             .map(|passes| {
                 if passes.contains(&Pass::All) {
-                    ALL_PASSES.to_vec()
+                    HashSet::from(ALL_PASSES)
                 } else {
                     passes
                 }
             })
             .unwrap_or_default();
+
+        // Always enable call checker
+        passes.insert(Pass::CallChecker);
 
         // Each pass that has its own settings should be included here.
         let check_checker = from_file
