@@ -176,11 +176,8 @@ impl GetChangesForNewProject {
             # epoch = "latest"
 
             [repl.analysis]
-            passes = ["check_checker", "call_checker"]
+            passes = ["check_checker"]
             check_checker = {{ trusted_sender = false, trusted_caller = false, callee_filter = false }}
-
-            [repl.analysis.lint_groups]
-            default = true
 
             # Check-checker settings:
             # trusted_sender: if true, inputs are trusted after tx_sender has been checked.
@@ -454,6 +451,7 @@ impl GetChangesForNewProject {
     }
 
     fn create_ts_config(&mut self) {
+        #[rustfmt::skip]
         let content = indoc!(r#"
             {
               "compilerOptions": {

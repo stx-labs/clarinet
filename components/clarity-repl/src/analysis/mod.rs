@@ -236,6 +236,15 @@ pub fn run_analysis(
 ) -> AnalysisResult {
     let mut errors: Vec<Diagnostic> = vec![];
     let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel)> = vec![];
+    let always_run = [Pass::CallChecker];
+
+    // Always run following passes
+    for pass in &always_run {
+        if !settings.passes.contains(pass) {
+            let f = AnalysisPassFn::try_from(pass).unwrap();
+            passes.push((f, pass.default_level()));
+        }
+    }
 
     for pass in &settings.passes {
         let f = AnalysisPassFn::try_from(pass).unwrap();
