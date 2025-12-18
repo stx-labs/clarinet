@@ -220,7 +220,10 @@ mod tests {
     #[test]
     fn define_private() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::CallChecker];
+        settings
+            .repl_settings
+            .analysis
+            .enable_passes(&[Pass::CallChecker]);
         let mut session = Session::new(settings);
         let snippet = "
 (define-private (foo (amount uint))
@@ -254,7 +257,10 @@ mod tests {
     #[test]
     fn define_read_only() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::CallChecker];
+        settings
+            .repl_settings
+            .analysis
+            .enable_passes(&[Pass::CallChecker]);
         let mut session = Session::new(settings);
         let snippet = "
 (define-read-only (foo (amount uint))
@@ -288,7 +294,10 @@ mod tests {
     #[test]
     fn define_public() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::CallChecker];
+        settings
+            .repl_settings
+            .analysis
+            .enable_passes(&[Pass::CallChecker]);
         let mut session = Session::new(settings);
         let snippet = "
 (define-public (foo (amount uint))
@@ -322,7 +331,10 @@ mod tests {
     #[test]
     fn correct_call() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::CallChecker];
+        settings
+            .repl_settings
+            .analysis
+            .enable_passes(&[Pass::CallChecker]);
         let mut session = Session::new(settings);
         let snippet = "
 (define-private (foo (amount uint))
@@ -345,7 +357,10 @@ mod tests {
     #[test]
     fn builtin_function_arg_count() {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.passes = vec![Pass::CallChecker];
+        settings
+            .repl_settings
+            .analysis
+            .enable_passes(&[Pass::CallChecker]);
         let mut session = Session::new(settings);
         let snippet = "
 (define-map kv-store { key: int } { value: int })

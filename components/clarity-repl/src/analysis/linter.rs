@@ -43,7 +43,7 @@ impl TryFrom<String> for LintName {
 #[strum(serialize_all = "snake_case")]
 pub enum LintGroup {
     All,
-    Recommended,
+    Default,
     Unused,
     Perf,
     Style,
@@ -61,7 +61,7 @@ impl LintGroup {
                     map.insert(*lint, value);
                 }
             }
-            Recommended => {
+            Default => {
                 Unused.insert_into(map, value);
                 Perf.insert_into(map, value);
                 Safety.insert_into(map, value);
