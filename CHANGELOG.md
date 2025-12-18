@@ -4,8 +4,8 @@
 
 - Suggest using encrypted mnemonics in testnet and mainnet TOML files (#2118) (ec5cd306)
 - Generate deployment plan in sdk (#2109) (32269474)
-* **linter:**  Add `unused_token` lint (#2091) (3ac821da)
-* Change encrypted mnemonic output to be pasteable into TOML without editing (#2107) (9b37fe58)
+- **linter:**  Add `unused_token` lint (#2091) (3ac821da)
+- Change encrypted mnemonic output to be pasteable into TOML without editing (#2107) (9b37fe58)
 
 ##### Bug Fixes
 
