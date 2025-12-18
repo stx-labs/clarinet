@@ -156,6 +156,8 @@ jobs:
 
   dist_clarinet:
     name: Build Clarinet Distributions
+    needs:
+      - get_release_info
     runs-on: ${{ matrix.os }}
     permissions:
       id-token: write
