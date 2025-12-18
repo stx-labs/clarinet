@@ -892,14 +892,18 @@ mod tests {
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    #[test]
-    fn allow_unchecked_bool_in_private_function_with_unchecked_params_annotation() {
+    fn default_session() -> Session {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        Session::new(settings)
+    }
+
+    #[test]
+    fn allow_unchecked_bool_in_private_function_with_unchecked_params_annotation() {
+        let mut session = default_session();
         let snippet = "
 (define-data-var p1 principal tx-sender)
 (define-data-var b1 bool false)
@@ -943,12 +947,7 @@ mod tests {
 
     #[test]
     fn allow_unchecked_bool_in_public_function() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-data-var myvar bool false)
 (define-public (tainted-var-set (b bool))
@@ -966,12 +965,7 @@ mod tests {
 
     #[test]
     fn define_public() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (tainted (amount uint))
     (stx-transfer? amount (as-contract tx-sender) tx-sender)
@@ -1009,12 +1003,7 @@ mod tests {
 
     #[test]
     fn expr_tainted() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (expr-tainted (amount uint))
     (stx-transfer? (+ u10 amount) (as-contract tx-sender) tx-sender)
@@ -1052,12 +1041,7 @@ mod tests {
 
     #[test]
     fn let_tainted() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (let-tainted (amount uint))
     (let ((x amount))
@@ -1097,12 +1081,7 @@ mod tests {
 
     #[test]
     fn filtered() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (filtered (amount uint))
     (begin
@@ -1122,12 +1101,7 @@ mod tests {
 
     #[test]
     fn filtered_expr() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (filtered-expr (amount uint))
     (begin
@@ -1147,12 +1121,7 @@ mod tests {
 
     #[test]
     fn let_filtered() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (let-filtered (amount uint))
     (let ((x amount))
@@ -1172,12 +1141,7 @@ mod tests {
 
     #[test]
     fn let_filtered_parent() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (let-filtered-parent (amount uint))
     (let ((x amount))
@@ -1197,12 +1161,7 @@ mod tests {
 
     #[test]
     fn let_tainted_twice() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (let-tainted-twice (amount1 uint) (amount2 uint))
     (let ((x (+ amount1 amount2)))
@@ -1260,12 +1219,7 @@ mod tests {
 
     #[test]
     fn let_tainted_twice_filtered_once() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (let-tainted-twice-filtered-once (amount1 uint) (amount2 uint))
     (let ((x (+ amount1 amount2)))
@@ -1309,12 +1263,7 @@ mod tests {
 
     #[test]
     fn let_tainted_twice_filtered_twice() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (let-tainted-twice-filtered-twice (amount1 uint) (amount2 uint))
     (let ((x (+ amount1 amount2)))
@@ -1335,12 +1284,7 @@ mod tests {
 
     #[test]
     fn let_tainted_twice_filtered_together() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (let-tainted-twice-filtered-together (amount1 uint) (amount2 uint))
     (let ((x (+ amount1 amount2)))
@@ -1360,12 +1304,7 @@ mod tests {
 
     #[test]
     fn if_filter() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (if-filter (amount uint))
     (stx-transfer? (if (< amount u100) amount u100) (as-contract tx-sender) tx-sender)
@@ -1382,12 +1321,7 @@ mod tests {
 
     #[test]
     fn if_not_filtered() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (if-not-filtered (amount uint))
     (stx-transfer? (if (< u50 u100) amount u100) (as-contract tx-sender) tx-sender)
@@ -1425,13 +1359,7 @@ mod tests {
 
     #[test]
     fn and_tainted() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        settings.repl_settings.analysis.disable_all_lints();
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (and-tainted (amount uint))
     (ok (and
@@ -1468,12 +1396,7 @@ mod tests {
 
     #[test]
     fn and_filter() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (and-filter (amount uint))
     (ok (and
@@ -1493,12 +1416,7 @@ mod tests {
 
     #[test]
     fn and_filter_after() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (and-filter-after (amount uint))
     (ok (and
@@ -1536,13 +1454,7 @@ mod tests {
 
     #[test]
     fn or_tainted() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        settings.repl_settings.analysis.disable_all_lints();
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (or-tainted (amount uint))
     (ok (or
@@ -1579,12 +1491,7 @@ mod tests {
 
     #[test]
     fn or_filter() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (or-filter (amount uint))
     (ok (or
@@ -1604,12 +1511,7 @@ mod tests {
 
     #[test]
     fn or_filter_after() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (or-filter-after (amount uint))
     (ok (or
@@ -1647,12 +1549,7 @@ mod tests {
 
     #[test]
     fn stx_burn_senders() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (stx-burn-senders (amount uint))
     (stx-burn? amount tx-sender)
@@ -1669,12 +1566,7 @@ mod tests {
 
     #[test]
     fn tainted_stx_burn() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (tainted-stx-burn (amount uint))
     (begin
@@ -1722,12 +1614,7 @@ mod tests {
 
     #[test]
     fn stx_transfer_senders() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (stx-transfer-senders (amount uint) (recipient principal))
     (stx-transfer? amount tx-sender recipient)
@@ -1744,12 +1631,7 @@ mod tests {
 
     #[test]
     fn tainted_ft_burn() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-fungible-token stackaroo)
 (define-public (tainted-ft-burn (amount uint))
@@ -1798,12 +1680,7 @@ mod tests {
 
     #[test]
     fn ft_burn_senders() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-fungible-token stackaroo)
 (define-public (ft-burn-senders (amount uint))
@@ -1821,12 +1698,7 @@ mod tests {
 
     #[test]
     fn tainted_ft_transfer() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-fungible-token stackaroo)
 (define-public (tainted-ft-transfer (amount uint))
@@ -1878,12 +1750,7 @@ mod tests {
 
     #[test]
     fn ft_transfer_senders() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-fungible-token stackaroo)
 (define-public (ft-transfer-senders (amount uint) (recipient principal))
@@ -1901,12 +1768,7 @@ mod tests {
 
     #[test]
     fn tainted_ft_mint() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-fungible-token stackaroo)
 (define-public (tainted-ft-mint (amount uint))
@@ -1955,12 +1817,7 @@ mod tests {
 
     #[test]
     fn tainted_nft_burn() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-non-fungible-token stackaroo uint)
 (define-public (tainted-nft-burn (identifier uint))
@@ -2012,12 +1869,7 @@ mod tests {
 
     #[test]
     fn nft_burn_senders() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-non-fungible-token stackaroo uint)
 (define-public (nft-burn-senders (identifier uint))
@@ -2035,12 +1887,7 @@ mod tests {
 
     #[test]
     fn tainted_nft_transfer() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-non-fungible-token stackaroo uint)
 (define-public (tainted-nft-transfer (identifier uint))
@@ -2098,12 +1945,7 @@ mod tests {
 
     #[test]
     fn nft_transfer_senders() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-non-fungible-token stackaroo uint)
 (define-public (nft-transfer-senders (identifier uint) (recipient principal))
@@ -2121,12 +1963,7 @@ mod tests {
 
     #[test]
     fn tainted_nft_mint() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-non-fungible-token stackaroo uint)
 (define-public (tainted-nft-mint (identifier uint))
@@ -2178,12 +2015,7 @@ mod tests {
 
     #[test]
     fn tainted_var_set() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-data-var myvar uint u0)
 (define-public (tainted-var-set (amount uint))
@@ -2219,12 +2051,7 @@ mod tests {
 
     #[test]
     fn tainted_map_set() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-map mymap { key-name-1: uint } { val-name-1: int })
 (define-public (tainted-map-set (key uint) (value int))
@@ -2296,12 +2123,7 @@ mod tests {
 
     #[test]
     fn tainted_map_set2() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-map mymap uint int)
 (define-public (tainted-map-set (key uint) (value int))
@@ -2364,12 +2186,7 @@ mod tests {
 
     #[test]
     fn tainted_map_insert() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-map mymap { key-name-1: uint } { val-name-1: int })
 (define-public (tainted-map-insert (key uint) (value int))
@@ -2441,12 +2258,7 @@ mod tests {
 
     #[test]
     fn tainted_map_insert2() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-map mymap uint int)
 (define-public (tainted-map-insert (key uint) (value int))
@@ -2509,12 +2321,7 @@ mod tests {
 
     #[test]
     fn tainted_map_delete() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-map mymap { key-name-1: uint } { val-name-1: int })
 (define-public (tainted-map-delete (key uint))
@@ -2550,12 +2357,7 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-trait multiplier
     ((multiply (uint uint) (response uint uint)))
@@ -2619,12 +2421,7 @@ mod tests {
 
     #[test]
     fn check_private_call() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-private (my-transfer (amount uint))
     (ok true)
@@ -2662,12 +2459,7 @@ mod tests {
 
     #[test]
     fn check_private_after() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (tainted (amount uint))
     (my-func amount)
@@ -2705,12 +2497,7 @@ mod tests {
 
     #[test]
     fn check_private_allow() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 ;; #[allow(unchecked_params)]
 (define-private (my-transfer (amount uint))
@@ -2755,12 +2542,7 @@ mod tests {
 
     #[test]
     fn check_private_return() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 ;; #[allow(unchecked_params)]
 (define-private (my-func (amount uint))
@@ -2796,12 +2578,7 @@ mod tests {
 
     #[test]
     fn check_private_return_cleaned() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 ;; #[allow(unchecked_params)]
 (define-private (cleaner (amount uint))
@@ -2822,12 +2599,7 @@ mod tests {
 
     #[test]
     fn check_private_return_clean() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 ;; #[allow(unchecked_params)]
 (define-private (cleaner (amount uint))
@@ -2848,12 +2620,7 @@ mod tests {
 
     #[test]
     fn unchecked_params_safe() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 ;; #[allow(unchecked_params)]
 (define-private (my-func (amount uint))
@@ -2874,12 +2641,7 @@ mod tests {
 
     #[test]
     fn unchecked_params_safe_after() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (tainted (amount uint))
     (my-func amount)
@@ -2900,13 +2662,7 @@ mod tests {
 
     #[test]
     fn allow_unchecked_data() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (allow_tainted (amount uint))
     ;; #[allow(unchecked_data)]
@@ -2924,12 +2680,7 @@ mod tests {
 
     #[test]
     fn allow_unchecked_data_parent() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (allow_tainted (amount uint))
     ;; #[allow(unchecked_data)]
@@ -2949,12 +2700,7 @@ mod tests {
 
     #[test]
     fn allow_unchecked_data_function() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 ;; #[allow(unchecked_data)]
 (define-public (allow_tainted (amount uint))
@@ -2972,12 +2718,7 @@ mod tests {
 
     #[test]
     fn annotate_other_expr() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (tainted (amount uint))
     (begin
@@ -3019,12 +2760,7 @@ mod tests {
 
     #[test]
     fn annotate_other_expr2() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (tainted (amount uint))
     (begin
@@ -3136,12 +2872,7 @@ mod tests {
 
     #[test]
     fn filter_all() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-data-var admin principal tx-sender)
 (define-public (filter_all (amount uint))
@@ -3163,12 +2894,7 @@ mod tests {
 
     #[test]
     fn filter_one() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-data-var admin principal tx-sender)
 (define-public (filter_one (amount uint))
@@ -3190,12 +2916,7 @@ mod tests {
 
     #[test]
     fn filter_two() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-data-var admin principal tx-sender)
 (define-public (filter_two (amount1 uint) (amount2 uint))
@@ -3217,12 +2938,7 @@ mod tests {
 
     #[test]
     fn filter_all2() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-data-var admin principal tx-sender)
 (define-public (filter_all2 (amount1 uint) (amount2 uint))
@@ -3296,12 +3012,7 @@ mod tests {
 
     #[test]
     fn filter_trait() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-trait my-trait
     (
@@ -3330,12 +3041,7 @@ mod tests {
 
     #[test]
     fn check_after() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CheckChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (filtered (amount uint))
     (begin
