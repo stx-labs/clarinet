@@ -238,14 +238,14 @@ jobs:
 
       - name: Upload unsigned Windows binary for SignPath
         id: upload-unsigned-windows
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+        if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != '' && matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: unsigned-clarinet-${{ env.SHORT_TARGET_NAME }}
           path: target/${{ matrix.target }}/release/clarinet.exe
 
       - name: Code sign Windows binary with SignPath
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+        if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != '' && matrix.os == 'windows-latest'
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -261,7 +261,7 @@ jobs:
         run: tar -C target/${{ matrix.target }}/release -zcvf clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz clarinet
 
       - name: Compress signed cargo artifact (Windows - main branch)
-        if: startsWith(github.ref, 'refs/heads/main') && matrix.os == 'windows-latest'
+        if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != '' && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           Compress-Archive -Path "./signed/clarinet.exe" -DestinationPath "clarinet-${{ env.SHORT_TARGET_NAME }}.zip"
@@ -274,7 +274,7 @@ jobs:
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz
 
       - name: Upload cargo artifact (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && needs.get_release_info.outputs.tag != ''
         uses: actions/upload-artifact@v4
         with:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
