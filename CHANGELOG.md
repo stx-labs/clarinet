@@ -1,17 +1,19 @@
 # [3.12.0](https://github.com/stx-labs/clarinet/compare/v3.11.0...v3.12.0) (2025-12-18)
 
-
 ##### New Features
 
 - Suggest using encrypted mnemonics in testnet and mainnet TOML files (#2118) (ec5cd306)
 - Generate deployment plan in sdk (#2109) (32269474)
 * **linter:**  Add `unused_token` lint (#2091) (3ac821da)
+* Change encrypted mnemonic output to be pasteable into TOML without editing (#2107) (9b37fe58)
 
 ##### Bug Fixes
 
 - Rework format-ignore to cache ignored exprs within the main loop (#2110) (d74c1674)
 - List spacing consistency (#2104) (4a10818a)
 - Update clarinet to parse new tenure extends (#2098) (1251ba2a)
+- **linter:** Fix noop generating diagnostics on single op arithmetic functions (#2111) (a1a9340a)
+- Decrypt encrypted_mnemonic immediately when loading NetworkManifest (#2103) (f7cd4d0a)
 
 ##### Continuous Integration
 
