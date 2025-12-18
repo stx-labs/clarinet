@@ -275,11 +275,12 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
 
     fn visit_define_trait(
         &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        functions: &'a [SymbolicExpression],
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        _functions: &'a [SymbolicExpression],
     ) -> bool {
-        panic!("visit trait {}", name);
+        // TODO
+        true
     }
 }
 
@@ -324,6 +325,7 @@ mod tests {
     use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
+    use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
         let mut settings = SessionSettings::default();
@@ -333,20 +335,43 @@ mod tests {
             .analysis
             .enable_lint(UnusedTrait::get_name(), Level::Warning);
 
-        Session::new(settings)
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+        // We need a trait in a separate contract for these tests
+        #[rustfmt::skip]
+        let trait_source = indoc!("
+            (define-trait token-trait (
+                (get-supply () (response uint uint))
+                (get-balance (principal) (response uint uint))
+            ))
+        ");
+
+        let mut session = Session::new(settings);
+
+        let trait_contract = ClarityContractBuilder::new()
+            .name("token-trait")
+            .code_source(trait_source.to_owned())
+            .build();
+
+        session
+            .interpreter
+            .run(&trait_contract, None, false, None)
+            .expect("Invalid trait contract");
+
+        session
+            .formatted_interpretation(snippet, Some("unit-test".to_owned()), false, None)
             .expect("Invalid code snippet")
     }
 
+    /// Currently a trait cannot define a read-only function, so trait args cannot be used by other read-only functions
+    /// There are proposals to change this though, so enable this test if and when that changes
+    #[ignore]
     #[test]
-    fn used() {
+    fn used_in_read_only_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-private (square (x uint))
-                (* x x))
+            (use-trait token-trait .token-trait.token-trait)
 
-            (define-read-only (cube (x uint))
-                (* x (square x)))
+            (define-read-only (get-token-amount (token <token-trait>) (p principal))
+                (contract-call? token get-balance p))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
@@ -355,14 +380,13 @@ mod tests {
     }
 
     #[test]
-    fn used_in_filter() {
+    fn used_in_public_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-private (is-even (x int))
-                (is-eq (mod x 2) 0))
+            (use-trait token-trait .token-trait.token-trait)
 
-            (define-read-only (even-ints-to-ten)
-                (filter is-even (list 0 1 2 3 4 5 6 7 8 9)))
+            (define-public (get-token-amount (token <token-trait>) (p principal))
+                (contract-call? token get-balance p))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
@@ -370,57 +394,47 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
+    /// If trait is used *only* in private function, it's unreachable, so consider it unused
     #[test]
-    fn used_in_fold() {
+    fn used_in_private_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-private (sum (x int) (y int))
-                (+ x y))
+            (use-trait token-trait .token-trait.token-trait)
 
-            (define-read-only (sum-to-ten)
-                (fold sum (list 0 1 2 3 4 5 6 7 8 9) 0))
-        ").to_string();
-
-        let (_, result) = run_snippet(snippet);
-
-        assert_eq!(result.diagnostics.len(), 0);
-    }
-
-    #[test]
-    fn used_in_map() {
-        #[rustfmt::skip]
-        let snippet = indoc!("
-            (define-private (square (x int))
-                (* x x))
-
-            (define-read-only (squares-to-ten)
-                (map square (list 0 1 2 3 4 5 6 7 8 9)))
-        ").to_string();
-
-        let (_, result) = run_snippet(snippet);
-
-        assert_eq!(result.diagnostics.len(), 0);
-    }
-
-    #[test]
-    fn not_used() {
-        #[rustfmt::skip]
-        let snippet = indoc!("
-            (define-private (square (x uint))
-                (* x x))
-
-            (define-read-only (cube (x uint))
-                (* x (* x x)))
+            (define-private (get-token-amount (token <token-trait>) (p principal))
+                (contract-call? token get-balance p))
         ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
-        let fn_name = "square";
-        let (expected_message, _) = UnusedTrait::make_diagnostic_strings(&fn_name.into());
+        let trait_name = "token-trait";
+        let (expected_message, _) = UnusedTrait::make_diagnostic_strings(&trait_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains(fn_name));
+        assert!(output[0].contains(trait_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    /// If trait is used *only* in private function, it's unreachable, so consider it unused
+    #[test]
+    fn not_used() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait token-trait .token-trait.token-trait)
+
+            (define-read-only (get-token-amount (p principal))
+                u100)
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let trait_name = "token-trait";
+        let (expected_message, _) = UnusedTrait::make_diagnostic_strings(&trait_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
 
@@ -428,12 +442,11 @@ mod tests {
     fn allow_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            ;; #[allow(unused_private_fn)]
-            (define-private (square (x uint))
-                (* x x))
+            ;; #[allow(unused_trait)]
+            (use-trait token-trait .token-trait.token-trait)
 
-            (define-read-only (cube (x uint))
-                (* x (* x x)))
+            (define-read-only (get-token-amount (p principal))
+                u100)
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
