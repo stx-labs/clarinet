@@ -197,6 +197,15 @@ stacks_node_rpc_address = "https://api.testnet.hiro.so"
 deployment_fee_rate = 10
 
 [accounts.deployer]
+# It is strongly suggested to use encrypted mnemonics to avoid putting
+# seed phrases directly into TOML files.  To do so, run:
+#
+#     clarinet deployments encrypt
+#
+# Enter your seed phrase and a password, then paste the encrypted mnemonic here.
+#
+# Otherwise, use the mnemonic field below:
+#
 mnemonic = "<YOUR PRIVATE TESTNET MNEMONIC HERE>"
 "#
         .into();
@@ -212,6 +221,14 @@ stacks_node_rpc_address = "https://api.hiro.so"
 deployment_fee_rate = 10
 
 [accounts.deployer]
+# It is strongly suggested to use encrypted mnemonics to avoid putting
+# seed phrases directly into TOML files.  To do so, run:
+#
+#     clarinet deployments encrypt
+#
+# Enter your seed phrase and a password, then paste the encrypted mnemonic here.
+#
+# Otherwise, use the mnemonic field below:
 mnemonic = "<YOUR PRIVATE MAINNET MNEMONIC HERE>"
 "#
         .into();
