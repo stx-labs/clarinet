@@ -239,7 +239,7 @@ mod tests {
         let _ = derive_key(password, &mut short)
             .expect_err("Should have failed with 1-byte output buffer");
 
-        let _ = derive_key(password, &mut right)
+        derive_key(password, &mut right)
             .expect("Should have succeeded with 32-byte output buffer");
     }
 
