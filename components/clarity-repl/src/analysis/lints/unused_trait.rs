@@ -317,6 +317,7 @@ impl Lint for UnusedTrait<'_> {
 
 #[cfg(test)]
 mod tests {
+    use clarity::types::StacksEpochId;
     use clarity::vm::diagnostic::Level;
     use clarity::vm::ExecutionResult;
     use indoc::indoc;
@@ -345,6 +346,7 @@ mod tests {
         ");
 
         let mut session = Session::new(settings);
+        session.update_epoch(StacksEpochId::Epoch33);
 
         let trait_contract = ClarityContractBuilder::new()
             .name("token-trait")
@@ -428,7 +430,7 @@ mod tests {
 
             (define-private (get-token-balance-private (token-opt (optional <token-trait>)) (p principal))
                 (let ((token (unwrap! token-opt (err u1))))
-                  (ok u100))) ;; We can't actually do `contract-call? token ...`, is this a bug?
+                    (contract-call? token get-balance p)))
         ").to_string();
 
         let (output, result) = run_snippet(snippet);
