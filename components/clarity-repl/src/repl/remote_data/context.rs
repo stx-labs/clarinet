@@ -5,7 +5,8 @@ use clarity::vm::errors::SyntaxBindingErrorType;
 use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::types::parse_name_type_pairs;
 use clarity::vm::{ClarityName, ContractContext, SymbolicExpression};
-use clarity_types::errors::analysis::{CheckErrorKind, StaticCheckError};
+use clarity_types::errors::analysis::StaticCheckError;
+use clarity_types::errors::StaticCheckErrorKind;
 
 fn handle_function(
     epoch_id: &StacksEpochId,
@@ -17,10 +18,10 @@ fn handle_function(
 ) -> Result<(ClarityName, DefinedFunction), StaticCheckError> {
     let (function_symbol, arg_symbols) = signature
         .split_first()
-        .ok_or(CheckErrorKind::DefineFunctionBadSignature)?;
+        .ok_or(StaticCheckErrorKind::DefineFunctionBadSignature)?;
     let function_name = function_symbol
         .match_atom()
-        .ok_or(CheckErrorKind::ExpectedName)?;
+        .ok_or(StaticCheckErrorKind::ExpectedName)?;
     let arguments = parse_name_type_pairs::<_, StaticCheckError>(
         *epoch_id,
         arg_symbols,

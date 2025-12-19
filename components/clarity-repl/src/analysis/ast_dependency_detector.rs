@@ -11,7 +11,7 @@ use clarity::vm::ast::ContractAST;
 use clarity::vm::representations::{SymbolicExpression, TraitDefinition};
 use clarity::vm::types::{FunctionSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpressionType};
-use clarity_types::errors::analysis::{CheckErrorKind, StaticCheckError};
+use clarity_types::errors::analysis::CheckErrorKind;
 use clarity_types::types::signatures::CallableSubtype;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceSubtype, TraitIdentifier, TypeSignature,
@@ -262,7 +262,7 @@ impl<'a> ASTDependencyDetector<'a> {
     pub fn order_contracts<'deps>(
         dependencies: &'deps BTreeMap<QualifiedContractIdentifier, DependencySet>,
         contract_epochs: &HashMap<QualifiedContractIdentifier, StacksEpochId>,
-    ) -> Result<Vec<&'deps QualifiedContractIdentifier>, StaticCheckError> {
+    ) -> Result<Vec<&'deps QualifiedContractIdentifier>, CheckErrorKind> {
         let mut lookup = BTreeMap::new();
         let mut reverse_lookup = Vec::new();
 
@@ -288,9 +288,7 @@ impl<'a> ASTDependencyDetector<'a> {
                     .get(&dep.contract_id)
                     .unwrap_or(&StacksEpochId::Epoch20);
                 if contract_epoch < dep_epoch {
-                    return Err(StaticCheckError::new(CheckErrorKind::NoSuchContract(
-                        dep.contract_id.to_string(),
-                    )));
+                    return Err(CheckErrorKind::NoSuchContract(dep.contract_id.to_string()));
                 }
                 let Some(dep_id) = lookup.get(&dep.contract_id) else {
                     // No need to report an error here, it will be caught
@@ -312,9 +310,7 @@ impl<'a> ASTDependencyDetector<'a> {
                 let contract = reverse_lookup[*index];
                 contracts.push(contract.name.to_string());
             }
-            return Err(StaticCheckError::new(CheckErrorKind::CircularReference(
-                contracts,
-            )));
+            return Err(CheckErrorKind::CircularReference(contracts));
         }
 
         Ok(sorted_indexes
