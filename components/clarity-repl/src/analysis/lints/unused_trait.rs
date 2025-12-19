@@ -26,13 +26,39 @@ impl UnusedTraitSettings {
     }
 }
 
+/// Data on trait
+struct TraitUsage<'a> {
+    /// Keep track of where trait was imported with `use-trait`
+    expr: &'a SymbolicExpression,
+    /// Has this trait appeared a function signature inside `declare-trait`?
+    pub declare_trait: bool,
+    /// Has this trait appeared in the arg list of a public function?
+    pub public_fn: bool,
+    /// Has this trait appeared in the arg list of a read-only function?
+    pub read_only_fn: bool,
+    /// Has this trait appeared in the arg list of a private function?
+    pub private_fn: bool,
+}
+
 pub struct UnusedTrait<'a> {
     clarity_version: ClarityVersion,
     _settings: UnusedTraitSettings,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
     level: Level,
-    unused_traits: HashMap<&'a ClarityName, &'a SymbolicExpression>,
+    traits: HashMap<&'a ClarityName, TraitUsage<'a>>,
+}
+
+impl<'a> TraitUsage<'a> {
+    fn new(expr: &'a SymbolicExpression) -> Self {
+        Self {
+            expr,
+            declare_trait: false,
+            public_fn: false,
+            read_only_fn: false,
+            private_fn: false,
+        }
+    }
 }
 
 impl<'a> UnusedTrait<'a> {
@@ -48,7 +74,7 @@ impl<'a> UnusedTrait<'a> {
             level,
             annotations,
             active_annotation: None,
-            unused_traits: HashMap::new(),
+            traits: HashMap::new(),
         }
     }
 
@@ -74,10 +100,18 @@ impl<'a> UnusedTrait<'a> {
             .unwrap_or(false)
     }
 
-    /// Make diagnostic message and suggestion for unused private fn
-    fn make_diagnostic_strings(name: &ClarityName) -> (String, Option<String>) {
+    /// Make diagnostic message and suggestion for unused trait
+    fn make_diagnostic_strings_unused(name: &ClarityName) -> (String, Option<String>) {
         (
             format!("imported trait `{name}` is never used"),
+            Some("Remove this expression".to_string()),
+        )
+    }
+
+    /// Make diagnostic message and suggestion if trait is only used in private function
+    fn make_diagnostic_strings_private_fn_only(name: &ClarityName) -> (String, Option<String>) {
+        (
+            format!("imported trait `{name}` only appears in private functions, so cannot be used"),
             Some("Remove this expression".to_string()),
         )
     }
@@ -99,9 +133,18 @@ impl<'a> UnusedTrait<'a> {
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (name, expr) in &self.unused_traits {
-            let (message, suggestion) = Self::make_diagnostic_strings(name);
-            let diagnostic = self.make_diagnostic(expr, message, suggestion);
+        for (name, usage) in &self.traits {
+            let (message, suggestion) = match (
+                usage.declare_trait,
+                usage.public_fn,
+                usage.read_only_fn,
+                usage.private_fn,
+            ) {
+                (true, _, _, _) | (_, true, _, _) | (_, _, true, _) => continue,
+                (false, false, false, true) => Self::make_diagnostic_strings_private_fn_only(name),
+                (false, false, false, false) => Self::make_diagnostic_strings_unused(name),
+            };
+            let diagnostic = self.make_diagnostic(usage.expr, message, suggestion);
             diagnostics.push(diagnostic);
         }
 
@@ -110,25 +153,31 @@ impl<'a> UnusedTrait<'a> {
         diagnostics
     }
 
-    fn process_param_type_expr(&mut self, param_type: &SymbolicExpressionType) {
+    /// Search a parameter for a trait object, and fun `func` on associated `TraitUsage` struct`
+    fn process_param_type_expr(
+        &mut self,
+        param_type: &SymbolicExpressionType,
+        func: fn(&mut TraitUsage) -> (),
+    ) {
         use SymbolicExpressionType::*;
 
         match param_type {
             TraitReference(name, _) => {
-                self.unused_traits.remove(name);
+                self.traits.get_mut(name).map(func);
             }
             List(exprs) => {
                 for expr in exprs {
-                    self.process_param_type_expr(&expr.expr);
+                    self.process_param_type_expr(&expr.expr, func);
                 }
             }
             Field(_) | AtomValue(_) | Atom(_) | LiteralValue(_) => {}
         }
     }
 
-    fn process_params(&mut self, params: &[TypedVar]) {
+    /// Search parameter list for a trait object, and fun `func` on associated `TraitUsage` struct`
+    fn process_params(&mut self, params: &[TypedVar], func: fn(&mut TraitUsage) -> ()) {
         for param in params {
-            self.process_param_type_expr(&param.type_expr.expr);
+            self.process_param_type_expr(&param.type_expr.expr, func);
         }
     }
 }
@@ -147,7 +196,7 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         self.set_active_annotation(&expr.span);
 
         if !self.allow() {
-            self.unused_traits.insert(name, expr);
+            self.traits.insert(name, TraitUsage::new(expr));
         }
 
         true
@@ -172,7 +221,7 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         if let Some(params) = parameters {
-            self.process_params(&params);
+            self.process_params(&params, |usage| usage.read_only_fn = true);
         }
         true
     }
@@ -196,7 +245,30 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         if let Some(params) = parameters {
-            self.process_params(&params);
+            self.process_params(&params, |usage| usage.public_fn = true);
+        }
+        true
+    }
+
+    fn traverse_define_private(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        parameters: Option<Vec<TypedVar<'a>>>,
+        body: &'a SymbolicExpression,
+    ) -> bool {
+        self.visit_define_private(expr, name, parameters, body)
+    }
+
+    fn visit_define_private(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        parameters: Option<Vec<TypedVar<'a>>>,
+        _body: &'a SymbolicExpression,
+    ) -> bool {
+        if let Some(params) = parameters {
+            self.process_params(&params, |usage| usage.private_fn = true);
         }
         true
     }
@@ -207,17 +279,6 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         _expr: &'a SymbolicExpression,
         _name: &'a ClarityName,
         _value: &'a SymbolicExpression,
-    ) -> bool {
-        true
-    }
-
-    /// Skip, not relevant to this lint
-    fn traverse_define_private(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        _parameters: Option<Vec<TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
     ) -> bool {
         true
     }
@@ -410,7 +471,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let trait_name = "token-trait";
-        let (expected_message, _) = UnusedTrait::make_diagnostic_strings(&trait_name.into());
+        let (expected_message, _) =
+            UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -436,7 +498,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let trait_name = "token-trait";
-        let (expected_message, _) = UnusedTrait::make_diagnostic_strings(&trait_name.into());
+        let (expected_message, _) =
+            UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -457,7 +520,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let trait_name = "token-trait";
-        let (expected_message, _) = UnusedTrait::make_diagnostic_strings(&trait_name.into());
+        let (expected_message, _) = UnusedTrait::make_diagnostic_strings_unused(&trait_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
