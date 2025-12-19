@@ -26,7 +26,7 @@ impl UnusedTraitSettings {
     }
 }
 
-/// Data on trait
+/// Data on trait usage
 struct TraitUsage<'a> {
     /// Keep track of where trait was imported with `use-trait`
     expr: &'a SymbolicExpression,
