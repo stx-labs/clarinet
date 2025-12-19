@@ -461,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn used_in_public_fn_nested() {
+    fn used_in_public_fn_nested_optional() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (use-trait token-trait .token-trait.token-trait)
@@ -470,6 +470,22 @@ mod tests {
                 (let ((token (unwrap-panic token-opt)))
                     (contract-call? token get-balance p)))
         ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_in_public_fn_nested_tuple() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (use-trait token-trait .token-trait.token-trait)
+
+            (define-public (get-token-balance (args { t: <token-trait>, p: principal }))
+                (let ((token (get t args)))
+                    (contract-call? token get-balance (get p args))))
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -544,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn used_in_declare_trait_nested() {
+    fn used_in_declare_trait_nested_optional() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (use-trait token-trait .token-trait.token-trait)
@@ -554,6 +570,23 @@ mod tests {
                 (get-balance ((optional <token-trait>) principal) (response uint uint))
             ))
         ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_in_declare_trait_nested_tuple() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (use-trait token-trait .token-trait.token-trait)
+
+            (define-trait token-proxy-trait (
+                (get-supply ({ t: <token-trait> }) (response uint uint))
+                (get-balance ({ t: <token-trait>, p: principal }) (response uint uint))
+            ))
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
 
