@@ -134,12 +134,13 @@ impl<'a> UnusedTrait<'a> {
         let mut diagnostics = vec![];
 
         for (name, usage) in &self.traits {
-            let (message, suggestion) = match (
+            let used_in = (
                 usage.declare_trait,
                 usage.public_fn,
                 usage.read_only_fn,
                 usage.private_fn,
-            ) {
+            );
+            let (message, suggestion) = match used_in {
                 (true, _, _, _) | (_, true, _, _) | (_, _, true, _) => continue,
                 (false, false, false, true) => Self::make_diagnostic_strings_private_fn_only(name),
                 (false, false, false, false) => Self::make_diagnostic_strings_unused(name),
@@ -505,6 +506,23 @@ mod tests {
         assert!(output[0].contains("warning:"));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
+    fn used_in_declare_trait() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait token-trait .token-trait.token-trait)
+
+            (define-trait token-proxy-trait (
+                (get-supply (<token-trait>) (response uint uint))
+                (get-balance (<token-trait> principal) (response uint uint))
+            ))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
     }
 
     #[test]
