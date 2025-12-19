@@ -460,6 +460,22 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
+    #[test]
+    fn used_in_public_fn_nested() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait token-trait .token-trait.token-trait)
+
+            (define-public (get-token-balance (token-opt (optional <token-trait>)) (p principal))
+                (let ((token (unwrap-panic token-opt)))
+                    (contract-call? token get-balance p)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
     /// If trait is used *only* in an unused private function, it's unreachable, so consider it unused
     #[test]
     fn used_in_unused_private_fn() {
@@ -519,6 +535,23 @@ mod tests {
             (define-trait token-proxy-trait (
                 (get-supply (<token-trait>) (response uint uint))
                 (get-balance (<token-trait> principal) (response uint uint))
+            ))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_in_declare_trait_nested() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait token-trait .token-trait.token-trait)
+
+            (define-trait token-proxy-trait (
+                (get-supply ((optional <token-trait>)) (response uint uint))
+                (get-balance ((optional <token-trait>) principal) (response uint uint))
             ))
         ").to_string();
 
