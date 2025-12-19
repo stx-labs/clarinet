@@ -217,14 +217,18 @@ mod tests {
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    #[test]
-    fn define_private() {
+    fn default_session() -> Session {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
             .analysis
             .enable_passes(&[Pass::CallChecker]);
-        let mut session = Session::new(settings);
+        Session::new_without_boot_contracts(settings)
+    }
+
+    #[test]
+    fn define_private() {
+        let mut session = default_session();
         let snippet = "
 (define-private (foo (amount uint))
     (ok amount)
@@ -256,12 +260,7 @@ mod tests {
 
     #[test]
     fn define_read_only() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CallChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-read-only (foo (amount uint))
     (ok amount)
@@ -293,12 +292,7 @@ mod tests {
 
     #[test]
     fn define_public() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CallChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-public (foo (amount uint))
     (ok amount)
@@ -330,12 +324,7 @@ mod tests {
 
     #[test]
     fn correct_call() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CallChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-private (foo (amount uint))
     (ok amount)
@@ -356,12 +345,7 @@ mod tests {
 
     #[test]
     fn builtin_function_arg_count() {
-        let mut settings = SessionSettings::default();
-        settings
-            .repl_settings
-            .analysis
-            .enable_passes(&[Pass::CallChecker]);
-        let mut session = Session::new(settings);
+        let mut session = default_session();
         let snippet = "
 (define-map kv-store { key: int } { value: int })
 (define-private (incompatible-tuple) (tuple (k 1)))

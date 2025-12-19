@@ -199,7 +199,7 @@ mod tests {
             .analysis
             .enable_lint(NoopChecker::get_name(), Level::Warning);
 
-        Session::new(settings)
+        Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
             .expect("Invalid code snippet")
     }
