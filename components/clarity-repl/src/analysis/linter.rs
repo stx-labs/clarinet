@@ -73,6 +73,7 @@ impl LintGroup {
                 map.insert(LintName::UnusedMap, value);
                 map.insert(LintName::UnusedPrivateFn, value);
                 map.insert(LintName::UnusedToken, value);
+                map.insert(LintName::UnusedTrait, value);
             }
             Perf => {
                 map.insert(LintName::Noop, value);
