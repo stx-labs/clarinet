@@ -154,21 +154,21 @@ impl<'a> UnusedTrait<'a> {
         diagnostics
     }
 
-    /// Search a parameter for a trait object, and fun `func` on associated `TraitUsage` struct`
-    fn process_param_type_expr(
+    /// Search a symbolic expression for a trait object, and fun `func` on associated `TraitUsage` struct`
+    fn process_symbolic_expr(
         &mut self,
-        param_type: &SymbolicExpressionType,
+        expr: &SymbolicExpression,
         func: fn(&mut TraitUsage) -> (),
     ) {
         use SymbolicExpressionType::*;
 
-        match param_type {
+        match &expr.expr {
             TraitReference(name, _) => {
                 self.traits.get_mut(name).map(func);
             }
             List(exprs) => {
                 for expr in exprs {
-                    self.process_param_type_expr(&expr.expr, func);
+                    self.process_symbolic_expr(expr, func);
                 }
             }
             Field(_) | AtomValue(_) | Atom(_) | LiteralValue(_) => {}
@@ -176,9 +176,9 @@ impl<'a> UnusedTrait<'a> {
     }
 
     /// Search parameter list for a trait object, and fun `func` on associated `TraitUsage` struct`
-    fn process_params(&mut self, params: &[TypedVar], func: fn(&mut TraitUsage) -> ()) {
+    fn process_param_list(&mut self, params: &[TypedVar], func: fn(&mut TraitUsage) -> ()) {
         for param in params {
-            self.process_param_type_expr(&param.type_expr.expr, func);
+            self.process_symbolic_expr(param.type_expr, func);
         }
     }
 }
@@ -222,7 +222,7 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         if let Some(params) = parameters {
-            self.process_params(&params, |usage| usage.read_only_fn = true);
+            self.process_param_list(&params, |usage| usage.read_only_fn = true);
         }
         true
     }
@@ -246,7 +246,7 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         if let Some(params) = parameters {
-            self.process_params(&params, |usage| usage.public_fn = true);
+            self.process_param_list(&params, |usage| usage.public_fn = true);
         }
         true
     }
@@ -269,7 +269,19 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         if let Some(params) = parameters {
-            self.process_params(&params, |usage| usage.private_fn = true);
+            self.process_param_list(&params, |usage| usage.private_fn = true);
+        }
+        true
+    }
+
+    fn visit_define_trait(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        functions: &'a [SymbolicExpression],
+    ) -> bool {
+        for expr in functions {
+            self.process_symbolic_expr(expr, |usage| usage.declare_trait = true);
         }
         true
     }
@@ -332,16 +344,6 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
         _expr: &'a SymbolicExpression,
         _trait_identifier: &TraitIdentifier,
     ) -> bool {
-        true
-    }
-
-    fn visit_define_trait(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        _functions: &'a [SymbolicExpression],
-    ) -> bool {
-        // TODO
         true
     }
 }
