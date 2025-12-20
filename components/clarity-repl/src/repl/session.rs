@@ -121,6 +121,7 @@ impl Session {
         Self::inner_new(settings, true)
     }
 
+    /// Many unit tests don't need the boot contracts, and skipping them makes the tests run significantly faster
     pub fn new_without_boot_contracts(settings: SessionSettings) -> Self {
         Self::inner_new(settings, false)
     }
