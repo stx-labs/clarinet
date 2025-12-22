@@ -409,7 +409,7 @@ mod tests {
             ))
         ");
 
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         session.update_epoch(StacksEpochId::Epoch33);
 
         let trait_contract = ClarityContractBuilder::new()
