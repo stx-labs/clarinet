@@ -898,7 +898,7 @@ mod tests {
             .repl_settings
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
-        Session::new(settings)
+        Session::new_without_boot_contracts(settings)
     }
 
     #[test]
@@ -2404,7 +2404,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-private (my-transfer (amount uint))
     (stx-transfer? amount (as-contract tx-sender) tx-sender)
@@ -2808,7 +2808,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-public (tainted (amount uint))
     (begin
@@ -2841,7 +2841,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-public (tainted (amount uint))
     (begin
@@ -2966,7 +2966,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = false;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-data-var admin principal tx-sender)
 (define-public (filter_one (amount1 uint) (amount2 uint))
@@ -3068,7 +3068,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-private (my-transfer (amount uint))
     (begin
@@ -3101,7 +3101,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = true;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-data-var owner principal tx-sender)
 (define-public (set-owner (address principal))
@@ -3128,7 +3128,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = true;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-data-var owner principal tx-sender)
 (define-public (set-owner (address principal))
@@ -3156,7 +3156,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = false;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-data-var owner principal tx-sender)
 (define-public (set-owner (address principal))
@@ -3201,7 +3201,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_caller = true;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-data-var owner principal tx-sender)
 (define-public (set-owner (address principal))
@@ -3228,7 +3228,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_caller = true;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-data-var owner principal tx-sender)
 (define-public (set-owner (address principal))
@@ -3256,7 +3256,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_caller = false;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-data-var owner principal tx-sender)
 (define-public (set-owner (address principal))
@@ -3301,7 +3301,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 (define-private (write-data (data uint))
     (begin
@@ -3337,7 +3337,7 @@ mod tests {
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
-        let mut session = Session::new(settings);
+        let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "
 ;; #[allow(unchecked_params)]
 (define-private (write-data (data uint))

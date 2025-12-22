@@ -118,6 +118,15 @@ pub struct Session {
 
 impl Session {
     pub fn new(settings: SessionSettings) -> Self {
+        Self::inner_new(settings, true)
+    }
+
+    /// Many unit tests don't need the boot contracts, and skipping them makes the tests run significantly faster
+    pub fn new_without_boot_contracts(settings: SessionSettings) -> Self {
+        Self::inner_new(settings, false)
+    }
+
+    fn inner_new(settings: SessionSettings, with_boot_contracts: bool) -> Self {
         let mut interpreter = ClarityInterpreter::new(
             settings.get_default_sender(),
             settings.repl_settings.clone(),
@@ -125,7 +134,11 @@ impl Session {
         );
 
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
-        let boot_contracts = deploy_boot_contracts(&settings, &mut interpreter);
+        let boot_contracts = if with_boot_contracts {
+            deploy_boot_contracts(&settings, &mut interpreter)
+        } else {
+            BTreeMap::new()
+        };
 
         Self {
             interpreter,

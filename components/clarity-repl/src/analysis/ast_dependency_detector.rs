@@ -978,7 +978,7 @@ mod tests {
 
     #[test]
     fn no_deps() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let snippet = "
 (define-public (hello)
     (ok (print \"hello\"))
@@ -1000,7 +1000,7 @@ mod tests {
 
     #[test]
     fn contract_call() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-public (hello (a int))
@@ -1037,7 +1037,7 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_local_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-public (hello (a int))
@@ -1080,7 +1080,7 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_remote_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-trait my-trait
@@ -1124,7 +1124,7 @@ mod tests {
 
     #[test]
     fn pass_contract_local() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-public (hello (a int))
@@ -1186,7 +1186,7 @@ mod tests {
 
     #[test]
     fn nested_trait_in_optional_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
 (define-public (hello) (ok true))"
@@ -1212,7 +1212,7 @@ mod tests {
 
     #[test]
     fn nested_trait_in_response_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
 (define-public (hello) (ok true))"
@@ -1238,7 +1238,7 @@ mod tests {
 
     #[test]
     fn nested_trait_in_tuple_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
 (define-public (hello) (ok true))"
@@ -1264,7 +1264,7 @@ mod tests {
 
     #[test]
     fn nested_trait_in_list_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
 (define-public (hello) (ok true))"
@@ -1291,7 +1291,7 @@ mod tests {
 
     #[test]
     fn nested_trait_in_composite_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
 (define-public (hello) (ok true))"
@@ -1318,7 +1318,7 @@ mod tests {
 
     #[test]
     fn impl_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-trait something
@@ -1358,7 +1358,7 @@ mod tests {
 
     #[test]
     fn use_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-trait something
@@ -1395,7 +1395,7 @@ mod tests {
 
     #[test]
     fn unresolved_contract_call() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet = "
 (define-public (call-foo)
@@ -1419,7 +1419,7 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_unresolved_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet = "
 (use-trait my-trait .bar.my-trait)
@@ -1445,7 +1445,7 @@ mod tests {
 
     #[test]
     fn contract_call_top_level() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-public (hello (a int))
@@ -1477,7 +1477,7 @@ mod tests {
 
     #[test]
     fn avoid_bad_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-public (hello (a (list principal)))
@@ -1509,7 +1509,7 @@ mod tests {
 
     #[test]
     fn contract_stored_in_constant() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let snippet1 = "
 (define-public (hello (a int))
