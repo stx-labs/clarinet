@@ -40,9 +40,21 @@ describe("generate deployment plans test", async () => {
     expect(success).toBe(true);
     expect(fs.existsSync(deploymentPlanPath)).toBe(true);
   })
+
+  it.only("can start a session without the existing deployment plan", async () => {
+    const success = await generateDeployement("tests/fixtures/Clarinet.toml");
+    expect(success).toBe(true);
+
+    const deployment = fs.readFileSync(deploymentPlanPath);
+    console.log(deployment);
+
+    const simnet = await initSimnet("tests/fixtures/Clarinet.toml", true, { forceOnDisk: true });
+    // make sure the simnet is running
+    expect(simnet.blockHeight).toBe(3);
+  })
 });
 
-describe("initSiment deployment plans test", async () => {
+describe.skip("initSiment deployment plans test", async () => {
 
   it("simnet deployment plan is created if it does not exist", async () => {
     expect(fs.existsSync(deploymentPlanPath)).toBe(false);

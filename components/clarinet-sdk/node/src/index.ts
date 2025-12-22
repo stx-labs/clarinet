@@ -21,9 +21,13 @@ BigInt.prototype.toJSON = function () {
 };
 
 type Options = {
-  trackCosts: boolean;
-  trackCoverage: boolean;
+  // sdk options
+  trackCosts?: boolean;
+  trackCoverage?: boolean;
   trackPerformance?: boolean;
+  // session options
+  /** Use the existing deployment plan without updating it */
+  forceOnDisk?: boolean;
 };
 
 export async function getSDK(options?: Options): Promise<Simnet> {
@@ -58,19 +62,13 @@ function memoizedInit() {
   return async (
     manifestPath = "./Clarinet.toml",
     noCache = false,
-    options?: {
-      trackCosts: boolean;
-      trackCoverage: boolean;
-      trackPerformance?: boolean;
-      performanceCostField?: string;
-    },
+    options?: Options
   ) => {
     if (noCache || !simnet) {
       simnet = await getSDK(options);
     }
 
-    // start a new simnet session
-    await simnet.initSession(process.cwd(), manifestPath);
+    await simnet.initSession(process.cwd(), manifestPath, !!options?.forceOnDisk);
     return simnet;
   };
 }

@@ -72,7 +72,7 @@ macro_rules! log {
 }
 
 struct DeploymentArtifacts {
-    artifacts: DeploymentGenerationArtifacts,
+    artifacts: Option<DeploymentGenerationArtifacts>,
     deployment: DeploymentSpecification,
     manifest: ProjectManifest,
 }
@@ -373,7 +373,12 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=initSession)]
-    pub async fn init_session(&mut self, cwd: &str, manifest_path: &str) -> Result<(), String> {
+    pub async fn init_session(
+        &mut self,
+        cwd: &str,
+        manifest_path: &str,
+        force_on_disk: bool,
+    ) -> Result<(), String> {
         let cwd_path = PathBuf::from(cwd);
         let cwd_root = FileLocation::FileSystem { path: cwd_path };
         let manifest_location = FileLocation::try_parse(manifest_path, Some(&cwd_root))
@@ -386,7 +391,10 @@ impl SDK {
             accounts,
         } = match self.cache.get(&manifest_location) {
             Some(cache) => cache.clone(),
-            None => self.setup_session(cwd, manifest_path).await?,
+            None => {
+                self.setup_session(cwd, manifest_path, force_on_disk)
+                    .await?
+            }
         };
 
         self.deployer = session.interpreter.get_tx_sender().to_string();
@@ -408,13 +416,14 @@ impl SDK {
         &mut self,
         cwd: &str,
         manifest_path: &str,
+        force_on_disk: bool,
     ) -> Result<ProjectCache, String> {
         let DeploymentArtifacts {
             deployment,
             manifest,
             artifacts,
         } = self
-            .generate_deployment_plan_internal(cwd, manifest_path)
+            .get_deployment_plan(cwd, manifest_path, force_on_disk)
             .await?;
 
         let mut session = initiate_session_from_manifest(&manifest);
@@ -425,7 +434,7 @@ impl SDK {
         let executed_contracts = update_session_with_deployment_plan(
             &mut session,
             &deployment,
-            Some(&artifacts.asts),
+            artifacts.map(|a| a.asts).as_ref(),
             Some(DEFAULT_EPOCH),
         );
 
@@ -484,28 +493,83 @@ impl SDK {
         Ok(cache)
     }
 
-    async fn generate_deployment_plan_internal(
+    async fn get_existing_deployment_plan(
+        &self,
+        project_root: &FileLocation,
+        deployment_plan_location: &FileLocation,
+    ) -> Result<Option<(String, DeploymentSpecification)>, String> {
+        let deployment_plan_path = deployment_plan_location.to_string();
+
+        if !self
+            .file_accessor
+            .file_exists(deployment_plan_path.clone())
+            .await?
+        {
+            return Ok(None);
+        }
+
+        let deployment_file = self.file_accessor.read_file(deployment_plan_path).await?;
+        let spec_file = DeploymentSpecificationFile::from_file_content(&deployment_file)?;
+        let deployment = DeploymentSpecification::from_specifications(
+            &spec_file,
+            &StacksNetwork::Simnet,
+            project_root,
+            None,
+        )?;
+
+        Ok(Some((deployment_file, deployment)))
+    }
+
+    async fn get_deployment_plan(
         &self,
         cwd: &str,
         manifest_path: &str,
+        force_on_disk: bool,
     ) -> Result<DeploymentArtifacts, String> {
-        let cwd_path = PathBuf::from(cwd);
-        let cwd_root = FileLocation::FileSystem { path: cwd_path };
+        let cwd_root = FileLocation::FileSystem {
+            path: PathBuf::from(cwd),
+        };
         let manifest_location = FileLocation::try_parse(manifest_path, Some(&cwd_root))
-            .ok_or("Failed to parse manifest location")?;
-        let manifest =
-            ProjectManifest::from_file_accessor(&manifest_location, true, &*self.file_accessor)
-                .await?;
+            .ok_or_else(|| format!("Failed to parse manifest location: {manifest_path}"))?;
+        let manifest = ProjectManifest::from_file_accessor(
+            &manifest_location,
+            true,
+            self.file_accessor.as_ref(),
+        )
+        .await?;
         let project_root = manifest_location.get_parent_location()?;
         let deployment_plan_location =
             FileLocation::try_parse("deployments/default.simnet-plan.yaml", Some(&project_root))
-                .ok_or("Failed to parse default deployment location")?;
+                .ok_or_else(|| {
+                    format!("Failed to parse deployment location relative to {project_root:?}")
+                })?;
 
+        // Read existing deployment plan once
+        let existing_deployment = self
+            .get_existing_deployment_plan(&project_root, &deployment_plan_location)
+            .await?;
+
+        // Early return if we only need the on-disk deployment plan
+        if force_on_disk {
+            let deployment = existing_deployment
+                .map(|(_, deployment)| deployment)
+                .ok_or_else(|| {
+                    format!("Deployment plan not found at {deployment_plan_location}")
+                })?;
+
+            return Ok(DeploymentArtifacts {
+                artifacts: None,
+                deployment,
+                manifest,
+            });
+        }
+
+        // Generate a new deployment plan
         let (mut deployment, artifacts) = generate_default_deployment(
             &manifest,
             &StacksNetwork::Simnet,
             false,
-            Some(&*self.file_accessor),
+            Some(self.file_accessor.as_ref()),
             Some(StacksEpochId::Epoch21),
         )
         .await?;
@@ -516,51 +580,36 @@ impl SDK {
                 return Err(diags_digest.message);
             }
         }
-        let project_root = manifest.location.get_parent_location()?;
 
-        if self
-            .file_accessor
-            .file_exists(deployment_plan_location.to_string())
-            .await?
+        // Merge with existing deployment plan if it exists
+        let original_deployment_file = if let Some((deployment_file, existing_deployment)) =
+            existing_deployment
         {
-            let spec_file_content = self
-                .file_accessor
-                .read_file(deployment_plan_location.to_string())
-                .await?;
+            let mut spec_file = DeploymentSpecificationFile::from_file_content(&deployment_file)?;
 
-            let mut spec_file = DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
-
-            // the contract publish txs are managed by the manifest
-            // keep the user added txs and merge them with the default deployment plan
+            // The contract publish txs are managed by the manifest
+            // Keep only the user-added txs and merge them with the default deployment plan
             if let Some(ref mut plan) = spec_file.plan {
                 for batch in plan.batches.iter_mut() {
                     batch.remove_publish_transactions()
                 }
             }
-
-            let existing_deployment = DeploymentSpecification::from_specifications(
-                &spec_file,
-                &StacksNetwork::Simnet,
-                &project_root,
-                None,
-            )?;
-
             deployment.merge_batches(existing_deployment.plan.batches);
-
-            self.write_deployment_plan(
-                &deployment,
-                &project_root,
-                &deployment_plan_location,
-                Some(&spec_file_content),
-            )
-            .await?;
+            Some(deployment_file)
         } else {
-            self.write_deployment_plan(&deployment, &project_root, &deployment_plan_location, None)
-                .await?;
-        }
+            None
+        };
+
+        self.write_deployment_plan(
+            &deployment,
+            &project_root,
+            &deployment_plan_location,
+            original_deployment_file.as_deref(),
+        )
+        .await?;
 
         Ok(DeploymentArtifacts {
-            artifacts,
+            artifacts: Some(artifacts),
             deployment,
             manifest,
         })
@@ -572,8 +621,7 @@ impl SDK {
         cwd: &str,
         manifest_path: &str,
     ) -> Result<(), String> {
-        self.generate_deployment_plan_internal(cwd, manifest_path)
-            .await?;
+        self.get_deployment_plan(cwd, manifest_path, false).await?;
         Ok(())
     }
 
