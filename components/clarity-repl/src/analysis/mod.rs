@@ -57,6 +57,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::UnusedMap => lints::UnusedMap::run_pass,
             LintName::UnusedPrivateFn => lints::UnusedPrivateFn::run_pass,
             LintName::UnusedToken => lints::UnusedToken::run_pass,
+            LintName::UnusedTrait => lints::UnusedTrait::run_pass,
         }
     }
 }
