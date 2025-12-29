@@ -39,6 +39,12 @@ _clarinet() {
             deployments)
                 cmd+="__deployments"
                 ;;
+            apply)
+                cmd+="__apply"
+                ;;
+            generate)
+                cmd+="__generate"
+                ;;
             requirement)
                 cmd+="__requirement"
                 ;;
@@ -194,17 +200,34 @@ _clarinet() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        deployments)
-            opts="--help --version new contract console test check deployments run integrate lsp completions"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
+        clarinet__deployments)
+            opts="--help --version --manifest-path check generate apply"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
-                *)
+                --manifest-path)
                     COMPREPLY=()
                     ;;
+                *)
+                    COMPREPLY=( $(compgen -W "check generate apply" -- "${cur}") )
+                    ;;
             esac
+            return 0
+            ;;
+        clarinet__deployments__check)
+            opts="--help --version --manifest-path --devnet --testnet --mainnet"
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        clarinet__deployments__generate)
+            opts="--help --version --manifest-path --devnet --testnet --mainnet --low-cost --medium-cost --manual-cost"
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        clarinet__deployments__apply)
+            opts="--help --version --manifest-path --devnet --testnet --mainnet --no-dashboard"
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
