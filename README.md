@@ -75,6 +75,13 @@ clarinet console
 (contract-call? .counter count-up)
 (contract-call? .counter get-count tx-sender)
 ```
+### Console Cheatsheet
+
+When debugging in `clarinet console`, use these commands to inspect the global chain state:
+
+- `::get_assets_maps`: Displays the balances of all assets (STX, FTs, NFTs) for all accounts.
+- `::get_contracts`: Lists all currently deployed contracts.
+- `::help`: Shows the full list of available console commands.
 
 ### Contributing
 
