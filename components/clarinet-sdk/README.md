@@ -10,6 +10,21 @@ duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the f
 be able to simplify this build, it would require some breaking changes so it could be part of
 Clarinet 3.x.
 
+### Verifying Contract Events
+
+To assert that a specific event was emitted during a function call, you can filter the transaction events. This is useful for testing indexer integration.
+
+```typescript
+it('emits a print event', () => {
+  const { result, events } = simnet.callPublicFn('counter', 'count-up', [], address1);
+
+  // Filter for 'print_event' type
+  const printEvents = events.filter(event => event.event === 'print_event');
+
+  expect(printEvents.length).toBe(1);
+  expect(printEvents[0].data.value).toBe('count-up called');
+});
+```
 ## Contributing
 
 The clarinet-sdk requires a few steps to be built and tested locally.
