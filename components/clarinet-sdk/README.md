@@ -10,6 +10,23 @@ duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the f
 be able to simplify this build, it would require some breaking changes so it could be part of
 Clarinet 3.x.
 
+## Usage
+
+### Simulating Time (Time Travel)
+
+When writing tests, you can simulate the passage of time (block height) to test time-dependent logic like vesting schedules or auctions.
+
+```typescript
+it('demonstrates time travel', () => {
+  const currentHeight = simnet.blockHeight;
+
+  // Advance the chain by 100 blocks
+  simnet.mineEmptyBlocks(100);
+
+  const newHeight = simnet.blockHeight;
+  expect(newHeight).toBe(currentHeight + 100);
+});
+
 ## Contributing
 
 The clarinet-sdk requires a few steps to be built and tested locally.
