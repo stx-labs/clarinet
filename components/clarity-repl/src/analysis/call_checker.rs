@@ -7,7 +7,6 @@ use clarity::vm::representations::SymbolicExpression;
 use clarity::vm::SymbolicExpressionType::List;
 use clarity::vm::{ClarityName, ClarityVersion};
 
-use crate::analysis::annotation::Annotation;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::{AnalysisPass, AnalysisResult, Settings};

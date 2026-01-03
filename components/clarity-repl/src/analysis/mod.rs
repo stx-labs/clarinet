@@ -16,7 +16,6 @@ use std::iter::FromIterator;
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
-use clarity::vm::analysis;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;

@@ -26,7 +26,7 @@ impl<'a> AnalysisCache<'a> {
         }
     }
 
-    pub fn get_constant_data(&mut self) -> &'a Constants {
+    pub fn get_constant_data(&mut self) -> &Constants<'a> {
         self.constants.get_or_insert(Constants::new(
             self.contract_analysis.clarity_version,
             self.contract_analysis,
