@@ -4,7 +4,7 @@ use clarity::vm::analysis::ContractAnalysis;
 
 pub mod constants;
 
-use constants::Constants;
+use constants::{ConstantMap, ConstantMapBuilder};
 
 use crate::analysis::annotation::Annotation;
 
@@ -14,7 +14,7 @@ pub struct AnalysisCache<'a> {
     pub contract_analysis: &'a ContractAnalysis,
     pub annotations: &'a Vec<Annotation>,
 
-    constants: Option<Constants<'a>>,
+    constants: Option<ConstantMap<'a>>,
 }
 
 impl<'a> AnalysisCache<'a> {
@@ -26,8 +26,8 @@ impl<'a> AnalysisCache<'a> {
         }
     }
 
-    pub fn get_constant_data(&mut self) -> &Constants<'a> {
-        self.constants.get_or_insert(Constants::new(
+    pub fn get_constants(&mut self) -> &ConstantMap<'a> {
+        self.constants.get_or_insert(ConstantMapBuilder::build(
             self.contract_analysis.clarity_version,
             self.contract_analysis,
             self.annotations,

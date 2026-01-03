@@ -853,7 +853,7 @@ fn is_param_type_excluded_from_checked_requirement(param: &TypedVar) -> bool {
 
 impl AnalysisPass for CheckChecker<'_> {
     fn run_pass(
-        analysis_db: &mut AnalysisDatabase,
+        _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         settings: &analysis::Settings,
