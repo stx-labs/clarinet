@@ -9,6 +9,7 @@ use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
@@ -198,20 +199,19 @@ impl<'a> ASTVisitor<'a> for UnusedPrivateFn<'a> {
 
 impl AnalysisPass for UnusedPrivateFn<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedPrivateFnSettings::new();
         let lint = UnusedPrivateFn::new(
-            contract_analysis.clarity_version,
-            annotations,
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
             level,
             settings,
         );
-        lint.run(contract_analysis)
+        lint.run(analysis_cache.contract_analysis)
     }
 }
 

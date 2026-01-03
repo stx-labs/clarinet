@@ -1,6 +1,7 @@
 pub mod annotation;
 pub mod ast_dependency_detector;
 pub mod ast_visitor;
+pub mod cache;
 pub mod call_checker;
 pub mod check_checker;
 pub mod coverage;
@@ -15,6 +16,7 @@ use std::iter::FromIterator;
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
+use clarity::vm::analysis;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
@@ -26,13 +28,13 @@ use serde::Serialize;
 use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::LintGroup;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
-    &mut ContractAnalysis,
     &mut AnalysisDatabase,
-    &Vec<Annotation>,
+    &mut AnalysisCache,
     level: ClarityDiagnosticLevel,
     settings: &Settings,
 ) -> AnalysisResult;
@@ -40,9 +42,8 @@ pub type AnalysisPassFn = fn(
 pub trait AnalysisPass {
     #[allow(clippy::ptr_arg)]
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: ClarityDiagnosticLevel,
         settings: &Settings,
     ) -> AnalysisResult;
@@ -252,10 +253,13 @@ pub fn run_analysis(
         passes.push((lint, level.clone()));
     }
 
+    // Create shared cache for all passes/lints
+    let mut cache = AnalysisCache::new(contract_analysis, annotations);
+
     execute(analysis_db, |database| {
         for (pass, level) in passes {
             // Collect warnings and continue, or if there is an error, return.
-            match pass(contract_analysis, database, annotations, level, settings) {
+            match pass(database, &mut cache, level, settings) {
                 Ok(mut w) => errors.append(&mut w),
                 Err(mut e) => {
                     errors.append(&mut e);

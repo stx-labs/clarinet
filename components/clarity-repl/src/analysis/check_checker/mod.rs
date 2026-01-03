@@ -18,6 +18,7 @@ use schemars::JsonSchema;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
 use crate::repl::DEFAULT_EPOCH;
 
@@ -852,19 +853,18 @@ fn is_param_type_excluded_from_checked_requirement(param: &TypedVar) -> bool {
 
 impl AnalysisPass for CheckChecker<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         settings: &analysis::Settings,
     ) -> AnalysisResult {
         let checker = CheckChecker::new(
-            contract_analysis.clarity_version,
-            annotations,
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
             level,
             settings.check_checker,
         );
-        checker.run(contract_analysis)
+        checker.run(analysis_cache.contract_analysis)
     }
 }
 
