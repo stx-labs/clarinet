@@ -76,11 +76,11 @@ impl<'a, 'b> UnusedConst<'a, 'b> {
         let annotations = self.analysis_cache.annotations;
         let constants = self.analysis_cache.get_constants();
 
-        for (name, const_data) in constants {
+        for (const_name, const_data) in constants {
             if const_data.used || Self::allow(const_data, annotations) {
                 continue;
             }
-            let message = Self::make_diagnostic_message(name);
+            let message = Self::make_diagnostic_message(const_name);
             let diagnostic = Self::make_diagnostic(self.level.clone(), const_data.expr, message);
             diagnostics.push(diagnostic);
         }
