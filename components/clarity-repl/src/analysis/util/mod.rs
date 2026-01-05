@@ -14,7 +14,6 @@ pub enum CaseError {
 ///
 /// An identifier is considered SCREAMING_SNAKE_CASE if...
 ///  - It contains only ASCII uppercase letters (A–Z), digits (0–9), and underscores (_)
-///  - Contains at least one letter
 ///  - Does **not** contain consecutive underscores
 ///
 /// Note that leading or trailing underscores **are** allowed

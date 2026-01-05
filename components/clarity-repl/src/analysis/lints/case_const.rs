@@ -11,7 +11,8 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::constants::ConstantData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
-use crate::analysis::{self, util, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::util::{is_screaming_snake_case, CaseError};
+use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
     // TODO
@@ -61,16 +62,28 @@ impl<'a, 'b> CaseConst<'a, 'b> {
             .unwrap_or(false)
     }
 
-    fn make_diagnostic_message(name: &ClarityName) -> String {
-        format!("constant `{name}` should be SCREAMING_SNAKE_CASE")
+    fn make_diagnostic_message(name: &ClarityName, error: &CaseError) -> String {
+        format!("constant `{name}` is not SCREAMING_SNAKE_CASE: {error:?}")
     }
 
-    fn make_diagnostic(level: Level, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
+    fn make_diagnostic(
+        level: Level,
+        expr: &'a SymbolicExpression,
+        message: String,
+        error: &CaseError,
+    ) -> Diagnostic {
+        let suggestion = match error {
+            CaseError::Empty => "Give the constant a name".to_owned(), // Shouldn't happen
+            CaseError::IllegalCharacter(b) => {
+                format!("Remove the illegal character '{c}'", c = char::from(*b))
+            }
+            CaseError::ConsecutiveUnderscores => "Remove the consecutive underscores".to_owned(),
+        };
         Diagnostic {
             level,
             message,
             spans: vec![expr.span.clone()],
-            suggestion: Some("Rename the constant".to_string()),
+            suggestion: Some(suggestion),
         }
     }
 
@@ -84,11 +97,12 @@ impl<'a, 'b> CaseConst<'a, 'b> {
             if Self::allow(const_data, annotations) {
                 continue;
             }
-            let Err(err) = util::is_screaming_snake_case(const_name.as_str()) else {
+            let Err(error) = is_screaming_snake_case(const_name.as_str()) else {
                 continue;
             };
-            let message = Self::make_diagnostic_message(const_name);
-            let diagnostic = Self::make_diagnostic(self.level.clone(), const_data.expr, message);
+            let message = Self::make_diagnostic_message(const_name, &error);
+            let diagnostic =
+                Self::make_diagnostic(self.level.clone(), const_data.expr, message, &error);
             diagnostics.push(diagnostic);
         }
 
@@ -132,6 +146,7 @@ mod tests {
 
     use super::CaseConst;
     use crate::analysis::linter::Lint;
+    use crate::analysis::util::CaseError;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -217,7 +232,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let const_name = "SECONDS_PER_MINUTE__";
-        let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+        let expected_message = CaseConst::make_diagnostic_message(
+            &const_name.into(),
+            &CaseError::ConsecutiveUnderscores,
+        );
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -239,7 +257,10 @@ mod tests {
         match res {
             Ok((output, result)) => {
                 let const_name = "__SECONDS_PER_MINUTE";
-                let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+                let expected_message = CaseConst::make_diagnostic_message(
+                    &const_name.into(),
+                    &CaseError::ConsecutiveUnderscores,
+                );
 
                 assert_eq!(result.diagnostics.len(), 1);
                 assert!(output[0].contains("warning:"));
@@ -262,7 +283,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let const_name = "MINUTES-PER-HOUR";
-        let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+        let expected_message = CaseConst::make_diagnostic_message(
+            &const_name.into(),
+            &CaseError::IllegalCharacter(b'-'),
+        );
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -280,7 +304,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let const_name = "minutes_per_hour";
-        let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+        let expected_message = CaseConst::make_diagnostic_message(
+            &const_name.into(),
+            &CaseError::IllegalCharacter(b'm'),
+        );
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -302,7 +329,10 @@ mod tests {
         match res {
             Ok((output, result)) => {
                 let const_name = "MINUTES__PER__HOUR ";
-                let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+                let expected_message = CaseConst::make_diagnostic_message(
+                    &const_name.into(),
+                    &CaseError::ConsecutiveUnderscores,
+                );
 
                 assert_eq!(result.diagnostics.len(), 1);
                 assert!(output[0].contains("warning:"));
