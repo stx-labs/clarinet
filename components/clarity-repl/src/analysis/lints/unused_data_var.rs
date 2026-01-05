@@ -1,4 +1,4 @@
-//! Lint to find global (`declare-data-var`) variables
+//! Lint to find unused global (`declare-data-var`) variables
 //!
 //! A dignostic is generated if:
 //!  - The variable is never referenced
