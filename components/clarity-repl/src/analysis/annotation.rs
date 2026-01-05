@@ -62,6 +62,7 @@ pub enum WarningKind {
     UnusedPrivateFn,
     UnusedToken,
     UnusedTrait,
+    CaseConst,
 }
 
 #[derive(Debug)]

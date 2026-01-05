@@ -9,6 +9,7 @@ pub mod coverage;
 mod coverage_tests;
 pub mod linter;
 pub mod lints;
+mod util;
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -58,6 +59,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::UnusedPrivateFn => lints::UnusedPrivateFn::run_pass,
             LintName::UnusedToken => lints::UnusedToken::run_pass,
             LintName::UnusedTrait => lints::UnusedTrait::run_pass,
+            LintName::CaseConst => lints::CaseConst::run_pass,
         }
     }
 }

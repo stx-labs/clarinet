@@ -24,6 +24,7 @@ pub enum LintName {
     UnusedPrivateFn,
     UnusedToken,
     UnusedTrait,
+    CaseConst,
 }
 
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
@@ -78,7 +79,9 @@ impl LintGroup {
             Perf => {
                 map.insert(LintName::Noop, value);
             }
-            Style => {}
+            Style => {
+                map.insert(LintName::CaseConst, value);
+            }
             Safety => {}
             Misc => {}
         }
