@@ -81,9 +81,12 @@ impl<'a, 'b> CaseConst<'a, 'b> {
         let constants = self.analysis_cache.get_constants();
 
         for (const_name, const_data) in constants {
-            if Self::allow(const_data, annotations) || util::is_screaming_snake_case(const_name) {
+            if Self::allow(const_data, annotations) {
                 continue;
             }
+            let Err(err) = util::is_screaming_snake_case(const_name) else {
+                continue;
+            };
             let message = Self::make_diagnostic_message(const_name);
             let diagnostic = Self::make_diagnostic(self.level.clone(), const_data.expr, message);
             diagnostics.push(diagnostic);
@@ -148,17 +151,81 @@ mod tests {
     fn valid_names() {
         #[rustfmt::skip]
         let snippet = indoc!(r#"
-            (define-constant SECONDS_PER_MINUTE_ u60)
+            (define-constant SECONDS_PER_MINUTE u60)
             (define-constant MINUTES_PER_HOUR u60)
-            (define-constant HOURS___PER___DAY u24)
+            (define-constant HOURS_PER_DAY u24)
 
             (define-constant PI u3)
-            (define-constant GREETING "Hello World!")
+            (define-constant G_R_E_E_T_I_N_G "Hello World!")
         "#).to_string();
 
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_single_trailing_underscore() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-constant SECONDS_PER_MINUTE_ u60)
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    // TODO: Enable when this leading underscores are legal in Clarity
+    #[ignore]
+    #[test]
+    fn allow_single_leading_underscore() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-constant _SECONDS_PER_MINUTE u60)
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn fail_on_multiple_trailing_underscore() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-constant SECONDS_PER_MINUTE__ u60)
+        "#).to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let const_name = "SECONDS_PER_MINUTE__";
+        let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(const_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    // TODO: Enable when this leading underscores are legal in Clarity
+    #[ignore]
+    #[test]
+    fn fail_on_multiple_leading_underscore() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-constant __SECONDS_PER_MINUTE u60)
+        "#).to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let const_name = "__SECONDS_PER_MINUTE";
+        let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(const_name));
+        assert!(output[0].contains(&expected_message));
     }
 
     #[test]
@@ -189,6 +256,24 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let const_name = "minutes_per_hour";
+        let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(const_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
+    fn fail_on_consecutive_underscores() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant MINUTES__PER__HOUR u60)
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let const_name = "MINUTES__PER__HOUR ";
         let expected_message = CaseConst::make_diagnostic_message(&const_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
