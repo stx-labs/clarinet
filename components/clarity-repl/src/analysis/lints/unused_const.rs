@@ -1,3 +1,7 @@
+//! Lint to find unused constants
+//!
+//! A constant is considered unused if declared but never referenced
+
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::SymbolicExpression;

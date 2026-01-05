@@ -1,4 +1,5 @@
 //! Find unused traits imported with `use-trait`
+//!
 //! A trait is considered unused if there is no public or read-only function parameter with the trait type
 
 use std::collections::HashMap;
