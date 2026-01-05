@@ -1,14 +1,11 @@
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
-use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
-use clarity::vm::representations::Span;
-use clarity::vm::{ClarityVersion, SymbolicExpression};
+use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::cache::constants::ConstantData;
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
@@ -22,53 +19,41 @@ impl UnusedConstSettings {
     }
 }
 
-pub struct UnusedConst<'a> {
-    clarity_version: ClarityVersion,
+pub struct UnusedConst<'a, 'b>
+where
+    'b: 'a,
+{
+    analysis_cache: &'a mut AnalysisCache<'b>,
     _settings: UnusedConstSettings,
-    annotations: &'a Vec<Annotation>,
-    active_annotation: Option<usize>,
-    /// Map of constants not yet used
-    unused_constants: HashMap<&'a ClarityName, &'a SymbolicExpression>,
     /// Clarity diagnostic level
     level: Level,
 }
 
-impl<'a> UnusedConst<'a> {
+impl<'a, 'b> UnusedConst<'a, 'b> {
     fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
+        analysis_cache: &'a mut AnalysisCache<'b>,
         level: Level,
         settings: UnusedConstSettings,
-    ) -> UnusedConst<'a> {
+    ) -> UnusedConst<'a, 'b> {
         Self {
-            clarity_version,
+            analysis_cache,
             _settings: settings,
             level,
-            annotations,
-            active_annotation: None,
-            unused_constants: HashMap::new(),
         }
     }
 
-    fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
-        // Traverse the entire AST
-        traverse(&mut self, &contract_analysis.expressions);
-
+    fn run(&mut self) -> AnalysisResult {
         // Process hashmap of unused constants and generate diagnostics
         let diagnostics = self.generate_diagnostics();
 
         Ok(diagnostics)
     }
 
-    // Check for annotations that should be attached to the given span
-    fn set_active_annotation(&mut self, span: &Span) {
-        self.active_annotation = get_index_of_span(self.annotations, span);
-    }
-
     // Check if the expression is annotated with `allow(<lint_name>)`
-    fn allow(&self) -> bool {
-        self.active_annotation
-            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+    fn allow(const_data: &ConstantData, annotations: &[Annotation]) -> bool {
+        const_data
+            .annotation
+            .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
 
@@ -76,9 +61,9 @@ impl<'a> UnusedConst<'a> {
         format!("constant `{name}` never used")
     }
 
-    fn make_diagnostic(&self, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
+    fn make_diagnostic(level: Level, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
         Diagnostic {
-            level: self.level.clone(),
+            level,
             message,
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
@@ -88,9 +73,15 @@ impl<'a> UnusedConst<'a> {
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (name, expr) in &self.unused_constants {
-            let message = Self::make_diagnostic_message(name);
-            let diagnostic = self.make_diagnostic(expr, message);
+        let annotations = self.analysis_cache.annotations;
+        let constants = self.analysis_cache.get_constants();
+
+        for (const_name, const_data) in constants {
+            if const_data.used || Self::allow(const_data, annotations) {
+                continue;
+            }
+            let message = Self::make_diagnostic_message(const_name);
+            let diagnostic = Self::make_diagnostic(self.level.clone(), const_data.expr, message);
             diagnostics.push(diagnostic);
         }
 
@@ -100,52 +91,20 @@ impl<'a> UnusedConst<'a> {
     }
 }
 
-impl<'a> ASTVisitor<'a> for UnusedConst<'a> {
-    fn get_clarity_version(&self) -> &ClarityVersion {
-        &self.clarity_version
-    }
-
-    fn visit_define_constant(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _value: &'a SymbolicExpression,
-    ) -> bool {
-        self.set_active_annotation(&expr.span);
-
-        if !self.allow() {
-            self.unused_constants.insert(name, expr);
-        }
-
-        true
-    }
-
-    fn visit_atom(&mut self, _expr: &'a SymbolicExpression, atom: &'a ClarityName) -> bool {
-        self.unused_constants.remove(atom);
-        true
-    }
-}
-
-impl AnalysisPass for UnusedConst<'_> {
+impl<'a, 'b> AnalysisPass for UnusedConst<'a, 'b> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedConstSettings::new();
-        let lint = UnusedConst::new(
-            contract_analysis.clarity_version,
-            annotations,
-            level,
-            settings,
-        );
-        lint.run(contract_analysis)
+        let mut lint = UnusedConst::new(analysis_cache, level, settings);
+        lint.run()
     }
 }
 
-impl Lint for UnusedConst<'_> {
+impl Lint for UnusedConst<'_, '_> {
     fn get_name() -> LintName {
         LintName::UnusedConst
     }

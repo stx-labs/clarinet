@@ -7,8 +7,8 @@ use clarity::vm::representations::SymbolicExpression;
 use clarity::vm::SymbolicExpressionType::List;
 use clarity::vm::{ClarityName, ClarityVersion};
 
-use crate::analysis::annotation::Annotation;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::{AnalysisPass, AnalysisResult, Settings};
 
 pub struct CallChecker<'a> {
@@ -200,14 +200,13 @@ impl<'a> ASTVisitor<'a> for CallChecker<'a> {
 
 impl AnalysisPass for CallChecker<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
-        _annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &Settings,
     ) -> AnalysisResult {
-        let tc = CallChecker::new(contract_analysis.clarity_version, level);
-        tc.run(contract_analysis)
+        let tc = CallChecker::new(analysis_cache.contract_analysis.clarity_version, level);
+        tc.run(analysis_cache.contract_analysis)
     }
 }
 
