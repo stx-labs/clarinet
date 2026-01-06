@@ -58,6 +58,7 @@ pub enum WarningKind {
     Noop,
     UnusedConst,
     UnusedDataVar,
+    UnusedLocal,
     UnusedMap,
     UnusedPrivateFn,
     UnusedToken,
