@@ -1,3 +1,9 @@
+//! Lint to find unused global (`declare-data-var`) variables
+//!
+//! A diagnostic is generated if:
+//!  - The variable is never referenced
+//!  - The variable is never modified (suggest using constant instead)
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;

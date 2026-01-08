@@ -1,3 +1,13 @@
+//! Lint to find unused FTs and NFTs
+//!
+//! A private function is considered unused if it is never referenced
+//!
+//! **NOTE:** A private function is considered used if it is referenced by another unused private function.
+//! In this case, repeated applications of the lint will find all unused code
+//!
+//! **NOTE:** It is common to intentinoally have unused private functions for unit testing.
+//! In this case, you should annotate the function with `;; #[allow(unused_private_fn)]`
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;

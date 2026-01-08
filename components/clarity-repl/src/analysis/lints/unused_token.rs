@@ -1,4 +1,5 @@
 //! Lint to find unused FTs and NFTs
+//!
 //! Tokens are considered unused if declared but never minted
 
 use std::collections::HashMap;

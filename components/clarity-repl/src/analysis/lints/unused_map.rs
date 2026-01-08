@@ -1,3 +1,9 @@
+//! Lint to find unused map (`declare-map`) variables
+//!
+//! A diagnostic is generated if:
+//!  - The map is never referenced
+//!  - The map is used, but in a way that cannot affect contract execution
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;

@@ -1,3 +1,4 @@
+mod case_const;
 mod noop;
 mod unused_const;
 mod unused_data_var;
@@ -6,6 +7,7 @@ mod unused_private_fn;
 mod unused_token;
 mod unused_trait;
 
+pub use case_const::CaseConst;
 pub use noop::NoopChecker;
 pub use unused_const::UnusedConst;
 pub use unused_data_var::UnusedDataVar;

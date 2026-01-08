@@ -1,3 +1,5 @@
+//! Lint to find expressions that have no effect (noops)
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
