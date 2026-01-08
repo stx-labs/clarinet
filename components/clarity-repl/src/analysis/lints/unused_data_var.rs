@@ -1,6 +1,6 @@
 //! Lint to find unused global (`declare-data-var`) variables
 //!
-//! A dignostic is generated if:
+//! A diagnostic is generated if:
 //!  - The variable is never referenced
 //!  - The variable is never modified (suggest using constant instead)
 

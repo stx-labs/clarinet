@@ -1,6 +1,6 @@
 //! Lint to find unused map (`declare-map`) variables
 //!
-//! A dignostic is generated if:
+//! A diagnostic is generated if:
 //!  - The map is never referenced
 //!  - The map is used, but in a way that cannot affect contract execution
 
