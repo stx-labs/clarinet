@@ -96,8 +96,13 @@ impl<'a> UnusedToken<'a> {
         }
     }
 
+    /// Returns total number of unused tokens
+    fn unused_tokens(&self) -> usize {
+        self.unused_fts.len() + self.unused_nfts.len()
+    }
+
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
-        let mut diagnostics = vec![];
+        let mut diagnostics = Vec::with_capacity(self.unused_tokens());
 
         for (name, expr) in &self.unused_fts {
             let message = Self::make_diagnostic_message_ft(name);

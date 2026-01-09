@@ -24,13 +24,14 @@ impl UnusedLocalSettings {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum LocalVarType {
     FunctionArg,
     LetBinding,
 }
 
 /// Unique identifier for each local variable in a contract
+#[derive(PartialEq, Eq)]
 struct LocalVarDefinition<'a> {
     var_type: LocalVarType,
     name: &'a ClarityName,
@@ -64,7 +65,7 @@ pub struct UnusedLocal<'a> {
     active_annotation: Option<usize>,
     level: Level,
     /// Names of all `let` bindings and function args currently in scope
-    scope: HashMap<&'a ClarityName, LocalVarData<'a>>,
+    active_bindings: HashMap<&'a ClarityName, LocalVarData<'a>>,
     /// Variables which went out of scope without being referenced
     unused: HashSet<LocalVarDefinition<'a>>,
 }
@@ -82,7 +83,7 @@ impl<'a> UnusedLocal<'a> {
             level,
             annotations,
             active_annotation: None,
-            scope: HashMap::new(),
+            active_bindings: HashMap::new(),
             unused: HashSet::new(),
         }
     }
@@ -154,6 +155,57 @@ impl<'a> ASTVisitor<'a> for UnusedLocal<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
     }
+
+    fn traverse_let(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        body: &'a [SymbolicExpression],
+    ) -> bool {
+        // Traverse bindings
+        for (name, expr) in bindings {
+            if !self.traverse_expr(expr) {
+                return false;
+            }
+            self.set_active_annotation(&expr.span);
+            if self.allow() {
+                continue;
+            }
+            // Binding becomes active AFTER traversing it's `expr` and BEFORE traversing the next binding's `expr`
+            self.active_bindings.insert(name, LocalVarData::new(expr));
+        }
+
+        // Traverse `let` body
+        for expr in body {
+            if !self.traverse_expr(expr) {
+                return false;
+            }
+        }
+
+        let res = self.visit_let(expr, bindings, body);
+
+        // Leaving scope, remove current `let` bindings and save those that were not used
+        for name in bindings.keys() {
+            if let Some(var) = self.active_bindings.remove(name) {
+                if !var.used {
+                    let unused_var_definition = LocalVarDefinition {
+                        var_type: LocalVarType::LetBinding,
+                        name,
+                        expr: var.expr,
+                    };
+                    self.unused.insert(unused_var_definition);
+                }
+            }
+        }
+        res
+    }
+
+    fn visit_atom(&mut self, _expr: &'a SymbolicExpression, atom: &'a ClarityName) -> bool {
+        if let Some(var) = self.active_bindings.get_mut(atom) {
+            var.used = true;
+        };
+        true
+    }
 }
 
 impl AnalysisPass for UnusedLocal<'_> {
@@ -194,6 +246,7 @@ mod tests {
 
     use super::UnusedLocal;
     use crate::analysis::linter::Lint;
+    use crate::analysis::lints::unused_local::LocalVarType;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -209,6 +262,8 @@ mod tests {
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
             .expect("Invalid code snippet")
     }
+
+    // Simple cases
 
     #[test]
     fn used_function_arg() {
@@ -233,9 +288,9 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        let var_name = "counter";
+        let var_name = "x";
         let (expected_message, _) =
-            UnusedLocal::make_diagnostic_strings_unused_arg(&var_name.into());
+            UnusedLocal::make_diagnostic_strings(LocalVarType::FunctionArg, &var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -244,18 +299,68 @@ mod tests {
     }
 
     #[test]
-    fn allow_with_annotation() {
+    fn allow_unused_function_arg_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            ;; #[allow(unused_data_var)]
-            (define-data-var counter uint u0)
-
-            (define-public (read-counter)
-                (ok u5))
+            ;; #[allow(unused_local)]
+            (define-read-only (increment (x uint))
+                (+ u1 u1))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
     }
+
+    #[test]
+    fn used_let_binding() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (double (x uint))
+                (let ((doubled (* x u2)))
+                    doubled))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn unused_let_binding() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (double (x uint))
+                (let ((doubled (* x u2)))
+                    (* x u2)))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let var_name = "doubled";
+        let (expected_message, _) =
+            UnusedLocal::make_diagnostic_strings(LocalVarType::LetBinding, &var_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(var_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
+    fn allow_unused_let_binding_with_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (double (x uint))
+                ;; #[allow(unused_local)]
+                (let ((doubled (* x u2)))
+                    (* x u2)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    // TODO: Nested and complex cases
 }
