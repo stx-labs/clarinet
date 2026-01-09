@@ -24,6 +24,7 @@ impl UnusedLocalSettings {
     }
 }
 
+#[derive(Clone, Copy)]
 enum LocalVarType {
     FunctionArg,
     LetBinding,
@@ -109,19 +110,15 @@ impl<'a> UnusedLocal<'a> {
     }
 
     /// Make diagnostic message and suggestion for unused function argument
-    fn make_diagnostic_strings_unused_arg(name: &ClarityName) -> (String, Option<String>) {
-        (
-            format!("function arg `{name}` is never used"),
-            Some("Remove this expression".to_string()),
-        )
-    }
-
-    /// Make diagnostic message and suggestion for unused let binding
-    fn make_diagnostic_strings_unused_let(name: &ClarityName) -> (String, Option<String>) {
-        (
-            format!("`let` binding `{name}` is never used"),
-            Some("Remove this expression".to_string()),
-        )
+    fn make_diagnostic_strings(
+        var_type: LocalVarType,
+        name: &ClarityName,
+    ) -> (String, Option<String>) {
+        let msg = match var_type {
+            LocalVarType::FunctionArg => format!("function parameter `{name}` is never used"),
+            LocalVarType::LetBinding => format!("`let` binding `{name}` is never used"),
+        };
+        (msg, Some("Remove this expression".to_string()))
     }
 
     fn make_diagnostic(
@@ -139,13 +136,10 @@ impl<'a> UnusedLocal<'a> {
     }
 
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
-        let mut diagnostics = vec![];
+        let mut diagnostics = Vec::with_capacity(self.unused.len());
 
         for var in &self.unused {
-            let (message, suggestion) = match var.var_type {
-                LocalVarType::FunctionArg => Self::make_diagnostic_strings_unused_arg(var.name),
-                LocalVarType::LetBinding => Self::make_diagnostic_strings_unused_let(var.name),
-            };
+            let (message, suggestion) = Self::make_diagnostic_strings(var.var_type, var.name);
             let diagnostic = self.make_diagnostic(var.expr, message, suggestion);
             diagnostics.push(diagnostic);
         }
