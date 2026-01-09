@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
@@ -23,22 +24,35 @@ impl UnusedLocalSettings {
     }
 }
 
-/// Data associated with a `define-data-var` variable
+enum LocalVarType {
+    FunctionArg,
+    LetBinding,
+}
+
+/// Unique identifier for each local variable in a contract
+struct LocalVarDefinition<'a> {
+    var_type: LocalVarType,
+    name: &'a ClarityName,
+    expr: &'a SymbolicExpression,
+}
+
+impl Hash for LocalVarDefinition<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.expr.span.hash(state);
+    }
+}
+
+/// Data associated with a local variable
 struct LocalVarData<'a> {
     expr: &'a SymbolicExpression,
-    /// Has this variable been written to?
-    pub written_to: bool,
-    /// Has this variable been read from?
-    pub read_from: bool,
+    /// Has this variable been referenced?
+    pub used: bool,
 }
 
 impl<'a> LocalVarData<'a> {
     fn new(expr: &'a SymbolicExpression) -> Self {
-        Self {
-            expr,
-            written_to: false,
-            read_from: false,
-        }
+        Self { expr, used: false }
     }
 }
 
@@ -48,7 +62,10 @@ pub struct UnusedLocal<'a> {
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
     level: Level,
-    data_vars: HashMap<&'a ClarityName, LocalVarData<'a>>,
+    /// Names of all `let` bindings and function args currently in scope
+    scope: HashMap<&'a ClarityName, LocalVarData<'a>>,
+    /// Variables which went out of scope without being referenced
+    unused: HashSet<LocalVarDefinition<'a>>,
 }
 
 impl<'a> UnusedLocal<'a> {
@@ -64,7 +81,8 @@ impl<'a> UnusedLocal<'a> {
             level,
             annotations,
             active_annotation: None,
-            data_vars: HashMap::new(),
+            scope: HashMap::new(),
+            unused: HashSet::new(),
         }
     }
 
@@ -90,26 +108,18 @@ impl<'a> UnusedLocal<'a> {
             .unwrap_or(false)
     }
 
-    /// Make diagnostic message and suggestion for variable which is never written to
-    fn make_diagnostic_strings_unset(name: &ClarityName) -> (String, Option<String>) {
+    /// Make diagnostic message and suggestion for unused function argument
+    fn make_diagnostic_strings_unused_arg(name: &ClarityName) -> (String, Option<String>) {
         (
-            format!("data variable `{name}` never modified"),
-            Some("Declare using `declare-constant`".to_string()),
-        )
-    }
-
-    /// Make diagnostic message and suggestion for variable which is never read from
-    fn make_diagnostic_strings_unread(name: &ClarityName) -> (String, Option<String>) {
-        (
-            format!("data variable `{name}` never read"),
+            format!("function arg `{name}` is never used"),
             Some("Remove this expression".to_string()),
         )
     }
 
-    /// Make diagnostic message and suggestion for variable which is never used
-    fn make_diagnostic_strings_unused(name: &ClarityName) -> (String, Option<String>) {
+    /// Make diagnostic message and suggestion for unused let binding
+    fn make_diagnostic_strings_unused_let(name: &ClarityName) -> (String, Option<String>) {
         (
-            format!("data variable `{name}` never used"),
+            format!("`let` binding `{name}` is never used"),
             Some("Remove this expression".to_string()),
         )
     }
@@ -131,14 +141,12 @@ impl<'a> UnusedLocal<'a> {
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (name, data) in &self.data_vars {
-            let (message, suggestion) = match (data.read_from, data.written_to) {
-                (true, true) => continue,
-                (true, false) => Self::make_diagnostic_strings_unset(name),
-                (false, true) => Self::make_diagnostic_strings_unread(name),
-                (false, false) => Self::make_diagnostic_strings_unused(name),
+        for var in &self.unused {
+            let (message, suggestion) = match var.var_type {
+                LocalVarType::FunctionArg => Self::make_diagnostic_strings_unused_arg(var.name),
+                LocalVarType::LetBinding => Self::make_diagnostic_strings_unused_let(var.name),
             };
-            let diagnostic = self.make_diagnostic(data.expr, message, suggestion);
+            let diagnostic = self.make_diagnostic(var.expr, message, suggestion);
             diagnostics.push(diagnostic);
         }
 
@@ -151,43 +159,6 @@ impl<'a> UnusedLocal<'a> {
 impl<'a> ASTVisitor<'a> for UnusedLocal<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
-    }
-
-    fn visit_define_data_var(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _data_type: &'a SymbolicExpression,
-        _initial: &'a SymbolicExpression,
-    ) -> bool {
-        self.set_active_annotation(&expr.span);
-
-        if !self.allow() {
-            self.data_vars.insert(name, LocalVarData::new(expr));
-        }
-
-        true
-    }
-
-    fn visit_var_set(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _value: &'a SymbolicExpression,
-    ) -> bool {
-        _ = self
-            .data_vars
-            .get_mut(name)
-            .map(|data| data.written_to = true);
-        true
-    }
-
-    fn visit_var_get(&mut self, _expr: &'a SymbolicExpression, name: &'a ClarityName) -> bool {
-        _ = self
-            .data_vars
-            .get_mut(name)
-            .map(|data| data.read_from = true);
-        true
     }
 }
 
@@ -246,13 +217,11 @@ mod tests {
     }
 
     #[test]
-    fn used() {
+    fn used_function_arg() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter uint u0)
-
-            (define-public (increment)
-                (ok (var-set counter (+ (var-get counter) u1))))
+            (define-read-only (increment (x uint))
+                (+ x u1))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
@@ -261,61 +230,18 @@ mod tests {
     }
 
     #[test]
-    fn not_set() {
+    fn unused_function_arg() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-data-var counter uint u0)
-
-            (define-public (read-counter)
-                (ok (var-get counter)))
+            (define-read-only (increment (x uint))
+                (+ u1 u1))
         ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
         let var_name = "counter";
-        let (expected_message, _) = UnusedLocal::make_diagnostic_strings_unset(&var_name.into());
-
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
-        assert!(output[0].contains(var_name));
-        assert!(output[0].contains(&expected_message));
-    }
-
-    #[test]
-    fn not_read() {
-        #[rustfmt::skip]
-        let snippet = indoc!("
-            (define-data-var counter uint u0)
-
-            (define-public (set (val uint))
-                (ok (var-set counter val)))
-        ").to_string();
-
-        let (output, result) = run_snippet(snippet);
-
-        let var_name = "counter";
-        let (expected_message, _) = UnusedLocal::make_diagnostic_strings_unread(&var_name.into());
-
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
-        assert!(output[0].contains(var_name));
-        assert!(output[0].contains(&expected_message));
-    }
-
-    #[test]
-    fn not_used() {
-        #[rustfmt::skip]
-        let snippet = indoc!("
-            (define-data-var counter uint u0)
-
-            (define-public (read-counter)
-                (ok u5))
-        ").to_string();
-
-        let (output, result) = run_snippet(snippet);
-
-        let var_name = "counter";
-        let (expected_message, _) = UnusedLocal::make_diagnostic_strings_unused(&var_name.into());
+        let (expected_message, _) =
+            UnusedLocal::make_diagnostic_strings_unused_arg(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
