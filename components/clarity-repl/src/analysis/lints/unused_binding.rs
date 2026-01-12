@@ -161,14 +161,26 @@ mod tests {
             .expect("Invalid code snippet")
     }
 
-    // Simple cases
-
     #[test]
     fn used_function_arg() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-read-only (increment (x uint))
                 (+ x u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_function_arg_in_let() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (increment (x uint))
+                (let ((val (+ x u1)))
+                    val))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
@@ -225,6 +237,38 @@ mod tests {
     }
 
     #[test]
+    fn used_let_binding_in_next_binding() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (triple (x uint))
+                (let ((doubled (* x u2))
+                      (tripled (* doubled x)))
+                    tripled))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_let_binding_in_next_binding_in_nested_let() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (triple (x uint))
+                (let ((doubled (* x u2))
+                      (tripled
+                          (let ((t (* doubled x)))
+                              t)))
+                    tripled))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
     fn unused_let_binding() {
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -259,6 +303,4 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 0);
     }
-
-    // TODO: Nested and complex cases
 }
