@@ -15,7 +15,7 @@ use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
@@ -158,6 +158,26 @@ impl<'a> UnusedBinding<'a> {
         diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
+
+    fn traverse_define_fn(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
+        body: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(body) && self.visit_define_fn(expr, name, parameters, body)
+    }
+
+    fn visit_define_fn(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        parameters: Option<Vec<TypedVar<'a>>>,
+        body: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
 }
 
 impl<'a> ASTVisitor<'a> for UnusedBinding<'a> {
@@ -196,15 +216,45 @@ impl<'a> ASTVisitor<'a> for UnusedBinding<'a> {
         // Leaving scope, remove current `let` bindings and save those that were not used
         for name in bindings.keys() {
             if let Some(data) = self.active_bindings.remove(name) {
-                let var_definition = Binding {
+                let binding = Binding {
                     kind: BindingType::LetBinding,
                     name,
                     expr: data.expr,
                 };
-                self.bindings.insert(var_definition, data);
+                self.bindings.insert(binding, data);
             }
         }
         res
+    }
+
+    fn traverse_define_read_only(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
+        body: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_define_fn(expr, name, parameters, body)
+    }
+
+    fn traverse_define_public(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
+        body: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_define_fn(expr, name, parameters, body)
+    }
+
+    fn traverse_define_private(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
+        body: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_define_fn(expr, name, parameters, body)
     }
 
     fn visit_atom(&mut self, _expr: &'a SymbolicExpression, atom: &'a ClarityName) -> bool {
