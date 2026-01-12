@@ -140,6 +140,7 @@ impl Lint for UnusedBinding<'_, '_> {
 mod tests {
     use clarity::vm::diagnostic::Level;
     use clarity::vm::ExecutionResult;
+    use clarity_types::diagnostic::Diagnostic;
     use indoc::indoc;
 
     use super::UnusedBinding;
@@ -148,7 +149,9 @@ mod tests {
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet_no_panic(
+        snippet: String,
+    ) -> Result<(Vec<String>, ExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
         let mut settings = SessionSettings::default();
         settings.repl_settings.analysis.disable_all_lints();
         settings
@@ -156,9 +159,16 @@ mod tests {
             .analysis
             .enable_lint(UnusedBinding::get_name(), Level::Warning);
 
-        Session::new_without_boot_contracts(settings)
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet")
+        Session::new_without_boot_contracts(settings).formatted_interpretation(
+            snippet,
+            Some("checker".to_string()),
+            false,
+            None,
+        )
+    }
+
+    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+        run_snippet_no_panic(snippet).expect("Invalid code snippet")
     }
 
     #[test]
@@ -302,5 +312,30 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Linter assumes we cannot redeclare or "shadow" bindings
+    /// It would not work right in its current form if this were possible
+    /// See comment in `BindingMapBuilder::traverse_let()` for partial context
+    /// It is currently not possible in Clarity, but f this ever changes, this test will notify us
+    #[test]
+    fn cannot_redeclare_let_bindings() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (double (x uint))
+                (let ((x (* x u2)))
+                    x))
+        ").to_string();
+
+        let result = run_snippet_no_panic(snippet);
+
+        let Err((_, diagnostics)) = result else {
+            panic!("Expected snippet to fail")
+        };
+
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0]
+            .message
+            .contains("conflicts with previous value"));
     }
 }
