@@ -1,4 +1,10 @@
-use std::collections::{HashMap, HashSet};
+//! Lint to find unused bindings from `let` statements or function args
+//!
+//! A diagnostic is generated if:
+//!  - A function argument is not referenced
+//!  - A `let` binding is not referenced
+
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
@@ -14,31 +20,31 @@ use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-struct UnusedLocalSettings {
+struct UnusedBindingSettings {
     // TODO
 }
 
-impl UnusedLocalSettings {
+impl UnusedBindingSettings {
     fn new() -> Self {
         Self {}
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum LocalVarType {
+enum BindingType {
     FunctionArg,
     LetBinding,
 }
 
-/// Unique identifier for each local variable in a contract
+/// Unique identifier for each binding, including location to prevent ambiguity
 #[derive(PartialEq, Eq)]
-struct LocalVarDefinition<'a> {
-    var_type: LocalVarType,
+struct Binding<'a> {
+    kind: BindingType,
     name: &'a ClarityName,
     expr: &'a SymbolicExpression,
 }
 
-impl Hash for LocalVarDefinition<'_> {
+impl Hash for Binding<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state);
         self.expr.span.hash(state);
@@ -46,37 +52,37 @@ impl Hash for LocalVarDefinition<'_> {
 }
 
 /// Data associated with a local variable
-struct LocalVarData<'a> {
+struct BindingData<'a> {
     expr: &'a SymbolicExpression,
     /// Has this variable been referenced?
     pub used: bool,
 }
 
-impl<'a> LocalVarData<'a> {
+impl<'a> BindingData<'a> {
     fn new(expr: &'a SymbolicExpression) -> Self {
         Self { expr, used: false }
     }
 }
 
-pub struct UnusedLocal<'a> {
+pub struct UnusedBinding<'a> {
     clarity_version: ClarityVersion,
-    _settings: UnusedLocalSettings,
+    _settings: UnusedBindingSettings,
     annotations: &'a Vec<Annotation>,
     active_annotation: Option<usize>,
     level: Level,
     /// Names of all `let` bindings and function args currently in scope
-    active_bindings: HashMap<&'a ClarityName, LocalVarData<'a>>,
+    active_bindings: HashMap<&'a ClarityName, BindingData<'a>>,
     /// Variables which went out of scope without being referenced
-    unused: HashSet<LocalVarDefinition<'a>>,
+    bindings: HashMap<Binding<'a>, BindingData<'a>>,
 }
 
-impl<'a> UnusedLocal<'a> {
+impl<'a> UnusedBinding<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
         level: Level,
-        settings: UnusedLocalSettings,
-    ) -> UnusedLocal<'a> {
+        settings: UnusedBindingSettings,
+    ) -> UnusedBinding<'a> {
         Self {
             clarity_version,
             _settings: settings,
@@ -84,7 +90,7 @@ impl<'a> UnusedLocal<'a> {
             annotations,
             active_annotation: None,
             active_bindings: HashMap::new(),
-            unused: HashSet::new(),
+            bindings: HashMap::new(),
         }
     }
 
@@ -112,12 +118,12 @@ impl<'a> UnusedLocal<'a> {
 
     /// Make diagnostic message and suggestion for unused function argument
     fn make_diagnostic_strings(
-        var_type: LocalVarType,
+        var_type: BindingType,
         name: &ClarityName,
     ) -> (String, Option<String>) {
         let msg = match var_type {
-            LocalVarType::FunctionArg => format!("function parameter `{name}` is never used"),
-            LocalVarType::LetBinding => format!("`let` binding `{name}` is never used"),
+            BindingType::FunctionArg => format!("function parameter `{name}` is never used"),
+            BindingType::LetBinding => format!("`let` binding `{name}` is never used"),
         };
         (msg, Some("Remove this expression".to_string()))
     }
@@ -137,11 +143,14 @@ impl<'a> UnusedLocal<'a> {
     }
 
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::with_capacity(self.unused.len());
+        let mut diagnostics = vec![];
 
-        for var in &self.unused {
-            let (message, suggestion) = Self::make_diagnostic_strings(var.var_type, var.name);
-            let diagnostic = self.make_diagnostic(var.expr, message, suggestion);
+        for (binding, data) in &self.bindings {
+            if data.used {
+                continue;
+            }
+            let (message, suggestion) = Self::make_diagnostic_strings(binding.kind, binding.name);
+            let diagnostic = self.make_diagnostic(binding.expr, message, suggestion);
             diagnostics.push(diagnostic);
         }
 
@@ -151,7 +160,7 @@ impl<'a> UnusedLocal<'a> {
     }
 }
 
-impl<'a> ASTVisitor<'a> for UnusedLocal<'a> {
+impl<'a> ASTVisitor<'a> for UnusedBinding<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
     }
@@ -172,7 +181,7 @@ impl<'a> ASTVisitor<'a> for UnusedLocal<'a> {
                 continue;
             }
             // Binding becomes active AFTER traversing it's `expr` and BEFORE traversing the next binding's `expr`
-            self.active_bindings.insert(name, LocalVarData::new(expr));
+            self.active_bindings.insert(name, BindingData::new(expr));
         }
 
         // Traverse `let` body
@@ -186,15 +195,13 @@ impl<'a> ASTVisitor<'a> for UnusedLocal<'a> {
 
         // Leaving scope, remove current `let` bindings and save those that were not used
         for name in bindings.keys() {
-            if let Some(var) = self.active_bindings.remove(name) {
-                if !var.used {
-                    let unused_var_definition = LocalVarDefinition {
-                        var_type: LocalVarType::LetBinding,
-                        name,
-                        expr: var.expr,
-                    };
-                    self.unused.insert(unused_var_definition);
-                }
+            if let Some(data) = self.active_bindings.remove(name) {
+                let var_definition = Binding {
+                    kind: BindingType::LetBinding,
+                    name,
+                    expr: data.expr,
+                };
+                self.bindings.insert(var_definition, data);
             }
         }
         res
@@ -208,15 +215,15 @@ impl<'a> ASTVisitor<'a> for UnusedLocal<'a> {
     }
 }
 
-impl AnalysisPass for UnusedLocal<'_> {
+impl AnalysisPass for UnusedBinding<'_> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let settings = UnusedLocalSettings::new();
-        let lint = UnusedLocal::new(
+        let settings = UnusedBindingSettings::new();
+        let lint = UnusedBinding::new(
             analysis_cache.contract_analysis.clarity_version,
             analysis_cache.annotations,
             level,
@@ -226,14 +233,14 @@ impl AnalysisPass for UnusedLocal<'_> {
     }
 }
 
-impl Lint for UnusedLocal<'_> {
+impl Lint for UnusedBinding<'_> {
     fn get_name() -> LintName {
-        LintName::UnusedLocal
+        LintName::UnusedBinding
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
         matches!(
             annotation.kind,
-            AnnotationKind::Allow(WarningKind::UnusedLocal)
+            AnnotationKind::Allow(WarningKind::UnusedBinding)
         )
     }
 }
@@ -244,9 +251,9 @@ mod tests {
     use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
-    use super::UnusedLocal;
+    use super::UnusedBinding;
     use crate::analysis::linter::Lint;
-    use crate::analysis::lints::unused_local::LocalVarType;
+    use crate::analysis::lints::unused_binding::BindingType;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -256,7 +263,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(UnusedLocal::get_name(), Level::Warning);
+            .enable_lint(UnusedBinding::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
@@ -290,7 +297,7 @@ mod tests {
 
         let var_name = "x";
         let (expected_message, _) =
-            UnusedLocal::make_diagnostic_strings(LocalVarType::FunctionArg, &var_name.into());
+            UnusedBinding::make_diagnostic_strings(BindingType::FunctionArg, &var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
@@ -339,7 +346,7 @@ mod tests {
 
         let var_name = "doubled";
         let (expected_message, _) =
-            UnusedLocal::make_diagnostic_strings(LocalVarType::LetBinding, &var_name.into());
+            UnusedBinding::make_diagnostic_strings(BindingType::LetBinding, &var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
