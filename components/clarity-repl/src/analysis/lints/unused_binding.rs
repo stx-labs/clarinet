@@ -4,18 +4,13 @@
 //!  - A function argument is not referenced
 //!  - A `let` binding is not referenced
 
-use std::collections::HashMap;
-use std::hash::Hash;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
-use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::Span;
-use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::cache::bindings::{BindingData, BindingType};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
@@ -30,72 +25,29 @@ impl UnusedBindingSettings {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum BindingType {
-    FunctionArg,
-    LetBinding,
-}
-
-/// Unique identifier for each binding, including span to prevent ambiguity
-#[derive(PartialEq, Eq, Hash)]
-struct Binding<'a> {
-    kind: BindingType,
-    name: &'a ClarityName,
-    span: Span,
-}
-
-/// Data associated with a local variable
-struct BindingData<'a> {
-    expr: &'a SymbolicExpression,
-    /// Has this variable been referenced?
-    pub used: bool,
-    /// Annotation comment, if present
-    pub annotation: Option<usize>,
-}
-
-impl<'a> BindingData<'a> {
-    fn new(expr: &'a SymbolicExpression, annotation: Option<usize>) -> Self {
-        Self {
-            expr,
-            annotation,
-            used: false,
-        }
-    }
-}
-
-pub struct UnusedBinding<'a> {
-    clarity_version: ClarityVersion,
+pub struct UnusedBinding<'a, 'b>
+where
+    'b: 'a,
+{
+    analysis_cache: &'a mut AnalysisCache<'b>,
     _settings: UnusedBindingSettings,
-    annotations: &'a Vec<Annotation>,
     level: Level,
-    /// Names of all `let` bindings and function args currently in scope
-    active_bindings: HashMap<&'a ClarityName, BindingData<'a>>,
-    /// Variables which went out of scope without being referenced
-    /// TODO: Move into `AnalysisCache`
-    bindings: HashMap<Binding<'a>, BindingData<'a>>,
 }
 
-impl<'a> UnusedBinding<'a> {
+impl<'a, 'b> UnusedBinding<'a, 'b> {
     fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
+        analysis_cache: &'a mut AnalysisCache<'b>,
         level: Level,
         settings: UnusedBindingSettings,
-    ) -> UnusedBinding<'a> {
+    ) -> UnusedBinding<'a, 'b> {
         Self {
-            clarity_version,
+            analysis_cache,
             _settings: settings,
             level,
-            annotations,
-            active_bindings: HashMap::new(),
-            bindings: HashMap::new(),
         }
     }
 
-    fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
-        // Traverse the entire AST
-        traverse(&mut self, &contract_analysis.expressions);
-
+    fn run(&mut self) -> AnalysisResult {
         // Process hashmap of unused constants and generate diagnostics
         let diagnostics = self.generate_diagnostics();
 
@@ -111,11 +63,8 @@ impl<'a> UnusedBinding<'a> {
     }
 
     /// Make diagnostic message and suggestion for unused function argument
-    fn make_diagnostic_strings(
-        var_type: BindingType,
-        name: &ClarityName,
-    ) -> (String, Option<String>) {
-        let msg = match var_type {
+    fn make_diagnostic_strings(kind: BindingType, name: &ClarityName) -> (String, Option<String>) {
+        let msg = match kind {
             BindingType::FunctionArg => format!("function parameter `{name}` is never used"),
             BindingType::LetBinding => format!("`let` binding `{name}` is never used"),
         };
@@ -123,13 +72,13 @@ impl<'a> UnusedBinding<'a> {
     }
 
     fn make_diagnostic(
-        &self,
+        level: Level,
         span: Span,
         message: String,
         suggestion: Option<String>,
     ) -> Diagnostic {
         Diagnostic {
-            level: self.level.clone(),
+            level,
             message,
             spans: vec![span],
             suggestion,
@@ -139,12 +88,20 @@ impl<'a> UnusedBinding<'a> {
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (binding, data) in &self.bindings {
-            if data.used || Self::allow(data, self.annotations) {
+        let annotations = self.analysis_cache.annotations;
+        let bindings = self.analysis_cache.get_bindings();
+
+        for (binding, data) in bindings {
+            if data.used || Self::allow(data, annotations) {
                 continue;
             }
             let (message, suggestion) = Self::make_diagnostic_strings(binding.kind, binding.name);
-            let diagnostic = self.make_diagnostic(binding.span.clone(), message, suggestion);
+            let diagnostic = Self::make_diagnostic(
+                self.level.clone(),
+                binding.span.clone(),
+                message,
+                suggestion,
+            );
             diagnostics.push(diagnostic);
         }
 
@@ -152,132 +109,9 @@ impl<'a> UnusedBinding<'a> {
         diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
-
-    /// Add function parameters to current scope (`active_bindings`)
-    fn add_to_scope(&mut self, params: &[TypedVar<'a>]) {
-        for param in params {
-            let annotation = get_index_of_span(self.annotations, &param.decl_span);
-            let data = BindingData::new(param.type_expr, annotation);
-            self.active_bindings.insert(param.name, data);
-        }
-    }
-
-    /// Remove function parameters to current scope (`active_bindings`)
-    fn remove_from_scope(&mut self, params: &[TypedVar<'a>]) {
-        for param in params {
-            if let Some(data) = self.active_bindings.remove(param.name) {
-                let binding = Binding {
-                    kind: BindingType::FunctionArg,
-                    name: param.name,
-                    span: param.decl_span.clone(),
-                };
-                self.bindings.insert(binding, data);
-            }
-        }
-    }
-
-    fn traverse_define_fn(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        parameters: Option<Vec<TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        if let Some(params) = parameters {
-            self.add_to_scope(&params);
-            let res = self.traverse_expr(body);
-            self.remove_from_scope(&params);
-            res
-        } else {
-            self.traverse_expr(body)
-        }
-    }
 }
 
-impl<'a> ASTVisitor<'a> for UnusedBinding<'a> {
-    fn get_clarity_version(&self) -> &ClarityVersion {
-        &self.clarity_version
-    }
-
-    fn traverse_let(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
-        body: &'a [SymbolicExpression],
-    ) -> bool {
-        // Traverse bindings
-        for (name, expr) in bindings {
-            if !self.traverse_expr(expr) {
-                return false;
-            }
-            // Binding becomes active AFTER traversing it's `expr` and BEFORE traversing the next binding's `expr`
-            let annotation = get_index_of_span(self.annotations, &expr.span);
-            self.active_bindings
-                .insert(name, BindingData::new(expr, annotation));
-        }
-
-        // Traverse `let` body
-        for expr in body {
-            if !self.traverse_expr(expr) {
-                return false;
-            }
-        }
-
-        let res = self.visit_let(expr, bindings, body);
-
-        // Leaving scope, remove current `let` bindings and save those that were not used
-        for name in bindings.keys() {
-            if let Some(data) = self.active_bindings.remove(name) {
-                let binding = Binding {
-                    kind: BindingType::LetBinding,
-                    name,
-                    span: data.expr.span.clone(),
-                };
-                self.bindings.insert(binding, data);
-            }
-        }
-        res
-    }
-
-    fn traverse_define_read_only(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        self.traverse_define_fn(expr, name, parameters, body)
-    }
-
-    fn traverse_define_public(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        self.traverse_define_fn(expr, name, parameters, body)
-    }
-
-    fn traverse_define_private(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        self.traverse_define_fn(expr, name, parameters, body)
-    }
-
-    fn visit_atom(&mut self, _expr: &'a SymbolicExpression, atom: &'a ClarityName) -> bool {
-        if let Some(var) = self.active_bindings.get_mut(atom) {
-            var.used = true;
-        };
-        true
-    }
-}
-
-impl AnalysisPass for UnusedBinding<'_> {
+impl<'a, 'b> AnalysisPass for UnusedBinding<'a, 'b> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
@@ -285,17 +119,12 @@ impl AnalysisPass for UnusedBinding<'_> {
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedBindingSettings::new();
-        let lint = UnusedBinding::new(
-            analysis_cache.contract_analysis.clarity_version,
-            analysis_cache.annotations,
-            level,
-            settings,
-        );
-        lint.run(analysis_cache.contract_analysis)
+        let mut lint = UnusedBinding::new(analysis_cache, level, settings);
+        lint.run()
     }
 }
 
-impl Lint for UnusedBinding<'_> {
+impl Lint for UnusedBinding<'_, '_> {
     fn get_name() -> LintName {
         LintName::UnusedBinding
     }
