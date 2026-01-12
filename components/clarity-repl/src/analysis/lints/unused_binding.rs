@@ -49,11 +49,17 @@ struct BindingData<'a> {
     expr: &'a SymbolicExpression,
     /// Has this variable been referenced?
     pub used: bool,
+    /// Annotation comment, if present
+    pub annotation: Option<usize>,
 }
 
 impl<'a> BindingData<'a> {
-    fn new(expr: &'a SymbolicExpression) -> Self {
-        Self { expr, used: false }
+    fn new(expr: &'a SymbolicExpression, annotation: Option<usize>) -> Self {
+        Self {
+            expr,
+            annotation,
+            used: false,
+        }
     }
 }
 
@@ -61,7 +67,6 @@ pub struct UnusedBinding<'a> {
     clarity_version: ClarityVersion,
     _settings: UnusedBindingSettings,
     annotations: &'a Vec<Annotation>,
-    active_annotation: Option<usize>,
     level: Level,
     /// Names of all `let` bindings and function args currently in scope
     active_bindings: HashMap<&'a ClarityName, BindingData<'a>>,
@@ -82,7 +87,6 @@ impl<'a> UnusedBinding<'a> {
             _settings: settings,
             level,
             annotations,
-            active_annotation: None,
             active_bindings: HashMap::new(),
             bindings: HashMap::new(),
         }
@@ -98,15 +102,11 @@ impl<'a> UnusedBinding<'a> {
         Ok(diagnostics)
     }
 
-    // Check for annotations that should be attached to the given span
-    fn set_active_annotation(&mut self, span: &Span) {
-        self.active_annotation = get_index_of_span(self.annotations, span);
-    }
-
     // Check if the expression is annotated with `allow(<lint_name>)`
-    fn allow(&self) -> bool {
-        self.active_annotation
-            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+    fn allow(binding_data: &BindingData, annotations: &[Annotation]) -> bool {
+        binding_data
+            .annotation
+            .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
 
@@ -140,7 +140,7 @@ impl<'a> UnusedBinding<'a> {
         let mut diagnostics = vec![];
 
         for (binding, data) in &self.bindings {
-            if data.used {
+            if data.used || Self::allow(data, self.annotations) {
                 continue;
             }
             let (message, suggestion) = Self::make_diagnostic_strings(binding.kind, binding.name);
@@ -156,11 +156,8 @@ impl<'a> UnusedBinding<'a> {
     /// Add function parameters to current scope (`active_bindings`)
     fn add_to_scope(&mut self, params: &[TypedVar<'a>]) {
         for param in params {
-            self.set_active_annotation(&param.type_expr.span);
-            if self.allow() {
-                continue;
-            }
-            let data = BindingData::new(param.type_expr);
+            let annotation = get_index_of_span(self.annotations, &param.decl_span);
+            let data = BindingData::new(param.type_expr, annotation);
             self.active_bindings.insert(param.name, data);
         }
     }
@@ -213,12 +210,10 @@ impl<'a> ASTVisitor<'a> for UnusedBinding<'a> {
             if !self.traverse_expr(expr) {
                 return false;
             }
-            self.set_active_annotation(&expr.span);
-            if self.allow() {
-                continue;
-            }
             // Binding becomes active AFTER traversing it's `expr` and BEFORE traversing the next binding's `expr`
-            self.active_bindings.insert(name, BindingData::new(expr));
+            let annotation = get_index_of_span(self.annotations, &expr.span);
+            self.active_bindings
+                .insert(name, BindingData::new(expr, annotation));
         }
 
         // Traverse `let` body
