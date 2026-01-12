@@ -5,7 +5,7 @@
 //!  - A `let` binding is not referenced
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
@@ -30,25 +30,18 @@ impl UnusedBindingSettings {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum BindingType {
     FunctionArg,
     LetBinding,
 }
 
-/// Unique identifier for each binding, including location to prevent ambiguity
-#[derive(PartialEq, Eq)]
+/// Unique identifier for each binding, including span to prevent ambiguity
+#[derive(PartialEq, Eq, Hash)]
 struct Binding<'a> {
     kind: BindingType,
     name: &'a ClarityName,
-    expr: &'a SymbolicExpression,
-}
-
-impl Hash for Binding<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.expr.span.hash(state);
-    }
+    span: Span,
 }
 
 /// Data associated with a local variable
@@ -73,6 +66,7 @@ pub struct UnusedBinding<'a> {
     /// Names of all `let` bindings and function args currently in scope
     active_bindings: HashMap<&'a ClarityName, BindingData<'a>>,
     /// Variables which went out of scope without being referenced
+    /// TODO: Move into `AnalysisCache`
     bindings: HashMap<Binding<'a>, BindingData<'a>>,
 }
 
@@ -130,14 +124,14 @@ impl<'a> UnusedBinding<'a> {
 
     fn make_diagnostic(
         &self,
-        expr: &'a SymbolicExpression,
+        span: Span,
         message: String,
         suggestion: Option<String>,
     ) -> Diagnostic {
         Diagnostic {
             level: self.level.clone(),
             message,
-            spans: vec![expr.span.clone()],
+            spans: vec![span],
             suggestion,
         }
     }
@@ -150,7 +144,7 @@ impl<'a> UnusedBinding<'a> {
                 continue;
             }
             let (message, suggestion) = Self::make_diagnostic_strings(binding.kind, binding.name);
-            let diagnostic = self.make_diagnostic(binding.expr, message, suggestion);
+            let diagnostic = self.make_diagnostic(binding.span.clone(), message, suggestion);
             diagnostics.push(diagnostic);
         }
 
@@ -159,24 +153,47 @@ impl<'a> UnusedBinding<'a> {
         diagnostics
     }
 
-    fn traverse_define_fn(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        self.traverse_expr(body) && self.visit_define_fn(expr, name, parameters, body)
+    /// Add function parameters to current scope (`active_bindings`)
+    fn add_to_scope(&mut self, params: &[TypedVar<'a>]) {
+        for param in params {
+            self.set_active_annotation(&param.type_expr.span);
+            if self.allow() {
+                continue;
+            }
+            let data = BindingData::new(param.type_expr);
+            self.active_bindings.insert(param.name, data);
+        }
     }
 
-    fn visit_define_fn(
+    /// Remove function parameters to current scope (`active_bindings`)
+    fn remove_from_scope(&mut self, params: &[TypedVar<'a>]) {
+        for param in params {
+            if let Some(data) = self.active_bindings.remove(param.name) {
+                let binding = Binding {
+                    kind: BindingType::FunctionArg,
+                    name: param.name,
+                    span: param.decl_span.clone(),
+                };
+                self.bindings.insert(binding, data);
+            }
+        }
+    }
+
+    fn traverse_define_fn(
         &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
         parameters: Option<Vec<TypedVar<'a>>>,
         body: &'a SymbolicExpression,
     ) -> bool {
-        true
+        if let Some(params) = parameters {
+            self.add_to_scope(&params);
+            let res = self.traverse_expr(body);
+            self.remove_from_scope(&params);
+            res
+        } else {
+            self.traverse_expr(body)
+        }
     }
 }
 
@@ -219,7 +236,7 @@ impl<'a> ASTVisitor<'a> for UnusedBinding<'a> {
                 let binding = Binding {
                     kind: BindingType::LetBinding,
                     name,
-                    expr: data.expr,
+                    span: data.expr.span.clone(),
                 };
                 self.bindings.insert(binding, data);
             }
@@ -359,7 +376,7 @@ mod tests {
     fn allow_unused_function_arg_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            ;; #[allow(unused_local)]
+            ;; #[allow(unused_binding)]
             (define-read-only (increment (x uint))
                 (+ u1 u1))
         ").to_string();
@@ -409,7 +426,7 @@ mod tests {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-read-only (double (x uint))
-                ;; #[allow(unused_local)]
+                ;; #[allow(unused_binding)]
                 (let ((doubled (* x u2)))
                     (* x u2)))
         ").to_string();
