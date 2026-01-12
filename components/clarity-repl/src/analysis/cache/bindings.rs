@@ -105,9 +105,11 @@ impl<'a> BindingMapBuilder<'a> {
     ) -> bool {
         if let Some(params) = parameters {
             self.add_to_scope(&params);
-            let res = self.traverse_expr(body);
+            if !self.traverse_expr(body) {
+                return false;
+            }
             self.remove_from_scope(&params);
-            res
+            true
         } else {
             self.traverse_expr(body)
         }
@@ -125,15 +127,23 @@ impl<'a> ASTVisitor<'a> for BindingMapBuilder<'a> {
         bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        // Traverse bindings
+        // Add `let` bindings to current scope and save them
+        // NOTE: We receive the bindings as a `HashMap`, which means may not be in the order declared
+        //       So we have to add all bindings to the current scope before we process any expressions
+        //       This means the linter may consider a binding valid before it actually is
+        //       This isn't a problem now, since interpretation will fail if you try to use a binding before it's declared,
+        //       or try to re-declare an existing binding in a nested scope
         for (name, expr) in bindings {
-            if !self.traverse_expr(expr) {
-                return false;
-            }
-            // Binding becomes active AFTER traversing it's `expr` and BEFORE traversing the next binding's `expr`
             let annotation = get_index_of_span(self.annotations, &expr.span);
             self.active_bindings
                 .insert(name, BindingData::new(expr, annotation));
+        }
+
+        // Traverse expressions in bindings
+        for expr in bindings.values() {
+            if !self.traverse_expr(expr) {
+                return false;
+            }
         }
 
         // Traverse `let` body
@@ -143,9 +153,11 @@ impl<'a> ASTVisitor<'a> for BindingMapBuilder<'a> {
             }
         }
 
-        let res = self.visit_let(expr, bindings, body);
+        if !self.visit_let(expr, bindings, body) {
+            return false;
+        }
 
-        // Leaving scope, remove current `let` bindings and save those that were not used
+        // Remove `let` bindings from current scope and save them
         for name in bindings.keys() {
             if let Some(data) = self.active_bindings.remove(name) {
                 let binding = Binding {
@@ -156,7 +168,7 @@ impl<'a> ASTVisitor<'a> for BindingMapBuilder<'a> {
                 self.bindings.insert(binding, data);
             }
         }
-        res
+        true
     }
 
     fn traverse_define_read_only(
