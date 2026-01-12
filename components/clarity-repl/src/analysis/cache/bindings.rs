@@ -1,8 +1,4 @@
-//! Lint to find unused bindings from `let` statements or function args
-//!
-//! A diagnostic is generated if:
-//!  - A function argument is not referenced
-//!  - A `let` binding is not referenced
+//! Builds `HashMap` of all bindings (`let` bindings and function args) in a contract
 
 use std::collections::HashMap;
 use std::hash::Hash;
