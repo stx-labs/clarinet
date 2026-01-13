@@ -11,7 +11,7 @@ pub mod linter;
 pub mod lints;
 mod util;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
@@ -30,7 +30,7 @@ use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
 use crate::analysis::cache::AnalysisCache;
-use crate::analysis::linter::LintGroup;
+use crate::analysis::linter::{LintGroup, LintMapBuilder};
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
@@ -183,8 +183,7 @@ pub struct SettingsFile {
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let max_size = LintName::VARIANTS.len();
-        let mut lints = HashMap::with_capacity(max_size);
+        let mut lints = LintMapBuilder::new().apply_defaults().build();
 
         // Process lint groups first
         for (group, val) in from_file.lint_groups.unwrap_or_default() {

@@ -45,13 +45,16 @@ impl TryFrom<String> for LintName {
 #[serde(rename_all = "snake_case", try_from = "String")]
 #[strum(serialize_all = "snake_case")]
 pub enum LintGroup {
+    /// All existing lints
     All,
-    Default,
+    /// Find dead code
     Unused,
+    /// Find inefficient code
     Perf,
+    /// Cosmetic lints like naming conventions
     Style,
+    /// Find code which might not work as user intended
     Safety,
-    Misc,
 }
 
 impl LintGroup {
@@ -64,11 +67,6 @@ impl LintGroup {
                     map.insert(*lint, value);
                 }
             }
-            Default => {
-                Unused.insert_into(map, value);
-                Perf.insert_into(map, value);
-                Safety.insert_into(map, value);
-            }
             Unused => {
                 map.insert(LintName::UnusedConst, value);
                 map.insert(LintName::UnusedDataVar, value);
@@ -78,15 +76,48 @@ impl LintGroup {
                 map.insert(LintName::UnusedToken, value);
                 map.insert(LintName::UnusedTrait, value);
             }
-            Perf => {
-                map.insert(LintName::Noop, value);
-            }
+            Perf => {}
             Style => {
                 map.insert(LintName::CaseConst, value);
             }
-            Safety => {}
-            Misc => {}
+            Safety => {
+                map.insert(LintName::Noop, value);
+            }
         }
+    }
+}
+
+pub type LintMap = HashMap<LintName, LintLevel>;
+
+pub struct LintMapBuilder {
+    map: LintMap,
+}
+
+impl LintMapBuilder {
+    pub fn new() -> Self {
+        let max_size = LintName::VARIANTS.len();
+        let map = HashMap::with_capacity(max_size);
+
+        Self { map }
+    }
+
+    pub fn apply_defaults(mut self) -> Self {
+        LintGroup::Unused.insert_into(&mut self.map, LintLevel::Warning);
+        LintGroup::Perf.insert_into(&mut self.map, LintLevel::Warning);
+        LintGroup::Safety.insert_into(&mut self.map, LintLevel::Warning);
+        //LintGroup::Style.insert_into(&mut map, LintLevel::Notice);
+
+        self
+    }
+
+    pub fn build(self) -> LintMap {
+        self.map
+    }
+}
+
+impl Default for LintMapBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
