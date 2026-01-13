@@ -17,7 +17,7 @@ pub enum CaseError {
 ///  - Does **not** contain consecutive underscores
 ///
 /// NOTE: Leading or trailing underscores **are** allowed
-/// NOTE: This function accepts **any** `&str`
+/// NOTE: This function accepts **any** `&str`, not just valid `ClarityName's`
 pub fn match_screaming_snake_case(s: &str) -> Result<(), CaseError> {
     if s.is_empty() {
         return Err(CaseError::Empty);
@@ -50,6 +50,8 @@ pub fn match_screaming_snake_case(s: &str) -> Result<(), CaseError> {
 /// An identifier is considered explicilty unused and ignored by `LintGroup::Unused` lints if...
 ///  - It begins with `_` (illegal in current version of Clarity)
 ///  - It ends with `_`
+///
+/// NOTE: This function accepts **any** `&str`, not just valid `ClarityName's`
 pub fn is_explicitly_unused(s: &str) -> bool {
     let prefix = "_";
     let suffix = prefix;
