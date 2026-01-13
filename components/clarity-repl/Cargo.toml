@@ -24,6 +24,7 @@ categories = [
 [dependencies]
 chrono = { workspace = true }
 colored = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 schemars = { workspace = true, optional = true }
