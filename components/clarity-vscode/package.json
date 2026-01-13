@@ -248,19 +248,19 @@
     "@swc/core": "^1.7.40",
     "@typescript-eslint/eslint-plugin": "^8.11.0",
     "@typescript-eslint/parser": "^8.11.0",
-    "@vscode/test-web": "0.0.77",
+    "@vscode/test-web": "0.0.78",
     "@vscode/vsce": "^3.2.2",
     "@wasm-tool/wasm-pack-plugin": "^1.6.0",
     "concurrently": "^9.1.2",
     "copy-webpack-plugin": "^13.0.0",
     "eslint": "^9.13.0",
-    "ovsx": "^0.10.2",
+    "ovsx": "^0.10.8",
     "path-browserify": "^1.0.1",
     "regenerator-runtime": "^0.14.0",
     "rimraf": "^6.0.1",
     "swc-loader": "^0.2.3",
     "typescript": "^5.0.2",
-    "webpack": "^5.76.0",
+    "webpack": "^5.104.1",
     "webpack-cli": "^6.0.1"
   }
 }

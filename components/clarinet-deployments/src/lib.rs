@@ -46,8 +46,7 @@ pub fn setup_session_with_deployment(
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> DeploymentGenerationArtifacts {
     let mut session = initiate_session_from_manifest(manifest);
-    let contracts =
-        update_session_with_deployment_plan(&mut session, deployment, contracts_asts, None);
+    let contracts = update_session_with_deployment_plan(&mut session, deployment, contracts_asts);
 
     let deps = BTreeMap::new();
     let mut diags = HashMap::new();
@@ -166,7 +165,6 @@ pub fn update_session_with_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
-    forced_min_epoch: Option<StacksEpochId>,
 ) -> ExecutionResultMap {
     update_session_with_genesis_accounts(session, deployment);
 
@@ -174,8 +172,8 @@ pub fn update_session_with_deployment_plan(
 
     let mut contracts = BTreeMap::new();
     for batch in deployment.plan.batches.iter() {
-        let epoch: StacksEpochId = match (batch.epoch, forced_min_epoch) {
-            (Some(epoch), _) => epoch.into(),
+        let epoch: StacksEpochId = match batch.epoch {
+            Some(epoch) => epoch.into(),
             _ => DEFAULT_EPOCH,
         };
         session.advance_chain_tip(1);
@@ -283,7 +281,6 @@ pub async fn generate_default_deployment(
     network: &StacksNetwork,
     no_batch: bool,
     file_accessor: Option<&dyn FileAccessor>,
-    forced_min_epoch: Option<StacksEpochId>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
     let network_manifest = match file_accessor {
         None => NetworkManifest::from_project_manifest_location(
@@ -545,11 +542,6 @@ pub async fn generate_default_deployment(
                         )
                         .await?;
 
-                    let epoch = match forced_min_epoch {
-                        Some(min_epoch) => std::cmp::max(min_epoch, epoch),
-                        None => epoch,
-                    };
-
                     contract_epochs.insert(contract_id.clone(), epoch);
 
                     // Build the struct representing the requirement in the deployment
@@ -797,10 +789,7 @@ pub async fn generate_default_deployment(
 
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
 
-        let epoch = match forced_min_epoch {
-            Some(min_epoch) => std::cmp::max(min_epoch, contract_config.epoch.resolve()),
-            None => contract_config.epoch.resolve(),
-        };
+        let epoch = contract_config.epoch.resolve();
 
         contracts_sources.insert(
             contract_id.clone(),
