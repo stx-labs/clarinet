@@ -17,6 +17,7 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedDataVarSettings {
@@ -138,6 +139,9 @@ impl<'a> UnusedDataVar<'a> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.data_vars {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let (message, suggestion) = match (data.read_from, data.written_to) {
                 (true, true) => continue,
                 (true, false) => Self::make_diagnostic_strings_unset(name),
@@ -335,6 +339,21 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_data_var)]
             (define-data-var counter uint u0)
+
+            (define-public (read-counter)
+                (ok u5))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter_ uint u0)
 
             (define-public (read-counter)
                 (ok u5))

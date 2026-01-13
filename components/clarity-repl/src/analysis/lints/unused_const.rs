@@ -11,6 +11,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::constants::ConstantData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
@@ -80,11 +81,12 @@ impl<'a, 'b> UnusedConst<'a, 'b> {
         let annotations = self.analysis_cache.annotations;
         let constants = self.analysis_cache.get_constants();
 
-        for (const_name, const_data) in constants {
-            if const_data.used || Self::allow(const_data, annotations) {
+        for (name, const_data) in constants {
+            if const_data.used || Self::allow(const_data, annotations) || is_explicitly_unused(name)
+            {
                 continue;
             }
-            let message = Self::make_diagnostic_message(const_name);
+            let message = Self::make_diagnostic_message(name);
             let diagnostic = Self::make_diagnostic(self.level.clone(), const_data.expr, message);
             diagnostics.push(diagnostic);
         }
@@ -201,6 +203,21 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_const)]
             (define-constant MINUTES_PER_HOUR u60)
+
+            (define-read-only (hours-to-minutes (hours uint))
+                (* hours u60))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant MINUTES_PER_HOUR_ u60)
 
             (define-read-only (hours-to-minutes (hours uint))
                 (* hours u60))

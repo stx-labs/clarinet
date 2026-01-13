@@ -21,6 +21,7 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedPrivateFnSettings {
@@ -123,6 +124,9 @@ impl<'a> UnusedPrivateFn<'a> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.private_fns {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let (message, suggestion) = match data.called {
                 true => continue,
                 false => Self::make_diagnostic_strings(name),
@@ -353,6 +357,22 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_private_fn)]
             (define-private (square (x uint))
+                (* x x))
+
+            (define-read-only (cube (x uint))
+                (* x (* x x)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (square_ (x uint))
                 (* x x))
 
             (define-read-only (cube (x uint))

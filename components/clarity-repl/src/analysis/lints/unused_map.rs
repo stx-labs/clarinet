@@ -17,6 +17,7 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 enum Usage {
@@ -180,6 +181,9 @@ impl<'a> UnusedMap<'a> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.maps {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let (message, suggestion) = match Self::compute_map_usage(data) {
                 Usage::Used => continue,
                 Usage::Unset => Self::make_diagnostic_strings_unset(name),
@@ -418,6 +422,21 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_map)]
             (define-map admins principal bool)
+
+            (define-read-only (is-admin (p principal))
+                true)
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map admins_ principal bool)
 
             (define-read-only (is-admin (p principal))
                 true)

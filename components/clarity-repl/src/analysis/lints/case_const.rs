@@ -11,7 +11,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::constants::ConstantData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
-use crate::analysis::util::{is_screaming_snake_case, CaseError};
+use crate::analysis::util::{match_screaming_snake_case, CaseError};
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedConstSettings {
@@ -97,7 +97,7 @@ impl<'a, 'b> CaseConst<'a, 'b> {
             if Self::allow(const_data, annotations) {
                 continue;
             }
-            let Err(error) = is_screaming_snake_case(const_name.as_str()) else {
+            let Err(error) = match_screaming_snake_case(const_name.as_str()) else {
                 continue;
             };
             let message = Self::make_diagnostic_message(const_name, &error);

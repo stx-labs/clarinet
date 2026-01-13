@@ -15,6 +15,7 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedTokenSettings {
@@ -100,12 +101,18 @@ impl<'a> UnusedToken<'a> {
         let mut diagnostics = vec![];
 
         for (name, expr) in &self.unused_fts {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let message = Self::make_diagnostic_message_ft(name);
             let diagnostic = self.make_diagnostic(expr, message);
             diagnostics.push(diagnostic);
         }
 
         for (name, expr) in &self.unused_nfts {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let message = Self::make_diagnostic_message_nft(name);
             let diagnostic = self.make_diagnostic(expr, message);
             diagnostics.push(diagnostic);
@@ -283,6 +290,21 @@ mod tests {
     }
 
     #[test]
+    fn allow_ft_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-fungible-token sbtc_)
+
+            (define-public (mint (amount uint) (recipient principal))
+                (err u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
     fn nft_used() {
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -325,6 +347,21 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_token)]
             (define-non-fungible-token hashes (buff 32))
+
+            (define-public (mint (hash (buff 32)) (recipient principal))
+                (err u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_nft_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token hashes_ (buff 32))
 
             (define-public (mint (hash (buff 32)) (recipient principal))
                 (err u1))
