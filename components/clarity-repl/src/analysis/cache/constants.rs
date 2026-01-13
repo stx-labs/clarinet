@@ -1,3 +1,5 @@
+//! Builds `HashMap` of all constants in a contract
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::ContractAnalysis;

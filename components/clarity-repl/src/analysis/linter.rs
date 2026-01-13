@@ -20,6 +20,7 @@ pub enum LintName {
     Noop,
     UnusedConst,
     UnusedDataVar,
+    UnusedBinding,
     UnusedMap,
     UnusedPrivateFn,
     UnusedToken,
@@ -71,6 +72,7 @@ impl LintGroup {
             Unused => {
                 map.insert(LintName::UnusedConst, value);
                 map.insert(LintName::UnusedDataVar, value);
+                map.insert(LintName::UnusedBinding, value);
                 map.insert(LintName::UnusedMap, value);
                 map.insert(LintName::UnusedPrivateFn, value);
                 map.insert(LintName::UnusedToken, value);
