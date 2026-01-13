@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
 
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 #[cfg(feature = "json_schema")]
