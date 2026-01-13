@@ -21,6 +21,7 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use indexmap::IndexMap;
 use linter::{LintLevel, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
@@ -102,7 +103,7 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
-    lints: HashMap<LintName, ClarityDiagnosticLevel>,
+    lints: IndexMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
 }
 
@@ -174,8 +175,8 @@ impl From<BoolOr<Self>> for LintLevel {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    lint_groups: Option<HashMap<LintGroup, BoolOr<LintLevel>>>,
-    lints: Option<HashMap<LintName, BoolOr<LintLevel>>>,
+    lint_groups: Option<IndexMap<LintGroup, BoolOr<LintLevel>>>,
+    lints: Option<IndexMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
