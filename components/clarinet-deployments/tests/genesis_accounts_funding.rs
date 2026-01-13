@@ -50,7 +50,7 @@ fn fund_geneis_account_with_stx() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -72,7 +72,7 @@ fn does_not_fund_sbtc_without_sbtc_contract() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -124,7 +124,7 @@ fn can_fund_initial_sbtc_balance() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![batch], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 2);
