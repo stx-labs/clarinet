@@ -47,14 +47,14 @@ impl TryFrom<String> for LintName {
 pub enum LintGroup {
     /// All existing lints
     All,
-    /// Find dead code
-    Unused,
     /// Find inefficient code
     Perf,
-    /// Cosmetic lints like naming conventions
-    Style,
     /// Find code which might not work as user intended
     Safety,
+    /// Cosmetic lints like naming conventions
+    Style,
+    /// Find dead code
+    Unused,
 }
 
 impl LintGroup {
@@ -67,6 +67,13 @@ impl LintGroup {
                     map.insert(*lint, value);
                 }
             }
+            Perf => {}
+            Safety => {
+                map.insert(LintName::Noop, value);
+            }
+            Style => {
+                map.insert(LintName::CaseConst, value);
+            }
             Unused => {
                 map.insert(LintName::UnusedConst, value);
                 map.insert(LintName::UnusedDataVar, value);
@@ -75,13 +82,6 @@ impl LintGroup {
                 map.insert(LintName::UnusedPrivateFn, value);
                 map.insert(LintName::UnusedToken, value);
                 map.insert(LintName::UnusedTrait, value);
-            }
-            Perf => {}
-            Style => {
-                map.insert(LintName::CaseConst, value);
-            }
-            Safety => {
-                map.insert(LintName::Noop, value);
             }
         }
     }
