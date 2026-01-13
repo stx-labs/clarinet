@@ -16,6 +16,7 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedTraitSettings {
@@ -136,6 +137,9 @@ impl<'a> UnusedTrait<'a> {
         let mut diagnostics = vec![];
 
         for (name, usage) in &self.traits {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let used_in = (
                 usage.declare_trait,
                 usage.public_fn,
@@ -621,6 +625,21 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_trait)]
             (use-trait token-trait .token-trait.token-trait)
+
+            (define-read-only (get-token-amount (p principal))
+                u100)
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait token-trait_ .token-trait.token-trait)
 
             (define-read-only (get-token-amount (p principal))
                 u100)
