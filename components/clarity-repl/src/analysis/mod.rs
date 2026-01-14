@@ -12,8 +12,6 @@ pub mod lints;
 mod util;
 
 use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::iter::FromIterator;
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
