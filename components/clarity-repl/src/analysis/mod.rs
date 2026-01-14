@@ -107,6 +107,9 @@ pub struct Settings {
     lint_groups: IndexMap<LintGroup, BoolOr<LintLevel>>,
     lints: IndexMap<LintName, BoolOr<LintLevel>>,
     check_checker: check_checker::Settings,
+    /// TODO: Fix writing `Clarinet.toml` and remove this
+    #[serde(skip)]
+    disable_default_lints: bool,
 }
 
 impl Settings {
@@ -141,7 +144,12 @@ impl Settings {
         }
     }
 
+    pub fn disable_default_lints(&mut self) {
+        self.disable_default_lints = true;
+    }
+
     pub fn disable_all_lints(&mut self) {
+        self.disable_default_lints();
         self.lints.clear();
     }
 }
@@ -219,6 +227,7 @@ impl From<SettingsFile> for Settings {
             lint_groups: from_file.lint_groups.unwrap_or_default(),
             passes,
             check_checker,
+            disable_default_lints: false,
         }
     }
 }
@@ -229,8 +238,12 @@ pub fn run_analysis(
     annotations: &Vec<Annotation>,
     settings: &Settings,
 ) -> AnalysisResult {
-    // Start with defaults
-    let mut lints = LintMapBuilder::new().apply_defaults().build();
+    // FIXME: Ugly hack to not use defaults in unit tests
+    let mut lints = if !settings.disable_default_lints {
+        LintMapBuilder::new().apply_defaults().build()
+    } else {
+        LintMapBuilder::new().build()
+    };
 
     // Process lint groups first
     for (group, val) in &settings.lint_groups {
