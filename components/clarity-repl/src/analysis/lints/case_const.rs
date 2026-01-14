@@ -139,13 +139,12 @@ impl Lint for CaseConst<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::diagnostic::Level;
     use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::Diagnostic;
     use indoc::indoc;
 
     use super::CaseConst;
-    use crate::analysis::linter::Lint;
+    use crate::analysis::linter::{Lint, LintLevel};
     use crate::analysis::util::CaseError;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -158,7 +157,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(CaseConst::get_name(), Level::Warning);
+            .set_lint_level(CaseConst::get_name(), LintLevel::Warning);
 
         Session::new_without_boot_contracts(settings).formatted_interpretation(
             snippet,

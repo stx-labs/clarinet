@@ -10,7 +10,17 @@ use crate::analysis::annotation::Annotation;
 
 /// Represents a single linter pass
 #[derive(
-    Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString,
+    Debug,
+    PartialEq,
+    Eq,
+    Copy,
+    Clone,
+    Serialize,
+    Deserialize,
+    Hash,
+    VariantArray,
+    EnumString,
+    strum::Display,
 )]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case", try_from = "String")]
@@ -44,13 +54,16 @@ impl TryFrom<String> for LintName {
 #[serde(rename_all = "snake_case", try_from = "String")]
 #[strum(serialize_all = "snake_case")]
 pub enum LintGroup {
+    /// All existing lints
     All,
-    Default,
-    Unused,
+    /// Find inefficient code
     Perf,
-    Style,
+    /// Find code which might not work as user intended
     Safety,
-    Misc,
+    /// Cosmetic lints like naming conventions
+    Style,
+    /// Find dead code
+    Unused,
 }
 
 impl LintGroup {
@@ -63,10 +76,12 @@ impl LintGroup {
                     map.insert(*lint, value);
                 }
             }
-            Default => {
-                Unused.insert_into(map, value);
-                Perf.insert_into(map, value);
-                Safety.insert_into(map, value);
+            Perf => {}
+            Safety => {
+                map.insert(LintName::Noop, value);
+            }
+            Style => {
+                map.insert(LintName::CaseConst, value);
             }
             Unused => {
                 map.insert(LintName::UnusedConst, value);
@@ -77,15 +92,41 @@ impl LintGroup {
                 map.insert(LintName::UnusedToken, value);
                 map.insert(LintName::UnusedTrait, value);
             }
-            Perf => {
-                map.insert(LintName::Noop, value);
-            }
-            Style => {
-                map.insert(LintName::CaseConst, value);
-            }
-            Safety => {}
-            Misc => {}
         }
+    }
+}
+
+pub type LintMap = HashMap<LintName, LintLevel>;
+
+pub struct LintMapBuilder {
+    map: LintMap,
+}
+
+impl LintMapBuilder {
+    pub fn new() -> Self {
+        let max_size = LintName::VARIANTS.len();
+        let map = HashMap::with_capacity(max_size);
+
+        Self { map }
+    }
+
+    pub fn apply_defaults(mut self) -> Self {
+        LintGroup::Unused.insert_into(&mut self.map, LintLevel::Warning);
+        LintGroup::Perf.insert_into(&mut self.map, LintLevel::Warning);
+        LintGroup::Safety.insert_into(&mut self.map, LintLevel::Warning);
+        //LintGroup::Style.insert_into(&mut map, LintLevel::Notice);
+
+        self
+    }
+
+    pub fn build(self) -> LintMap {
+        self.map
+    }
+}
+
+impl Default for LintMapBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -128,4 +169,31 @@ impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
 pub trait Lint {
     fn get_name() -> LintName;
     fn match_allow_annotation(annotation: &Annotation) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Check that all lints are in at least one `LintGroup`
+    #[test]
+    fn all_lints_are_part_of_least_one_group() {
+        let mut lints = HashMap::new();
+
+        // Add all groups (except `All`) to the map
+        for group in LintGroup::VARIANTS {
+            if matches!(group, LintGroup::All) {
+                continue;
+            }
+            group.insert_into(&mut lints, LintLevel::default());
+        }
+
+        for lint in LintName::VARIANTS {
+            assert!(
+                lints.contains_key(lint),
+                "{} is not part of any `LintGroup` variant",
+                lint
+            )
+        }
+    }
 }
