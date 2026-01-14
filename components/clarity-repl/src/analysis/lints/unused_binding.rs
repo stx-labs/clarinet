@@ -13,6 +13,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::bindings::{BindingData, BindingType};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedBindingSettings {
@@ -92,7 +93,7 @@ impl<'a, 'b> UnusedBinding<'a, 'b> {
         let bindings = self.analysis_cache.get_bindings();
 
         for (binding, data) in bindings {
-            if data.used || Self::allow(data, annotations) {
+            if data.used || Self::allow(data, annotations) || is_explicitly_unused(binding.name) {
                 continue;
             }
             let (message, suggestion) = Self::make_diagnostic_strings(binding.kind, binding.name);
@@ -233,6 +234,19 @@ mod tests {
     }
 
     #[test]
+    fn allow_unused_function_arg_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (increment (x_ uint))
+                (+ u1 u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
     fn used_let_binding() {
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -306,6 +320,20 @@ mod tests {
             (define-read-only (double (x uint))
                 ;; #[allow(unused_binding)]
                 (let ((doubled (* x u2)))
+                    (* x u2)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_unused_let_binding_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (double (x uint))
+                (let ((doubled_ (* x u2)))
                     (* x u2)))
         ").to_string();
 
