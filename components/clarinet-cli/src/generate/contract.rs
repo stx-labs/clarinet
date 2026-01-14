@@ -6,6 +6,7 @@ use clarinet_files::FileLocation;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_CLARITY_VERSION,
 };
+use indoc::{formatdoc, indoc};
 
 use super::changes::{Changes, FileCreation, FileDeletion, TOMLEdition};
 
@@ -112,39 +113,37 @@ impl GetChangesForNewContract {
         let content = if let Some(ref source) = self.source {
             source.to_string()
         } else {
-            format!(
-                r#";; title: {}
-;; version:
-;; summary:
-;; description:
+            formatdoc! {"
+                ;; title: {}
+                ;; version:
+                ;; summary:
+                ;; description:
 
-;; traits
-;;
+                ;; traits
+                ;;
 
-;; token definitions
-;;
+                ;; token definitions
+                ;;
 
-;; constants
-;;
+                ;; constants
+                ;;
 
-;; data vars
-;;
+                ;; data vars
+                ;;
 
-;; data maps
-;;
+                ;; data maps
+                ;;
 
-;; public functions
-;;
+                ;; public functions
+                ;;
 
-;; read only functions
-;;
+                ;; read only functions
+                ;;
 
-;; private functions
-;;
+                ;; private functions
+                ;;
 
-"#,
-                self.contract_name
-            )
+            ", self.contract_name}
         };
         let name = format!("{}.clar", self.contract_name);
         let mut new_file = self.manifest_location.get_project_root_location().unwrap();
@@ -163,28 +162,28 @@ impl GetChangesForNewContract {
     }
 
     fn create_template_test(&mut self) -> Result<(), String> {
-        let content = r#"
-import { describe, expect, it } from "vitest";
+        let content = indoc! {r#"
+            import { describe, expect, it } from "vitest";
 
-const accounts = simnet.getAccounts();
-const address1 = accounts.get("wallet_1")!;
+            const accounts = simnet.getAccounts();
+            const address1 = accounts.get("wallet_1")!;
 
-/*
-  The test below is an example. To learn more, read the testing documentation here:
-  https://docs.hiro.so/stacks/clarinet-js-sdk
-*/
+            /*
+            The test below is an example. To learn more, read the testing documentation here:
+            https://docs.hiro.so/stacks/clarinet-js-sdk
+            */
 
-describe("example tests", () => {
-  it("ensures simnet is well initialised", () => {
-    expect(simnet.blockHeight).toBeDefined();
-  });
+            describe("example tests", () => {
+            it("ensures simnet is well initialised", () => {
+                expect(simnet.blockHeight).toBeDefined();
+            });
 
-  // it("shows an example", () => {
-  //   const { result } = simnet.callReadOnlyFn("counter", "get-counter", [], address1);
-  //   expect(result).toBeUint(0);
-  // });
-});
-"#
+            // it("shows an example", () => {
+            //   const { result } = simnet.callReadOnlyFn("counter", "get-counter", [], address1);
+            //   expect(result).toBeUint(0);
+            // });
+            });
+        "#}
         .into();
 
         let name = format!("{}.test.ts", self.contract_name);
