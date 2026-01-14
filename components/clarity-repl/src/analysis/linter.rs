@@ -11,7 +11,17 @@ use crate::analysis::annotation::Annotation;
 
 /// Represents a single linter pass
 #[derive(
-    Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString,
+    Debug,
+    PartialEq,
+    Eq,
+    Copy,
+    Clone,
+    Serialize,
+    Deserialize,
+    Hash,
+    VariantArray,
+    EnumString,
+    strum::Display,
 )]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case", try_from = "String")]
@@ -160,4 +170,31 @@ impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
 pub trait Lint {
     fn get_name() -> LintName;
     fn match_allow_annotation(annotation: &Annotation) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Check that all lints are in at least one `LintGroup`
+    #[test]
+    fn all_lints_are_part_of_least_one_group() {
+        let mut lints = HashMap::new();
+
+        // Add all groups (except `All`) to the map
+        for group in LintGroup::VARIANTS {
+            if matches!(group, LintGroup::All) {
+                continue;
+            }
+            group.insert_into(&mut lints, LintLevel::default());
+        }
+
+        for lint in LintName::VARIANTS {
+            assert!(
+                lints.contains_key(lint),
+                "{} is not part of any `LintGroup` variant",
+                lint
+            )
+        }
+    }
 }
