@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;

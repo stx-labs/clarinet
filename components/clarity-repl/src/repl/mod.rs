@@ -13,7 +13,6 @@ pub mod settings;
 #[cfg(any(not(target_arch = "wasm32"), feature = "dap"))]
 pub mod debug;
 
-use std::convert::TryInto;
 use std::fmt::Display;
 use std::path::PathBuf;
 

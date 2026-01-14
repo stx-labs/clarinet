@@ -24,8 +24,6 @@ pub mod frontend;
 pub mod repl;
 pub mod utils;
 
-use std::env;
-
 use frontend::Terminal;
 use pico_args::Arguments;
 use repl::{settings, Session, SessionSettings};

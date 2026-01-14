@@ -9,7 +9,7 @@ authors = [
     "Hugo Caillard <hugo@hiro.so>",
 ]
 readme = "README.md"
-edition = "2018"
+edition = "2021"
 license = "GPL-3.0-only"
 keywords = ["stacks", "blockchain", "clarity", "smart-contract", "repl"]
 exclude = ["vs-client/**", ".husky", ".git*"]
