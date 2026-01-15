@@ -31,8 +31,8 @@ mod tests {
     fn allow_with_annotation_at_error_level() {
         #[rustfmt::skip]
         let snippet = indoc!("
-        ;; #[allow(unused_const, case_const)]
-        (define-constant this_is_regular_snake_case u100)
+            ;; #[allow(unused_const, case_const)]
+            (define-constant this_is_regular_snake_case u100)
         ").to_string();
 
         let mut settings = SessionSettings::default();
