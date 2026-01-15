@@ -1742,17 +1742,23 @@ impl<'a> Aggregator<'a> {
                 // in the original source code
                 let on_different_line_in_source =
                     // i - 1 index is fine here because we're withing !first_on_line
-                    is_comment(expr) && list[i - 1].span().start_line != expr.span().start_line;
+                    is_comment(expr) || list[i - 1].span().start_line != expr.span().start_line;
 
-                // Add line break if comment was on different lines in source
+                // Add line break if expression was on different lines in source
                 // or if the line would be too long
                 if on_different_line_in_source
                     || (!is_map_opening
                         && (current_line_width + expr_width + 1 > self.settings.max_line_length))
                 {
                     result.push('\n');
-                    result.push_str(&base_indent);
-                    current_line_width = base_indent.len() + indentation.len();
+                    // For comments, preserve their original indentation level
+                    if is_comment(expr) {
+                        result.push_str(&base_indent);
+                        current_line_width = base_indent.len();
+                    } else {
+                        result.push_str(&base_indent);
+                        current_line_width = base_indent.len() + indentation.len();
+                    }
                     broken_up = true;
                 } else {
                     result.push(' ');
@@ -1762,7 +1768,13 @@ impl<'a> Aggregator<'a> {
 
             if broken_up {
                 // reformat with increased indent in the case we broke up the code on max width
-                let formatted = self.format_source_exprs(slice::from_ref(expr), &base_indent);
+                // For comments, use the original indentation level
+                let indent_level = if is_comment(expr) {
+                    previous_indentation
+                } else {
+                    &base_indent
+                };
+                let formatted = self.format_source_exprs(slice::from_ref(expr), indent_level);
                 let trimmed = t(&formatted);
                 result.push_str(trimmed);
             } else {
@@ -2756,6 +2768,20 @@ mod tests_formatter {
                 (contract-call? .aibtc-faktory get-balance contract-caller)
               )
               ERR_FETCHING_TOKEN_DATA
+            ))"#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_comment_edgecase() {
+        let src = indoc!(
+            r#"
+            ;; /g/'STV9K21TBFAK4KNRJXF5DFP8N7W46G4V9RJ5XDY2.sbtc-token/base_contract_sbtc
+            (try! (contract-call? 'STV9K21TBFAK4KNRJXF5DFP8N7W46G4V9RJ5XDY2.sbtc-token
+              ;; /g/.aibtc-pre-faktory/dao_contract_token_prelaunch
+              transfer pre-fee tx-sender .aibtc-pre-faktory none
             ))"#
         );
         let result = format_with_default(src);
