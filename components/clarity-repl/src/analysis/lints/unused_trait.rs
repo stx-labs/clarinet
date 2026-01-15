@@ -377,10 +377,12 @@ impl Lint for UnusedTrait<'_> {
         LintName::UnusedTrait
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
-        matches!(
-            annotation.kind,
-            AnnotationKind::Allow(WarningKind::UnusedTrait)
-        )
+        match &annotation.kind {
+            AnnotationKind::Allow(warning_kinds) => {
+                warning_kinds.contains(&WarningKind::UnusedTrait)
+            }
+            _ => false,
+        }
     }
 }
 

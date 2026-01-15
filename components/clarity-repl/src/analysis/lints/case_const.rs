@@ -130,10 +130,10 @@ impl Lint for CaseConst<'_, '_> {
         LintName::CaseConst
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
-        matches!(
-            annotation.kind,
-            AnnotationKind::Allow(WarningKind::CaseConst)
-        )
+        match &annotation.kind {
+            AnnotationKind::Allow(warning_kinds) => warning_kinds.contains(&WarningKind::CaseConst),
+            _ => false,
+        }
     }
 }
 

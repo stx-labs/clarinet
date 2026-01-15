@@ -224,10 +224,12 @@ impl Lint for UnusedDataVar<'_> {
         LintName::UnusedDataVar
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
-        matches!(
-            annotation.kind,
-            AnnotationKind::Allow(WarningKind::UnusedDataVar)
-        )
+        match &annotation.kind {
+            AnnotationKind::Allow(warning_kinds) => {
+                warning_kinds.contains(&WarningKind::UnusedDataVar)
+            }
+            _ => false,
+        }
     }
 }
 

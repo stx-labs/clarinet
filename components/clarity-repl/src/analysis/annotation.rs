@@ -5,7 +5,7 @@ use strum::EnumString;
 
 #[derive(Debug)]
 pub enum AnnotationKind {
-    Allow(WarningKind),
+    Allow(Vec<WarningKind>),
     Filter(Vec<ClarityName>),
     FilterAll,
 }
@@ -22,10 +22,18 @@ impl std::str::FromStr for AnnotationKind {
                 (&captures[1], "")
             };
             match base {
-                "allow" => match value.parse() {
-                    Ok(value) => Ok(AnnotationKind::Allow(value)),
-                    Err(_) => Err("missing value for 'allow' annotation".to_string()),
-                },
+                "allow" => {
+                    let params: Vec<WarningKind> = value
+                        .split(',')
+                        .filter(|s| !s.is_empty())
+                        .filter_map(|s| s.trim().parse().ok())
+                        .collect();
+                    if params.is_empty() {
+                        Err("missing value for 'allow' annotation".to_string())
+                    } else {
+                        Ok(AnnotationKind::Allow(params))
+                    }
+                }
                 "filter" => {
                     if value == "*" {
                         Ok(AnnotationKind::FilterAll)
@@ -50,7 +58,7 @@ impl std::str::FromStr for AnnotationKind {
     }
 }
 
-#[derive(Debug, EnumString)]
+#[derive(Debug, EnumString, PartialEq, Eq, Hash)]
 #[strum(serialize_all = "snake_case")]
 pub enum WarningKind {
     UncheckedData,
@@ -110,8 +118,23 @@ mod tests {
     #[test]
     fn parse_allow_unchecked_data() {
         match "allow(unchecked_data)".parse::<AnnotationKind>() {
-            Ok(AnnotationKind::Allow(WarningKind::UncheckedData)) => (),
+            Ok(AnnotationKind::Allow(params)) => {
+                assert_eq!(params.len(), 1);
+                assert!(matches!(params[0], WarningKind::UncheckedData));
+            }
             _ => panic!("failed to parse annotation kind correctly"),
+        };
+    }
+
+    #[test]
+    fn parse_allow_multiple() {
+        match "allow(unused_const, case_const)".parse::<AnnotationKind>() {
+            Ok(AnnotationKind::Allow(params)) => {
+                assert_eq!(params.len(), 2);
+                assert!(params.contains(&WarningKind::UnusedConst));
+                assert!(params.contains(&WarningKind::CaseConst));
+            }
+            _ => panic!("failed to parse multiple allow annotation correctly"),
         };
     }
 

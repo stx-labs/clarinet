@@ -130,10 +130,12 @@ impl Lint for UnusedBinding<'_, '_> {
         LintName::UnusedBinding
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
-        matches!(
-            annotation.kind,
-            AnnotationKind::Allow(WarningKind::UnusedBinding)
-        )
+        match &annotation.kind {
+            AnnotationKind::Allow(warning_kinds) => {
+                warning_kinds.contains(&WarningKind::UnusedBinding)
+            }
+            _ => false,
+        }
     }
 }
 

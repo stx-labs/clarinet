@@ -254,10 +254,12 @@ impl<'a> CheckChecker<'a> {
     fn allow_unchecked_data(&self) -> bool {
         if let Some(idx) = self.active_annotation {
             let annotation = &self.annotations[idx];
-            return matches!(
-                annotation.kind,
-                AnnotationKind::Allow(WarningKind::UncheckedData)
-            );
+            return match &annotation.kind {
+                AnnotationKind::Allow(warning_kinds) => {
+                    warning_kinds.contains(&WarningKind::UncheckedData)
+                }
+                _ => false,
+            };
         }
         false
     }
@@ -266,10 +268,12 @@ impl<'a> CheckChecker<'a> {
     fn allow_unchecked_params(&self) -> bool {
         if let Some(idx) = self.active_annotation {
             let annotation = &self.annotations[idx];
-            return matches!(
-                annotation.kind,
-                AnnotationKind::Allow(WarningKind::UncheckedParams)
-            );
+            return match &annotation.kind {
+                AnnotationKind::Allow(warning_kinds) => {
+                    warning_kinds.contains(&WarningKind::UncheckedParams)
+                }
+                _ => false,
+            };
         }
         false
     }
