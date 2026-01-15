@@ -1,3 +1,27 @@
+#### [3.13.0](https://github.com/stx-labs/clarinet/compare/v3.12.0...v3.13.0) 2026-01-15
+
+##### New Features
+
+* **linter:**
+  * Add `unused_binding` lint (#2134) (7ab80d56)
+  * Add `case_const` lint (#2132) (3afd5274)
+  * Add `unused_trait` lint (#2121) (438722e3)
+  * Allow `LintGroup::Unused` lints to ignore identifiers using naming convention (#2138) (46db1fc1)
+  * Enable lints by default (#2141) (a3e4bb8c)
+
+##### Refactors
+
+* **linter:**  Create struct `AnalysisCache` to share data structures between passes (#2131) (59d43a6e)
+* Add `Session::new_without_boot_contracts()` to avoid loading them in unit tests (#2123) (59ad4435)
+
+##### Chores
+
+* Update `clarity-repl` to Rust Edition 2021 (#2139) (8dfa44ee)
+* Upgrade default stacks-node docker image (#2137) (dce12e80)
+* Upgrade clarity-vm (#2136) (e34782f9)
+* Upgrade clarity (#2113) (64e5fe1c)
+* Bump `qs` from 6.14.0 to 6.14.1 in /components/clarity-vscode (#2130) (0fb286a0)
+
 # [3.12.0](https://github.com/stx-labs/clarinet/compare/v3.11.0...v3.12.0) (2025-12-18)
 
 ##### New Features
