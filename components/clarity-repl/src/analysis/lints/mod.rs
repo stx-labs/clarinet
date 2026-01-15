@@ -17,3 +17,39 @@ pub use unused_map::UnusedMap;
 pub use unused_private_fn::UnusedPrivateFn;
 pub use unused_token::UnusedToken;
 pub use unused_trait::UnusedTrait;
+
+#[cfg(test)]
+mod tests {
+    use indoc::indoc;
+
+    use super::{CaseConst, UnusedConst};
+    use crate::analysis::linter::{Lint, LintLevel};
+    use crate::repl::session::Session;
+    use crate::repl::SessionSettings;
+
+    #[test]
+    fn allow_with_annotation_at_error_level() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unused_const, case_const)]
+            (define-constant this_is_regular_snake_case u100)
+        ").to_string();
+
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
+        settings
+            .repl_settings
+            .analysis
+            .set_lint_level(UnusedConst::get_name(), LintLevel::Error);
+        settings
+            .repl_settings
+            .analysis
+            .set_lint_level(CaseConst::get_name(), LintLevel::Error);
+
+        let (_, result) = Session::new_without_boot_contracts(settings)
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+}

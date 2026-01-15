@@ -178,7 +178,10 @@ impl Lint for NoopChecker<'_> {
         LintName::Noop
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
-        matches!(annotation.kind, AnnotationKind::Allow(WarningKind::Noop))
+        match &annotation.kind {
+            AnnotationKind::Allow(warning_kinds) => warning_kinds.contains(&WarningKind::Noop),
+            _ => false,
+        }
     }
 }
 
