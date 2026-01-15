@@ -72,8 +72,6 @@ pub fn value_to_string(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
-
     use clarity::vm::{ClarityName, Value};
     use clarity_types::types::{
         ASCIIData, CharType, ListData, ListTypeData, OptionalData, PrincipalData,

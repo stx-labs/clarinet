@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
@@ -18,6 +17,7 @@ use schemars::JsonSchema;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
 use crate::repl::DEFAULT_EPOCH;
 
@@ -852,19 +852,18 @@ fn is_param_type_excluded_from_checked_requirement(param: &TypedVar) -> bool {
 
 impl AnalysisPass for CheckChecker<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
-        analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        _analysis_db: &mut AnalysisDatabase,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         settings: &analysis::Settings,
     ) -> AnalysisResult {
         let checker = CheckChecker::new(
-            contract_analysis.clarity_version,
-            annotations,
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
             level,
             settings.check_checker,
         );
-        checker.run(contract_analysis)
+        checker.run(analysis_cache.contract_analysis)
     }
 }
 
@@ -894,6 +893,7 @@ mod tests {
 
     fn default_session() -> Session {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -2399,6 +2399,7 @@ mod tests {
     #[test]
     fn check_private() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -2694,7 +2695,7 @@ mod tests {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
             }
-            _ => panic!("Expected successful interpretation"),
+            _ => panic!("Expected successful interpretation:"),
         };
     }
 
@@ -2803,6 +2804,7 @@ mod tests {
     #[test]
     fn private_filter() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -2836,6 +2838,7 @@ mod tests {
     #[test]
     fn private_filter_indirect() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -2961,6 +2964,7 @@ mod tests {
     #[test]
     fn filter_one_of_two() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3063,6 +3067,7 @@ mod tests {
     #[test]
     fn check_after_callee() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3096,6 +3101,7 @@ mod tests {
     #[test]
     fn trusted_sender() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3123,6 +3129,7 @@ mod tests {
     #[test]
     fn trusted_sender_after() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3151,6 +3158,7 @@ mod tests {
     #[test]
     fn trusted_sender_disabled() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3196,6 +3204,7 @@ mod tests {
     #[test]
     fn trusted_caller() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3223,6 +3232,7 @@ mod tests {
     #[test]
     fn trusted_caller_after() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3251,6 +3261,7 @@ mod tests {
     #[test]
     fn trusted_caller_disabled() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3296,6 +3307,7 @@ mod tests {
     #[test]
     fn callee_filter() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -3332,6 +3344,7 @@ mod tests {
     #[test]
     fn callee_filter_disabled() {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis

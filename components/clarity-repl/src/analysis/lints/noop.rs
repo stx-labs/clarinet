@@ -1,3 +1,5 @@
+//! Lint to find expressions that have no effect (noops)
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
@@ -9,6 +11,7 @@ use clarity::vm::{ClarityVersion, SymbolicExpression};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
@@ -154,20 +157,19 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
 
 impl AnalysisPass for NoopChecker<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = NoopCheckerSettings::new();
         let checker = NoopChecker::new(
-            contract_analysis.clarity_version,
-            annotations,
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
             level,
             settings,
         );
-        checker.run(contract_analysis)
+        checker.run(analysis_cache.contract_analysis)
     }
 }
 
@@ -182,12 +184,11 @@ impl Lint for NoopChecker<'_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::diagnostic::Level;
     use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
     use super::NoopChecker;
-    use crate::analysis::linter::Lint;
+    use crate::analysis::linter::{Lint, LintLevel};
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -197,7 +198,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(NoopChecker::get_name(), Level::Warning);
+            .set_lint_level(NoopChecker::get_name(), LintLevel::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)

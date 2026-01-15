@@ -58,10 +58,12 @@ pub enum WarningKind {
     Noop,
     UnusedConst,
     UnusedDataVar,
+    UnusedBinding,
     UnusedMap,
     UnusedPrivateFn,
     UnusedToken,
     UnusedTrait,
+    CaseConst,
 }
 
 #[derive(Debug)]

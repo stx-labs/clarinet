@@ -1,6 +1,7 @@
 pub mod annotation;
 pub mod ast_dependency_detector;
 pub mod ast_visitor;
+pub mod cache;
 pub mod call_checker;
 pub mod check_checker;
 pub mod coverage;
@@ -8,10 +9,9 @@ pub mod coverage;
 mod coverage_tests;
 pub mod linter;
 pub mod lints;
+mod util;
 
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::iter::FromIterator;
+use std::collections::HashSet;
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
@@ -19,6 +19,7 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use indexmap::IndexMap;
 use linter::{LintLevel, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
@@ -26,13 +27,13 @@ use serde::Serialize;
 use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
-use crate::analysis::linter::LintGroup;
+use crate::analysis::cache::AnalysisCache;
+use crate::analysis::linter::{LintGroup, LintMapBuilder};
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
-    &mut ContractAnalysis,
     &mut AnalysisDatabase,
-    &Vec<Annotation>,
+    &mut AnalysisCache,
     level: ClarityDiagnosticLevel,
     settings: &Settings,
 ) -> AnalysisResult;
@@ -40,9 +41,8 @@ pub type AnalysisPassFn = fn(
 pub trait AnalysisPass {
     #[allow(clippy::ptr_arg)]
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: ClarityDiagnosticLevel,
         settings: &Settings,
     ) -> AnalysisResult;
@@ -54,10 +54,12 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::Noop => lints::NoopChecker::run_pass,
             LintName::UnusedConst => lints::UnusedConst::run_pass,
             LintName::UnusedDataVar => lints::UnusedDataVar::run_pass,
+            LintName::UnusedBinding => lints::UnusedBinding::run_pass,
             LintName::UnusedMap => lints::UnusedMap::run_pass,
             LintName::UnusedPrivateFn => lints::UnusedPrivateFn::run_pass,
             LintName::UnusedToken => lints::UnusedToken::run_pass,
             LintName::UnusedTrait => lints::UnusedTrait::run_pass,
+            LintName::CaseConst => lints::CaseConst::run_pass,
         }
     }
 }
@@ -100,8 +102,12 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
-    lints: HashMap<LintName, ClarityDiagnosticLevel>,
+    lint_groups: IndexMap<LintGroup, BoolOr<LintLevel>>,
+    lints: IndexMap<LintName, BoolOr<LintLevel>>,
     check_checker: check_checker::Settings,
+    /// TODO: Fix writing `Clarinet.toml` and remove this
+    #[serde(skip)]
+    disable_default_lints: bool,
 }
 
 impl Settings {
@@ -121,21 +127,27 @@ impl Settings {
         }
     }
 
-    pub fn enable_lint(
+    pub fn set_lint_level(
         &mut self,
         lint: LintName,
-        level: ClarityDiagnosticLevel,
-    ) -> Option<ClarityDiagnosticLevel> {
-        self.lints.insert(lint, level)
+        level: LintLevel,
+    ) -> Option<BoolOr<LintLevel>> {
+        let value = BoolOr::Value(level);
+        self.lints.insert(lint, value)
     }
 
-    pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
+    pub fn set_all_lint_levels(&mut self, level: LintLevel) {
         for lint in LintName::VARIANTS {
-            self.enable_lint(*lint, level.clone());
+            self.set_lint_level(*lint, level);
         }
     }
 
+    pub fn disable_default_lints(&mut self) {
+        self.disable_default_lints = true;
+    }
+
     pub fn disable_all_lints(&mut self) {
+        self.disable_default_lints();
         self.lints.clear();
     }
 }
@@ -172,34 +184,23 @@ impl From<BoolOr<Self>> for LintLevel {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
-    lint_groups: Option<HashMap<LintGroup, BoolOr<LintLevel>>>,
-    lints: Option<HashMap<LintName, BoolOr<LintLevel>>>,
+    lint_groups: Option<IndexMap<LintGroup, BoolOr<LintLevel>>>,
+    lints: Option<IndexMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
 }
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let max_size = LintName::VARIANTS.len();
-        let mut lints = HashMap::with_capacity(max_size);
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // WARNING: Try to avoid any processing or applying defaults here!
+        // Any changes to `Settings` will be written out to file if `clarinet contract new` is run!
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-        // Process lint groups first
-        for (group, val) in from_file.lint_groups.unwrap_or_default() {
-            group.insert_into(&mut lints, LintLevel::from(val));
-        }
-
-        // Individual lints can override group settings
-        for (lint, val) in from_file.lints.unwrap_or_default() {
-            lints.insert(lint, LintLevel::from(val));
-        }
-
-        // Filter out explicitly disabled lints
-        let lints = lints
-            .into_iter()
-            .filter_map(|(lint, lint_level)| {
-                let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
-                diag_level.map(|level| (lint, level))
-            })
-            .collect();
+        // Each pass that has its own settings should be included here.
+        let check_checker = from_file
+            .check_checker
+            .map(check_checker::Settings::from)
+            .unwrap_or_default();
 
         let mut passes = from_file
             .passes
@@ -219,16 +220,12 @@ impl From<SettingsFile> for Settings {
         // Always enable call checker
         passes.insert(Pass::CallChecker);
 
-        // Each pass that has its own settings should be included here.
-        let check_checker = from_file
-            .check_checker
-            .map(check_checker::Settings::from)
-            .unwrap_or_default();
-
         Self {
-            lints,
+            lints: from_file.lints.unwrap_or_default(),
+            lint_groups: from_file.lint_groups.unwrap_or_default(),
             passes,
             check_checker,
+            disable_default_lints: false,
         }
     }
 }
@@ -239,6 +236,29 @@ pub fn run_analysis(
     annotations: &Vec<Annotation>,
     settings: &Settings,
 ) -> AnalysisResult {
+    // FIXME: Ugly hack to not use defaults in unit tests
+    let mut lints = if !settings.disable_default_lints {
+        LintMapBuilder::new().apply_defaults().build()
+    } else {
+        LintMapBuilder::new().build()
+    };
+
+    // Process lint groups first
+    for (group, val) in &settings.lint_groups {
+        group.insert_into(&mut lints, LintLevel::from(val.clone()));
+    }
+
+    // Individual lints can override group settings
+    for (lint, val) in &settings.lints {
+        lints.insert(*lint, LintLevel::from(val.clone()));
+    }
+
+    // Filter out explicitly disabled lints
+    let lints = lints.into_iter().filter_map(|(lint, lint_level)| {
+        let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
+        diag_level.map(|level| (lint, level))
+    });
+
     let mut errors: Vec<Diagnostic> = vec![];
     let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel)> = vec![];
 
@@ -247,15 +267,18 @@ pub fn run_analysis(
         passes.push((f, pass.default_level()));
     }
 
-    for (name, level) in &settings.lints {
-        let lint = AnalysisPassFn::from(name);
-        passes.push((lint, level.clone()));
+    for (name, level) in lints {
+        let lint = AnalysisPassFn::from(&name);
+        passes.push((lint, level));
     }
+
+    // Create shared cache for all passes/lints
+    let mut cache = AnalysisCache::new(contract_analysis, annotations);
 
     execute(analysis_db, |database| {
         for (pass, level) in passes {
             // Collect warnings and continue, or if there is an error, return.
-            match pass(contract_analysis, database, annotations, level, settings) {
+            match pass(database, &mut cache, level, settings) {
                 Ok(mut w) => errors.append(&mut w),
                 Err(mut e) => {
                     errors.append(&mut e);

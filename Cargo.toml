@@ -20,7 +20,7 @@ members = [
 default-members = ["components/clarinet-cli"]
 
 [workspace.package]
-version = "3.12.0"
+version = "3.13.0"
 
 [workspace.dependencies]
 clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "clarity", default-features = false }
@@ -41,6 +41,7 @@ colored = "3"
 chrono = "0.4.42"
 crossterm = "0.28.0"
 dirs = "6.0.0"
+indexmap = "2.13.0"
 js-sys = "0.3.80"
 libsecp256k1 = "0.7.2"
 pretty_assertions = "1.4"

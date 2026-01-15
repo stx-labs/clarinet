@@ -19,6 +19,6 @@ fn can_run_boot_contracts() {
                 dbg!(&err);
                 panic!("failed to interpret {} boot contract", &boot_contract.name)
             });
-        assert!(res.diagnostics.is_empty());
+        assert!(res.diagnostics.is_empty(), "{:?}", res.diagnostics);
     }
 }

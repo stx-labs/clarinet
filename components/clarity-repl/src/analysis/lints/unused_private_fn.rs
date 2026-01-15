@@ -1,3 +1,13 @@
+//! Lint to find unused FTs and NFTs
+//!
+//! A private function is considered unused if it is never referenced
+//!
+//! **NOTE:** A private function is considered used if it is referenced by another unused private function.
+//! In this case, repeated applications of the lint will find all unused code
+//!
+//! **NOTE:** It is common to intentinoally have unused private functions for unit testing.
+//! In this case, you should annotate the function with `;; #[allow(unused_private_fn)]`
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
@@ -9,7 +19,9 @@ use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedPrivateFnSettings {
@@ -112,6 +124,9 @@ impl<'a> UnusedPrivateFn<'a> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.private_fns {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let (message, suggestion) = match data.called {
                 true => continue,
                 false => Self::make_diagnostic_strings(name),
@@ -198,20 +213,19 @@ impl<'a> ASTVisitor<'a> for UnusedPrivateFn<'a> {
 
 impl AnalysisPass for UnusedPrivateFn<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedPrivateFnSettings::new();
         let lint = UnusedPrivateFn::new(
-            contract_analysis.clarity_version,
-            annotations,
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
             level,
             settings,
         );
-        lint.run(contract_analysis)
+        lint.run(analysis_cache.contract_analysis)
     }
 }
 
@@ -229,12 +243,11 @@ impl Lint for UnusedPrivateFn<'_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::diagnostic::Level;
     use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
     use super::UnusedPrivateFn;
-    use crate::analysis::linter::Lint;
+    use crate::analysis::linter::{Lint, LintLevel};
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -244,7 +257,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(UnusedPrivateFn::get_name(), Level::Warning);
+            .set_lint_level(UnusedPrivateFn::get_name(), LintLevel::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
@@ -343,6 +356,22 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_private_fn)]
             (define-private (square (x uint))
+                (* x x))
+
+            (define-read-only (cube (x uint))
+                (* x (* x x)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (square_ (x uint))
                 (* x x))
 
             (define-read-only (cube (x uint))

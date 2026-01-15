@@ -115,7 +115,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -126,7 +126,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -670,7 +670,7 @@ checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 
 [[package]]
 name = "clarinet-cli"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "bs58",
  "clap",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-deployments"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "base58",
  "base64 0.22.1",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-files"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "bitcoin",
  "clarinet-utils",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "clarinet-deployments",
  "clarinet-files",
@@ -824,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-events"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "clap",
  "clarinet-files",
@@ -836,7 +836,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "clarinet-deployments",
  "clarinet-files",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -873,6 +873,7 @@ dependencies = [
  "futures",
  "hiro-system-kit",
  "httparse",
+ "indexmap 2.13.0",
  "indoc",
  "js-sys",
  "log",
@@ -935,7 +936,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1260,7 +1261,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1407,7 +1408,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1442,7 +1443,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if 1.0.4",
  "rustix 1.1.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1708,7 +1709,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http",
- "indexmap 2.12.1",
+ "indexmap 2.13.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -2134,9 +2135,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.12.1"
+version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
+checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
@@ -2217,7 +2218,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2668,7 +2669,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3298,7 +3299,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3311,7 +3312,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3586,7 +3587,7 @@ version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
- "indexmap 2.12.1",
+ "indexmap 2.13.0",
  "itoa",
  "memchr",
  "ryu",
@@ -3649,7 +3650,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.12.1",
+ "indexmap 2.13.0",
  "schemars 0.9.0",
  "schemars 1.1.0",
  "serde_core",
@@ -3915,12 +3916,13 @@ dependencies = [
  "cfg-if 1.0.4",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "stacks-codec"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "clarity",
  "serde",
@@ -3960,7 +3962,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-network"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "base58",
  "bitcoincore-rpc",
@@ -4005,7 +4007,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "3.12.0"
+version = "3.13.0"
 dependencies = [
  "clarinet-utils",
  "clarity",
@@ -4170,7 +4172,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4179,7 +4181,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4829,7 +4831,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

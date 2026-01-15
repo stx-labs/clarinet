@@ -1,3 +1,9 @@
+//! Lint to find unused map (`declare-map`) variables
+//!
+//! A diagnostic is generated if:
+//!  - The map is never referenced
+//!  - The map is used, but in a way that cannot affect contract execution
+
 use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
@@ -9,7 +15,9 @@ use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 enum Usage {
@@ -173,6 +181,9 @@ impl<'a> UnusedMap<'a> {
         let mut diagnostics = vec![];
 
         for (name, data) in &self.maps {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let (message, suggestion) = match Self::compute_map_usage(data) {
                 Usage::Used => continue,
                 Usage::Unset => Self::make_diagnostic_strings_unset(name),
@@ -255,20 +266,19 @@ impl<'a> ASTVisitor<'a> for UnusedMap<'a> {
 
 impl AnalysisPass for UnusedMap<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedMapSettings::new();
         let lint = UnusedMap::new(
-            contract_analysis.clarity_version,
-            annotations,
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
             level,
             settings,
         );
-        lint.run(contract_analysis)
+        lint.run(analysis_cache.contract_analysis)
     }
 }
 
@@ -286,12 +296,11 @@ impl Lint for UnusedMap<'_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::diagnostic::Level;
     use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
     use super::UnusedMap;
-    use crate::analysis::linter::Lint;
+    use crate::analysis::linter::{Lint, LintLevel};
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -301,7 +310,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(UnusedMap::get_name(), Level::Warning);
+            .set_lint_level(UnusedMap::get_name(), LintLevel::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
@@ -412,6 +421,21 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_map)]
             (define-map admins principal bool)
+
+            (define-read-only (is-admin (p principal))
+                true)
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map admins_ principal bool)
 
             (define-read-only (is-admin (p principal))
                 true)

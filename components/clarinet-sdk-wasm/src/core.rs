@@ -422,12 +422,8 @@ impl SDK {
             session.enable_coverage_hook();
         }
         session.enable_logger_hook();
-        let executed_contracts = update_session_with_deployment_plan(
-            &mut session,
-            &deployment,
-            Some(&artifacts.asts),
-            Some(DEFAULT_EPOCH),
-        );
+        let executed_contracts =
+            update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
 
         let mut accounts = HashMap::new();
         if let Some(ref spec) = deployment.genesis {
@@ -506,7 +502,6 @@ impl SDK {
             &StacksNetwork::Simnet,
             false,
             Some(&*self.file_accessor),
-            Some(StacksEpochId::Epoch21),
         )
         .await?;
 

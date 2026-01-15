@@ -652,22 +652,13 @@ pub async fn build_state(
         }
     };
 
-    let (deployment, mut artifacts) = generate_default_deployment(
-        &manifest,
-        &StacksNetwork::Simnet,
-        false,
-        file_accessor,
-        Some(StacksEpochId::Epoch21),
-    )
-    .await?;
+    let (deployment, mut artifacts) =
+        generate_default_deployment(&manifest, &StacksNetwork::Simnet, false, file_accessor)
+            .await?;
 
     let mut session = initiate_session_from_manifest(&manifest);
-    let contracts = update_session_with_deployment_plan(
-        &mut session,
-        &deployment,
-        Some(&artifacts.asts),
-        Some(StacksEpochId::Epoch21),
-    );
+    let contracts =
+        update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
     for (contract_id, mut result) in contracts.into_iter() {
         let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
             continue;

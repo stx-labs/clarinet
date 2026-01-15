@@ -1,4 +1,5 @@
 //! Find unused traits imported with `use-trait`
+//!
 //! A trait is considered unused if there is no public or read-only function parameter with the trait type
 
 use std::collections::HashMap;
@@ -13,7 +14,9 @@ use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
+use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedTraitSettings {
@@ -134,6 +137,9 @@ impl<'a> UnusedTrait<'a> {
         let mut diagnostics = vec![];
 
         for (name, usage) in &self.traits {
+            if is_explicitly_unused(name) {
+                continue;
+            }
             let used_in = (
                 usage.declare_trait,
                 usage.public_fn,
@@ -350,20 +356,19 @@ impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
 
 impl AnalysisPass for UnusedTrait<'_> {
     fn run_pass(
-        contract_analysis: &mut ContractAnalysis,
         _analysis_db: &mut AnalysisDatabase,
-        annotations: &Vec<Annotation>,
+        analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedTraitSettings::new();
         let lint = UnusedTrait::new(
-            contract_analysis.clarity_version,
-            annotations,
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
             level,
             settings,
         );
-        lint.run(contract_analysis)
+        lint.run(analysis_cache.contract_analysis)
     }
 }
 
@@ -382,12 +387,11 @@ impl Lint for UnusedTrait<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::diagnostic::Level;
     use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
     use super::UnusedTrait;
-    use crate::analysis::linter::Lint;
+    use crate::analysis::linter::{Lint, LintLevel};
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
@@ -398,7 +402,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(UnusedTrait::get_name(), Level::Warning);
+            .set_lint_level(UnusedTrait::get_name(), LintLevel::Warning);
 
         // We need a trait in a separate contract for these tests
         #[rustfmt::skip]
@@ -620,6 +624,21 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(unused_trait)]
             (use-trait token-trait .token-trait.token-trait)
+
+            (define-read-only (get-token-amount (p principal))
+                u100)
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_naming_convention() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait token-trait_ .token-trait.token-trait)
 
             (define-read-only (get-token-amount (p principal))
                 u100)
