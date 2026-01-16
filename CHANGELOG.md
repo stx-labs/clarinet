@@ -1,3 +1,9 @@
+#### [3.13.1](https://github.com/stx-labs/clarinet/compare/v3.12.0...v3.13.0) 2026-01-16
+
+##### Bug Fixes
+
+*  Allow multiple lints inside a single `#[allow(...)]` annotation (#2145) (436a939b)
+
 #### [3.13.0](https://github.com/stx-labs/clarinet/compare/v3.12.0...v3.13.0) 2026-01-15
 
 ##### New Features
