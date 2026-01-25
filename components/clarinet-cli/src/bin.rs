@@ -13,7 +13,6 @@ mod generate;
 mod lsp;
 
 use frontend::cli;
-
 #[cfg(not(any(target_env = "msvc", target_os = "macos")))]
 use tikv_jemallocator::Jemalloc;
 
