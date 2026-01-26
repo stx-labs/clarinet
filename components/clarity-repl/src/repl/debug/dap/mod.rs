@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use clarity::vm::callables::FunctionIdentifier;
@@ -16,6 +15,7 @@ use debug_types::responses::*;
 use debug_types::types::*;
 use debug_types::*;
 use futures::{SinkExt, StreamExt};
+use hashbrown::HashMap;
 use tokio;
 use tokio::io::{Stdin, Stdout};
 use tokio::runtime::Runtime;

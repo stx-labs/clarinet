@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use clarity::vm::docs::{
@@ -7,6 +6,7 @@ use clarity::vm::docs::{
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::variables::NativeVariables;
+use hashbrown::HashMap;
 
 fn normalize_description(description: &str) -> String {
     description.replace('\n', " ")
