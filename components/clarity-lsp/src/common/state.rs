@@ -955,6 +955,7 @@ async fn get_cost_analysis(
 ) -> Option<HashMap<String, CostAnalysisNode>> {
     use clarity::vm::contexts::{CallStack, ContractContext, Environment};
     use clarity::vm::costs::analysis::static_cost_tree;
+    use clarity::vm::errors::{VmExecutionError, VmInternalError};
 
     crate::lsp_log!(
         "[LSP] get_cost_analysis called for contract: {} (clarity version: {:?})",
@@ -975,28 +976,34 @@ async fn get_cost_analysis(
 
     global_context.begin();
 
-    let cost_result: Result<HashMap<String, CostAnalysisNode>, clarity_types::Error> =
+    let cost_result: Result<HashMap<String, CostAnalysisNode>, clarity::vm::errors::VmExecutionError> =
         global_context.execute(|g| {
             let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
             let mut call_stack = CallStack::new();
 
-            let mut env = Environment::new(
-                g,
-                &contract_context,
-                &mut call_stack,
-                Some(tx_sender.clone()),
-                Some(tx_sender),
-                None,
-            );
+        let mut env = Environment::new(
+            g,
+            &contract_context,
+            &mut call_stack,
+            Some(tx_sender.clone()),
+            Some(tx_sender),
+            None,
+        );
 
-            // convert the cost restult
-            static_cost_tree(&mut env, contract_id).map_err(|e| {
-                crate::lsp_log!("[LSP] static_cost_tree failed with error: {}", e);
-                clarity_types::Error::from(clarity_types::errors::InterpreterError::Expect(
-                    format!("Cost analysis failed for contract {}: {}", contract_id, e),
-                ))
-            })
-        });
+            // convert the cost result - extract CostAnalysisNode from tuple
+            static_cost_tree(&mut env, contract_id)
+                .map(|result| {
+                    result
+                        .into_iter()
+                        .map(|(k, (node, _))| (k, node))
+                        .collect()
+                })
+                .map_err(|e| {
+                    crate::lsp_log!("[LSP] static_cost_tree failed with error: {}", e);
+                    let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
+                    VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+                })
+    });
 
     cost_result
         .map_err(|e| {
