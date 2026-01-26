@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::vec;
@@ -23,6 +23,7 @@ use clarity::vm::{ContractContext, StacksEpoch};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };
+use hashbrown::HashMap;
 use pox_locking::handle_contract_call_special_cases;
 use sha2::{Digest, Sha512_256};
 
@@ -772,12 +773,12 @@ impl Datastore {
         let current_chain_tip = clarity_datastore.current_chain_tip.borrow();
         let stacks_chain_height = clarity_datastore
             .height_at_chain_tip
-            .get(&current_chain_tip)
+            .get(&*current_chain_tip)
             .unwrap();
 
         let block = {
             let cache = clarity_datastore.remote_block_info_cache.borrow();
-            cache.get(&current_chain_tip).unwrap().clone()
+            cache.get(&*current_chain_tip).unwrap().clone()
         };
         let sortition = {
             let cache = clarity_datastore.remote_sortition_cache.borrow();
@@ -1268,7 +1269,7 @@ impl BurnStateDB for Datastore {
 
                 self.remote_block_info_cache
                     .borrow()
-                    .get(&current_chain_tip)
+                    .get(&*current_chain_tip)
                     .map(|block| block.burn_block_height)
             }
             // preserve the 3.0 -> 3.3 special behavior of burn-block-height
