@@ -4,7 +4,7 @@ use clarity::vm::ast::ContractAST;
 use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::functions::NativeFunctions::{self, Filter, Fold, Map};
 use clarity::vm::{EvalHook, SymbolicExpression};
-use clarity_types::errors::VmExecutionError;
+use clarity::vm::errors::VmExecutionError;
 use clarity_types::types::QualifiedContractIdentifier;
 
 type ExprCoverage = HashMap<u64, u64>;

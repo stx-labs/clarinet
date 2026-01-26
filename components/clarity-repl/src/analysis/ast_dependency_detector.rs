@@ -10,7 +10,7 @@ use clarity::vm::ast::ContractAST;
 use clarity::vm::representations::{SymbolicExpression, TraitDefinition};
 use clarity::vm::types::{FunctionSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpressionType};
-use clarity_types::errors::analysis::CheckErrorKind;
+use clarity_types::errors::analysis::RuntimeCheckErrorKind as CheckErrorKind;
 use clarity_types::types::signatures::CallableSubtype;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceSubtype, TraitIdentifier, TypeSignature,
@@ -931,7 +931,7 @@ impl GraphWalker {
 
 #[cfg(test)]
 mod tests {
-    use ::clarity::vm::diagnostic::Diagnostic;
+    use clarity::vm::diagnostic::Diagnostic;
 
     use super::*;
     use crate::repl::session::Session;

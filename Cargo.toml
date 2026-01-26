@@ -23,11 +23,11 @@ default-members = ["components/clarinet-cli"]
 version = "3.13.1"
 
 [workspace.dependencies]
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "clarity-types" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b112ddcff5528b63251622802b2965e5a78b58bf", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b112ddcff5528b63251622802b2965e5a78b58bf", package = "clarity-types" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b112ddcff5528b63251622802b2965e5a78b58bf", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b112ddcff5528b63251622802b2965e5a78b58bf", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b112ddcff5528b63251622802b2965e5a78b58bf", package = "stackslib", default-features = false }
 
 aes-gcm = "0.10"
 argon2 = "0.5.3"
@@ -74,9 +74,9 @@ indoc = "2.0.3"
 # dev dependencies
 mockito = { version = "1.6", default-features = false }
 
-# [patch.'https://github.com/stacks-network/stacks-core.git']
-# clarity = { path = "../stacks-core/clarity" }
-# clarity-types = { path = "../stacks-core/clarity-types" }
-# stacks-common = { path = "../stacks-core/stacks-common" }
-# stackslib = { path = "../stacks-core/stackslib" }
-# pox-locking = { path = "../stacks-core/pox-locking" }
+[patch.'https://github.com/stacks-network/stacks-core.git']
+clarity = { path = "../stacks-core/clarity" }
+clarity-types = { path = "../stacks-core/clarity-types" }
+stacks-common = { path = "../stacks-core/stacks-common" }
+stackslib = { path = "../stacks-core/stackslib" }
+pox-locking = { path = "../stacks-core/pox-locking" }

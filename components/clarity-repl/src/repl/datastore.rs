@@ -19,7 +19,7 @@ use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
 use clarity::vm::{ContractContext, StacksEpoch};
-use clarity_types::errors::{VmExecutionError, VmInternalError};
+use clarity::vm::errors::{VmExecutionError, VmInternalError};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };

@@ -5,7 +5,7 @@ use clarity::vm::functions::NativeFunctions;
 use clarity::vm::{
     eval, ClarityVersion, EvalHook, EvaluationResult, SymbolicExpression, SymbolicExpressionType,
 };
-use clarity_types::errors::VmExecutionError;
+use clarity::vm::errors::VmExecutionError;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, Value,
 };

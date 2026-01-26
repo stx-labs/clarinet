@@ -8,7 +8,7 @@ use clarity::vm::diagnostic::Level;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{eval, ClarityVersion, ContractName, SymbolicExpressionType};
-use clarity_types::errors::VmExecutionError;
+use clarity::vm::errors::VmExecutionError;
 use clarity_types::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity_types::Value;
 
