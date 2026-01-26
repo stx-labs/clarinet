@@ -1,11 +1,10 @@
 //! Builds `HashMap` of all bindings (`let` bindings and function args) in a contract
 
-use hashbrown::HashMap;
-
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::representations::Span;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
+use hashbrown::HashMap;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};

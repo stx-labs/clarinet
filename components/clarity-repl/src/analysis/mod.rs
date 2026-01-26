@@ -17,8 +17,8 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
-use indexmap::IndexMap;
 use hashbrown::HashSet;
+use indexmap::IndexMap;
 use linter::{LintLevel, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
