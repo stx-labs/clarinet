@@ -4024,7 +4024,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b#3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=b112ddcff5528b63251622802b2965e5a78b58bf"
 dependencies = [
  "clarity",
  "ed25519-dalek",
