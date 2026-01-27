@@ -785,6 +785,7 @@ dependencies = [
  "clarity-repl",
  "console_error_panic_hook",
  "gloo-utils",
+ "hashbrown 0.16.1",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
