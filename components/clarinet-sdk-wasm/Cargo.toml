@@ -15,6 +15,7 @@ path = "src/lib.rs"
 clarity = { workspace = true, default-features = false }
 console_error_panic_hook = { version = "0.1" }
 gloo-utils = { version = "0.2.0", features = ["serde"] }
+hashbrown = { workspace = true }
 js-sys = { workspace = true }
 serde = {  workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

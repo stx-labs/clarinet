@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use hashbrown::HashMap;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;

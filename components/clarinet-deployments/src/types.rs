@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use clarinet_files::{DevnetConfig, FileAccessor, FileLocation, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
@@ -11,6 +11,7 @@ use clarity_repl::clarity::vm::types::{
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
 use clarity_repl::repl::{Session, DEFAULT_CLARITY_VERSION};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 use strum::{EnumIter, IntoEnumIterator};
@@ -648,9 +649,10 @@ pub mod qualified_contract_identifier_serde {
 }
 
 pub mod remap_principals_serde {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use clarity_repl::clarity::vm::types::{PrincipalData, StandardPrincipalData};
+    use hashbrown::HashMap;
     use serde::ser::SerializeMap;
     use serde::{Deserializer, Serializer};
 
@@ -895,12 +897,13 @@ pub struct DeploymentSpecification {
 }
 
 pub mod contracts_serde {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use base64::engine::general_purpose::STANDARD as b64;
     use base64::Engine as _;
     use clarinet_files::FileLocation;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
+    use hashbrown::HashMap;
     use serde::ser::SerializeSeq;
     use serde::{Deserializer, Serializer};
 

@@ -4,14 +4,13 @@
 //!  - The variable is never referenced
 //!  - The variable is never modified (suggest using constant instead)
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::Span;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
+use hashbrown::HashMap;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};

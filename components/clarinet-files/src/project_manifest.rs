@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -7,6 +7,7 @@ use clarity::vm::ClarityVersion;
 use clarity_repl::repl;
 use clarity_repl::repl::boot::BOOT_CONTRACTS_NAMES;
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
+use hashbrown::HashMap;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::ser::SerializeMap;

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -6,6 +5,7 @@ use clarinet_files::FileLocation;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_CLARITY_VERSION,
 };
+use hashbrown::HashMap;
 use indoc::{formatdoc, indoc};
 
 use super::changes::{Changes, FileCreation, FileDeletion, TOMLEdition};
