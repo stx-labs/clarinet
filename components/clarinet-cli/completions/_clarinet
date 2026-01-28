@@ -107,10 +107,60 @@ _arguments "${_arguments_options[@]}" \
 '--manifest-path=[Path to Clarinet.toml]:MANIFEST_PATH: ' \
 '--help[Print help information]' \
 '--version[Print version information]' \
-'(--testnet --mainnet)--devnet[Deploy contracts on devnet, using settings/Devnet.toml]' \
-'(--devnet --mainnet)--testnet[Deploy contracts on testnet, using settings/Testnet.toml]' \
-'(--testnet --devnet)--mainnet[Deploy contracts on mainnet, using settings/Mainnet.toml]' \
+":: :_deployments_commands" \
+"*::: :->deployments" \
 && ret=0
+
+    case $state in
+    (deployments)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:deployments-command-$line[1]:"
+        case $line[1] in
+            (check)
+_arguments "${_arguments_options[@]}" \
+'--manifest-path=[Path to Clarinet.toml]:MANIFEST_PATH: ' \
+'--help[Print help information]' \
+'--version[Print version information]' \
+'(--testnet --mainnet)--devnet[Check deployment plan for devnet]' \
+'(--devnet --mainnet)--testnet[Check deployment plan for testnet]' \
+'(--testnet --devnet)--mainnet[Check deployment plan for mainnet]' \
+&& ret=0
+;;
+            (generate)
+_arguments "${_arguments_options[@]}" \
+'--manifest-path=[Path to Clarinet.toml]:MANIFEST_PATH: ' \
+'--help[Print help information]' \
+'--version[Print version information]' \
+'(--testnet --mainnet)--devnet[Generate deployment plan for devnet]' \
+'(--devnet --mainnet)--testnet[Generate deployment plan for testnet]' \
+'(--testnet --devnet)--mainnet[Generate deployment plan for mainnet]' \
+'--low-cost[Use low cost settings]' \
+'--medium-cost[Use medium cost settings]' \
+'--manual-cost[Set transaction costs manually]' \
+&& ret=0
+;;
+            (apply)
+_arguments "${_arguments_options[@]}" \
+'--manifest-path=[Path to Clarinet.toml]:MANIFEST_PATH: ' \
+'--help[Print help information]' \
+'--version[Print version information]' \
+'(--testnet --mainnet)--devnet[Apply deployment plan for devnet]' \
+'(--devnet --mainnet)--testnet[Apply deployment plan for testnet]' \
+'(--testnet --devnet)--mainnet[Apply deployment plan for mainnet]' \
+'--no-dashboard[Display streams of logs instead of terminal UI dashboard]' \
+&& ret=0
+;;
+            (encrypt)
+_arguments "${_arguments_options[@]}" \
+'--manifest-path=[Path to Clarinet.toml]:MANIFEST_PATH: ' \
+'--help[Print help information]' \
+'--version[Print version information]' \
+&& ret=0
+;;
+        esac
+    ;;
+esac
 ;;
 (run)
 _arguments "${_arguments_options[@]}" \
@@ -211,7 +261,12 @@ _new_commands() {
 }
 (( $+functions[_deployments_commands] )) ||
 _deployments_commands() {
-    local commands; commands=()
+    local commands; commands=(
+'check:Check a deployment plan' \
+'generate:Generate a deployment plan' \
+'apply:Apply a deployment plan' \
+'encrypt:Encrypt deployment mnemonic' \
+    )
     _describe -t commands 'deployments commands' commands "$@"
 }
 (( $+functions[_requirement_commands] )) ||

@@ -39,12 +39,38 @@ complete -c clarinet -n "__fish_seen_subcommand_from test" -l watch -d 'Relaunch
 complete -c clarinet -n "__fish_seen_subcommand_from check" -l manifest-path -d 'Path to Clarinet.toml' -r
 complete -c clarinet -n "__fish_seen_subcommand_from check" -l help -d 'Print help information'
 complete -c clarinet -n "__fish_seen_subcommand_from check" -l version -d 'Print version information'
-complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l manifest-path -d 'Path to Clarinet.toml' -r
-complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l help -d 'Print help information'
-complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l version -d 'Print version information'
-complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l devnet -d 'Deploy contracts on devnet, using settings/Devnet.toml'
-complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l testnet -d 'Deploy contracts on testnet, using settings/Testnet.toml'
-complete -c clarinet -n "__fish_seen_subcommand_from deployments" -l mainnet -d 'Deploy contracts on mainnet, using settings/Mainnet.toml'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and not __fish_seen_subcommand_from check; and not __fish_seen_subcommand_from generate; and not __fish_seen_subcommand_from apply; and not __fish_seen_subcommand_from encrypt" -l manifest-path -d 'Path to Clarinet.toml' -r
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and not __fish_seen_subcommand_from check; and not __fish_seen_subcommand_from generate; and not __fish_seen_subcommand_from apply; and not __fish_seen_subcommand_from encrypt" -l help -d 'Print help information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and not __fish_seen_subcommand_from check; and not __fish_seen_subcommand_from generate; and not __fish_seen_subcommand_from apply; and not __fish_seen_subcommand_from encrypt" -l version -d 'Print version information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and not __fish_seen_subcommand_from check; and not __fish_seen_subcommand_from generate; and not __fish_seen_subcommand_from apply; and not __fish_seen_subcommand_from encrypt" -f -a "check" -d 'Check a deployment plan'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and not __fish_seen_subcommand_from check; and not __fish_seen_subcommand_from generate; and not __fish_seen_subcommand_from apply; and not __fish_seen_subcommand_from encrypt" -f -a "generate" -d 'Generate a deployment plan'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and not __fish_seen_subcommand_from check; and not __fish_seen_subcommand_from generate; and not __fish_seen_subcommand_from apply; and not __fish_seen_subcommand_from encrypt" -f -a "apply" -d 'Apply a deployment plan'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and not __fish_seen_subcommand_from check; and not __fish_seen_subcommand_from generate; and not __fish_seen_subcommand_from apply; and not __fish_seen_subcommand_from encrypt" -f -a "encrypt" -d 'Encrypt deployment mnemonic'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from check" -l manifest-path -d 'Path to Clarinet.toml' -r
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from check" -l help -d 'Print help information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from check" -l version -d 'Print version information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from check" -l devnet -d 'Check deployment plan for devnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from check" -l testnet -d 'Check deployment plan for testnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from check" -l mainnet -d 'Check deployment plan for mainnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l manifest-path -d 'Path to Clarinet.toml' -r
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l help -d 'Print help information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l version -d 'Print version information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l devnet -d 'Generate deployment plan for devnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l testnet -d 'Generate deployment plan for testnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l mainnet -d 'Generate deployment plan for mainnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l low-cost -d 'Use low cost settings'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l medium-cost -d 'Use medium cost settings'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from generate" -l manual-cost -d 'Set transaction costs manually'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from apply" -l manifest-path -d 'Path to Clarinet.toml' -r
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from apply" -l help -d 'Print help information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from apply" -l version -d 'Print version information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from apply" -l devnet -d 'Apply deployment plan for devnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from apply" -l testnet -d 'Apply deployment plan for testnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from apply" -l mainnet -d 'Apply deployment plan for mainnet'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from apply" -l no-dashboard -d 'Display streams of logs instead of terminal UI dashboard'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from encrypt" -l manifest-path -d 'Path to Clarinet.toml' -r
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from encrypt" -l help -d 'Print help information'
+complete -c clarinet -n "__fish_seen_subcommand_from deployments; and __fish_seen_subcommand_from encrypt" -l version -d 'Print version information'
 complete -c clarinet -n "__fish_seen_subcommand_from run" -l manifest-path -d 'Path to Clarinet.toml' -r
 complete -c clarinet -n "__fish_seen_subcommand_from run" -l help -d 'Print help information'
 complete -c clarinet -n "__fish_seen_subcommand_from run" -l version -d 'Print version information'
