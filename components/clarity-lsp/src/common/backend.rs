@@ -189,10 +189,15 @@ pub async fn process_notification(
                                     get_boot_contract_epoch_and_clarity_version(contract_name);
                                 version
                             } else {
-                                return Err(format!(
+                                // Log warning instead of returning error since this is non-fatal
+                                // The contract can still be opened without a Clarinet.toml
+                                #[cfg(target_arch = "wasm32")]
+                                log!(
                                     "No Clarinet.toml is associated to the contract {}",
                                     contract_location_string
-                                ));
+                                );
+                                // Note: perhaps the version should alternatively allow setting within the contract source?
+                                clarity_repl::clarity::ClarityVersion::latest()
                             }
                         }
                     }

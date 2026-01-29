@@ -14,7 +14,7 @@ use lsp_types::request::{
 };
 use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, MessageType, PublishDiagnosticsParams,
+    DidSaveTextDocumentParams, PublishDiagnosticsParams,
 };
 use serde::Serialize;
 use serde_wasm_bindgen::{from_value as decode_from_js, to_value as encode_to_js, Serializer};
@@ -148,7 +148,6 @@ impl LspVscodeBridge {
 
         let mut editor_state_lock = EditorStateInput::RwLock(self.editor_state_lock.clone());
         let send_diagnostic = self.client_diagnostic_tx.clone();
-        let send_notification = self.client_notification_tx.clone();
         let file_accessor: Box<dyn FileAccessor> = Box::new(WASMFileSystemAccessor::new(
             self.backend_to_client_tx.clone(),
         ));
@@ -159,17 +158,6 @@ impl LspVscodeBridge {
 
             let mut aggregated_diagnostics = vec![];
             if let Err(err) = result {
-                if err.starts_with("No Clarinet.toml is associated to the contract") {
-                    let _ = send_notification.call2(
-                        &JsValue::NULL,
-                        &encode_to_js(&lsp_types::notification::ShowMessage::METHOD).unwrap(),
-                        &encode_to_js(&lsp_types::ShowMessageParams {
-                            typ: MessageType::WARNING,
-                            message: String::from(&err),
-                        })
-                        .unwrap(),
-                    );
-                }
                 return Err(JsValue::from(err));
             }
             if let Ok(ref mut response) = result {
