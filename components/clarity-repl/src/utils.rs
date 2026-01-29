@@ -100,14 +100,11 @@ pub fn remove_env_simnet(
 
     // remove any top level exprs marked #[env(simnet)]
     let mut exprs = Vec::new();
-    let mut lines = source
-        .lines()
-        .map(|line| Some(line))
-        .collect::<Vec<Option<&str>>>();
+    let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
     for expr in &ast.expressions {
         let mut is_env_simnet = false;
         for (text, _span) in &expr.pre_comments {
-            if text.find("#[env(simnet)]").is_some() {
+            if text.contains("#[env(simnet)]") {
                 is_env_simnet = true;
                 break;
             }
@@ -136,11 +133,9 @@ pub fn remove_env_simnet(
 
     ast.expressions = exprs;
     let mut source = String::new();
-    for line in &lines {
-        if let Some(line) = line {
-            source.push_str(line);
-            source.push('\n');
-        }
+    for line in lines.iter().flatten() {
+        source.push_str(line);
+        source.push('\n');
     }
 
     Ok(source)
