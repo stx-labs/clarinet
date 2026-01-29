@@ -826,7 +826,7 @@ pub fn main() {
                     (_, _) => unreachable!()
                 };
 
-                let mut deployment = match result {
+                let deployment = match result {
                     Ok(deployment) => deployment,
                     Err(e) => {
                         eprintln!("{e}");
