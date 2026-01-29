@@ -5,7 +5,6 @@ use ::clarity::vm::ClarityVersion;
 use crate::repl::clarity_values::value_to_string;
 use crate::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
-    DEFAULT_EPOCH,
 };
 
 pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
@@ -75,6 +74,8 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
 }
 
 pub fn remove_env_simnet(
+    clarity_version: ClarityVersion,
+    epoch: Epoch,
     id: &QualifiedContractIdentifier,
     source: String,
 ) -> Result<String, String> {
@@ -82,13 +83,12 @@ pub fn remove_env_simnet(
     settings.repl_settings.analysis.enable_all_passes();
 
     let session = Session::new(settings.clone());
-    let epoch = DEFAULT_EPOCH;
     let contract = ClarityContract {
         code_source: ClarityCodeSource::ContractInMemory(source.clone()),
         deployer: ContractDeployer::Address(id.issuer.to_string()),
         name: id.name.to_string(),
-        clarity_version: ClarityVersion::default_for_epoch(epoch),
-        epoch: Epoch::Specific(epoch),
+        clarity_version,
+        epoch,
     };
 
     // parse AST
@@ -144,6 +144,7 @@ pub fn remove_env_simnet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repl::DEFAULT_EPOCH;
 
     #[test]
     fn can_remove_env_simnet() {
@@ -174,16 +175,29 @@ mod tests {
 
 "#;
 
+        let epoch = DEFAULT_EPOCH;
+        let version = ClarityVersion::default_for_epoch(epoch);
+        let epoch = Epoch::Specific(epoch);
         let contract_id = QualifiedContractIdentifier::transient();
 
         // test that we can remove a marked fn
-        let clean = remove_env_simnet(&contract_id, with_env_simnet.to_string())
-            .expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(
+            version,
+            epoch.clone(),
+            &contract_id,
+            with_env_simnet.to_string(),
+        )
+        .expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
 
         // test that nothing is removed if nothing is marked
-        let clean = remove_env_simnet(&contract_id, without_env_simnet.to_string())
-            .expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(
+            version,
+            epoch.clone(),
+            &contract_id,
+            without_env_simnet.to_string(),
+        )
+        .expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
     }
 }
