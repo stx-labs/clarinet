@@ -1,11 +1,11 @@
+use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
+use ::clarity::vm::types::QualifiedContractIdentifier;
+use ::clarity::vm::ClarityVersion;
+
+use crate::repl::clarity_values::value_to_string;
 use crate::repl::{
-    clarity_values::value_to_string, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
-    Session, SessionSettings, DEFAULT_EPOCH,
-};
-use ::clarity::vm::{
-    events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent},
-    types::QualifiedContractIdentifier,
-    ClarityVersion,
+    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
+    DEFAULT_EPOCH,
 };
 
 pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
