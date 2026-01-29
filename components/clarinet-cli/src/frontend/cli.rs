@@ -31,6 +31,7 @@ use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_EPOCH};
+use clarity_repl::utils::remove_env_simnet;
 use clarity_repl::{analysis, repl};
 use stacks_network::{self, DevnetOrchestrator};
 use toml;
@@ -826,7 +827,7 @@ pub fn main() {
                     (_, _) => unreachable!()
                 };
 
-                let deployment = match result {
+                let mut deployment = match result {
                     Ok(deployment) => deployment,
                     Err(e) => {
                         eprintln!("{e}");
@@ -852,6 +853,17 @@ pub fn main() {
                     {
                         eprintln!("Deployment aborted");
                         std::process::exit(1);
+                    }
+                }
+
+                // if we aren't deploying to simnet, load AST for each contract so we can strip out anything marked as #[env(simnet)]
+                if network != StacksNetwork::Simnet {
+                    for (id, (ref mut source, loc)) in &mut deployment.contracts {
+                        let Ok(clean) = remove_env_simnet(id, source.to_string()) else {
+                            println!("Failed to remove code tagged as #[env(simnet)] from {loc}");
+                            std::process::exit(1);
+                        };
+                        *source = clean;
                     }
                 }
 
