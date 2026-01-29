@@ -10,7 +10,8 @@ use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
-use clarity_repl::repl::{Session, DEFAULT_CLARITY_VERSION};
+use clarity_repl::repl::{Epoch, Session, DEFAULT_CLARITY_VERSION};
+use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 use strum::{EnumIter, IntoEnumIterator};
@@ -1091,7 +1092,13 @@ impl DeploymentSpecification {
                                     let spec = ContractPublishSpecification::from_specifications(spec, project_root_location)?;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
+                                    let epoch = if let Some(epoch_spec) = batch.epoch {
+                                        Epoch::Specific(StacksEpochId::from(epoch_spec))
+                                    } else {
+                                        Epoch::Latest
+                                    };
+                                    let source = remove_env_simnet(spec.clarity_version, epoch, &contract_id, spec.source.clone())?;
+                                    contracts.insert(contract_id, (source, spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
                                 TransactionSpecificationFile::BtcTransfer(spec) => {

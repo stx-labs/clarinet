@@ -1,6 +1,11 @@
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
+use ::clarity::vm::types::QualifiedContractIdentifier;
+use ::clarity::vm::ClarityVersion;
 
 use crate::repl::clarity_values::value_to_string;
+use crate::repl::{
+    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
+};
 
 pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     match event {
@@ -65,5 +70,134 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
             "type": "ft_burn_event",
             "ft_burn_event": event_data.json_serialize()
         }),
+    }
+}
+
+pub fn remove_env_simnet(
+    clarity_version: ClarityVersion,
+    epoch: Epoch,
+    id: &QualifiedContractIdentifier,
+    source: String,
+) -> Result<String, String> {
+    let mut settings = SessionSettings::default();
+    settings.repl_settings.analysis.enable_all_passes();
+
+    let session = Session::new(settings.clone());
+    let contract = ClarityContract {
+        code_source: ClarityCodeSource::ContractInMemory(source.clone()),
+        deployer: ContractDeployer::Address(id.issuer.to_string()),
+        name: id.name.to_string(),
+        clarity_version,
+        epoch,
+    };
+
+    // parse AST
+    let (mut ast, mut _diagnostics, success) = session.interpreter.build_ast(&contract);
+
+    if !success {
+        return Err("Failed to parse AST for contract {loc}".to_string());
+    }
+
+    // remove any top level exprs marked #[env(simnet)]
+    let mut exprs = Vec::new();
+    let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
+    for expr in &ast.expressions {
+        let mut is_env_simnet = false;
+        for (text, _span) in &expr.pre_comments {
+            if text.contains("#[env(simnet)]") {
+                is_env_simnet = true;
+                break;
+            }
+        }
+
+        if !is_env_simnet {
+            exprs.push(expr.clone());
+        } else {
+            for i in expr.span.start_line..=expr.span.end_line {
+                lines[(i - 1) as usize] = None;
+            }
+
+            for (_, span) in &expr.pre_comments {
+                for i in span.start_line..=span.end_line {
+                    lines[(i - 1) as usize] = None;
+                }
+            }
+
+            for (_, span) in &expr.post_comments {
+                for i in span.start_line..=span.end_line {
+                    lines[(i - 1) as usize] = None;
+                }
+            }
+        }
+    }
+
+    ast.expressions = exprs;
+    let mut source = String::new();
+    for line in lines.iter().flatten() {
+        source.push_str(line);
+        source.push('\n');
+    }
+
+    Ok(source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repl::DEFAULT_EPOCH;
+
+    #[test]
+    fn can_remove_env_simnet() {
+        let with_env_simnet = r#"
+(define-public (mint (amount uint) (recipient principal))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+        (ft-mint? drachma amount recipient)
+    )
+)
+
+;; #[env(simnet)]
+(define-public (minty-fresh (amount uint) (recipient principal)) ;; eol
+    (begin
+        (ft-mint? drachma amount recipient)
+    )
+)
+;; post comment
+"#;
+
+        let without_env_simnet = r#"
+(define-public (mint (amount uint) (recipient principal))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+        (ft-mint? drachma amount recipient)
+    )
+)
+
+"#;
+
+        let epoch = DEFAULT_EPOCH;
+        let version = ClarityVersion::default_for_epoch(epoch);
+        let epoch = Epoch::Specific(epoch);
+        let contract_id = QualifiedContractIdentifier::transient();
+
+        // test that we can remove a marked fn
+        let clean = remove_env_simnet(
+            version,
+            epoch.clone(),
+            &contract_id,
+            with_env_simnet.to_string(),
+        )
+        .expect("remove_env_simnet failed");
+        assert_eq!(clean, without_env_simnet);
+
+        // test that nothing is removed if nothing is marked
+        let clean = remove_env_simnet(
+            version,
+            epoch.clone(),
+            &contract_id,
+            without_env_simnet.to_string(),
+        )
+        .expect("remove_env_simnet failed");
+        assert_eq!(clean, without_env_simnet);
     }
 }
