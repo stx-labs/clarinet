@@ -193,7 +193,7 @@ pub async fn process_notification(
                                 // The contract can still be opened without a Clarinet.toml
                                 #[cfg(target_arch = "wasm32")]
                                 log!(
-                                    "No Clarinet.toml is associated to the contract {}",
+                                    "No Clarinet.toml is associated with the contract '{}'",
                                     contract_location_string
                                 );
                                 // Note: perhaps the version should alternatively allow setting within the contract source?
