@@ -960,7 +960,7 @@ impl SDK {
                 epoch: Epoch::Specific(current_epoch),
             };
 
-            match session.deploy_contract(&contract, false, None) {
+            match session.deploy_contract(&contract, self.options.track_costs, None) {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(
