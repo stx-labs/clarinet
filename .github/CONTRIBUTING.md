@@ -16,4 +16,11 @@ If somebody claims an issue but doesn’t follow up for more than two weeks, it�
 
 ### Contribution Prerequisites
 
-... 🚧 Work in progress 🚧 ...
+Before you start contributing, make sure you have:
+
+- Rust (>=1.89.0) and Cargo installed
+- Node.js (>=v24.4.1) and npm (>=11.5.2) for SDK work
+- Git for version control
+- A code editor (VSCode recommended for the extension support)
+
+For more details, see the [README](../README.md#prerequisites).
