@@ -1858,7 +1858,7 @@ fn display_post_check_hint() {
         "{}",
         yellow!("    Run all run tests in the ./tests folder.\n")
     );
-    println!("{}", yellow!("Find more information on testing with Clarinet here: https://docs.hiro.so/stacks/clarinet-js-sdk"));
+    println!("{}", yellow!("Find more information on testing with Clarinet here: https://docs.stacks.co/clarinet/testing-with-clarinet-sdk"));
     display_hint_footer();
 }
 
@@ -1888,7 +1888,7 @@ fn display_contract_new_hint(project_name: Option<&str>) {
         yellow!("    Check contract syntax for all files in ./contracts.\n")
     );
 
-    println!("{}", yellow!("Find more information on writing contracts with Clarinet here: https://docs.hiro.so/clarinet/how-to-guides/how-to-set-up-local-development-environment#developing-a-clarity-smart-contract"));
+    println!("{}", yellow!("Find more information on writing contracts with Clarinet here: https://docs.stacks.co/clarinet"));
     display_hint_footer();
 }
 
@@ -1918,7 +1918,7 @@ fn display_deploy_hint() {
     );
     println!(
         "{}",
-        yellow!("Find more information on the devnet here: https://docs.hiro.so/clarinet/guides/how-to-run-integration-environment")
+        yellow!("Find more information on the devnet here: https://docs.stacks.co/clarinet/local-blockchain-development")
     );
     display_hint_footer();
 }

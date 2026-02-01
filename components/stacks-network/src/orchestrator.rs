@@ -890,7 +890,7 @@ rpcport={bitcoin_node_rpc_port}
             panic!("unable to get Docker client");
         };
         let res = docker.list_containers(options).await;
-        let url = "https://docs.hiro.so/tools/clarinet/local-blockchain-development#common-issues";
+        let url = "https://docs.stacks.co/clarinet/local-blockchain-development#common-issues";
         let containers = res.map_err(|e| {
             formatdoc!(
                 "

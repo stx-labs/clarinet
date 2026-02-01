@@ -7,7 +7,7 @@ const address1 = accounts.get("wallet_1")!;
 const address2 = accounts.get("wallet_2")!;
 
 /*
-  The test below is an example. Learn more in the documentation: https://docs.hiro.so/stacks/clarinet-js-sdk
+  The test below is an example. Learn more in the documentation: https://docs.stacks.co/clarinet/testing-with-clarinet-sdk
 */
 
 it("Ensure that counter can be incremented multiples times per block, across multiple blocks", () => {

@@ -20,8 +20,8 @@ code with confidence.
 
 ### Documentation
 
-- [Clarinet CLI](https://docs.hiro.so/stacks/clarinet)
-- [Clarinet JS SDK and testing framework](https://docs.hiro.so/stacks/clarinet-js-sdk)
+- [Clarinet CLI](https://docs.stacks.co/clarinet)
+- [Clarinet JS SDK and testing framework](https://docs.stacks.co/clarinet/testing-with-clarinet-sdk)
 
 ---
 
@@ -33,7 +33,7 @@ brew install clarinet
 ```
 
 > To check out more installation methods, click
-> [here](https://docs.hiro.so/stacks/clarinet#installation)
+> [here](https://docs.stacks.co/clarinet/overview#installation)
 
 ```bash
 # Create a new project
