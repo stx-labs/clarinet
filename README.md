@@ -33,7 +33,9 @@ brew install clarinet
 ```
 
 > To check out more installation methods, click
-> [here](https://docs.hiro.so/stacks/clarinet#installation)
+> [here](https://docs.hiro.so/stacks/clarinet#installation).
+
+> **Tip:** If you're on Windows or Linux, check the installation docs for platform-specific instructions.
 
 ```bash
 # Create a new project
