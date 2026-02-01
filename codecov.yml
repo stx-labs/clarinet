@@ -1,8 +1,12 @@
+# Codecov configuration for test coverage reporting
+# See: https://docs.codecov.com/docs/codecovyml-reference
+
 coverage:
   status:
     patch: false
     project:
       default:
+        # Allowed drop in coverage percentage before failing
         threshold: 5%
         if_not_found: failure
 
