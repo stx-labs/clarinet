@@ -33,7 +33,9 @@ brew install clarinet
 ```
 
 > To check out more installation methods, click
-> [here](https://docs.hiro.so/stacks/clarinet#installation)
+> [here](https://docs.hiro.so/stacks/clarinet#installation).
+
+> **Tip:** If you're on Windows or Linux, check the installation docs for platform-specific instructions.
 
 ```bash
 # Create a new project
@@ -97,10 +99,10 @@ of Rust and Node.js (LTS) tooling.
 This repo follows the [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/#summary)
 specification when writing commit messages.
 
-**Note:** These conventions are helpful for any commit message, but all PR end up being merged with
-"squash and merge", giving an other chance to refine the commit messages.
+**Note:** These conventions are helpful for any commit message, but all PRs end up being merged with
+"squash and merge", giving another chance to refine the commit messages.
 
-To start contributing, fork this repo and open a new branc:
+To start contributing, fork this repo and open a new branch:
 
 1. Fork this repo and clone the fork locally.
 1. Create a new branch
@@ -133,7 +135,7 @@ For VSCode users, we recommend opening the following workspace
 Wasm target.
 
 The SDK is divided between the Rust lib compiled to Wasm `./components/clarinet-sdk-wasm` and a TS
-wrapper around it: `./components/clarinet-sdk-wasm`.
+wrapper around it: `./components/clarinet-sdk`.
 
 1. Compile the Wasm package with `npm run build:sdk-wasm`
 1. Compile the SDK with `npm run build:sdk`
@@ -143,7 +145,7 @@ Learn more in the [SDK Readme.md](./components/clarinet-sdk/README.md).
 
 ### Code of Conduct
 
-Please read our [Code of conduct](../../../.github/blob/main/CODE_OF_CONDUCT.md) since we expect
+Please read our [Code of Conduct](.github/CONTRIBUTING.md) since we expect
 project participants to adhere to it.
 
 ## Community
