@@ -133,7 +133,7 @@ For VSCode users, we recommend opening the following workspace
 Wasm target.
 
 The SDK is divided between the Rust lib compiled to Wasm `./components/clarinet-sdk-wasm` and a TS
-wrapper around it: `./components/clarinet-sdk-wasm`.
+wrapper around it: `./components/clarinet-sdk`.
 
 1. Compile the Wasm package with `npm run build:sdk-wasm`
 1. Compile the SDK with `npm run build:sdk`
