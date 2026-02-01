@@ -97,7 +97,7 @@ of Rust and Node.js (LTS) tooling.
 This repo follows the [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/#summary)
 specification when writing commit messages.
 
-**Note:** These conventions are helpful for any commit message, but all PR end up being merged with
+**Note:** These conventions are helpful for any commit message, but all PRs end up being merged with
 "squash and merge", giving another chance to refine the commit messages.
 
 To start contributing, fork this repo and open a new branch:
