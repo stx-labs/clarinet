@@ -15,4 +15,6 @@
 ### Checklist
 
 - [ ] Tests added in this PR (if applicable)
-
+- [ ] Code builds without errors (`cargo build`)
+- [ ] Code formatted with `cargo fmt-stacks`
+- [ ] Documentation updated (if applicable)
