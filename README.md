@@ -98,7 +98,7 @@ This repo follows the [Conventional Commit](https://www.conventionalcommits.org/
 specification when writing commit messages.
 
 **Note:** These conventions are helpful for any commit message, but all PR end up being merged with
-"squash and merge", giving an other chance to refine the commit messages.
+"squash and merge", giving another chance to refine the commit messages.
 
 To start contributing, fork this repo and open a new branch:
 
