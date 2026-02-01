@@ -143,7 +143,7 @@ Learn more in the [SDK Readme.md](./components/clarinet-sdk/README.md).
 
 ### Code of Conduct
 
-Please read our [Code of conduct](../../../.github/blob/main/CODE_OF_CONDUCT.md) since we expect
+Please read our [Code of Conduct](.github/CONTRIBUTING.md) since we expect
 project participants to adhere to it.
 
 ## Community
