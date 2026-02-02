@@ -18,8 +18,8 @@ use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
+use clarity::vm::errors::{VmExecutionError, VmInternalError};
 use clarity::vm::{ContractContext, StacksEpoch};
-use clarity_types::errors::{VmExecutionError, VmInternalError};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };
@@ -431,7 +431,8 @@ impl ClarityDatastore {
             &mut (),
             analysis.clarity_version,
             analysis.epoch,
-        )?;
+        )
+        .map_err(|e| VmInternalError::Expect(e.to_string()))?;
 
         context::set_functions_in_contract_context(
             &contract_ast.expressions,

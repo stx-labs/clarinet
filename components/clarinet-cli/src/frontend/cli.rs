@@ -907,11 +907,7 @@ pub fn main() {
                 let _ = command_tx.send(DeploymentCommand::Start);
 
                 if cmd.no_dashboard {
-                    loop {
-                        let cmd = match event_rx.recv() {
-                            Ok(cmd) => cmd,
-                            Err(_e) => break,
-                        };
+                    while let Ok(cmd) = event_rx.recv() {
                         match cmd {
                             DeploymentEvent::Interrupted(message) => {
                                 eprintln!(

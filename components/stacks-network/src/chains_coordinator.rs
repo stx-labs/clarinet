@@ -666,11 +666,7 @@ pub fn relay_devnet_protocol_deployment(
     let devnet_event_tx = devnet_event_tx.clone();
     let boot_completed = boot_completed.clone();
     let _ = hiro_system_kit::thread_named("Deployment monitoring").spawn(move || {
-        loop {
-            let event = match deployment_events_rx.recv() {
-                Ok(event) => event,
-                Err(_e) => break,
-            };
+        while let Ok(event) = deployment_events_rx.recv() {
             match event {
                 DeploymentEvent::TransactionUpdate(tracker) => {
                     if let TransactionStatus::Error(ref message) = tracker.status {

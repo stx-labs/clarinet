@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use clarity::vm::callables::FunctionIdentifier;
 use clarity::vm::contexts::{ContractContext, Environment, GlobalContext, LocalContext};
+use clarity::vm::errors::VmExecutionError;
 use clarity::vm::representations::Span;
 use clarity::vm::{EvalHook, EvaluationResult, ExecutionResult, SymbolicExpression};
-use clarity_types::errors::VmExecutionError;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceData, StandardPrincipalData,
 };

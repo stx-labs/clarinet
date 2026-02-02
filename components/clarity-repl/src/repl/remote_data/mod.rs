@@ -2,7 +2,7 @@ use clarity::types::chainstate::{
     BlockHeaderHash, BurnchainHeaderHash, ConsensusHash, SortitionId, StacksBlockId, VRFSeed,
 };
 use clarity::types::StacksEpochId;
-use clarity_types::errors::VmExecutionError;
+use clarity::vm::errors::VmExecutionError;
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::de::{DeserializeOwned, Error as SerdeError};
 use serde::{Deserialize, Deserializer};
