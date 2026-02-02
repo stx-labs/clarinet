@@ -170,7 +170,7 @@ impl GetChangesForNewContract {
 
             /*
             The test below is an example. To learn more, read the testing documentation here:
-            https://docs.hiro.so/stacks/clarinet-js-sdk
+            https://docs.stacks.co/clarinet/testing-with-clarinet-sdk
             */
 
             describe("example tests", () => {
