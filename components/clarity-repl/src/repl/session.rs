@@ -1583,7 +1583,7 @@ mod tests {
         let result = session.encode("::encode { foo false }");
         assert_eq!(
             result,
-            format_err!("Tuple literal construction expects a colon at index 1\nencoding failed")
+            "encode:1:7: error: expected ':' after key in tuple\n{ foo false }\n      ^~~~~\nencoding failed"
         );
 
         let result = session.encode("::encode (foo 1)");
@@ -1617,7 +1617,7 @@ mod tests {
         let result = session.decode("::decode 42");
         assert_eq!(
             result,
-            "Failed to decode clarity value: DeserializationError(\"Bad type prefix\")"
+            "Failed to decode clarity value: DeserializationFailure(\"Bad type prefix\")"
                 .red()
                 .to_string()
         );
