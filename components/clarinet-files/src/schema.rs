@@ -51,8 +51,8 @@ pub(crate) fn clarity_version_schema(_gen: &mut schemars::SchemaGenerator) -> sc
 
     json_schema!({
         "type": "integer",
-        "enum": [1, 2, 3],
-        "description": "Clarity language version (1, 2, or 3)"
+        "enum": [1, 2, 3, 4],
+        "description": "Clarity language version (1, 2, 3 or 4)"
     })
 }
 
@@ -63,7 +63,7 @@ pub(crate) fn epoch_string_schema(_gen: &mut schemars::SchemaGenerator) -> schem
         "type": "string",
         "enum": [
             "2.0", "2.05", "2.1", "2.2", "2.3", "2.4", "2.5",
-            "3.0", "3.1", "3.2", "latest"
+            "3.0", "3.1", "3.2", "3.3", "latest"
         ]
     })
 }
@@ -73,7 +73,7 @@ pub(crate) fn epoch_number_schema(_gen: &mut schemars::SchemaGenerator) -> schem
 
     json_schema!({
         "type": "number",
-        "enum": [2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2]
+        "enum": [2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2, 3.3]
     })
 }
 
