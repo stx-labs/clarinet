@@ -728,21 +728,19 @@ pub fn apply_on_chain_deployment(
     for (epoch, batch) in batches.into_iter() {
         if network == StacksNetwork::Devnet {
             // Devnet only: ensure we've reached the appropriate epoch for this batch
-            let devnet = network_manifest.devnet.as_ref().unwrap();
             let after_bitcoin_block = match epoch {
-                EpochSpec::Epoch2_0 => devnet.epoch_2_0,
-                EpochSpec::Epoch2_05 => devnet.epoch_2_05,
-                EpochSpec::Epoch2_1 => devnet.epoch_2_1,
-                EpochSpec::Epoch2_2 => devnet.epoch_2_2,
-                EpochSpec::Epoch2_3 => devnet.epoch_2_3,
-                EpochSpec::Epoch2_4 => devnet.epoch_2_4,
-                EpochSpec::Epoch2_5 => devnet.epoch_2_5,
-                EpochSpec::Epoch3_0 => devnet.epoch_3_0,
-                EpochSpec::Epoch3_1 => devnet.epoch_3_1,
-                EpochSpec::Epoch3_2 => devnet.epoch_3_2,
-                EpochSpec::Epoch3_3 => devnet.epoch_3_3,
-                // this version of clarinet has to handle optional support for epoch 3_4
-                EpochSpec::Epoch3_4 => devnet.epoch_3_4.unwrap_or(u64::MAX),
+                EpochSpec::Epoch2_0 => network_manifest.devnet.as_ref().unwrap().epoch_2_0,
+                EpochSpec::Epoch2_05 => network_manifest.devnet.as_ref().unwrap().epoch_2_05,
+                EpochSpec::Epoch2_1 => network_manifest.devnet.as_ref().unwrap().epoch_2_1,
+                EpochSpec::Epoch2_2 => network_manifest.devnet.as_ref().unwrap().epoch_2_2,
+                EpochSpec::Epoch2_3 => network_manifest.devnet.as_ref().unwrap().epoch_2_3,
+                EpochSpec::Epoch2_4 => network_manifest.devnet.as_ref().unwrap().epoch_2_4,
+                EpochSpec::Epoch2_5 => network_manifest.devnet.as_ref().unwrap().epoch_2_5,
+                EpochSpec::Epoch3_0 => network_manifest.devnet.as_ref().unwrap().epoch_3_0,
+                EpochSpec::Epoch3_1 => network_manifest.devnet.as_ref().unwrap().epoch_3_1,
+                EpochSpec::Epoch3_2 => network_manifest.devnet.as_ref().unwrap().epoch_3_2,
+                EpochSpec::Epoch3_3 => network_manifest.devnet.as_ref().unwrap().epoch_3_3,
+                EpochSpec::Epoch3_4 => network_manifest.devnet.as_ref().unwrap().epoch_3_4,
             };
             let mut epoch_transition_successful =
                 current_bitcoin_block_height > after_bitcoin_block;
