@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::panic;
 use std::path::PathBuf;
 
@@ -32,6 +32,7 @@ use clarity_repl::repl::{
     SessionSettings, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
 };
 use gloo_utils::format::JsValueSerdeExt;
+use hashbrown::HashMap;
 use js_sys::Function as JsFunction;
 use serde::{Deserialize, Serialize};
 use serde_json::json;

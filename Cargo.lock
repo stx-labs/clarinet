@@ -685,6 +685,7 @@ dependencies = [
  "crossbeam-channel",
  "crossterm",
  "ctrlc",
+ "hashbrown 0.16.1",
  "hiro-system-kit",
  "indoc",
  "libc",
@@ -721,6 +722,7 @@ dependencies = [
  "clarity",
  "clarity-repl",
  "colored",
+ "hashbrown 0.16.1",
  "indoc",
  "libsecp256k1",
  "pretty_assertions",
@@ -746,6 +748,7 @@ dependencies = [
  "clarity",
  "clarity-repl",
  "dirs",
+ "hashbrown 0.16.1",
  "js-sys",
  "libsecp256k1",
  "rpassword",
@@ -782,6 +785,7 @@ dependencies = [
  "clarity-repl",
  "console_error_panic_hook",
  "gloo-utils",
+ "hashbrown 0.16.1",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
@@ -830,6 +834,7 @@ dependencies = [
  "clap",
  "clarinet-files",
  "clarity-repl",
+ "hashbrown 0.16.1",
  "serde",
  "serde_derive",
  "serde_json",
@@ -846,6 +851,7 @@ dependencies = [
  "clarity-repl",
  "clarity-types",
  "console_error_panic_hook",
+ "hashbrown 0.16.1",
  "js-sys",
  "lsp-types",
  "regex",
@@ -872,6 +878,7 @@ dependencies = [
  "debug_types",
  "divan",
  "futures",
+ "hashbrown 0.16.1",
  "hiro-system-kit",
  "httparse",
  "indexmap 2.13.0",
@@ -1513,6 +1520,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1740,7 +1753,7 @@ checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash",
+ "foldhash 0.1.5",
  "serde",
 ]
 
@@ -1749,6 +1762,13 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "hashlink"

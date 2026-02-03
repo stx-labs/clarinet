@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::fmt::Display;
 
 use clarity::vm::ast::build_ast_with_diagnostics;
@@ -11,6 +11,7 @@ use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{eval, ClarityVersion, ContractName, SymbolicExpressionType};
 use clarity_types::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity_types::Value;
+use hashbrown::{HashMap, HashSet};
 
 use crate::repl::diagnostic::output_diagnostic;
 

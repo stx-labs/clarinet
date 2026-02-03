@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 #![allow(clippy::get_first)]
 
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use clarity::vm::functions::define::DefineFunctions;
@@ -10,6 +9,7 @@ use clarity::vm::representations::SymbolicExpressionType::*;
 use clarity::vm::representations::{Span, TraitDefinition};
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression, SymbolicExpressionType};
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, TraitIdentifier, Value};
+use hashbrown::HashMap;
 
 #[derive(Clone)]
 pub struct TypedVar<'a> {

@@ -615,7 +615,6 @@ pub fn process_mutating_request(
 
 #[cfg(test)]
 mod lsp_tests {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use clarinet_files::FileLocation;
@@ -677,7 +676,7 @@ mod lsp_tests {
             options: FormattingOptions {
                 tab_size: 2,
                 insert_spaces: true,
-                properties: HashMap::new(),
+                properties: std::collections::HashMap::new(),
                 trim_trailing_whitespace: None,
                 insert_final_newline: None,
                 trim_final_newlines: None,

@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use bitcoin::hex::DisplayHex;
+use hashbrown::HashMap;
 
 pub use crate::DevnetConfig;
 
