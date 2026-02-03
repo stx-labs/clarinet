@@ -1,7 +1,7 @@
 use clarity::vm::contexts::{Environment, LocalContext};
+use clarity::vm::errors::VmExecutionError;
 use clarity::vm::representations::Span;
 use clarity::vm::{ContractName, EvalHook, SymbolicExpression};
-use clarity_types::errors::VmExecutionError;
 use clarity_types::types::QualifiedContractIdentifier;
 use clarity_types::Value;
 use rustyline::error::ReadlineError;

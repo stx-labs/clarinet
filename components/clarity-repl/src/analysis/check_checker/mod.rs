@@ -3390,12 +3390,12 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:12:28: {} source of untrusted input here",
+                        "checker:12:29: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
                 assert_eq!(output[4], "(define-public (handle-one (arg1 uint))");
-                assert_eq!(output[5], "                           ^~~~");
+                assert_eq!(output[5], "                            ^~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };

@@ -23,11 +23,11 @@ default-members = ["components/clarinet-cli"]
 version = "3.13.1"
 
 [workspace.dependencies]
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "clarity-types" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "3da96c1a3af20bd677a7d8bfd17dcfbcde86d78b", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6c76d35624e2c08ff96f658d0d09b0bf9867ccaf", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6c76d35624e2c08ff96f658d0d09b0bf9867ccaf", package = "clarity-types" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6c76d35624e2c08ff96f658d0d09b0bf9867ccaf", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6c76d35624e2c08ff96f658d0d09b0bf9867ccaf", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6c76d35624e2c08ff96f658d0d09b0bf9867ccaf", package = "stackslib", default-features = false }
 
 aes-gcm = "0.10"
 argon2 = "0.5.3"
