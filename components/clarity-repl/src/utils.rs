@@ -93,7 +93,7 @@ pub fn remove_env_simnet(
 
     // parse AST
     let (mut ast, mut _diagnostics, success) = session.interpreter.build_ast(&contract);
-
+    println!("{ast:#?}");
     if !success {
         return Err("Failed to parse AST for contract {loc}".to_string());
     }
@@ -152,7 +152,7 @@ mod tests {
 (define-public (mint (amount uint) (recipient principal))
     (begin
         (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
-        (ft-mint? drachma amount recipient)
+        (minty-fresh amount recipient)
     )
 )
 
@@ -169,7 +169,7 @@ mod tests {
 (define-public (mint (amount uint) (recipient principal))
     (begin
         (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
-        (ft-mint? drachma amount recipient)
+        (minty-fresh amount recipient)
     )
 )
 
