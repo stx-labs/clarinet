@@ -1,11 +1,10 @@
+use ::clarity::types::StacksEpochId;
+use ::clarity::vm::ast::parser;
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
-use ::clarity::vm::types::QualifiedContractIdentifier;
-use ::clarity::vm::ClarityVersion;
+use ::clarity::vm::representations::PreSymbolicExpressionType::Comment;
 
 use crate::repl::clarity_values::value_to_string;
-use crate::repl::{
-    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
-};
+use crate::repl::Epoch;
 
 pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     match event {
@@ -73,65 +72,44 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     }
 }
 
-pub fn remove_env_simnet(
-    clarity_version: ClarityVersion,
-    epoch: Epoch,
-    id: &QualifiedContractIdentifier,
-    source: String,
-) -> Result<String, String> {
-    let mut settings = SessionSettings::default();
-    settings.repl_settings.analysis.enable_all_passes();
-
-    let session = Session::new(settings.clone());
-    let contract = ClarityContract {
-        code_source: ClarityCodeSource::ContractInMemory(source.clone()),
-        deployer: ContractDeployer::Address(id.issuer.to_string()),
-        name: id.name.to_string(),
-        clarity_version,
-        epoch,
+pub fn remove_env_simnet(epoch: Epoch, source: String) -> Result<String, String> {
+    let (pre_expressions, mut _diagnostics, success) = if epoch >= StacksEpochId::Epoch21 {
+        parser::v2::parse_collect_diagnostics(&source)
+    } else {
+        let parse_result = parser::v1::parse(&source);
+        match parse_result {
+            Ok(pre_expressions) => (pre_expressions, vec![], true),
+            Err(error) => (vec![], vec![error.diagnostic], false),
+        }
     };
 
-    // parse AST
-    let (mut ast, mut _diagnostics, success) = session.interpreter.build_ast(&contract);
-    println!("{ast:#?}");
     if !success {
-        return Err("Failed to parse AST for contract {loc}".to_string());
+        return Err("failed to parse pre_expressions from source".to_string());
     }
 
-    // remove any top level exprs marked #[env(simnet)]
-    let mut exprs = Vec::new();
     let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
-    for expr in &ast.expressions {
-        let mut is_env_simnet = false;
-        for (text, _span) in &expr.pre_comments {
-            if text.contains("#[env(simnet)]") {
-                is_env_simnet = true;
-                break;
-            }
-        }
-
-        if !is_env_simnet {
-            exprs.push(expr.clone());
-        } else {
+    let mut found_env_simnet = false;
+    for expr in &pre_expressions {
+        // remove all comments and first non-comment
+        if found_env_simnet {
             for i in expr.span.start_line..=expr.span.end_line {
                 lines[(i - 1) as usize] = None;
             }
-
-            for (_, span) in &expr.pre_comments {
-                for i in span.start_line..=span.end_line {
-                    lines[(i - 1) as usize] = None;
-                }
+            if !matches!(expr.pre_expr, Comment(_)) {
+                found_env_simnet = false;
             }
+        }
 
-            for (_, span) in &expr.post_comments {
-                for i in span.start_line..=span.end_line {
+        if let Comment(comment) = &expr.pre_expr {
+            if comment.contains("#[env(simnet)]") {
+                found_env_simnet = true;
+                for i in expr.span.start_line..=expr.span.end_line {
                     lines[(i - 1) as usize] = None;
                 }
             }
         }
     }
 
-    ast.expressions = exprs;
     let mut source = String::new();
     for line in lines.iter().flatten() {
         source.push_str(line);
@@ -155,6 +133,7 @@ mod tests {
         (minty-fresh amount recipient)
     )
 )
+;; mint post comment
 
 ;; #[env(simnet)]
 (define-public (minty-fresh (amount uint) (recipient principal)) ;; eol
@@ -162,7 +141,6 @@ mod tests {
         (ft-mint? drachma amount recipient)
     )
 )
-;; post comment
 "#;
 
         let without_env_simnet = r#"
@@ -172,32 +150,21 @@ mod tests {
         (minty-fresh amount recipient)
     )
 )
+;; mint post comment
 
 "#;
 
         let epoch = DEFAULT_EPOCH;
-        let version = ClarityVersion::default_for_epoch(epoch);
         let epoch = Epoch::Specific(epoch);
-        let contract_id = QualifiedContractIdentifier::transient();
 
         // test that we can remove a marked fn
-        let clean = remove_env_simnet(
-            version,
-            epoch.clone(),
-            &contract_id,
-            with_env_simnet.to_string(),
-        )
-        .expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(epoch.clone(), with_env_simnet.to_string())
+            .expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
 
         // test that nothing is removed if nothing is marked
-        let clean = remove_env_simnet(
-            version,
-            epoch.clone(),
-            &contract_id,
-            without_env_simnet.to_string(),
-        )
-        .expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(epoch.clone(), without_env_simnet.to_string())
+            .expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
     }
 }
