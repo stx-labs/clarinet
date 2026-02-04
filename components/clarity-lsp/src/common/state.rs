@@ -144,7 +144,7 @@ pub struct ContractState {
     #[allow(dead_code)]
     location: FileLocation,
     clarity_version: ClarityVersion,
-    cost_analysis: Option<HashMap<String, CostAnalysisNode>>,
+    cost_analysis: Option<HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>>,
 }
 
 impl ContractState {
@@ -157,7 +157,9 @@ impl ContractState {
         definitions: HashMap<ClarityName, Range>,
         location: FileLocation,
         clarity_version: ClarityVersion,
-        cost_analysis: Option<HashMap<String, CostAnalysisNode>>,
+        cost_analysis: Option<
+            HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>,
+        >,
     ) -> ContractState {
         let mut errors = vec![];
         let mut warnings = vec![];
@@ -209,6 +211,51 @@ pub struct CostPercents {
 fn u64_to_f64(value: u64) -> f64 {
     // XXX Not sure if there's a safer conversion
     value as f64
+}
+
+// Compute total cost from a CostAnalysisNode tree by summing all children's costs
+fn compute_total_cost_from_tree(cost_node: &CostAnalysisNode) -> ExecutionCost {
+    let mut total = cost_node.cost.max.clone();
+
+    // Recursively sum costs from all children
+    for child in &cost_node.children {
+        let child_cost = compute_total_cost_from_tree(child);
+        total.runtime += child_cost.runtime;
+        total.read_count += child_cost.read_count;
+        total.read_length += child_cost.read_length;
+        total.write_count += child_cost.write_count;
+        total.write_length += child_cost.write_length;
+    }
+
+    total
+}
+
+// Compute total min cost from a CostAnalysisNode tree by summing all children's costs
+fn compute_total_min_cost_from_tree(cost_node: &CostAnalysisNode) -> ExecutionCost {
+    let mut total = cost_node.cost.min.clone();
+
+    // Recursively sum costs from all children
+    for child in &cost_node.children {
+        let child_cost = compute_total_min_cost_from_tree(child);
+        total.runtime += child_cost.runtime;
+        total.read_count += child_cost.read_count;
+        total.read_length += child_cost.read_length;
+        total.write_count += child_cost.write_count;
+        total.write_length += child_cost.write_length;
+    }
+
+    total
+}
+
+// Format a number with abbreviation (e.g., 2.6k instead of 2,634)
+fn format_abbreviated_number(value: u64) -> String {
+    if value >= 1_000_000 {
+        format!("{:.1}M", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}k", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
+    }
 }
 
 fn get_cost_percents(cost: &ExecutionCost, block_limits: &ExecutionCost) -> CostPercents {
@@ -519,7 +566,7 @@ impl EditorState {
         for (function_name, range) in &contract_state.definitions {
             // Convert ClarityName to String for lookup
             let function_name_str = function_name.to_string();
-            if let Some(cost_node) = cost_analysis.get(&function_name_str) {
+            if let Some((cost_node, _)) = cost_analysis.get(&function_name_str) {
                 let cost_text = Self::format_cost_for_codelens(cost_node);
 
                 let code_lens_line = range.start.line;
@@ -538,8 +585,8 @@ impl EditorState {
                     range: code_lens_range,
                     command: Some(ls_types::Command {
                         title: cost_text,
-                        command: "".to_string(), // Empty command means it's just informational
-                        arguments: None,
+                        command: "clarity.showCostDetails".to_string(),
+                        arguments,
                     }),
                     data: None,
                 });
@@ -550,17 +597,15 @@ impl EditorState {
     }
 
     fn format_cost_for_codelens(cost_node: &CostAnalysisNode) -> String {
-        let block_limits = BLOCK_LIMIT_MAINNET;
-        let percents = get_cost_percents(&cost_node.cost.max, &block_limits);
+        let total_cost = compute_total_cost_from_tree(cost_node);
 
         format!(
-            "runtime: {:.1}%, read count: {:.1}%, read length: {:.1}%, write count: {:.1}%, write length: {:.1}%",
-            percents.runtime,
-            // if percents.read_count < 0.01 { "< 0.01".to_string() } else { format!("{:.2}", percents.read_count) },
-            percents.read_count,
-            percents.read_length,
-            percents.write_count,
-            percents.write_length
+            "runtime: {}, read count: {}, read length: {}, write count: {}, write length: {}",
+            format_abbreviated_number(total_cost.runtime),
+            format_abbreviated_number(total_cost.read_count),
+            format_abbreviated_number(total_cost.read_length),
+            format_abbreviated_number(total_cost.write_count),
+            format_abbreviated_number(total_cost.write_length)
         )
     }
 
@@ -727,8 +772,8 @@ impl EditorState {
             }
         };
 
-        let cost_node = match cost_analysis.get(&function_name) {
-            Some(node) => node,
+        let (cost_node, trait_count_opt) = match cost_analysis.get(&function_name) {
+            Some((node, trait_count)) => (node, trait_count),
             None => {
                 crate::lsp_log!("[LSP] No cost node found for function: {}", function_name);
                 crate::lsp_log!(
@@ -739,9 +784,176 @@ impl EditorState {
             }
         };
 
+        let block_limits = BLOCK_LIMIT_MAINNET;
+        let total_cost_max = compute_total_cost_from_tree(cost_node);
+        let total_cost_min = compute_total_min_cost_from_tree(cost_node);
+        let percents = get_cost_percents(&total_cost_max, &block_limits);
+
+        // Extract trait count from the stored data
+        // TraitCount is HashMap<String, (u64, u64)>, so we use the size as the count
+        let trait_count = trait_count_opt
+            .as_ref()
+            .map(|tc| tc.len() as u32)
+            .unwrap_or(0u32);
+
         let result = serde_json::json!({
             "function": function_name,
-            "cost_node": format!("{:?}", cost_node)
+            "cost": {
+                "runtime": {
+                    "min": total_cost_min.runtime,
+                    "max": total_cost_max.runtime,
+                },
+                "read_count": {
+                    "min": total_cost_min.read_count,
+                    "max": total_cost_max.read_count,
+                },
+                "read_length": {
+                    "min": total_cost_min.read_length,
+                    "max": total_cost_max.read_length,
+                },
+                "write_count": {
+                    "min": total_cost_min.write_count,
+                    "max": total_cost_max.write_count,
+                },
+                "write_length": {
+                    "min": total_cost_min.write_length,
+                    "max": total_cost_max.write_length,
+                },
+            },
+            "percentages": {
+                "runtime": percents.runtime,
+                "read_count": percents.read_count,
+                "read_length": percents.read_length,
+                "write_count": percents.write_count,
+                "write_length": percents.write_length,
+            },
+            "limits": {
+                "runtime": block_limits.runtime,
+                "read_count": block_limits.read_count,
+                "read_length": block_limits.read_length,
+                "write_count": block_limits.write_count,
+                "write_length": block_limits.write_length,
+            },
+            "trait_count": trait_count,
+        })
+        .to_string();
+
+        Some(result)
+    }
+
+    pub fn get_cost_details(
+        &self,
+        contract_location: &FileLocation,
+        function_name: &str,
+    ) -> Option<String> {
+        crate::lsp_log!(
+            "[LSP] get_cost_details called for {} function {}",
+            contract_location,
+            function_name,
+        );
+
+        let contract_metadata = self.contracts_lookup.get(contract_location)?;
+        let protocol_state = self.protocols.get(&contract_metadata.manifest_location)?;
+        let contract_state = protocol_state.contracts.get(contract_location)?;
+
+        // Get the stored cost analysis
+        let cost_analysis = match contract_state.cost_analysis.as_ref() {
+            Some(ca) => ca,
+            None => {
+                crate::lsp_log!("[LSP] No cost analysis stored for contract");
+                return None;
+            }
+        };
+
+        crate::lsp_log!(
+            "[LSP] Looking for function '{}' in cost analysis. Available functions: {:?}",
+            function_name,
+            cost_analysis.keys().collect::<Vec<_>>()
+        );
+
+        let (cost_node, trait_count_opt) = match cost_analysis.get(function_name) {
+            Some((node, trait_count)) => {
+                let total_cost = compute_total_cost_from_tree(node);
+                crate::lsp_log!(
+                    "[LSP] Found cost node for '{}'. Total cost values: runtime={}, read_count={}, read_length={}, write_count={}, write_length={}",
+                    function_name,
+                    total_cost.runtime,
+                    total_cost.read_count,
+                    total_cost.read_length,
+                    total_cost.write_count,
+                    total_cost.write_length
+                );
+                (node, trait_count)
+            }
+            None => {
+                crate::lsp_log!("[LSP] No cost node found for function: {}", function_name);
+                crate::lsp_log!(
+                    "[LSP] Available functions: {:?}",
+                    cost_analysis.keys().collect::<Vec<_>>()
+                );
+                return None;
+            }
+        };
+
+        let block_limits = BLOCK_LIMIT_MAINNET;
+        let total_cost_max = compute_total_cost_from_tree(cost_node);
+        let total_cost_min = compute_total_min_cost_from_tree(cost_node);
+        let percents = get_cost_percents(&total_cost_max, &block_limits);
+
+        crate::lsp_log!(
+            "[LSP] Cost details for '{}': total runtime min={}, max={}, percentages={:?}",
+            function_name,
+            total_cost_min.runtime,
+            total_cost_max.runtime,
+            percents
+        );
+
+        // Extract trait count from the stored data
+        // TraitCount is HashMap<String, (u64, u64)>, so we use the size as the count
+        let trait_count = trait_count_opt
+            .as_ref()
+            .map(|tc| tc.len() as u32)
+            .unwrap_or(0u32);
+
+        let result = serde_json::json!({
+            "function": function_name,
+            "cost": {
+                "runtime": {
+                    "min": total_cost_min.runtime,
+                    "max": total_cost_max.runtime,
+                },
+                "read_count": {
+                    "min": total_cost_min.read_count,
+                    "max": total_cost_max.read_count,
+                },
+                "read_length": {
+                    "min": total_cost_min.read_length,
+                    "max": total_cost_max.read_length,
+                },
+                "write_count": {
+                    "min": total_cost_min.write_count,
+                    "max": total_cost_max.write_count,
+                },
+                "write_length": {
+                    "min": total_cost_min.write_length,
+                    "max": total_cost_max.write_length,
+                },
+            },
+            "percentages": {
+                "runtime": percents.runtime,
+                "read_count": percents.read_count,
+                "read_length": percents.read_length,
+                "write_count": percents.write_count,
+                "write_length": percents.write_length,
+            },
+            "limits": {
+                "runtime": block_limits.runtime,
+                "read_count": block_limits.read_count,
+                "read_length": block_limits.read_length,
+                "write_count": block_limits.write_count,
+                "write_length": block_limits.write_length,
+            },
+            "trait_count": trait_count,
         })
         .to_string();
 
@@ -769,7 +981,10 @@ impl ProtocolState {
         definitions: &mut HashMap<QualifiedContractIdentifier, HashMap<ClarityName, Range>>,
         analyses: &mut HashMap<QualifiedContractIdentifier, Option<ContractAnalysis>>,
         clarity_versions: &mut HashMap<QualifiedContractIdentifier, ClarityVersion>,
-        cost_analyses: &mut HashMap<QualifiedContractIdentifier, HashMap<String, CostAnalysisNode>>,
+        cost_analyses: &mut HashMap<
+            QualifiedContractIdentifier,
+            HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>,
+        >,
     ) {
         // Remove old paths
         // TODO(lgalabru)
@@ -952,9 +1167,9 @@ async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
-) -> Option<HashMap<String, CostAnalysisNode>> {
+) -> Option<HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>> {
     use clarity::vm::contexts::{CallStack, ContractContext, Environment};
-    use clarity::vm::costs::analysis::static_cost_tree;
+    use clarity::vm::costs::analysis::static_cost;
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
 
     crate::lsp_log!(
@@ -976,10 +1191,12 @@ async fn get_cost_analysis(
 
     global_context.begin();
 
-    let cost_result: Result<HashMap<String, CostAnalysisNode>, clarity::vm::errors::VmExecutionError> =
-        global_context.execute(|g| {
-            let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
-            let mut call_stack = CallStack::new();
+    let cost_result: Result<
+        HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>,
+        clarity::vm::errors::VmExecutionError,
+    > = global_context.execute(|g| {
+        let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
+        let mut call_stack = CallStack::new();
 
         let mut env = Environment::new(
             g,
@@ -990,19 +1207,13 @@ async fn get_cost_analysis(
             None,
         );
 
-            // convert the cost result - extract CostAnalysisNode from tuple
-            static_cost_tree(&mut env, contract_id)
-                .map(|result| {
-                    result
-                        .into_iter()
-                        .map(|(k, (node, _))| (k, node))
-                        .collect()
-                })
-                .map_err(|e| {
-                    crate::lsp_log!("[LSP] static_cost_tree failed with error: {}", e);
-                    let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
-                    VmExecutionError::Internal(VmInternalError::Expect(error_msg))
-                })
+        // Use static_cost which returns (CostAnalysisNode, Option<TraitCount>)
+        // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
+        static_cost(&mut env, contract_id).map_err(|e| {
+            crate::lsp_log!("[LSP] static_cost failed with error: {}", e);
+            let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
+            VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+        })
     });
 
     cost_result

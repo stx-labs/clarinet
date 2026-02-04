@@ -1,0 +1,142 @@
+.cost-details-container {
+  padding: 20px;
+  font-family: var(--vscode-font-family);
+  color: var(--vscode-foreground);
+}
+
+.cost-details-container h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: var(--vscode-textLink-foreground);
+}
+
+.cost-details-container h3 {
+  margin-top: 24px;
+  margin-bottom: 12px;
+  color: var(--vscode-textLink-foreground);
+}
+
+.section {
+  margin-bottom: 32px;
+}
+
+.info-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background-color: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+}
+
+.info-box .label {
+  font-weight: 600;
+}
+
+.info-box .value {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 1.1em;
+  color: var(--vscode-textLink-foreground);
+}
+
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+.cost-table thead {
+  background-color: var(--vscode-editor-background);
+}
+
+.cost-table th {
+  padding: 10px;
+  text-align: left;
+  border: 1px solid var(--vscode-panel-border);
+  font-weight: 600;
+}
+
+.cost-table td {
+  padding: 10px;
+  border: 1px solid var(--vscode-panel-border);
+  font-family: var(--vscode-editor-font-family);
+}
+
+.cost-table tbody tr:hover {
+  background-color: var(--vscode-list-hoverBackground);
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.breakdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.breakdown-bar {
+  flex: 1;
+  height: 24px;
+  background-color: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.breakdown-fill {
+  height: 100%;
+  width: 0%;
+  transition: width 0.3s ease;
+  border-radius: 3px;
+}
+
+.breakdown-fill.percent-high {
+  background-color: #ff4444;
+}
+
+.breakdown-fill.percent-medium-high {
+  background-color: #ffaa00;
+}
+
+.breakdown-fill.percent-medium {
+  background-color: #ffcc00;
+}
+
+.breakdown-fill.percent-low {
+  background-color: #44ff44;
+}
+
+.cost-table td.percent-high {
+  color: #ff4444;
+}
+
+.cost-table td.percent-medium-high {
+  color: #ffaa00;
+}
+
+.cost-table td.percent-medium {
+  color: #ffcc00;
+}
+
+.cost-table td.percent-low {
+  color: #44ff44;
+}
+
+.breakdown-label {
+  min-width: 180px;
+  font-size: 0.9em;
+  font-family: var(--vscode-editor-font-family);
+}
+
+code {
+  background-color: var(--vscode-textCodeBlock-background);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family);
+}

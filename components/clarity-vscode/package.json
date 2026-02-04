@@ -184,6 +184,13 @@
         }
       ]
     },
+    "commands": [
+      {
+        "command": "clarity.showCostDetails",
+        "title": "Show Cost Details",
+        "category": "Clarity"
+      }
+    ],
     "breakpoints": [
       {
         "language": "clarity"
