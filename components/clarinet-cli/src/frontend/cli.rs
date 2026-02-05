@@ -1618,136 +1618,90 @@ fn sanitize_project_name(name: &str) -> String {
 }
 
 fn execute_changes(changes: Vec<Changes>) -> bool {
-    // Store the document and its location for editing
     let mut shared_doc: Option<(FileLocation, DocumentMut)> = None;
 
-    for mut change in changes.into_iter() {
+    for mut change in changes {
         match change {
             Changes::AddFile(options) => {
-                if let Ok(entry) = fs::metadata(&options.path) {
-                    if entry.is_file() {
-                        println!(
-                            "{} file already exists at path {}",
-                            yellow!("warning:"),
-                            options.path
-                        );
-                        continue;
-                    }
+                if fs::metadata(&options.path).is_ok_and(|e| e.is_file()) {
+                    println!(
+                        "{} file already exists at path {}",
+                        yellow!("warning:"),
+                        options.path
+                    );
+                    continue;
                 }
-                let mut file = match File::create(options.path.clone()) {
-                    Ok(file) => file,
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to create file {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
-                match file.write_all(options.content.as_bytes()) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to write file {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
+
+                let write_result = File::create(&options.path)
+                    .and_then(|mut file| file.write_all(options.content.as_bytes()));
+
+                if let Err(e) = write_result {
+                    eprintln!(
+                        "{} Unable to write file {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
+                }
+
                 println!("{}", options.comment);
             }
+
             Changes::AddDirectory(options) => {
-                match fs::create_dir_all(options.path.clone()) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to create directory {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
+                if let Err(e) = fs::create_dir_all(&options.path) {
+                    eprintln!(
+                        "{} Unable to create directory {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
+                }
                 println!("{}", options.comment);
             }
+
             Changes::EditTOML(ref mut options) => {
                 let (location, doc) = match shared_doc.take() {
-                    Some((loc, doc)) => (loc, doc),
+                    Some(cached) => cached,
                     None => {
-                        let manifest_location = options.manifest_location.clone();
-                        let content = match manifest_location.read_content() {
-                            Ok(content) => content,
-                            Err(message) => {
-                                eprintln!("{}", format_err!(message));
-                                return false;
-                            }
+                        let Some(doc) = load_manifest(&options.manifest_location) else {
+                            return false;
                         };
-
-                        let content_str = match std::str::from_utf8(&content) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                eprintln!(
-                                    "{} Invalid UTF-8 in manifest file: {}",
-                                    red!("error:"),
-                                    e
-                                );
-                                return false;
-                            }
-                        };
-
-                        let doc: DocumentMut = match content_str.parse() {
-                            Ok(doc) => doc,
-                            Err(e) => {
-                                eprintln!(
-                                    "{} Failed to parse manifest file: {}",
-                                    red!("error:"),
-                                    e
-                                );
-                                return false;
-                            }
-                        };
-
-                        (manifest_location, doc)
+                        (options.manifest_location.clone(), doc)
                     }
                 };
 
                 let doc = edit_toml_document(doc, options);
-
                 shared_doc = Some((location, doc));
                 println!("{}", options.comment);
             }
+
             Changes::RemoveFile(options) => {
-                if let Ok(entry) = fs::metadata(&options.path) {
-                    if !entry.is_file() {
-                        eprintln!(
-                            "{} file doesn't exist at path {}",
-                            yellow!("warning:"),
-                            options.path
-                        );
-                        continue;
-                    }
+                if !fs::metadata(&options.path).is_ok_and(|e| e.is_file()) {
+                    eprintln!(
+                        "{} file doesn't exist at path {}",
+                        yellow!("warning:"),
+                        options.path
+                    );
+                    continue;
                 }
-                match fs::remove_file(&options.path) {
-                    Ok(_) => println!("{}", options.comment),
-                    Err(e) => eprintln!("error {e}"),
+
+                if let Err(e) = fs::remove_file(&options.path) {
+                    eprintln!(
+                        "{} Unable to remove file {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
                 }
+
+                println!("{}", options.comment);
             }
         }
     }
 
     if let Some((location, doc)) = shared_doc {
-        let content = doc.to_string();
-        if let Err(message) = location.write_content(content.as_bytes()) {
-            eprintln!(
-                "{} Unable to update manifest file - {}",
-                red!("error:"),
-                message
-            );
+        if let Err(e) = location.write_content(doc.to_string().as_bytes()) {
+            eprintln!("{} Unable to update manifest file: {e}", red!("error:"));
             return false;
         }
     }
@@ -1755,22 +1709,41 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
     true
 }
 
+/// Load and parse a manifest file, printing errors on failure.
+fn load_manifest(location: &FileLocation) -> Option<DocumentMut> {
+    let content = location
+        .read_content()
+        .map_err(|e| {
+            eprintln!("{}", format_err!(e));
+        })
+        .ok()?;
+
+    let content_str = std::str::from_utf8(&content)
+        .map_err(|e| {
+            eprintln!("{} Invalid UTF-8 in manifest file: {e}", red!("error:"));
+        })
+        .ok()?;
+
+    content_str
+        .parse()
+        .map_err(|e| {
+            eprintln!("{} Failed to parse manifest file: {e}", red!("error:"));
+        })
+        .ok()
+}
+
 /// Edit a TOML document directly, preserving comments and structure.
-/// This modifies the document in place to add/remove contracts and requirements.
 fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> DocumentMut {
-    // Add requirements to [[project.requirements]]
-    for requirement in options.requirements_to_add.drain(..) {
-        add_requirement_to_doc(&mut doc, &requirement.contract_id);
+    for req in options.requirements_to_add.drain(..) {
+        add_requirement_to_doc(&mut doc, &req.contract_id);
     }
 
-    // Add contracts as [contracts.<name>] sections
-    for (contract_name, contract_config) in options.contracts_to_add.drain() {
-        add_contract_to_doc(&mut doc, &contract_name, &contract_config);
+    for (name, contract) in options.contracts_to_add.drain() {
+        add_contract_to_doc(&mut doc, &name, &contract);
     }
 
-    // Remove contracts
-    for contract_name in options.contracts_to_rm.iter() {
-        remove_contract_from_doc(&mut doc, contract_name);
+    for name in &options.contracts_to_rm {
+        remove_contract_from_doc(&mut doc, name);
     }
 
     doc
@@ -1778,33 +1751,30 @@ fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> Docume
 
 /// Add a requirement to the [[project.requirements]] array in the document.
 fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
+    use toml_edit::{ArrayOfTables, Item, Table};
+
     // Ensure [project] table exists
-    if !doc.contains_key("project") {
-        doc["project"] = toml_edit::Item::Table(toml_edit::Table::new());
-    }
+    let project = doc
+        .entry("project")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .expect("[project] should be a table");
 
-    let project = doc["project"].as_table_mut().unwrap();
+    // Ensure [[project.requirements]] array exists
+    let requirements = project
+        .entry("requirements")
+        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
+        .as_array_of_tables_mut()
+        .expect("[[project.requirements]] should be an array of tables");
 
-    // Get or create the requirements array
-    if !project.contains_key("requirements") {
-        project["requirements"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
-    }
+    // Check for duplicates
+    let already_exists = requirements
+        .iter()
+        .filter_map(|req| req.get("contract_id")?.as_str())
+        .any(|id| id == contract_id);
 
-    // Check if this requirement already exists
-    if let Some(requirements) = project["requirements"].as_array_of_tables() {
-        for req in requirements.iter() {
-            if let Some(id) = req.get("contract_id").and_then(|v| v.as_str()) {
-                if id == contract_id {
-                    // Requirement already exists, don't add duplicate
-                    return;
-                }
-            }
-        }
-    }
-
-    // Add the new requirement
-    if let Some(requirements) = project["requirements"].as_array_of_tables_mut() {
-        let mut new_req = toml_edit::Table::new();
+    if !already_exists {
+        let mut new_req = Table::new();
         new_req["contract_id"] = toml_edit::value(contract_id);
         requirements.push(new_req);
     }
@@ -1812,43 +1782,39 @@ fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
 
 /// Add a contract to the [contracts.<name>] section in the document.
 fn add_contract_to_doc(doc: &mut DocumentMut, name: &str, contract: &ClarityContract) {
-    // Ensure [contracts] table exists
-    if !doc.contains_key("contracts") {
-        doc["contracts"] = toml_edit::Item::Table(toml_edit::Table::new());
+    use toml_edit::{Item, Table};
+
+    let contracts = doc
+        .entry("contracts")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .expect("[contracts] should be a table");
+
+    let mut entry = Table::new();
+
+    if let ClarityCodeSource::ContractOnDisk(path) = &contract.code_source {
+        entry["path"] = toml_edit::value(path.display().to_string());
     }
 
-    let contracts = doc["contracts"].as_table_mut().unwrap();
-
-    // Create the contract table
-    let mut contract_table = toml_edit::Table::new();
-
-    // Add path
-    if let ClarityCodeSource::ContractOnDisk(ref path) = contract.code_source {
-        contract_table["path"] = toml_edit::value(path.display().to_string());
+    if let ContractDeployer::LabeledDeployer(label) = &contract.deployer {
+        entry["deployer"] = toml_edit::value(label.as_str());
     }
 
-    // Add deployer if not default
-    if let ContractDeployer::LabeledDeployer(ref label) = contract.deployer {
-        contract_table["deployer"] = toml_edit::value(label.as_str());
-    }
-
-    // Add clarity_version
-    let clarity_version: i64 = match contract.clarity_version {
+    let clarity_version = match contract.clarity_version {
         ClarityVersion::Clarity1 => 1,
         ClarityVersion::Clarity2 => 2,
         ClarityVersion::Clarity3 => 3,
         ClarityVersion::Clarity4 => 4,
     };
-    contract_table["clarity_version"] = toml_edit::value(clarity_version);
+    entry["clarity_version"] = toml_edit::value(clarity_version);
 
-    // Add epoch
-    let epoch_str = match &contract.epoch {
+    let epoch = match &contract.epoch {
         Epoch::Latest => "latest".to_string(),
-        Epoch::Specific(epoch) => format!("{epoch}"),
+        Epoch::Specific(e) => e.to_string(),
     };
-    contract_table["epoch"] = toml_edit::value(epoch_str);
+    entry["epoch"] = toml_edit::value(epoch);
 
-    contracts[name] = toml_edit::Item::Table(contract_table);
+    contracts[name] = Item::Table(entry);
 }
 
 /// Remove a contract from the [contracts] section in the document.
