@@ -18,8 +18,8 @@ use clarinet_deployments::{
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::{
-    get_manifest_location, FileLocation, NetworkManifest, ProjectManifest, ProjectManifestFile,
-    RequirementConfig, StacksNetwork,
+    get_manifest_location, FileLocation, NetworkManifest, ProjectManifest, RequirementConfig,
+    StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity_repl::analysis::call_checker::ContractAnalysis;
@@ -30,10 +30,10 @@ use clarity_repl::clarity::ClarityVersion;
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
-use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_EPOCH};
+use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, DEFAULT_EPOCH};
 use clarity_repl::{analysis, repl};
 use stacks_network::{self, DevnetOrchestrator};
-use toml;
+use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
@@ -1616,7 +1616,8 @@ fn sanitize_project_name(name: &str) -> String {
 }
 
 fn execute_changes(changes: Vec<Changes>) -> bool {
-    let mut shared_config = None;
+    // Store the document and its location for editing
+    let mut shared_doc: Option<(FileLocation, DocumentMut)> = None;
 
     for mut change in changes.into_iter() {
         match change {
@@ -1673,11 +1674,11 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
                 println!("{}", options.comment);
             }
             Changes::EditTOML(ref mut options) => {
-                let mut config = match shared_config.take() {
-                    Some(config) => config,
+                let (location, doc) = match shared_doc.take() {
+                    Some((loc, doc)) => (loc, doc),
                     None => {
                         let manifest_location = options.manifest_location.clone();
-                        let project_manifest_content = match manifest_location.read_content() {
+                        let content = match manifest_location.read_content() {
                             Ok(content) => content,
                             Err(message) => {
                                 eprintln!("{}", format_err!(message));
@@ -1685,48 +1686,37 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
                             }
                         };
 
-                        let project_manifest_file: ProjectManifestFile =
-                            match toml::from_slice(&project_manifest_content[..]) {
-                                Ok(manifest) => manifest,
-                                Err(message) => {
-                                    eprintln!(
-                                        "{} Failed to process manifest file: {}",
-                                        red!("error:"),
-                                        message
-                                    );
-                                    return false;
-                                }
-                            };
-                        match ProjectManifest::from_project_manifest_file(
-                            project_manifest_file,
-                            &manifest_location,
-                            true,
-                        ) {
-                            Ok(content) => content,
-                            Err(message) => {
-                                eprintln!("{}", format_err!(message));
+                        let content_str = match std::str::from_utf8(&content) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!(
+                                    "{} Invalid UTF-8 in manifest file: {}",
+                                    red!("error:"),
+                                    e
+                                );
                                 return false;
                             }
-                        }
+                        };
+
+                        let doc: DocumentMut = match content_str.parse() {
+                            Ok(doc) => doc,
+                            Err(e) => {
+                                eprintln!(
+                                    "{} Failed to parse manifest file: {}",
+                                    red!("error:"),
+                                    e
+                                );
+                                return false;
+                            }
+                        };
+
+                        (manifest_location, doc)
                     }
                 };
 
-                let mut requirements = config.project.requirements.take().unwrap_or_default();
-                for requirement in options.requirements_to_add.drain(..) {
-                    if !requirements.contains(&requirement) {
-                        requirements.push(requirement);
-                    }
-                }
-                config.project.requirements = Some(requirements);
+                let doc = edit_toml_document(doc, options);
 
-                for (contract_name, contract_config) in options.contracts_to_add.drain() {
-                    config.contracts.insert(contract_name, contract_config);
-                }
-                for contract_name in options.contracts_to_rm.iter() {
-                    config.contracts.remove(contract_name);
-                }
-
-                shared_config = Some(config);
+                shared_doc = Some((location, doc));
                 println!("{}", options.comment);
             }
             Changes::RemoveFile(options) => {
@@ -1748,27 +1738,9 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
         }
     }
 
-    if let Some(project_manifest) = shared_config {
-        let toml_value = match toml::Value::try_from(&project_manifest) {
-            Ok(value) => value,
-            Err(e) => {
-                eprintln!("{} failed encoding config file ({})", red!("error:"), e);
-                return false;
-            }
-        };
-
-        let pretty_toml = match toml::ser::to_string_pretty(&toml_value) {
-            Ok(value) => value,
-            Err(e) => {
-                eprintln!("{} failed formatting config file ({})", red!("error:"), e);
-                return false;
-            }
-        };
-
-        if let Err(message) = project_manifest
-            .location
-            .write_content(pretty_toml.as_bytes())
-        {
+    if let Some((location, doc)) = shared_doc {
+        let content = doc.to_string();
+        if let Err(message) = location.write_content(content.as_bytes()) {
             eprintln!(
                 "{} Unable to update manifest file - {}",
                 red!("error:"),
@@ -1779,6 +1751,109 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
     }
 
     true
+}
+
+/// Edit a TOML document directly, preserving comments and structure.
+/// This modifies the document in place to add/remove contracts and requirements.
+fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> DocumentMut {
+    // Add requirements to [[project.requirements]]
+    for requirement in options.requirements_to_add.drain(..) {
+        add_requirement_to_doc(&mut doc, &requirement.contract_id);
+    }
+
+    // Add contracts as [contracts.<name>] sections
+    for (contract_name, contract_config) in options.contracts_to_add.drain() {
+        add_contract_to_doc(&mut doc, &contract_name, &contract_config);
+    }
+
+    // Remove contracts
+    for contract_name in options.contracts_to_rm.iter() {
+        remove_contract_from_doc(&mut doc, contract_name);
+    }
+
+    doc
+}
+
+/// Add a requirement to the [[project.requirements]] array in the document.
+fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
+    // Ensure [project] table exists
+    if !doc.contains_key("project") {
+        doc["project"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+
+    let project = doc["project"].as_table_mut().unwrap();
+
+    // Get or create the requirements array
+    if !project.contains_key("requirements") {
+        project["requirements"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
+    }
+
+    // Check if this requirement already exists
+    if let Some(requirements) = project["requirements"].as_array_of_tables() {
+        for req in requirements.iter() {
+            if let Some(id) = req.get("contract_id").and_then(|v| v.as_str()) {
+                if id == contract_id {
+                    // Requirement already exists, don't add duplicate
+                    return;
+                }
+            }
+        }
+    }
+
+    // Add the new requirement
+    if let Some(requirements) = project["requirements"].as_array_of_tables_mut() {
+        let mut new_req = toml_edit::Table::new();
+        new_req["contract_id"] = toml_edit::value(contract_id);
+        requirements.push(new_req);
+    }
+}
+
+/// Add a contract to the [contracts.<name>] section in the document.
+fn add_contract_to_doc(doc: &mut DocumentMut, name: &str, contract: &ClarityContract) {
+    // Ensure [contracts] table exists
+    if !doc.contains_key("contracts") {
+        doc["contracts"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+
+    let contracts = doc["contracts"].as_table_mut().unwrap();
+
+    // Create the contract table
+    let mut contract_table = toml_edit::Table::new();
+
+    // Add path
+    if let ClarityCodeSource::ContractOnDisk(ref path) = contract.code_source {
+        contract_table["path"] = toml_edit::value(path.display().to_string());
+    }
+
+    // Add deployer if not default
+    if let ContractDeployer::LabeledDeployer(ref label) = contract.deployer {
+        contract_table["deployer"] = toml_edit::value(label.as_str());
+    }
+
+    // Add clarity_version
+    let clarity_version: i64 = match contract.clarity_version {
+        ClarityVersion::Clarity1 => 1,
+        ClarityVersion::Clarity2 => 2,
+        ClarityVersion::Clarity3 => 3,
+        ClarityVersion::Clarity4 => 4,
+    };
+    contract_table["clarity_version"] = toml_edit::value(clarity_version);
+
+    // Add epoch
+    let epoch_str = match &contract.epoch {
+        Epoch::Latest => "latest".to_string(),
+        Epoch::Specific(epoch) => format!("{epoch}"),
+    };
+    contract_table["epoch"] = toml_edit::value(epoch_str);
+
+    contracts[name] = toml_edit::Item::Table(contract_table);
+}
+
+/// Remove a contract from the [contracts] section in the document.
+fn remove_contract_from_doc(doc: &mut DocumentMut, name: &str) {
+    if let Some(contracts) = doc.get_mut("contracts").and_then(|c| c.as_table_mut()) {
+        contracts.remove(name);
+    }
 }
 
 fn prompt_user_to_continue() {

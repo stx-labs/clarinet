@@ -65,6 +65,7 @@ serde-wasm-bindgen = "0.6.4"
 strum = "0.27.2"
 tempfile = "3.22.0"
 toml = { version = "0.5.6", features = ["preserve_order"] }
+toml_edit = "0.22"
 tokio = { version = "1.47.0", features = ["full"] }
 tokio-util = { version = "0.7.16", features = ["codec"] }
 wasm-bindgen = { version = "0.2.103" }
