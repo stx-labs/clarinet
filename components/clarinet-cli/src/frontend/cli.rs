@@ -30,7 +30,9 @@ use clarity_repl::clarity::ClarityVersion;
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
-use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, DEFAULT_EPOCH};
+use clarity_repl::repl::{
+    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, DEFAULT_EPOCH,
+};
 use clarity_repl::{analysis, repl};
 use stacks_network::{self, DevnetOrchestrator};
 use toml_edit::DocumentMut;
@@ -2172,8 +2174,11 @@ mod tests {
     }
 
     mod toml_editing_tests {
-        use super::*;
         use std::path::PathBuf;
+
+        use indoc::indoc;
+
+        use super::*;
 
         /// Helper to create a ClarityContract for testing
         fn make_test_contract(name: &str) -> ClarityContract {
@@ -2260,21 +2265,22 @@ mod tests {
 
         #[test]
         fn test_add_contract_preserves_comments() {
-            // Input with comments
-            let input = r#"[project]
-name = "test-project"
-description = ""
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
+                description = \"\"
 
-# This is an important comment that should be preserved!
-# Another comment line
+                # This is an important comment that should be preserved!
+                # Another comment line
 
-[repl.analysis]
-passes = ["check_checker"]
+                [repl.analysis]
+                passes = [\"check_checker\"]
 
-# Check-checker settings comment
-[repl.analysis.check_checker]
-strict = false
-"#;
+                # Check-checker settings comment
+                [repl.analysis.check_checker]
+                strict = false
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
@@ -2314,23 +2320,25 @@ strict = false
 
         #[test]
         fn test_remove_contract_preserves_comments_and_other_contracts() {
-            let input = r#"[project]
-name = "test-project"
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
 
-# Comment about contracts
-[contracts.keep-me]
-path = "contracts/keep-me.clar"
-clarity_version = 2
-epoch = "2.4"
+                # Comment about contracts
+                [contracts.keep-me]
+                path = \"contracts/keep-me.clar\"
+                clarity_version = 2
+                epoch = \"2.4\"
 
-# Comment about remove-me
-[contracts.remove-me]
-path = "contracts/remove-me.clar"
-clarity_version = 1
-epoch = "2.0"
+                # Comment about remove-me
+                [contracts.remove-me]
+                path = \"contracts/remove-me.clar\"
+                clarity_version = 1
+                epoch = \"2.0\"
 
-# Final comment
-"#;
+                # Final comment
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             remove_contract_from_doc(&mut doc, "remove-me");
@@ -2358,28 +2366,36 @@ epoch = "2.0"
 
         #[test]
         fn test_add_requirement_preserves_comments() {
-            let input = r#"[project]
-name = "test-project"
-description = "A test project"
-authors = ["Test Author"]
-telemetry = false
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
+                description = \"A test project\"
+                authors = [\"Test Author\"]
+                telemetry = false
 
-# This comment should survive
+                # This comment should survive
 
-[contracts.my-contract]
-path = "contracts/my-contract.clar"
-clarity_version = 2
-epoch = "latest"
-"#;
+                [contracts.my-contract]
+                path = \"contracts/my-contract.clar\"
+                clarity_version = 2
+                epoch = \"latest\"
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(&mut doc, "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
 
             let output = doc.to_string();
 
             // Verify the requirement was added
             assert!(
-                has_requirement(&output, "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"),
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
                 "Requirement should be added"
             );
 
@@ -2408,17 +2424,22 @@ epoch = "latest"
 
         #[test]
         fn test_add_requirement_does_not_duplicate() {
-            let input = r#"[project]
-name = "test-project"
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
 
-[[project.requirements]]
-contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
-"#;
+                [[project.requirements]]
+                contract_id = \"SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait\"
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
             // Try to add the same requirement again
-            add_requirement_to_doc(&mut doc, "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
 
             let output = doc.to_string();
 
@@ -2429,25 +2450,36 @@ contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
 
         #[test]
         fn test_add_multiple_requirements() {
-            let input = r#"[project]
-name = "test-project"
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
 
-[[project.requirements]]
-contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
-"#;
+                [[project.requirements]]
+                contract_id = \"SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait\"
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(&mut doc, "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait",
+            );
 
             let output = doc.to_string();
 
             // Both requirements should exist
             assert!(
-                has_requirement(&output, "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"),
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
                 "Original requirement should be preserved"
             );
             assert!(
-                has_requirement(&output, "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"),
+                has_requirement(
+                    &output,
+                    "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"
+                ),
                 "New requirement should be added"
             );
         }
@@ -2455,35 +2487,41 @@ contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
         #[test]
         fn test_edit_simple_nft_example() {
             // Test with the actual simple-nft example content
-            let input = r#"[project]
-name = 'simple-nft'
-description = ''
-authors = []
-telemetry = false
-cache_dir = './.cache'
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = 'simple-nft'
+                description = ''
+                authors = []
+                telemetry = false
+                cache_dir = './.cache'
 
-[[project.requirements]]
-contract_id = 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait'
+                [[project.requirements]]
+                contract_id = 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait'
 
-[contracts.simple-nft]
-path = 'contracts/simple-nft.clar'
-clarity_version = 2
-epoch = 2.4
+                [contracts.simple-nft]
+                path = 'contracts/simple-nft.clar'
+                clarity_version = 2
+                epoch = 2.4
 
-# the analysis errors are used as a test case
-[repl.analysis]
-passes = ["check_checker"]
-check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+                # the analysis errors are used as a test case
+                [repl.analysis]
+                passes = [\"check_checker\"]
+                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
 
-# We don't want linter diagnostics in this test
-[repl.analysis.lint_groups]
-all = false
-"#;
+                # We don't want linter diagnostics in this test
+                [repl.analysis.lint_groups]
+                all = false
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
             // Add a new contract
-            add_contract_to_doc(&mut doc, "new-contract", &make_test_contract("new-contract"));
+            add_contract_to_doc(
+                &mut doc,
+                "new-contract",
+                &make_test_contract("new-contract"),
+            );
 
             let output = doc.to_string();
 
@@ -2507,7 +2545,10 @@ all = false
                 "New contract should be added"
             );
             assert!(
-                has_requirement(&output, "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"),
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
                 "Requirement should be preserved"
             );
             assert!(
@@ -2519,31 +2560,33 @@ all = false
         #[test]
         fn test_edit_counter_example() {
             // Test with the actual counter example content
-            let input = r#"[project]
-name = "counter"
-authors = []
-description = ""
-telemetry = false
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"counter\"
+                authors = []
+                description = \"\"
+                telemetry = false
 
-[contracts.counter]
-path = "contracts/counter.clar"
-clarity_version = 1
-epoch = "2.0"
+                [contracts.counter]
+                path = \"contracts/counter.clar\"
+                clarity_version = 1
+                epoch = \"2.0\"
 
-[contracts.counter-2]
-path = "contracts/counter-v2.clar"
-clarity_version = 2
-epoch = "2.4"
+                [contracts.counter-2]
+                path = \"contracts/counter-v2.clar\"
+                clarity_version = 2
+                epoch = \"2.4\"
 
-[repl.analysis]
-passes = ["check_checker"]
+                [repl.analysis]
+                passes = [\"check_checker\"]
 
-[repl.analysis.check_checker]
-strict = false
-trusted_sender = true
-trusted_caller = false
-callee_filter = false
-"#;
+                [repl.analysis.check_checker]
+                strict = false
+                trusted_sender = true
+                trusted_caller = false
+                callee_filter = false
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
@@ -2573,16 +2616,22 @@ callee_filter = false
                 "Project name should be preserved"
             );
             assert!(
-                has_toml_value(&output, "repl.analysis.check_checker.trusted_sender", "true"),
+                has_toml_value(
+                    &output,
+                    "repl.analysis.check_checker.trusted_sender",
+                    "true"
+                ),
                 "Check checker settings should be preserved"
             );
         }
 
         #[test]
         fn test_contract_with_labeled_deployer() {
-            let input = r#"[project]
-name = "test-project"
-"#;
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
@@ -2614,20 +2663,26 @@ name = "test-project"
                 "wallet_1"
             );
             assert_eq!(
-                special.get("clarity_version").unwrap().as_integer().unwrap(),
+                special
+                    .get("clarity_version")
+                    .unwrap()
+                    .as_integer()
+                    .unwrap(),
                 3
             );
         }
 
         #[test]
         fn test_preserves_inline_tables() {
-            let input = r#"[project]
-name = "test-project"
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
 
-[repl.analysis]
-passes = ["check_checker"]
-check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
-"#;
+                [repl.analysis]
+                passes = [\"check_checker\"]
+                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
@@ -2636,8 +2691,7 @@ check_checker = { trusted_sender = false, trusted_caller = false, callee_filter 
 
             // The inline table format should be preserved
             assert!(
-                output.contains("check_checker = {")
-                    || output.contains("check_checker = { "),
+                output.contains("check_checker = {") || output.contains("check_checker = { "),
                 "Inline table format should be preserved: {}",
                 output
             );
@@ -2645,14 +2699,16 @@ check_checker = { trusted_sender = false, trusted_caller = false, callee_filter 
 
         #[test]
         fn test_preserves_array_format() {
-            let input = r#"[project]
-name = "test-project"
-authors = ["Alice", "Bob"]
-requirements = []
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"test-project\"
+                authors = [\"Alice\", \"Bob\"]
+                requirements = []
 
-[repl.analysis]
-passes = ["check_checker", "lint"]
-"#;
+                [repl.analysis]
+                passes = [\"check_checker\", \"lint\"]
+            "};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
