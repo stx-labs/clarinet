@@ -2721,5 +2721,133 @@ mod tests {
                 "Authors array should be preserved"
             );
         }
+
+        #[test]
+        fn test_preserves_lint_groups_and_lints_ordering() {
+            // Test with all lint groups and lints in a deliberately random order
+            // with random values to ensure ordering is preserved after edits
+            //
+            // LintGroups: All, Perf, Safety, Style, Unused
+            // LintNames: Noop, UnusedConst, UnusedDataVar, UnusedBinding, UnusedMap,
+            //            UnusedPrivateFn, UnusedToken, UnusedTrait, CaseConst
+            // LintLevels: ignore/allow/off/none, notice/note, warning/warn/on, error/err
+            #[rustfmt::skip]
+            let input = indoc! {"
+                [project]
+                name = \"lint-ordering-test\"
+                authors = []
+                telemetry = false
+
+                [contracts.existing-contract]
+                path = \"contracts/existing.clar\"
+
+                # Custom comment about linting configuration
+                [repl.analysis]
+                passes = [\"check_checker\", \"lint\"]
+
+                # Lint groups in random order with random values
+                [repl.analysis.lint_groups]
+                style = \"warn\"
+                unused = \"error\"
+                all = false
+                safety = \"notice\"
+                perf = \"off\"
+
+                # Individual lints in random order with random values
+                [repl.analysis.lints]
+                unused_map = \"error\"
+                case_const = \"warn\"
+                unused_binding = \"off\"
+                noop = \"notice\"
+                unused_trait = \"warning\"
+                unused_const = \"allow\"
+                unused_private_fn = \"err\"
+                unused_data_var = \"note\"
+                unused_token = \"none\"
+            "};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Perform an edit (add a contract) to simulate real usage
+            add_contract_to_doc(
+                &mut doc,
+                "new-contract",
+                &make_test_contract("new-contract"),
+            );
+
+            let output = doc.to_string();
+
+            // Verify the comment is preserved
+            assert!(
+                contains_comment(&output, "Custom comment about linting configuration"),
+                "Linting comment should be preserved"
+            );
+
+            // Helper to extract keys in order from a TOML section
+            fn get_keys_in_order(toml_str: &str, section: &str) -> Vec<String> {
+                let doc: DocumentMut = toml_str.parse().unwrap();
+
+                // Navigate to the section (e.g., "repl.analysis.lint_groups")
+                let parts: Vec<&str> = section.split('.').collect();
+                let mut current = doc.as_item();
+
+                for part in &parts {
+                    current = current.as_table().unwrap().get(part).unwrap();
+                }
+
+                current
+                    .as_table()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, _)| k.to_string())
+                    .collect()
+            }
+
+            // Verify lint_groups ordering is preserved
+            let lint_groups_order = get_keys_in_order(&output, "repl.analysis.lint_groups");
+            assert_eq!(
+                lint_groups_order,
+                vec!["style", "unused", "all", "safety", "perf"],
+                "Lint groups ordering should be preserved"
+            );
+
+            // Verify lints ordering is preserved
+            let lints_order = get_keys_in_order(&output, "repl.analysis.lints");
+            assert_eq!(
+                lints_order,
+                vec![
+                    "unused_map",
+                    "case_const",
+                    "unused_binding",
+                    "noop",
+                    "unused_trait",
+                    "unused_const",
+                    "unused_private_fn",
+                    "unused_data_var",
+                    "unused_token"
+                ],
+                "Lints ordering should be preserved"
+            );
+
+            // Also verify the values are preserved
+            let parsed: DocumentMut = output.parse().unwrap();
+            let lint_groups = parsed["repl"]["analysis"]["lint_groups"]
+                .as_table()
+                .unwrap();
+            let lints = parsed["repl"]["analysis"]["lints"].as_table().unwrap();
+
+            // Check a few lint group values
+            assert_eq!(lint_groups["style"].as_str().unwrap(), "warn");
+            assert_eq!(lint_groups["unused"].as_str().unwrap(), "error");
+            assert_eq!(lint_groups["all"].as_bool().unwrap(), false);
+            assert_eq!(lint_groups["safety"].as_str().unwrap(), "notice");
+            assert_eq!(lint_groups["perf"].as_str().unwrap(), "off");
+
+            // Check a few lint values
+            assert_eq!(lints["unused_map"].as_str().unwrap(), "error");
+            assert_eq!(lints["case_const"].as_str().unwrap(), "warn");
+            assert_eq!(lints["noop"].as_str().unwrap(), "notice");
+            assert_eq!(lints["unused_token"].as_str().unwrap(), "none");
+        }
     }
 }
