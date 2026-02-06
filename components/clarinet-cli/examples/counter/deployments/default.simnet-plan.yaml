@@ -63,17 +63,17 @@ plan:
   batches:
     - id: 0
       transactions:
-        - emulated-contract-publish:
-            contract-name: counter
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/counter.clar
-            clarity-version: 1
+        - transaction-type: emulated-contract-publish
+          contract-name: counter
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          path: contracts/counter.clar
+          clarity-version: 1
       epoch: "2.0"
     - id: 1
       transactions:
-        - emulated-contract-publish:
-            contract-name: counter-2
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/counter-v2.clar
-            clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: counter-2
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          path: contracts/counter-v2.clar
+          clarity-version: 2
       epoch: "2.4"

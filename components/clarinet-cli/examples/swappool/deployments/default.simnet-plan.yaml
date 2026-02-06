@@ -63,50 +63,50 @@ plan:
   batches:
     - id: 0
       transactions:
-        - emulated-contract-publish:
-            contract-name: trait-sip-010
-            emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
-            path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-sip-010.clar"
-            clarity-version: 1
-        - emulated-contract-publish:
-            contract-name: trait-flash-loan-user
-            emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
-            path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-flash-loan-user.clar"
-            clarity-version: 1
-        - emulated-contract-publish:
-            contract-name: trait-semi-fungible
-            emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
-            path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-semi-fungible.clar"
-            clarity-version: 1
-        - emulated-contract-publish:
-            contract-name: trait-ownable
-            emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
-            path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-ownable.clar"
-            clarity-version: 1
+        - transaction-type: emulated-contract-publish
+          contract-name: trait-sip-010
+          emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
+          path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-sip-010.clar"
+          clarity-version: 1
+        - transaction-type: emulated-contract-publish
+          contract-name: trait-flash-loan-user
+          emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
+          path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-flash-loan-user.clar"
+          clarity-version: 1
+        - transaction-type: emulated-contract-publish
+          contract-name: trait-semi-fungible
+          emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
+          path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-semi-fungible.clar"
+          clarity-version: 1
+        - transaction-type: emulated-contract-publish
+          contract-name: trait-ownable
+          emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
+          path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.trait-ownable.clar"
+          clarity-version: 1
       epoch: "2.1"
     - id: 1
       transactions:
-        - emulated-contract-publish:
-            contract-name: alex-vault-v1-1
-            emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
-            path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.alex-vault-v1-1.clar"
-            clarity-version: 2
-        - emulated-contract-publish:
-            contract-name: token-amm-swap-pool-v1-1
-            emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
-            path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-amm-swap-pool-v1-1.clar"
-            clarity-version: 2
-        - emulated-contract-publish:
-            contract-name: amm-swap-pool-v1-1
-            emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
-            path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.amm-swap-pool-v1-1.clar"
-            clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: alex-vault-v1-1
+          emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
+          path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.alex-vault-v1-1.clar"
+          clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: token-amm-swap-pool-v1-1
+          emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
+          path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-amm-swap-pool-v1-1.clar"
+          clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: amm-swap-pool-v1-1
+          emulated-sender: SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9
+          path: "./.cache/requirements/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.amm-swap-pool-v1-1.clar"
+          clarity-version: 2
       epoch: "2.2"
     - id: 2
       transactions:
-        - emulated-contract-publish:
-            contract-name: empty
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/empty.clar
-            clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: empty
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          path: contracts/empty.clar
+          clarity-version: 2
       epoch: "2.4"

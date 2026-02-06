@@ -38,7 +38,7 @@ fn main() {
         .read_content()
         .unwrap_or_else(|e| panic!("failed to read manifest data {e:?}"));
 
-    let manifest: ProjectManifest = serde_yaml::from_slice(&project_manifest_file_content[..])
+    let manifest: ProjectManifest = yaml_serde::from_slice(&project_manifest_file_content[..])
         .unwrap_or_else(|e| panic!("Clarinet.toml file malformatted {e:?}"));
 
     let network_manifest_file_content = network_manifest_path
@@ -46,7 +46,7 @@ fn main() {
         .unwrap_or_else(|e| panic!("failed to read network manifest data {e:?}"));
 
     let network_manifest: NetworkManifest =
-        serde_yaml::from_slice(&network_manifest_file_content[..])
+        yaml_serde::from_slice(&network_manifest_file_content[..])
             .unwrap_or_else(|e| panic!("Devnet.toml file malformatted {e:?}"));
 
     let orchestrator =
@@ -56,7 +56,7 @@ fn main() {
     let deployment_specification_file_content = deployment_location
         .read_content()
         .unwrap_or_else(|e| panic!("failed to read manifest data {e:?}"));
-    let deployment = serde_yaml::from_slice(&deployment_specification_file_content)
+    let deployment = yaml_serde::from_slice(&deployment_specification_file_content)
         .unwrap_or_else(|e| panic!("deployment plan malformatted {e:?}"));
 
     let chainhooks = match load_chainhooks(

@@ -42,8 +42,7 @@ describe("generate deployment plans test", async () => {
   })
 });
 
-describe("initSiment deployment plans test", async () => {
-
+describe("initSimnet deployment plans test", async () => {
   it("simnet deployment plan is created if it does not exist", async () => {
     expect(fs.existsSync(deploymentPlanPath)).toBe(false);
 
