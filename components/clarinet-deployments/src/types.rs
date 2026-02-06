@@ -208,11 +208,9 @@ fn deserialize_variant(
         "emulated-contract-call" => EmulatedContractCallSpecificationFile::deserialize(value)
             .map(TransactionSpecificationFile::EmulatedContractCall)
             .map_err(|e| e.to_string()),
-        "emulated-contract-publish" => {
-            EmulatedContractPublishSpecificationFile::deserialize(value)
-                .map(TransactionSpecificationFile::EmulatedContractPublish)
-                .map_err(|e| e.to_string())
-        }
+        "emulated-contract-publish" => EmulatedContractPublishSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::EmulatedContractPublish)
+            .map_err(|e| e.to_string()),
         "requirement-publish" => RequirementPublishSpecificationFile::deserialize(value)
             .map(TransactionSpecificationFile::RequirementPublish)
             .map_err(|e| e.to_string()),
@@ -226,9 +224,10 @@ fn deserialize_variant(
     }
 }
 
-// Custom Deserialize for backward compatibility: supports the new internally-tagged format
-// (`transaction-type: variant-name`), the old serde_yaml externally-tagged format
-// (`variant-name: { fields }`) and yaml_serde's native `!tag` format.
+// Custom Deserialize for backward compatibility: supports:
+// - the new internally-tagged format (`transaction-type: variant-name`)
+// - the old serde_yaml externally-tagged format (`variant-name: { fields }`) (Clarinet <= 3.13.1)
+// - and yaml_serde's native `!tag` format.
 impl<'de> Deserialize<'de> for TransactionSpecificationFile {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -267,8 +266,7 @@ impl<'de> Deserialize<'de> for TransactionSpecificationFile {
                 // yaml_serde tag format: !variant-name { ... }
                 let tag_str = tagged.tag.to_string();
                 let variant = tag_str.strip_prefix('!').unwrap_or(&tag_str);
-                deserialize_variant(variant, tagged.value.clone())
-                    .map_err(serde::de::Error::custom)
+                deserialize_variant(variant, tagged.value.clone()).map_err(serde::de::Error::custom)
             }
             _ => Err(serde::de::Error::custom(
                 "expected mapping or tagged value for transaction specification",
