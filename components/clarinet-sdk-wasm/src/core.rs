@@ -14,7 +14,7 @@ use clarinet_deployments::{
 use clarinet_files::{
     FileAccessor, FileLocation, ProjectManifest, StacksNetwork, WASMFileSystemAccessor,
 };
-use clarity::types::{Address, StacksEpochId};
+use clarity::types::Address;
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::clarity::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
