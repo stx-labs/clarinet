@@ -62,7 +62,7 @@ cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
 
 ## Architecture
 
-This is a Cargo workspace with 15 Rust crates in `components/`:
+This is a Cargo workspace with 14 Rust crates in `components/`:
 
 **CLI & User Interfaces:**
 - `clarinet-cli` - Main CLI binary (default member)
@@ -71,7 +71,7 @@ This is a Cargo workspace with 15 Rust crates in `components/`:
 
 **SDK (WASM + TypeScript):**
 - `clarinet-sdk-wasm` - Rust core compiled to WebAssembly
-- TypeScript wrappers in `components/clarinet-sdk/` (node and browser packages)
+- `clarinet-sdk` - TypeScript SDK with `node` and `browser` packages (not a workspace member)
 
 **Project Management:**
 - `clarinet-files` - Manifest parsing (Clarinet.toml, project structure)
@@ -81,17 +81,20 @@ This is a Cargo workspace with 15 Rust crates in `components/`:
 **Blockchain Integration:**
 - `stacks-network` - Local devnet orchestration (Docker-based)
 - `stacks-rpc-client` - Stacks node HTTP client
-- `stacks-codec` - Stacks wire format encoding/decoding
 - `chainhook-sdk` - Event indexing and webhooks
 - `chainhook-types` - Bitcoin/Stacks data schemas
+
+**Serialization:**
+- `stacks-codec` - Stacks wire format encoding/decoding
 
 **Utilities:**
 - `clarinet-utils` - Cryptographic utilities
 - `clarity-events` - Event processing
 - `hiro-system-kit` - Cross-platform system helpers
 
-**Plugins & Extensions**
-- `clarity-vscode` - TypeScript/WASM extension for Microsoft Visual Studio Code (external project)
+**Plugins & Extensions (not workspace members):**
+- `clarity-vscode` - TypeScript/WASM extension for Microsoft Visual Studio Code
+- `clarity-jupyter-kernel` - Jupyter kernel for Clarity
 
 ## Key Dependencies
 
