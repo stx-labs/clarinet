@@ -90,10 +90,15 @@ pub async fn process_notification(
 
             // With this manifest_location, let's initialize our state.
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor).await {
-                Ok(_) => {
-                    editor_state
-                        .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
+            match build_state(&manifest_location, &mut protocol_state, file_accessor, None).await {
+                Ok(new_cache_entries) => {
+                    editor_state.try_write(|es| {
+                        es.index_protocol(manifest_location, protocol_state);
+                        // Populate the cache with the newly built ASTs
+                        for (loc, cached) in new_cache_entries {
+                            es.cache_ast(loc, cached);
+                        }
+                    })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
                     Ok(LspNotificationResponse {
@@ -106,12 +111,20 @@ pub async fn process_notification(
         }
 
         LspNotification::ManifestSaved(manifest_location) => {
-            // We will rebuild the entire state, without to try any optimizations for now
+            // Clear the AST cache when manifest changes (clarity version, epoch settings may have changed)
+            editor_state.try_write(|es| es.clear_ast_cache())?;
+
+            // We will rebuild the entire state without cache
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor).await {
-                Ok(_) => {
-                    editor_state
-                        .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
+            match build_state(&manifest_location, &mut protocol_state, file_accessor, None).await {
+                Ok(new_cache_entries) => {
+                    editor_state.try_write(|es| {
+                        es.index_protocol(manifest_location, protocol_state);
+                        // Populate the cache with the newly built ASTs
+                        for (loc, cached) in new_cache_entries {
+                            es.cache_ast(loc, cached);
+                        }
+                    })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
                     Ok(LspNotificationResponse {
@@ -219,10 +232,15 @@ pub async fn process_notification(
             }
 
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor).await {
-                Ok(_) => {
-                    editor_state
-                        .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
+            match build_state(&manifest_location, &mut protocol_state, file_accessor, None).await {
+                Ok(new_cache_entries) => {
+                    editor_state.try_write(|es| {
+                        es.index_protocol(manifest_location, protocol_state);
+                        // Populate the cache with the newly built ASTs
+                        for (loc, cached) in new_cache_entries {
+                            es.cache_ast(loc, cached);
+                        }
+                    })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
                     Ok(LspNotificationResponse {
@@ -235,6 +253,9 @@ pub async fn process_notification(
         }
 
         LspNotification::ContractSaved(contract_location) => {
+            // Get cached ASTs from editor state before clearing the protocol
+            let cached_asts = editor_state.try_read(|es| es.ast_cache.clone())?;
+
             let manifest_location = match editor_state
                 .try_write(|es| es.clear_protocol_associated_with_contract(&contract_location))?
             {
@@ -246,12 +267,23 @@ pub async fn process_notification(
                 }
             };
 
-            // TODO(): introduce partial analysis #604
+            // Use cached ASTs for contracts that haven't changed
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor).await {
-                Ok(_) => {
+            match build_state(
+                &manifest_location,
+                &mut protocol_state,
+                file_accessor,
+                Some(&cached_asts),
+            )
+            .await
+            {
+                Ok(new_cache_entries) => {
                     editor_state.try_write(|es| {
                         es.index_protocol(manifest_location, protocol_state);
+                        // Update cache with new entries
+                        for (loc, cached) in new_cache_entries {
+                            es.cache_ast(loc, cached);
+                        }
                         if let Some(contract) = es.active_contracts.get_mut(&contract_location) {
                             contract.update_definitions();
                         };

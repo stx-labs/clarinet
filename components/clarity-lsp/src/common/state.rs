@@ -1,10 +1,12 @@
 use std::borrow::BorrowMut;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::vec;
 
 use clarinet_deployments::{
-    generate_default_deployment, initiate_session_from_manifest,
-    update_session_with_deployment_plan,
+    generate_default_deployment_with_cache, initiate_session_from_manifest,
+    update_session_with_deployment_plan, CachedContractASTData,
 };
 use clarinet_files::{FileAccessor, FileLocation, ProjectManifest, StacksNetwork};
 use clarity::vm::ast::build_ast;
@@ -32,6 +34,22 @@ use super::requests::helpers::get_atom_or_field_start_at_position;
 use super::requests::hover::get_expression_documentation;
 use super::requests::signature_help::get_signatures;
 use crate::common::requests::completion::check_if_should_wrap;
+
+/// Compute a hash of the contract source code for cache validation
+pub fn compute_content_hash(source: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Cached AST data for a contract
+#[derive(Debug, Clone)]
+pub struct CachedContractAST {
+    pub content_hash: u64,
+    pub ast: ContractAST,
+    pub clarity_version: ClarityVersion,
+    pub epoch: StacksEpochId,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActiveContractData {
@@ -204,6 +222,8 @@ pub struct EditorState {
     pub contracts_lookup: HashMap<FileLocation, ContractMetadata>,
     pub active_contracts: HashMap<FileLocation, ActiveContractData>,
     pub settings: InitializationOptions,
+    /// Cached AST data for contracts, keyed by file location
+    pub ast_cache: HashMap<FileLocation, CachedContractAST>,
 }
 
 impl EditorState {
@@ -213,7 +233,29 @@ impl EditorState {
             contracts_lookup: HashMap::new(),
             active_contracts: HashMap::new(),
             settings: InitializationOptions::default(),
+            ast_cache: HashMap::new(),
         }
+    }
+
+    /// Get a cached AST if it exists and the content hash matches
+    pub fn get_cached_ast(
+        &self,
+        location: &FileLocation,
+        content_hash: u64,
+    ) -> Option<&CachedContractAST> {
+        self.ast_cache
+            .get(location)
+            .filter(|c| c.content_hash == content_hash)
+    }
+
+    /// Store an AST in the cache
+    pub fn cache_ast(&mut self, location: FileLocation, cached: CachedContractAST) {
+        self.ast_cache.insert(location, cached);
+    }
+
+    /// Clear the entire AST cache (e.g., when manifest changes)
+    pub fn clear_ast_cache(&mut self) {
+        self.ast_cache.clear();
     }
 
     pub fn index_protocol(&mut self, manifest_location: FileLocation, protocol: ProtocolState) {
@@ -634,7 +676,8 @@ pub async fn build_state(
     manifest_location: &FileLocation,
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
-) -> Result<(), String> {
+    cached_asts: Option<&HashMap<FileLocation, CachedContractAST>>,
+) -> Result<HashMap<FileLocation, CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut analyses = HashMap::new();
     let mut definitions = HashMap::new();
@@ -652,9 +695,33 @@ pub async fn build_state(
         }
     };
 
-    let (deployment, mut artifacts) =
-        generate_default_deployment(&manifest, &StacksNetwork::Simnet, false, file_accessor)
-            .await?;
+    // Convert CachedContractAST to CachedContractASTData for the deployment function
+    let cached_asts_data: Option<HashMap<FileLocation, CachedContractASTData>> =
+        cached_asts.map(|cache| {
+            cache
+                .iter()
+                .map(|(loc, cached)| {
+                    (
+                        loc.clone(),
+                        CachedContractASTData {
+                            content_hash: cached.content_hash,
+                            ast: cached.ast.clone(),
+                            clarity_version: cached.clarity_version,
+                            epoch: cached.epoch,
+                        },
+                    )
+                })
+                .collect()
+        });
+
+    let (deployment, mut artifacts) = generate_default_deployment_with_cache(
+        &manifest,
+        &StacksNetwork::Simnet,
+        false,
+        file_accessor,
+        cached_asts_data.as_ref(),
+    )
+    .await?;
 
     let mut session = initiate_session_from_manifest(&manifest);
     let contracts =
@@ -721,5 +788,21 @@ pub async fn build_state(
         &mut clarity_versions,
     );
 
-    Ok(())
+    // Build the new cache entries from the artifacts
+    let mut new_cache_entries = HashMap::new();
+    for (contract_id, ast) in artifacts.asts.iter() {
+        if let Some(metadata) = artifacts.ast_metadata.get(contract_id) {
+            new_cache_entries.insert(
+                metadata.location.clone(),
+                CachedContractAST {
+                    content_hash: metadata.content_hash,
+                    ast: ast.clone(),
+                    clarity_version: metadata.clarity_version,
+                    epoch: metadata.epoch,
+                },
+            );
+        }
+    }
+
+    Ok(new_cache_entries)
 }

@@ -138,6 +138,15 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
     }
 }
 
+/// Metadata for caching ASTs in the LSP
+#[derive(Clone, Debug)]
+pub struct ContractASTMetadata {
+    pub location: FileLocation,
+    pub content_hash: u64,
+    pub clarity_version: ClarityVersion,
+    pub epoch: StacksEpochId,
+}
+
 #[derive(Clone)]
 pub struct DeploymentGenerationArtifacts {
     pub asts: BTreeMap<QualifiedContractIdentifier, ContractAST>,
@@ -147,6 +156,8 @@ pub struct DeploymentGenerationArtifacts {
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
     pub session: Session,
     pub success: bool,
+    /// Metadata for AST caching (location, content hash, version info per contract)
+    pub ast_metadata: HashMap<QualifiedContractIdentifier, ContractASTMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
