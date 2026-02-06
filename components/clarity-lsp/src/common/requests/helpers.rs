@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use clarity_repl::clarity::representations::Span;
 use clarity_repl::clarity::{ClarityName, SymbolicExpression, SymbolicExpressionType};
-use lsp_types::{Position, Range};
+use ls_types::{Position, Range};
 
 pub fn span_to_range(span: &Span) -> Range {
     if span == &Span::zero() {

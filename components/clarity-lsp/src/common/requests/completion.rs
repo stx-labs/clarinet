@@ -14,7 +14,7 @@ use clarity_repl::clarity::variables::NativeVariables;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_repl::repl::DEFAULT_EPOCH;
 use clarity_types::types::TypeSignature;
-use lsp_types::{
+use ls_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
     Position,
 };
@@ -538,7 +538,7 @@ pub fn build_default_native_keywords_list(version: ClarityVersion) -> Vec<Comple
         NativeFunctions::BitwiseXor,
     ];
 
-    let command = lsp_types::Command {
+    let command = ls_types::Command {
         title: "triggerParameterHints".into(),
         command: "editor.action.triggerParameterHints".into(),
         arguments: None,
@@ -828,7 +828,7 @@ mod get_contract_global_data_tests {
     use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
-    use lsp_types::Position;
+    use ls_types::Position;
 
     use super::ContractDefinedData;
 
@@ -881,7 +881,7 @@ mod get_contract_local_data_tests {
     use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
-    use lsp_types::Position;
+    use ls_types::Position;
 
     use super::ContractDefinedData;
 
@@ -936,7 +936,7 @@ mod populate_snippet_with_options_tests {
     use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
-    use lsp_types::Position;
+    use ls_types::Position;
 
     use super::ContractDefinedData;
 
