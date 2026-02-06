@@ -211,7 +211,9 @@ impl ContractDefinedData {
             let choices = self.nfts.join(",");
             return Some(snippet.replace("${1:asset-name}", &format!("${{1|{choices}|}}")));
         }
-        if ITERATOR_FUNCTIONS.iter().any(|s| s == name) && !self.functions_completion_items.is_empty() {
+        if ITERATOR_FUNCTIONS.iter().any(|s| s == name)
+            && !self.functions_completion_items.is_empty()
+        {
             let mut choices = self
                 .functions_completion_items
                 .iter()
@@ -371,7 +373,9 @@ pub fn get_contract_calls(analysis: &ContractAnalysis) -> Vec<CompletionItem> {
         );
         let documentation = MarkupContent {
             kind: MarkupKind::Markdown,
-            value: [vec![format!("**{name}**")], doc_args].concat().join("\n\n"),
+            value: [vec![format!("**{name}**")], doc_args]
+                .concat()
+                .join("\n\n"),
         };
         let insert_text = format!(
             "contract-call? .{} {} {}",
@@ -446,7 +450,12 @@ pub fn build_completion_item_list(
         .iter()
         .cloned()
         .chain(contract_calls)
-        .chain(active_contract_defined_data.functions_completion_items.iter().cloned());
+        .chain(
+            active_contract_defined_data
+                .functions_completion_items
+                .iter()
+                .cloned(),
+        );
 
     for mut item in items_iter {
         match item.kind {

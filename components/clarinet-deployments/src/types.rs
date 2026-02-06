@@ -10,7 +10,9 @@ use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
-use clarity_repl::repl::{Epoch, Session, DEFAULT_CLARITY_VERSION};
+use clarity_repl::repl::{
+    clarity_version_from_u8, clarity_version_to_u8, Epoch, Session, DEFAULT_CLARITY_VERSION,
+};
 use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
@@ -132,15 +134,9 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
 
 fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, String> {
     match value {
-        Some(1) => Ok(ClarityVersion::Clarity1),
-        Some(2) => Ok(ClarityVersion::Clarity2),
-        Some(3) => Ok(ClarityVersion::Clarity3),
-        Some(4) => Ok(ClarityVersion::Clarity4),
-        Some(5) => Ok(ClarityVersion::Clarity5),
-        Some(_) => Err(
-            "unable to parse clarity_version (can either be '1', '2', '3', '4', or '5')"
-                .to_string(),
-        ),
+        Some(v) => clarity_version_from_u8(v).ok_or_else(|| {
+            "unable to parse clarity_version (can either be '1', '2', '3', '4', or '5')".to_string()
+        }),
         None => Ok(DEFAULT_CLARITY_VERSION),
     }
 }
@@ -697,19 +693,14 @@ pub mod remap_principals_serde {
 pub mod clarity_version_serde {
     use clarinet_files::INVALID_CLARITY_VERSION;
     use clarity_repl::clarity::ClarityVersion;
+    use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8};
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(clarity_version: &ClarityVersion, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        match clarity_version {
-            ClarityVersion::Clarity1 => s.serialize_i64(1),
-            ClarityVersion::Clarity2 => s.serialize_i64(2),
-            ClarityVersion::Clarity3 => s.serialize_i64(3),
-            ClarityVersion::Clarity4 => s.serialize_i64(4),
-            ClarityVersion::Clarity5 => s.serialize_i64(5),
-        }
+        s.serialize_i64(clarity_version_to_u8(*clarity_version) as i64)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<ClarityVersion, D::Error>
@@ -717,14 +708,8 @@ pub mod clarity_version_serde {
         D: Deserializer<'de>,
     {
         let cv = i64::deserialize(deserializer)?;
-        match cv {
-            1 => Ok(ClarityVersion::Clarity1),
-            2 => Ok(ClarityVersion::Clarity2),
-            3 => Ok(ClarityVersion::Clarity3),
-            4 => Ok(ClarityVersion::Clarity4),
-            5 => Ok(ClarityVersion::Clarity5),
-            _ => Err(serde::de::Error::custom(INVALID_CLARITY_VERSION)),
-        }
+        clarity_version_from_u8(cv as u8)
+            .ok_or_else(|| serde::de::Error::custom(INVALID_CLARITY_VERSION))
     }
 }
 
@@ -1391,13 +1376,7 @@ impl TransactionPlanSpecification {
                                 url: None,
                                 cost: tx.cost,
                                 anchor_block_only: Some(tx.anchor_block_only),
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                    ClarityVersion::Clarity5 => Some(5),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1419,13 +1398,7 @@ impl TransactionPlanSpecification {
                                 location: Some(tx.location.clone()),
                                 path: None,
                                 url: None,
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                    ClarityVersion::Clarity5 => Some(5),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1443,13 +1416,7 @@ impl TransactionPlanSpecification {
                                 path: None,
                                 url: None,
                                 cost: tx.cost,
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                    ClarityVersion::Clarity5 => Some(5),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }

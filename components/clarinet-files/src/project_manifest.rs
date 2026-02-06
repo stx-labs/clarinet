@@ -20,7 +20,7 @@ use crate::schema;
 use crate::FileAccessor;
 
 pub const INVALID_CLARITY_VERSION: &str =
-    "clarity_version field invalid (value supported: 1, 2, 3)";
+    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5)";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ClarityContractMetadata {
@@ -477,23 +477,9 @@ fn get_epoch_and_clarity_version(
         // Which can differ from `StacksEpochId::latest()` if it hasn't been activated yet
         Some("latest") => clarity_repl::repl::Epoch::Latest,
         Some(epoch) => {
-            let stacks_epoch = match epoch {
-                "2" | "2.0" => StacksEpochId::Epoch20,
-                "2.05" => StacksEpochId::Epoch2_05,
-                "2.1" => StacksEpochId::Epoch21,
-                "2.2" => StacksEpochId::Epoch22,
-                "2.3" => StacksEpochId::Epoch23,
-                "2.4" => StacksEpochId::Epoch24,
-                "2.5" => StacksEpochId::Epoch25,
-                "3" | "3.0" => StacksEpochId::Epoch30,
-                "3.1" => StacksEpochId::Epoch31,
-                "3.2" => StacksEpochId::Epoch32,
-                "3.3" => StacksEpochId::Epoch33,
-                _ => return Err(
-                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 3.0, 3.1, 3.2, 3.3 latest)"
-                        .into(),
-                ),
-            };
+            let stacks_epoch = clarity_repl::repl::epoch_from_str(epoch).ok_or(
+                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2, 3.3, 3.4, latest)",
+                )?;
             clarity_repl::repl::Epoch::Specific(stacks_epoch)
         }
     };
