@@ -47,7 +47,7 @@ stacks-codec = { path = "../stacks-codec" }
 libc = "0.2.173"
 
 [target.'cfg(unix)'.dependencies]
-signal-hook = { version = "0.3", features = ["iterator"] }
+signal-hook = { workspace = true, features = ["iterator"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
