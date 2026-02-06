@@ -2231,7 +2231,6 @@ mod tests {
 
         #[test]
         fn test_add_contract_preserves_comments() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2286,7 +2285,6 @@ mod tests {
 
         #[test]
         fn test_remove_contract_preserves_comments_and_other_contracts() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2332,7 +2330,6 @@ mod tests {
 
         #[test]
         fn test_add_requirement_preserves_comments() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2390,7 +2387,6 @@ mod tests {
 
         #[test]
         fn test_add_requirement_does_not_duplicate() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2416,7 +2412,6 @@ mod tests {
 
         #[test]
         fn test_add_multiple_requirements() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2453,7 +2448,6 @@ mod tests {
         #[test]
         fn test_edit_simple_nft_example() {
             // Test with the actual simple-nft example content
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = 'simple-nft'
@@ -2526,7 +2520,6 @@ mod tests {
         #[test]
         fn test_edit_counter_example() {
             // Test with the actual counter example content
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "counter"
@@ -2593,7 +2586,6 @@ mod tests {
 
         #[test]
         fn test_contract_with_labeled_deployer() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2640,7 +2632,6 @@ mod tests {
 
         #[test]
         fn test_preserves_inline_tables() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2665,7 +2656,6 @@ mod tests {
 
         #[test]
         fn test_preserves_array_format() {
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "test-project"
@@ -2697,7 +2687,6 @@ mod tests {
             // LintNames: Noop, UnusedConst, UnusedDataVar, UnusedBinding, UnusedMap,
             //            UnusedPrivateFn, UnusedToken, UnusedTrait, CaseConst
             // LintLevels: ignore/allow/off/none, notice/note, warning/warn/on, error/err
-            #[rustfmt::skip]
             let input = indoc! {r#"
                 [project]
                 name = "lint-ordering-test"
