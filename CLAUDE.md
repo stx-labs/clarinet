@@ -94,7 +94,7 @@ This is a Cargo workspace with 14 Rust crates in `components/`:
 
 **Plugins & Extensions (not workspace members):**
 - `clarity-vscode` - TypeScript/WASM extension for Microsoft Visual Studio Code
-- `clarity-jupyter-kernel` - Jupyter kernel for Clarity
+- `clarity-jupyter-kernel` - Jupyter kernel for Clarity (currently unmaintained)
 
 ## Key Dependencies
 
