@@ -158,11 +158,11 @@ const STACKS_EPOCH_ID_STRING: &'static str = r#"export type StacksEpochId =
   | "Epoch30"
   | "Epoch31"
   | "Epoch32"
-  | "Epoch33";"#;
+  | "Epoch33"
+  | "Epoch34";"#;
 
 #[wasm_bindgen(typescript_custom_section)]
-const CLARITY_VERSION_STRING: &'static str =
-    r#"export type ClarityVersionString = "Clarity1" | "Clarity2" | "Clarity3"| "Clarity4";"#;
+const CLARITY_VERSION_STRING: &'static str = r#"export type ClarityVersionString = "Clarity1" | "Clarity2" | "Clarity3"| "Clarity4" | "Clarity5";"#;
 
 // To avoid collision with the Rust type ContractAST, prefix with the conventional typescript I
 #[wasm_bindgen(typescript_custom_section)]

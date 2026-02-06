@@ -170,6 +170,9 @@ impl Serialize for ClarityContract {
             ClarityVersion::Clarity4 => {
                 map.serialize_entry("clarity_version", &4)?;
             }
+            ClarityVersion::Clarity5 => {
+                map.serialize_entry("clarity_version", &5)?;
+            }
         }
         map.serialize_entry("epoch", &self.epoch)?;
         map.end()

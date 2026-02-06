@@ -70,6 +70,7 @@ pub async fn retrieve_contract(
         Some(2) => ClarityVersion::Clarity2,
         Some(3) => ClarityVersion::Clarity3,
         Some(4) => ClarityVersion::Clarity4,
+        Some(5) => ClarityVersion::Clarity5,
         Some(v) => return Err(format!("Unsupported clarity_version: {v}")),
         None => ClarityVersion::default_for_epoch(epoch),
     };

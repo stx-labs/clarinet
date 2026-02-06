@@ -144,6 +144,7 @@ fn clarity_version_from_u32(v: Option<u32>) -> ClarityVersion {
         Some(2) => ClarityVersion::Clarity2,
         Some(3) => ClarityVersion::Clarity3,
         Some(4) => ClarityVersion::Clarity4,
+        Some(5) => ClarityVersion::Clarity5,
         Some(v) => {
             log!("Invalid clarity version {v}. Using default version.");
             DEFAULT_CLARITY_VERSION
