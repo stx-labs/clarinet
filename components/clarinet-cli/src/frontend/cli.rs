@@ -2232,21 +2232,21 @@ mod tests {
         #[test]
         fn test_add_contract_preserves_comments() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
-                description = \"\"
+                name = "test-project"
+                description = ""
 
                 # This is an important comment that should be preserved!
                 # Another comment line
 
                 [repl.analysis]
-                passes = [\"check_checker\"]
+                passes = ["check_checker"]
 
                 # Check-checker settings comment
                 [repl.analysis.check_checker]
                 strict = false
-            "};
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
@@ -2287,24 +2287,24 @@ mod tests {
         #[test]
         fn test_remove_contract_preserves_comments_and_other_contracts() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
+                name = "test-project"
 
                 # Comment about contracts
                 [contracts.keep-me]
-                path = \"contracts/keep-me.clar\"
+                path = "contracts/keep-me.clar"
                 clarity_version = 2
-                epoch = \"2.4\"
+                epoch = "2.4"
 
                 # Comment about remove-me
                 [contracts.remove-me]
-                path = \"contracts/remove-me.clar\"
+                path = "contracts/remove-me.clar"
                 clarity_version = 1
-                epoch = \"2.0\"
+                epoch = "2.0"
 
                 # Final comment
-            "};
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             remove_contract_from_doc(&mut doc, "remove-me");
@@ -2333,20 +2333,20 @@ mod tests {
         #[test]
         fn test_add_requirement_preserves_comments() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
-                description = \"A test project\"
-                authors = [\"Test Author\"]
+                name = "test-project"
+                description = "A test project"
+                authors = ["Test Author"]
                 telemetry = false
 
                 # This comment should survive
 
                 [contracts.my-contract]
-                path = \"contracts/my-contract.clar\"
+                path = "contracts/my-contract.clar"
                 clarity_version = 2
-                epoch = \"latest\"
-            "};
+                epoch = "latest"
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_requirement_to_doc(
@@ -2391,13 +2391,13 @@ mod tests {
         #[test]
         fn test_add_requirement_does_not_duplicate() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
+                name = "test-project"
 
                 [[project.requirements]]
-                contract_id = \"SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait\"
-            "};
+                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
@@ -2417,13 +2417,13 @@ mod tests {
         #[test]
         fn test_add_multiple_requirements() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
+                name = "test-project"
 
                 [[project.requirements]]
-                contract_id = \"SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait\"
-            "};
+                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_requirement_to_doc(
@@ -2454,7 +2454,7 @@ mod tests {
         fn test_edit_simple_nft_example() {
             // Test with the actual simple-nft example content
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
                 name = 'simple-nft'
                 description = ''
@@ -2472,13 +2472,13 @@ mod tests {
 
                 # the analysis errors are used as a test case
                 [repl.analysis]
-                passes = [\"check_checker\"]
+                passes = ["check_checker"]
                 check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
 
                 # We don't want linter diagnostics in this test
                 [repl.analysis.lint_groups]
                 all = false
-            "};
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
@@ -2527,32 +2527,32 @@ mod tests {
         fn test_edit_counter_example() {
             // Test with the actual counter example content
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"counter\"
+                name = "counter"
                 authors = []
-                description = \"\"
+                description = ""
                 telemetry = false
 
                 [contracts.counter]
-                path = \"contracts/counter.clar\"
+                path = "contracts/counter.clar"
                 clarity_version = 1
-                epoch = \"2.0\"
+                epoch = "2.0"
 
                 [contracts.counter-2]
-                path = \"contracts/counter-v2.clar\"
+                path = "contracts/counter-v2.clar"
                 clarity_version = 2
-                epoch = \"2.4\"
+                epoch = "2.4"
 
                 [repl.analysis]
-                passes = [\"check_checker\"]
+                passes = ["check_checker"]
 
                 [repl.analysis.check_checker]
                 strict = false
                 trusted_sender = true
                 trusted_caller = false
                 callee_filter = false
-            "};
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
@@ -2594,10 +2594,10 @@ mod tests {
         #[test]
         fn test_contract_with_labeled_deployer() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
-            "};
+                name = "test-project"
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
@@ -2641,14 +2641,14 @@ mod tests {
         #[test]
         fn test_preserves_inline_tables() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
+                name = "test-project"
 
                 [repl.analysis]
-                passes = [\"check_checker\"]
+                passes = ["check_checker"]
                 check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
-            "};
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
@@ -2666,15 +2666,15 @@ mod tests {
         #[test]
         fn test_preserves_array_format() {
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"test-project\"
-                authors = [\"Alice\", \"Bob\"]
+                name = "test-project"
+                authors = ["Alice", "Bob"]
                 requirements = []
 
                 [repl.analysis]
-                passes = [\"check_checker\", \"lint\"]
-            "};
+                passes = ["check_checker", "lint"]
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
@@ -2698,39 +2698,39 @@ mod tests {
             //            UnusedPrivateFn, UnusedToken, UnusedTrait, CaseConst
             // LintLevels: ignore/allow/off/none, notice/note, warning/warn/on, error/err
             #[rustfmt::skip]
-            let input = indoc! {"
+            let input = indoc! {r#"
                 [project]
-                name = \"lint-ordering-test\"
+                name = "lint-ordering-test"
                 authors = []
                 telemetry = false
 
                 [contracts.existing-contract]
-                path = \"contracts/existing.clar\"
+                path = "contracts/existing.clar"
 
                 # Custom comment about linting configuration
                 [repl.analysis]
-                passes = [\"check_checker\", \"lint\"]
+                passes = ["check_checker", "lint"]
 
                 # Lint groups in random order with random values
                 [repl.analysis.lint_groups]
-                style = \"warn\"
-                unused = \"error\"
+                style = "warn"
+                unused = "error"
                 all = false
-                safety = \"notice\"
-                perf = \"off\"
+                safety = "notice"
+                perf = "off"
 
                 # Individual lints in random order with random values
                 [repl.analysis.lints]
-                unused_map = \"error\"
-                case_const = \"warn\"
-                unused_binding = \"off\"
-                noop = \"notice\"
-                unused_trait = \"warning\"
-                unused_const = \"allow\"
-                unused_private_fn = \"err\"
-                unused_data_var = \"note\"
-                unused_token = \"none\"
-            "};
+                unused_map = "error"
+                case_const = "warn"
+                unused_binding = "off"
+                noop = "notice"
+                unused_trait = "warning"
+                unused_const = "allow"
+                unused_private_fn = "err"
+                unused_data_var = "note"
+                unused_token = "none"
+            "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
