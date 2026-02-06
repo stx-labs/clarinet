@@ -51,7 +51,7 @@ ratatui = { version = "0.30.0", default-features = false, features = [
     "crossterm",
 ] }
 regex = "1.12.3"
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.12.28", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
