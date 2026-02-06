@@ -106,3 +106,16 @@ For VSCode users working on the SDK, open the workspace file at `components/clar
 - Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary) for commit messages
 - PRs merge via "squash and merge"
 - Rust stable toolchain (>= 1.89.0), Node >= v24.4.1
+
+## Rust Style
+
+Write modern, idiomatic Rust. Prefer:
+- Iterator chains and combinators over manual loops where they improve clarity
+- `if let` / `let else` / `match` over chains of `if`/`else` with `.is_some()`/`.is_ok()` checks
+- `?` for error propagation instead of manual `match`/`unwrap`
+- Destructuring in function arguments and match arms
+- Meaningful type aliases and newtypes where they aid readability
+- `impl Into<T>` / `AsRef<T>` parameters for flexible function signatures when appropriate
+- Implement `From<T>` (not `Into<T>`) for type conversions; the blanket impl provides `Into` for free
+- Derive macros (`Clone`, `Debug`, `Default`, etc.) rather than manual implementations
+- Standard library traits (`From`, `Display`, `FromStr`) for type conversions
