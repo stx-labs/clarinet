@@ -55,6 +55,9 @@ cargo fmt-stacks --check
 
 # Run clippy
 cargo clippy --workspace --exclude clarinet-sdk-wasm
+
+# Run clippy for WASM target
+cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
 ```
 
 ## Architecture
@@ -87,7 +90,8 @@ This is a Cargo workspace with 15 Rust crates in `components/`:
 - `clarity-events` - Event processing
 - `hiro-system-kit` - Cross-platform system helpers
 
-**External:** `clarity-vscode` extension (separate TypeScript project)
+**Plugins & Extensions**
+- `clarity-vscode` - TypeScript/WASM extension for Microsoft Visual Studio Code (external project)
 
 ## Key Dependencies
 
