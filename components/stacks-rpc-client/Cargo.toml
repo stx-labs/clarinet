@@ -18,7 +18,7 @@ clarinet-utils = { path = "../clarinet-utils" }
 stacks-codec = { path = "../stacks-codec" }
 
 # enable mock stacks rpc for tests
-mockito = { version = "1.6", default-features = false, optional = true }
+mockito = { workspace = true, default-features = false, optional = true }
 
 [features]
 mock = ["mockito"]

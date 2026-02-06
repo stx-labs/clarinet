@@ -41,8 +41,8 @@ hiro-system-kit = { path = "../hiro-system-kit" }
 stacks-network = { path = "../stacks-network" }
 
 [target.'cfg(unix)'.dependencies]
-nix = "0.29.0"
-signal-hook = { version = "0.3", features = ["iterator"] }
+nix = "0.30.1"
+signal-hook = { workspace = true, features = ["iterator"] }
 libc = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
