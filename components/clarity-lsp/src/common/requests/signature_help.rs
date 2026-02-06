@@ -1,5 +1,5 @@
 use clarity_repl::clarity::docs::FunctionAPI;
-use lsp_types::{ParameterInformation, ParameterLabel, Position, SignatureInformation};
+use ls_types::{ParameterInformation, ParameterLabel, Position, SignatureInformation};
 
 use super::api_ref::API_REF;
 use super::helpers::get_function_at_position;
@@ -84,8 +84,8 @@ mod definitions_visitor_tests {
     use clarity_repl::clarity::functions::NativeFunctions;
     use clarity_repl::clarity::ClarityVersion::Clarity2;
     use clarity_repl::clarity::StacksEpochId::Epoch21;
-    use lsp_types::ParameterLabel::Simple;
-    use lsp_types::{ParameterInformation, Position, SignatureInformation};
+    use ls_types::ParameterLabel::Simple;
+    use ls_types::{ParameterInformation, Position, SignatureInformation};
 
     use super::get_signatures;
     use crate::state::ActiveContractData;
@@ -93,7 +93,7 @@ mod definitions_visitor_tests {
     fn get_source_signature(
         source: String,
         position: &Position,
-    ) -> Option<Vec<lsp_types::SignatureInformation>> {
+    ) -> Option<Vec<ls_types::SignatureInformation>> {
         let contract = &ActiveContractData::new(Clarity2, Epoch21, None, source);
         get_signatures(contract, position)
     }

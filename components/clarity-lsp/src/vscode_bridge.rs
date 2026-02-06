@@ -4,15 +4,15 @@ use std::sync::{Arc, RwLock};
 
 use clarinet_files::{FileAccessor, WASMFileSystemAccessor};
 use js_sys::{Function as JsFunction, Promise};
-use lsp_types::notification::{
+use ls_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     Initialized, Notification,
 };
-use lsp_types::request::{
+use ls_types::request::{
     Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest, Initialize,
     RangeFormatting, Request, SignatureHelpRequest,
 };
-use lsp_types::{
+use ls_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, MessageType, PublishDiagnosticsParams,
 };
@@ -162,8 +162,8 @@ impl LspVscodeBridge {
                 if err.starts_with("No Clarinet.toml is associated to the contract") {
                     let _ = send_notification.call2(
                         &JsValue::NULL,
-                        &encode_to_js(&lsp_types::notification::ShowMessage::METHOD).unwrap(),
-                        &encode_to_js(&lsp_types::ShowMessageParams {
+                        &encode_to_js(&ls_types::notification::ShowMessage::METHOD).unwrap(),
+                        &encode_to_js(&ls_types::ShowMessageParams {
                             typ: MessageType::WARNING,
                             message: String::from(&err),
                         })
