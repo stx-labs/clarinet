@@ -1,7 +1,7 @@
 # Clarinet SDK Workspace
 
 This workspace regroups
-`@stacks/clarinet-sdk` for node.js and `@stacks/clarinet-sdk-browser` for web browsers.  
+`@stacks/clarinet-sdk` for node.js and `@stacks/clarinet-sdk-browser` for web browsers.
 They respectively rely on `@stacks/clarinet-sdk-wasm` and `@stacks/clarinet-sdk-browser-wasm`.
 
 Because of the way the wasm packages are build, with wasm-pack, it made sense to have two different
@@ -34,7 +34,7 @@ The SDK mainly relies on two components:
 - the TS component: `components/clarinet-sdk`
 
 To work with these two packages locally, the first one needs to be built with
-wasm-pack (install [wasm-pack](https://rustwasm.github.io/wasm-pack/installer)).
+wasm-pack (install [wasm-pack](https://drager.github.io/wasm-pack/)).
 
 ```sh
 # build the wasm package
@@ -47,7 +47,7 @@ npm test
 
 ### Release
 
-The Node.js and browser versions can be published with this single command.  
+The Node.js and browser versions can be published with this single command.
 Make sure to check the check both packages versions first.
 
 ```sh
