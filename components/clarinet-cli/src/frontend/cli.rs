@@ -31,7 +31,8 @@ use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{
-    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, DEFAULT_EPOCH,
+    clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
+    DEFAULT_EPOCH,
 };
 use clarity_repl::{analysis, repl};
 use stacks_network::{self, DevnetOrchestrator};
@@ -1800,12 +1801,7 @@ fn add_contract_to_doc(doc: &mut DocumentMut, name: &str, contract: &ClarityCont
         entry["deployer"] = toml_edit::value(label.as_str());
     }
 
-    let clarity_version = match contract.clarity_version {
-        ClarityVersion::Clarity1 => 1,
-        ClarityVersion::Clarity2 => 2,
-        ClarityVersion::Clarity3 => 3,
-        ClarityVersion::Clarity4 => 4,
-    };
+    let clarity_version = clarity_version_to_u8(contract.clarity_version) as i64;
     entry["clarity_version"] = toml_edit::value(clarity_version);
 
     let epoch = match &contract.epoch {
@@ -2178,7 +2174,7 @@ mod tests {
                 if i == parts.len() - 1 {
                     // Last part - check the value
                     if let Some(table) = current.as_table() {
-                        if let Some(item) = table.get(*part) {
+                        if let Some(item) = table.get(part) {
                             let value_str = item.to_string();
                             // Handle quoted strings
                             let cleaned = value_str.trim().trim_matches('"').trim_matches('\'');
@@ -2189,7 +2185,7 @@ mod tests {
                 } else {
                     // Navigate to the next level
                     if let Some(table) = current.as_table() {
-                        if let Some(item) = table.get(*part) {
+                        if let Some(item) = table.get(part) {
                             current = item;
                         } else {
                             return false;
@@ -2794,7 +2790,7 @@ mod tests {
             // Check a few lint group values
             assert_eq!(lint_groups["style"].as_str().unwrap(), "warn");
             assert_eq!(lint_groups["unused"].as_str().unwrap(), "error");
-            assert_eq!(lint_groups["all"].as_bool().unwrap(), false);
+            assert!(!lint_groups["all"].as_bool().unwrap());
             assert_eq!(lint_groups["safety"].as_str().unwrap(), "notice");
             assert_eq!(lint_groups["perf"].as_str().unwrap(), "off");
 
