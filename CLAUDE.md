@@ -101,15 +101,10 @@ npm test
 
 Clarity interpreter and Stacks libraries come from `stacks-network/stacks-core` git dependency (see `Cargo.toml` for current revision).
 
-## SDK Development
-
-For VSCode users working on the SDK, open the workspace file at `components/clarinet-sdk/clarinet-sdk.code-workspace` which configures rust-analyzer for WASM targets.
-
 ## Conventions
 
 - Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary) for commit messages
 - PRs merge via "squash and merge"
-- Rust stable toolchain (>= 1.89.0), Node >= v24.4.1
 
 ## Rust Style
 
