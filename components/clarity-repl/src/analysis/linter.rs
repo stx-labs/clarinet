@@ -26,15 +26,17 @@ use crate::analysis::annotation::Annotation;
 #[serde(rename_all = "snake_case", try_from = "String")]
 #[strum(serialize_all = "snake_case")]
 pub enum LintName {
+    // Keep sorted alphabetically
+    CaseConst,
+    ErrorConst,
     Noop,
+    UnusedBinding,
     UnusedConst,
     UnusedDataVar,
-    UnusedBinding,
     UnusedMap,
     UnusedPrivateFn,
     UnusedToken,
     UnusedTrait,
-    CaseConst,
 }
 
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
@@ -78,6 +80,7 @@ impl LintGroup {
             }
             Perf => {}
             Safety => {
+                map.insert(LintName::ErrorConst, value);
                 map.insert(LintName::Noop, value);
             }
             Style => {
