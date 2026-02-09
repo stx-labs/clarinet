@@ -7,7 +7,7 @@ use clarity_repl::clarity::vm::diagnostic::{
     Diagnostic as ClarityDiagnostic, Level as ClarityLevel,
 };
 use crossbeam_channel::unbounded;
-use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use tower_lsp_server::{LspService, Server};
 
 use self::native_bridge::LspNativeBridge;
@@ -50,7 +50,7 @@ async fn do_run_lsp() -> Result<(), String> {
 
 pub fn clarity_diagnostics_to_tower_lsp_type(
     diagnostics: &[ClarityDiagnostic],
-) -> Vec<tower_lsp_server::lsp_types::Diagnostic> {
+) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     diagnostics
         .iter()
         .map(clarity_diagnostic_to_tower_lsp_type)
@@ -59,7 +59,7 @@ pub fn clarity_diagnostics_to_tower_lsp_type(
 
 pub fn clarity_diagnostic_to_tower_lsp_type(
     diagnostic: &ClarityDiagnostic,
-) -> tower_lsp_server::lsp_types::Diagnostic {
+) -> tower_lsp_server::ls_types::Diagnostic {
     let range = match diagnostic.spans.len() {
         0 => Range::default(),
         _ => Range {

@@ -18,8 +18,8 @@ use clarinet_deployments::{
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::{
-    get_manifest_location, FileLocation, NetworkManifest, ProjectManifest, ProjectManifestFile,
-    RequirementConfig, StacksNetwork,
+    get_manifest_location, FileLocation, NetworkManifest, ProjectManifest, RequirementConfig,
+    StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity_repl::analysis::call_checker::ContractAnalysis;
@@ -30,10 +30,12 @@ use clarity_repl::clarity::ClarityVersion;
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
-use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_EPOCH};
+use clarity_repl::repl::{
+    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, DEFAULT_EPOCH,
+};
 use clarity_repl::{analysis, repl};
 use stacks_network::{self, DevnetOrchestrator};
-use toml;
+use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
@@ -1616,169 +1618,210 @@ fn sanitize_project_name(name: &str) -> String {
 }
 
 fn execute_changes(changes: Vec<Changes>) -> bool {
-    let mut shared_config = None;
+    let mut shared_doc: Option<(FileLocation, DocumentMut)> = None;
 
-    for mut change in changes.into_iter() {
+    for mut change in changes {
         match change {
             Changes::AddFile(options) => {
-                if let Ok(entry) = fs::metadata(&options.path) {
-                    if entry.is_file() {
-                        println!(
-                            "{} file already exists at path {}",
-                            yellow!("warning:"),
-                            options.path
-                        );
-                        continue;
-                    }
+                if fs::metadata(&options.path).is_ok_and(|e| e.is_file()) {
+                    println!(
+                        "{} file already exists at path {}",
+                        yellow!("warning:"),
+                        options.path
+                    );
+                    continue;
                 }
-                let mut file = match File::create(options.path.clone()) {
-                    Ok(file) => file,
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to create file {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
-                match file.write_all(options.content.as_bytes()) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to write file {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
+
+                let write_result = File::create(&options.path)
+                    .and_then(|mut file| file.write_all(options.content.as_bytes()));
+
+                if let Err(e) = write_result {
+                    eprintln!(
+                        "{} Unable to write file {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
+                }
+
                 println!("{}", options.comment);
             }
+
             Changes::AddDirectory(options) => {
-                match fs::create_dir_all(options.path.clone()) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to create directory {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
+                if let Err(e) = fs::create_dir_all(&options.path) {
+                    eprintln!(
+                        "{} Unable to create directory {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
+                }
                 println!("{}", options.comment);
             }
+
             Changes::EditTOML(ref mut options) => {
-                let mut config = match shared_config.take() {
-                    Some(config) => config,
+                let (location, doc) = match shared_doc.take() {
+                    Some(cached) => cached,
                     None => {
-                        let manifest_location = options.manifest_location.clone();
-                        let project_manifest_content = match manifest_location.read_content() {
-                            Ok(content) => content,
-                            Err(message) => {
-                                eprintln!("{}", format_err!(message));
-                                return false;
-                            }
+                        let Some(doc) = load_manifest(&options.manifest_location) else {
+                            return false;
                         };
-
-                        let project_manifest_file: ProjectManifestFile =
-                            match toml::from_slice(&project_manifest_content[..]) {
-                                Ok(manifest) => manifest,
-                                Err(message) => {
-                                    eprintln!(
-                                        "{} Failed to process manifest file: {}",
-                                        red!("error:"),
-                                        message
-                                    );
-                                    return false;
-                                }
-                            };
-                        match ProjectManifest::from_project_manifest_file(
-                            project_manifest_file,
-                            &manifest_location,
-                            true,
-                        ) {
-                            Ok(content) => content,
-                            Err(message) => {
-                                eprintln!("{}", format_err!(message));
-                                return false;
-                            }
-                        }
+                        (options.manifest_location.clone(), doc)
                     }
                 };
 
-                let mut requirements = config.project.requirements.take().unwrap_or_default();
-                for requirement in options.requirements_to_add.drain(..) {
-                    if !requirements.contains(&requirement) {
-                        requirements.push(requirement);
-                    }
-                }
-                config.project.requirements = Some(requirements);
-
-                for (contract_name, contract_config) in options.contracts_to_add.drain() {
-                    config.contracts.insert(contract_name, contract_config);
-                }
-                for contract_name in options.contracts_to_rm.iter() {
-                    config.contracts.remove(contract_name);
-                }
-
-                shared_config = Some(config);
+                let doc = edit_toml_document(doc, options);
+                shared_doc = Some((location, doc));
                 println!("{}", options.comment);
             }
+
             Changes::RemoveFile(options) => {
-                if let Ok(entry) = fs::metadata(&options.path) {
-                    if !entry.is_file() {
-                        eprintln!(
-                            "{} file doesn't exist at path {}",
-                            yellow!("warning:"),
-                            options.path
-                        );
-                        continue;
-                    }
+                if !fs::metadata(&options.path).is_ok_and(|e| e.is_file()) {
+                    eprintln!(
+                        "{} file doesn't exist at path {}",
+                        yellow!("warning:"),
+                        options.path
+                    );
+                    continue;
                 }
-                match fs::remove_file(&options.path) {
-                    Ok(_) => println!("{}", options.comment),
-                    Err(e) => eprintln!("error {e}"),
+
+                if let Err(e) = fs::remove_file(&options.path) {
+                    eprintln!(
+                        "{} Unable to remove file {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
                 }
+
+                println!("{}", options.comment);
             }
         }
     }
 
-    if let Some(project_manifest) = shared_config {
-        let toml_value = match toml::Value::try_from(&project_manifest) {
-            Ok(value) => value,
-            Err(e) => {
-                eprintln!("{} failed encoding config file ({})", red!("error:"), e);
-                return false;
-            }
-        };
-
-        let pretty_toml = match toml::ser::to_string_pretty(&toml_value) {
-            Ok(value) => value,
-            Err(e) => {
-                eprintln!("{} failed formatting config file ({})", red!("error:"), e);
-                return false;
-            }
-        };
-
-        if let Err(message) = project_manifest
-            .location
-            .write_content(pretty_toml.as_bytes())
-        {
-            eprintln!(
-                "{} Unable to update manifest file - {}",
-                red!("error:"),
-                message
-            );
+    if let Some((location, doc)) = shared_doc {
+        if let Err(e) = location.write_content(doc.to_string().as_bytes()) {
+            eprintln!("{} Unable to update manifest file: {e}", red!("error:"));
             return false;
         }
     }
 
     true
+}
+
+/// Load and parse a manifest file, printing errors on failure.
+fn load_manifest(location: &FileLocation) -> Option<DocumentMut> {
+    let content = location
+        .read_content()
+        .map_err(|e| {
+            eprintln!("{}", format_err!(e));
+        })
+        .ok()?;
+
+    let content_str = std::str::from_utf8(&content)
+        .map_err(|e| {
+            eprintln!("{} Invalid UTF-8 in manifest file: {e}", red!("error:"));
+        })
+        .ok()?;
+
+    content_str
+        .parse()
+        .map_err(|e| {
+            eprintln!("{} Failed to parse manifest file: {e}", red!("error:"));
+        })
+        .ok()
+}
+
+/// Edit a TOML document directly, preserving comments and structure.
+fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> DocumentMut {
+    for req in options.requirements_to_add.drain(..) {
+        add_requirement_to_doc(&mut doc, &req.contract_id);
+    }
+
+    for (name, contract) in options.contracts_to_add.drain() {
+        add_contract_to_doc(&mut doc, &name, &contract);
+    }
+
+    for name in &options.contracts_to_rm {
+        remove_contract_from_doc(&mut doc, name);
+    }
+
+    doc
+}
+
+/// Add a requirement to the [[project.requirements]] array in the document.
+fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
+    use toml_edit::{ArrayOfTables, Item, Table};
+
+    // Ensure [project] table exists
+    let project = doc
+        .entry("project")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .expect("[project] should be a table");
+
+    // Ensure [[project.requirements]] array exists
+    let requirements = project
+        .entry("requirements")
+        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
+        .as_array_of_tables_mut()
+        .expect("[[project.requirements]] should be an array of tables");
+
+    // Check for duplicates
+    let already_exists = requirements
+        .iter()
+        .filter_map(|req| req.get("contract_id")?.as_str())
+        .any(|id| id == contract_id);
+
+    if !already_exists {
+        let mut new_req = Table::new();
+        new_req["contract_id"] = toml_edit::value(contract_id);
+        requirements.push(new_req);
+    }
+}
+
+/// Add a contract to the [contracts.<name>] section in the document.
+fn add_contract_to_doc(doc: &mut DocumentMut, name: &str, contract: &ClarityContract) {
+    use toml_edit::{Item, Table};
+
+    let contracts = doc
+        .entry("contracts")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .expect("[contracts] should be a table");
+
+    let mut entry = Table::new();
+
+    if let ClarityCodeSource::ContractOnDisk(path) = &contract.code_source {
+        entry["path"] = toml_edit::value(path.display().to_string());
+    }
+
+    if let ContractDeployer::LabeledDeployer(label) = &contract.deployer {
+        entry["deployer"] = toml_edit::value(label.as_str());
+    }
+
+    let clarity_version = match contract.clarity_version {
+        ClarityVersion::Clarity1 => 1,
+        ClarityVersion::Clarity2 => 2,
+        ClarityVersion::Clarity3 => 3,
+        ClarityVersion::Clarity4 => 4,
+    };
+    entry["clarity_version"] = toml_edit::value(clarity_version);
+
+    let epoch = match &contract.epoch {
+        Epoch::Latest => "latest".to_string(),
+        Epoch::Specific(e) => e.to_string(),
+    };
+    entry["epoch"] = toml_edit::value(epoch);
+
+    contracts[name] = Item::Table(entry);
+}
+
+/// Remove a contract from the [contracts] section in the document.
+fn remove_contract_from_doc(doc: &mut DocumentMut, name: &str) {
+    if let Some(contracts) = doc.get_mut("contracts").and_then(|c| c.as_table_mut()) {
+        contracts.remove(name);
+    }
 }
 
 fn prompt_user_to_continue() {
@@ -2094,5 +2137,672 @@ mod tests {
 
         let sanitized = sanitize_project_name("H€llo/world");
         assert_eq!(sanitized, "H_llo/world");
+    }
+
+    mod toml_editing_tests {
+        use std::path::PathBuf;
+
+        use indoc::indoc;
+
+        use super::*;
+
+        /// Helper to create a ClarityContract for testing
+        fn make_test_contract(name: &str) -> ClarityContract {
+            ClarityContract {
+                code_source: ClarityCodeSource::ContractOnDisk(PathBuf::from(format!(
+                    "contracts/{}.clar",
+                    name
+                ))),
+                name: name.to_string(),
+                deployer: ContractDeployer::DefaultDeployer,
+                clarity_version: ClarityVersion::Clarity2,
+                epoch: Epoch::Latest,
+            }
+        }
+
+        /// Helper to check if a string contains a comment (line starting with #)
+        fn contains_comment(content: &str, comment_text: &str) -> bool {
+            content.lines().any(|line| {
+                let trimmed = line.trim();
+                trimmed.starts_with('#') && trimmed.contains(comment_text)
+            })
+        }
+
+        /// Helper to check if a TOML has a specific key-value in a section
+        fn has_toml_value(content: &str, key_path: &str, expected_value: &str) -> bool {
+            let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
+            let parts: Vec<&str> = key_path.split('.').collect();
+
+            let mut current = doc.as_item();
+            for (i, part) in parts.iter().enumerate() {
+                if i == parts.len() - 1 {
+                    // Last part - check the value
+                    if let Some(table) = current.as_table() {
+                        if let Some(item) = table.get(*part) {
+                            let value_str = item.to_string();
+                            // Handle quoted strings
+                            let cleaned = value_str.trim().trim_matches('"').trim_matches('\'');
+                            return cleaned == expected_value;
+                        }
+                    }
+                    return false;
+                } else {
+                    // Navigate to the next level
+                    if let Some(table) = current.as_table() {
+                        if let Some(item) = table.get(*part) {
+                            current = item;
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            }
+            false
+        }
+
+        /// Helper to check if a contract exists in the TOML
+        fn has_contract(content: &str, contract_name: &str) -> bool {
+            let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
+            if let Some(contracts) = doc.get("contracts").and_then(|c| c.as_table()) {
+                return contracts.contains_key(contract_name);
+            }
+            false
+        }
+
+        /// Helper to check if a requirement exists in the TOML
+        fn has_requirement(content: &str, contract_id: &str) -> bool {
+            let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
+            if let Some(project) = doc.get("project").and_then(|p| p.as_table()) {
+                if let Some(requirements) = project.get("requirements") {
+                    if let Some(arr) = requirements.as_array_of_tables() {
+                        return arr.iter().any(|req| {
+                            req.get("contract_id")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s == contract_id)
+                                .unwrap_or(false)
+                        });
+                    }
+                }
+            }
+            false
+        }
+
+        #[test]
+        fn test_add_contract_preserves_comments() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+                description = ""
+
+                # This is an important comment that should be preserved!
+                # Another comment line
+
+                [repl.analysis]
+                passes = ["check_checker"]
+
+                # Check-checker settings comment
+                [repl.analysis.check_checker]
+                strict = false
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
+
+            let output = doc.to_string();
+
+            // Verify comments are preserved
+            assert!(
+                contains_comment(&output, "important comment"),
+                "Important comment should be preserved"
+            );
+            assert!(
+                contains_comment(&output, "Another comment"),
+                "Second comment should be preserved"
+            );
+            assert!(
+                contains_comment(&output, "Check-checker settings"),
+                "Check-checker comment should be preserved"
+            );
+
+            // Verify the contract was added
+            assert!(
+                has_contract(&output, "my-contract"),
+                "Contract should be added"
+            );
+
+            // Verify existing settings are preserved
+            assert!(
+                has_toml_value(&output, "project.name", "test-project"),
+                "Project name should be preserved"
+            );
+            assert!(
+                has_toml_value(&output, "repl.analysis.check_checker.strict", "false"),
+                "Repl settings should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_remove_contract_preserves_comments_and_other_contracts() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                # Comment about contracts
+                [contracts.keep-me]
+                path = "contracts/keep-me.clar"
+                clarity_version = 2
+                epoch = "2.4"
+
+                # Comment about remove-me
+                [contracts.remove-me]
+                path = "contracts/remove-me.clar"
+                clarity_version = 1
+                epoch = "2.0"
+
+                # Final comment
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            remove_contract_from_doc(&mut doc, "remove-me");
+
+            let output = doc.to_string();
+
+            // Verify the contract was removed
+            assert!(
+                !has_contract(&output, "remove-me"),
+                "Contract should be removed"
+            );
+
+            // Verify the other contract is still there
+            assert!(
+                has_contract(&output, "keep-me"),
+                "Other contract should be preserved"
+            );
+
+            // Verify comments are preserved (at least the ones not directly attached to removed section)
+            assert!(
+                contains_comment(&output, "Comment about contracts"),
+                "Contract section comment should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_add_requirement_preserves_comments() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+                description = "A test project"
+                authors = ["Test Author"]
+                telemetry = false
+
+                # This comment should survive
+
+                [contracts.my-contract]
+                path = "contracts/my-contract.clar"
+                clarity_version = 2
+                epoch = "latest"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
+
+            let output = doc.to_string();
+
+            // Verify the requirement was added
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Requirement should be added"
+            );
+
+            // Verify comment is preserved
+            assert!(
+                contains_comment(&output, "This comment should survive"),
+                "Comment should be preserved"
+            );
+
+            // Verify existing settings are preserved
+            assert!(
+                has_toml_value(&output, "project.name", "test-project"),
+                "Project name should be preserved"
+            );
+            assert!(
+                has_toml_value(&output, "project.telemetry", "false"),
+                "Telemetry setting should be preserved"
+            );
+
+            // Verify contract is still there
+            assert!(
+                has_contract(&output, "my-contract"),
+                "Contract should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_add_requirement_does_not_duplicate() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                [[project.requirements]]
+                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Try to add the same requirement again
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
+
+            let output = doc.to_string();
+
+            // Count how many times the contract_id appears
+            let count = output.matches("nft-trait").count();
+            assert_eq!(count, 1, "Requirement should not be duplicated");
+        }
+
+        #[test]
+        fn test_add_multiple_requirements() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                [[project.requirements]]
+                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait",
+            );
+
+            let output = doc.to_string();
+
+            // Both requirements should exist
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Original requirement should be preserved"
+            );
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"
+                ),
+                "New requirement should be added"
+            );
+        }
+
+        #[test]
+        fn test_edit_simple_nft_example() {
+            // Test with the actual simple-nft example content
+            let input = indoc! {r#"
+                [project]
+                name = 'simple-nft'
+                description = ''
+                authors = []
+                telemetry = false
+                cache_dir = './.cache'
+
+                [[project.requirements]]
+                contract_id = 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait'
+
+                [contracts.simple-nft]
+                path = 'contracts/simple-nft.clar'
+                clarity_version = 2
+                epoch = 2.4
+
+                # the analysis errors are used as a test case
+                [repl.analysis]
+                passes = ["check_checker"]
+                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+
+                # We don't want linter diagnostics in this test
+                [repl.analysis.lint_groups]
+                all = false
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Add a new contract
+            add_contract_to_doc(
+                &mut doc,
+                "new-contract",
+                &make_test_contract("new-contract"),
+            );
+
+            let output = doc.to_string();
+
+            // Verify comments are preserved
+            assert!(
+                contains_comment(&output, "analysis errors are used as a test case"),
+                "Analysis comment should be preserved"
+            );
+            assert!(
+                contains_comment(&output, "don't want linter diagnostics"),
+                "Linter comment should be preserved"
+            );
+
+            // Verify existing content is preserved
+            assert!(
+                has_contract(&output, "simple-nft"),
+                "Original contract should be preserved"
+            );
+            assert!(
+                has_contract(&output, "new-contract"),
+                "New contract should be added"
+            );
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Requirement should be preserved"
+            );
+            assert!(
+                has_toml_value(&output, "project.cache_dir", "./.cache"),
+                "Cache dir should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_edit_counter_example() {
+            // Test with the actual counter example content
+            let input = indoc! {r#"
+                [project]
+                name = "counter"
+                authors = []
+                description = ""
+                telemetry = false
+
+                [contracts.counter]
+                path = "contracts/counter.clar"
+                clarity_version = 1
+                epoch = "2.0"
+
+                [contracts.counter-2]
+                path = "contracts/counter-v2.clar"
+                clarity_version = 2
+                epoch = "2.4"
+
+                [repl.analysis]
+                passes = ["check_checker"]
+
+                [repl.analysis.check_checker]
+                strict = false
+                trusted_sender = true
+                trusted_caller = false
+                callee_filter = false
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Remove one contract, add another
+            remove_contract_from_doc(&mut doc, "counter");
+            add_contract_to_doc(&mut doc, "counter-3", &make_test_contract("counter-3"));
+
+            let output = doc.to_string();
+
+            // Verify the operations
+            assert!(
+                !has_contract(&output, "counter"),
+                "counter should be removed"
+            );
+            assert!(
+                has_contract(&output, "counter-2"),
+                "counter-2 should be preserved"
+            );
+            assert!(
+                has_contract(&output, "counter-3"),
+                "counter-3 should be added"
+            );
+
+            // Verify settings are preserved
+            assert!(
+                has_toml_value(&output, "project.name", "counter"),
+                "Project name should be preserved"
+            );
+            assert!(
+                has_toml_value(
+                    &output,
+                    "repl.analysis.check_checker.trusted_sender",
+                    "true"
+                ),
+                "Check checker settings should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_contract_with_labeled_deployer() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Create a contract with a labeled deployer
+            let contract = ClarityContract {
+                code_source: ClarityCodeSource::ContractOnDisk(PathBuf::from(
+                    "contracts/special.clar",
+                )),
+                name: "special".to_string(),
+                deployer: ContractDeployer::LabeledDeployer("wallet_1".to_string()),
+                clarity_version: ClarityVersion::Clarity3,
+                epoch: Epoch::Specific(clarity_repl::clarity::StacksEpochId::Epoch25),
+            };
+
+            add_contract_to_doc(&mut doc, "special", &contract);
+
+            let output = doc.to_string();
+
+            // Verify the contract was added with all properties
+            assert!(has_contract(&output, "special"), "Contract should be added");
+
+            // Parse and check the values
+            let parsed: DocumentMut = output.parse().unwrap();
+            let contracts = parsed.get("contracts").unwrap().as_table().unwrap();
+            let special = contracts.get("special").unwrap().as_table().unwrap();
+
+            assert_eq!(
+                special.get("deployer").unwrap().as_str().unwrap(),
+                "wallet_1"
+            );
+            assert_eq!(
+                special
+                    .get("clarity_version")
+                    .unwrap()
+                    .as_integer()
+                    .unwrap(),
+                3
+            );
+        }
+
+        #[test]
+        fn test_preserves_inline_tables() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                [repl.analysis]
+                passes = ["check_checker"]
+                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
+
+            let output = doc.to_string();
+
+            // The inline table format should be preserved
+            assert!(
+                output.contains("check_checker = {") || output.contains("check_checker = { "),
+                "Inline table format should be preserved: {}",
+                output
+            );
+        }
+
+        #[test]
+        fn test_preserves_array_format() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+                authors = ["Alice", "Bob"]
+                requirements = []
+
+                [repl.analysis]
+                passes = ["check_checker", "lint"]
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
+
+            let output = doc.to_string();
+
+            // Verify arrays are preserved
+            assert!(
+                output.contains("authors = [") || output.contains("authors= ["),
+                "Authors array should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_preserves_lint_groups_and_lints_ordering() {
+            // Test with all lint groups and lints in a deliberately random order
+            // with random values to ensure ordering is preserved after edits
+            //
+            // LintGroups: All, Perf, Safety, Style, Unused
+            // LintNames: Noop, UnusedConst, UnusedDataVar, UnusedBinding, UnusedMap,
+            //            UnusedPrivateFn, UnusedToken, UnusedTrait, CaseConst
+            // LintLevels: ignore/allow/off/none, notice/note, warning/warn/on, error/err
+            let input = indoc! {r#"
+                [project]
+                name = "lint-ordering-test"
+                authors = []
+                telemetry = false
+
+                [contracts.existing-contract]
+                path = "contracts/existing.clar"
+
+                # Custom comment about linting configuration
+                [repl.analysis]
+                passes = ["check_checker", "lint"]
+
+                # Lint groups in random order with random values
+                [repl.analysis.lint_groups]
+                style = "warn"
+                unused = "error"
+                all = false
+                safety = "notice"
+                perf = "off"
+
+                # Individual lints in random order with random values
+                [repl.analysis.lints]
+                unused_map = "error"
+                case_const = "warn"
+                unused_binding = "off"
+                noop = "notice"
+                unused_trait = "warning"
+                unused_const = "allow"
+                unused_private_fn = "err"
+                unused_data_var = "note"
+                unused_token = "none"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Perform an edit (add a contract) to simulate real usage
+            add_contract_to_doc(
+                &mut doc,
+                "new-contract",
+                &make_test_contract("new-contract"),
+            );
+
+            let output = doc.to_string();
+
+            // Verify the comment is preserved
+            assert!(
+                contains_comment(&output, "Custom comment about linting configuration"),
+                "Linting comment should be preserved"
+            );
+
+            // Helper to extract keys in order from a TOML section
+            fn get_keys_in_order(toml_str: &str, section: &str) -> Vec<String> {
+                let doc: DocumentMut = toml_str.parse().unwrap();
+
+                // Navigate to the section (e.g., "repl.analysis.lint_groups")
+                let parts: Vec<&str> = section.split('.').collect();
+                let mut current = doc.as_item();
+
+                for part in &parts {
+                    current = current.as_table().unwrap().get(part).unwrap();
+                }
+
+                current
+                    .as_table()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, _)| k.to_string())
+                    .collect()
+            }
+
+            // Verify lint_groups ordering is preserved
+            let lint_groups_order = get_keys_in_order(&output, "repl.analysis.lint_groups");
+            assert_eq!(
+                lint_groups_order,
+                vec!["style", "unused", "all", "safety", "perf"],
+                "Lint groups ordering should be preserved"
+            );
+
+            // Verify lints ordering is preserved
+            let lints_order = get_keys_in_order(&output, "repl.analysis.lints");
+            assert_eq!(
+                lints_order,
+                vec![
+                    "unused_map",
+                    "case_const",
+                    "unused_binding",
+                    "noop",
+                    "unused_trait",
+                    "unused_const",
+                    "unused_private_fn",
+                    "unused_data_var",
+                    "unused_token"
+                ],
+                "Lints ordering should be preserved"
+            );
+
+            // Also verify the values are preserved
+            let parsed: DocumentMut = output.parse().unwrap();
+            let lint_groups = parsed["repl"]["analysis"]["lint_groups"]
+                .as_table()
+                .unwrap();
+            let lints = parsed["repl"]["analysis"]["lints"].as_table().unwrap();
+
+            // Check a few lint group values
+            assert_eq!(lint_groups["style"].as_str().unwrap(), "warn");
+            assert_eq!(lint_groups["unused"].as_str().unwrap(), "error");
+            assert_eq!(lint_groups["all"].as_bool().unwrap(), false);
+            assert_eq!(lint_groups["safety"].as_str().unwrap(), "notice");
+            assert_eq!(lint_groups["perf"].as_str().unwrap(), "off");
+
+            // Check a few lint values
+            assert_eq!(lints["unused_map"].as_str().unwrap(), "error");
+            assert_eq!(lints["case_const"].as_str().unwrap(), "warn");
+            assert_eq!(lints["noop"].as_str().unwrap(), "notice");
+            assert_eq!(lints["unused_token"].as_str().unwrap(), "none");
+        }
     }
 }

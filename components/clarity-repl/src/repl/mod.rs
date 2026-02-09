@@ -85,6 +85,17 @@ impl PartialEq<StacksEpochId> for Epoch {
     }
 }
 
+impl PartialOrd<StacksEpochId> for Epoch {
+    fn partial_cmp(&self, other: &StacksEpochId) -> Option<std::cmp::Ordering> {
+        let myself = match self {
+            Epoch::Specific(epoch) => epoch,
+            Epoch::Latest => &DEFAULT_EPOCH,
+        };
+
+        StacksEpochId::partial_cmp(myself, other)
+    }
+}
+
 impl Serialize for Epoch {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

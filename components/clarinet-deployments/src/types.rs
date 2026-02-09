@@ -1091,7 +1091,7 @@ impl DeploymentSpecification {
                                     } else {
                                         Epoch::Latest
                                     };
-                                    let source = remove_env_simnet(spec.clarity_version, epoch, &contract_id, spec.source.clone())?;
+                                    let source = remove_env_simnet(epoch, spec.source.clone())?;
                                     contracts.insert(contract_id, (source, spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }

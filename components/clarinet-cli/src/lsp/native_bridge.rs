@@ -5,19 +5,17 @@ use clarity_lsp::backend::{
     process_mutating_request, process_notification, process_request, EditorStateInput,
     LspNotification, LspNotificationResponse, LspRequest, LspRequestResponse,
 };
-use clarity_lsp::lsp_types::{
-    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    SignatureHelp, SignatureHelpParams,
-};
 use clarity_lsp::state::EditorState;
 use crossbeam_channel::{Receiver as MultiplexableReceiver, Select, Sender as MultiplexableSender};
 use serde_json::Value;
 use tower_lsp_server::jsonrpc::{Error, ErrorCode, Result};
-use tower_lsp_server::lsp_types::{
+use tower_lsp_server::ls_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
-    DocumentRangeFormattingParams, ExecuteCommandParams, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, MessageType, TextEdit,
+    DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
+    ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, InitializeResult, InitializedParams, MessageType, SignatureHelp,
+    SignatureHelpParams, TextEdit,
 };
 use tower_lsp_server::{Client, LanguageServer};
 

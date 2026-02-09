@@ -4,7 +4,7 @@ use clarity::vm::ClarityVersion;
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor};
 use clarity_repl::clarity::representations::Span;
 use clarity_repl::clarity::{ClarityName, SymbolicExpression, SymbolicExpressionType};
-use lsp_types::{DocumentSymbol, SymbolKind};
+use ls_types::{DocumentSymbol, SymbolKind};
 use serde::{Deserialize, Serialize};
 
 use super::helpers::span_to_range;
@@ -492,7 +492,7 @@ mod tests {
     use clarity_repl::clarity::representations::Span;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
-    use lsp_types::{DocumentSymbol, SymbolKind};
+    use ls_types::{DocumentSymbol, SymbolKind};
 
     use super::ASTSymbols;
     use crate::common::requests::document_symbols::{build_symbol, ClaritySymbolKind};

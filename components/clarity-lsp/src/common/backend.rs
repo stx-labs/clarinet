@@ -4,16 +4,15 @@ use clarinet_files::{FileAccessor, FileLocation, ProjectManifest};
 use clarity_repl::clarity::diagnostic::Diagnostic;
 use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
-use lsp_types::{
+use ls_types::{
     CompletionItem, CompletionParams, DocumentFormattingParams, DocumentRangeFormattingParams,
     DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams, Hover, HoverParams,
-    InitializeParams, InitializeResult, Location, ServerInfo, SignatureHelp, SignatureHelpParams,
-    TextEdit,
+    InitializeParams, InitializeResult, Location, MessageType, ServerInfo, SignatureHelp,
+    SignatureHelpParams, TextEdit,
 };
 use serde::{Deserialize, Serialize};
 
 use super::requests::capabilities::{get_capabilities, InitializationOptions};
-use crate::lsp_types::MessageType;
 use crate::state::{build_state, EditorState, ProtocolState};
 use crate::utils::get_contract_location;
 
@@ -395,8 +394,8 @@ pub fn process_request(
                 .and_then(|value| {
                     // FormattingProperty can be boolean, number, or string
                     match value {
-                        lsp_types::FormattingProperty::Number(num) => Some(*num as usize),
-                        lsp_types::FormattingProperty::String(s) => s.parse::<usize>().ok(),
+                        ls_types::FormattingProperty::Number(num) => Some(*num as usize),
+                        ls_types::FormattingProperty::String(s) => s.parse::<usize>().ok(),
                         _ => None,
                     }
                 })
@@ -412,13 +411,13 @@ pub fn process_request(
 
             let formatter = clarinet_format::formatter::ClarityFormatter::new(formatting_options);
             let formatted_result = formatter.format_file(source);
-            let text_edit = lsp_types::TextEdit {
-                range: lsp_types::Range {
-                    start: lsp_types::Position {
+            let text_edit = ls_types::TextEdit {
+                range: ls_types::Range {
+                    start: ls_types::Position {
                         line: 0,
                         character: 0,
                     },
-                    end: lsp_types::Position {
+                    end: ls_types::Position {
                         line: source.lines().count() as u32,
                         character: 0,
                     },
@@ -451,8 +450,8 @@ pub fn process_request(
                 .and_then(|value| {
                     // FormattingProperty can be boolean, number, or string
                     match value {
-                        lsp_types::FormattingProperty::Number(num) => Some(*num as usize),
-                        lsp_types::FormattingProperty::String(s) => s.parse::<usize>().ok(),
+                        ls_types::FormattingProperty::Number(num) => Some(*num as usize),
+                        ls_types::FormattingProperty::String(s) => s.parse::<usize>().ok(),
                         _ => None,
                     }
                 })
@@ -554,7 +553,7 @@ pub fn process_request(
                 }
             };
 
-            let text_edit = lsp_types::TextEdit {
+            let text_edit = ls_types::TextEdit {
                 range: param.range,
                 new_text: formatted_result,
             };
@@ -620,7 +619,7 @@ mod lsp_tests {
 
     use clarinet_files::FileLocation;
     use clarity_repl::clarity::ClarityVersion;
-    use lsp_types::{
+    use ls_types::{
         DocumentRangeFormattingParams, FormattingOptions, Position, Range, TextDocumentIdentifier,
         WorkDoneProgressParams,
     };
@@ -699,8 +698,8 @@ mod lsp_tests {
         let contract_location = FileLocation::FileSystem { path: path.clone() };
 
         let params = GotoDefinitionParams {
-            text_document_position_params: lsp_types::TextDocumentPositionParams {
-                text_document: lsp_types::TextDocumentIdentifier {
+            text_document_position_params: ls_types::TextDocumentPositionParams {
+                text_document: ls_types::TextDocumentIdentifier {
                     uri: contract_location.to_url_string().unwrap().parse().unwrap(),
                 },
                 // Position inside the 'N' constant
@@ -712,7 +711,7 @@ mod lsp_tests {
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
             },
-            partial_result_params: lsp_types::PartialResultParams {
+            partial_result_params: ls_types::PartialResultParams {
                 partial_result_token: None,
             },
         };
@@ -724,7 +723,7 @@ mod lsp_tests {
             panic!("Expected a Definition response, got: {response:?}");
         };
 
-        assert_eq!(location.uri.scheme().unwrap().as_str(), "file");
+        assert_eq!(location.uri.scheme().as_str(), "file");
         let response_json = json!(response);
         assert!(response_json
             .get("Definition")

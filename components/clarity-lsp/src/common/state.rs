@@ -16,7 +16,7 @@ use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrin
 use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::{ContractDeployer, DEFAULT_CLARITY_VERSION};
-use lsp_types::{
+use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
 
@@ -300,7 +300,7 @@ impl EditorState {
         &self,
         contract_location: &FileLocation,
         position: &Position,
-    ) -> Vec<lsp_types::CompletionItem> {
+    ) -> Vec<ls_types::CompletionItem> {
         let Some(active_contract) = self.active_contracts.get(contract_location) else {
             return vec![];
         };
@@ -357,7 +357,7 @@ impl EditorState {
         &self,
         contract_location: &FileLocation,
         position: &Position,
-    ) -> Option<lsp_types::Location> {
+    ) -> Option<ls_types::Location> {
         let contract = self.active_contracts.get(contract_location)?;
         let position = Position {
             line: position.line + 1,
@@ -422,7 +422,7 @@ impl EditorState {
     pub fn get_hover_data(
         &self,
         contract_location: &FileLocation,
-        position: &lsp_types::Position,
+        position: &ls_types::Position,
     ) -> Option<Hover> {
         let contract = self.active_contracts.get(contract_location)?;
         let position = Position {
@@ -433,8 +433,8 @@ impl EditorState {
             get_expression_documentation(&position, contract.expressions.as_ref()?)?;
 
         Some(Hover {
-            contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
-                kind: lsp_types::MarkupKind::Markdown,
+            contents: ls_types::HoverContents::Markup(ls_types::MarkupContent {
+                kind: ls_types::MarkupKind::Markdown,
                 value: documentation,
             }),
             range: None,
@@ -444,7 +444,7 @@ impl EditorState {
     pub fn get_signature_help(
         &self,
         contract_location: &FileLocation,
-        position: &lsp_types::Position,
+        position: &ls_types::Position,
         active_signature: Option<u32>,
     ) -> Option<SignatureHelp> {
         let contract = self.active_contracts.get(contract_location)?;
