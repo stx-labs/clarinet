@@ -3,7 +3,7 @@ use clarity_repl::clarity::chainstate::StacksAddress;
 use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
 use clarity_repl::clarity::{Address, ClarityVersion, StacksEpochId};
 use clarity_repl::repl::remote_data::epoch_for_height;
-use clarity_repl::repl::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
+use clarity_repl::repl::{clarity_version_from_u8, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use reqwest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,11 +66,9 @@ pub async fn retrieve_contract(
 
     let epoch = epoch_for_height(is_mainnet, contract.block_height);
     let clarity_version = match contract.clarity_version {
-        Some(1) => ClarityVersion::Clarity1,
-        Some(2) => ClarityVersion::Clarity2,
-        Some(3) => ClarityVersion::Clarity3,
-        Some(4) => ClarityVersion::Clarity4,
-        Some(v) => return Err(format!("Unsupported clarity_version: {v}")),
+        Some(v) => {
+            clarity_version_from_u8(v).ok_or_else(|| format!("Unsupported clarity_version: {v}"))?
+        }
         None => ClarityVersion::default_for_epoch(epoch),
     };
 

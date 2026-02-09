@@ -1028,20 +1028,10 @@ impl Session {
     }
 
     pub fn set_epoch(&mut self, cmd: &str) -> String {
-        let epoch = match cmd.split_once(' ').map(|(_, epoch)| epoch) {
-            Some("2.0") => StacksEpochId::Epoch20,
-            Some("2.05") => StacksEpochId::Epoch2_05,
-            Some("2.1") => StacksEpochId::Epoch21,
-            Some("2.2") => StacksEpochId::Epoch22,
-            Some("2.3") => StacksEpochId::Epoch23,
-            Some("2.4") => StacksEpochId::Epoch24,
-            Some("2.5") => StacksEpochId::Epoch25,
-            Some("3.0") => StacksEpochId::Epoch30,
-            Some("3.1") => StacksEpochId::Epoch31,
-            Some("3.2") => StacksEpochId::Epoch32,
-            Some("3.3") => StacksEpochId::Epoch33,
-            _ => {
-                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3"
+        let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
+            Some(epoch) => epoch,
+            None => {
+                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4"
                     .red()
                     .to_string()
             }

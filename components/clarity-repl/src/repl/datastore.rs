@@ -53,6 +53,7 @@ fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
         StacksEpochId::Epoch31 => PEER_VERSION_EPOCH_3_1,
         StacksEpochId::Epoch32 => PEER_VERSION_EPOCH_3_2,
         StacksEpochId::Epoch33 => PEER_VERSION_EPOCH_3_3,
+        StacksEpochId::Epoch34 => PEER_VERSION_EPOCH_3_4,
     }
 }
 
@@ -1273,7 +1274,7 @@ impl BurnStateDB for Datastore {
             }
             // preserve the 3.0 -> 3.3 special behavior of burn-block-height
             // https://github.com/stacks-network/stacks-core/pull/5524
-            Epoch30 | Epoch31 | Epoch32 | Epoch33 => Some(self.burn_chain_height),
+            Epoch30 | Epoch31 | Epoch32 | Epoch33 | Epoch34 => Some(self.burn_chain_height),
         }
     }
 

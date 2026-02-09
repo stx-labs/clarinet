@@ -14,7 +14,7 @@ use clarinet_deployments::{
 use clarinet_files::{
     FileAccessor, FileLocation, ProjectManifest, StacksNetwork, WASMFileSystemAccessor,
 };
-use clarity::types::{Address, StacksEpochId};
+use clarity::types::Address;
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::clarity::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
@@ -28,8 +28,8 @@ use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::session::CostsReport;
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
-    clarity_values, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session,
-    SessionSettings, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
+    clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
+    Session, SessionSettings, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
 };
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
@@ -140,14 +140,10 @@ impl CallFnArgs {
 
 fn clarity_version_from_u32(v: Option<u32>) -> ClarityVersion {
     match v {
-        Some(1) => ClarityVersion::Clarity1,
-        Some(2) => ClarityVersion::Clarity2,
-        Some(3) => ClarityVersion::Clarity3,
-        Some(4) => ClarityVersion::Clarity4,
-        Some(v) => {
+        Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8).unwrap_or_else(|| {
             log!("Invalid clarity version {v}. Using default version.");
             DEFAULT_CLARITY_VERSION
-        }
+        }),
         None => DEFAULT_CLARITY_VERSION,
     }
 }
@@ -661,24 +657,11 @@ impl SDK {
 
     #[wasm_bindgen(js_name=setEpoch)]
     pub fn set_epoch(&mut self, epoch: EpochString) {
-        let epoch = epoch.as_string().unwrap_or(DEFAULT_EPOCH.to_string());
-        let epoch = match epoch.as_str() {
-            "2.0" => StacksEpochId::Epoch20,
-            "2.05" => StacksEpochId::Epoch2_05,
-            "2.1" => StacksEpochId::Epoch21,
-            "2.2" => StacksEpochId::Epoch22,
-            "2.3" => StacksEpochId::Epoch23,
-            "2.4" => StacksEpochId::Epoch24,
-            "2.5" => StacksEpochId::Epoch25,
-            "3.0" => StacksEpochId::Epoch30,
-            "3.1" => StacksEpochId::Epoch31,
-            "3.2" => StacksEpochId::Epoch32,
-            "3.3" => StacksEpochId::Epoch33,
-            _ => {
-                log!("Invalid epoch {epoch}. Using default epoch");
-                DEFAULT_EPOCH
-            }
-        };
+        let epoch_str = epoch.as_string().unwrap_or(DEFAULT_EPOCH.to_string());
+        let epoch = epoch_from_str(&epoch_str).unwrap_or_else(|| {
+            log!("Invalid epoch {epoch_str}. Using default epoch");
+            DEFAULT_EPOCH
+        });
 
         let session = self.get_session_mut();
         session.update_epoch(epoch);

@@ -3100,6 +3100,7 @@ fn clarity_version_consensus_serialize<W: Write>(
         ClarityVersion::Clarity2 => write_next(fd, &2u8)?,
         ClarityVersion::Clarity3 => write_next(fd, &3u8)?,
         ClarityVersion::Clarity4 => write_next(fd, &4u8)?,
+        ClarityVersion::Clarity5 => write_next(fd, &5u8)?,
     }
     Ok(())
 }
@@ -3113,6 +3114,7 @@ fn clarity_version_consensus_deserialize<R: Read>(
         2u8 => Ok(ClarityVersion::Clarity2),
         3u8 => Ok(ClarityVersion::Clarity3),
         4u8 => Ok(ClarityVersion::Clarity4),
+        5u8 => Ok(ClarityVersion::Clarity5),
         _ => Err(CodecError::DeserializeError(format!(
             "Unrecognized ClarityVersion byte {}",
             &version_byte

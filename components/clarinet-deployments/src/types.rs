@@ -10,7 +10,9 @@ use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
-use clarity_repl::repl::{Epoch, Session, DEFAULT_CLARITY_VERSION};
+use clarity_repl::repl::{
+    clarity_version_from_u8, clarity_version_to_u8, Epoch, Session, DEFAULT_CLARITY_VERSION,
+};
 use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
@@ -40,6 +42,8 @@ pub enum EpochSpec {
     Epoch3_2,
     #[serde(rename = "3.3")]
     Epoch3_3,
+    #[serde(rename = "3.4")]
+    Epoch3_4,
 }
 
 impl From<StacksEpochId> for EpochSpec {
@@ -56,6 +60,7 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch31 => EpochSpec::Epoch3_1,
             StacksEpochId::Epoch32 => EpochSpec::Epoch3_2,
             StacksEpochId::Epoch33 => EpochSpec::Epoch3_3,
+            StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
         }
     }
@@ -75,6 +80,7 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_1 => StacksEpochId::Epoch31,
             EpochSpec::Epoch3_2 => StacksEpochId::Epoch32,
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
+            EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
         }
     }
 }
@@ -111,6 +117,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_1 => Some(config.epoch_3_1),
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
                     EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
+                    EpochSpec::Epoch3_4 => config.epoch_3_4,
                 };
                 start_height.map(|start_height| EpochConfig {
                     epoch_name: epoch,
@@ -127,13 +134,9 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
 
 fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, String> {
     match value {
-        Some(1) => Ok(ClarityVersion::Clarity1),
-        Some(2) => Ok(ClarityVersion::Clarity2),
-        Some(3) => Ok(ClarityVersion::Clarity3),
-        Some(4) => Ok(ClarityVersion::Clarity4),
-        Some(_) => {
-            Err("unable to parse clarity_version (can either be '1', '2', '3', or '4'".to_string())
-        }
+        Some(v) => clarity_version_from_u8(v).ok_or_else(|| {
+            "unable to parse clarity_version (can either be '1', '2', '3', '4', or '5')".to_string()
+        }),
         None => Ok(DEFAULT_CLARITY_VERSION),
     }
 }
@@ -690,18 +693,14 @@ pub mod remap_principals_serde {
 pub mod clarity_version_serde {
     use clarinet_files::INVALID_CLARITY_VERSION;
     use clarity_repl::clarity::ClarityVersion;
+    use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8};
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(clarity_version: &ClarityVersion, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        match clarity_version {
-            ClarityVersion::Clarity1 => s.serialize_i64(1),
-            ClarityVersion::Clarity2 => s.serialize_i64(2),
-            ClarityVersion::Clarity3 => s.serialize_i64(3),
-            ClarityVersion::Clarity4 => s.serialize_i64(4),
-        }
+        s.serialize_i64(clarity_version_to_u8(*clarity_version) as i64)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<ClarityVersion, D::Error>
@@ -709,13 +708,8 @@ pub mod clarity_version_serde {
         D: Deserializer<'de>,
     {
         let cv = i64::deserialize(deserializer)?;
-        match cv {
-            1 => Ok(ClarityVersion::Clarity1),
-            2 => Ok(ClarityVersion::Clarity2),
-            3 => Ok(ClarityVersion::Clarity3),
-            4 => Ok(ClarityVersion::Clarity4),
-            _ => Err(serde::de::Error::custom(INVALID_CLARITY_VERSION)),
-        }
+        clarity_version_from_u8(cv as u8)
+            .ok_or_else(|| serde::de::Error::custom(INVALID_CLARITY_VERSION))
     }
 }
 
@@ -1382,12 +1376,7 @@ impl TransactionPlanSpecification {
                                 url: None,
                                 cost: tx.cost,
                                 anchor_block_only: Some(tx.anchor_block_only),
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1409,12 +1398,7 @@ impl TransactionPlanSpecification {
                                 location: Some(tx.location.clone()),
                                 path: None,
                                 url: None,
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1432,12 +1416,7 @@ impl TransactionPlanSpecification {
                                 path: None,
                                 url: None,
                                 cost: tx.cost,
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1551,6 +1530,82 @@ mod tests {
                 [[burnchain.epochs]]
                 epoch_name = "3.3"
                 start_height = 11
+                "#
+            }
+        );
+    }
+
+    #[test]
+    fn test_epoch_config_with_optional_next_epoch() {
+        let devnet_config = DevnetConfig {
+            epoch_2_0: 1,
+            epoch_2_05: 2,
+            epoch_2_1: 3,
+            epoch_2_2: 4,
+            epoch_2_3: 5,
+            epoch_2_4: 6,
+            epoch_2_5: 7,
+            epoch_3_0: 8,
+            epoch_3_1: 9,
+            epoch_3_2: 10,
+            epoch_3_3: 11,
+            epoch_3_4: Some(12),
+            ..Default::default()
+        };
+
+        let epoch_config = BurnchainEpochConfig::from(&devnet_config);
+        let epoch_config_toml = toml::to_string(&epoch_config).unwrap();
+
+        assert_eq!(
+            epoch_config_toml,
+            indoc! { r#"
+                [[burnchain.epochs]]
+                epoch_name = "2.0"
+                start_height = 1
+
+                [[burnchain.epochs]]
+                epoch_name = "2.05"
+                start_height = 2
+
+                [[burnchain.epochs]]
+                epoch_name = "2.1"
+                start_height = 3
+
+                [[burnchain.epochs]]
+                epoch_name = "2.2"
+                start_height = 4
+
+                [[burnchain.epochs]]
+                epoch_name = "2.3"
+                start_height = 5
+
+                [[burnchain.epochs]]
+                epoch_name = "2.4"
+                start_height = 6
+
+                [[burnchain.epochs]]
+                epoch_name = "2.5"
+                start_height = 7
+
+                [[burnchain.epochs]]
+                epoch_name = "3.0"
+                start_height = 8
+
+                [[burnchain.epochs]]
+                epoch_name = "3.1"
+                start_height = 9
+
+                [[burnchain.epochs]]
+                epoch_name = "3.2"
+                start_height = 10
+
+                [[burnchain.epochs]]
+                epoch_name = "3.3"
+                start_height = 11
+
+                [[burnchain.epochs]]
+                epoch_name = "3.4"
+                start_height = 12
                 "#
             }
         );
