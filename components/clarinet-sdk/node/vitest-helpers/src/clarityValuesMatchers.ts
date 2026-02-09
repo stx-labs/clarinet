@@ -313,7 +313,7 @@ expect.extend({
     };
   },
 
-  toBeBuff(actual: unknown, expectedRaw: Uint8Array) {
+  toBeBuff(actual: unknown, expectedRaw: Uint8Array | string) {
     const expectedType = ClarityType.Buffer;
     try {
       const isCV = checkCVType(actual, expectedType, this.isNot);
@@ -322,7 +322,7 @@ expect.extend({
       return errorToAssertionResult.call(this, e);
     }
 
-    const expected = Cl.buffer(expectedRaw);
+    const expected = expectedRaw instanceof Uint8Array ? Cl.buffer(expectedRaw) : Cl.bufferFromHex(expectedRaw);
     return {
       pass: this.equals(actual, expected, undefined, true),
       // note: throw a simple message and rely on `actual` and `expected` to display the diff

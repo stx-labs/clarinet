@@ -1,4 +1,4 @@
-use lsp_types::{
+use ls_types::{
     CompletionOptions, HoverProviderCapability, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions,
@@ -53,19 +53,19 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             false => None,
         },
         document_symbol_provider: match initialization_options.document_symbols {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         document_formatting_provider: match initialization_options.formatting {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         document_range_formatting_provider: match initialization_options.formatting {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         definition_provider: match initialization_options.go_to_definition {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         signature_help_provider: match initialization_options.signature_help {

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 clarity = { workspace = true, default-features = false, features = ["developer-mode"] }
 clarity-types = { workspace = true, features = ["developer-mode"] }
-lsp-types = "0.97.0"
+ls-types = "0.0.2"
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

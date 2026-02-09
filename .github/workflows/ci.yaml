@@ -75,7 +75,7 @@ jobs:
           target-cache-key: ${{ runner.os }}-${{ github.job }}
 
       - name: Run audit
-        run: cargo audit --ignore RUSTSEC-2022-0028
+        run: cargo audit
 
       - name: Run rustfmt
         run: cargo fmt-stacks --check

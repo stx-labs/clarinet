@@ -4,4 +4,3 @@ pub mod utils;
 pub mod vscode_bridge;
 
 pub use common::{backend, state};
-pub use lsp_types;

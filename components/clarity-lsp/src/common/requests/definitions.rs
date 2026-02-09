@@ -7,7 +7,7 @@ use clarity_repl::clarity::vm::types::{
     QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
 };
 use clarity_repl::clarity::{ClarityName, SymbolicExpression};
-use lsp_types::Range;
+use ls_types::Range;
 
 use super::helpers::span_to_range;
 #[cfg(target_arch = "wasm32")]
@@ -669,7 +669,7 @@ mod definitions_visitor_tests {
     use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
-    use lsp_types::{Position, Range};
+    use ls_types::{Position, Range};
 
     use super::{DefinitionLocation, Definitions};
 

@@ -30,6 +30,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 similar = "2.1.0"
 tokio = { workspace = true }
 toml = { workspace = true }
+toml_edit = { workspace = true }
 
 clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
 clarinet-files = { path = "../clarinet-files" }
@@ -41,14 +42,14 @@ hiro-system-kit = { path = "../hiro-system-kit" }
 stacks-network = { path = "../stacks-network" }
 
 [target.'cfg(unix)'.dependencies]
-nix = "0.29.0"
-signal-hook = { version = "0.3", features = ["iterator"] }
+nix = "0.30.1"
+signal-hook = { workspace = true, features = ["iterator"] }
 libc = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { workspace = true, features = ["derive"] }
 clap_complete = { version = "4.4.4" }
-tower-lsp-server = { version = "0.22.0" }
+tower-lsp-server = { version = "0.23.0" }
 segment = { version = "0.2.4", optional = true }
 mac_address = { version = "1.1.8", optional = true }
 

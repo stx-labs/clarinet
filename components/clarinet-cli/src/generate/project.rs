@@ -175,10 +175,6 @@ impl GetChangesForNewProject {
             # path = "contracts/counter.clar"
             # epoch = "latest"
 
-            [repl.analysis]
-            passes = ["check_checker"]
-            check_checker = {{ trusted_sender = false, trusted_caller = false, callee_filter = false }}
-
             # Check-checker settings:
             # trusted_sender: if true, inputs are trusted after tx_sender has been checked.
             # trusted_caller: if true, inputs are trusted after contract-caller has been checked.
@@ -186,6 +182,10 @@ impl GetChangesForNewProject {
             # warning, if it gets checked inside. This check will also propagate up to the
             # caller.
             # More informations: https://www.hiro.so/blog/new-safety-checks-in-clarinet
+
+            [repl.analysis]
+            passes = ["check_checker"]
+            check_checker = {{ trusted_sender = false, trusted_caller = false, callee_filter = false }}
         "#,
             name = self.project_name,
             tel = self.telemetry_enabled
