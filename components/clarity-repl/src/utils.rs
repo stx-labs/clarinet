@@ -1,10 +1,8 @@
-use ::clarity::types::StacksEpochId;
 use ::clarity::vm::ast::parser;
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
 use ::clarity::vm::representations::PreSymbolicExpressionType::Comment;
 
 use crate::repl::clarity_values::value_to_string;
-use crate::repl::Epoch;
 
 pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     match event {
@@ -72,16 +70,9 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     }
 }
 
-pub fn remove_env_simnet(epoch: Epoch, source: String) -> Result<String, String> {
-    let (pre_expressions, mut _diagnostics, success) = if epoch >= StacksEpochId::Epoch21 {
-        parser::v2::parse_collect_diagnostics(&source)
-    } else {
-        let parse_result = parser::v1::parse(&source);
-        match parse_result {
-            Ok(pre_expressions) => (pre_expressions, vec![], true),
-            Err(error) => (vec![], vec![error.diagnostic], false),
-        }
-    };
+pub fn remove_env_simnet(source: String) -> Result<String, String> {
+    let (pre_expressions, mut _diagnostics, success) =
+        parser::v2::parse_collect_diagnostics(&source);
 
     if !success {
         return Err("failed to parse pre_expressions from source".to_string());
@@ -122,7 +113,6 @@ pub fn remove_env_simnet(epoch: Epoch, source: String) -> Result<String, String>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repl::DEFAULT_EPOCH;
 
     #[test]
     fn can_remove_env_simnet() {
@@ -154,17 +144,14 @@ mod tests {
 
 "#;
 
-        let epoch = DEFAULT_EPOCH;
-        let epoch = Epoch::Specific(epoch);
-
         // test that we can remove a marked fn
-        let clean = remove_env_simnet(epoch.clone(), with_env_simnet.to_string())
-            .expect("remove_env_simnet failed");
+        let clean =
+            remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
 
         // test that nothing is removed if nothing is marked
-        let clean = remove_env_simnet(epoch.clone(), without_env_simnet.to_string())
-            .expect("remove_env_simnet failed");
+        let clean =
+            remove_env_simnet(without_env_simnet.to_string()).expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
     }
 }
