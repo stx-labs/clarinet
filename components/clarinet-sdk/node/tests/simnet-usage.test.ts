@@ -181,6 +181,17 @@ describe("simnet can call contracts function", () => {
     });
   });
 
+  it("reports costs for deployContract", () => {
+    simnet.setEpoch(latestEpochStr);
+    const source = "(define-public (add (a uint) (b uint)) (ok (+ a b)))\n";
+    const res = simnet.deployContract("cost-test", source, null, deployerAddr);
+
+    expect(res).toHaveProperty("costs");
+    expect(res.costs).not.toBeNull();
+    // Verify that runtime cost is reported (should be > 0 for a deployment)
+    expect(res.costs.total.runtime).toEqual(224);
+  });
+
   it("can call public functions with arguments", () => {
     const res = simnet.callPublicFn("counter", "add", [Cl.uint(2)], address1);
 
