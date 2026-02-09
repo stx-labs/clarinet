@@ -2,99 +2,100 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+# Project Overview
 
 Clarinet is a development toolkit for building, testing, and deploying Clarity smart contracts on the Stacks blockchain. It provides a CLI, REPL, testing framework, debugger, and local devnet environment.
 
-## Build Commands
+This repository contains three tools htat are built on top of the same Rust components
+- CLI
+- TypeScript SDK
+- VSCode Extension (LSP wrapper)
+
+# Architecture
+
+## Core Rust Components
+
+- `clarity-repl` - Interactive REPL with DAP debugger support
+- `clarity-lsp` - Language Server Protocol for IDE integration
+- `clarinet-files` - Manifest parsing (Clarinet.toml, project structure)
+- `clarinet-deployments` - Contract deployment orchestration
+- `clarinet-format` - Clarity code formatter
+- `stacks-network` - Local devnet orchestration (Docker-based)
+- `stacks-rpc-client` - Stacks node HTTP client
+- `stacks-codec` - Stacks wire format encoding/decoding
+- `clarinet-utils` - Cryptographic utilities
+- `hiro-system-kit` - Cross-platform system helpers
+
+## CLI
+
+- `clarinet-cli` - Main CLI binary. Default member of `./cargo.toml`
+
+### Commands
 
 ```bash
-# Build CLI (debug)
+# Build
 cargo build
 
-# Build CLI (release)
-cargo build --release
-
-# Install CLI to system path
-cargo clarinet-install
-
-# Build WASM SDK (required before SDK tests)
-npm run build:sdk-wasm
-
-# Build TypeScript SDK
-npm run build:sdk
-```
-
-## Testing
-
-```bash
 # Run all Rust tests (uses cargo-nextest)
 cargo tst
 
 # Run single test
 cargo tst -p <crate-name> -- <test-name>
 
-# Run tests with coverage (LCOV output)
-cargo cov
-
-# Run tests with HTML coverage report
-cargo cov-dev
-
-# Run SDK tests
-npm test
-```
-
-## Linting and Formatting
-
-```bash
-# Format code (Stacks style with grouped imports)
-cargo fmt-stacks
-
-# Check formatting without modifying
-cargo fmt-stacks --check
-
 # Run clippy
 cargo clippy --workspace --exclude clarinet-sdk-wasm
 
-# Run clippy for WASM target
+# Format code
+cargo fmt-stacks
+
+# Check formatting
+cargo fmt-stacks --check
+```
+
+## SDK (Wasm + TypeScript)
+
+- `clarinet-sdk-wasm` - Rust core built on top of the core components and CLI, compiled to WebAssembly
+- `clarinet-sdk` - TypeScript wrapper around `clarinet-sdk-wasm`
+
+Exposes some of the CLI features thanks to Wasm, and contains the Clarity unit testing framework.
+The NPM workspace is configureed in the root `./package.json`
+
+### Commands
+
+```bash
+# Compile the Wasm bindgen (required before SDK tests)
+npm run build:sdk-wasm
+
+# Build the SDK
+npm run build:sdk
+
+# Run all SDK tests
+npm test -w components/clarinet-sdk/node
+
+# Run tests matching a pattern
+npm test -w components/clarinet-sdk/node -- tests/<filename>.test.ts -t <test name pattern>
+
+# Run clippy
 cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
 ```
 
-## Architecture
+## VSCode extension
 
-This is a Cargo workspace with 14 Rust crates in `components/`:
-
-**CLI & User Interfaces:**
-- `clarinet-cli` - Main CLI binary (default member)
-- `clarity-repl` - Interactive REPL with DAP debugger support
-- `clarity-lsp` - Language Server Protocol for IDE integration
-
-**SDK (WASM + TypeScript):**
-- `clarinet-sdk-wasm` - Rust core compiled to WebAssembly
-- `clarinet-sdk` - TypeScript SDK with `node` and `browser` packages (not a workspace member)
-
-**Project Management:**
-- `clarinet-files` - Manifest parsing (Clarinet.toml, project structure)
-- `clarinet-deployments` - Contract deployment orchestration
-- `clarinet-format` - Clarity code formatter
-
-**Blockchain Integration:**
-- `stacks-network` - Local devnet orchestration (Docker-based)
-- `stacks-rpc-client` - Stacks node HTTP client
-- `chainhook-sdk` - Event indexing and webhooks
-- `chainhook-types` - Bitcoin/Stacks data schemas
-
-**Serialization:**
-- `stacks-codec` - Stacks wire format encoding/decoding
-
-**Utilities:**
-- `clarinet-utils` - Cryptographic utilities
-- `clarity-events` - Event processing
-- `hiro-system-kit` - Cross-platform system helpers
-
-**Plugins & Extensions (not workspace members):**
 - `clarity-vscode` - TypeScript/WASM extension for Microsoft Visual Studio Code
-- `clarity-jupyter-kernel` - Jupyter kernel for Clarity (currently unmaintained)
+
+A wrapper around the `clarity-lsp`, compiled to Wasm to produced a self-contained VSCode extension binary.
+It has it's own `package.json` in `./components/clarity-vscode/package.json`
+
+## Build Commands
+
+The commands have to run in the `components/clarity-vscode`
+```bash
+# Build the extension
+npm run vsce:package
+
+# Run end-to-end tests
+npm test
+```
 
 ## Key Dependencies
 
