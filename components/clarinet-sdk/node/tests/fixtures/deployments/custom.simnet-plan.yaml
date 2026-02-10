@@ -31,28 +31,28 @@ plan:
   batches:
     - id: 0
       transactions:
-        - emulated-contract-publish:
-            contract-name: multiplier-trait
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/multiplier-trait.clar
-            clarity-version: 2
-        - emulated-contract-publish:
-            contract-name: counter
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/counter.clar
-            clarity-version: 2
-        - emulated-contract-publish:
-            contract-name: multiplier-contract
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/multiplier-contract.clar
-            clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: multiplier-trait
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          path: contracts/multiplier-trait.clar
+          clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: counter
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          path: contracts/counter.clar
+          clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: multiplier-contract
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          path: contracts/multiplier-contract.clar
+          clarity-version: 2
       epoch: "2.4"
     - id: 1
       transactions:
-        - emulated-contract-call:
-            contract-id: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            method: add
-            parameters:
-              - u2
+        - transaction-type: emulated-contract-call
+          contract-id: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          method: add
+          parameters:
+            - u2
       epoch: "2.4"

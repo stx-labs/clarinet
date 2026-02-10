@@ -63,9 +63,9 @@ plan:
   batches:
     - id: 0
       transactions:
-        - emulated-contract-publish:
-            contract-name: billboard
-            emulated-sender: ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE
-            path: contracts/billboard.clar
-            clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: billboard
+          emulated-sender: ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE
+          path: contracts/billboard.clar
+          clarity-version: 2
       epoch: "2.4"

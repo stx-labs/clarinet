@@ -8,21 +8,21 @@ plan:
   batches:
     - id: 0
       transactions:
-        - contract-publish:
-            contract-name: counter
-            expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            cost: 5960
-            path: contracts/counter.clar
-            anchor-block-only: true
-            clarity-version: 1
+        - transaction-type: contract-publish
+          contract-name: counter
+          expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          cost: 5960
+          path: contracts/counter.clar
+          anchor-block-only: true
+          clarity-version: 1
       epoch: "2.0"
     - id: 1
       transactions:
-        - contract-publish:
-            contract-name: counter-2
-            expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            cost: 6940
-            path: contracts/counter-v2.clar
-            anchor-block-only: true
-            clarity-version: 2
+        - transaction-type: contract-publish
+          contract-name: counter-2
+          expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          cost: 6940
+          path: contracts/counter-v2.clar
+          anchor-block-only: true
+          clarity-version: 2
       epoch: "2.4"
