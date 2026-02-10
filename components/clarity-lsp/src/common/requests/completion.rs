@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::sync::LazyLock;
-use std::vec;
+use std::sync::{LazyLock, OnceLock};
 
 use clarity::vm::types::{BlockInfoProperty, FunctionType, TypeSignatureExt};
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
@@ -22,14 +21,27 @@ use regex::Regex;
 
 use super::helpers::{get_function_at_position, is_position_within_span};
 
-static COMPLETION_ITEMS_CLARITY_1: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_default_native_keywords_list(ClarityVersion::Clarity1));
-static COMPLETION_ITEMS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_default_native_keywords_list(ClarityVersion::Clarity2));
-static COMPLETION_ITEMS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_default_native_keywords_list(ClarityVersion::Clarity3));
-static COMPLETION_ITEMS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_default_native_keywords_list(ClarityVersion::Clarity4));
+const fn version_to_index(version: ClarityVersion) -> usize {
+    match version {
+        ClarityVersion::Clarity1 => 0,
+        ClarityVersion::Clarity2 => 1,
+        ClarityVersion::Clarity3 => 2,
+        ClarityVersion::Clarity4 => 3,
+        ClarityVersion::Clarity5 => 4,
+    }
+}
+
+fn get_native_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+    ];
+    CELLS[version_to_index(version)].get_or_init(|| build_default_native_keywords_list(version))
+}
+
 static VAR_FUNCTIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
     vec![
         NativeFunctions::SetVar.to_string(),
@@ -68,32 +80,42 @@ static ITERATOR_FUNCTIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
         NativeFunctions::Fold.to_string(),
     ]
 });
-static VALID_MAP_FUNCTIONS_CLARITY_1: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_map_valid_cb_completion_items(ClarityVersion::Clarity1));
-static VALID_MAP_FUNCTIONS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_map_valid_cb_completion_items(ClarityVersion::Clarity2));
-static VALID_MAP_FUNCTIONS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_map_valid_cb_completion_items(ClarityVersion::Clarity3));
-static VALID_MAP_FUNCTIONS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_map_valid_cb_completion_items(ClarityVersion::Clarity4));
 
-static VALID_FILTER_FUNCTIONS_CLARITY_1: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity1));
-static VALID_FILTER_FUNCTIONS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity2));
-static VALID_FILTER_FUNCTIONS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity3));
-static VALID_FILTER_FUNCTIONS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_filter_valid_cb_completion_items(ClarityVersion::Clarity4));
+fn get_map_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+    ];
+    CELLS[version_to_index(version)].get_or_init(|| build_map_valid_cb_completion_items(version))
+}
 
-static VALID_FOLD_FUNCTIONS_CLARITY_1: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity1));
-static VALID_FOLD_FUNCTIONS_CLARITY_2: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity2));
-static VALID_FOLD_FUNCTIONS_CLARITY_3: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity3));
-static VALID_FOLD_FUNCTIONS_CLARITY_4: LazyLock<Vec<CompletionItem>> =
-    LazyLock::new(|| build_fold_valid_cb_completion_items(ClarityVersion::Clarity4));
+fn get_filter_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+    ];
+    CELLS[version_to_index(version)].get_or_init(|| build_filter_valid_cb_completion_items(version))
+}
+
+fn get_fold_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+    ];
+    CELLS[version_to_index(version)].get_or_init(|| build_fold_valid_cb_completion_items(version))
+}
+
+static PLACEHOLDER_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r" \$\{\d+:[\w-]+\}").unwrap());
 
 #[derive(Clone, Debug)]
 pub struct ContractDefinedData {
@@ -152,9 +174,10 @@ impl ContractDefinedData {
             };
         }
 
-        let insert_text = match completion_args.len() {
-            0 => Some(name.to_string()),
-            _ => Some(format!("{} {}", name, completion_args.join(" "))),
+        let insert_text = if completion_args.is_empty() {
+            Some(name.to_string())
+        } else {
+            Some(format!("{} {}", name, completion_args.join(" ")))
         };
 
         self.functions_completion_items.push(CompletionItem {
@@ -169,26 +192,28 @@ impl ContractDefinedData {
     pub fn populate_snippet_with_options(
         &self,
         version: &ClarityVersion,
-        name: &String,
+        name: &str,
         snippet: &str,
     ) -> Option<String> {
-        if VAR_FUNCTIONS.contains(name) && !self.vars.is_empty() {
+        if VAR_FUNCTIONS.iter().any(|s| s == name) && !self.vars.is_empty() {
             let choices = self.vars.join(",");
             return Some(snippet.replace("${1:var}", &format!("${{1|{choices}|}}")));
         }
-        if MAP_FUNCTIONS.contains(name) && !self.maps.is_empty() {
+        if MAP_FUNCTIONS.iter().any(|s| s == name) && !self.maps.is_empty() {
             let choices = self.maps.join(",");
             return Some(snippet.replace("${1:map-name}", &format!("${{1|{choices}|}}")));
         }
-        if FT_FUNCTIONS.contains(name) && !self.fts.is_empty() {
+        if FT_FUNCTIONS.iter().any(|s| s == name) && !self.fts.is_empty() {
             let choices = self.fts.join(",");
             return Some(snippet.replace("${1:token-name}", &format!("${{1|{choices}|}}")));
         }
-        if NFT_FUNCTIONS.contains(name) && !self.nfts.is_empty() {
+        if NFT_FUNCTIONS.iter().any(|s| s == name) && !self.nfts.is_empty() {
             let choices = self.nfts.join(",");
             return Some(snippet.replace("${1:asset-name}", &format!("${{1|{choices}|}}")));
         }
-        if ITERATOR_FUNCTIONS.contains(name) && !self.functions_completion_items.is_empty() {
+        if ITERATOR_FUNCTIONS.iter().any(|s| s == name)
+            && !self.functions_completion_items.is_empty()
+        {
             let mut choices = self
                 .functions_completion_items
                 .iter()
@@ -209,12 +234,10 @@ impl ContractDefinedData {
     }
 
     pub fn get_contract_completion_items(&self) -> Vec<CompletionItem> {
-        [&self.consts[..], &self.locals[..]]
-            .concat()
+        self.consts
             .iter()
-            .map(|(name, definition)| {
-                CompletionItem::new_simple(name.to_string(), definition.to_string())
-            })
+            .chain(self.locals.iter())
+            .map(|(name, definition)| CompletionItem::new_simple(name.clone(), definition.clone()))
             .collect()
     }
 }
@@ -350,7 +373,7 @@ pub fn get_contract_calls(analysis: &ContractAnalysis) -> Vec<CompletionItem> {
         );
         let documentation = MarkupContent {
             kind: MarkupKind::Markdown,
-            value: [vec![format!("**{}**", name.to_string())], doc_args]
+            value: [vec![format!("**{name}**")], doc_args]
                 .concat()
                 .join("\n\n"),
         };
@@ -384,63 +407,57 @@ pub fn build_completion_item_list(
     include_native_placeholders: bool,
 ) -> Vec<CompletionItem> {
     if let Some((function_name, param)) = get_function_at_position(position, expressions) {
+        let function_name_str = function_name.to_string();
+
         // - for var-*, map-*, ft-* or nft-* methods, return the corresponding data names
-        let mut completion_strings: Option<Vec<String>> = None;
-        if VAR_FUNCTIONS.contains(&function_name.to_string()) && param == Some(0) {
-            completion_strings = Some(active_contract_defined_data.vars.clone());
-        } else if MAP_FUNCTIONS.contains(&function_name.to_string()) && param == Some(0) {
-            completion_strings = Some(active_contract_defined_data.maps.clone());
-        } else if FT_FUNCTIONS.contains(&function_name.to_string()) && param == Some(0) {
-            completion_strings = Some(active_contract_defined_data.fts.clone());
-        } else if NFT_FUNCTIONS.contains(&function_name.to_string()) && param == Some(0) {
-            completion_strings = Some(active_contract_defined_data.nfts.clone());
-        }
+        let completion_strings = if VAR_FUNCTIONS.contains(&function_name_str) && param == Some(0) {
+            Some(&active_contract_defined_data.vars)
+        } else if MAP_FUNCTIONS.contains(&function_name_str) && param == Some(0) {
+            Some(&active_contract_defined_data.maps)
+        } else if FT_FUNCTIONS.contains(&function_name_str) && param == Some(0) {
+            Some(&active_contract_defined_data.fts)
+        } else if NFT_FUNCTIONS.contains(&function_name_str) && param == Some(0) {
+            Some(&active_contract_defined_data.nfts)
+        } else {
+            None
+        };
 
         if let Some(completion_strings) = completion_strings {
             return completion_strings
                 .iter()
-                .map(|s| CompletionItem::new_simple(String::from(s), String::from("")))
+                .map(|s| CompletionItem::new_simple(s.clone(), String::new()))
                 .collect();
         }
 
         // - for iterator methods (filter, fold, map) return the list of available and valid functions
-        if ITERATOR_FUNCTIONS.contains(&function_name.to_string()) && param == Some(0) {
-            let mut completion_items: Vec<CompletionItem> = vec![];
-            completion_items.append(
-                &mut active_contract_defined_data
-                    .functions_completion_items
-                    .iter()
-                    .map(|f| CompletionItem::new_simple(f.label.clone(), String::from("")))
-                    .collect::<Vec<CompletionItem>>(),
-            );
+        if ITERATOR_FUNCTIONS.contains(&function_name_str) && param == Some(0) {
+            let mut completion_items: Vec<CompletionItem> = active_contract_defined_data
+                .functions_completion_items
+                .iter()
+                .map(|f| CompletionItem::new_simple(f.label.clone(), String::new()))
+                .collect();
             completion_items.append(&mut get_iterator_cb_completion_item(
                 clarity_version,
-                &function_name.to_string(),
+                &function_name_str,
             ));
             return completion_items;
         }
     }
 
-    let native_keywords = match clarity_version {
-        ClarityVersion::Clarity1 => COMPLETION_ITEMS_CLARITY_1.to_vec(),
-        ClarityVersion::Clarity2 => COMPLETION_ITEMS_CLARITY_2.to_vec(),
-        ClarityVersion::Clarity3 => COMPLETION_ITEMS_CLARITY_3.to_vec(),
-        ClarityVersion::Clarity4 => COMPLETION_ITEMS_CLARITY_4.to_vec(),
-    };
-    let placeholder_pattern = Regex::new(r" \$\{\d+:[\w-]+\}").unwrap();
+    let mut completion_items = active_contract_defined_data.get_contract_completion_items();
 
-    let mut completion_items = vec![];
-    completion_items.append(&mut active_contract_defined_data.get_contract_completion_items());
-    for mut item in [
-        native_keywords,
-        contract_calls,
-        active_contract_defined_data
-            .functions_completion_items
-            .clone(),
-    ]
-    .concat()
-    .drain(..)
-    {
+    let items_iter = get_native_completions(*clarity_version)
+        .iter()
+        .cloned()
+        .chain(contract_calls)
+        .chain(
+            active_contract_defined_data
+                .functions_completion_items
+                .iter()
+                .cloned(),
+        );
+
+    for mut item in items_iter {
         match item.kind {
             Some(
                 CompletionItemKind::EVENT
@@ -464,8 +481,8 @@ pub fn build_completion_item_list(
                         // for var-*, map-*, ft-* and nft-* methods
                         // the variable name is kept but the other placeholders are removed
                         let updated_snippet =
-                            placeholder_pattern.replace_all(&snippet, "").to_string();
-                        if updated_snippet.ne(&snippet) {
+                            PLACEHOLDER_PATTERN.replace_all(&snippet, "").to_string();
+                        if updated_snippet != snippet {
                             snippet = updated_snippet;
                             snippet.push_str(" $0");
                         }
@@ -723,6 +740,7 @@ pub fn build_map_valid_cb_completion_items(version: ClarityVersion) -> Vec<Compl
         NativeFunctions::BitwiseLShift,
         NativeFunctions::BitwiseRShift,
         NativeFunctions::BitwiseXor2,
+        NativeFunctions::ContractHash,
     ]
     .iter()
     .filter_map(|func| build_iterator_cb_completion_item(func, version))
@@ -799,27 +817,12 @@ fn build_iterator_cb_completion_item(
 }
 
 fn get_iterator_cb_completion_item(version: &ClarityVersion, func: &str) -> Vec<CompletionItem> {
-    if func.to_string().eq(&NativeFunctions::Map.to_string()) {
-        return match version {
-            ClarityVersion::Clarity1 => VALID_MAP_FUNCTIONS_CLARITY_1.to_vec(),
-            ClarityVersion::Clarity2 => VALID_MAP_FUNCTIONS_CLARITY_2.to_vec(),
-            ClarityVersion::Clarity3 => VALID_MAP_FUNCTIONS_CLARITY_3.to_vec(),
-            ClarityVersion::Clarity4 => VALID_MAP_FUNCTIONS_CLARITY_4.to_vec(),
-        };
-    }
-    if func.to_string().eq(&NativeFunctions::Filter.to_string()) {
-        return match version {
-            ClarityVersion::Clarity1 => VALID_FILTER_FUNCTIONS_CLARITY_1.to_vec(),
-            ClarityVersion::Clarity2 => VALID_FILTER_FUNCTIONS_CLARITY_2.to_vec(),
-            ClarityVersion::Clarity3 => VALID_FILTER_FUNCTIONS_CLARITY_3.to_vec(),
-            ClarityVersion::Clarity4 => VALID_FILTER_FUNCTIONS_CLARITY_4.to_vec(),
-        };
-    }
-    match version {
-        ClarityVersion::Clarity1 => VALID_FOLD_FUNCTIONS_CLARITY_1.to_vec(),
-        ClarityVersion::Clarity2 => VALID_FOLD_FUNCTIONS_CLARITY_2.to_vec(),
-        ClarityVersion::Clarity3 => VALID_FOLD_FUNCTIONS_CLARITY_3.to_vec(),
-        ClarityVersion::Clarity4 => VALID_FOLD_FUNCTIONS_CLARITY_4.to_vec(),
+    if func == NativeFunctions::Map.to_string() {
+        get_map_cb_completions(*version).clone()
+    } else if func == NativeFunctions::Filter.to_string() {
+        get_filter_cb_completions(*version).clone()
+    } else {
+        get_fold_cb_completions(*version).clone()
     }
 }
 
@@ -964,7 +967,7 @@ mod populate_snippet_with_options_tests {
         );
         let snippet = data.populate_snippet_with_options(
             &ClarityVersion::Clarity2,
-            &"var-get".to_string(),
+            "var-get",
             "var-get ${1:var}",
         );
         assert_eq!(snippet, Some("var-get ${1|counter,is-active|}".to_string()));
@@ -975,7 +978,7 @@ mod populate_snippet_with_options_tests {
         let data = get_defined_data("(define-map names principal { name: (buff 48) })");
         let snippet = data.populate_snippet_with_options(
             &ClarityVersion::Clarity2,
-            &"map-get?".to_string(),
+            "map-get?",
             "map-get? ${1:map-name} ${2:key-tuple}",
         );
         assert_eq!(
@@ -989,7 +992,7 @@ mod populate_snippet_with_options_tests {
         let data = get_defined_data("(define-fungible-token btc u21)");
         let snippet = data.populate_snippet_with_options(
             &ClarityVersion::Clarity2,
-            &"ft-mint?".to_string(),
+            "ft-mint?",
             "ft-mint? ${1:token-name} ${2:amount} ${3:recipient}",
         );
         assert_eq!(
@@ -1003,7 +1006,7 @@ mod populate_snippet_with_options_tests {
         let data = get_defined_data("(define-non-fungible-token bitcoin-nft uint)");
         let snippet = data.populate_snippet_with_options(
             &ClarityVersion::Clarity2,
-            &"nft-mint?".to_string(),
+            "nft-mint?",
             "nft-mint? ${1:asset-name} ${2:asset-identifier} ${3:recipient}",
         );
         assert_eq!(
