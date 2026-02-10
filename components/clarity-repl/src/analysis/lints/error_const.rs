@@ -104,7 +104,6 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             .iter()
             // TODO: Can we declare the prefix as a constant at the top of the file, rather than hardcoding it here (and elsewhere in the file)?
             .filter(|(name, _)| name.as_str().starts_with("ERR_"))
-            // TODO: Also ignore if the constant name begins or ends with `_` (use `util::is_explicitly_unused()`)
             .map(|(name, data)| (*name, data))
             .collect();
         // TODO: How about using an `IndexMap` in `AnalysisCache` instead, so we know the map order is the key order is the same as the declaration order
