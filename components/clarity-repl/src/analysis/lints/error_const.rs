@@ -12,6 +12,8 @@ use clarity::vm::functions::NativeFunctions;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
+const ERR_PREFIX: &str = "ERR_";
+
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::constants::ConstantData;
 use crate::analysis::cache::AnalysisCache;
@@ -85,7 +87,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
     }
 
     fn make_not_err_message(name: &ClarityName) -> String {
-        format!("constant `{name}` has the `ERR_` prefix but its value is not an error type")
+        format!("constant `{name}` has the `{ERR_PREFIX}` prefix but its value is not an error type")
     }
 
     fn make_duplicate_message(name: &ClarityName, other_name: &ClarityName) -> String {
@@ -102,8 +104,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
         // Collect ERR_ constants sorted by span position for deterministic duplicate detection
         let mut err_constants: Vec<(&ClarityName, &ConstantData)> = constants
             .iter()
-            // TODO: Can we declare the prefix as a constant at the top of the file, rather than hardcoding it here (and elsewhere in the file)?
-            .filter(|(name, _)| name.as_str().starts_with("ERR_"))
+            .filter(|(name, _)| name.as_str().starts_with(ERR_PREFIX))
             .map(|(name, data)| (*name, data))
             .collect();
         // TODO: How about using an `IndexMap` in `AnalysisCache` instead, so we know the map order is the key order is the same as the declaration order
@@ -129,7 +130,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
                     message: Self::make_not_err_message(name),
                     spans: vec![const_data.expr.span.clone()],
                     suggestion: Some(
-                        "Use `(err ...)` as the value or remove the `ERR_` prefix".to_string(),
+                        format!("Use `(err ...)` as the value or remove the `{ERR_PREFIX}` prefix"),
                     ),
                 });
                 continue;
