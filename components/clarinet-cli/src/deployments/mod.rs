@@ -2,19 +2,19 @@ pub mod types;
 mod ui;
 
 use std::fs::{self};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clarinet_deployments::types::{DeploymentGenerationArtifacts, DeploymentSpecification};
-use clarinet_files::{FileLocation, ProjectManifest, StacksNetwork};
+use clarinet_files::{paths, ProjectManifest, StacksNetwork};
 pub use ui::start_ui;
 
 pub fn get_absolute_deployment_path(
     manifest: &ProjectManifest,
     relative_deployment_path: &str,
-) -> Result<FileLocation, String> {
-    let mut deployment_path = manifest.location.get_project_root_location()?;
-    deployment_path.append_path(relative_deployment_path)?;
-    Ok(deployment_path)
+) -> Result<PathBuf, String> {
+    let project_root =
+        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))?;
+    Ok(project_root.join(relative_deployment_path))
 }
 
 pub fn generate_default_deployment(
@@ -27,13 +27,11 @@ pub fn generate_default_deployment(
 }
 
 pub fn check_deployments(manifest: &ProjectManifest) -> Result<(), String> {
-    let project_root_location = manifest.location.get_project_root_location()?;
+    let project_root_location =
+        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))?;
     let files = get_deployments_files(&project_root_location)?;
     for (path, relative_path) in files.into_iter() {
-        let _spec = match DeploymentSpecification::from_config_file(
-            &FileLocation::from_path(path),
-            &project_root_location,
-        ) {
+        let _spec = match DeploymentSpecification::from_config_file(&path, &project_root_location) {
             Ok(spec) => spec,
             Err(msg) => {
                 println!("{} {} syntax incorrect\n{}", red!("x"), relative_path, msg);
@@ -45,13 +43,11 @@ pub fn check_deployments(manifest: &ProjectManifest) -> Result<(), String> {
     Ok(())
 }
 
-fn get_deployments_files(
-    project_root_location: &FileLocation,
-) -> Result<Vec<(PathBuf, String)>, String> {
-    let mut project_dir = project_root_location.clone();
-    let prefix_len = project_dir.to_string().len() + 1;
-    project_dir.append_path("deployments")?;
-    let Ok(paths) = fs::read_dir(project_dir.to_string()) else {
+fn get_deployments_files(project_root_location: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+    let project_dir = project_root_location.to_path_buf();
+    let prefix_len = project_dir.to_string_lossy().len() + 1;
+    let deployments_dir = project_dir.join("deployments");
+    let Ok(paths) = fs::read_dir(&deployments_dir) else {
         return Ok(vec![]);
     };
     let mut plans_paths = vec![];
@@ -74,13 +70,14 @@ fn get_deployments_files(
 
 pub fn write_deployment(
     deployment: &DeploymentSpecification,
-    target_location: &FileLocation,
+    target_location: &Path,
+    project_root: &Path,
     prompt_override: bool,
 ) -> Result<(), String> {
     if target_location.exists() && prompt_override {
         println!(
             "Deployment {} already exists.\n{}?",
-            target_location,
+            target_location.display(),
             yellow!("Overwrite [Y/n]")
         );
         let mut buffer = String::new();
@@ -90,6 +87,6 @@ pub fn write_deployment(
         }
     }
 
-    target_location.write_content(&deployment.to_file_content()?)?;
+    paths::write_content(target_location, &deployment.to_file_content(project_root)?)?;
     Ok(())
 }

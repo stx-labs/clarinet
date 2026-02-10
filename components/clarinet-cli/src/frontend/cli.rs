@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::prelude::*;
 use std::io::{self};
+use std::path::{Path, PathBuf};
 use std::{env, process};
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -18,7 +19,7 @@ use clarinet_deployments::{
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::{
-    get_manifest_location, FileLocation, NetworkManifest, ProjectManifest, RequirementConfig,
+    get_manifest_location, paths, NetworkManifest, ProjectManifest, RequirementConfig,
     StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
@@ -744,24 +745,38 @@ pub fn main() {
                     };
                 }
 
+                let project_root =
+                    paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))
+                        .unwrap();
+
                 let write_plan = if default_deployment_path.exists() {
                     let existing_deployment = load_deployment(&manifest, &default_deployment_path)
                         .unwrap_or_else(|message| {
                             eprintln!(
                                 "{}",
                                 format_err!(format!(
-                                    "unable to load {default_deployment_path}\n{message}",
+                                    "unable to load {}\n{message}",
+                                    default_deployment_path.display(),
                                 ))
                             );
                             process::exit(1);
                         });
-                    should_existing_plan_be_replaced(&existing_deployment, &deployment)
+                    should_existing_plan_be_replaced(
+                        &existing_deployment,
+                        &deployment,
+                        &project_root,
+                    )
                 } else {
                     true
                 };
 
                 if write_plan {
-                    let res = write_deployment(&deployment, &default_deployment_path, false);
+                    let res = write_deployment(
+                        &deployment,
+                        &default_deployment_path,
+                        &project_root,
+                        false,
+                    );
                     if let Err(message) = res {
                         eprintln!("{}", format_err!(message));
                         process::exit(1);
@@ -770,7 +785,7 @@ pub fn main() {
                     println!(
                         "{} {}",
                         green!("Generated file"),
-                        default_deployment_path.get_relative_location().unwrap()
+                        paths::get_relative_path(&default_deployment_path, &project_root).unwrap()
                     );
                 }
             }
@@ -786,6 +801,10 @@ pub fn main() {
                 } else {
                     None
                 };
+
+                let project_root =
+                    paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))
+                        .unwrap();
 
                 let result = match (&network, cmd.deployment_plan_path) {
                     (None, None) => {
@@ -812,11 +831,11 @@ pub fn main() {
                                         std::process::exit(1);
                                     }
                                 };
-                                let res = write_deployment(&deployment, &default_deployment_path, true);
+                                let res = write_deployment(&deployment, &default_deployment_path, &project_root, true);
                                 if let Err(message) = res {
                                     Err(message)
                                 } else {
-                                    println!("{} {}", green!("Generated file"), default_deployment_path.get_relative_location().unwrap());
+                                    println!("{} {}", green!("Generated file"), paths::get_relative_path(&default_deployment_path, &project_root).unwrap());
                                     Ok(deployment)
                                 }
                             }
@@ -842,7 +861,7 @@ pub fn main() {
 
                 println!(
                     "The following deployment plan will be applied:\n{}\n\n",
-                    DeploymentSynthesis::from_deployment(&deployment)
+                    DeploymentSynthesis::from_deployment(&deployment, &project_root)
                 );
 
                 if !cmd.use_on_disk_deployment_plan {
@@ -1349,14 +1368,14 @@ fn from_code_source(src: ClarityCodeSource) -> String {
     }
 }
 
-fn get_manifest_location_or_exit(path: Option<String>) -> FileLocation {
+fn get_manifest_location_or_exit(path: Option<String>) -> PathBuf {
     get_manifest_location(path).unwrap_or_else(|| {
         eprintln!("Could not find Clarinet.toml");
         process::exit(1);
     })
 }
 
-fn get_manifest_location_or_warn(path: Option<String>) -> Option<FileLocation> {
+fn get_manifest_location_or_warn(path: Option<String>) -> Option<PathBuf> {
     match get_manifest_location(path) {
         Some(manifest_location) => Some(manifest_location),
         None => {
@@ -1454,7 +1473,11 @@ pub fn load_deployment_and_artifacts_or_exit(
             match load_deployment(manifest, &deployment_location) {
                 Ok(deployment) => {
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
-                    Ok((deployment, Some(deployment_location.to_string()), artifacts))
+                    Ok((
+                        deployment,
+                        Some(deployment_location.to_string_lossy().to_string()),
+                        artifacts,
+                    ))
                 }
                 Err(e) => Err(format!("loading {path} failed with error: {e}")),
             }
@@ -1473,14 +1496,15 @@ pub fn load_deployment_and_artifacts_or_exit(
 fn should_existing_plan_be_replaced(
     existing_plan: &DeploymentSpecification,
     new_plan: &DeploymentSpecification,
+    project_root: &Path,
 ) -> bool {
     use similar::{ChangeTag, TextDiff};
 
     let existing_file = existing_plan
-        .to_file_content()
+        .to_file_content(project_root)
         .expect("unable to serialize deployment");
     let new_file = new_plan
-        .to_file_content()
+        .to_file_content(project_root)
         .expect("unable to serialize deployment");
 
     if existing_file == new_file {
@@ -1529,16 +1553,22 @@ fn load_deployment_if_exists(
     }
 
     if !force_on_disk {
+        let project_root =
+            match paths::find_project_root(manifest.location.parent().unwrap_or(Path::new("."))) {
+                Ok(root) => root,
+                Err(e) => return Some(Err(e)),
+            };
+
         match generate_default_deployment(manifest, network, true) {
             Ok((deployment, _)) => {
                 use similar::{ChangeTag, TextDiff};
 
-                let current_version = match default_deployment_location.read_content() {
+                let current_version = match paths::read_content(&default_deployment_location) {
                     Ok(content) => content,
                     Err(message) => return Some(Err(message)),
                 };
 
-                let updated_version = match deployment.to_file_content() {
+                let updated_version = match deployment.to_file_content(&project_root) {
                     Ok(res) => res,
                     Err(err) => return Some(Err(format!("failed serializing deployment\n{err}"))),
                 };
@@ -1574,15 +1604,12 @@ fn load_deployment_if_exists(
                     if buffer.starts_with('n') {
                         Some(load_deployment(manifest, &default_deployment_location))
                     } else {
-                        default_deployment_location
-                            .write_content(&updated_version)
+                        paths::write_content(&default_deployment_location, &updated_version)
                             .ok()?;
                         Some(Ok(deployment))
                     }
                 } else {
-                    default_deployment_location
-                        .write_content(&updated_version)
-                        .ok()?;
+                    paths::write_content(&default_deployment_location, &updated_version).ok()?;
                     Some(Ok(deployment))
                 }
             }
@@ -1619,7 +1646,7 @@ fn sanitize_project_name(name: &str) -> String {
 }
 
 fn execute_changes(changes: Vec<Changes>) -> bool {
-    let mut shared_doc: Option<(FileLocation, DocumentMut)> = None;
+    let mut shared_doc: Option<(PathBuf, DocumentMut)> = None;
 
     for mut change in changes {
         match change {
@@ -1701,8 +1728,13 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
     }
 
     if let Some((location, doc)) = shared_doc {
-        if let Err(e) = location.write_content(doc.to_string().as_bytes()) {
-            eprintln!("{} Unable to update manifest file: {e}", red!("error:"));
+        let content = doc.to_string();
+        if let Err(message) = paths::write_content(&location, content.as_bytes()) {
+            eprintln!(
+                "{} Unable to update manifest file - {}",
+                red!("error:"),
+                message
+            );
             return false;
         }
     }
@@ -1711,9 +1743,8 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
 }
 
 /// Load and parse a manifest file, printing errors on failure.
-fn load_manifest(location: &FileLocation) -> Option<DocumentMut> {
-    let content = location
-        .read_content()
+fn load_manifest(location: &Path) -> Option<DocumentMut> {
+    let content = paths::read_content(location)
         .map_err(|e| {
             eprintln!("{}", format_err!(e));
         })
@@ -1968,6 +1999,8 @@ fn display_deploy_hint() {
 
 fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let manifest = load_manifest_or_exit(cmd.manifest_path, false);
+    let project_root =
+        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new("."))).unwrap();
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {
         None => {
@@ -2010,14 +2043,20 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                                 std::process::exit(1);
                             }
                         };
-                    let res = write_deployment(&deployment, &default_deployment_path, true);
+                    let res = write_deployment(
+                        &deployment,
+                        &default_deployment_path,
+                        &project_root,
+                        true,
+                    );
                     if let Err(message) = res {
                         Err(message)
                     } else {
                         println!(
                             "{} {}",
                             green!("Generated file"),
-                            default_deployment_path.get_relative_location().unwrap()
+                            paths::get_relative_path(&default_deployment_path, &project_root)
+                                .unwrap()
                         );
                         Ok(deployment)
                     }

@@ -1,11 +1,11 @@
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chainhook_sdk::chainhooks::types::{ChainhookSpecificationNetworkMap, ChainhookStore};
 use chainhook_sdk::types::{BitcoinNetwork, StacksNetwork};
-use clarinet_files::FileLocation;
+use clarinet_files::paths;
 
 pub fn parse_chainhook_full_specification(
     path: &PathBuf,
@@ -21,7 +21,7 @@ pub fn parse_chainhook_full_specification(
 }
 
 pub fn load_chainhooks(
-    manifest_location: &FileLocation,
+    manifest_location: &Path,
     networks: &(BitcoinNetwork, StacksNetwork),
 ) -> Result<ChainhookStore, String> {
     let hook_files = get_chainhooks_files(manifest_location)?;
@@ -50,13 +50,12 @@ pub fn load_chainhooks(
     })
 }
 
-fn get_chainhooks_files(
-    manifest_location: &FileLocation,
-) -> Result<Vec<(PathBuf, String)>, String> {
-    let mut chainhooks_dir = manifest_location.get_project_root_location()?;
-    chainhooks_dir.append_path("chainhooks")?;
-    let prefix_len = chainhooks_dir.to_string().len() + 1;
-    let Ok(paths) = fs::read_dir(chainhooks_dir.to_string()) else {
+fn get_chainhooks_files(manifest_location: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+    let project_root =
+        paths::find_project_root(manifest_location.parent().unwrap_or(Path::new(".")))?;
+    let chainhooks_dir = project_root.join("chainhooks");
+    let prefix_len = chainhooks_dir.to_string_lossy().len() + 1;
+    let Ok(paths) = fs::read_dir(&chainhooks_dir) else {
         return Ok(vec![]);
     };
     let mut hook_paths = vec![];

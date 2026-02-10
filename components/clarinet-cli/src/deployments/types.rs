@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter, Result};
+use std::path::Path;
 
 use clarinet_deployments::types::{DeploymentSpecification, TransactionSpecification};
 
@@ -9,7 +10,10 @@ pub struct DeploymentSynthesis {
 }
 
 impl DeploymentSynthesis {
-    pub fn from_deployment(deployment: &DeploymentSpecification) -> DeploymentSynthesis {
+    pub fn from_deployment(
+        deployment: &DeploymentSpecification,
+        project_root: &Path,
+    ) -> DeploymentSynthesis {
         let mut blocks_count = 0;
         let mut total_cost = 0;
         for batch in deployment.plan.batches.iter() {
@@ -31,7 +35,7 @@ impl DeploymentSynthesis {
             }
         }
 
-        let content = match deployment.to_file_content() {
+        let content = match deployment.to_file_content(project_root) {
             Ok(res) => res,
             Err(err) => panic!("unable to serialize deployment {err}"),
         };

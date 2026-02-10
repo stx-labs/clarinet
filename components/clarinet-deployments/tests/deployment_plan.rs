@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use clarinet_deployments::types::*;
-use clarinet_files::{FileLocation, StacksNetwork};
+use clarinet_files::StacksNetwork;
 use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName};
 
@@ -15,7 +16,7 @@ fn get_test_txs() -> (TransactionSpecification, TransactionSpecification) {
         TransactionSpecification::EmulatedContractPublish(EmulatedContractPublishSpecification {
             contract_name: ContractName::try_from("test".to_string()).unwrap(),
             emulated_sender: tx_sender.clone(),
-            location: FileLocation::from_path_string("/contracts/test.clar").unwrap(),
+            location: PathBuf::from("/contracts/test.clar"),
             source: "(ok true)".to_string(),
             clarity_version: ClarityVersion::Clarity2,
         });

@@ -2,7 +2,7 @@ extern crate console_error_panic_hook;
 use std::panic;
 use std::sync::{Arc, RwLock};
 
-use clarinet_files::{FileAccessor, WASMFileSystemAccessor};
+use clarinet_files::{paths, FileAccessor, WASMFileSystemAccessor};
 use js_sys::{Function as JsFunction, Promise};
 use ls_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
@@ -71,14 +71,16 @@ impl LspVscodeBridge {
                     }
                 };
                 let uri = &params.text_document.uri;
+
                 if let Some(contract_location) = get_contract_location(uri) {
                     LspNotification::ContractOpened(contract_location.clone())
                 } else if let Some(manifest_location) = get_manifest_location(uri) {
                     LspNotification::ManifestOpened(manifest_location)
                 } else {
-                    return Promise::reject(&JsValue::from_str(
-                        "error (did open): unsupported file opened",
-                    ));
+                    return Promise::reject(&JsValue::from_str(&format!(
+                        "error (did open): unsupported file opened {:?}",
+                        uri
+                    )));
                 }
             }
 
@@ -177,7 +179,7 @@ impl LspVscodeBridge {
             }
 
             for (location, diags) in aggregated_diagnostics.into_iter() {
-                if let Ok(uri) = location.to_url_string()?.parse() {
+                if let Ok(uri) = paths::path_to_url_string(&location)?.parse() {
                     send_diagnostic.call1(
                         &JsValue::NULL,
                         &encode_to_js(&PublishDiagnosticsParams {

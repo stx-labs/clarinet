@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use clarinet_deployments::types::*;
 use clarinet_deployments::update_session_with_deployment_plan;
-use clarinet_files::{FileLocation, StacksNetwork};
+use clarinet_files::StacksNetwork;
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::Address;
 use clarity::vm::types::StandardPrincipalData;
@@ -100,8 +101,7 @@ fn can_fund_initial_sbtc_balance() {
                     contract_name: ContractName::try_from(contract_name.to_string()).unwrap(),
                     source: source.to_string(),
                     clarity_version: ClarityVersion::Clarity3,
-                    location: FileLocation::from_path_string("./fixtures/sbtc-registry.clar")
-                        .unwrap(),
+                    location: PathBuf::from("./fixtures/sbtc-registry.clar"),
                     emulated_sender: SBTC_DEPLOYER.clone(),
                 },
             )

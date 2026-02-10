@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use clarinet_files::FileLocation;
+use clarinet_files::paths;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_CLARITY_VERSION,
 };
@@ -11,13 +11,13 @@ use indoc::{formatdoc, indoc};
 use super::changes::{Changes, FileCreation, FileDeletion, TOMLEdition};
 
 pub struct GetChangesForRmContract {
-    manifest_location: FileLocation,
+    manifest_location: PathBuf,
     contract_name: String,
     changes: Vec<Changes>,
 }
 
 impl GetChangesForRmContract {
-    pub fn new(manifest_location: FileLocation, contract_name: String) -> Self {
+    pub fn new(manifest_location: PathBuf, contract_name: String) -> Self {
         Self {
             manifest_location,
             contract_name: contract_name.replace('.', "_"),
@@ -32,30 +32,32 @@ impl GetChangesForRmContract {
     }
     fn rm_test(&mut self) -> Result<(), String> {
         let name = format!("{}.test.ts", self.contract_name);
-        let mut f = self.manifest_location.get_project_root_location().unwrap();
-        f.append_path("tests")?;
-        f.append_path(&name)?;
+        let root =
+            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
+                .unwrap();
+        let f = root.join("tests").join(&name);
         if !f.exists() {
             return Ok(());
         }
         let change = FileDeletion {
             comment: format!("{} tests/{}", red!("Deleted file"), name),
-            path: f.to_string(),
+            path: f.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::RemoveFile(change));
         Ok(())
     }
     fn rm_template_contract(&mut self) -> Result<(), String> {
         let name = format!("{}.clar", self.contract_name);
-        let mut f = self.manifest_location.get_project_root_location().unwrap();
-        f.append_path("contracts")?;
-        f.append_path(&name)?;
+        let root =
+            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
+                .unwrap();
+        let f = root.join("contracts").join(&name);
         if !f.exists() {
-            return Err(format!("{f} doesn't exist"));
+            return Err(format!("{} doesn't exist", f.display()));
         }
         let change = FileDeletion {
             comment: format!("{} contracts/{}", red!("Deleted file"), name),
-            path: f.to_string(),
+            path: f.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::RemoveFile(change));
         Ok(())
@@ -80,18 +82,14 @@ impl GetChangesForRmContract {
 }
 
 pub struct GetChangesForNewContract {
-    manifest_location: FileLocation,
+    manifest_location: PathBuf,
     contract_name: String,
     source: Option<String>,
     changes: Vec<Changes>,
 }
 
 impl GetChangesForNewContract {
-    pub fn new(
-        manifest_location: FileLocation,
-        contract_name: String,
-        source: Option<String>,
-    ) -> Self {
+    pub fn new(manifest_location: PathBuf, contract_name: String, source: Option<String>) -> Self {
         Self {
             manifest_location,
             contract_name: contract_name.replace('.', "_"),
@@ -146,16 +144,17 @@ impl GetChangesForNewContract {
             ", self.contract_name}
         };
         let name = format!("{}.clar", self.contract_name);
-        let mut new_file = self.manifest_location.get_project_root_location().unwrap();
-        new_file.append_path("contracts")?;
-        new_file.append_path(&name)?;
+        let root =
+            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
+                .unwrap();
+        let new_file = root.join("contracts").join(&name);
         if new_file.exists() {
-            return Err(format!("{new_file} already exists"));
+            return Err(format!("{} already exists", new_file.display()));
         }
         let change = FileCreation {
             comment: format!("{} contracts/{}", green!("Created file"), name),
             content,
-            path: new_file.to_string(),
+            path: new_file.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::AddFile(change));
         Ok(())
@@ -187,16 +186,17 @@ impl GetChangesForNewContract {
         .into();
 
         let name = format!("{}.test.ts", self.contract_name);
-        let mut new_file = self.manifest_location.get_project_root_location().unwrap();
-        new_file.append_path("tests")?;
-        new_file.append_path(&name)?;
+        let root =
+            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
+                .unwrap();
+        let new_file = root.join("tests").join(&name);
         if new_file.exists() {
-            return Err(format!("{new_file} already exists"));
+            return Err(format!("{} already exists", new_file.display()));
         }
         let change = FileCreation {
             comment: format!("{} tests/{}", green!("Created file"), name),
             content,
-            path: new_file.to_string(),
+            path: new_file.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::AddFile(change));
         Ok(())

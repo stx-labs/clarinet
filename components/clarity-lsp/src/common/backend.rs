@@ -1,6 +1,7 @@
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use clarinet_files::{FileAccessor, FileLocation, ProjectManifest};
+use clarinet_files::{paths, FileAccessor, ProjectManifest};
 use clarity_repl::clarity::diagnostic::Diagnostic;
 use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
@@ -52,17 +53,17 @@ impl EditorStateInput {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LspNotification {
-    ManifestOpened(FileLocation),
-    ManifestSaved(FileLocation),
-    ContractOpened(FileLocation),
-    ContractSaved(FileLocation),
-    ContractChanged(FileLocation, String),
-    ContractClosed(FileLocation),
+    ManifestOpened(PathBuf),
+    ManifestSaved(PathBuf),
+    ContractOpened(PathBuf),
+    ContractSaved(PathBuf),
+    ContractChanged(PathBuf, String),
+    ContractClosed(PathBuf),
 }
 
 #[derive(Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct LspNotificationResponse {
-    pub aggregated_diagnostics: Vec<(FileLocation, Vec<Diagnostic>)>,
+    pub aggregated_diagnostics: Vec<(PathBuf, Vec<Diagnostic>)>,
     pub notification: Option<(MessageType, String)>,
 }
 
@@ -123,16 +124,21 @@ pub async fn process_notification(
         }
 
         LspNotification::ContractOpened(contract_location) => {
-            let manifest_location = contract_location
-                .get_project_manifest_location(file_accessor)
-                .await?;
+            let manifest_location = match file_accessor {
+                None => paths::find_manifest_location(&contract_location)?,
+                Some(file_accessor) => {
+                    paths::find_manifest_location_async(&contract_location, file_accessor).await?
+                }
+            };
 
             // store the contract in the active_contracts map
             if !editor_state.try_read(|es| es.active_contracts.contains_key(&contract_location))? {
                 let contract_source = match file_accessor {
-                    None => contract_location.read_content_as_utf8(),
+                    None => paths::read_content_as_utf8(&contract_location),
                     Some(file_accessor) => {
-                        file_accessor.read_file(contract_location.to_string()).await
+                        file_accessor
+                            .read_file(contract_location.to_string_lossy().to_string())
+                            .await
                     }
                 }?;
 
@@ -164,7 +170,6 @@ pub async fn process_notification(
                             contract_metadata.clarity_version
                         } else {
                             // boot contracts path checking
-                            let contract_location_string = contract_location.to_string();
                             let mut found_boot_contract = None;
 
                             for (contract_name, contract_path) in
@@ -172,12 +177,10 @@ pub async fn process_notification(
                             {
                                 let project_root = manifest
                                     .location
-                                    .get_parent_location()
-                                    .map_err(|e| format!("Failed to get project root: {e}"))?;
-                                let mut resolved_path = project_root.clone();
-                                if resolved_path.append_path(contract_path).is_ok()
-                                    && resolved_path.to_string() == contract_location_string
-                                {
+                                    .parent()
+                                    .ok_or_else(|| "Failed to get project root".to_string())?;
+                                let resolved_path = project_root.join(contract_path);
+                                if resolved_path == contract_location {
                                     found_boot_contract = Some(contract_name);
                                     break;
                                 }
@@ -190,7 +193,7 @@ pub async fn process_notification(
                             } else {
                                 return Err(format!(
                                     "No Clarinet.toml is associated to the contract {}",
-                                    contract_location_string
+                                    contract_location.display()
                                 ));
                             }
                         }
@@ -238,11 +241,13 @@ pub async fn process_notification(
                 .try_write(|es| es.clear_protocol_associated_with_contract(&contract_location))?
             {
                 Some(manifest_location) => manifest_location,
-                None => {
-                    contract_location
-                        .get_project_manifest_location(file_accessor)
-                        .await?
-                }
+                None => match file_accessor {
+                    None => paths::find_manifest_location(&contract_location)?,
+                    Some(file_accessor) => {
+                        paths::find_manifest_location_async(&contract_location, file_accessor)
+                            .await?
+                    }
+                },
             };
 
             // TODO(): introduce partial analysis #604
@@ -617,7 +622,6 @@ mod lsp_tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use clarinet_files::FileLocation;
     use clarity_repl::clarity::ClarityVersion;
     use ls_types::{
         DocumentRangeFormattingParams, FormattingOptions, Position, Range, TextDocumentIdentifier,
@@ -639,9 +643,7 @@ mod lsp_tests {
     fn create_test_editor_state(source: String) -> EditorStateInput {
         let mut editor_state = EditorState::new();
 
-        let contract_location = FileLocation::FileSystem {
-            path: get_root_path().join("test.clar"),
-        };
+        let contract_location = get_root_path().join("test.clar");
 
         editor_state.insert_active_contract(
             contract_location,
@@ -695,12 +697,11 @@ mod lsp_tests {
         let editor_state_input = create_test_editor_state(source.to_owned());
 
         let path = get_root_path().join("test.clar");
-        let contract_location = FileLocation::FileSystem { path: path.clone() };
 
         let params = GotoDefinitionParams {
             text_document_position_params: ls_types::TextDocumentPositionParams {
                 text_document: ls_types::TextDocumentIdentifier {
-                    uri: contract_location.to_url_string().unwrap().parse().unwrap(),
+                    uri: paths::path_to_url_string(&path).unwrap().parse().unwrap(),
                 },
                 // Position inside the 'N' constant
                 position: Position {
