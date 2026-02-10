@@ -149,17 +149,17 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             //   - `PartialEq` with `BTreeMap`: `SymbolicExpression` does implement `Eq`/`PartialEq`, but the derived `PartialEq` compares all fields including `id` (a unique per-expression counter). Also, `Ord` isn't implemented, so `BTreeMap` won't work
             if let Some(inner_value) = Self::get_err_inner_value(value) {
                 let value_key = format!("{inner_value}");
-                // TODO: Can we use `Entry` instead of separate `get()` and `insert()`?
-                if let Some(other_name) = seen_values.get(&value_key) {
-                    diagnostics.push(Diagnostic {
-                        level: self.level.clone(),
-                        message: Self::make_duplicate_message(name, other_name),
-                        spans: vec![const_data.expr.span.clone()],
-                        suggestion: Some("Use a unique error value".to_string()),
-                    });
-                } else {
-                    seen_values.insert(value_key, name);
-                }
+                seen_values
+                    .entry(value_key)
+                    .and_modify(|other_name| {
+                        diagnostics.push(Diagnostic {
+                            level: self.level.clone(),
+                            message: Self::make_duplicate_message(name, other_name),
+                            spans: vec![const_data.expr.span.clone()],
+                            suggestion: Some("Use a unique error value".to_string()),
+                        });
+                    })
+                    .or_insert(name);
             }
         }
 
