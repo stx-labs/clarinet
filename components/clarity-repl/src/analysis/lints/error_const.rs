@@ -148,7 +148,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             //   - `Hash`: `SymbolicExpression` is defined in stacks-core (a git dependency), so we can't add derives. And even `Value` doesn't implement `Hash`
             //   - `PartialEq` with `BTreeMap`: `SymbolicExpression` does implement `Eq`/`PartialEq`, but the derived `PartialEq` compares all fields including `id` (a unique per-expression counter). Also, `Ord` isn't implemented, so `BTreeMap` won't work
             if let Some(inner_value) = Self::get_err_inner_value(value) {
-                let value_key = format!("{inner_value}");
+                let value_key = inner_value.to_string();
                 seen_values
                     .entry(value_key)
                     .and_modify(|other_name| {
