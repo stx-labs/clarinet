@@ -74,6 +74,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             .match_list()
             .and_then(|list| list.first())
             .and_then(|first| first.match_atom())
+            // TODO: Is there some way to test this against an enum variant rather than a `&str`?
             .is_some_and(|atom| atom.as_str() == "err")
     }
 
@@ -99,9 +100,13 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
         // Collect ERR_ constants sorted by span position for deterministic duplicate detection
         let mut err_constants: Vec<(&ClarityName, &ConstantData)> = constants
             .iter()
+            // TODO: Can we declare the prefix as a constant at the top of the file, rather than hardcoding it here (and elsewhere in the file)?
             .filter(|(name, _)| name.as_str().starts_with("ERR_"))
+            // TODO: Also ignore if the constant name begins or ends with `_` (use `util::is_explicitly_unused()`)
             .map(|(name, data)| (*name, data))
             .collect();
+        // TODO: How about using an `IndexMap` in `AnalysisCache` instead, so we know the map order is the key order is the same as the declaration order
+        //       Then we can just use an iterator here rather than `collect()` and sort
         err_constants.sort_by(|a, b| a.1.expr.span.cmp(&b.1.expr.span));
 
         // Track error values for duplicate detection: value_string -> name
@@ -130,8 +135,13 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             }
 
             // Check 2: No duplicate error values
+            // TODO: Can we so something other than stringify the inner value here? If could cause collisions, say if we had both `(err u100)` and `(err "100")`
+            //       We could do one of the following instead:
+            //         - Derive or implement `Hash` for `SymbolicExpression`, if it doesn't already exist
+            //         - Derive or implement `PartialEq` for `SymbolicExpression`, if it doesn't already exist, and use a `BTreeMap` instead of `HashMap`
             if let Some(inner_value) = Self::get_err_inner_value(value) {
                 let value_key = format!("{inner_value}");
+                // TODO: Can we use `Entry` instead of separate `get()` and `insert()`?
                 if let Some(other_name) = seen_values.get(&value_key) {
                     diagnostics.push(Diagnostic {
                         level: self.level.clone(),
@@ -202,6 +212,7 @@ mod tests {
 
     #[test]
     fn valid_error_constants() {
+        // TODO: Can we use `indoc` with curly brackets instead of parenthesis everywhere in this file so we can remove the `#[rustfmt::skip]`?
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant ERR_NOT_AUTHORIZED (err u1001))
