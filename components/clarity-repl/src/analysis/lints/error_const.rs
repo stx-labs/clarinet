@@ -220,7 +220,6 @@ mod tests {
 
     #[test]
     fn valid_error_constants() {
-        // TODO: Can we use `indoc` with curly brackets instead of parenthesis everywhere in this file so we can remove the `#[rustfmt::skip]`?
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant ERR_NOT_AUTHORIZED (err u1001))
