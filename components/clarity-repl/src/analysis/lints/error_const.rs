@@ -135,10 +135,16 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             }
 
             // Check 2: No duplicate error values
-            // TODO: Can we so something other than stringify the inner value here? If could cause collisions, say if we had both `(err u100)` and `(err "100")`
-            //       We could do one of the following instead:
-            //         - Derive or implement `Hash` for `SymbolicExpression`, if it doesn't already exist
-            //         - Derive or implement `PartialEq` for `SymbolicExpression`, if it doesn't already exist, and use a `BTreeMap` instead of `HashMap`
+            //
+            // Stringifying values here seems to be the only practical way to compare them
+            // There is no risk of collision because:
+            //   - UInt(100) → u100                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+            //   - Int(100) → 100                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+            //   - ASCII string "100" → "100" (with literal quote characters)                                                                                                                                                                                                                                                                                                                                                                                                                              
+            //   - UTF8 string u"100" → u"100" (with prefix and quotes) 
+            // And using a map key that implements `Hash` or `PartialEq` is not practical because:
+            //   - `Hash`: `SymbolicExpression` is defined in stacks-core (a git dependency), so we can't add derives. And even `Value` doesn't implement `Hash`
+            //   - `PartialEq` with `BTreeMap`: `SymbolicExpression` does implement `Eq`/`PartialEq`, but the derived `PartialEq` compares all fields including `id` (a unique per-expression counter). Also, `Ord` isn't implemented, so `BTreeMap` won't work
             if let Some(inner_value) = Self::get_err_inner_value(value) {
                 let value_key = format!("{inner_value}");
                 // TODO: Can we use `Entry` instead of separate `get()` and `insert()`?
