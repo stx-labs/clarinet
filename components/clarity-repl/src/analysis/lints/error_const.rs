@@ -8,7 +8,8 @@ use std::collections::HashMap;
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
-use clarity::vm::SymbolicExpression;
+use clarity::vm::functions::NativeFunctions;
+use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
@@ -69,13 +70,13 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
     }
 
     /// Check if a value expression is `(err ...)`
-    fn is_err_value(value: &SymbolicExpression) -> bool {
+    fn is_err_value(value: &SymbolicExpression, clarity_version: &ClarityVersion) -> bool {
         value
             .match_list()
             .and_then(|list| list.first())
             .and_then(|first| first.match_atom())
-            // TODO: Is there some way to test this against an enum variant rather than a `&str`?
-            .is_some_and(|atom| atom.as_str() == "err")
+            .and_then(|atom| NativeFunctions::lookup_by_name_at_version(atom, clarity_version))
+            .is_some_and(|func| func == NativeFunctions::ConsError)
     }
 
     /// Get the inner value of an `(err X)` expression (returns `X`)
@@ -95,6 +96,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
         let mut diagnostics = vec![];
 
         let annotations = self.analysis_cache.annotations;
+        let clarity_version = self.analysis_cache.contract_analysis.clarity_version;
         let constants = self.analysis_cache.get_constants();
 
         // Collect ERR_ constants sorted by span position for deterministic duplicate detection
@@ -122,7 +124,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             };
 
             // Check 1: ERR_ constant must have (err ...) value
-            if !Self::is_err_value(value) {
+            if !Self::is_err_value(value, &clarity_version) {
                 diagnostics.push(Diagnostic {
                     level: self.level.clone(),
                     message: Self::make_not_err_message(name),
@@ -138,10 +140,10 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             //
             // Stringifying values here seems to be the only practical way to compare them
             // There is no risk of collision because:
-            //   - UInt(100) → u100                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
-            //   - Int(100) → 100                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
-            //   - ASCII string "100" → "100" (with literal quote characters)                                                                                                                                                                                                                                                                                                                                                                                                                              
-            //   - UTF8 string u"100" → u"100" (with prefix and quotes) 
+            //   - UInt(100) → u100
+            //   - Int(100) → 100
+            //   - ASCII string "100" → "100" (with literal quote characters)
+            //   - UTF8 string u"100" → u"100" (with prefix and quotes)
             // And using a map key that implements `Hash` or `PartialEq` is not practical because:
             //   - `Hash`: `SymbolicExpression` is defined in stacks-core (a git dependency), so we can't add derives. And even `Value` doesn't implement `Hash`
             //   - `PartialEq` with `BTreeMap`: `SymbolicExpression` does implement `Eq`/`PartialEq`, but the derived `PartialEq` compares all fields including `id` (a unique per-expression counter). Also, `Ord` isn't implemented, so `BTreeMap` won't work
