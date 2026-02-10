@@ -12,8 +12,7 @@ pub fn get_absolute_deployment_path(
     manifest: &ProjectManifest,
     relative_deployment_path: &str,
 ) -> Result<PathBuf, String> {
-    let project_root =
-        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))?;
+    let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
     Ok(project_root.join(relative_deployment_path))
 }
 
@@ -27,8 +26,7 @@ pub fn generate_default_deployment(
 }
 
 pub fn check_deployments(manifest: &ProjectManifest) -> Result<(), String> {
-    let project_root_location =
-        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))?;
+    let project_root_location = paths::project_root_from_manifest_location(&manifest.location)?;
     let files = get_deployments_files(&project_root_location)?;
     for (path, relative_path) in files.into_iter() {
         let _spec = match DeploymentSpecification::from_config_file(&path, &project_root_location) {

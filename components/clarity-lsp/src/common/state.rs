@@ -217,10 +217,9 @@ impl EditorState {
     }
 
     pub fn index_protocol(&mut self, manifest_location: PathBuf, protocol: ProtocolState) {
-        // Go up two levels from manifest: manifest_location -> project_dir -> parent
+        // Get the project directory (parent of Clarinet.toml)
         let base_location = manifest_location
             .parent()
-            .and_then(|p| p.parent())
             .unwrap_or(Path::new("."))
             .to_path_buf();
 

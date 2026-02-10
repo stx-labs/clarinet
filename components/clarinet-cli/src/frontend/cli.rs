@@ -746,8 +746,7 @@ pub fn main() {
                 }
 
                 let project_root =
-                    paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))
-                        .unwrap();
+                    paths::project_root_from_manifest_location(&manifest.location).unwrap();
 
                 let write_plan = if default_deployment_path.exists() {
                     let existing_deployment = load_deployment(&manifest, &default_deployment_path)
@@ -803,8 +802,7 @@ pub fn main() {
                 };
 
                 let project_root =
-                    paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))
-                        .unwrap();
+                    paths::project_root_from_manifest_location(&manifest.location).unwrap();
 
                 let result = match (&network, cmd.deployment_plan_path) {
                     (None, None) => {
@@ -1553,11 +1551,10 @@ fn load_deployment_if_exists(
     }
 
     if !force_on_disk {
-        let project_root =
-            match paths::find_project_root(manifest.location.parent().unwrap_or(Path::new("."))) {
-                Ok(root) => root,
-                Err(e) => return Some(Err(e)),
-            };
+        let project_root = match paths::project_root_from_manifest_location(&manifest.location) {
+            Ok(root) => root,
+            Err(e) => return Some(Err(e)),
+        };
 
         match generate_default_deployment(manifest, network, true) {
             Ok((deployment, _)) => {
@@ -1999,8 +1996,7 @@ fn display_deploy_hint() {
 
 fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let manifest = load_manifest_or_exit(cmd.manifest_path, false);
-    let project_root =
-        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new("."))).unwrap();
+    let project_root = paths::project_root_from_manifest_location(&manifest.location).unwrap();
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {
         None => {

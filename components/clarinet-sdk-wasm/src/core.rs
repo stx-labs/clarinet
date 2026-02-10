@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::panic;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
@@ -571,8 +571,8 @@ impl SDK {
     async fn write_deployment_plan(
         &self,
         deployment_plan: &DeploymentSpecification,
-        project_root: &PathBuf,
-        deployment_plan_location: &PathBuf,
+        project_root: &Path,
+        deployment_plan_location: &Path,
         existing_file: Option<&str>,
     ) -> Result<(), String> {
         let deployment_file = deployment_plan.to_file_content(project_root)?;

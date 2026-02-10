@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::path::Path;
 use std::process;
 
 use clarinet_deployments::get_default_deployment_path;
@@ -45,9 +44,8 @@ pub fn pack(file_name: Option<String>, project_manifest: ProjectManifest) -> Res
     let deployment_path = get_default_deployment_path(&project_manifest, &StacksNetwork::Devnet)
         .map_err(|e| format!("failed to get default deployment path: {e}"))?;
 
-    let project_root =
-        paths::find_project_root(project_manifest.location.parent().unwrap_or(Path::new(".")))
-            .map_err(|e| format!("failed to get project root location: {e}"))?;
+    let project_root = paths::project_root_from_manifest_location(&project_manifest.location)
+        .map_err(|e| format!("failed to get project root location: {e}"))?;
 
     let deployment_manifest =
         DeploymentSpecification::from_config_file(&deployment_path, &project_root)

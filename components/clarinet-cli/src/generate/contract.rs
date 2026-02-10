@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use clarinet_files::paths;
@@ -32,9 +32,7 @@ impl GetChangesForRmContract {
     }
     fn rm_test(&mut self) -> Result<(), String> {
         let name = format!("{}.test.ts", self.contract_name);
-        let root =
-            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
-                .unwrap();
+        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
         let f = root.join("tests").join(&name);
         if !f.exists() {
             return Ok(());
@@ -48,9 +46,7 @@ impl GetChangesForRmContract {
     }
     fn rm_template_contract(&mut self) -> Result<(), String> {
         let name = format!("{}.clar", self.contract_name);
-        let root =
-            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
-                .unwrap();
+        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
         let f = root.join("contracts").join(&name);
         if !f.exists() {
             return Err(format!("{} doesn't exist", f.display()));
@@ -144,9 +140,7 @@ impl GetChangesForNewContract {
             ", self.contract_name}
         };
         let name = format!("{}.clar", self.contract_name);
-        let root =
-            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
-                .unwrap();
+        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
         let new_file = root.join("contracts").join(&name);
         if new_file.exists() {
             return Err(format!("{} already exists", new_file.display()));
@@ -186,9 +180,7 @@ impl GetChangesForNewContract {
         .into();
 
         let name = format!("{}.test.ts", self.contract_name);
-        let root =
-            paths::find_project_root(self.manifest_location.parent().unwrap_or(Path::new(".")))
-                .unwrap();
+        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
         let new_file = root.join("tests").join(&name);
         if new_file.exists() {
             return Err(format!("{} already exists", new_file.display()));

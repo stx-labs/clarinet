@@ -51,8 +51,7 @@ pub fn load_chainhooks(
 }
 
 fn get_chainhooks_files(manifest_location: &Path) -> Result<Vec<(PathBuf, String)>, String> {
-    let project_root =
-        paths::find_project_root(manifest_location.parent().unwrap_or(Path::new(".")))?;
+    let project_root = paths::project_root_from_manifest_location(manifest_location)?;
     let chainhooks_dir = project_root.join("chainhooks");
     let prefix_len = chainhooks_dir.to_string_lossy().len() + 1;
     let Ok(paths) = fs::read_dir(&chainhooks_dir) else {

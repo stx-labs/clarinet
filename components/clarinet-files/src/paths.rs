@@ -1,3 +1,5 @@
+use std::fs::{self, File};
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{FileAccessor, StacksNetwork};
@@ -108,6 +110,11 @@ pub fn get_network_manifest_path(project_root: &Path, network: &StacksNetwork) -
     })
 }
 
+/// Get the project root directory from a manifest (Clarinet.toml) path.
+pub fn project_root_from_manifest_location(manifest_location: &Path) -> Result<PathBuf, String> {
+    find_project_root(manifest_location.parent().unwrap_or(Path::new(".")))
+}
+
 /// Get the relative path from a base directory.
 pub fn get_relative_path(path: &Path, base: &Path) -> Result<String, String> {
     path.strip_prefix(base)
@@ -117,8 +124,6 @@ pub fn get_relative_path(path: &Path, base: &Path) -> Result<String, String> {
 
 /// Read file content as bytes.
 pub fn read_content(path: &Path) -> Result<Vec<u8>, String> {
-    use std::fs::File;
-    use std::io::{BufReader, Read};
     let file =
         File::open(path).map_err(|e| format!("unable to read file {}\n{:?}", path.display(), e))?;
     let mut reader = BufReader::new(file);
@@ -138,8 +143,6 @@ pub fn read_content_as_utf8(path: &Path) -> Result<String, String> {
 
 /// Write content to a path, creating parent directories as needed.
 pub fn write_content(path: &Path, content: &[u8]) -> Result<(), String> {
-    use std::fs::{self, File};
-    use std::io::Write;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
             format!(

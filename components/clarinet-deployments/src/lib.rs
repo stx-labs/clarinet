@@ -979,8 +979,7 @@ pub fn get_default_deployment_path(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
 ) -> Result<PathBuf, String> {
-    let project_root =
-        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))?;
+    let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
     let deployment_path = project_root.join("deployments").join(match network {
         StacksNetwork::Simnet => "default.simnet-plan.yaml",
         StacksNetwork::Devnet => "default.devnet-plan.yaml",
@@ -994,8 +993,7 @@ pub fn load_deployment(
     manifest: &ProjectManifest,
     deployment_plan_location: &Path,
 ) -> Result<DeploymentSpecification, String> {
-    let project_root_location =
-        paths::find_project_root(manifest.location.parent().unwrap_or(Path::new(".")))?;
+    let project_root_location = paths::project_root_from_manifest_location(&manifest.location)?;
     let spec = match DeploymentSpecification::from_config_file(
         deployment_plan_location,
         &project_root_location,
