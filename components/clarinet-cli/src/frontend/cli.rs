@@ -1761,7 +1761,15 @@ fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
         .as_table_mut()
         .expect("[project] should be a table");
 
-    // Ensure [[project.requirements]] array exists
+    // Ensure [[project.requirements]] array exists.
+    // If requirements = [] (an empty inline array), replace it with an array of tables.
+    if project
+        .get("requirements")
+        .is_some_and(|v| v.as_array().is_some_and(|a| a.is_empty()))
+    {
+        project["requirements"] = Item::ArrayOfTables(ArrayOfTables::new());
+    }
+
     let requirements = project
         .entry("requirements")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
@@ -2378,6 +2386,36 @@ mod tests {
             assert!(
                 has_contract(&output, "my-contract"),
                 "Contract should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_add_requirement_with_empty_requirements_array() {
+            let input = indoc! {r#"
+                [project]
+                name = 'project-template'
+                requirements = []
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
+
+            let output = doc.to_string();
+
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Requirement should be added when requirements was an empty array"
+            );
+
+            assert!(
+                has_toml_value(&output, "project.name", "project-template"),
+                "Project name should be preserved"
             );
         }
 
