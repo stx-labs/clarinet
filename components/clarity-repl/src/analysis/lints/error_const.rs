@@ -106,15 +106,16 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
         // Track error values for duplicate detection: value_string -> name
         let mut seen_values: HashMap<String, &ClarityName> = HashMap::new();
 
-        // ConstantMap is an IndexMap, so iteration order matches declaration order
-        for (name, const_data) in constants
+        // Find constants at which the linter should test
+        let candidate_consts = constants
             .iter()
+            // Ignore constants that don't start with `ERR_PREFIX`
             .filter(|(name, _)| name.as_str().starts_with(ERR_PREFIX))
-        {
-            if Self::allow(const_data, annotations) {
-                continue;
-            }
+            // Ignore constants we explicitly allow
+            .filter(|(_, const_data)| !Self::allow(const_data, annotations));
 
+        // ConstantMap is an IndexMap, so iteration order matches declaration order
+        for (name, const_data) in candidate_consts {
             let Some(value) = Self::get_value_expr(const_data) else {
                 continue;
             };
