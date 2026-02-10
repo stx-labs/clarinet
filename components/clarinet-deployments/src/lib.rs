@@ -502,35 +502,27 @@ pub async fn generate_default_deployment(
                 .iter()
                 .any(|r| r.contract_id == SBTC_DEPOSIT_MAINNET_ADDRESS.to_string())
         {
-            queue.push_front((
+            queue.push_front(
                 QualifiedContractIdentifier::parse(&SBTC_DEPOSIT_MAINNET_ADDRESS.to_string())
                     .unwrap(),
-                None,
-            ));
+            );
         }
 
         // Load all the requirements
         // Some requirements are explicitly listed, some are discovered as we compute the ASTs.
         for requirement in requirements.iter() {
-            let contract_id = match QualifiedContractIdentifier::parse(&requirement.contract_id) {
-                Ok(contract_id) => contract_id,
-                Err(_e) => {
-                    return Err(format!(
-                        "malformatted contract_id: {}",
-                        requirement.contract_id
-                    ))
-                }
-            };
-            queue.push_front((contract_id, None));
+            let contract_id = QualifiedContractIdentifier::parse(&requirement.contract_id)
+                .map_err(|_e| format!("malformatted contract_id: {}", requirement.contract_id))?;
+            queue.push_front(contract_id);
         }
 
-        while let Some((contract_id, forced_clarity_version)) = queue.pop_front() {
+        while let Some(contract_id) = queue.pop_front() {
             if requirements_deps.contains_key(&contract_id) {
                 continue;
             }
 
             // Did we already get the source in a prior cycle?
-            let requirement_data = match requirements_data.remove(&contract_id) {
+            let (clarity_version, ast) = match requirements_data.remove(&contract_id) {
                 Some(requirement_data) => requirement_data,
                 None => {
                     // Download the code
@@ -614,19 +606,7 @@ pub async fn generate_default_deployment(
 
             // Detect the eventual dependencies for this AST
             let mut contract_data = BTreeMap::new();
-            let (_, ast) = requirement_data;
-            let clarity_version = match forced_clarity_version {
-                Some(clarity_version) => clarity_version,
-                None => {
-                    let (_, _, clarity_version, _) = requirements::retrieve_contract(
-                        &contract_id,
-                        cache_location,
-                        &file_accessor,
-                    )
-                    .await?;
-                    clarity_version
-                }
-            };
+
             contract_data.insert(contract_id.clone(), (clarity_version, ast));
             let dependencies =
                 ASTDependencyDetector::detect_dependencies(&contract_data, &requirements_data);
@@ -646,7 +626,7 @@ pub async fn generate_default_deployment(
                         inferable_dependencies.into_iter().next()
                     {
                         for dependency in dependencies.iter() {
-                            queue.push_back((dependency.contract_id.clone(), None));
+                            queue.push_back(dependency.contract_id.clone());
                         }
                         requirements_deps.insert(contract_id.clone(), dependencies);
                         requirements_data.insert(contract_id.clone(), (clarity_version, ast));
@@ -658,14 +638,14 @@ pub async fn generate_default_deployment(
                     // and we will keep the source in memory to avoid useless disk access.
                     for (_, dependencies) in inferable_dependencies.iter() {
                         for dependency in dependencies.iter() {
-                            queue.push_back((dependency.contract_id.clone(), None));
+                            queue.push_back(dependency.contract_id.clone());
                         }
                     }
                     requirements_data.insert(contract_id.clone(), (clarity_version, ast));
-                    queue.push_front((contract_id, None));
+                    queue.push_front(contract_id);
 
                     for non_inferable_contract_id in non_inferable_dependencies.into_iter() {
-                        queue.push_front((non_inferable_contract_id, None));
+                        queue.push_front(non_inferable_contract_id);
                     }
                 }
             };
@@ -673,13 +653,9 @@ pub async fn generate_default_deployment(
 
         // Avoid listing requirements as deployment transactions to the deployment specification on Mainnet
         if !matches!(network, StacksNetwork::Mainnet) && !simnet_remote_data {
-            let mut ordered_contracts_ids = match ASTDependencyDetector::order_contracts(
-                &requirements_deps,
-                &contract_epochs,
-            ) {
-                Ok(ordered_contracts) => ordered_contracts,
-                Err(e) => return Err(format!("unable to order requirements {e}")),
-            };
+            let mut ordered_contracts_ids =
+                ASTDependencyDetector::order_contracts(&requirements_deps, &contract_epochs)
+                    .map_err(|e| format!("unable to order requirements {e}"))?;
 
             // Filter out boot contracts from requirement dependencies
             ordered_contracts_ids.retain(|contract_id| !boot_contracts_ids.contains(contract_id));
