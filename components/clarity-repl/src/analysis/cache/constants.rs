@@ -1,10 +1,9 @@
-//! Builds `HashMap` of all constants in a contract
-
-use std::collections::HashMap;
+//! Builds an ordered map of all constants in a contract
 
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
+use indexmap::IndexMap;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
@@ -27,7 +26,7 @@ impl<'a> ConstantData<'a> {
     }
 }
 
-pub type ConstantMap<'a> = HashMap<&'a ClarityName, ConstantData<'a>>;
+pub type ConstantMap<'a> = IndexMap<&'a ClarityName, ConstantData<'a>>;
 
 pub struct ConstantMapBuilder<'a> {
     clarity_version: ClarityVersion,
@@ -44,7 +43,7 @@ impl<'a> ConstantMapBuilder<'a> {
         let mut builder = Self {
             clarity_version,
             annotations,
-            map: HashMap::new(),
+            map: IndexMap::new(),
         };
         // Traverse the entire AST
         traverse(&mut builder, &contract_analysis.expressions);

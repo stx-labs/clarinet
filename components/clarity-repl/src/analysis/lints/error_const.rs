@@ -87,7 +87,9 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
     }
 
     fn make_not_err_message(name: &ClarityName) -> String {
-        format!("constant `{name}` has the `{ERR_PREFIX}` prefix but its value is not an error type")
+        format!(
+            "constant `{name}` has the `{ERR_PREFIX}` prefix but its value is not an error type"
+        )
     }
 
     fn make_duplicate_message(name: &ClarityName, other_name: &ClarityName) -> String {
@@ -101,20 +103,14 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
         let clarity_version = self.analysis_cache.contract_analysis.clarity_version;
         let constants = self.analysis_cache.get_constants();
 
-        // Collect ERR_ constants sorted by span position for deterministic duplicate detection
-        let mut err_constants: Vec<(&ClarityName, &ConstantData)> = constants
-            .iter()
-            .filter(|(name, _)| name.as_str().starts_with(ERR_PREFIX))
-            .map(|(name, data)| (*name, data))
-            .collect();
-        // TODO: How about using an `IndexMap` in `AnalysisCache` instead, so we know the map order is the key order is the same as the declaration order
-        //       Then we can just use an iterator here rather than `collect()` and sort
-        err_constants.sort_by(|a, b| a.1.expr.span.cmp(&b.1.expr.span));
-
         // Track error values for duplicate detection: value_string -> name
         let mut seen_values: HashMap<String, &ClarityName> = HashMap::new();
 
-        for (name, const_data) in err_constants {
+        // ConstantMap is an IndexMap, so iteration order matches declaration order
+        for (name, const_data) in constants
+            .iter()
+            .filter(|(name, _)| name.as_str().starts_with(ERR_PREFIX))
+        {
             if Self::allow(const_data, annotations) {
                 continue;
             }
@@ -129,9 +125,9 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
                     level: self.level.clone(),
                     message: Self::make_not_err_message(name),
                     spans: vec![const_data.expr.span.clone()],
-                    suggestion: Some(
-                        format!("Use `(err ...)` as the value or remove the `{ERR_PREFIX}` prefix"),
-                    ),
+                    suggestion: Some(format!(
+                        "Use `(err ...)` as the value or remove the `{ERR_PREFIX}` prefix"
+                    )),
                 });
                 continue;
             }
