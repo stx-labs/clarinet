@@ -11,7 +11,7 @@ use clarity_repl::clarity::vm::types::{
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
 use clarity_repl::repl::{
-    clarity_version_from_u8, clarity_version_to_u8, Epoch, Session, DEFAULT_CLARITY_VERSION,
+    clarity_version_from_u8, clarity_version_to_u8, Session, DEFAULT_CLARITY_VERSION,
 };
 use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
@@ -1086,12 +1086,7 @@ impl DeploymentSpecification {
                                     let spec = ContractPublishSpecification::from_specifications(spec, project_root_location)?;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    let epoch = if let Some(epoch_spec) = batch.epoch {
-                                        Epoch::Specific(StacksEpochId::from(epoch_spec))
-                                    } else {
-                                        Epoch::Latest
-                                    };
-                                    let source = remove_env_simnet(epoch, spec.source.clone())?;
+                                    let source = remove_env_simnet(spec.source.clone())?;
                                     contracts.insert(contract_id, (source, spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
