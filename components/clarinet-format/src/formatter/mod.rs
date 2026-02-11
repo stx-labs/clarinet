@@ -1604,7 +1604,6 @@ impl<'a> Aggregator<'a> {
     fn function(&self, exprs: &[PreSymbolicExpression]) -> String {
         let func_type = self.display_pse(exprs.first().unwrap(), "");
         let indentation = &self.settings.indentation.to_string();
-        let args_indent = format!("{indentation}{indentation}");
 
         let mut acc = format!("({func_type} (");
 
@@ -1613,6 +1612,8 @@ impl<'a> Aggregator<'a> {
             if let Some((name, args)) = def.split_first() {
                 acc.push_str(&self.display_pse(name, ""));
 
+                let args_indent = format!("{indentation}{indentation}");
+
                 // Keep everything on one line if there's only one argument
                 if args.len() == 1 {
                     acc.push(' ');
@@ -1620,6 +1621,7 @@ impl<'a> Aggregator<'a> {
                     acc.push(')');
                 } else {
                     let mut iter = args.iter().peekable();
+                    let mut prev_end_line = 0u32;
                     while let Some(arg) = iter.next() {
                         let trailing = get_trailing_comment(arg, &mut iter);
                         self.check_and_cache_ignored_expression(
@@ -1628,15 +1630,22 @@ impl<'a> Aggregator<'a> {
                             self.source,
                             &args_indent,
                         );
+                        // Preserve comment line positions: add newline before arg when it's on a
+                        // different line than the previous (comments must never be moved), or when
+                        // it's a list arg (each gets own line), or when it's the first arg
+                        let need_newline = prev_end_line == 0
+                            || arg.match_list().is_some()
+                            || arg.span().start_line > prev_end_line;
+                        if need_newline {
+                            acc.push_str(&format!("\n{args_indent}"));
+                        }
                         if arg.match_list().is_some() {
                             // expr args
-                            acc.push_str(&format!(
-                                "\n{}{}",
-                                args_indent,
-                                self.format_source_exprs(slice::from_ref(arg), &args_indent)
-                            ))
+                            acc.push_str(
+                                &self.format_source_exprs(slice::from_ref(arg), &args_indent),
+                            )
                         } else {
-                            // atom args
+                            // atom args (includes standalone comments)
                             acc.push_str(
                                 &self.format_source_exprs(slice::from_ref(arg), &args_indent),
                             )
@@ -1644,6 +1653,9 @@ impl<'a> Aggregator<'a> {
                         if let Some(comment) = trailing {
                             acc.push(' ');
                             acc.push_str(&self.display_pse(comment, ""));
+                            prev_end_line = comment.span().end_line;
+                        } else {
+                            prev_end_line = arg.span().end_line;
                         }
                     }
                     if args.is_empty() {
@@ -2904,6 +2916,37 @@ mod tests_formatter {
                   "something"
                 ))
               )
+            )
+            "#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_comment_args() {
+        // Comments must stay on their original lines (span.start_line preserved)
+        let src = indoc!(
+            r#"
+            (define-public (some-fn
+                (a uint)
+                ;; (b uint)
+              )
+              (ok true)
+            )
+            "#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+
+        let src = indoc!(
+            r#"
+            (define-public (some-fn
+                (a uint)
+                ;; documentation comment for b
+                (b uint)
+              )
+              (ok true)
             )
             "#
         );
