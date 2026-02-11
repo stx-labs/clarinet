@@ -980,13 +980,12 @@ pub fn get_default_deployment_path(
     network: &StacksNetwork,
 ) -> Result<PathBuf, String> {
     let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
-    let deployment_path = project_root.join("deployments").join(match network {
+    Ok(project_root.join("deployments").join(match network {
         StacksNetwork::Simnet => "default.simnet-plan.yaml",
         StacksNetwork::Devnet => "default.devnet-plan.yaml",
         StacksNetwork::Testnet => "default.testnet-plan.yaml",
         StacksNetwork::Mainnet => "default.mainnet-plan.yaml",
-    });
-    Ok(deployment_path)
+    }))
 }
 
 pub fn load_deployment(

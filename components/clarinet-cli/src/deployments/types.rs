@@ -35,10 +35,9 @@ impl DeploymentSynthesis {
             }
         }
 
-        let content = match deployment.to_file_content(project_root) {
-            Ok(res) => res,
-            Err(err) => panic!("unable to serialize deployment {err}"),
-        };
+        let content = deployment
+            .to_file_content(project_root)
+            .unwrap_or_else(|err| panic!("unable to serialize deployment {err}"));
 
         DeploymentSynthesis {
             total_cost,

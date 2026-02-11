@@ -809,9 +809,8 @@ pub fn main() {
                         Err(format!("{}: a flag `--devnet`, `--testnet`, `--mainnet` or `--deployment-plan-path=path/to/yaml` should be provided.", yellow!("Command usage")))
                     }
                     (Some(network), None) => {
-                        let res = load_deployment_if_exists(&manifest, network, cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan);
-                        match res {
-                            Some(Ok(deployment)) => {
+                        load_deployment_if_exists(&manifest, network, cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan).and_then(|opt| match opt {
+                            Some(deployment) => {
                                 println!(
                                     "{} using existing deployments/default.{}-plan.yaml",
                                     yellow!("note:"),
@@ -819,25 +818,19 @@ pub fn main() {
                                 );
                                 Ok(deployment)
                             }
-                            Some(Err(e)) => Err(e),
                             None => {
                                 let default_deployment_path = get_default_deployment_path(&manifest, network).unwrap();
-                                let (deployment, _) = match generate_default_deployment(&manifest, network, false) {
-                                    Ok(deployment) => deployment,
-                                    Err(message) => {
-                                        eprintln!("{}", red!(message));
-                                        std::process::exit(1);
-                                    }
-                                };
-                                let res = write_deployment(&deployment, &default_deployment_path, &project_root, true);
-                                if let Err(message) = res {
-                                    Err(message)
-                                } else {
-                                    println!("{} {}", green!("Generated file"), paths::get_relative_path(&default_deployment_path, &project_root).unwrap());
-                                    Ok(deployment)
-                                }
+                                let (deployment, _) =
+                                    generate_default_deployment(&manifest, network, false)
+                                        .unwrap_or_else(|message| {
+                                            eprintln!("{}", red!(message));
+                                            std::process::exit(1);
+                                        });
+                                write_deployment(&deployment, &default_deployment_path, &project_root, true)?;
+                                println!("{} {}", green!("Generated file"), paths::get_relative_path(&default_deployment_path, &project_root).unwrap());
+                                Ok(deployment)
                             }
-                        }
+                        })
                     }
                     (None, Some(deployment_plan_path)) => {
                         let deployment_path = get_absolute_deployment_path(&manifest, &deployment_plan_path).expect("unable to retrieve deployment");
@@ -1424,14 +1417,17 @@ pub fn load_deployment_and_artifacts_or_exit(
 ) {
     let result = match deployment_plan_path {
         None => {
-            let res = load_deployment_if_exists(
+            load_deployment_if_exists(
                 manifest,
                 &StacksNetwork::Simnet,
                 force_on_disk,
                 force_computed,
-            );
-            match res {
-                Some(Ok(deployment)) => {
+            )
+            .map_err(|e| {
+                format!("loading deployments/default.simnet-plan.yaml failed with error: {e}")
+            })
+            .and_then(|opt| match opt {
+                Some(deployment) => {
                     println!(
                         "{} using deployments/default.simnet-plan.yaml",
                         yellow!("note:")
@@ -1439,56 +1435,49 @@ pub fn load_deployment_and_artifacts_or_exit(
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     Ok((deployment, None, artifacts))
                 }
-                Some(Err(e)) => Err(format!(
-                    "loading deployments/default.simnet-plan.yaml failed with error: {e}"
-                )),
                 None => {
-                    match generate_default_deployment(manifest, &StacksNetwork::Simnet, false) {
-                        Ok((deployment, ast_artifacts)) if ast_artifacts.success => {
-                            let mut artifacts = setup_session_with_deployment(
-                                manifest,
-                                &deployment,
-                                Some(&ast_artifacts.asts),
-                            );
-                            for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
-                                // Merge parser's diags with analysis' diags.
-                                if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
-                                    parser_diags.append(diags);
-                                }
-                                artifacts.diags.insert(contract_id, parser_diags);
+                    let (deployment, ast_artifacts) =
+                        generate_default_deployment(manifest, &StacksNetwork::Simnet, false)?;
+                    if ast_artifacts.success {
+                        let mut artifacts = setup_session_with_deployment(
+                            manifest,
+                            &deployment,
+                            Some(&ast_artifacts.asts),
+                        );
+                        for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
+                            // Merge parser's diags with analysis' diags.
+                            if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
+                                parser_diags.append(diags);
                             }
-                            Ok((deployment, None, artifacts))
+                            artifacts.diags.insert(contract_id, parser_diags);
                         }
-                        Ok((deployment, ast_artifacts)) => Ok((deployment, None, ast_artifacts)),
-                        Err(e) => Err(e),
+                        Ok((deployment, None, artifacts))
+                    } else {
+                        Ok((deployment, None, ast_artifacts))
                     }
                 }
-            }
+            })
         }
         Some(path) => {
             let deployment_location = get_absolute_deployment_path(manifest, path)
                 .expect("unable to retrieve deployment");
-            match load_deployment(manifest, &deployment_location) {
-                Ok(deployment) => {
+            load_deployment(manifest, &deployment_location)
+                .map(|deployment| {
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
-                    Ok((
+                    (
                         deployment,
                         Some(deployment_location.to_string_lossy().to_string()),
                         artifacts,
-                    ))
-                }
-                Err(e) => Err(format!("loading {path} failed with error: {e}")),
-            }
+                    )
+                })
+                .map_err(|e| format!("loading {path} failed with error: {e}"))
         }
     };
 
-    match result {
-        Ok(deployment) => deployment,
-        Err(e) => {
-            eprintln!("{}", format_err!(e));
-            process::exit(1);
-        }
-    }
+    result.unwrap_or_else(|e| {
+        eprintln!("{}", format_err!(e));
+        process::exit(1);
+    })
 }
 
 fn should_existing_plan_be_replaced(
@@ -1541,37 +1530,26 @@ fn load_deployment_if_exists(
     network: &StacksNetwork,
     force_on_disk: bool,
     force_computed: bool,
-) -> Option<Result<DeploymentSpecification, String>> {
-    let default_deployment_location = match get_default_deployment_path(manifest, network) {
-        Ok(location) => location,
-        Err(e) => return Some(Err(e)),
-    };
+) -> Result<Option<DeploymentSpecification>, String> {
+    let default_deployment_location = get_default_deployment_path(manifest, network)?;
     if !default_deployment_location.exists() {
-        return None;
+        return Ok(None);
     }
 
     if !force_on_disk {
-        let project_root = match paths::project_root_from_manifest_location(&manifest.location) {
-            Ok(root) => root,
-            Err(e) => return Some(Err(e)),
-        };
+        let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
 
         match generate_default_deployment(manifest, network, true) {
             Ok((deployment, _)) => {
                 use similar::{ChangeTag, TextDiff};
 
-                let current_version = match paths::read_content(&default_deployment_location) {
-                    Ok(content) => content,
-                    Err(message) => return Some(Err(message)),
-                };
-
-                let updated_version = match deployment.to_file_content(&project_root) {
-                    Ok(res) => res,
-                    Err(err) => return Some(Err(format!("failed serializing deployment\n{err}"))),
-                };
+                let current_version = paths::read_content(&default_deployment_location)?;
+                let updated_version = deployment
+                    .to_file_content(&project_root)
+                    .map_err(|err| format!("failed serializing deployment\n{err}"))?;
 
                 if updated_version == current_version {
-                    return Some(load_deployment(manifest, &default_deployment_location));
+                    return load_deployment(manifest, &default_deployment_location).map(Some);
                 }
 
                 if !force_computed {
@@ -1599,15 +1577,14 @@ fn load_deployment_if_exists(
                     let mut buffer = String::new();
                     std::io::stdin().read_line(&mut buffer).unwrap();
                     if buffer.starts_with('n') {
-                        Some(load_deployment(manifest, &default_deployment_location))
+                        load_deployment(manifest, &default_deployment_location).map(Some)
                     } else {
-                        paths::write_content(&default_deployment_location, &updated_version)
-                            .ok()?;
-                        Some(Ok(deployment))
+                        paths::write_content(&default_deployment_location, &updated_version)?;
+                        Ok(Some(deployment))
                     }
                 } else {
-                    paths::write_content(&default_deployment_location, &updated_version).ok()?;
-                    Some(Ok(deployment))
+                    paths::write_content(&default_deployment_location, &updated_version)?;
+                    Ok(Some(deployment))
                 }
             }
             Err(message) => {
@@ -1616,11 +1593,11 @@ fn load_deployment_if_exists(
                     red!("error:"),
                     message
                 );
-                Some(load_deployment(manifest, &default_deployment_location))
+                load_deployment(manifest, &default_deployment_location).map(Some)
             }
         }
     } else {
-        Some(load_deployment(manifest, &default_deployment_location))
+        load_deployment(manifest, &default_deployment_location).map(Some)
     }
 }
 
@@ -1725,13 +1702,8 @@ fn execute_changes(changes: Vec<Changes>) -> bool {
     }
 
     if let Some((location, doc)) = shared_doc {
-        let content = doc.to_string();
-        if let Err(message) = paths::write_content(&location, content.as_bytes()) {
-            eprintln!(
-                "{} Unable to update manifest file - {}",
-                red!("error:"),
-                message
-            );
+        if let Err(e) = paths::write_content(&location, doc.to_string().as_bytes()) {
+            eprintln!("{}", format_err!(e));
             return false;
         }
     }
@@ -2007,7 +1979,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                 };
                 let deployment: ConfigurationPackage = serde_json::from_reader(package_file)
                     .expect("error while reading deployment specification");
-                Some(Ok(deployment.deployment_plan))
+                Ok(Some(deployment.deployment_plan))
             } else {
                 load_deployment_if_exists(
                     &manifest,
@@ -2016,48 +1988,33 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                     cmd.use_computed_deployment_plan,
                 )
             };
-            match res {
-                Some(Ok(deployment)) => {
+
+            res.and_then(|opt| match opt {
+                Some(deployment) => {
                     println!(
                         "{} using existing deployments/default.devnet-plan.yaml",
                         yellow!("note:")
                     );
-                    // TODO(lgalabru): Think more about the desired DX.
-                    // Compute the latest version, display differences and propose overwrite?
                     Ok(deployment)
                 }
-                Some(Err(e)) => Err(e),
                 None => {
                     let default_deployment_path =
                         get_default_deployment_path(&manifest, &StacksNetwork::Devnet).unwrap();
                     let (deployment, _) =
-                        match generate_default_deployment(&manifest, &StacksNetwork::Devnet, false)
-                        {
-                            Ok(deployment) => deployment,
-                            Err(message) => {
+                        generate_default_deployment(&manifest, &StacksNetwork::Devnet, false)
+                            .unwrap_or_else(|message| {
                                 eprintln!("{}", red!(message));
                                 std::process::exit(1);
-                            }
-                        };
-                    let res = write_deployment(
-                        &deployment,
-                        &default_deployment_path,
-                        &project_root,
-                        true,
+                            });
+                    write_deployment(&deployment, &default_deployment_path, &project_root, true)?;
+                    println!(
+                        "{} {}",
+                        green!("Generated file"),
+                        paths::get_relative_path(&default_deployment_path, &project_root).unwrap()
                     );
-                    if let Err(message) = res {
-                        Err(message)
-                    } else {
-                        println!(
-                            "{} {}",
-                            green!("Generated file"),
-                            paths::get_relative_path(&default_deployment_path, &project_root)
-                                .unwrap()
-                        );
-                        Ok(deployment)
-                    }
+                    Ok(deployment)
                 }
-            }
+            })
         }
         Some(deployment_plan_path) => {
             let deployment_path = get_absolute_deployment_path(&manifest, &deployment_plan_path)

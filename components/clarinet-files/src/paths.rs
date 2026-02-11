@@ -7,12 +7,10 @@ use crate::{FileAccessor, StacksNetwork};
 /// Parse a URI string to a PathBuf.
 /// On native, only `file://` URIs are accepted and converted to filesystem paths.
 /// On WASM, any URI scheme is accepted (e.g. `vscode-test-web://`, `vscode-vfs://`)
-/// and the full URI string is kept as-is in the PathBuf so it can be sent back to
-/// the VSCode client (which uses `Uri.parse()` on these strings).
 fn path_from_file_uri(uri_string: &str) -> Option<PathBuf> {
-    let url = url::Url::parse(uri_string).ok()?;
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let url = url::Url::parse(uri_string).ok()?;
         if url.scheme() == "file" {
             url.to_file_path().ok()
         } else {
@@ -25,13 +23,12 @@ fn path_from_file_uri(uri_string: &str) -> Option<PathBuf> {
         // PathBuf operations (parent, join, file_name) work on URI strings
         // since they use `/` as separator, and the full URI is needed by the
         // JS client (customVFS.ts) which calls `Uri.parse()` on these strings.
-        let _ = url;
         Some(PathBuf::from(uri_string))
     }
 }
 
 /// Remove `/./` segments from a path string.
-/// `vscode-test-web` struggle with extra `/./` in paths
+/// `vscode-test-web` struggles with extra `/./` in paths
 /// Uses string manipulation rather than `Path::components()` to preserve
 /// URI scheme prefixes (e.g. `vscode-vfs://mount/...`) on WASM.
 fn normalize_dot_segments(path: PathBuf) -> PathBuf {
@@ -47,23 +44,22 @@ fn normalize_dot_segments(path: PathBuf) -> PathBuf {
 }
 
 /// Try to parse a location string as either a file:// URI or a plain path.
-/// If relative and project_root is provided, resolve against it.
+/// If relative and `project_root` is provided, resolve against it.
 pub fn try_parse_path(location_string: &str, project_root: Option<&Path>) -> Option<PathBuf> {
     if let Some(path) = path_from_file_uri(location_string) {
         return Some(path);
     }
     let path = PathBuf::from(location_string);
-    match (project_root, path.is_relative()) {
-        (None, true) => None,
-        (Some(root), true) => Some(normalize_dot_segments(root.join(&path))),
-        (_, false) => Some(path),
+    if path.is_relative() {
+        project_root.map(|root| normalize_dot_segments(root.join(&path)))
+    } else {
+        Some(path)
     }
 }
 
 /// Walk up from a path to find a directory containing Clarinet.toml.
 pub fn find_project_root(from: &Path) -> Result<PathBuf, String> {
     let mut path = from.to_path_buf();
-    // If `from` is a file, start from its parent
     if path.is_file() {
         path.pop();
     }
@@ -126,19 +122,16 @@ pub fn get_network_manifest_path(project_root: &Path, network: &StacksNetwork) -
     })
 }
 
-/// Get the project root directory from a manifest (Clarinet.toml) path.
 pub fn project_root_from_manifest_location(manifest_location: &Path) -> Result<PathBuf, String> {
     find_project_root(manifest_location.parent().unwrap_or(Path::new(".")))
 }
 
-/// Get the relative path from a base directory.
 pub fn get_relative_path(path: &Path, base: &Path) -> Result<String, String> {
     path.strip_prefix(base)
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|_| format!("{} is not under {}", path.display(), base.display()))
 }
 
-/// Read file content as bytes.
 pub fn read_content(path: &Path) -> Result<Vec<u8>, String> {
     let file =
         File::open(path).map_err(|e| format!("unable to read file {}\n{:?}", path.display(), e))?;
@@ -150,14 +143,12 @@ pub fn read_content(path: &Path) -> Result<Vec<u8>, String> {
     Ok(buffer)
 }
 
-/// Read file content as a UTF-8 string.
 pub fn read_content_as_utf8(path: &Path) -> Result<String, String> {
     let content = read_content(path)?;
     String::from_utf8(content)
         .map_err(|e| format!("unable to read content as utf8 {}\n{e:?}", path.display()))
 }
 
-/// Write content to a path, creating parent directories as needed.
 pub fn write_content(path: &Path, content: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
