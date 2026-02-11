@@ -6,6 +6,7 @@ use strum::EnumString;
 #[derive(Debug)]
 pub enum AnnotationKind {
     Allow(Vec<WarningKind>),
+    Env(String),
     Filter(Vec<ClarityName>),
     FilterAll,
 }
@@ -32,6 +33,16 @@ impl std::str::FromStr for AnnotationKind {
                         Err("missing value for 'allow' annotation".to_string())
                     } else {
                         Ok(AnnotationKind::Allow(params))
+                    }
+                }
+                "env" => {
+                    let network = value;
+                    if network.is_empty() {
+                        Err("missing network for 'env' annotation".to_string())
+                    } else if network != "simnet" {
+                        Err("bad network for 'env' annotation".to_string())
+                    } else {
+                        Ok(AnnotationKind::Env(network.to_string()))
                     }
                 }
                 "filter" => {
