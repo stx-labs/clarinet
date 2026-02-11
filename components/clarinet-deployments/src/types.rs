@@ -1287,6 +1287,23 @@ impl DeploymentSpecification {
         }
         self.sort_batches_by_epoch();
     }
+
+    pub fn remove_env_simnet(&mut self) {
+        for ref mut batch in self.plan.batches.iter_mut() {
+            for ref mut transaction in batch.transactions.iter_mut() {
+                if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = transaction
+                {
+                    spec.source = remove_env_simnet(spec.source.to_string())
+                        .expect("Failed to remove env(simnet) code");
+                }
+            }
+        }
+
+        for (_, (ref mut source, _)) in &mut self.contracts {
+            *source =
+                remove_env_simnet(source.to_string()).expect("Failed to remove env(simnet) code");
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
