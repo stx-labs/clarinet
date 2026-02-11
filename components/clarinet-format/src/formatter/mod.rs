@@ -1750,13 +1750,15 @@ impl<'a> Aggregator<'a> {
                 // Don't break before an opening brace of a map
                 let is_map_opening = trimmed.starts_with("{");
 
-                // Check if the current expression is on a different line than the previous one
-                // in the original source code
-                let on_different_line_in_source =
-                    // i - 1 index is fine here because we're withing !first_on_line
-                    is_comment(expr) && list[i - 1].span().start_line != expr.span().start_line;
+                // Check if we need a line break to preserve comment/expr line positions:
+                // - current expr is a comment on a different line than previous
+                // - previous expr is a comment on a different line than current (comment stays alone)
+                let prev = &list[i - 1];
+                let on_different_line_in_source = (is_comment(expr)
+                    && prev.span().start_line != expr.span().start_line)
+                    || (is_comment(prev) && prev.span().start_line != expr.span().start_line);
 
-                // Add line break if comment was on different lines in source
+                // Add line break if comment/expr was on different lines in source
                 // or if the line would be too long
                 if on_different_line_in_source
                     || (!is_map_opening
@@ -2949,6 +2951,19 @@ mod tests_formatter {
               (ok true)
             )
             "#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_inline_comment_try() {
+        let src = indoc!(
+            r#"
+    (try! (contract-call? 'STV9K21TBFAK4KNRJXF5DFP8N7W46G4V9RJ5XDY2.sbtc-token
+      ;; /g/.aibtc-pre-faktory/dao_contract_token_prelaunch
+      transfer pre-fee tx-sender .aibtc-pre-faktory none
+    ))"#
         );
         let result = format_with_default(src);
         assert_eq!(src, result);
