@@ -586,7 +586,7 @@ impl EditorState {
                     command: Some(ls_types::Command {
                         title: cost_text,
                         command: "clarity.showCostDetails".to_string(),
-                        arguments,
+                        arguments: None,
                     }),
                     data: None,
                 });

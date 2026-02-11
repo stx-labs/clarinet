@@ -850,7 +850,7 @@ dependencies = [
  "clarity-types",
  "console_error_panic_hook",
  "js-sys",
- "ls-types 0.0.2",
+ "ls-types",
  "regex",
  "serde",
  "serde-wasm-bindgen",
@@ -1531,16 +1531,6 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
-]
-
-[[package]]
-name = "fluent-uri"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1918b65d96df47d3591bed19c5cca17e3fa5d0707318e4b5ef2eae01764df7e5"
-dependencies = [
- "borrow-or-share",
- "ref-cast",
 ]
 
 [[package]]
@@ -2553,25 +2543,12 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "ls-types"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a7deb98ef9daaa7500324351a5bab7c80c644cfb86b4be0c4433b582af93510"
-dependencies = [
- "bitflags 2.10.0",
- "fluent-uri 0.3.2",
- "percent-encoding",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ls-types"
 version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c029d4b509074b7d59dac432d87d4c24badaaf6c6c9c8b7ac030ae8022dc118d"
 dependencies = [
  "bitflags 2.10.0",
- "fluent-uri 0.4.1",
+ "fluent-uri",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -4635,7 +4612,7 @@ dependencies = [
  "dashmap",
  "futures",
  "httparse",
- "ls-types 0.0.3",
+ "ls-types",
  "memchr",
  "serde",
  "serde_json",
