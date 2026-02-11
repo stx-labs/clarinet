@@ -9,6 +9,7 @@ use clarinet_deployments::{
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::vm::ast::build_ast;
+use clarity::vm::diagnostic::Diagnostic;
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::clarity::analysis::ContractAnalysis;
 use clarity_repl::clarity::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
@@ -17,6 +18,7 @@ use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrin
 use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::ContractDeployer;
+use clarity_repl::utils::REMOVE_ENV_SIMNET_PASSES;
 use clarity_static_cost::static_cost::StaticCost;
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
@@ -725,12 +727,43 @@ impl ProtocolState {
     }
 }
 
+pub enum Environment {
+    OnChain,
+    Simnet,
+}
+
+impl std::fmt::Display for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Environment::OnChain => write!(f, "onchain"),
+            Environment::Simnet => write!(f, "simnet"),
+        }
+    }
+}
+
+fn tag_chain(remove_env_simnet: bool, found_env_simnet: bool, diagnostics: &mut Vec<Diagnostic>) {
+    if found_env_simnet {
+        let env = if remove_env_simnet {
+            Environment::OnChain
+        } else {
+            Environment::Simnet
+        };
+
+        for ref mut diag in diagnostics {
+            diag.message.push_str(&format!(" ({env})"));
+        }
+    }
+}
+
 pub async fn build_state(
     manifest_location: &Path,
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
 ) -> Result<(), String> {
     let mut locations = HashMap::new();
+    let mut asts = BTreeMap::new();
+    let mut deps = BTreeMap::new();
+    let mut diagnostics = HashMap::new();
     let mut analyses = HashMap::new();
     let mut definitions = HashMap::new();
     let mut clarity_versions = HashMap::new();
@@ -747,68 +780,101 @@ pub async fn build_state(
         }
     };
 
-    let (deployment, mut artifacts) = generate_default_deployment(
-        &manifest,
-        &StacksNetwork::Simnet,
-        false,
-        file_accessor,
-        None,
-    )
-    .await?;
-
+    let mut global_found_env_simnet = false;
     let mut session = initiate_session_from_manifest(&manifest);
-    let contracts =
-        update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
-    for (contract_id, mut result) in contracts.into_iter() {
-        let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
-            continue;
-        };
-        locations.insert(contract_id.clone(), contract_location.clone());
-        if let Some(contract_metadata) = manifest.contracts_settings.get(contract_location) {
-            clarity_versions.insert(contract_id.clone(), contract_metadata.clarity_version);
-        } else {
-            let contract_name = contract_location
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default()
-                .to_string();
+    for force_remove_env_simnet in REMOVE_ENV_SIMNET_PASSES {
+        let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment(
+            &manifest,
+            &StacksNetwork::Simnet,
+            false,
+            file_accessor,
+            None,
+            force_remove_env_simnet,
+        )
+        .await?;
+        global_found_env_simnet |= found_env_simnet;
 
-            if manifest
-                .project
-                .override_boot_contracts_source
-                .contains_key(&contract_name)
-            {
-                let (_, version) =
-                    clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version(
-                        &contract_name,
-                    );
-                clarity_versions.insert(contract_id.clone(), version);
+        session = initiate_session_from_manifest(&manifest);
+        let contracts =
+            update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
+        for (contract_id, mut result) in contracts.into_iter() {
+            let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
+                continue;
+            };
+            locations.insert(contract_id.clone(), contract_location.clone());
+            if let Some(contract_metadata) = manifest.contracts_settings.get(contract_location) {
+                clarity_versions.insert(contract_id.clone(), contract_metadata.clarity_version);
+            } else {
+                let contract_name = contract_location
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+
+                if manifest
+                    .project
+                    .override_boot_contracts_source
+                    .contains_key(&contract_name)
+                {
+                    let (_, version) =
+                        clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version(
+                            &contract_name,
+                        );
+                    clarity_versions.insert(contract_id.clone(), version);
+                }
             }
+
+            match result {
+                Ok(mut execution_result) => {
+                    if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
+                        tag_chain(
+                            force_remove_env_simnet,
+                            global_found_env_simnet,
+                            &mut execution_result.diagnostics,
+                        );
+                        entry.append(&mut execution_result.diagnostics);
+                    }
+
+                    if let EvaluationResult::Contract(contract_result) = execution_result.result {
+                        if let Some(ast) = artifacts.asts.get(&contract_id) {
+                            let mut v = HashMap::new();
+                            get_all_function_definitions(&mut v, &ast.expressions);
+                            get_trait_definitions(&mut v, &ast.expressions);
+                            definitions.insert(contract_id.clone(), v);
+                        }
+                        analyses
+                            .insert(contract_id.clone(), Some(contract_result.contract.analysis));
+                    };
+                }
+                Err(ref mut diags) => {
+                    if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
+                        tag_chain(
+                            force_remove_env_simnet,
+                            global_found_env_simnet,
+                            &mut *diags,
+                        );
+                        entry.append(diags);
+                    }
+                    continue;
+                }
+            };
         }
 
-        match result {
-            Ok(mut execution_result) => {
-                if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
-                    entry.append(&mut execution_result.diagnostics);
-                }
+        // overwrite the asts and deps
+        asts = artifacts.asts;
+        deps = artifacts.deps;
 
-                if let EvaluationResult::Contract(contract_result) = execution_result.result {
-                    if let Some(ast) = artifacts.asts.get(&contract_id) {
-                        let mut v = HashMap::new();
-                        get_all_function_definitions(&mut v, &ast.expressions);
-                        get_trait_definitions(&mut v, &ast.expressions);
-                        definitions.insert(contract_id.clone(), v);
-                    }
-                    analyses.insert(contract_id.clone(), Some(contract_result.contract.analysis));
-                };
-            }
-            Err(ref mut diags) => {
-                if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
-                    entry.append(diags);
-                }
-                continue;
-            }
-        };
+        // merge the diags
+        for (contract_id, diags) in &mut artifacts.diags {
+            let entry = diagnostics
+                .entry(contract_id.clone())
+                .or_insert_with(Vec::new);
+            entry.append(diags);
+        }
+
+        if !global_found_env_simnet {
+            break;
+        }
     }
 
     // Compute cost analysis for each contract
@@ -817,8 +883,7 @@ pub async fn build_state(
     let mut cost_analyses = HashMap::new();
     for contract_id in locations.keys() {
         // Skip cost analysis for empty contracts (no expressions to analyze)
-        if artifacts
-            .asts
+        if asts
             .get(contract_id)
             .is_none_or(|ast| ast.expressions.is_empty())
         {
@@ -847,9 +912,9 @@ pub async fn build_state(
 
     protocol_state.consolidate(
         &mut locations,
-        &mut artifacts.asts,
-        &mut artifacts.deps,
-        &mut artifacts.diags,
+        &mut asts,
+        &mut deps,
+        &mut diagnostics,
         &mut definitions,
         &mut analyses,
         &mut clarity_versions,

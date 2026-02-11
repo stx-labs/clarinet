@@ -17,6 +17,10 @@ clarity-repl = { path = "../clarity-repl", default-features = false }
 clarinet-deployments = { path = "../clarinet-deployments" }
 clarity-static-cost = { path = "../clarity-static-cost" }
 
+[dev-dependencies]
+indoc = { workspace = true }
+tokio = { workspace = true }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 clarity = { workspace = true, default-features = false, features = ["wasm-web", "developer-mode"] }
 clarity-types = { workspace = true, features = ["wasm-web", "developer-mode"] }

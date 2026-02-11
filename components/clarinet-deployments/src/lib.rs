@@ -28,6 +28,7 @@ use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
 };
+use clarity_repl::utils::remove_env_simnet;
 use types::{
     ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,
     EpochSpec, RequirementPublishSpecification, StxTransferSpecification, TransactionSpecification,
@@ -296,7 +297,9 @@ pub async fn generate_default_deployment(
     no_batch: bool,
     file_accessor: Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
-) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
+    force_remove_env_simnet: bool,
+) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
+    let mut found_env_simnet = false;
     let network_manifest = match file_accessor {
         None => NetworkManifest::from_project_root(
             &manifest.root_dir,
@@ -753,13 +756,20 @@ pub async fn generate_default_deployment(
         };
 
         let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
-        let source = sources
+        let mut source = sources
             .get(&contract_location.to_string_lossy().to_string())
             .ok_or(format!(
                 "Invalid Clarinet.toml, source file not found for: {}",
                 &name
             ))?
             .clone();
+
+        if force_remove_env_simnet {
+            let (clean, had_annotation) =
+                remove_env_simnet(source.clone()).unwrap_or((source, false));
+            source = clean;
+            found_env_simnet |= had_annotation;
+        }
 
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
 
@@ -966,7 +976,7 @@ pub async fn generate_default_deployment(
         session,
     };
 
-    Ok((deployment, artifacts))
+    Ok((deployment, artifacts, found_env_simnet))
 }
 
 fn add_transaction_to_epoch(
