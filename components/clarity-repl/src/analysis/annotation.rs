@@ -61,17 +61,20 @@ impl std::str::FromStr for AnnotationKind {
 #[derive(Debug, EnumString, PartialEq, Eq, Hash)]
 #[strum(serialize_all = "snake_case")]
 pub enum WarningKind {
+    // Check checker
     UncheckedData,
     UncheckedParams,
+    // Linter. Keep sorted alphabetically
+    CaseConst,
+    ErrorConst,
     Noop,
+    UnusedBinding,
     UnusedConst,
     UnusedDataVar,
-    UnusedBinding,
     UnusedMap,
     UnusedPrivateFn,
     UnusedToken,
     UnusedTrait,
-    CaseConst,
 }
 
 #[derive(Debug)]

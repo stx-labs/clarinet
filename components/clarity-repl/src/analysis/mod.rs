@@ -60,6 +60,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::UnusedToken => lints::UnusedToken::run_pass,
             LintName::UnusedTrait => lints::UnusedTrait::run_pass,
             LintName::CaseConst => lints::CaseConst::run_pass,
+            LintName::ErrorConst => lints::ErrorConst::run_pass,
         }
     }
 }
