@@ -51,7 +51,11 @@ pub trait AnalysisPass {
 impl From<&LintName> for AnalysisPassFn {
     fn from(lint: &LintName) -> AnalysisPassFn {
         match lint {
+            // Keep alphabetically sorted
+            LintName::CaseConst => lints::CaseConst::run_pass,
+            LintName::ErrorConst => lints::ErrorConst::run_pass,
             LintName::Noop => lints::NoopChecker::run_pass,
+            LintName::UnnecessaryPublic => lints::UnnecessaryPublic::run_pass,
             LintName::UnusedConst => lints::UnusedConst::run_pass,
             LintName::UnusedDataVar => lints::UnusedDataVar::run_pass,
             LintName::UnusedBinding => lints::UnusedBinding::run_pass,
@@ -59,8 +63,6 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::UnusedPrivateFn => lints::UnusedPrivateFn::run_pass,
             LintName::UnusedToken => lints::UnusedToken::run_pass,
             LintName::UnusedTrait => lints::UnusedTrait::run_pass,
-            LintName::CaseConst => lints::CaseConst::run_pass,
-            LintName::ErrorConst => lints::ErrorConst::run_pass,
         }
     }
 }
