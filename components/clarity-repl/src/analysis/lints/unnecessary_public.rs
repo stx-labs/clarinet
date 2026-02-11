@@ -393,6 +393,31 @@ mod tests {
             .expect("Invalid code snippet")
     }
 
+    fn run_snippet_with_other_contract(snippet: String) -> (Vec<String>, ExecutionResult) {
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
+        settings
+            .repl_settings
+            .analysis
+            .set_lint_level(UnnecessaryPublic::get_name(), LintLevel::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+
+        let other_contract = ClarityContractBuilder::new()
+            .name("other-contract")
+            .code_source("(define-public (do-something) (ok true))".to_owned())
+            .build();
+
+        session
+            .interpreter
+            .run(&other_contract, None, false, None)
+            .expect("Invalid helper contract");
+
+        session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet")
+    }
+
     #[test]
     fn warn_on_public_with_no_side_effects() {
         #[rustfmt::skip]
@@ -610,31 +635,6 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
-    }
-
-    fn run_snippet_with_other_contract(snippet: String) -> (Vec<String>, ExecutionResult) {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
-        settings
-            .repl_settings
-            .analysis
-            .set_lint_level(UnnecessaryPublic::get_name(), LintLevel::Warning);
-
-        let mut session = Session::new_without_boot_contracts(settings);
-
-        let other_contract = ClarityContractBuilder::new()
-            .name("other-contract")
-            .code_source("(define-public (do-something) (ok true))".to_owned())
-            .build();
-
-        session
-            .interpreter
-            .run(&other_contract, None, false, None)
-            .expect("Invalid helper contract");
-
-        session
-            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
-            .expect("Invalid code snippet")
     }
 
     #[test]
