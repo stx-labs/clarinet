@@ -30,6 +30,22 @@ fn path_from_file_uri(uri_string: &str) -> Option<PathBuf> {
     }
 }
 
+/// Remove `/./` segments from a path string.
+/// `vscode-test-web` struggle with extra `/./` in paths
+/// Uses string manipulation rather than `Path::components()` to preserve
+/// URI scheme prefixes (e.g. `vscode-vfs://mount/...`) on WASM.
+fn normalize_dot_segments(path: PathBuf) -> PathBuf {
+    let s = path.to_string_lossy();
+    if !s.contains("/./") {
+        return path;
+    }
+    let mut s = s.into_owned();
+    while s.contains("/./") {
+        s = s.replace("/./", "/");
+    }
+    PathBuf::from(s)
+}
+
 /// Try to parse a location string as either a file:// URI or a plain path.
 /// If relative and project_root is provided, resolve against it.
 pub fn try_parse_path(location_string: &str, project_root: Option<&Path>) -> Option<PathBuf> {
@@ -39,7 +55,7 @@ pub fn try_parse_path(location_string: &str, project_root: Option<&Path>) -> Opt
     let path = PathBuf::from(location_string);
     match (project_root, path.is_relative()) {
         (None, true) => None,
-        (Some(root), true) => Some(root.join(&path)),
+        (Some(root), true) => Some(normalize_dot_segments(root.join(&path))),
         (_, false) => Some(path),
     }
 }
