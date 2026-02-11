@@ -6,10 +6,12 @@
 //! - No `stx-transfer?`, `stx-burn?`
 //! - No `ft-mint?`, `ft-burn?`, `ft-transfer?`
 //! - No `nft-mint?`, `nft-burn?`, `nft-transfer?`
-//! - No `contract-call?` (which could call state-modifying functions)
+//! - No `contract-call?` to a public (non-read-only) function
+//! - No dynamic `contract-call?` (trait-based dispatch, conservatively assumed to have side effects)
 
 use std::collections::HashMap;
 
+use clarity::types::StacksEpochId;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
@@ -23,27 +25,33 @@ use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-pub struct UnnecessaryPublic<'a> {
+pub struct UnnecessaryPublic<'a, 'b, 'c> {
     clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
     annotations: &'a Vec<Annotation>,
+    analysis_db: &'b mut AnalysisDatabase<'c>,
+    epoch: StacksEpochId,
     level: Level,
     active_annotation: Option<usize>,
     /// Set to `true` when traversing a public function body that contains a state-modifying op
     found_side_effect: bool,
 }
 
-impl<'a> UnnecessaryPublic<'a> {
+impl<'a, 'b, 'c> UnnecessaryPublic<'a, 'b, 'c> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
+        analysis_db: &'b mut AnalysisDatabase<'c>,
+        epoch: StacksEpochId,
         level: Level,
-    ) -> UnnecessaryPublic<'a> {
+    ) -> UnnecessaryPublic<'a, 'b, 'c> {
         Self {
             clarity_version,
             level,
             diagnostics: Vec::new(),
             annotations,
+            analysis_db,
+            epoch,
             active_annotation: None,
             found_side_effect: false,
         }
@@ -65,7 +73,7 @@ impl<'a> UnnecessaryPublic<'a> {
     }
 }
 
-impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
+impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
     }
@@ -317,14 +325,23 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
     fn visit_static_contract_call(
         &mut self,
         _expr: &'a SymbolicExpression,
-        _contract_identifier: &'a QualifiedContractIdentifier,
-        _function_name: &'a ClarityName,
+        contract_identifier: &'a QualifiedContractIdentifier,
+        function_name: &'a ClarityName,
         _args: &'a [SymbolicExpression],
     ) -> bool {
-        // TODO: Currently any `contract-call?` is considered to have side effects,
-        //       but in theory we could check a static call and see if the called function is read-only
-        self.found_side_effect = true;
-        false
+        // If the called function is read-only, it has no side effects
+        let is_read_only = self
+            .analysis_db
+            .get_read_only_function_type(contract_identifier, function_name, &self.epoch)
+            .ok()
+            .flatten()
+            .is_some();
+
+        if !is_read_only {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
     }
 
     fn visit_dynamic_contract_call(
@@ -339,9 +356,9 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
     }
 }
 
-impl AnalysisPass for UnnecessaryPublic<'_> {
+impl AnalysisPass for UnnecessaryPublic<'_, '_, '_> {
     fn run_pass(
-        _analysis_db: &mut AnalysisDatabase,
+        analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
@@ -349,13 +366,15 @@ impl AnalysisPass for UnnecessaryPublic<'_> {
         let checker = UnnecessaryPublic::new(
             analysis_cache.contract_analysis.clarity_version,
             analysis_cache.annotations,
+            analysis_db,
+            analysis_cache.contract_analysis.epoch,
             level,
         );
         checker.run(analysis_cache.contract_analysis)
     }
 }
 
-impl Lint for UnnecessaryPublic<'_> {
+impl Lint for UnnecessaryPublic<'_, '_, '_> {
     fn get_name() -> LintName {
         LintName::UnnecessaryPublic
     }
@@ -403,9 +422,19 @@ mod tests {
 
         let mut session = Session::new_without_boot_contracts(settings);
 
+        #[rustfmt::skip]
+        let source = indoc!("
+            (define-public (do-something)
+                (ok true))
+
+            (define-read-only (get-value)
+                u1)
+        ")
+        .to_string();
+
         let other_contract = ClarityContractBuilder::new()
             .name("other-contract")
-            .code_source("(define-public (do-something) (ok true))".to_owned())
+            .code_source(source)
             .build();
 
         session
@@ -638,7 +667,7 @@ mod tests {
     }
 
     #[test]
-    fn no_warn_on_public_with_contract_call() {
+    fn no_warn_on_public_calling_public_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (call-other)
@@ -650,6 +679,22 @@ mod tests {
         let (_, result) = run_snippet_with_other_contract(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_on_public_calling_read_only_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (call-other)
+                (ok (contract-call? .other-contract get-value))
+            )
+        ")
+        .to_string();
+
+        let (output, result) = run_snippet_with_other_contract(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("could be declared as `define-read-only`"));
     }
 
     #[test]
