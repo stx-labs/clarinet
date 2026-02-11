@@ -1437,7 +1437,6 @@ pub fn load_deployment_and_artifacts_or_exit(
                         "{} using deployments/default.simnet-plan.yaml",
                         yellow!("note:")
                     );
-                    // remove env(simnet) code if necessary
                     if force_remove_env_simnet {
                         deployment.remove_env_simnet();
                     }
@@ -1450,7 +1449,6 @@ pub fn load_deployment_and_artifacts_or_exit(
                 None => {
                     match generate_default_deployment(manifest, &StacksNetwork::Simnet, false) {
                         Ok((mut deployment, ast_artifacts)) if ast_artifacts.success => {
-                            // remove env(simnet) code if necessary
                             if force_remove_env_simnet {
                                 deployment.remove_env_simnet();
                             }
@@ -1479,7 +1477,6 @@ pub fn load_deployment_and_artifacts_or_exit(
                 .expect("unable to retrieve deployment");
             match load_deployment(manifest, &deployment_location) {
                 Ok(mut deployment) => {
-                    // remove env(simnet) code if necessary
                     if force_remove_env_simnet {
                         deployment.remove_env_simnet();
                     }

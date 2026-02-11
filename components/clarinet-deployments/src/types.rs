@@ -1299,7 +1299,7 @@ impl DeploymentSpecification {
             }
         }
 
-        for (_, (ref mut source, _)) in &mut self.contracts {
+        for (ref mut source, _) in self.contracts.values_mut() {
             *source =
                 remove_env_simnet(source.to_string()).expect("Failed to remove env(simnet) code");
         }
