@@ -19,11 +19,18 @@ fn path_from_file_uri(uri_string: &str) -> Option<PathBuf> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        // On WASM, keep the full URI string as the PathBuf value.
-        // PathBuf operations (parent, join, file_name) work on URI strings
-        // since they use `/` as separator, and the full URI is needed by the
-        // JS client (customVFS.ts) which calls `Uri.parse()` on these strings.
-        Some(PathBuf::from(uri_string))
+        // On WASM, keep the full URI string as the PathBuf value only if it
+        // actually contains a URI scheme. PathBuf operations (parent, join,
+        // file_name) work on URI strings since they use `/` as separator, and
+        // the full URI is needed by the JS client (customVFS.ts) which calls
+        // `Uri.parse()` on these strings.
+        // Plain paths (no scheme) return None so they fall through to the
+        // relative path joining logic in try_parse_path().
+        if uri_string.contains("://") {
+            Some(PathBuf::from(uri_string))
+        } else {
+            None
+        }
     }
 }
 
