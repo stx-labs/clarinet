@@ -73,7 +73,7 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     }
 }
 
-pub fn remove_env_simnet(source: String) -> Result<String, String> {
+pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
     let (pre_expressions, mut _diagnostics, success) = parser::v2::parse_collect_diagnostics(
         &source,
         StackDepthLimits::for_epoch(StacksEpochId::latest()),
@@ -85,6 +85,8 @@ pub fn remove_env_simnet(source: String) -> Result<String, String> {
 
     let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
     let mut found_env_simnet = false;
+    let mut global_found_env_simnet = false;
+
     for expr in &pre_expressions {
         // remove all comments and first non-comment
         if found_env_simnet {
@@ -99,6 +101,7 @@ pub fn remove_env_simnet(source: String) -> Result<String, String> {
         if let Comment(comment) = &expr.pre_expr {
             if comment.contains("#[env(simnet)]") {
                 found_env_simnet = true;
+                global_found_env_simnet = true;
                 for i in expr.span.start_line..=expr.span.end_line {
                     lines[(i - 1) as usize] = None;
                 }
@@ -106,13 +109,19 @@ pub fn remove_env_simnet(source: String) -> Result<String, String> {
         }
     }
 
-    let mut source = String::new();
-    for line in lines.iter().flatten() {
-        source.push_str(line);
-        source.push('\n');
-    }
+    if !global_found_env_simnet {
+        Ok((source, false))
+    } else {
+        let mut source = String::new();
+        for line in lines {
+            if let Some(line) = line {
+                source.push_str(line);
+            }
+            source.push('\n');
+        }
 
-    Ok(source)
+        Ok((source, true))
+    }
 }
 
 #[cfg(test)]
@@ -151,16 +160,24 @@ mod tests {
             )
             ;; mint post comment
 
+
+
+
+
+
+
         "#);
 
         // test that we can remove a marked fn
-        let clean =
+        let (clean, found) =
             remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
+        assert_eq!(found, true);
 
         // test that nothing is removed if nothing is marked
-        let clean =
+        let (clean, found) =
             remove_env_simnet(without_env_simnet.to_string()).expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
+        assert_eq!(found, false);
     }
 }
