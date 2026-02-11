@@ -51,10 +51,6 @@ impl<'a> UnnecessaryPublic<'a> {
 
     fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
         traverse(&mut self, &contract_analysis.expressions);
-
-        // TODO: Do we need to sort here? The functions should always be traversed in the order they are declared, right?
-        //       And errors should be generated in the same order, right?
-        self.diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         Ok(self.diagnostics)
     }
 
@@ -96,7 +92,61 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
         true
     }
 
-    // TODO: We skip private and read-only functions, but there are more top-level declarations that we can skip
+    fn traverse_define_constant(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        _value: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_define_nft(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        _nft_type: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_define_ft(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        _supply: Option<&'a SymbolicExpression>,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_define_map(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        _key_type: &'a SymbolicExpression,
+        _value_type: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_define_data_var(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        _data_type: &'a SymbolicExpression,
+        _initial: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_define_trait(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        _functions: &'a [SymbolicExpression],
+    ) -> bool {
+        true
+    }
 
     fn traverse_define_public(
         &mut self,
@@ -328,6 +378,7 @@ mod tests {
     use crate::analysis::linter::{Lint, LintLevel};
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
+    use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
         let mut settings = SessionSettings::default();
@@ -561,10 +612,45 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
-    // Note: `contract-call?` cannot be tested with a single snippet because the
-    // target contract must exist in the session. The `visit_static_contract_call`
-    // and `visit_dynamic_contract_call` handlers follow the same trivial pattern
-    // as the other state-modifying operations tested here.
+    fn run_snippet_with_other_contract(snippet: String) -> (Vec<String>, ExecutionResult) {
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
+        settings
+            .repl_settings
+            .analysis
+            .set_lint_level(UnnecessaryPublic::get_name(), LintLevel::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+
+        let other_contract = ClarityContractBuilder::new()
+            .name("other-contract")
+            .code_source("(define-public (do-something) (ok true))".to_owned())
+            .build();
+
+        session
+            .interpreter
+            .run(&other_contract, None, false, None)
+            .expect("Invalid helper contract");
+
+        session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet")
+    }
+
+    #[test]
+    fn no_warn_on_public_with_contract_call() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (call-other)
+                (contract-call? .other-contract do-something)
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet_with_other_contract(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
 
     #[test]
     fn no_warn_on_read_only() {
@@ -694,7 +780,4 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 0);
     }
-
-    // TODO: Add test for `contract-call?`
-    //       See `unused_trait.rs` for example of how to deploy multiple contracts in a unit tests
 }
