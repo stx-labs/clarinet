@@ -52,6 +52,8 @@ impl<'a> UnnecessaryPublic<'a> {
     fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
         traverse(&mut self, &contract_analysis.expressions);
 
+        // TODO: Do we need to sort here? The functions should always be traversed in the order they are declared, right?
+        //       And errors should be generated in the same order, right?
         self.diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         Ok(self.diagnostics)
     }
@@ -270,7 +272,7 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
         _args: &'a [SymbolicExpression],
     ) -> bool {
         // TODO: Currently any `contract-call?` is considered to have side effects,
-        // but in theory we could check a static call and see if the called function is read-only
+        //       but in theory we could check a static call and see if the called function is read-only
         self.found_side_effect = true;
         false
     }
@@ -692,4 +694,7 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 0);
     }
+
+    // TODO: Add test for `contract-call?`
+    //       See `unused_trait.rs` for example of how to deploy multiple contracts in a unit tests
 }
