@@ -302,18 +302,6 @@ impl LspVscodeBridge {
                 }
             }
 
-            crate::backend::CostDetailsParams::METHOD => {
-                let lsp_response = process_request(
-                    LspRequest::CostDetails(decode_from_js(js_params)?),
-                    &EditorStateInput::RwLock(self.editor_state_lock.clone()),
-                );
-                if let Ok(LspRequestResponse::CostDetails(response)) = lsp_response {
-                    if let Some(json_str) = response {
-                        return Ok(JsValue::from_str(&json_str));
-                    }
-                }
-            }
-
             _ => {
                 #[cfg(debug_assertions)]
                 log!("unexpected request ({})", method);

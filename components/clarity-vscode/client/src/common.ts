@@ -4,8 +4,7 @@ import { LanguageClientOptions } from "vscode-languageclient";
 
 import { initVFS } from "./customVFS";
 import { InsightsViewProvider } from "./Views/InsightsViewProvider";
-import { CostDetailsViewProvider } from "./Views/CostDetailsViewProvider";
-import type { InsightsData, LanguageClient, CostDetailsData } from "./types";
+import type { InsightsData, LanguageClient } from "./types";
 
 const { window, workspace } = vscode;
 
@@ -70,6 +69,7 @@ export async function initClient(
       "hover",
       "documentSymbols",
       "goToDefinition",
+      "staticCostAnalysis",
     ].forEach((k) => {
       if (newConfig[k] !== config[k]) requireReload = true;
     });
@@ -115,109 +115,9 @@ export async function initClient(
     }
   }
 
-  // Register cost details command
+  // Register no-op command for static cost code lens (display-only, no action on click)
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "clarity.showCostDetails",
-      async (args: any) => {
-        // VSCode code lens commands pass arguments as an array, so extract the first element if needed
-        const rawParams = Array.isArray(args) && args.length > 0 ? args[0] : args;
-
-        // Validate and extract parameters
-        if (!rawParams || typeof rawParams !== "object") {
-          vscode.window.showErrorMessage(
-            "Invalid arguments passed to cost details command",
-          );
-          return;
-        }
-
-        // Helper function to extract value from serde_json::Value wrapper
-        const extractValue = (value: any): any => {
-          if (value === null || value === undefined) {
-            return value;
-          }
-          // Handle serde_json::Value number wrapper: {$serde_json::private::Number: '4'}
-          if (typeof value === "object" && "$serde_json::private::Number" in value) {
-            return parseInt(value["$serde_json::private::Number"], 10);
-          }
-          // Handle regular numbers
-          if (typeof value === "number") {
-            return value;
-          }
-          // Handle strings that should be numbers
-          if (typeof value === "string") {
-            const parsed = parseInt(value, 10);
-            return isNaN(parsed) ? value : parsed;
-          }
-          // Handle circular references by converting to JSON string first
-          try {
-            const jsonStr = JSON.stringify(value);
-            const parsed = JSON.parse(jsonStr);
-            // Check if it's a wrapped number
-            if (typeof parsed === "object" && parsed !== null && "$serde_json::private::Number" in parsed) {
-              return parseInt(parsed["$serde_json::private::Number"], 10);
-            }
-            return parsed;
-          } catch {
-            return value;
-          }
-        };
-
-        // Extract and validate parameters
-        const lineValue = extractValue(rawParams.line);
-        const lineNumber = typeof lineValue === "number" ? lineValue : parseInt(String(lineValue), 10);
-
-        if (isNaN(lineNumber) || lineNumber < 0) {
-          console.error("Invalid line number:", rawParams.line, "extracted:", lineValue, "from args:", args);
-          vscode.window.showErrorMessage(
-            `Invalid line number: ${rawParams.line}`,
-          );
-          return;
-        }
-
-        const functionName = extractValue(rawParams.function);
-        const pathValue = extractValue(rawParams.path);
-
-        const params = {
-          path: String(pathValue || ""),
-          line: lineNumber,
-          function: String(functionName || ""),
-        };
-
-        console.log("Cost details request params:", params);
-        console.log("Raw params:", rawParams);
-
-        if (!params.path || !params.function) {
-          vscode.window.showErrorMessage(
-            "Missing required parameters (path or function)",
-          );
-          return;
-        }
-
-        try {
-          const res = await client.sendRequest("clarity/getCostDetails", {
-            path: params.path,
-            line: params.line,
-            function: params.function,
-          });
-          if (!res) {
-            vscode.window.showWarningMessage(
-              "No cost details available for this function",
-            );
-            return;
-          }
-
-          const costDetails: CostDetailsData = JSON.parse(res as string);
-          costDetails.path = params.path;
-          CostDetailsViewProvider.createOrShow(context.extensionUri, costDetails);
-        } catch (err) {
-          console.error("Error fetching cost details:", err);
-          vscode.window.showErrorMessage(
-            "Failed to fetch cost details. See output for details.",
-          );
-        }
-      },
-    ),
+    vscode.commands.registerCommand("clarity.staticCostLens", () => {}),
   );
 
   initVFS(client);

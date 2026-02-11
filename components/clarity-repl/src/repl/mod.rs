@@ -214,23 +214,10 @@ impl Serialize for ClarityContract {
             ContractDeployer::DefaultDeployer => {}
             _ => unreachable!(),
         }
-        match self.clarity_version {
-            ClarityVersion::Clarity1 => {
-                map.serialize_entry("clarity_version", &1)?;
-            }
-            ClarityVersion::Clarity2 => {
-                map.serialize_entry("clarity_version", &2)?;
-            }
-            ClarityVersion::Clarity3 => {
-                map.serialize_entry("clarity_version", &3)?;
-            }
-            ClarityVersion::Clarity4 => {
-                map.serialize_entry("clarity_version", &4)?;
-            }
-            ClarityVersion::Clarity5 => {
-                map.serialize_entry("clarity_version", &5)?;
-            }
-        }
+        map.serialize_entry(
+            "clarity_version",
+            &clarity_version_to_u8(self.clarity_version),
+        )?;
         map.serialize_entry("epoch", &self.epoch)?;
         map.end()
     }

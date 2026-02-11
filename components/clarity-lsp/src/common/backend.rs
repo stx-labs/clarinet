@@ -295,17 +295,6 @@ impl FunctionAnalysisParams {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CostDetailsParams {
-    pub path: String,
-    pub line: u32,
-    pub function: String,
-}
-
-impl CostDetailsParams {
-    pub const METHOD: &'static str = "clarity/getCostDetails";
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub enum LspRequest {
     Completion(CompletionParams),
     SignatureHelp(SignatureHelpParams),
@@ -317,7 +306,6 @@ pub enum LspRequest {
     CodeLens(CodeLensParams),
     Initialize(Box<InitializeParams>),
     FunctionAnalysis(FunctionAnalysisParams),
-    CostDetails(CostDetailsParams),
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -332,7 +320,6 @@ pub enum LspRequestResponse {
     CodeLens(Vec<CodeLens>),
     Initialize(Box<InitializeResult>),
     FunctionAnalysis(Option<String>),
-    CostDetails(Option<String>),
 }
 
 pub fn process_request(
@@ -641,28 +628,6 @@ pub fn process_request(
             Ok(LspRequestResponse::FunctionAnalysis(cost_analysis))
         }
 
-        LspRequest::CostDetails(params) => {
-            eprintln!(
-                "[LSP] CostDetails request received: path={}, line={}, function={}",
-                params.path, params.line, params.function
-            );
-            let file_url = params
-                .path
-                .parse()
-                .map_err(|e| format!("Invalid URI: {e}"))?;
-            let Some(contract_location) = get_contract_location(&file_url) else {
-                eprintln!("[LSP] Could not get contract location from URI");
-                return Ok(LspRequestResponse::CostDetails(None));
-            };
-            let cost_details = editor_state
-                .try_read(|es| es.get_cost_details(&contract_location, &params.function))
-                .unwrap_or_default();
-            eprintln!(
-                "[LSP] CostDetails response: {}",
-                cost_details.as_deref().unwrap_or("None")
-            );
-            Ok(LspRequestResponse::CostDetails(cost_details))
-        }
         _ => Err(format!("Unexpected command: {command:?}")),
     }
 }

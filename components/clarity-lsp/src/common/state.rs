@@ -539,6 +539,10 @@ impl EditorState {
     pub fn get_code_lenses(&self, contract_location: &FileLocation) -> Vec<ls_types::CodeLens> {
         let mut code_lenses = Vec::new();
 
+        if !self.settings.static_cost_analysis {
+            return code_lenses;
+        }
+
         // Get the contract metadata to find the manifest
         let contract_metadata = match self.contracts_lookup.get(contract_location) {
             Some(md) => md,
@@ -585,7 +589,7 @@ impl EditorState {
                     range: code_lens_range,
                     command: Some(ls_types::Command {
                         title: cost_text,
-                        command: "clarity.showCostDetails".to_string(),
+                        command: "clarity.staticCostLens".to_string(),
                         arguments: None,
                     }),
                     data: None,
@@ -788,125 +792,6 @@ impl EditorState {
         let total_cost_max = compute_total_cost_from_tree(cost_node);
         let total_cost_min = compute_total_min_cost_from_tree(cost_node);
         let percents = get_cost_percents(&total_cost_max, &block_limits);
-
-        // Extract trait count from the stored data
-        // TraitCount is HashMap<String, (u64, u64)>, so we use the size as the count
-        let trait_count = trait_count_opt
-            .as_ref()
-            .map(|tc| tc.len() as u32)
-            .unwrap_or(0u32);
-
-        let result = serde_json::json!({
-            "function": function_name,
-            "cost": {
-                "runtime": {
-                    "min": total_cost_min.runtime,
-                    "max": total_cost_max.runtime,
-                },
-                "read_count": {
-                    "min": total_cost_min.read_count,
-                    "max": total_cost_max.read_count,
-                },
-                "read_length": {
-                    "min": total_cost_min.read_length,
-                    "max": total_cost_max.read_length,
-                },
-                "write_count": {
-                    "min": total_cost_min.write_count,
-                    "max": total_cost_max.write_count,
-                },
-                "write_length": {
-                    "min": total_cost_min.write_length,
-                    "max": total_cost_max.write_length,
-                },
-            },
-            "percentages": {
-                "runtime": percents.runtime,
-                "read_count": percents.read_count,
-                "read_length": percents.read_length,
-                "write_count": percents.write_count,
-                "write_length": percents.write_length,
-            },
-            "limits": {
-                "runtime": block_limits.runtime,
-                "read_count": block_limits.read_count,
-                "read_length": block_limits.read_length,
-                "write_count": block_limits.write_count,
-                "write_length": block_limits.write_length,
-            },
-            "trait_count": trait_count,
-        })
-        .to_string();
-
-        Some(result)
-    }
-
-    pub fn get_cost_details(
-        &self,
-        contract_location: &FileLocation,
-        function_name: &str,
-    ) -> Option<String> {
-        crate::lsp_log!(
-            "[LSP] get_cost_details called for {} function {}",
-            contract_location,
-            function_name,
-        );
-
-        let contract_metadata = self.contracts_lookup.get(contract_location)?;
-        let protocol_state = self.protocols.get(&contract_metadata.manifest_location)?;
-        let contract_state = protocol_state.contracts.get(contract_location)?;
-
-        // Get the stored cost analysis
-        let cost_analysis = match contract_state.cost_analysis.as_ref() {
-            Some(ca) => ca,
-            None => {
-                crate::lsp_log!("[LSP] No cost analysis stored for contract");
-                return None;
-            }
-        };
-
-        crate::lsp_log!(
-            "[LSP] Looking for function '{}' in cost analysis. Available functions: {:?}",
-            function_name,
-            cost_analysis.keys().collect::<Vec<_>>()
-        );
-
-        let (cost_node, trait_count_opt) = match cost_analysis.get(function_name) {
-            Some((node, trait_count)) => {
-                let total_cost = compute_total_cost_from_tree(node);
-                crate::lsp_log!(
-                    "[LSP] Found cost node for '{}'. Total cost values: runtime={}, read_count={}, read_length={}, write_count={}, write_length={}",
-                    function_name,
-                    total_cost.runtime,
-                    total_cost.read_count,
-                    total_cost.read_length,
-                    total_cost.write_count,
-                    total_cost.write_length
-                );
-                (node, trait_count)
-            }
-            None => {
-                crate::lsp_log!("[LSP] No cost node found for function: {}", function_name);
-                crate::lsp_log!(
-                    "[LSP] Available functions: {:?}",
-                    cost_analysis.keys().collect::<Vec<_>>()
-                );
-                return None;
-            }
-        };
-
-        let block_limits = BLOCK_LIMIT_MAINNET;
-        let total_cost_max = compute_total_cost_from_tree(cost_node);
-        let total_cost_min = compute_total_min_cost_from_tree(cost_node);
-        let percents = get_cost_percents(&total_cost_max, &block_limits);
-
-        crate::lsp_log!(
-            "[LSP] Cost details for '{}': total runtime min={}, max={}, percentages={:?}",
-            function_name,
-            total_cost_min.runtime,
-            total_cost_max.runtime,
-            percents
-        );
 
         // Extract trait count from the stored data
         // TraitCount is HashMap<String, (u64, u64)>, so we use the size as the count

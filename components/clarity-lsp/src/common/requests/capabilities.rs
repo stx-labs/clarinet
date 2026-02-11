@@ -16,6 +16,7 @@ pub struct InitializationOptions {
     go_to_definition: bool,
     hover: bool,
     signature_help: bool,
+    pub static_cost_analysis: bool,
 }
 
 impl Default for InitializationOptions {
@@ -29,6 +30,7 @@ impl Default for InitializationOptions {
             go_to_definition: true,
             hover: true,
             signature_help: true,
+            static_cost_analysis: true,
         }
     }
 }
@@ -76,9 +78,12 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             }),
             false => None,
         },
-        code_lens_provider: Some(ls_types::CodeLensOptions {
-            resolve_provider: Some(false),
-        }),
+        code_lens_provider: match initialization_options.static_cost_analysis {
+            true => Some(ls_types::CodeLensOptions {
+                resolve_provider: Some(false),
+            }),
+            false => None,
+        },
         ..ServerCapabilities::default()
     }
 }
