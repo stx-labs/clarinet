@@ -1,13 +1,13 @@
 mod case_const;
 mod error_const;
 mod noop;
+mod unnecessary_public;
 mod unused_binding;
 mod unused_const;
 mod unused_data_var;
 mod unused_map;
 mod unused_private_fn;
 mod unused_token;
-mod unnecessary_public;
 mod unused_trait;
 
 pub use case_const::CaseConst;

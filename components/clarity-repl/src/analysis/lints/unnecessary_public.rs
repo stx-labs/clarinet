@@ -52,8 +52,7 @@ impl<'a> UnnecessaryPublic<'a> {
     fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
         traverse(&mut self, &contract_analysis.expressions);
 
-        self.diagnostics
-            .sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
+        self.diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         Ok(self.diagnostics)
     }
 
@@ -120,9 +119,7 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
                         name,
                     ),
                     spans: vec![expr.span.clone()],
-                    suggestion: Some(
-                        "Replace `define-public` with `define-read-only`".to_string(),
-                    ),
+                    suggestion: Some("Replace `define-public` with `define-read-only`".to_string()),
                 });
             }
         }
@@ -345,6 +342,7 @@ mod tests {
 
     #[test]
     fn warn_on_public_with_no_side_effects() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (get-value)
                 (ok u1)
@@ -361,6 +359,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_var_set() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
             (define-public (increment)
@@ -379,6 +378,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_map_set() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-map balances principal uint)
             (define-public (set-balance (who principal) (amount uint))
@@ -397,6 +397,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_map_insert() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-map balances principal uint)
             (define-public (init-balance (who principal))
@@ -415,6 +416,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_map_delete() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-map balances principal uint)
             (define-public (remove-balance (who principal))
@@ -433,6 +435,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_stx_transfer() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (send-stx (amount uint) (to principal))
                 (stx-transfer? amount tx-sender to)
@@ -447,6 +450,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_stx_burn() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (burn-stx (amount uint))
                 (stx-burn? amount tx-sender)
@@ -461,6 +465,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_ft_mint() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-fungible-token my-token)
             (define-public (mint (amount uint) (to principal))
@@ -476,6 +481,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_ft_burn() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-fungible-token my-token)
             (define-public (burn (amount uint))
@@ -491,6 +497,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_ft_transfer() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-fungible-token my-token)
             (define-public (transfer (amount uint) (to principal))
@@ -506,6 +513,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_nft_mint() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-non-fungible-token my-nft uint)
             (define-public (mint (id uint) (to principal))
@@ -521,6 +529,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_nft_burn() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-non-fungible-token my-nft uint)
             (define-public (burn (id uint))
@@ -536,6 +545,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_public_with_nft_transfer() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-non-fungible-token my-nft uint)
             (define-public (transfer (id uint) (to principal))
@@ -556,6 +566,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_read_only() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-read-only (get-value)
                 u1
@@ -570,6 +581,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_private() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (helper)
                 u1
@@ -584,6 +596,7 @@ mod tests {
 
     #[test]
     fn warn_on_multiple_public_fns_without_side_effects() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (get-a)
                 (ok u1)
@@ -601,6 +614,7 @@ mod tests {
 
     #[test]
     fn mixed_public_fns() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
             (define-public (get-counter)
@@ -622,6 +636,7 @@ mod tests {
 
     #[test]
     fn allow_with_annotation() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             ;; #[allow(unnecessary_public)]
             (define-public (get-value)
@@ -637,6 +652,7 @@ mod tests {
 
     #[test]
     fn warn_on_public_with_only_reads() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
             (define-map balances principal uint)
@@ -657,6 +673,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_side_effect_in_branch() {
+        #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var counter uint u0)
             (define-public (maybe-increment (do-it bool))
