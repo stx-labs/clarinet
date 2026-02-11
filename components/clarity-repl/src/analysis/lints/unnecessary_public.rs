@@ -73,7 +73,7 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
         &self.clarity_version
     }
 
-    // Skip private function bodies — we only care about public functions
+    // Skip private function bodies, we only care about public functions
     fn traverse_define_private(
         &mut self,
         _expr: &'a SymbolicExpression,
@@ -84,7 +84,7 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
         true
     }
 
-    // Skip read-only function bodies — they're already read-only
+    // Skip read-only function bodies, they're already read-only
     fn traverse_define_read_only(
         &mut self,
         _expr: &'a SymbolicExpression,
@@ -94,6 +94,8 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
     ) -> bool {
         true
     }
+
+    // TODO: We skip private and read-only functions, but there are more top-level declarations that we can skip
 
     fn traverse_define_public(
         &mut self,
@@ -270,6 +272,8 @@ impl<'a> ASTVisitor<'a> for UnnecessaryPublic<'a> {
         _function_name: &'a ClarityName,
         _args: &'a [SymbolicExpression],
     ) -> bool {
+        // TODO: Currently any `contract-call?` is considered to have side effects,
+        // but in theory we could check a static call and see if the called function is read-only
         self.found_side_effect = true;
         false
     }
