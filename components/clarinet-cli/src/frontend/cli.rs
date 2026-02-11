@@ -14,7 +14,7 @@ use clarinet_deployments::onchain::{
 };
 use clarinet_deployments::types::{DeploymentGenerationArtifacts, DeploymentSpecification};
 use clarinet_deployments::{
-    get_default_deployment_path, load_deployment, setup_session_with_deployment,
+    get_default_deployment_path, load_deployment, load_deployment_and_artifacts,
 };
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
@@ -65,6 +65,7 @@ enum OutputFormat {
 struct JsonCheckOutput {
     success: bool,
     diagnostics: HashMap<String, Vec<Diagnostic>>,
+    environment: String,
 }
 
 /// Clarinet is a command line tool for Clarity smart contract development.
@@ -747,9 +748,9 @@ pub fn main() {
                     StacksNetwork::Simnet
                 };
 
-                let (mut deployment, _) =
+                let (mut deployment, _, _) =
                     match generate_default_deployment(&manifest, &network, cmd.no_batch) {
-                        Ok(deployment) => deployment,
+                        Ok(result) => result,
                         Err(message) => {
                             eprintln!("{}", format_err!(message));
                             std::process::exit(1);
@@ -857,7 +858,7 @@ pub fn main() {
                             }
                             None => {
                                 let default_deployment_path = project_root.join(get_default_deployment_path(network));
-                                let (deployment, _) =
+                                let (deployment, _, _) =
                                     generate_default_deployment(&manifest, network, false)
                                         .unwrap_or_else(|message| {
                                             eprintln!("{}", red!(message));
@@ -1085,11 +1086,12 @@ pub fn main() {
 
                 let mut terminal = match manifest {
                     Some(ref manifest) => {
-                        let (deployment, _, artifacts) = load_deployment_and_artifacts_or_exit(
+                        let ((deployment, _, artifacts), _) = load_deployment_and_artifacts_or_exit(
                             manifest,
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
                             cmd.use_computed_deployment_plan,
+                            false,
                         );
 
                         if !artifacts.success {
@@ -1222,6 +1224,7 @@ pub fn main() {
                     let output = JsonCheckOutput {
                         success,
                         diagnostics: HashMap::from([(file, diagnostics)]),
+                        environment: "simnet".to_string(),
                     };
                     let json = if cmd.output_format == OutputFormat::JsonPretty {
                         serde_json::to_string_pretty(&output).unwrap()
@@ -1252,67 +1255,91 @@ pub fn main() {
         }
         Command::Check(cmd) => {
             let manifest = load_manifest_or_exit(cmd.manifest_path, false);
-            let (deployment, _, artifacts) = load_deployment_and_artifacts_or_exit(
-                &manifest,
-                &cmd.deployment_plan_path,
-                cmd.use_on_disk_deployment_plan,
-                cmd.use_computed_deployment_plan,
-            );
+            let mut exit_codes = Vec::new();
+            let mut global_found_env_simnet = false;
+            for force_remove_env_simnet in [true, false] {
+                let ((deployment, _, artifacts), found_env_simnet) =
+                    load_deployment_and_artifacts_or_exit(
+                        &manifest,
+                        &cmd.deployment_plan_path,
+                        cmd.use_on_disk_deployment_plan,
+                        cmd.use_computed_deployment_plan,
+                        force_remove_env_simnet,
+                    );
+                global_found_env_simnet |= found_env_simnet;
 
-            let exit_code = i32::from(!artifacts.success);
+                let exit_code = i32::from(!artifacts.success);
+                exit_codes.push(exit_code);
 
-            match cmd.output_format {
-                OutputFormat::Json | OutputFormat::JsonPretty => {
-                    let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
-                        .diags
-                        .into_iter()
-                        .filter(|(_, diags)| !diags.is_empty())
-                        .filter_map(|(contract_id, diags)| {
-                            let (_, path) = deployment.contracts.get(&contract_id)?;
-                            Some((path.to_string_lossy().to_string(), diags))
-                        })
-                        .collect();
-                    let output = JsonCheckOutput {
-                        success: artifacts.success,
-                        diagnostics,
-                    };
-                    let json = if cmd.output_format == OutputFormat::JsonPretty {
-                        serde_json::to_string_pretty(&output).unwrap()
-                    } else {
-                        serde_json::to_string(&output).unwrap()
-                    };
-                    println!("{json}");
+                match cmd.output_format {
+                    OutputFormat::Json | OutputFormat::JsonPretty => {
+                        let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
+                            .diags
+                            .into_iter()
+                            .filter(|(_, diags)| !diags.is_empty())
+                            .filter_map(|(contract_id, diags)| {
+                                let (_, path) = deployment.contracts.get(&contract_id)?;
+                                Some((path.to_string_lossy().to_string(), diags))
+                            })
+                            .collect();
+                        let environment = if force_remove_env_simnet {
+                            "mainnet".to_string()
+                        } else {
+                            "simnet".to_string()
+                        };
+                        let output = JsonCheckOutput {
+                            success: artifacts.success,
+                            diagnostics,
+                            environment,
+                        };
+                        let json = if cmd.output_format == OutputFormat::JsonPretty {
+                            serde_json::to_string_pretty(&output).unwrap()
+                        } else {
+                            serde_json::to_string(&output).unwrap()
+                        };
+                        println!("{json}");
+                    }
+                    OutputFormat::Standard => {
+                        if global_found_env_simnet {
+                            if !force_remove_env_simnet {
+                                println!("Checking contracts with #[env(simnet)] code");
+                            } else {
+                                println!("Checking contracts without #[env(simnet)] code");
+                            }
+                        }
+                        let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                        if diags_digest.has_feedbacks() {
+                            println!("{}", diags_digest.message);
+                        }
+
+                        if diags_digest.warnings > 0 {
+                            println!(
+                                "{} {} detected",
+                                yellow!("!"),
+                                pluralize!(diags_digest.warnings, "warning")
+                            );
+                        }
+                        if diags_digest.errors > 0 {
+                            println!(
+                                "{} {} detected",
+                                red!("x"),
+                                pluralize!(diags_digest.errors, "error")
+                            );
+                        } else {
+                            println!(
+                                "{} {} checked",
+                                green!("✔"),
+                                pluralize!(diags_digest.contracts_checked, "contract"),
+                            );
+                        }
+
+                        if clarinetrc.enable_hints.unwrap_or(true) {
+                            display_post_check_hint();
+                        }
+                    }
                 }
-                OutputFormat::Standard => {
-                    let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-                    if diags_digest.has_feedbacks() {
-                        println!("{}", diags_digest.message);
-                    }
-
-                    if diags_digest.warnings > 0 {
-                        println!(
-                            "{} {} detected",
-                            yellow!("!"),
-                            pluralize!(diags_digest.warnings, "warning")
-                        );
-                    }
-                    if diags_digest.errors > 0 {
-                        println!(
-                            "{} {} detected",
-                            red!("x"),
-                            pluralize!(diags_digest.errors, "error")
-                        );
-                    } else {
-                        println!(
-                            "{} {} checked",
-                            green!("✔"),
-                            pluralize!(diags_digest.contracts_checked, "contract"),
-                        );
-                    }
-
-                    if clarinetrc.enable_hints.unwrap_or(true) {
-                        display_post_check_hint();
-                    }
+                if !global_found_env_simnet {
+                    break;
                 }
             }
 
@@ -1322,7 +1349,11 @@ pub fn main() {
                     DeveloperUsageDigest::new(&manifest.project.name, &manifest.project.authors),
                 ));
             }
-            std::process::exit(exit_code);
+            if exit_codes.contains(&1) {
+                std::process::exit(1);
+            } else {
+                std::process::exit(0);
+            }
         }
         Command::Integrate(cmd) => {
             eprintln!(
@@ -1489,70 +1520,59 @@ pub fn load_deployment_and_artifacts_or_exit(
     deployment_plan_path: &Option<String>,
     force_on_disk: bool,
     force_computed: bool,
+    force_remove_env_simnet: bool,
 ) -> (
-    DeploymentSpecification,
-    Option<String>,
-    DeploymentGenerationArtifacts,
+    (
+        DeploymentSpecification,
+        Option<String>,
+        DeploymentGenerationArtifacts,
+    ),
+    bool,
 ) {
     let default_deployment_file = get_default_deployment_path(&StacksNetwork::Simnet);
-    let result = match deployment_plan_path {
-        None => {
-            load_deployment_if_exists(
-                manifest,
-                &StacksNetwork::Simnet,
-                force_on_disk,
-                force_computed,
-            )
-            .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
-            .and_then(|opt| match opt {
-                Some(mut deployment) => {
-                    eprintln!("{} using {default_deployment_file}", yellow!("note:"));
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
-                    Ok((deployment, None, artifacts))
-                }
-                None => {
-                    let (mut deployment, ast_artifacts) =
-                        generate_default_deployment(manifest, &StacksNetwork::Simnet, false)?;
-                    if ast_artifacts.success {
-                        let mut artifacts = setup_session_with_deployment(
-                            manifest,
-                            &mut deployment,
-                            Some(&ast_artifacts.asts),
-                        );
-                        for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
-                            // Merge parser's diags with analysis' diags.
-                            if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
-                                parser_diags.append(diags);
-                            }
-                            artifacts.diags.insert(contract_id, parser_diags);
-                        }
-                        Ok((deployment, None, artifacts))
-                    } else {
-                        Ok((deployment, None, ast_artifacts))
-                    }
-                }
-            })
+
+    // Try to load an existing on-disk deployment (CLI-specific: interactive prompts)
+    let existing_deployment = if deployment_plan_path.is_none() {
+        match load_deployment_if_exists(
+            manifest,
+            &StacksNetwork::Simnet,
+            force_on_disk,
+            force_computed,
+        ) {
+            Ok(Some(deployment)) => {
+                eprintln!("{} using {default_deployment_file}", yellow!("note:"));
+                Some(deployment)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!(
+                    "{} loading {default_deployment_file} failed with error: {e}",
+                    red!("error:")
+                );
+                process::exit(1);
+            }
         }
-        Some(path) => {
-            let project_root = &manifest.root_dir;
-            let deployment_location = project_root.join(path);
-            load_deployment(project_root, &deployment_location)
-                .map(|mut deployment| {
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
-                    (
-                        deployment,
-                        Some(deployment_location.to_string_lossy().to_string()),
-                        artifacts,
-                    )
-                })
-                .map_err(|e| format!("loading {path} failed with error: {e}"))
-        }
+    } else {
+        None
     };
 
-    result.unwrap_or_else(|e| {
-        eprintln!("{}", format_err!(e));
-        process::exit(1);
-    })
+    let future = load_deployment_and_artifacts(
+        manifest,
+        deployment_plan_path.as_deref(),
+        existing_deployment,
+        force_remove_env_simnet,
+        None,
+    );
+
+    match hiro_system_kit::nestable_block_on(future) {
+        Ok((deployment, path, artifacts, found_env_simnet)) => {
+            ((deployment, path, artifacts), found_env_simnet)
+        }
+        Err(e) => {
+            eprintln!("{}", format_err!(e));
+            process::exit(1);
+        }
+    }
 }
 
 fn should_existing_plan_be_replaced(
@@ -1614,7 +1634,7 @@ fn load_deployment_if_exists(
 
     if !force_on_disk {
         match generate_default_deployment(manifest, network, true) {
-            Ok((deployment, _)) => {
+            Ok((deployment, _, _)) => {
                 use similar::{ChangeTag, TextDiff};
 
                 let current_version = paths::read_content(&default_deployment_location)?;
@@ -2074,7 +2094,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                 None => {
                     let default_deployment_path =
                         project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
-                    let (deployment, _) =
+                    let (deployment, _, _) =
                         generate_default_deployment(&manifest, &StacksNetwork::Devnet, false)
                             .unwrap_or_else(|message| {
                                 eprintln!("{}", red!(message));
@@ -2969,6 +2989,7 @@ mod tests {
         let output = JsonCheckOutput {
             success,
             diagnostics: HashMap::from([(filename.clone(), diagnostics)]),
+            environment: "simnet".to_string(),
         };
 
         // Verify both JSON formats parse correctly

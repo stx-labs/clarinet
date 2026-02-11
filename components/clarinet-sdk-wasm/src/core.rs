@@ -490,11 +490,12 @@ impl SDK {
         let deployment_plan_location =
             project_root.join(get_default_deployment_path(&StacksNetwork::Simnet));
 
-        let (mut deployment, artifacts) = generate_default_deployment(
+        let (mut deployment, artifacts, _) = generate_default_deployment(
             &manifest,
             &StacksNetwork::Simnet,
             false,
             Some(&*self.file_accessor),
+            false,
         )
         .await?;
 

@@ -12,8 +12,9 @@ pub fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
     _no_batch: bool,
-) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
-    let future = clarinet_deployments::generate_default_deployment(manifest, network, false, None);
+) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
+    let future =
+        clarinet_deployments::generate_default_deployment(manifest, network, false, None, false);
     hiro_system_kit::nestable_block_on(future)
 }
 
