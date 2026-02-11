@@ -68,6 +68,7 @@ pub enum WarningKind {
     CaseConst,
     ErrorConst,
     Noop,
+    UnnecessaryPublic,
     UnusedBinding,
     UnusedConst,
     UnusedDataVar,
