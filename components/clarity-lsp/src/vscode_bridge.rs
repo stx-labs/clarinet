@@ -9,8 +9,8 @@ use ls_types::notification::{
     Initialized, Notification,
 };
 use ls_types::request::{
-    Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest, Initialize,
-    RangeFormatting, Request, SignatureHelpRequest,
+    CodeLensRequest, Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest,
+    Initialize, RangeFormatting, Request, SignatureHelpRequest,
 };
 use ls_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
@@ -277,6 +277,28 @@ impl LspVscodeBridge {
                 );
                 if let Ok(LspRequestResponse::Hover(response)) = lsp_response {
                     return response.serialize(&serializer).map_err(|_| JsValue::NULL);
+                }
+            }
+
+            CodeLensRequest::METHOD => {
+                let lsp_response = process_request(
+                    LspRequest::CodeLens(decode_from_js(js_params)?),
+                    &EditorStateInput::RwLock(self.editor_state_lock.clone()),
+                );
+                if let Ok(LspRequestResponse::CodeLens(response)) = lsp_response {
+                    return response.serialize(&serializer).map_err(|_| JsValue::NULL);
+                }
+            }
+
+            crate::backend::FunctionAnalysisParams::METHOD => {
+                let lsp_response = process_request(
+                    LspRequest::FunctionAnalysis(decode_from_js(js_params)?),
+                    &EditorStateInput::RwLock(self.editor_state_lock.clone()),
+                );
+                if let Ok(LspRequestResponse::FunctionAnalysis(response)) = lsp_response {
+                    if let Some(json_str) = response {
+                        return Ok(JsValue::from_str(&json_str));
+                    }
                 }
             }
 

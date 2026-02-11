@@ -125,6 +125,12 @@
             "order": 0,
             "description": "Show function signature help."
           },
+          "clarity-lsp.staticCostAnalysis": {
+            "type": "boolean",
+            "default": true,
+            "order": 0,
+            "description": "Show static cost analysis (runtime, read/write counts) as code lens above function definitions."
+          },
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",
             "default": false,
@@ -184,6 +190,7 @@
         }
       ]
     },
+    "commands": [],
     "breakpoints": [
       {
         "language": "clarity"

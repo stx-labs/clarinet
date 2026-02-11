@@ -933,7 +933,7 @@ impl GraphWalker {
 
 #[cfg(test)]
 mod tests {
-    use ::clarity::vm::diagnostic::Diagnostic;
+    use clarity::vm::diagnostic::Diagnostic;
 
     use super::*;
     use crate::repl::session::Session;

@@ -69,6 +69,7 @@ export async function initClient(
       "hover",
       "documentSymbols",
       "goToDefinition",
+      "staticCostAnalysis",
     ].forEach((k) => {
       if (newConfig[k] !== config[k]) requireReload = true;
     });
@@ -113,6 +114,11 @@ export async function initClient(
       console.warn(err);
     }
   }
+
+  // Register no-op command for static cost code lens (display-only, no action on click)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("clarity.staticCostLens", () => {}),
+  );
 
   initVFS(client);
   try {

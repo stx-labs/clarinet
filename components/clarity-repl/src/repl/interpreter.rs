@@ -330,7 +330,7 @@ impl ClarityInterpreter {
         Some(format!("0x{value_hex}"))
     }
 
-    fn get_global_context(
+    pub fn get_global_context(
         &'_ mut self,
         epoch: StacksEpochId,
         cost_track: bool,

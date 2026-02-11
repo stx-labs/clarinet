@@ -1,4 +1,5 @@
 mod common;
+#[macro_use]
 pub mod utils;
 #[cfg(target_arch = "wasm32")]
 pub mod vscode_bridge;
