@@ -160,7 +160,6 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             }
         }
 
-        diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
 }
