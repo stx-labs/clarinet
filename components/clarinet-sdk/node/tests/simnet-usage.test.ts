@@ -628,13 +628,13 @@ describe("the simnet can execute commands", () => {
   });
 });
 
-// describe("custom manifest path", () => {
-//   it("initSimnet handles absolute path", async () => {
-//     const manifestPath = path.join(process.cwd(), "tests/fixtures/Clarinet.toml");
-//     const simnet = await initSimnet(manifestPath);
-//     expect(simnet.blockHeight).toBe(1);
-//   });
-// });
+describe("custom manifest path", () => {
+  it("initSimnet handles absolute path", async () => {
+    const manifestPath = path.join(process.cwd(), "tests/fixtures/Clarinet.toml");
+    const simnet = await initSimnet(manifestPath);
+    expect(simnet.blockHeight).toBe(3);
+  });
+});
 
 describe("the sdk handles multiple manifests project", () => {
   it("handle invalid project", async () => {

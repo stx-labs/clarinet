@@ -77,10 +77,9 @@ impl LspVscodeBridge {
                 } else if let Some(manifest_location) = get_manifest_location(uri) {
                     LspNotification::ManifestOpened(manifest_location)
                 } else {
-                    return Promise::reject(&JsValue::from_str(&format!(
-                        "error (did open): unsupported file opened {:?}",
-                        uri
-                    )));
+                    return Promise::reject(&JsValue::from_str(
+                        "error (did open): unsupported file opened",
+                    ));
                 }
             }
 
