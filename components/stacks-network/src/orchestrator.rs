@@ -509,7 +509,7 @@ impl DevnetOrchestrator {
         // Start streaming container logs if enabled
         let _ = self.start_container_logs_streaming(ctx).await;
 
-        for (i, signer_key) in signers_keys.clone().iter().enumerate() {
+        for (i, signer_key) in signers_keys.iter().enumerate() {
             let _ = event_tx.send(DevnetEvent::info(format!("Starting stacks-signer-{i}")));
             send_status_update(
                 &event_tx,
@@ -886,9 +886,7 @@ rpcport={bitcoin_node_rpc_port}
             ..Default::default()
         });
 
-        let Some(docker) = &self.docker_client else {
-            panic!("unable to get Docker client");
-        };
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
         let res = docker.list_containers(options).await;
         let url = "https://docs.stacks.co/clarinet/local-blockchain-development#common-issues";
         let containers = res.map_err(|e| {
@@ -924,16 +922,14 @@ rpcport={bitcoin_node_rpc_port}
         devnet_event_tx: &Sender<DevnetEvent>,
         no_snapshot: bool,
     ) -> Result<(), String> {
-        let container = match &self.bitcoin_node_container_id {
-            Some(container) => container.clone(),
-            _ => return Err("unable to boot container".to_string()),
-        };
+        let container = self
+            .bitcoin_node_container_id
+            .as_ref()
+            .ok_or("unable to boot container")?;
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
         docker
-            .start_container::<String>(&container, None)
+            .start_container::<String>(container, None)
             .await
             .map_err(|e| formatted_docker_error("unable to start bitcoind container", e))?;
         // Copy snapshot if available
@@ -948,7 +944,7 @@ rpcport={bitcoin_node_rpc_port}
         };
 
         let exec = docker
-            .create_exec(&container, exec_config)
+            .create_exec(container, exec_config)
             .await
             .map_err(|e| format!("Failed to create exec for mkdir: {e}"))?;
 
@@ -960,7 +956,7 @@ rpcport={bitcoin_node_rpc_port}
             // Ensure the destination directory exists in the container
 
             copy_snapshot_to_container(
-                &container,
+                container,
                 &bitcoin_snapshot,
                 BITCOIND_DATA_DIR,
                 devnet_event_tx,
@@ -1260,20 +1256,17 @@ peer_port = {bitcoin_node_p2p_port}
         devnet_event_tx: &Sender<DevnetEvent>,
         no_snapshot: bool,
     ) -> Result<(), String> {
-        let container = match &self.stacks_node_container_id {
-            Some(container) => container.clone(),
-            _ => return Err("unable to boot container".to_string()),
-        };
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let container = self
+            .stacks_node_container_id
+            .as_ref()
+            .ok_or("unable to boot container")?;
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
         let global_snapshot_dir = get_global_snapshot_dir();
         let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
 
         if !no_snapshot {
             copy_snapshot_to_container(
-                &container,
+                container,
                 &stacks_snapshot,
                 "/devnet",
                 devnet_event_tx,
@@ -1283,7 +1276,7 @@ peer_port = {bitcoin_node_p2p_port}
         }
 
         docker
-            .start_container::<String>(&container, None)
+            .start_container::<String>(container, None)
             .await
             .map_err(|e| formatted_docker_error("unable to start stacks-node container", e))?;
 
@@ -1422,14 +1415,11 @@ db_path = "stacks-signer-{signer_id}.sqlite"
     }
 
     pub async fn boot_stacks_signer_container(&mut self, signer_id: u32) -> Result<(), String> {
-        let container = self.stacks_signers_containers_ids[signer_id as usize].clone();
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let container = &self.stacks_signers_containers_ids[signer_id as usize];
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         docker
-            .start_container::<String>(&container, None)
+            .start_container::<String>(container, None)
             .await
             .map_err(|e| formatted_docker_error("unable to start stacks-signer container", e))?;
 
@@ -1437,10 +1427,7 @@ db_path = "stacks-signer-{signer_id}.sqlite"
     }
 
     pub async fn prepare_stacks_api_container(&mut self, ctx: &Context) -> Result<(), String> {
-        let docker = self
-            .docker_client
-            .as_ref()
-            .ok_or_else(|| "unable to get Docker client".to_string())?;
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
         let devnet_config = self.get_devnet_config()?;
 
         let _info = docker
@@ -1558,17 +1545,14 @@ db_path = "stacks-signer-{signer_id}.sqlite"
         }
     }
     pub async fn boot_stacks_api_container(&self, ctx: &Context) -> Result<(), String> {
-        let container = match &self.stacks_api_container_id {
-            Some(container) => container.clone(),
-            _ => return Err("unable to boot container".to_string()),
-        };
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let container = self
+            .stacks_api_container_id
+            .as_ref()
+            .ok_or("unable to boot container")?;
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         docker
-            .start_container::<String>(&container, None)
+            .start_container::<String>(container, None)
             .await
             .map_err(|e| formatted_docker_error("unable to start stacks-api container", e))?;
 
@@ -1698,17 +1682,14 @@ db_path = "stacks-signer-{signer_id}.sqlite"
     }
 
     pub async fn boot_postgres_container(&self, _ctx: &Context) -> Result<(), String> {
-        let container = match &self.postgres_container_id {
-            Some(container) => container.clone(),
-            _ => return Err("unable to boot container".to_string()),
-        };
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let container = self
+            .postgres_container_id
+            .as_ref()
+            .ok_or("unable to boot container")?;
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         docker
-            .start_container::<String>(&container, None)
+            .start_container::<String>(container, None)
             .await
             .map_err(|e| formatted_docker_error("unable to start postgres container", e))?;
 
@@ -1808,19 +1789,16 @@ db_path = "stacks-signer-{signer_id}.sqlite"
     }
 
     pub async fn boot_stacks_explorer_container(&self, _ctx: &Context) -> Result<(), String> {
-        let container = match &self.stacks_explorer_container_id {
-            Some(container) => container.clone(),
-            _ => return Err("unable to boot container".to_string()),
-        };
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let container = self
+            .stacks_explorer_container_id
+            .as_ref()
+            .ok_or("unable to boot container")?;
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         docker
-            .start_container::<String>(&container, None)
+            .start_container::<String>(container, None)
             .await
-            .map_err(|e| format!("unable to create container: {e}"))?;
+            .map_err(|e| format!("unable to start container: {e}"))?;
 
         Ok(())
     }
@@ -1926,25 +1904,29 @@ db_path = "stacks-signer-{signer_id}.sqlite"
     }
 
     pub async fn boot_bitcoin_explorer_container(&self, _ctx: &Context) -> Result<(), String> {
-        let container = match &self.bitcoin_explorer_container_id {
-            Some(container) => container.clone(),
-            _ => return Err("unable to boot container".to_string()),
-        };
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let container = self
+            .bitcoin_explorer_container_id
+            .as_ref()
+            .ok_or("unable to boot container")?;
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         docker
-            .start_container::<String>(&container, None)
+            .start_container::<String>(container, None)
             .await
-            .map_err(|e| format!("unable to create container: {e}"))?;
+            .map_err(|e| format!("unable to start container: {e}"))?;
 
         Ok(())
     }
 
     pub async fn stop_containers(&self) -> Result<(), String> {
-        let containers_ids = match (
+        let (
+            stacks_node_c_id,
+            stacks_api_c_id,
+            stacks_explorer_c_id,
+            bitcoin_node_c_id,
+            bitcoin_explorer_c_id,
+            postgres_c_id,
+        ) = match (
             &self.stacks_node_container_id,
             &self.stacks_api_container_id,
             &self.stacks_explorer_container_id,
@@ -1957,19 +1939,7 @@ db_path = "stacks-signer-{signer_id}.sqlite"
             }
             _ => return Err("unable to get containers".to_string()),
         };
-
-        let (
-            stacks_node_c_id,
-            stacks_api_c_id,
-            stacks_explorer_c_id,
-            bitcoin_node_c_id,
-            bitcoin_explorer_c_id,
-            postgres_c_id,
-        ) = containers_ids;
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         let options = KillContainerOptions { signal: "SIGKILL" };
 
@@ -2018,7 +1988,7 @@ db_path = "stacks-signer-{signer_id}.sqlite"
         boot_index: u32,
         no_snapshot: bool,
     ) -> Result<(String, String), String> {
-        let containers_ids = match (
+        let (stacks_api_c_id, stacks_explorer_c_id, bitcoin_explorer_c_id, postgres_c_id) = match (
             &self.stacks_api_container_id,
             &self.stacks_explorer_container_id,
             &self.bitcoin_explorer_container_id,
@@ -2027,12 +1997,7 @@ db_path = "stacks-signer-{signer_id}.sqlite"
             (Some(c1), Some(c2), Some(c3), Some(c4)) => (c1, c2, c3, c4),
             _ => return Err("unable to boot container".to_string()),
         };
-        let (stacks_api_c_id, stacks_explorer_c_id, bitcoin_explorer_c_id, postgres_c_id) =
-            containers_ids;
-
-        let Some(docker) = &self.docker_client else {
-            return Err("unable to get Docker client".into());
-        };
+        let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         // Prune
         let mut filters = HashMap::new();
@@ -2112,25 +2077,23 @@ db_path = "stacks-signer-{signer_id}.sqlite"
         let options = Some(KillContainerOptions { signal: "SIGKILL" });
 
         // Terminate containers
-        let container_ids = vec![
-            self.bitcoin_explorer_container_id.clone(),
-            self.stacks_explorer_container_id.clone(),
-            self.bitcoin_node_container_id.clone(),
-            self.stacks_api_container_id.clone(),
-            self.postgres_container_id.clone(),
-            self.stacks_node_container_id.clone(),
+        let container_ids = [
+            &self.bitcoin_explorer_container_id,
+            &self.stacks_explorer_container_id,
+            &self.bitcoin_node_container_id,
+            &self.stacks_api_container_id,
+            &self.postgres_container_id,
+            &self.stacks_node_container_id,
         ];
-
-        let signers_container_ids = self.stacks_signers_containers_ids.clone();
 
         for container_id in container_ids
             .into_iter()
             .flatten()
-            .chain(signers_container_ids)
+            .chain(&self.stacks_signers_containers_ids)
         {
-            let _ = docker.kill_container(&container_id, options.clone()).await;
+            let _ = docker.kill_container(container_id, options.clone()).await;
             ctx.try_log(|logger| slog::info!(logger, "Terminating container: {}", &container_id));
-            let _ = docker.remove_container(&container_id, None).await;
+            let _ = docker.remove_container(container_id, None).await;
         }
 
         // Delete network
@@ -2895,8 +2858,8 @@ pub fn get_project_snapshot_dir(devnet_config: &DevnetConfig) -> std::path::Path
 }
 
 pub fn copy_directory(
-    source: &PathBuf,
-    destination: &PathBuf,
+    source: &Path,
+    destination: &Path,
     exclude_patterns: Option<&[&str]>,
 ) -> Result<(), String> {
     fs::create_dir_all(destination).map_err(|e| {
