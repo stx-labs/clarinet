@@ -79,6 +79,7 @@ pub fn setup_session_with_deployment(
         success,
         session,
         analysis: contracts_analysis,
+        ast_metadata: HashMap::new(), // Not populated in this code path
     }
 }
 
@@ -276,11 +277,39 @@ fn handle_emulated_contract_call(
     result
 }
 
+/// Cached AST data for a contract, used for IDE performance optimization
+#[derive(Debug, Clone)]
+pub struct CachedContractASTData {
+    pub content_hash: u64,
+    pub ast: ContractAST,
+    pub clarity_version: clarity_repl::clarity::ClarityVersion,
+    pub epoch: StacksEpochId,
+}
+
+/// Compute a hash of the contract source code for cache validation
+pub fn compute_content_hash(source: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub async fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
     no_batch: bool,
     file_accessor: Option<&dyn FileAccessor>,
+) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
+    generate_default_deployment_with_cache(manifest, network, no_batch, file_accessor, None).await
+}
+
+pub async fn generate_default_deployment_with_cache(
+    manifest: &ProjectManifest,
+    network: &StacksNetwork,
+    no_batch: bool,
+    file_accessor: Option<&dyn FileAccessor>,
+    cached_asts: Option<&HashMap<FileLocation, CachedContractASTData>>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
     let network_manifest = match file_accessor {
         None => NetworkManifest::from_project_manifest_location(
@@ -769,13 +798,16 @@ pub async fn generate_default_deployment(
 
         contracts_sources.insert(
             contract_id.clone(),
-            ClarityContract {
-                code_source: ClarityCodeSource::ContractInMemory(source.clone()),
-                deployer: ContractDeployer::Address(sender.to_address()),
-                name: contract_name.to_string(),
-                clarity_version: contract_config.clarity_version,
-                epoch: clarity_repl::repl::Epoch::Specific(epoch),
-            },
+            (
+                ClarityContract {
+                    code_source: ClarityCodeSource::ContractInMemory(source.clone()),
+                    deployer: ContractDeployer::Address(sender.to_address()),
+                    name: contract_name.to_string(),
+                    clarity_version: contract_config.clarity_version,
+                    epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                },
+                contract_location.clone(),
+            ),
         );
 
         let contract_spec = if matches!(network, StacksNetwork::Simnet) {
@@ -807,13 +839,43 @@ pub async fn generate_default_deployment(
 
     let mut contract_asts = BTreeMap::new();
     let mut contract_data = BTreeMap::new();
+    let mut ast_metadata = HashMap::new();
 
-    for (contract_id, contract) in contracts_sources.into_iter() {
-        let (ast, diags, ast_success) = session.interpreter.build_ast(&contract);
+    for (contract_id, (contract, contract_location)) in contracts_sources.into_iter() {
+        let source = contract.expect_in_memory_code_source();
+        let content_hash = compute_content_hash(source);
+        let resolved_epoch = contract.epoch.resolve();
+
+        // Check if we have a valid cached AST
+        let (ast, diags, ast_success) = if let Some(cached) = cached_asts
+            .and_then(|cache| cache.get(&contract_location))
+            .filter(|c| {
+                c.content_hash == content_hash
+                    && c.clarity_version == contract.clarity_version
+                    && c.epoch == resolved_epoch
+            }) {
+            // Reuse cached AST - no diagnostics since it was already validated
+            (cached.ast.clone(), vec![], true)
+        } else {
+            // Build new AST
+            session.interpreter.build_ast(&contract)
+        };
+
+        // Track metadata for caching
+        ast_metadata.insert(
+            contract_id.clone(),
+            types::ContractASTMetadata {
+                location: contract_location,
+                content_hash,
+                clarity_version: contract.clarity_version,
+                epoch: resolved_epoch,
+            },
+        );
+
         contract_asts.insert(contract_id.clone(), ast.clone());
         contract_data.insert(contract_id.clone(), (contract.clarity_version, ast));
         contract_diags.insert(contract_id.clone(), diags);
-        contract_epochs.insert(contract_id, contract.epoch.resolve());
+        contract_epochs.insert(contract_id, resolved_epoch);
         asts_success = asts_success && ast_success;
     }
 
@@ -964,6 +1026,7 @@ pub async fn generate_default_deployment(
         results_values: HashMap::new(),
         analysis: HashMap::new(),
         session,
+        ast_metadata,
     };
 
     Ok((deployment, artifacts))
