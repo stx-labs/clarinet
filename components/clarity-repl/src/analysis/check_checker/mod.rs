@@ -920,8 +920,7 @@ mod tests {
                     (var-set p1 p)
                     (var-set b1 b)
                 )
-            )
-        ").to_string();
+            )        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 2);
@@ -961,7 +960,6 @@ mod tests {
             (define-public (tainted-var-set (b bool))
                 (ok (var-set myvar b))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -979,7 +977,6 @@ mod tests {
             (define-public (tainted (amount uint))
                 (stx-transfer? amount (as-contract tx-sender) tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1018,7 +1015,6 @@ mod tests {
             (define-public (expr-tainted (amount uint))
                 (stx-transfer? (+ u10 amount) (as-contract tx-sender) tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1059,7 +1055,6 @@ mod tests {
                     (stx-transfer? x (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1101,7 +1096,6 @@ mod tests {
                     (stx-transfer? amount (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1122,7 +1116,6 @@ mod tests {
                     (stx-transfer? amount (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1143,7 +1136,6 @@ mod tests {
                     (stx-transfer? x (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1164,7 +1156,6 @@ mod tests {
                     (stx-transfer? x (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1184,7 +1175,6 @@ mod tests {
                     (stx-transfer? x (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1244,7 +1234,6 @@ mod tests {
                     (stx-transfer? x (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1290,7 +1279,6 @@ mod tests {
                     (stx-transfer? x (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1311,7 +1299,6 @@ mod tests {
                     (stx-transfer? x (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1329,7 +1316,6 @@ mod tests {
             (define-public (if-filter (amount uint))
                 (stx-transfer? (if (< amount u100) amount u100) (as-contract tx-sender) tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1347,7 +1333,6 @@ mod tests {
             (define-public (if-not-filtered (amount uint))
                 (stx-transfer? (if (< u50 u100) amount u100) (as-contract tx-sender) tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1388,7 +1373,6 @@ mod tests {
                     (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
                 ))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1427,7 +1411,6 @@ mod tests {
                     (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
                 ))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1448,7 +1431,6 @@ mod tests {
                     (< amount u100)
                 ))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1486,7 +1468,6 @@ mod tests {
                     (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
                 ))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1525,7 +1506,6 @@ mod tests {
                     (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
                 ))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1546,7 +1526,6 @@ mod tests {
                     (< amount u100)
                 ))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1582,7 +1561,6 @@ mod tests {
             (define-public (stx-burn-senders (amount uint))
                 (stx-burn? amount tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1603,7 +1581,6 @@ mod tests {
                     (as-contract (stx-burn? amount tx-sender))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1649,7 +1626,6 @@ mod tests {
             (define-public (stx-transfer-senders (amount uint) (recipient principal))
                 (stx-transfer? amount tx-sender recipient)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1671,7 +1647,6 @@ mod tests {
                     (as-contract (ft-burn? stackaroo amount tx-sender))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1718,7 +1693,6 @@ mod tests {
             (define-public (ft-burn-senders (amount uint))
                 (ft-burn? stackaroo amount tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1740,7 +1714,6 @@ mod tests {
                     (as-contract (ft-transfer? stackaroo amount tx-sender sender))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1790,7 +1763,6 @@ mod tests {
             (define-public (ft-transfer-senders (amount uint) (recipient principal))
                 (ft-transfer? stackaroo amount tx-sender recipient)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1812,7 +1784,6 @@ mod tests {
                     (as-contract (ft-mint? stackaroo amount tx-sender))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1862,7 +1833,6 @@ mod tests {
                     (as-contract (nft-burn? stackaroo identifier tx-sender))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1912,7 +1882,6 @@ mod tests {
             (define-public (nft-burn-senders (identifier uint))
                 (nft-burn? stackaroo identifier tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -1934,7 +1903,6 @@ mod tests {
                     (as-contract (nft-transfer? stackaroo identifier tx-sender sender))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -1990,7 +1958,6 @@ mod tests {
             (define-public (nft-transfer-senders (identifier uint) (recipient principal))
                 (nft-transfer? stackaroo identifier tx-sender recipient)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2012,7 +1979,6 @@ mod tests {
                     (as-contract (nft-mint? stackaroo identifier tx-sender))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2062,7 +2028,6 @@ mod tests {
             (define-public (tainted-var-set (amount uint))
                 (ok (var-set myvar amount))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2099,7 +2064,6 @@ mod tests {
             (define-public (tainted-map-set (key uint) (value int))
                 (ok (map-set mymap {key-name-1: key} {val-name-1: value}))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2172,7 +2136,6 @@ mod tests {
             (define-public (tainted-map-set (key uint) (value int))
                 (ok (map-set mymap key value))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2236,7 +2199,6 @@ mod tests {
             (define-public (tainted-map-insert (key uint) (value int))
                 (ok (map-insert mymap {key-name-1: key} {val-name-1: value}))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2309,7 +2271,6 @@ mod tests {
             (define-public (tainted-map-insert (key uint) (value int))
                 (ok (map-insert mymap key value))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2373,7 +2334,6 @@ mod tests {
             (define-public (tainted-map-delete (key uint))
                 (ok (map-delete mymap {key-name-1: key}))
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2412,7 +2372,6 @@ mod tests {
             (define-public (my-multiply (untrusted <multiplier>) (a uint) (b uint))
                 (contract-call? untrusted multiply a b)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2458,7 +2417,6 @@ mod tests {
             (define-private (my-transfer (amount uint))
                 (stx-transfer? amount (as-contract tx-sender) tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2479,7 +2437,6 @@ mod tests {
             (define-public (tainted (amount uint))
                 (my-transfer amount)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2518,7 +2475,6 @@ mod tests {
             (define-private (my-func (amount uint))
                 (ok true)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2561,7 +2517,6 @@ mod tests {
             (define-public (tainted (amount uint))
                 (my-transfer amount)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2601,7 +2556,6 @@ mod tests {
             (define-private (my-func (amount uint))
                 (ok amount)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2641,7 +2595,6 @@ mod tests {
                     (ok amount)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2663,7 +2616,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2685,7 +2637,6 @@ mod tests {
             (define-public (tainted (amount uint))
                 (my-func amount)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2707,7 +2658,6 @@ mod tests {
             (define-private (my-func (amount uint))
                 (ok true)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2726,7 +2676,6 @@ mod tests {
                 ;; #[allow(unchecked_data)]
                 (stx-transfer? amount (as-contract tx-sender) tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2747,7 +2696,6 @@ mod tests {
                     (stx-transfer? amount (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2766,7 +2714,6 @@ mod tests {
             (define-public (allow_tainted (amount uint))
                 (stx-transfer? amount (as-contract tx-sender) tx-sender)
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2788,7 +2735,6 @@ mod tests {
                     (stx-transfer? amount (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2831,7 +2777,6 @@ mod tests {
                     (ok (+ amount u1))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -2887,7 +2832,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2926,7 +2870,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2949,7 +2892,6 @@ mod tests {
                     (stx-transfer? amount (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2972,7 +2914,6 @@ mod tests {
                     (stx-transfer? amount (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -2995,7 +2936,6 @@ mod tests {
                     (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3018,7 +2958,6 @@ mod tests {
                     (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3048,7 +2987,6 @@ mod tests {
                     (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -3102,7 +3040,6 @@ mod tests {
                     (ok u1)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3124,7 +3061,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3159,7 +3095,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3188,7 +3123,6 @@ mod tests {
                     (ok (var-set owner address))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3218,7 +3152,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3247,7 +3180,6 @@ mod tests {
                     (ok (var-set owner address))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -3294,7 +3226,6 @@ mod tests {
                     (ok (var-set owner address))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3324,7 +3255,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3353,7 +3283,6 @@ mod tests {
                     (ok (var-set owner address))
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
@@ -3409,7 +3338,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
@@ -3448,7 +3376,6 @@ mod tests {
                     (ok true)
                 )
             )
-
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {

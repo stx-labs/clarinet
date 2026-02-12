@@ -4,7 +4,7 @@ use clarity::vm::representations::Span;
 use clarity::vm::{ContractName, EvalHook, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
 use clarity_types::Value;
-use indoc::indoc;
+use indoc::printdoc;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
@@ -507,7 +507,7 @@ fn print_help(args: &str) {
 
 fn print_help_main() {
     #[rustfmt::skip]
-    println!("{}", indoc!(r#"
+    printdoc!(r#"
         Debugger commands:
           aw | awatch       -- Read/write watchpoint, see `help watch' for details)
           b  | breakpoint   -- Commands for operating on breakpoints (see 'help b' for details)
@@ -520,12 +520,12 @@ fn print_help_main() {
           rw | rwatch       -- Read watchpoint, see `help watch' for details)
           s  | step         -- Single step, stepping into sub-expressions
           w  | watch        -- Commands for operating on watchpoints (see 'help w' for details)
-    "#));
+    "#);
 }
 
 fn print_help_breakpoint() {
     #[rustfmt::skip]
-    println!("{}", indoc!(r#"
+    printdoc!(r#"
         Set a breakpoint using 'b' or 'break' and one of these formats
           b <principal?>.<contract>:<linenum>:<colnum>
             SP000000000000000000002Q6VF78.bns:604:9
@@ -570,12 +570,12 @@ fn print_help_breakpoint() {
         Delete all breakpoints
           b delete
           b del
-    "#));
+    "#);
 }
 
 fn print_help_watchpoint() {
     #[rustfmt::skip]
-    println!("{}", indoc!(r#"
+    printdoc!(r#"
         Set a watchpoint using 'w' or 'watch' and one of these formats
           w <principal>.<contract>.<name>
             SP000000000000000000002Q6VF78.bns.owner-name
@@ -605,5 +605,5 @@ fn print_help_watchpoint() {
         Delete all watchpoints
           w delete
           w del
-    "#));
+    "#);
 }

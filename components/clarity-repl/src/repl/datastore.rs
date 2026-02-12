@@ -1391,45 +1391,47 @@ mod tests {
     fn get_datastores_with_remote_data() -> (ClarityDatastore, Datastore) {
         let mut server = mockito::Server::new();
         #[rustfmt::skip]
+        let blocks_body = indoc!(r#"
+            {
+                "canonical": true,
+                "height": 10,
+                "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
+                "block_time": 1735934294,
+                "block_time_iso": "2025-01-03T19:58:14.000Z",
+                "tenure_height": 10,
+                "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
+                "parent_block_hash": "0x94c3d8f56ed2e1093f26089572af9cc5d5b097d461dcc184196f1ee2070de063",
+                "parent_index_block_hash": "0x1969bdddb9902162f5fdd2ff49cabb30300a9819c89bedd4c27fed82f8c9cf4b",
+                "burn_block_time": 1735451504,
+                "burn_block_time_iso": "2024-12-29T05:51:44.000Z",
+                "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
+                "burn_block_height": 798,
+                "miner_txid": "0x5fb426cf9eb4577b545bd731634886d5bd5c9d40d573e2cdb95100f483913491",
+                "tx_count": 2
+            }
+        "#);
         let _ = server
             .mock("GET", "/extended/v2/blocks/10")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(indoc!(r#"
-                {
-                    "canonical": true,
-                    "height": 10,
-                    "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
-                    "block_time": 1735934294,
-                    "block_time_iso": "2025-01-03T19:58:14.000Z",
-                    "tenure_height": 10,
-                    "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
-                    "parent_block_hash": "0x94c3d8f56ed2e1093f26089572af9cc5d5b097d461dcc184196f1ee2070de063",
-                    "parent_index_block_hash": "0x1969bdddb9902162f5fdd2ff49cabb30300a9819c89bedd4c27fed82f8c9cf4b",
-                    "burn_block_time": 1735451504,
-                    "burn_block_time_iso": "2024-12-29T05:51:44.000Z",
-                    "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
-                    "burn_block_height": 798,
-                    "miner_txid": "0x5fb426cf9eb4577b545bd731634886d5bd5c9d40d573e2cdb95100f483913491",
-                    "tx_count": 2
-                }
-            "#))
+            .with_body(blocks_body)
             .create();
         #[rustfmt::skip]
+        let sortitions_body = indoc!(r#"
+            [{
+                "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
+                "burn_block_height":798,
+                "burn_header_timestamp": 1735451504,
+                "sortition_id": "0x71e332329133c0f331c6b5e9b21a415ea0c32aa300a0e94a88e7c30d4aaf78c6",
+                "parent_sortition_id": "0xd6bffd8c4cd86428d5404ef36867319976008e84047d2acbae9079fd918c4de9",
+                "consensus_hash": "0x44f6511f569d3ed78d437af619d529b6c66a4fa2"
+            }]
+        "#);
         let _ = server
             .mock("GET", "/v3/sortitions/burn_height/798")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(indoc!(r#"
-                [{
-                    "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
-                    "burn_block_height":798,
-                    "burn_header_timestamp": 1735451504,
-                    "sortition_id": "0x71e332329133c0f331c6b5e9b21a415ea0c32aa300a0e94a88e7c30d4aaf78c6",
-                    "parent_sortition_id": "0xd6bffd8c4cd86428d5404ef36867319976008e84047d2acbae9079fd918c4de9",
-                    "consensus_hash": "0x44f6511f569d3ed78d437af619d529b6c66a4fa2"
-                }]
-            "#))
+            .with_body(sortitions_body)
             .create();
         let client = HttpClient::new(ApiUrl(server.url()));
         let constants = StacksConstants::default();
