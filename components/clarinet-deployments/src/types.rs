@@ -1159,7 +1159,7 @@ impl DeploymentSpecification {
                                     let spec = ContractPublishSpecification::from_specifications(spec, project_root_location)?;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    let source = remove_env_simnet(spec.source.clone())?;
+                                    let (source, _) = remove_env_simnet(spec.source.clone())?;
                                     contracts.insert(contract_id, (source, spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
@@ -1286,6 +1286,30 @@ impl DeploymentSpecification {
             }
         }
         self.sort_batches_by_epoch();
+    }
+
+    pub fn remove_env_simnet(&mut self) -> bool {
+        let mut global_found_env_simnet = false;
+        for ref mut batch in self.plan.batches.iter_mut() {
+            for ref mut transaction in batch.transactions.iter_mut() {
+                if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = transaction
+                {
+                    let (clean, found_env_simnet) = remove_env_simnet(spec.source.to_string())
+                        .expect("Failed to remove env(simnet) code");
+                    spec.source = clean;
+                    global_found_env_simnet |= found_env_simnet;
+                }
+            }
+        }
+
+        for (ref mut source, _) in self.contracts.values_mut() {
+            let (clean, found_env_simnet) =
+                remove_env_simnet(source.to_string()).expect("Failed to remove env(simnet) code");
+            *source = clean;
+            global_found_env_simnet |= found_env_simnet;
+        }
+
+        global_found_env_simnet
     }
 }
 

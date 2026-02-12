@@ -1047,11 +1047,12 @@ pub fn main() {
 
                 let mut terminal = match manifest {
                     Some(ref manifest) => {
-                        let (deployment, _, artifacts) = load_deployment_and_artifacts_or_exit(
+                        let ((deployment, _, artifacts), _) = load_deployment_and_artifacts_or_exit(
                             manifest,
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
                             cmd.use_computed_deployment_plan,
+                            false,
                         );
 
                         if !artifacts.success {
@@ -1188,53 +1189,77 @@ pub fn main() {
         }
         Command::Check(cmd) => {
             let manifest = load_manifest_or_exit(cmd.manifest_path, false);
-            let (deployment, _, artifacts) = load_deployment_and_artifacts_or_exit(
-                &manifest,
-                &cmd.deployment_plan_path,
-                cmd.use_on_disk_deployment_plan,
-                cmd.use_computed_deployment_plan,
-            );
+            let mut exit_codes = Vec::new();
+            let mut global_found_env_simnet = false;
+            for force_remove_env_simnet in [true, false] {
+                let ((deployment, _, artifacts), found_env_simnet) =
+                    load_deployment_and_artifacts_or_exit(
+                        &manifest,
+                        &cmd.deployment_plan_path,
+                        cmd.use_on_disk_deployment_plan,
+                        cmd.use_computed_deployment_plan,
+                        force_remove_env_simnet,
+                    );
+                global_found_env_simnet |= found_env_simnet;
+                if global_found_env_simnet {
+                    if !force_remove_env_simnet {
+                        println!("Checking contracts with #[env(simnet)] code");
+                    } else {
+                        println!("Checking contracts without #[env(simnet)] code");
+                    }
+                }
+                let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                if diags_digest.has_feedbacks() {
+                    println!("{}", diags_digest.message);
+                }
 
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-            if diags_digest.has_feedbacks() {
-                println!("{}", diags_digest.message);
-            }
+                if diags_digest.warnings > 0 {
+                    println!(
+                        "{} {} detected",
+                        yellow!("!"),
+                        pluralize!(diags_digest.warnings, "warning")
+                    );
+                }
+                if diags_digest.errors > 0 {
+                    println!(
+                        "{} {} detected",
+                        red!("x"),
+                        pluralize!(diags_digest.errors, "error")
+                    );
+                } else {
+                    println!(
+                        "{} {} checked",
+                        green!("✔"),
+                        pluralize!(diags_digest.contracts_checked, "contract"),
+                    );
+                }
+                let exit_code = match artifacts.success {
+                    true => 0,
+                    false => 1,
+                };
+                exit_codes.push(exit_code);
 
-            if diags_digest.warnings > 0 {
-                println!(
-                    "{} {} detected",
-                    yellow!("!"),
-                    pluralize!(diags_digest.warnings, "warning")
-                );
+                if clarinetrc.enable_hints.unwrap_or(true) {
+                    display_post_check_hint();
+                }
+                if manifest.project.telemetry {
+                    #[cfg(feature = "telemetry")]
+                    telemetry_report_event(DeveloperUsageEvent::CheckExecuted(
+                        DeveloperUsageDigest::new(
+                            &manifest.project.name,
+                            &manifest.project.authors,
+                        ),
+                    ));
+                }
+                if !global_found_env_simnet {
+                    break;
+                }
             }
-            if diags_digest.errors > 0 {
-                println!(
-                    "{} {} detected",
-                    red!("x"),
-                    pluralize!(diags_digest.errors, "error")
-                );
+            if exit_codes.contains(&1) {
+                std::process::exit(1);
             } else {
-                println!(
-                    "{} {} checked",
-                    green!("✔"),
-                    pluralize!(diags_digest.contracts_checked, "contract"),
-                );
+                std::process::exit(0);
             }
-            let exit_code = match artifacts.success {
-                true => 0,
-                false => 1,
-            };
-
-            if clarinetrc.enable_hints.unwrap_or(true) {
-                display_post_check_hint();
-            }
-            if manifest.project.telemetry {
-                #[cfg(feature = "telemetry")]
-                telemetry_report_event(DeveloperUsageEvent::CheckExecuted(
-                    DeveloperUsageDigest::new(&manifest.project.name, &manifest.project.authors),
-                ));
-            }
-            std::process::exit(exit_code);
         }
         Command::Integrate(cmd) => {
             eprintln!(
@@ -1400,11 +1425,16 @@ pub fn load_deployment_and_artifacts_or_exit(
     deployment_plan_path: &Option<String>,
     force_on_disk: bool,
     force_computed: bool,
+    force_remove_env_simnet: bool,
 ) -> (
-    DeploymentSpecification,
-    Option<String>,
-    DeploymentGenerationArtifacts,
+    (
+        DeploymentSpecification,
+        Option<String>,
+        DeploymentGenerationArtifacts,
+    ),
+    bool,
 ) {
+    let mut found_env_simnet = false;
     let result = match deployment_plan_path {
         None => {
             let res = load_deployment_if_exists(
@@ -1414,11 +1444,14 @@ pub fn load_deployment_and_artifacts_or_exit(
                 force_computed,
             );
             match res {
-                Some(Ok(deployment)) => {
+                Some(Ok(mut deployment)) => {
                     println!(
                         "{} using deployments/default.simnet-plan.yaml",
                         yellow!("note:")
                     );
+                    if force_remove_env_simnet {
+                        found_env_simnet |= deployment.remove_env_simnet();
+                    }
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     Ok((deployment, None, artifacts))
                 }
@@ -1427,7 +1460,10 @@ pub fn load_deployment_and_artifacts_or_exit(
                 )),
                 None => {
                     match generate_default_deployment(manifest, &StacksNetwork::Simnet, false) {
-                        Ok((deployment, ast_artifacts)) if ast_artifacts.success => {
+                        Ok((mut deployment, ast_artifacts)) if ast_artifacts.success => {
+                            if force_remove_env_simnet {
+                                found_env_simnet |= deployment.remove_env_simnet();
+                            }
                             let mut artifacts = setup_session_with_deployment(
                                 manifest,
                                 &deployment,
@@ -1452,7 +1488,10 @@ pub fn load_deployment_and_artifacts_or_exit(
             let deployment_location = get_absolute_deployment_path(manifest, path)
                 .expect("unable to retrieve deployment");
             match load_deployment(manifest, &deployment_location) {
-                Ok(deployment) => {
+                Ok(mut deployment) => {
+                    if force_remove_env_simnet {
+                        found_env_simnet |= deployment.remove_env_simnet();
+                    }
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     Ok((deployment, Some(deployment_location.to_string()), artifacts))
                 }
@@ -1462,7 +1501,7 @@ pub fn load_deployment_and_artifacts_or_exit(
     };
 
     match result {
-        Ok(deployment) => deployment,
+        Ok(deployment) => (deployment, found_env_simnet),
         Err(e) => {
             eprintln!("{}", format_err!(e));
             process::exit(1);
