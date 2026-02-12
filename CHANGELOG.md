@@ -1,32 +1,67 @@
+#### [3.14.0](https://github.com/stx-labs/clarinet/compare/v3.13.1...v3.14.0) 2026-02-12
+
+##### New Features
+
+- Add `unnecessary_public` lint (#2190) (4db92079)
+- Add `error_const` lint (#2186) (3af16427)
+- Improve deployment plan transaction structure (#2175) (81cb8ffe)
+- Add hex string support to toBeBuff matcher (#2176) (63b0041e)
+
+##### Performance Improvements
+
+- Improve Linux performance by using `jemalloc` instead of default allocator (#2149) (fb198d84)
+
+##### Refactors
+
+- Remove a few clone() in orchestrator.rs (#2193) (7eaa919b)
+- Remove forced epoch dead code (#2183) (cf5f55b2)
+- Remove epoch parameter since its no longer necessary (#2180) (76fc0269)
+
+##### Bug Fixes
+
+- Formatter: commented-out function params (#2191) (86f1188a)
+- `deploy_contract` respects cost tracking (#2158) (8e40fe48)
+- Preserve user settings, key ordering, and comments when editing `Clarinet.toml` (#2167) (c1df374c)
+- `encode_error` failure in certain environments (#2192) (552642cf)
+
+##### Chores
+
+- Upgrade stacks docker images (#2171) (210d88f4)
+- Remove generated completions files (#2153) (382f9ebc)
+
+##### Documentation Changes
+
+- Updated links from hiro docs to stacks docs (#2160) (3d62752c)
+
 #### [3.13.1](https://github.com/stx-labs/clarinet/compare/v3.12.0...v3.13.0) 2026-01-16
 
 ##### Bug Fixes
 
-*  Allow multiple lints inside a single `#[allow(...)]` annotation (#2145) (436a939b)
+- Allow multiple lints inside a single `#[allow(...)]` annotation (#2145) (436a939b)
 
 #### [3.13.0](https://github.com/stx-labs/clarinet/compare/v3.12.0...v3.13.0) 2026-01-15
 
 ##### New Features
 
-* **linter:**
-  * Add `unused_binding` lint (#2134) (7ab80d56)
-  * Add `case_const` lint (#2132) (3afd5274)
-  * Add `unused_trait` lint (#2121) (438722e3)
-  * Allow `LintGroup::Unused` lints to ignore identifiers using naming convention (#2138) (46db1fc1)
-  * Enable lints by default (#2141) (a3e4bb8c)
+- **linter:**
+  - Add `unused_binding` lint (#2134) (7ab80d56)
+  - Add `case_const` lint (#2132) (3afd5274)
+  - Add `unused_trait` lint (#2121) (438722e3)
+  - Allow `LintGroup::Unused` lints to ignore identifiers using naming convention (#2138) (46db1fc1)
+  - Enable lints by default (#2141) (a3e4bb8c)
 
 ##### Refactors
 
-* **linter:**  Create struct `AnalysisCache` to share data structures between passes (#2131) (59d43a6e)
-* Add `Session::new_without_boot_contracts()` to avoid loading them in unit tests (#2123) (59ad4435)
+- **linter:** Create struct `AnalysisCache` to share data structures between passes (#2131) (59d43a6e)
+- Add `Session::new_without_boot_contracts()` to avoid loading them in unit tests (#2123) (59ad4435)
 
 ##### Chores
 
-* Update `clarity-repl` to Rust Edition 2021 (#2139) (8dfa44ee)
-* Upgrade default stacks-node docker image (#2137) (dce12e80)
-* Upgrade clarity-vm (#2136) (e34782f9)
-* Upgrade clarity (#2113) (64e5fe1c)
-* Bump `qs` from 6.14.0 to 6.14.1 in /components/clarity-vscode (#2130) (0fb286a0)
+- Update `clarity-repl` to Rust Edition 2021 (#2139) (8dfa44ee)
+- Upgrade default stacks-node docker image (#2137) (dce12e80)
+- Upgrade clarity-vm (#2136) (e34782f9)
+- Upgrade clarity (#2113) (64e5fe1c)
+- Bump `qs` from 6.14.0 to 6.14.1 in /components/clarity-vscode (#2130) (0fb286a0)
 
 # [3.12.0](https://github.com/stx-labs/clarinet/compare/v3.11.0...v3.12.0) (2025-12-18)
 
@@ -34,7 +69,7 @@
 
 - Suggest using encrypted mnemonics in testnet and mainnet TOML files (#2118) (ec5cd306)
 - Generate deployment plan in sdk (#2109) (32269474)
-- **linter:**  Add `unused_token` lint (#2091) (3ac821da)
+- **linter:** Add `unused_token` lint (#2091) (3ac821da)
 - Change encrypted mnemonic output to be pasteable into TOML without editing (#2107) (9b37fe58)
 - Always enable call_checker (#2117)
 
