@@ -503,11 +503,6 @@ impl SDK {
                 return Err(diags_digest.message);
             }
         }
-        let project_root = manifest
-            .location
-            .parent()
-            .ok_or("Failed to get parent of manifest location")?
-            .to_path_buf();
 
         if self
             .file_accessor
