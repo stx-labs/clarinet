@@ -670,7 +670,7 @@ checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 
 [[package]]
 name = "clarinet-cli"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "bs58",
  "clap",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-deployments"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "base58",
  "base64 0.22.1",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-files"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "bitcoin",
  "clarinet-utils",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "clarinet-deployments",
  "clarinet-files",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-events"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "clap",
  "clarinet-files",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "clarinet-deployments",
  "clarinet-files",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -4027,7 +4027,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-codec"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "clarity",
  "serde",
@@ -4067,7 +4067,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-network"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "base58",
  "bitcoincore-rpc",
@@ -4112,7 +4112,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "3.13.1"
+version = "3.14.0"
 dependencies = [
  "clarinet-utils",
  "clarity",
