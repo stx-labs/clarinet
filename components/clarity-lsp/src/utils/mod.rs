@@ -23,6 +23,7 @@ pub fn clarity_diagnostics_to_lsp_type(diagnostics: &Vec<ClarityDiagnostic>) -> 
     dst
 }
 
+
 pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiagnostic {
     let range = match diagnostic.spans.len() {
         0 => Range::default(),
@@ -37,7 +38,10 @@ pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiag
             },
         },
     };
-    // TODO(lgalabru): add hint for contracts not found errors
+    
+    // Enhance error message with helpful hints for common errors
+    let message = enhance_error_message(&diagnostic.message);
+    
     LspDiagnostic {
         range,
         severity: match diagnostic.level {
@@ -48,10 +52,38 @@ pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiag
         code: None,
         code_description: None,
         source: Some("clarity".to_string()),
-        message: diagnostic.message.clone(),
+        message,
         related_information: None,
         tags: None,
         data: None,
+    }
+}
+
+/// Enhance error messages with helpful hints for common issues
+fn enhance_error_message(original_message: &str) -> String {
+    // Check for "use of unresolved" errors which typically indicate missing contracts or traits
+    if original_message.contains("use of unresolved contract") {
+        format!(
+            "{}\n\nHint: Make sure the contract is:\n  • Listed in your Clarinet.toml\n  • Located in the contracts/ directory\n  • Deployed before this contract (check deployment order)",
+            original_message
+        )
+    } else if original_message.contains("use of unresolved trait") {
+        format!(
+            "{}\n\nHint: Make sure the trait is:\n  • Defined in an accessible contract\n  • Properly imported with 'use-trait'\n  • The contract defining it is deployed first",
+            original_message
+        )
+    } else if original_message.contains("contract not found") || original_message.contains("NoSuchContract") {
+        format!(
+            "{}\n\nHint: Verify that:\n  • The contract is registered in Clarinet.toml\n  • The contract file exists in contracts/\n  • The contract name matches exactly (case-sensitive)",
+            original_message
+        )
+    } else if original_message.contains("use of unresolved function") {
+        format!(
+            "{}\n\nHint: Check if:\n  • The function is defined in this contract\n  • You're using the correct function name (Clarity is case-sensitive)\n  • The function is public (use define-public) if calling from another contract",
+            original_message
+        )
+    } else {
+        original_message.to_string()
     }
 }
 
