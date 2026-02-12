@@ -1,5 +1,7 @@
 mod case_const;
+mod error_const;
 mod noop;
+mod unnecessary_public;
 mod unused_binding;
 mod unused_const;
 mod unused_data_var;
@@ -9,7 +11,9 @@ mod unused_token;
 mod unused_trait;
 
 pub use case_const::CaseConst;
+pub use error_const::ErrorConst;
 pub use noop::NoopChecker;
+pub use unnecessary_public::UnnecessaryPublic;
 pub use unused_binding::UnusedBinding;
 pub use unused_const::UnusedConst;
 pub use unused_data_var::UnusedDataVar;

@@ -1573,7 +1573,10 @@ mod tests {
         let result = session.encode("::encode { foo false }");
         assert_eq!(
             result,
-            "encode:1:7: error: expected ':' after key in tuple\n{ foo false }\n      ^~~~~\nencoding failed"
+            format!(
+                "encode:1:7: {} expected ':' after key in tuple\n{{ foo false }}\n      ^~~~~\nencoding failed",
+                "error:".red().bold()
+            )
         );
 
         let result = session.encode("::encode (foo 1)");

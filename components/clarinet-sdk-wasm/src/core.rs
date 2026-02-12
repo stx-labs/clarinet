@@ -898,6 +898,7 @@ impl SDK {
             return Err(format!("Invalid sender address '{}'.", args.sender));
         }
 
+        let track_costs = self.options.track_costs;
         let execution = {
             let session = self.get_session_mut();
             if advance_chain_tip {
@@ -917,7 +918,7 @@ impl SDK {
                 epoch: Epoch::Specific(current_epoch),
             };
 
-            match session.deploy_contract(&contract, false, None) {
+            match session.deploy_contract(&contract, track_costs, None) {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(

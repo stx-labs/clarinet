@@ -91,8 +91,6 @@ impl<'a, 'b> UnusedConst<'a, 'b> {
             diagnostics.push(diagnostic);
         }
 
-        // Order the sets by the span of the error (the first diagnostic)
-        diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
 }
