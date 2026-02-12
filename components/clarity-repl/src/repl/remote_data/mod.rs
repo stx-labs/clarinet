@@ -249,35 +249,40 @@ impl HttpClient {
 }
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
 
     #[test]
     fn test_http_client_fetch_info() {
         let mut server = mockito::Server::new();
+        #[rustfmt::skip]
         let _ = server
             .mock("GET", "/v2/info")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{
-                "peer_version": 402653196,
-                "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
-                "burn_block_height": 882262,
-                "stable_pox_consensus": "f517f5aced5be836f9fe10980ff06108a6a2acec",
-                "stable_burn_block_height": 882255,
-                "network_id": 1,
-                "parent_network_id": 3652501241,
-                "stacks_tip_height": 556946,
-                "stacks_tip": "70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
-                "stacks_tip_consensus_hash": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
-                "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
-                "unanchored_tip": null,
-                "unanchored_seq": null,
-                "tenure_height": 184037,
-                "is_fully_synced": true,
-                "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
-                "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
-                "stackerdbs": []
-            }"#)
+            .with_body(indoc!(r#"
+                {
+                    "peer_version": 402653196,
+                    "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+                    "burn_block_height": 882262,
+                    "stable_pox_consensus": "f517f5aced5be836f9fe10980ff06108a6a2acec",
+                    "stable_burn_block_height": 882255,
+                    "network_id": 1,
+                    "parent_network_id": 3652501241,
+                    "stacks_tip_height": 556946,
+                    "stacks_tip": "70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
+                    "stacks_tip_consensus_hash": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+                    "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
+                    "unanchored_tip": null,
+                    "unanchored_seq": null,
+                    "tenure_height": 184037,
+                    "is_fully_synced": true,
+                    "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
+                    "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
+                    "stackerdbs": []
+                }
+            "#))
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));
@@ -290,12 +295,13 @@ mod tests {
     fn test_http_client_fetch_sortition() {
         let mut server = mockito::Server::new();
 
+        #[rustfmt::skip]
         let _ = server
             .mock("GET", "/v3/sortitions/burn_height/882262")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"[{
+            .with_body(indoc!(r#"
+                [{
                     "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
                     "burn_block_height": 882262,
                     "burn_header_timestamp": 1738666756,
@@ -307,8 +313,8 @@ mod tests {
                     "stacks_parent_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
                     "last_sortition_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
                     "committed_block_hash": "0xbf7e26ee22b18461dfed70cc114372a0f8a61249de2f20b120e6fe63da5a45e4"
-                }]"#,
-            )
+                }]
+            "#))
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));
@@ -338,12 +344,13 @@ mod tests {
     #[test]
     fn test_http_client_fetch_block() {
         let mut server = mockito::Server::new();
+        #[rustfmt::skip]
         let _ = server
             .mock("GET", "/extended/v2/blocks/556946")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"{
+            .with_body(indoc!(r#"
+                {
                     "canonical": true,
                     "height": 556946,
                     "hash": "0x70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
@@ -364,8 +371,8 @@ mod tests {
                     "execution_cost_runtime": 0,
                     "execution_cost_write_count": 0,
                     "execution_cost_write_length": 0
-                }"#,
-            )
+                }
+            "#))
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));
@@ -434,30 +441,33 @@ mod tests {
             .create();
 
         // The third call returns a 200
+        #[rustfmt::skip]
         let _ = server
             .mock("GET", "/v2/info")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{
-                "peer_version": 402653196,
-                "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
-                "burn_block_height": 882262,
-                "stable_pox_consensus": "f517f5aced5be836f9fe10980ff06108a6a2acec",
-                "stable_burn_block_height": 882255,
-                "network_id": 1,
-                "parent_network_id": 3652501241,
-                "stacks_tip_height": 556946,
-                "stacks_tip": "70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
-                "stacks_tip_consensus_hash": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
-                "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
-                "unanchored_tip": null,
-                "unanchored_seq": null,
-                "tenure_height": 184037,
-                "is_fully_synced": true,
-                "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
-                "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
-                "stackerdbs": []
-            }"#)
+            .with_body(indoc!(r#"
+                {
+                    "peer_version": 402653196,
+                    "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+                    "burn_block_height": 882262,
+                    "stable_pox_consensus": "f517f5aced5be836f9fe10980ff06108a6a2acec",
+                    "stable_burn_block_height": 882255,
+                    "network_id": 1,
+                    "parent_network_id": 3652501241,
+                    "stacks_tip_height": 556946,
+                    "stacks_tip": "70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
+                    "stacks_tip_consensus_hash": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+                    "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
+                    "unanchored_tip": null,
+                    "unanchored_seq": null,
+                    "tenure_height": 184037,
+                    "is_fully_synced": true,
+                    "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
+                    "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
+                    "stackerdbs": []
+                }
+            "#))
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));

@@ -4,6 +4,7 @@ use clarity::vm::representations::Span;
 use clarity::vm::{ContractName, EvalHook, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
 use clarity_types::Value;
+use indoc::indoc;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
@@ -505,104 +506,104 @@ fn print_help(args: &str) {
 }
 
 fn print_help_main() {
-    println!(
-        r#"Debugger commands:
-  aw | awatch       -- Read/write watchpoint, see `help watch' for details)
-  b  | breakpoint   -- Commands for operating on breakpoints (see 'help b' for details)
-  c  | continue     -- Continue execution until next breakpoint or completion
-  f  | finish       -- Continue execution until returning from the current expression
-  n  | next         -- Single step, stepping over sub-expressions
-  p  | print <expr> -- Evaluate an expression and print the result
-  q  | quit         -- Quit the debugger
-  r  | run          -- Begin execution
-  rw | rwatch       -- Read watchpoint, see `help watch' for details)
-  s  | step         -- Single step, stepping into sub-expressions
-  w  | watch        -- Commands for operating on watchpoints (see 'help w' for details)
-"#
-    );
+    #[rustfmt::skip]
+    println!("{}", indoc!(r#"
+        Debugger commands:
+          aw | awatch       -- Read/write watchpoint, see `help watch' for details)
+          b  | breakpoint   -- Commands for operating on breakpoints (see 'help b' for details)
+          c  | continue     -- Continue execution until next breakpoint or completion
+          f  | finish       -- Continue execution until returning from the current expression
+          n  | next         -- Single step, stepping over sub-expressions
+          p  | print <expr> -- Evaluate an expression and print the result
+          q  | quit         -- Quit the debugger
+          r  | run          -- Begin execution
+          rw | rwatch       -- Read watchpoint, see `help watch' for details)
+          s  | step         -- Single step, stepping into sub-expressions
+          w  | watch        -- Commands for operating on watchpoints (see 'help w' for details)
+    "#));
 }
 
 fn print_help_breakpoint() {
-    println!(
-        r#"Set a breakpoint using 'b' or 'break' and one of these formats
-  b <principal?>.<contract>:<linenum>:<colnum>
-    SP000000000000000000002Q6VF78.bns:604:9
-        Break at line 604, column 9 of the bns contract deployed by
-          SP000000000000000000002Q6VF78
+    #[rustfmt::skip]
+    println!("{}", indoc!(r#"
+        Set a breakpoint using 'b' or 'break' and one of these formats
+          b <principal?>.<contract>:<linenum>:<colnum>
+            SP000000000000000000002Q6VF78.bns:604:9
+                Break at line 604, column 9 of the bns contract deployed by
+                  SP000000000000000000002Q6VF78
 
-  b <principal?>.<contract>:<linenum>
-    .my-contract:193
-        Break at line 193 of the my-contract contract deployed by the current
-          tx-sender
+          b <principal?>.<contract>:<linenum>
+            .my-contract:193
+                Break at line 193 of the my-contract contract deployed by the current
+                  tx-sender
 
-  b :<linenum>:<colnum>
-    :12:4
-        Break at line 12, column 4 of the current contract
+          b :<linenum>:<colnum>
+            :12:4
+                Break at line 12, column 4 of the current contract
 
-  b :<linenum>
-    :12
-        Break at line 12 of the current contract
+          b :<linenum>
+            :12
+                Break at line 12 of the current contract
 
-  b <principal>.<contract>.<function>
-    SP000000000000000000002Q6VF78.bns.name-preorder
-        Break at the function name-preorder from the bns contract deployed by
-          SP000000000000000000002Q6VF78
+          b <principal>.<contract>.<function>
+            SP000000000000000000002Q6VF78.bns.name-preorder
+                Break at the function name-preorder from the bns contract deployed by
+                  SP000000000000000000002Q6VF78
 
-  b .<contract>.<function>
-    .foo.do-something
-        Break at the function 'do-something from the 'foo' contract deployed by
-          the current principal
+          b .<contract>.<function>
+            .foo.do-something
+                Break at the function 'do-something from the 'foo' contract deployed by
+                  the current principal
 
-  b <function>
-    take-action
-        Break at the function 'take-action' current contract
+          b <function>
+            take-action
+                Break at the function 'take-action' current contract
 
-List current breakpoints
-  b list
-  b l
+        List current breakpoints
+          b list
+          b l
 
-Delete a breakpoint using its identifier
-  b delete <breakpoint-id>
-  b del <breakpoint-id>
+        Delete a breakpoint using its identifier
+          b delete <breakpoint-id>
+          b del <breakpoint-id>
 
-Delete all breakpoints
-  b delete
-  b del
-"#
-    );
+        Delete all breakpoints
+          b delete
+          b del
+    "#));
 }
 
 fn print_help_watchpoint() {
-    println!(
-        r#"Set a watchpoint using 'w' or 'watch' and one of these formats
-  w <principal>.<contract>.<name>
-    SP000000000000000000002Q6VF78.bns.owner-name
-        Break on writes to the map 'owner-name' from the 'bns' contract
-          deployed by SP000000000000000000002Q6VF78
-  w .<contract>.<name>
-    .foo.bar
-        Break on writes to the variable 'bar' from the 'foo' contract
-          deployed by the current principal
-  w <name>
-    something
-        Watch the variable 'something' from the current contract
+    #[rustfmt::skip]
+    println!("{}", indoc!(r#"
+        Set a watchpoint using 'w' or 'watch' and one of these formats
+          w <principal>.<contract>.<name>
+            SP000000000000000000002Q6VF78.bns.owner-name
+                Break on writes to the map 'owner-name' from the 'bns' contract
+                  deployed by SP000000000000000000002Q6VF78
+          w .<contract>.<name>
+            .foo.bar
+                Break on writes to the variable 'bar' from the 'foo' contract
+                  deployed by the current principal
+          w <name>
+            something
+                Watch the variable 'something' from the current contract
 
-Default watchpoints break when the variable or map is written. Using the same
-formats, the command 'rwatch' sets a read watchpoint to break when the variable
-or map is read, and 'awatch' sets a read/write watchpoint to break on read or
-write.
+        Default watchpoints break when the variable or map is written. Using the same
+        formats, the command 'rwatch' sets a read watchpoint to break when the variable
+        or map is read, and 'awatch' sets a read/write watchpoint to break on read or
+        write.
 
-List current watchpoints
-  w list
-  w l
+        List current watchpoints
+          w list
+          w l
 
-Delete a watchpoint using its identifier
-  w delete <watchpoint-id>
-  w del <watchpoint-id>
+        Delete a watchpoint using its identifier
+          w delete <watchpoint-id>
+          w del <watchpoint-id>
 
-Delete all watchpoints
-  w delete
-  w del
-"#
-    );
+        Delete all watchpoints
+          w delete
+          w del
+    "#));
 }

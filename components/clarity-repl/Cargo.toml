@@ -33,6 +33,7 @@ serde_derive = { workspace = true }
 serde_json = { workspace = true, features = ["unbounded_depth"] }
 sha2 = "0.10"
 strum = { workspace = true, features = ["derive"] }
+indoc = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clarity = { workspace = true, default-features = false, features = ["rusqlite", "developer-mode", "devtools"] }
@@ -74,7 +75,6 @@ mockito = { workspace = true }
 tempfile = { workspace = true }
 clarinet-files = { path = "../clarinet-files" }
 clarinet-deployments = { path = "../clarinet-deployments" }
-indoc = { workspace = true }
 
 [lib]
 name = "clarity_repl"

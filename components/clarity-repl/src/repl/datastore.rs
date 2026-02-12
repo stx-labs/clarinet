@@ -1375,6 +1375,7 @@ impl BurnStateDB for Datastore {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpoch;
+    use indoc::indoc;
 
     use super::*;
     use crate::repl::settings::ApiUrl;
@@ -1389,12 +1390,13 @@ mod tests {
 
     fn get_datastores_with_remote_data() -> (ClarityDatastore, Datastore) {
         let mut server = mockito::Server::new();
+        #[rustfmt::skip]
         let _ = server
             .mock("GET", "/extended/v2/blocks/10")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"{
+            .with_body(indoc!(r#"
+                {
                     "canonical": true,
                     "height": 10,
                     "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
@@ -1410,23 +1412,24 @@ mod tests {
                     "burn_block_height": 798,
                     "miner_txid": "0x5fb426cf9eb4577b545bd731634886d5bd5c9d40d573e2cdb95100f483913491",
                     "tx_count": 2
-                }"#,
-            )
+                }
+            "#))
             .create();
+        #[rustfmt::skip]
         let _ = server
             .mock("GET", "/v3/sortitions/burn_height/798")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"[{
+            .with_body(indoc!(r#"
+                [{
                     "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
                     "burn_block_height":798,
                     "burn_header_timestamp": 1735451504,
                     "sortition_id": "0x71e332329133c0f331c6b5e9b21a415ea0c32aa300a0e94a88e7c30d4aaf78c6",
                     "parent_sortition_id": "0xd6bffd8c4cd86428d5404ef36867319976008e84047d2acbae9079fd918c4de9",
                     "consensus_hash": "0x44f6511f569d3ed78d437af619d529b6c66a4fa2"
-                }]"#,
-            )
+                }]
+            "#))
             .create();
         let client = HttpClient::new(ApiUrl(server.url()));
         let constants = StacksConstants::default();
