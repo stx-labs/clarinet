@@ -38,7 +38,7 @@ impl From<&MapData<'_>> for Usage {
         } else if !map_data.map_get && !map_data.map_set {
             Self::Unused
         } else {
-            unreachable!("Unhandled usage pattern: {:?}", map_data)
+            unreachable!("Unhandled usage pattern: {map_data:?}")
         }
     }
 }
