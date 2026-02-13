@@ -307,6 +307,58 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
+    /// Should NOT warn when there are 2+ operands
+    #[test]
+    fn valid_multi_operand() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (sum (a uint) (b uint))
+                (+ a b))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn single_operand_or() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (test-func)
+                (begin
+                    (or true)
+                    (ok true)
+                )
+            )
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("`or` with fewer than 2 operands has no effect"));
+    }
+
+    #[test]
+    fn single_operand_subtract() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (test-func)
+                (begin
+                    (- u1)
+                    (ok true)
+                )
+            )
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("`-` with fewer than 2 operands has no effect"));
+    }
+
     #[test]
     fn allow_with_annotation() {
         #[rustfmt::skip]

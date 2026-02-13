@@ -330,6 +330,53 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
+    /// A private fn that calls another private fn, but neither is called from public/read-only.
+    /// The called fn is considered "used" (by the caller), but the caller is unused.
+    #[test]
+    fn unused_fn_calling_other_private_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (square (x uint))
+                (* x x))
+
+            (define-private (square-plus-one (x uint))
+                (+ (square x) u1))
+
+            (define-read-only (identity (x uint))
+                x)
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let fn_name = "square-plus-one";
+        let (expected_message, _) = UnusedPrivateFn::make_diagnostic_strings(&fn_name.into());
+
+        // Only square-plus-one should warn; square is "used" by square-plus-one
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(fn_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
+    fn multiple_unused() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (square (x uint))
+                (* x x))
+
+            (define-private (double (x uint))
+                (* x u2))
+
+            (define-read-only (identity (x uint))
+                x)
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 2);
+    }
+
     #[test]
     fn not_used() {
         #[rustfmt::skip]

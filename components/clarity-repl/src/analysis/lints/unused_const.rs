@@ -197,6 +197,39 @@ mod tests {
     }
 
     #[test]
+    fn multiple_unused() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant A u1)
+            (define-constant B u2)
+            (define-constant C u3)
+
+            (define-read-only (get-val)
+                u0)
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 3);
+    }
+
+    #[test]
+    fn used_in_another_constant() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant SECONDS_PER_MINUTE u60)
+            (define-constant SECONDS_PER_HOUR (* SECONDS_PER_MINUTE u60))
+
+            (define-read-only (hours-to-seconds (hours uint))
+                (* hours SECONDS_PER_HOUR))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
     fn allow_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
