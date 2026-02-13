@@ -55,6 +55,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::CaseConst => lints::CaseConst::run_pass,
             LintName::ErrorConst => lints::ErrorConst::run_pass,
             LintName::Noop => lints::NoopChecker::run_pass,
+            LintName::Panic => lints::PanicChecker::run_pass,
             LintName::UnnecessaryPublic => lints::UnnecessaryPublic::run_pass,
             LintName::UnusedConst => lints::UnusedConst::run_pass,
             LintName::UnusedDataVar => lints::UnusedDataVar::run_pass,
