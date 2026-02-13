@@ -1,6 +1,7 @@
 mod case_const;
 mod error_const;
 mod noop;
+mod panic;
 mod unnecessary_public;
 mod unused_binding;
 mod unused_const;
@@ -13,6 +14,7 @@ mod unused_trait;
 pub use case_const::CaseConst;
 pub use error_const::ErrorConst;
 pub use noop::NoopChecker;
+pub use panic::PanicChecker;
 pub use unnecessary_public::UnnecessaryPublic;
 pub use unused_binding::UnusedBinding;
 pub use unused_const::UnusedConst;

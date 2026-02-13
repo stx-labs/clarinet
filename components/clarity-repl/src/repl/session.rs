@@ -1696,7 +1696,8 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let settings = SessionSettings::default();
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
 
         let mut session = Session::new(settings);
 
