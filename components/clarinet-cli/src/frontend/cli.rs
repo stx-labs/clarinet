@@ -42,10 +42,7 @@ use toml_edit::DocumentMut;
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
 use crate::deployments::types::DeploymentSynthesis;
-use crate::deployments::{
-    self, check_deployments, generate_default_deployment, get_absolute_deployment_path,
-    write_deployment,
-};
+use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
 use crate::generate::changes::{Changes, TOMLEdition};
@@ -710,8 +707,6 @@ pub fn main() {
                     StacksNetwork::Simnet
                 };
 
-                let default_deployment_path =
-                    get_default_deployment_path(&manifest, &network).unwrap();
                 let (mut deployment, _) =
                     match generate_default_deployment(&manifest, &network, cmd.no_batch) {
                         Ok(deployment) => deployment,
@@ -747,19 +742,23 @@ pub fn main() {
 
                 let project_root =
                     paths::project_root_from_manifest_location(&manifest.location).unwrap();
+                let default_deployment_path =
+                    project_root.join(get_default_deployment_path(&network));
 
                 let write_plan = if default_deployment_path.exists() {
-                    let existing_deployment = load_deployment(&manifest, &default_deployment_path)
-                        .unwrap_or_else(|message| {
-                            eprintln!(
-                                "{}",
-                                format_err!(format!(
-                                    "unable to load {}\n{message}",
-                                    default_deployment_path.display(),
-                                ))
-                            );
-                            process::exit(1);
-                        });
+                    let existing_deployment =
+                        load_deployment(&project_root, &default_deployment_path).unwrap_or_else(
+                            |message| {
+                                eprintln!(
+                                    "{}",
+                                    format_err!(format!(
+                                        "unable to load {}\n{message}",
+                                        default_deployment_path.display(),
+                                    ))
+                                );
+                                process::exit(1);
+                            },
+                        );
                     should_existing_plan_be_replaced(
                         &existing_deployment,
                         &deployment,
@@ -819,7 +818,7 @@ pub fn main() {
                                 Ok(deployment)
                             }
                             None => {
-                                let default_deployment_path = get_default_deployment_path(&manifest, network).unwrap();
+                                let default_deployment_path = project_root.join(get_default_deployment_path(network));
                                 let (deployment, _) =
                                     generate_default_deployment(&manifest, network, false)
                                         .unwrap_or_else(|message| {
@@ -833,8 +832,8 @@ pub fn main() {
                         })
                     }
                     (None, Some(deployment_plan_path)) => {
-                        let deployment_path = get_absolute_deployment_path(&manifest, &deployment_plan_path).expect("unable to retrieve deployment");
-                        load_deployment(&manifest, &deployment_path)
+                        let deployment_path = project_root.join(&deployment_plan_path);
+                        load_deployment(&project_root, &deployment_path)
                     }
                     (_, _) => unreachable!()
                 };
@@ -974,7 +973,7 @@ pub fn main() {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
 
                 let changes = match generate::get_changes_for_new_contract(
-                    &manifest.location,
+                    manifest.location,
                     cmd.name,
                     None,
                     true,
@@ -997,7 +996,7 @@ pub fn main() {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
                 let contract_name = cmd.name.clone();
                 let changes =
-                    match generate::get_changes_for_rm_contract(&manifest.location, cmd.name) {
+                    match generate::get_changes_for_rm_contract(manifest.location, cmd.name) {
                         Ok(changes) => changes,
                         Err(message) => {
                             eprintln!("{}", format_err!(message));
@@ -1415,6 +1414,7 @@ pub fn load_deployment_and_artifacts_or_exit(
     Option<String>,
     DeploymentGenerationArtifacts,
 ) {
+    let default_deployment_file = get_default_deployment_path(&StacksNetwork::Simnet);
     let result = match deployment_plan_path {
         None => {
             load_deployment_if_exists(
@@ -1423,15 +1423,10 @@ pub fn load_deployment_and_artifacts_or_exit(
                 force_on_disk,
                 force_computed,
             )
-            .map_err(|e| {
-                format!("loading deployments/default.simnet-plan.yaml failed with error: {e}")
-            })
+            .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
             .and_then(|opt| match opt {
                 Some(deployment) => {
-                    println!(
-                        "{} using deployments/default.simnet-plan.yaml",
-                        yellow!("note:")
-                    );
+                    println!("{} using {default_deployment_file}", yellow!("note:"));
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     Ok((deployment, None, artifacts))
                 }
@@ -1459,9 +1454,10 @@ pub fn load_deployment_and_artifacts_or_exit(
             })
         }
         Some(path) => {
-            let deployment_location = get_absolute_deployment_path(manifest, path)
-                .expect("unable to retrieve deployment");
-            load_deployment(manifest, &deployment_location)
+            let project_root = paths::project_root_from_manifest_location(&manifest.location)
+                .expect("unable to retrieve project root");
+            let deployment_location = project_root.join(path);
+            load_deployment(&project_root, &deployment_location)
                 .map(|deployment| {
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     (
@@ -1531,14 +1527,13 @@ fn load_deployment_if_exists(
     force_on_disk: bool,
     force_computed: bool,
 ) -> Result<Option<DeploymentSpecification>, String> {
-    let default_deployment_location = get_default_deployment_path(manifest, network)?;
+    let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
+    let default_deployment_location = project_root.join(get_default_deployment_path(network));
     if !default_deployment_location.exists() {
         return Ok(None);
     }
 
     if !force_on_disk {
-        let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
-
         match generate_default_deployment(manifest, network, true) {
             Ok((deployment, _)) => {
                 use similar::{ChangeTag, TextDiff};
@@ -1549,7 +1544,7 @@ fn load_deployment_if_exists(
                     .map_err(|err| format!("failed serializing deployment\n{err}"))?;
 
                 if updated_version == current_version {
-                    return load_deployment(manifest, &default_deployment_location).map(Some);
+                    return load_deployment(&project_root, &default_deployment_location).map(Some);
                 }
 
                 if !force_computed {
@@ -1577,7 +1572,7 @@ fn load_deployment_if_exists(
                     let mut buffer = String::new();
                     std::io::stdin().read_line(&mut buffer).unwrap();
                     if buffer.starts_with('n') {
-                        load_deployment(manifest, &default_deployment_location).map(Some)
+                        load_deployment(&project_root, &default_deployment_location).map(Some)
                     } else {
                         paths::write_content(&default_deployment_location, &updated_version)?;
                         Ok(Some(deployment))
@@ -1593,11 +1588,11 @@ fn load_deployment_if_exists(
                     red!("error:"),
                     message
                 );
-                load_deployment(manifest, &default_deployment_location).map(Some)
+                load_deployment(&project_root, &default_deployment_location).map(Some)
             }
         }
     } else {
-        load_deployment(manifest, &default_deployment_location).map(Some)
+        load_deployment(&project_root, &default_deployment_location).map(Some)
     }
 }
 
@@ -1999,7 +1994,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                 }
                 None => {
                     let default_deployment_path =
-                        get_default_deployment_path(&manifest, &StacksNetwork::Devnet).unwrap();
+                        project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
                     let (deployment, _) =
                         generate_default_deployment(&manifest, &StacksNetwork::Devnet, false)
                             .unwrap_or_else(|message| {
@@ -2017,9 +2012,8 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
             })
         }
         Some(deployment_plan_path) => {
-            let deployment_path = get_absolute_deployment_path(&manifest, &deployment_plan_path)
-                .expect("unable to retrieve deployment");
-            load_deployment(&manifest, &deployment_path)
+            let deployment_path = project_root.join(&deployment_plan_path);
+            load_deployment(&project_root, &deployment_path)
         }
     };
 

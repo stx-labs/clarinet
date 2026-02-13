@@ -8,14 +8,6 @@ use clarinet_deployments::types::{DeploymentGenerationArtifacts, DeploymentSpeci
 use clarinet_files::{paths, ProjectManifest, StacksNetwork};
 pub use ui::start_ui;
 
-pub fn get_absolute_deployment_path(
-    manifest: &ProjectManifest,
-    relative_deployment_path: &str,
-) -> Result<PathBuf, String> {
-    paths::project_root_from_manifest_location(&manifest.location)
-        .map(|r| r.join(relative_deployment_path))
-}
-
 pub fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,

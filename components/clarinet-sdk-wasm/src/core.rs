@@ -7,7 +7,7 @@ use clarinet_deployments::types::{
     DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
 };
 use clarinet_deployments::{
-    generate_default_deployment, initiate_session_from_manifest,
+    generate_default_deployment, get_default_deployment_path, initiate_session_from_manifest,
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
@@ -487,7 +487,8 @@ impl SDK {
             .parent()
             .ok_or("Failed to get parent of manifest location")?
             .to_path_buf();
-        let deployment_plan_location = project_root.join("deployments/default.simnet-plan.yaml");
+        let deployment_plan_location =
+            project_root.join(get_default_deployment_path(&StacksNetwork::Simnet));
 
         let (mut deployment, artifacts) = generate_default_deployment(
             &manifest,

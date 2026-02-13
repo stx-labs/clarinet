@@ -33,11 +33,10 @@ pub fn run_dap() -> Result<(), String> {
                 ));
             }
 
-            for (contract_id, (_, location)) in deployment.contracts.iter() {
+            for (contract_id, (_, location)) in deployment.contracts {
                 dap.path_to_contract_id
                     .insert(location.clone(), contract_id.clone());
-                dap.contract_id_to_path
-                    .insert(contract_id.clone(), location.clone());
+                dap.contract_id_to_path.insert(contract_id, location);
             }
 
             // Begin execution of the expression in debug mode

@@ -12,7 +12,7 @@ pub mod onchain;
 pub mod requirements;
 pub mod types;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
@@ -489,7 +489,6 @@ pub async fn generate_default_deployment(
 
     // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
     if let Some(ref requirements) = manifest.project.requirements {
-        let cache_location = manifest.project.cache_location.as_path();
         let mut emulated_contracts_publish = HashMap::new();
         let mut requirements_publish = HashMap::new();
 
@@ -528,7 +527,7 @@ pub async fn generate_default_deployment(
                     let (source, epoch, clarity_version, contract_location) =
                         requirements::retrieve_contract(
                             &contract_id,
-                            cache_location,
+                            &manifest.project.cache_location,
                             &file_accessor,
                         )
                         .await?;
@@ -975,41 +974,31 @@ fn add_transaction_to_epoch(
     epoch_transactions.push(transaction);
 }
 
-pub fn get_default_deployment_path(
-    manifest: &ProjectManifest,
-    network: &StacksNetwork,
-) -> Result<PathBuf, String> {
-    let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
-    Ok(project_root.join("deployments").join(match network {
-        StacksNetwork::Simnet => "default.simnet-plan.yaml",
-        StacksNetwork::Devnet => "default.devnet-plan.yaml",
-        StacksNetwork::Testnet => "default.testnet-plan.yaml",
-        StacksNetwork::Mainnet => "default.mainnet-plan.yaml",
-    }))
+pub fn get_default_deployment_path(network: &StacksNetwork) -> &'static str {
+    match network {
+        StacksNetwork::Simnet => "deployments/default.simnet-plan.yaml",
+        StacksNetwork::Devnet => "deployments/default.devnet-plan.yaml",
+        StacksNetwork::Testnet => "deployments/default.testnet-plan.yaml",
+        StacksNetwork::Mainnet => "deployments/default.mainnet-plan.yaml",
+    }
 }
 
 pub fn load_deployment(
-    manifest: &ProjectManifest,
-    deployment_plan_location: &Path,
+    project_root: &Path,
+    deployment_plan_path: &Path,
 ) -> Result<DeploymentSpecification, String> {
-    let project_root_location = paths::project_root_from_manifest_location(&manifest.location)?;
-    let spec = match DeploymentSpecification::from_config_file(
-        deployment_plan_location,
-        &project_root_location,
-    ) {
-        Ok(spec) => spec,
-        Err(msg) => {
-            return Err(format!(
-                "error: {} syntax incorrect\n{msg}",
-                deployment_plan_location.display()
-            ));
-        }
-    };
-    Ok(spec)
+    DeploymentSpecification::from_config_file(deployment_plan_path, project_root).map_err(|err| {
+        format!(
+            "error: {} syntax incorrect\n{err}",
+            deployment_plan_path.display()
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clarity::vm::types::TupleData;
     use clarity::vm::{ClarityName, ClarityVersion, Value};
     use clarity_repl::repl::clarity_values::to_raw_value;
