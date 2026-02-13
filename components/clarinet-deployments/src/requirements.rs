@@ -1,4 +1,6 @@
-use clarinet_files::{FileAccessor, FileLocation};
+use std::path::{Path, PathBuf};
+
+use clarinet_files::{paths, FileAccessor};
 use clarity_repl::clarity::chainstate::StacksAddress;
 use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
 use clarity_repl::clarity::{Address, ClarityVersion, StacksEpochId};
@@ -23,26 +25,30 @@ impl Default for ContractMetadata {
 
 pub async fn retrieve_contract(
     contract_id: &QualifiedContractIdentifier,
-    cache_location: &FileLocation,
+    cache_location: &Path,
     file_accessor: &Option<&dyn FileAccessor>,
-) -> Result<(String, StacksEpochId, ClarityVersion, FileLocation), String> {
+) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
     let contract_deployer = contract_id.issuer.to_address();
     let contract_name = contract_id.name.to_string();
 
-    let mut contract_location = cache_location.clone();
-    contract_location.append_path("requirements")?;
-    let mut metadata_location = contract_location.clone();
-    contract_location.append_path(&format!("{contract_deployer}.{contract_name}.clar"))?;
-    metadata_location.append_path(&format!("{contract_deployer}.{contract_name}.json"))?;
+    let requirements_dir = cache_location.join("requirements");
+    let contract_location =
+        requirements_dir.join(format!("{contract_deployer}.{contract_name}.clar"));
+    let metadata_location =
+        requirements_dir.join(format!("{contract_deployer}.{contract_name}.json"));
 
     let (contract_source, metadata_json) = match file_accessor {
         None => (
-            contract_location.read_content_as_utf8(),
-            metadata_location.read_content_as_utf8(),
+            paths::read_content_as_utf8(&contract_location),
+            paths::read_content_as_utf8(&metadata_location),
         ),
         Some(file_accessor) => (
-            file_accessor.read_file(contract_location.to_string()).await,
-            file_accessor.read_file(metadata_location.to_string()).await,
+            file_accessor
+                .read_file(contract_location.to_string_lossy().to_string())
+                .await,
+            file_accessor
+                .read_file(metadata_location.to_string_lossy().to_string())
+                .await,
         ),
     };
 
@@ -74,8 +80,9 @@ pub async fn retrieve_contract(
 
     match file_accessor {
         None => {
-            contract_location.write_content(contract.source_code.as_bytes())?;
-            metadata_location.write_content(
+            paths::write_content(&contract_location, contract.source_code.as_bytes())?;
+            paths::write_content(
+                &metadata_location,
                 serde_json::to_string_pretty(&ContractMetadata {
                     epoch,
                     clarity_version,
@@ -87,13 +94,13 @@ pub async fn retrieve_contract(
         Some(file_accessor) => {
             file_accessor
                 .write_file(
-                    contract_location.to_string(),
+                    contract_location.to_string_lossy().to_string(),
                     contract.source_code.as_bytes(),
                 )
                 .await?;
             file_accessor
                 .write_file(
-                    metadata_location.to_string(),
+                    metadata_location.to_string_lossy().to_string(),
                     serde_json::to_string_pretty(&ContractMetadata {
                         epoch,
                         clarity_version,

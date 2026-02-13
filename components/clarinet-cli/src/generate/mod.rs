@@ -2,8 +2,9 @@ pub mod changes;
 mod contract;
 mod project;
 
+use std::path::PathBuf;
+
 pub use changes::Changes;
-use clarinet_files::FileLocation;
 use contract::GetChangesForNewContract;
 use project::GetChangesForNewProject;
 
@@ -25,20 +26,19 @@ pub fn get_changes_for_new_project(
 }
 
 pub fn get_changes_for_new_contract(
-    manifest_location: &FileLocation,
+    manifest_location: PathBuf,
     contract_name: String,
     source: Option<String>,
     include_test: bool,
 ) -> Result<Vec<Changes>, String> {
-    let mut command =
-        GetChangesForNewContract::new(manifest_location.clone(), contract_name, source);
+    let mut command = GetChangesForNewContract::new(manifest_location, contract_name, source);
     command.run(include_test)
 }
 
 pub fn get_changes_for_rm_contract(
-    manifest_location: &FileLocation,
+    manifest_location: PathBuf,
     contract_name: String,
 ) -> Result<Vec<Changes>, String> {
-    let mut command = GetChangesForRmContract::new(manifest_location.clone(), contract_name);
+    let mut command = GetChangesForRmContract::new(manifest_location, contract_name);
     command.run()
 }

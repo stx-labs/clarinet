@@ -12,7 +12,9 @@ pub mod onchain;
 pub mod requirements;
 pub mod types;
 
-use clarinet_files::{FileAccessor, FileLocation, NetworkManifest, ProjectManifest, StacksNetwork};
+use std::path::Path;
+
+use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::clarity::vm::ast::ContractAST;
 use clarity_repl::clarity::vm::diagnostic::Diagnostic;
@@ -86,7 +88,7 @@ pub fn initiate_session_from_manifest(manifest: &ProjectManifest) -> Session {
     let settings = SessionSettings {
         repl_settings: manifest.repl_settings.clone(),
         disk_cache_enabled: true,
-        cache_location: Some(manifest.project.cache_location.to_path_buf()),
+        cache_location: Some(manifest.project.cache_location.clone()),
         override_boot_contracts_source: manifest.project.override_boot_contracts_source.clone(),
         ..Default::default()
     };
@@ -425,13 +427,10 @@ pub async fn generate_default_deployment(
             // Resolve the relative path to the project root
             let project_root = manifest
                 .location
-                .get_parent_location()
-                .map_err(|e| format!("Failed to get project root: {e}"))?;
-            let mut resolved_path = project_root.clone();
-            resolved_path
-                .append_path(file_path)
-                .map_err(|e| format!("Failed to resolve boot contract path {file_path}: {e}"))?;
-            let resolved_path_string = resolved_path.to_string();
+                .parent()
+                .ok_or_else(|| "Failed to get project root".to_string())?;
+            let resolved_path = project_root.join(file_path);
+            let resolved_path_string = resolved_path.to_string_lossy().to_string();
 
             // Load and validate the custom boot contract
             let custom_source = match file_accessor {
@@ -490,7 +489,6 @@ pub async fn generate_default_deployment(
 
     // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
     if let Some(ref requirements) = manifest.project.requirements {
-        let cache_location = &manifest.project.cache_location;
         let mut emulated_contracts_publish = HashMap::new();
         let mut requirements_publish = HashMap::new();
 
@@ -529,7 +527,7 @@ pub async fn generate_default_deployment(
                     let (source, epoch, clarity_version, contract_location) =
                         requirements::retrieve_contract(
                             &contract_id,
-                            cache_location,
+                            &manifest.project.cache_location,
                             &file_accessor,
                         )
                         .await?;
@@ -691,26 +689,21 @@ pub async fn generate_default_deployment(
     let mut contracts = HashMap::new();
     let mut contracts_sources = HashMap::new();
 
-    let base_location = manifest.location.clone().get_parent_location()?;
+    let base_dir = manifest
+        .location
+        .parent()
+        .ok_or_else(|| "unable to get parent directory of manifest".to_string())?;
 
     let sources: HashMap<String, String> = match file_accessor {
         None => {
             let mut sources = HashMap::new();
             for (_, contract_config) in manifest.contracts.iter() {
-                let mut contract_location = base_location.clone();
-                contract_location
-                    .append_path(contract_config.expect_contract_path_as_str())
-                    .map_err(|_| {
-                        format!(
-                            "unable to build path for contract {}",
-                            contract_config.expect_contract_path_as_str()
-                        )
-                    })?;
-
-                let source = contract_location
-                    .read_content_as_utf8()
-                    .map_err(|_| format!("unable to find contract at {contract_location}"))?;
-                sources.insert(contract_location.to_string(), source);
+                let contract_location =
+                    base_dir.join(contract_config.expect_contract_path_as_str());
+                let source = paths::read_content_as_utf8(&contract_location).map_err(|_| {
+                    format!("unable to find contract at {}", contract_location.display())
+                })?;
+                sources.insert(contract_location.to_string_lossy().to_string(), source);
             }
             sources
         }
@@ -719,11 +712,9 @@ pub async fn generate_default_deployment(
                 .contracts
                 .values()
                 .map(|contract_config| {
-                    let mut contract_location = base_location.clone();
-                    contract_location
-                        .append_path(contract_config.expect_contract_path_as_str())
-                        .unwrap();
-                    contract_location.to_string()
+                    let contract_location =
+                        base_dir.join(contract_config.expect_contract_path_as_str());
+                    contract_location.to_string_lossy().to_string()
                 })
                 .collect();
             file_accessor.read_files(contracts_location).await?
@@ -753,10 +744,9 @@ pub async fn generate_default_deployment(
             ));
         };
 
-        let mut contract_location = base_location.clone();
-        contract_location.append_path(contract_config.expect_contract_path_as_str())?;
+        let contract_location = base_dir.join(contract_config.expect_contract_path_as_str());
         let source = sources
-            .get(&contract_location.to_string())
+            .get(&contract_location.to_string_lossy().to_string())
             .ok_or(format!(
                 "Invalid Clarinet.toml, source file not found for: {}",
                 &name
@@ -984,42 +974,31 @@ fn add_transaction_to_epoch(
     epoch_transactions.push(transaction);
 }
 
-pub fn get_default_deployment_path(
-    manifest: &ProjectManifest,
-    network: &StacksNetwork,
-) -> Result<FileLocation, String> {
-    let mut deployment_path = manifest.location.get_project_root_location()?;
-    deployment_path.append_path("deployments")?;
-    deployment_path.append_path(match network {
-        StacksNetwork::Simnet => "default.simnet-plan.yaml",
-        StacksNetwork::Devnet => "default.devnet-plan.yaml",
-        StacksNetwork::Testnet => "default.testnet-plan.yaml",
-        StacksNetwork::Mainnet => "default.mainnet-plan.yaml",
-    })?;
-    Ok(deployment_path)
+pub fn get_default_deployment_path(network: &StacksNetwork) -> &'static str {
+    match network {
+        StacksNetwork::Simnet => "deployments/default.simnet-plan.yaml",
+        StacksNetwork::Devnet => "deployments/default.devnet-plan.yaml",
+        StacksNetwork::Testnet => "deployments/default.testnet-plan.yaml",
+        StacksNetwork::Mainnet => "deployments/default.mainnet-plan.yaml",
+    }
 }
 
 pub fn load_deployment(
-    manifest: &ProjectManifest,
-    deployment_plan_location: &FileLocation,
+    project_root: &Path,
+    deployment_plan_path: &Path,
 ) -> Result<DeploymentSpecification, String> {
-    let project_root_location = manifest.location.get_project_root_location()?;
-    let spec = match DeploymentSpecification::from_config_file(
-        deployment_plan_location,
-        &project_root_location,
-    ) {
-        Ok(spec) => spec,
-        Err(msg) => {
-            return Err(format!(
-                "error: {deployment_plan_location} syntax incorrect\n{msg}"
-            ));
-        }
-    };
-    Ok(spec)
+    DeploymentSpecification::from_config_file(deployment_plan_path, project_root).map_err(|err| {
+        format!(
+            "error: {} syntax incorrect\n{err}",
+            deployment_plan_path.display()
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clarity::vm::types::TupleData;
     use clarity::vm::{ClarityName, ClarityVersion, Value};
     use clarity_repl::repl::clarity_values::to_raw_value;
@@ -1040,7 +1019,7 @@ mod tests {
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
             source: source.to_string(),
             clarity_version: ClarityVersion::Clarity2,
-            location: FileLocation::from_path_string("/contracts/contract_1.clar").unwrap(),
+            location: PathBuf::from("/contracts/contract_1.clar"),
         };
 
         handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch)

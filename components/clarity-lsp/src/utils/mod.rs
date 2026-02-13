@@ -1,4 +1,6 @@
-use clarinet_files::FileLocation;
+use std::path::PathBuf;
+
+use clarinet_files::paths;
 use clarity_repl::clarity::vm::diagnostic::{
     Diagnostic as ClarityDiagnostic, Level as ClarityLevel,
 };
@@ -55,18 +57,18 @@ pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiag
     }
 }
 
-pub fn get_manifest_location(text_document_uri: &Uri) -> Option<FileLocation> {
-    let file_location = text_document_uri.to_string();
-    if !file_location.ends_with("Clarinet.toml") {
+pub fn get_manifest_location(text_document_uri: &Uri) -> Option<PathBuf> {
+    let uri_string = text_document_uri.to_string();
+    if !uri_string.ends_with("Clarinet.toml") {
         return None;
     }
-    FileLocation::try_parse(&file_location, None)
+    paths::try_parse_path(&uri_string, None)
 }
 
-pub fn get_contract_location(text_document_uri: &Uri) -> Option<FileLocation> {
-    let file_location = text_document_uri.to_string();
-    if !file_location.ends_with(".clar") {
+pub fn get_contract_location(text_document_uri: &Uri) -> Option<PathBuf> {
+    let uri_string = text_document_uri.to_string();
+    if !uri_string.ends_with(".clar") {
         return None;
     }
-    FileLocation::try_parse(&file_location, None)
+    paths::try_parse_path(&uri_string, None)
 }

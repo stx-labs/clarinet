@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use clarinet_utils::{get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_mnemonic};
@@ -9,7 +10,8 @@ use libsecp256k1::PublicKey;
 use serde::Serialize;
 use toml::value::Value;
 
-use super::{FileAccessor, FileLocation};
+use super::FileAccessor;
+use crate::paths;
 
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
@@ -344,14 +346,16 @@ pub struct AccountConfig {
 
 impl NetworkManifest {
     pub fn from_project_manifest_location(
-        project_manifest_location: &FileLocation,
+        project_manifest_location: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
-        cache_location: Option<&FileLocation>,
+        cache_location: Option<&Path>,
         devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_location =
-            project_manifest_location.get_network_manifest_location(&networks.1)?;
+        let project_root = project_manifest_location
+            .parent()
+            .ok_or_else(|| "unable to get parent of manifest location".to_string())?;
+        let network_manifest_location = paths::get_network_manifest_path(project_root, &networks.1);
         NetworkManifest::from_location(
             &network_manifest_location,
             networks,
@@ -362,15 +366,17 @@ impl NetworkManifest {
     }
 
     pub async fn from_project_manifest_location_using_file_accessor(
-        location: &FileLocation,
+        location: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
         file_accessor: &dyn FileAccessor,
     ) -> Result<NetworkManifest, String> {
-        let mut network_manifest_location = location.get_parent_location()?;
-        network_manifest_location.append_path("settings/Devnet.toml")?;
+        let network_manifest_location = location
+            .parent()
+            .ok_or_else(|| "unable to get parent of manifest location".to_string())?
+            .join("settings/Devnet.toml");
         let content = file_accessor
-            .read_file(network_manifest_location.to_string())
+            .read_file(network_manifest_location.to_string_lossy().to_string())
             .await?;
 
         let mut network_manifest_file: NetworkManifestFile =
@@ -385,13 +391,13 @@ impl NetworkManifest {
     }
 
     pub fn from_location(
-        location: &FileLocation,
+        location: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
-        cache_location: Option<&FileLocation>,
+        cache_location: Option<&Path>,
         devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_file_content = location.read_content()?;
+        let network_manifest_file_content = paths::read_content(location)?;
         let mut network_manifest_file: NetworkManifestFile =
             toml::from_slice(&network_manifest_file_content[..]).unwrap();
         NetworkManifest::from_network_manifest_file(
@@ -407,7 +413,7 @@ impl NetworkManifest {
         network_manifest_file: &mut NetworkManifestFile,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
-        cache_location: Option<&FileLocation>,
+        cache_location: Option<&Path>,
         devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
         let stacks_node_rpc_address = match (
@@ -710,11 +716,10 @@ impl NetworkManifest {
                 format!("stacks-devnet-{now}/")
             };
             let default_working_dir = match cache_location {
-                Some(cache_location) => {
-                    let mut devnet_location = cache_location.clone();
-                    let _ = devnet_location.append_path(&devnet_dir);
-                    devnet_location.to_string()
-                }
+                Some(cache_location) => cache_location
+                    .join(&devnet_dir)
+                    .to_string_lossy()
+                    .to_string(),
                 None => {
                     let mut dir = std::env::temp_dir();
                     dir.push(devnet_dir);

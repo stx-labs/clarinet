@@ -1,19 +1,16 @@
 use std::collections::{BTreeMap, HashMap};
 use std::panic;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
     DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
-    EmulatedContractPublishSpecification, TransactionSpecification,
 };
 use clarinet_deployments::{
-    generate_default_deployment, initiate_session_from_manifest,
+    generate_default_deployment, get_default_deployment_path, initiate_session_from_manifest,
     update_session_with_deployment_plan,
 };
-use clarinet_files::{
-    FileAccessor, FileLocation, ProjectManifest, StacksNetwork, WASMFileSystemAccessor,
-};
+use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
 use clarity::types::Address;
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::clarity::analysis::contract_interface_builder::{
@@ -261,7 +258,7 @@ pub fn execution_result_to_transaction_res(execution: &ExecutionResult) -> Trans
 #[derive(Clone)]
 struct ProjectCache {
     accounts: HashMap<String, String>,
-    contracts_locations: HashMap<QualifiedContractIdentifier, FileLocation>,
+    contracts_locations: HashMap<QualifiedContractIdentifier, PathBuf>,
     contracts_interfaces: HashMap<QualifiedContractIdentifier, ContractInterface>,
     session: Session,
 }
@@ -292,9 +289,9 @@ impl SDKOptions {
 pub struct SDK {
     #[wasm_bindgen(getter_with_clone)]
     pub deployer: String,
-    cache: HashMap<FileLocation, ProjectCache>,
+    cache: HashMap<PathBuf, ProjectCache>,
     accounts: HashMap<String, String>,
-    contracts_locations: HashMap<QualifiedContractIdentifier, FileLocation>,
+    contracts_locations: HashMap<QualifiedContractIdentifier, PathBuf>,
     contracts_interfaces: HashMap<QualifiedContractIdentifier, ContractInterface>,
     session: Option<Session>,
     file_accessor: Box<dyn FileAccessor>,
@@ -371,8 +368,7 @@ impl SDK {
     #[wasm_bindgen(js_name=initSession)]
     pub async fn init_session(&mut self, cwd: &str, manifest_path: &str) -> Result<(), String> {
         let cwd_path = PathBuf::from(cwd);
-        let cwd_root = FileLocation::FileSystem { path: cwd_path };
-        let manifest_location = FileLocation::try_parse(manifest_path, Some(&cwd_root))
+        let manifest_location = paths::try_parse_path(manifest_path, Some(&cwd_path))
             .ok_or("Failed to parse manifest location")?;
 
         let ProjectCache {
@@ -482,16 +478,17 @@ impl SDK {
         manifest_path: &str,
     ) -> Result<DeploymentArtifacts, String> {
         let cwd_path = PathBuf::from(cwd);
-        let cwd_root = FileLocation::FileSystem { path: cwd_path };
-        let manifest_location = FileLocation::try_parse(manifest_path, Some(&cwd_root))
+        let manifest_location = paths::try_parse_path(manifest_path, Some(&cwd_path))
             .ok_or("Failed to parse manifest location")?;
         let manifest =
             ProjectManifest::from_file_accessor(&manifest_location, true, &*self.file_accessor)
                 .await?;
-        let project_root = manifest_location.get_parent_location()?;
+        let project_root = manifest_location
+            .parent()
+            .ok_or("Failed to get parent of manifest location")?
+            .to_path_buf();
         let deployment_plan_location =
-            FileLocation::try_parse("deployments/default.simnet-plan.yaml", Some(&project_root))
-                .ok_or("Failed to parse default deployment location")?;
+            project_root.join(get_default_deployment_path(&StacksNetwork::Simnet));
 
         let (mut deployment, artifacts) = generate_default_deployment(
             &manifest,
@@ -507,16 +504,15 @@ impl SDK {
                 return Err(diags_digest.message);
             }
         }
-        let project_root = manifest.location.get_parent_location()?;
 
         if self
             .file_accessor
-            .file_exists(deployment_plan_location.to_string())
+            .file_exists(deployment_plan_location.to_string_lossy().to_string())
             .await?
         {
             let spec_file_content = self
                 .file_accessor
-                .read_file(deployment_plan_location.to_string())
+                .read_file(deployment_plan_location.to_string_lossy().to_string())
                 .await?;
 
             let mut spec_file = DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
@@ -571,35 +567,11 @@ impl SDK {
     async fn write_deployment_plan(
         &self,
         deployment_plan: &DeploymentSpecification,
-        project_root: &FileLocation,
-        deployment_plan_location: &FileLocation,
+        project_root: &Path,
+        deployment_plan_location: &Path,
         existing_file: Option<&str>,
     ) -> Result<(), String> {
-        // we must manually update the location of the contracts in the deployment plan to be relative to the project root
-        // because the serialize function is not able to get project_root location in wasm, so it falls back to the full path
-        // https://github.com/stx-labs/clarinet/blob/7a41c0c312148b3a5f0eee28a95bebf2766d2e8d/components/clarinet-files/src/lib.rs#L379
-        let mut deployment_plan_with_relative_paths = deployment_plan.clone();
-        deployment_plan_with_relative_paths
-            .plan
-            .batches
-            .iter_mut()
-            .for_each(|batch| {
-                batch.transactions.iter_mut().for_each(|tx| {
-                    if let TransactionSpecification::EmulatedContractPublish(
-                        EmulatedContractPublishSpecification { location, .. },
-                    ) = tx
-                    {
-                        *location = FileLocation::from_path_string(
-                            &location
-                                .get_relative_path_from_base(project_root)
-                                .expect("failed to retrieve relative path"),
-                        )
-                        .expect("failed to get file location");
-                    }
-                });
-            });
-
-        let deployment_file = deployment_plan_with_relative_paths.to_file_content()?;
+        let deployment_file = deployment_plan.to_file_content(project_root)?;
 
         if let Some(existing_file) = existing_file {
             if existing_file.as_bytes() == deployment_file {
@@ -610,7 +582,10 @@ impl SDK {
         log!("Updated deployment plan file");
 
         self.file_accessor
-            .write_file(deployment_plan_location.to_string(), &deployment_file)
+            .write_file(
+                deployment_plan_location.to_string_lossy().to_string(),
+                &deployment_file,
+            )
             .await?;
         Ok(())
     }
@@ -1202,7 +1177,10 @@ impl SDK {
             asts.insert(contract_id.clone(), contract.ast.clone());
         }
         for (contract_id, contract_location) in contracts_locations.iter() {
-            contract_paths.insert(contract_id.name.to_string(), contract_location.to_string());
+            contract_paths.insert(
+                contract_id.name.to_string(),
+                contract_location.to_string_lossy().to_string(),
+            );
         }
 
         if include_boot_contracts {

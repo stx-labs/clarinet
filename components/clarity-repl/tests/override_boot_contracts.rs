@@ -1,7 +1,7 @@
 use std::fs;
 
 use clarinet_deployments::initiate_session_from_manifest;
-use clarinet_files::{FileLocation, ProjectManifest};
+use clarinet_files::ProjectManifest;
 use tempfile::TempDir;
 
 #[test]
@@ -34,9 +34,8 @@ pox-4 = "{}"
     fs::write(project_path.join("pox-4.clar"), custom_pox4).expect("Failed to write pox-4.clar");
 
     let manifest_path = project_path.join("Clarinet.toml");
-    let file_location = FileLocation::from_path(manifest_path);
     let manifest =
-        ProjectManifest::from_location(&file_location, false).expect("Failed to load manifest");
+        ProjectManifest::from_location(&manifest_path, false).expect("Failed to load manifest");
     let mut session = initiate_session_from_manifest(&manifest);
     session.update_epoch(clarity::types::StacksEpochId::Epoch25);
 

@@ -10,6 +10,7 @@ contract_id = 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait'
 
 [[project.requirements]]
 contract_id = 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard'
+
 [contracts.bns]
 path = 'contracts/bns.clar'
 clarity_version = 2
@@ -29,8 +30,6 @@ epoch = 2.4
 path = 'contracts/iterators.clar'
 clarity_version = 1
 epoch = 2.0
-
-# Not sure what the epoch's are for each of the versions here. 
 
 [contracts.nft-project]
 path = 'contracts/nft-project.clar'
