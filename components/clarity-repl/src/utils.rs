@@ -112,37 +112,41 @@ pub fn remove_env_simnet(source: String) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
 
     #[test]
     fn can_remove_env_simnet() {
-        let with_env_simnet = r#"
-(define-public (mint (amount uint) (recipient principal))
-    (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
-        (minty-fresh amount recipient)
-    )
-)
-;; mint post comment
+        #[rustfmt::skip]
+        let with_env_simnet = indoc!(r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                    (minty-fresh amount recipient)
+                )
+            )
+            ;; mint post comment
 
-;; #[env(simnet)]
-(define-public (minty-fresh (amount uint) (recipient principal)) ;; eol
-    (begin
-        (ft-mint? drachma amount recipient)
-    )
-)
-"#;
+            ;; #[env(simnet)]
+            (define-public (minty-fresh (amount uint) (recipient principal)) ;; eol
+                (begin
+                    (ft-mint? drachma amount recipient)
+                )
+            )
+        "#);
 
-        let without_env_simnet = r#"
-(define-public (mint (amount uint) (recipient principal))
-    (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
-        (minty-fresh amount recipient)
-    )
-)
-;; mint post comment
+        #[rustfmt::skip]
+        let without_env_simnet = indoc!(r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                    (minty-fresh amount recipient)
+                )
+            )
+            ;; mint post comment
 
-"#;
+        "#);
 
         // test that we can remove a marked fn
         let clean =

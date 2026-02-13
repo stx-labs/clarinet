@@ -891,6 +891,8 @@ fn match_contract_caller(expr: &SymbolicExpression) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use crate::analysis::Pass;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -908,17 +910,17 @@ mod tests {
     #[test]
     fn allow_unchecked_bool_in_private_function_with_unchecked_params_annotation() {
         let mut session = default_session();
-        let snippet = "
-(define-data-var p1 principal tx-sender)
-(define-data-var b1 bool false)
-;; #[allow(unchecked_params)]
-(define-private (my-func-p (p principal) (b bool))
-    (begin
-        (var-set p1 p)
-        (var-set b1 b)
-    )
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var p1 principal tx-sender)
+            (define-data-var b1 bool false)
+            ;; #[allow(unchecked_params)]
+            (define-private (my-func-p (p principal) (b bool))
+                (begin
+                    (var-set p1 p)
+                    (var-set b1 b)
+                )
+            )        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
                 assert_eq!(result.diagnostics.len(), 2);
@@ -926,7 +928,7 @@ mod tests {
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:7:21: {} use of potentially unchecked data",
+                        "checker:6:21: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -935,7 +937,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:5:29: {} source of untrusted input here",
+                        "checker:4:29: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -952,13 +954,13 @@ mod tests {
     #[test]
     fn allow_unchecked_bool_in_public_function() {
         let mut session = default_session();
-        let snippet = "
-(define-data-var myvar bool false)
-(define-public (tainted-var-set (b bool))
-    (ok (var-set myvar b))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var myvar bool false)
+            (define-public (tainted-var-set (b bool))
+                (ok (var-set myvar b))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -970,19 +972,19 @@ mod tests {
     #[test]
     fn define_public() {
         let mut session = default_session();
-        let snippet = "
-(define-public (tainted (amount uint))
-    (stx-transfer? amount (as-contract tx-sender) tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted (amount uint))
+                (stx-transfer? amount (as-contract tx-sender) tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:3:20: {} use of potentially unchecked data",
+                        "checker:2:20: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -994,7 +996,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:26: {} source of untrusted input here",
+                        "checker:1:26: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1008,19 +1010,19 @@ mod tests {
     #[test]
     fn expr_tainted() {
         let mut session = default_session();
-        let snippet = "
-(define-public (expr-tainted (amount uint))
-    (stx-transfer? (+ u10 amount) (as-contract tx-sender) tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (expr-tainted (amount uint))
+                (stx-transfer? (+ u10 amount) (as-contract tx-sender) tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:3:20: {} use of potentially unchecked data",
+                        "checker:2:20: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1032,7 +1034,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:31: {} source of untrusted input here",
+                        "checker:1:31: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1046,21 +1048,21 @@ mod tests {
     #[test]
     fn let_tainted() {
         let mut session = default_session();
-        let snippet = "
-(define-public (let-tainted (amount uint))
-    (let ((x amount))
-        (stx-transfer? x (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (let-tainted (amount uint))
+                (let ((x amount))
+                    (stx-transfer? x (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:24: {} use of potentially unchecked data",
+                        "checker:3:24: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1072,7 +1074,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:30: {} source of untrusted input here",
+                        "checker:1:30: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1086,15 +1088,15 @@ mod tests {
     #[test]
     fn filtered() {
         let mut session = default_session();
-        let snippet = "
-(define-public (filtered (amount uint))
-    (begin
-        (asserts! (< amount u100) (err u100))
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (filtered (amount uint))
+                (begin
+                    (asserts! (< amount u100) (err u100))
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1106,15 +1108,15 @@ mod tests {
     #[test]
     fn filtered_expr() {
         let mut session = default_session();
-        let snippet = "
-(define-public (filtered-expr (amount uint))
-    (begin
-        (asserts! (< (+ amount u10) u100) (err u100))
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (filtered-expr (amount uint))
+                (begin
+                    (asserts! (< (+ amount u10) u100) (err u100))
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1126,15 +1128,15 @@ mod tests {
     #[test]
     fn let_filtered() {
         let mut session = default_session();
-        let snippet = "
-(define-public (let-filtered (amount uint))
-    (let ((x amount))
-        (asserts! (< x u100) (err u100))
-        (stx-transfer? x (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (let-filtered (amount uint))
+                (let ((x amount))
+                    (asserts! (< x u100) (err u100))
+                    (stx-transfer? x (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1146,15 +1148,15 @@ mod tests {
     #[test]
     fn let_filtered_parent() {
         let mut session = default_session();
-        let snippet = "
-(define-public (let-filtered-parent (amount uint))
-    (let ((x amount))
-        (asserts! (< amount u100) (err u100))
-        (stx-transfer? x (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (let-filtered-parent (amount uint))
+                (let ((x amount))
+                    (asserts! (< amount u100) (err u100))
+                    (stx-transfer? x (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1166,21 +1168,21 @@ mod tests {
     #[test]
     fn let_tainted_twice() {
         let mut session = default_session();
-        let snippet = "
-(define-public (let-tainted-twice (amount1 uint) (amount2 uint))
-    (let ((x (+ amount1 amount2)))
-        (stx-transfer? x (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (let-tainted-twice (amount1 uint) (amount2 uint))
+                (let ((x (+ amount1 amount2)))
+                    (stx-transfer? x (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 9);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:24: {} use of potentially unchecked data",
+                        "checker:3:24: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1192,7 +1194,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:36: {} source of untrusted input here",
+                        "checker:1:36: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1204,7 +1206,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:2:51: {} source of untrusted input here",
+                        "checker:1:51: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1224,22 +1226,22 @@ mod tests {
     #[test]
     fn let_tainted_twice_filtered_once() {
         let mut session = default_session();
-        let snippet = "
-(define-public (let-tainted-twice-filtered-once (amount1 uint) (amount2 uint))
-    (let ((x (+ amount1 amount2)))
-        (asserts! (< amount1 u100) (err u100))
-        (stx-transfer? x (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (let-tainted-twice-filtered-once (amount1 uint) (amount2 uint))
+                (let ((x (+ amount1 amount2)))
+                    (asserts! (< amount1 u100) (err u100))
+                    (stx-transfer? x (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:5:24: {} use of potentially unchecked data",
+                        "checker:4:24: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1251,7 +1253,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:65: {} source of untrusted input here",
+                        "checker:1:65: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1268,16 +1270,16 @@ mod tests {
     #[test]
     fn let_tainted_twice_filtered_twice() {
         let mut session = default_session();
-        let snippet = "
-(define-public (let-tainted-twice-filtered-twice (amount1 uint) (amount2 uint))
-    (let ((x (+ amount1 amount2)))
-        (asserts! (< amount1 u100) (err u100))
-        (asserts! (< amount2 u100) (err u101))
-        (stx-transfer? x (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (let-tainted-twice-filtered-twice (amount1 uint) (amount2 uint))
+                (let ((x (+ amount1 amount2)))
+                    (asserts! (< amount1 u100) (err u100))
+                    (asserts! (< amount2 u100) (err u101))
+                    (stx-transfer? x (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1289,15 +1291,15 @@ mod tests {
     #[test]
     fn let_tainted_twice_filtered_together() {
         let mut session = default_session();
-        let snippet = "
-(define-public (let-tainted-twice-filtered-together (amount1 uint) (amount2 uint))
-    (let ((x (+ amount1 amount2)))
-        (asserts! (< (+ amount1 amount2) u100) (err u100))
-        (stx-transfer? x (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (let-tainted-twice-filtered-together (amount1 uint) (amount2 uint))
+                (let ((x (+ amount1 amount2)))
+                    (asserts! (< (+ amount1 amount2) u100) (err u100))
+                    (stx-transfer? x (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1309,12 +1311,12 @@ mod tests {
     #[test]
     fn if_filter() {
         let mut session = default_session();
-        let snippet = "
-(define-public (if-filter (amount uint))
-    (stx-transfer? (if (< amount u100) amount u100) (as-contract tx-sender) tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (if-filter (amount uint))
+                (stx-transfer? (if (< amount u100) amount u100) (as-contract tx-sender) tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1326,19 +1328,19 @@ mod tests {
     #[test]
     fn if_not_filtered() {
         let mut session = default_session();
-        let snippet = "
-(define-public (if-not-filtered (amount uint))
-    (stx-transfer? (if (< u50 u100) amount u100) (as-contract tx-sender) tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (if-not-filtered (amount uint))
+                (stx-transfer? (if (< u50 u100) amount u100) (as-contract tx-sender) tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:3:20: {} use of potentially unchecked data",
+                        "checker:2:20: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1350,7 +1352,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:34: {} source of untrusted input here",
+                        "checker:1:34: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1364,21 +1366,21 @@ mod tests {
     #[test]
     fn and_tainted() {
         let mut session = default_session();
-        let snippet = "
-(define-public (and-tainted (amount uint))
-    (ok (and
-        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
-    ))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (and-tainted (amount uint))
+                (ok (and
+                    (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                ))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:38: {} use of potentially unchecked data",
+                        "checker:3:38: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1387,7 +1389,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:30: {} source of untrusted input here",
+                        "checker:1:30: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1401,15 +1403,15 @@ mod tests {
     #[test]
     fn and_filter() {
         let mut session = default_session();
-        let snippet = "
-(define-public (and-filter (amount uint))
-    (ok (and
-        (< amount u100)
-        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
-    ))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (and-filter (amount uint))
+                (ok (and
+                    (< amount u100)
+                    (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                ))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1421,22 +1423,22 @@ mod tests {
     #[test]
     fn and_filter_after() {
         let mut session = default_session();
-        let snippet = "
-(define-public (and-filter-after (amount uint))
-    (ok (and
-        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
-        (< amount u100)
-    ))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (and-filter-after (amount uint))
+                (ok (and
+                    (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                    (< amount u100)
+                ))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:38: {} use of potentially unchecked data",
+                        "checker:3:38: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1445,7 +1447,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:35: {} source of untrusted input here",
+                        "checker:1:35: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1459,21 +1461,21 @@ mod tests {
     #[test]
     fn or_tainted() {
         let mut session = default_session();
-        let snippet = "
-(define-public (or-tainted (amount uint))
-    (ok (or
-        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
-    ))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (or-tainted (amount uint))
+                (ok (or
+                    (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                ))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:38: {} use of potentially unchecked data",
+                        "checker:3:38: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1482,7 +1484,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:29: {} source of untrusted input here",
+                        "checker:1:29: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1496,15 +1498,15 @@ mod tests {
     #[test]
     fn or_filter() {
         let mut session = default_session();
-        let snippet = "
-(define-public (or-filter (amount uint))
-    (ok (or
-        (< amount u100)
-        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
-    ))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (or-filter (amount uint))
+                (ok (or
+                    (< amount u100)
+                    (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                ))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1516,22 +1518,22 @@ mod tests {
     #[test]
     fn or_filter_after() {
         let mut session = default_session();
-        let snippet = "
-(define-public (or-filter-after (amount uint))
-    (ok (or
-        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
-        (< amount u100)
-    ))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (or-filter-after (amount uint))
+                (ok (or
+                    (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                    (< amount u100)
+                ))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:38: {} use of potentially unchecked data",
+                        "checker:3:38: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1540,7 +1542,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:34: {} source of untrusted input here",
+                        "checker:1:34: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1554,12 +1556,12 @@ mod tests {
     #[test]
     fn stx_burn_senders() {
         let mut session = default_session();
-        let snippet = "
-(define-public (stx-burn-senders (amount uint))
-    (stx-burn? amount tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (stx-burn-senders (amount uint))
+                (stx-burn? amount tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1571,22 +1573,22 @@ mod tests {
     #[test]
     fn tainted_stx_burn() {
         let mut session = default_session();
-        let snippet = "
-(define-public (tainted-stx-burn (amount uint))
-    (begin
-        (try! (stx-burn? amount (as-contract tx-sender)))
-        (as-contract (stx-burn? amount tx-sender))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted-stx-burn (amount uint))
+                (begin
+                    (try! (stx-burn? amount (as-contract tx-sender)))
+                    (as-contract (stx-burn? amount tx-sender))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:26: {} use of potentially unchecked data",
+                        "checker:3:26: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1598,7 +1600,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:35: {} source of untrusted input here",
+                        "checker:1:35: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1607,7 +1609,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:5:33: {} use of potentially unchecked data",
+                        "checker:4:33: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1619,12 +1621,12 @@ mod tests {
     #[test]
     fn stx_transfer_senders() {
         let mut session = default_session();
-        let snippet = "
-(define-public (stx-transfer-senders (amount uint) (recipient principal))
-    (stx-transfer? amount tx-sender recipient)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (stx-transfer-senders (amount uint) (recipient principal))
+                (stx-transfer? amount tx-sender recipient)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1636,23 +1638,23 @@ mod tests {
     #[test]
     fn tainted_ft_burn() {
         let mut session = default_session();
-        let snippet = "
-(define-fungible-token stackaroo)
-(define-public (tainted-ft-burn (amount uint))
-    (begin
-        (try! (ft-burn? stackaroo amount (as-contract tx-sender)))
-        (as-contract (ft-burn? stackaroo amount tx-sender))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-fungible-token stackaroo)
+            (define-public (tainted-ft-burn (amount uint))
+                (begin
+                    (try! (ft-burn? stackaroo amount (as-contract tx-sender)))
+                    (as-contract (ft-burn? stackaroo amount tx-sender))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:5:35: {} use of potentially unchecked data",
+                        "checker:4:35: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1664,7 +1666,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:34: {} source of untrusted input here",
+                        "checker:2:34: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1673,7 +1675,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:6:42: {} use of potentially unchecked data",
+                        "checker:5:42: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1685,13 +1687,13 @@ mod tests {
     #[test]
     fn ft_burn_senders() {
         let mut session = default_session();
-        let snippet = "
-(define-fungible-token stackaroo)
-(define-public (ft-burn-senders (amount uint))
-    (ft-burn? stackaroo amount tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-fungible-token stackaroo)
+            (define-public (ft-burn-senders (amount uint))
+                (ft-burn? stackaroo amount tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1703,23 +1705,23 @@ mod tests {
     #[test]
     fn tainted_ft_transfer() {
         let mut session = default_session();
-        let snippet = "
-(define-fungible-token stackaroo)
-(define-public (tainted-ft-transfer (amount uint))
-    (let ((sender tx-sender))
-        (try! (ft-transfer? stackaroo amount (as-contract tx-sender) tx-sender))
-        (as-contract (ft-transfer? stackaroo amount tx-sender sender))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-fungible-token stackaroo)
+            (define-public (tainted-ft-transfer (amount uint))
+                (let ((sender tx-sender))
+                    (try! (ft-transfer? stackaroo amount (as-contract tx-sender) tx-sender))
+                    (as-contract (ft-transfer? stackaroo amount tx-sender sender))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:5:39: {} use of potentially unchecked data",
+                        "checker:4:39: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1731,7 +1733,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:38: {} source of untrusted input here",
+                        "checker:2:38: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1743,7 +1745,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:6:46: {} use of potentially unchecked data",
+                        "checker:5:46: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1755,13 +1757,13 @@ mod tests {
     #[test]
     fn ft_transfer_senders() {
         let mut session = default_session();
-        let snippet = "
-(define-fungible-token stackaroo)
-(define-public (ft-transfer-senders (amount uint) (recipient principal))
-    (ft-transfer? stackaroo amount tx-sender recipient)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-fungible-token stackaroo)
+            (define-public (ft-transfer-senders (amount uint) (recipient principal))
+                (ft-transfer? stackaroo amount tx-sender recipient)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1773,23 +1775,23 @@ mod tests {
     #[test]
     fn tainted_ft_mint() {
         let mut session = default_session();
-        let snippet = "
-(define-fungible-token stackaroo)
-(define-public (tainted-ft-mint (amount uint))
-    (begin
-        (try! (ft-mint? stackaroo amount (as-contract tx-sender)))
-        (as-contract (ft-mint? stackaroo amount tx-sender))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-fungible-token stackaroo)
+            (define-public (tainted-ft-mint (amount uint))
+                (begin
+                    (try! (ft-mint? stackaroo amount (as-contract tx-sender)))
+                    (as-contract (ft-mint? stackaroo amount tx-sender))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:5:35: {} use of potentially unchecked data",
+                        "checker:4:35: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1801,7 +1803,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:34: {} source of untrusted input here",
+                        "checker:2:34: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1810,7 +1812,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:6:42: {} use of potentially unchecked data",
+                        "checker:5:42: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1822,23 +1824,23 @@ mod tests {
     #[test]
     fn tainted_nft_burn() {
         let mut session = default_session();
-        let snippet = "
-(define-non-fungible-token stackaroo uint)
-(define-public (tainted-nft-burn (identifier uint))
-    (begin
-        (try! (nft-burn? stackaroo identifier (as-contract tx-sender)))
-        (as-contract (nft-burn? stackaroo identifier tx-sender))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token stackaroo uint)
+            (define-public (tainted-nft-burn (identifier uint))
+                (begin
+                    (try! (nft-burn? stackaroo identifier (as-contract tx-sender)))
+                    (as-contract (nft-burn? stackaroo identifier tx-sender))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:5:36: {} use of potentially unchecked data",
+                        "checker:4:36: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1850,7 +1852,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:35: {} source of untrusted input here",
+                        "checker:2:35: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1862,7 +1864,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:6:43: {} use of potentially unchecked data",
+                        "checker:5:43: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1874,13 +1876,13 @@ mod tests {
     #[test]
     fn nft_burn_senders() {
         let mut session = default_session();
-        let snippet = "
-(define-non-fungible-token stackaroo uint)
-(define-public (nft-burn-senders (identifier uint))
-    (nft-burn? stackaroo identifier tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token stackaroo uint)
+            (define-public (nft-burn-senders (identifier uint))
+                (nft-burn? stackaroo identifier tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1892,23 +1894,23 @@ mod tests {
     #[test]
     fn tainted_nft_transfer() {
         let mut session = default_session();
-        let snippet = "
-(define-non-fungible-token stackaroo uint)
-(define-public (tainted-nft-transfer (identifier uint))
-    (let ((sender tx-sender))
-        (try! (nft-transfer? stackaroo identifier (as-contract tx-sender) tx-sender))
-        (as-contract (nft-transfer? stackaroo identifier tx-sender sender))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token stackaroo uint)
+            (define-public (tainted-nft-transfer (identifier uint))
+                (let ((sender tx-sender))
+                    (try! (nft-transfer? stackaroo identifier (as-contract tx-sender) tx-sender))
+                    (as-contract (nft-transfer? stackaroo identifier tx-sender sender))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:5:40: {} use of potentially unchecked data",
+                        "checker:4:40: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1923,7 +1925,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:39: {} source of untrusted input here",
+                        "checker:2:39: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -1938,7 +1940,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:6:47: {} use of potentially unchecked data",
+                        "checker:5:47: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1950,13 +1952,13 @@ mod tests {
     #[test]
     fn nft_transfer_senders() {
         let mut session = default_session();
-        let snippet = "
-(define-non-fungible-token stackaroo uint)
-(define-public (nft-transfer-senders (identifier uint) (recipient principal))
-    (nft-transfer? stackaroo identifier tx-sender recipient)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token stackaroo uint)
+            (define-public (nft-transfer-senders (identifier uint) (recipient principal))
+                (nft-transfer? stackaroo identifier tx-sender recipient)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -1968,23 +1970,23 @@ mod tests {
     #[test]
     fn tainted_nft_mint() {
         let mut session = default_session();
-        let snippet = "
-(define-non-fungible-token stackaroo uint)
-(define-public (tainted-nft-mint (identifier uint))
-    (begin
-        (try! (nft-mint? stackaroo identifier (as-contract tx-sender)))
-        (as-contract (nft-mint? stackaroo identifier tx-sender))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token stackaroo uint)
+            (define-public (tainted-nft-mint (identifier uint))
+                (begin
+                    (try! (nft-mint? stackaroo identifier (as-contract tx-sender)))
+                    (as-contract (nft-mint? stackaroo identifier tx-sender))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:5:36: {} use of potentially unchecked data",
+                        "checker:4:36: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -1996,7 +1998,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:35: {} source of untrusted input here",
+                        "checker:2:35: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2008,7 +2010,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:6:43: {} use of potentially unchecked data",
+                        "checker:5:43: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2020,20 +2022,20 @@ mod tests {
     #[test]
     fn tainted_var_set() {
         let mut session = default_session();
-        let snippet = "
-(define-data-var myvar uint u0)
-(define-public (tainted-var-set (amount uint))
-    (ok (var-set myvar amount))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var myvar uint u0)
+            (define-public (tainted-var-set (amount uint))
+                (ok (var-set myvar amount))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:24: {} use of potentially unchecked data",
+                        "checker:3:24: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2042,7 +2044,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:34: {} source of untrusted input here",
+                        "checker:2:34: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2056,20 +2058,20 @@ mod tests {
     #[test]
     fn tainted_map_set() {
         let mut session = default_session();
-        let snippet = "
-(define-map mymap { key-name-1: uint } { val-name-1: int })
-(define-public (tainted-map-set (key uint) (value int))
-    (ok (map-set mymap {key-name-1: key} {val-name-1: value}))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map mymap { key-name-1: uint } { val-name-1: int })
+            (define-public (tainted-map-set (key uint) (value int))
+                (ok (map-set mymap {key-name-1: key} {val-name-1: value}))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:37: {} use of potentially unchecked data",
+                        "checker:3:37: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2081,7 +2083,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:34: {} source of untrusted input here",
+                        "checker:2:34: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2093,7 +2095,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:4:55: {} use of potentially unchecked data",
+                        "checker:3:55: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2108,7 +2110,7 @@ mod tests {
                 assert_eq!(
                     output[9],
                     format!(
-                        "checker:3:45: {} source of untrusted input here",
+                        "checker:2:45: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2128,20 +2130,20 @@ mod tests {
     #[test]
     fn tainted_map_set2() {
         let mut session = default_session();
-        let snippet = "
-(define-map mymap uint int)
-(define-public (tainted-map-set (key uint) (value int))
-    (ok (map-set mymap key value))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map mymap uint int)
+            (define-public (tainted-map-set (key uint) (value int))
+                (ok (map-set mymap key value))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:24: {} use of potentially unchecked data",
+                        "checker:3:24: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2150,7 +2152,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:34: {} source of untrusted input here",
+                        "checker:2:34: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2162,7 +2164,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:4:28: {} use of potentially unchecked data",
+                        "checker:3:28: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2171,7 +2173,7 @@ mod tests {
                 assert_eq!(
                     output[9],
                     format!(
-                        "checker:3:45: {} source of untrusted input here",
+                        "checker:2:45: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2191,20 +2193,20 @@ mod tests {
     #[test]
     fn tainted_map_insert() {
         let mut session = default_session();
-        let snippet = "
-(define-map mymap { key-name-1: uint } { val-name-1: int })
-(define-public (tainted-map-insert (key uint) (value int))
-    (ok (map-insert mymap {key-name-1: key} {val-name-1: value}))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map mymap { key-name-1: uint } { val-name-1: int })
+            (define-public (tainted-map-insert (key uint) (value int))
+                (ok (map-insert mymap {key-name-1: key} {val-name-1: value}))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:40: {} use of potentially unchecked data",
+                        "checker:3:40: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2216,7 +2218,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:37: {} source of untrusted input here",
+                        "checker:2:37: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2228,7 +2230,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:4:58: {} use of potentially unchecked data",
+                        "checker:3:58: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2243,7 +2245,7 @@ mod tests {
                 assert_eq!(
                     output[9],
                     format!(
-                        "checker:3:48: {} source of untrusted input here",
+                        "checker:2:48: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2263,20 +2265,20 @@ mod tests {
     #[test]
     fn tainted_map_insert2() {
         let mut session = default_session();
-        let snippet = "
-(define-map mymap uint int)
-(define-public (tainted-map-insert (key uint) (value int))
-    (ok (map-insert mymap key value))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map mymap uint int)
+            (define-public (tainted-map-insert (key uint) (value int))
+                (ok (map-insert mymap key value))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:27: {} use of potentially unchecked data",
+                        "checker:3:27: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2285,7 +2287,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:37: {} source of untrusted input here",
+                        "checker:2:37: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2297,7 +2299,7 @@ mod tests {
                 assert_eq!(
                     output[6],
                     format!(
-                        "checker:4:31: {} use of potentially unchecked data",
+                        "checker:3:31: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2306,7 +2308,7 @@ mod tests {
                 assert_eq!(
                     output[9],
                     format!(
-                        "checker:3:48: {} source of untrusted input here",
+                        "checker:2:48: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2326,20 +2328,20 @@ mod tests {
     #[test]
     fn tainted_map_delete() {
         let mut session = default_session();
-        let snippet = "
-(define-map mymap { key-name-1: uint } { val-name-1: int })
-(define-public (tainted-map-delete (key uint))
-    (ok (map-delete mymap {key-name-1: key}))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map mymap { key-name-1: uint } { val-name-1: int })
+            (define-public (tainted-map-delete (key uint))
+                (ok (map-delete mymap {key-name-1: key}))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:4:40: {} use of potentially unchecked data",
+                        "checker:3:40: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2348,7 +2350,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:37: {} source of untrusted input here",
+                        "checker:2:37: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2362,22 +2364,22 @@ mod tests {
     #[test]
     fn dynamic_contract_call() {
         let mut session = default_session();
-        let snippet = "
-(define-trait multiplier
-    ((multiply (uint uint) (response uint uint)))
-)
-(define-public (my-multiply (untrusted <multiplier>) (a uint) (b uint))
-    (contract-call? untrusted multiply a b)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-trait multiplier
+                ((multiply (uint uint) (response uint uint)))
+            )
+            (define-public (my-multiply (untrusted <multiplier>) (a uint) (b uint))
+                (contract-call? untrusted multiply a b)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:6:21: {} use of potentially unchecked data",
+                        "checker:5:21: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2386,7 +2388,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:5:30: {} source of untrusted input here",
+                        "checker:4:30: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2410,12 +2412,12 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-private (my-transfer (amount uint))
-    (stx-transfer? amount (as-contract tx-sender) tx-sender)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (my-transfer (amount uint))
+                (stx-transfer? amount (as-contract tx-sender) tx-sender)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -2427,22 +2429,22 @@ mod tests {
     #[test]
     fn check_private_call() {
         let mut session = default_session();
-        let snippet = "
-(define-private (my-transfer (amount uint))
-    (ok true)
-)
-(define-public (tainted (amount uint))
-    (my-transfer amount)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (my-transfer (amount uint))
+                (ok true)
+            )
+            (define-public (tainted (amount uint))
+                (my-transfer amount)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:6:18: {} use of potentially unchecked data",
+                        "checker:5:18: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2451,7 +2453,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:5:26: {} source of untrusted input here",
+                        "checker:4:26: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2465,22 +2467,22 @@ mod tests {
     #[test]
     fn check_private_after() {
         let mut session = default_session();
-        let snippet = "
-(define-public (tainted (amount uint))
-    (my-func amount)
-)
-(define-private (my-func (amount uint))
-    (ok true)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted (amount uint))
+                (my-func amount)
+            )
+            (define-private (my-func (amount uint))
+                (ok true)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:3:14: {} use of potentially unchecked data",
+                        "checker:2:14: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -2489,7 +2491,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:26: {} source of untrusted input here",
+                        "checker:1:26: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2503,279 +2505,19 @@ mod tests {
     #[test]
     fn check_private_allow() {
         let mut session = default_session();
-        let snippet = "
-;; #[allow(unchecked_params)]
-(define-private (my-transfer (amount uint))
-    (begin
-        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
-        (ok true)
-    )
-)
-(define-public (tainted (amount uint))
-    (my-transfer amount)
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
-                assert_eq!(
-                    output[0],
-                    format!(
-                        "checker:5:30: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
-                );
-                assert_eq!(
-                    output[1],
-                    "        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))"
-                );
-                assert_eq!(output[2], "                             ^~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:3:31: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
-                assert_eq!(output[4], "(define-private (my-transfer (amount uint))");
-                assert_eq!(output[5], "                              ^~~~~~");
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn check_private_return() {
-        let mut session = default_session();
-        let snippet = "
-;; #[allow(unchecked_params)]
-(define-private (my-func (amount uint))
-    (ok amount)
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
-                assert_eq!(
-                    output[0],
-                    format!(
-                        "checker:4:5: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
-                );
-                assert_eq!(output[1], "    (ok amount)");
-                assert_eq!(output[2], "    ^~~~~~~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:3:27: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
-                assert_eq!(output[4], "(define-private (my-func (amount uint))");
-                assert_eq!(output[5], "                          ^~~~~~");
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn check_private_return_cleaned() {
-        let mut session = default_session();
-        let snippet = "
-;; #[allow(unchecked_params)]
-(define-private (cleaner (amount uint))
-    (begin
-        (asserts! (< amount u10) (err 1))
-        (ok amount)
-    )
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn check_private_return_clean() {
-        let mut session = default_session();
-        let snippet = "
-;; #[allow(unchecked_params)]
-(define-private (cleaner (amount uint))
-    (begin
-        (+ amount u1)
-        (ok true)
-    )
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn unchecked_params_safe() {
-        let mut session = default_session();
-        let snippet = "
-;; #[allow(unchecked_params)]
-(define-private (my-func (amount uint))
-    (ok true)
-)
-(define-public (tainted (amount uint))
-    (my-func amount)
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn unchecked_params_safe_after() {
-        let mut session = default_session();
-        let snippet = "
-(define-public (tainted (amount uint))
-    (my-func amount)
-)
-;; #[allow(unchecked_params)]
-(define-private (my-func (amount uint))
-    (ok true)
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn allow_unchecked_data() {
-        let mut session = default_session();
-        let snippet = "
-(define-public (allow_tainted (amount uint))
-    ;; #[allow(unchecked_data)]
-    (stx-transfer? amount (as-contract tx-sender) tx-sender)
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn allow_unchecked_data_parent() {
-        let mut session = default_session();
-        let snippet = "
-(define-public (allow_tainted (amount uint))
-    ;; #[allow(unchecked_data)]
-    (let ((x (+ amount u1)))
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected successful interpretation:"),
-        };
-    }
-
-    #[test]
-    fn allow_unchecked_data_function() {
-        let mut session = default_session();
-        let snippet = "
-;; #[allow(unchecked_data)]
-(define-public (allow_tainted (amount uint))
-    (stx-transfer? amount (as-contract tx-sender) tx-sender)
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn annotate_other_expr() {
-        let mut session = default_session();
-        let snippet = "
-(define-public (tainted (amount uint))
-    (begin
-        ;; #[allow(unchecked_data)]
-        (+ amount u1)
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
-            Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
-                assert_eq!(
-                    output[0],
-                    format!(
-                        "checker:6:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
-                );
-                assert_eq!(
-                    output[1],
-                    "        (stx-transfer? amount (as-contract tx-sender) tx-sender)"
-                );
-                assert_eq!(output[2], "                       ^~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:26: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
-                assert_eq!(output[4], "(define-public (tainted (amount uint))");
-                assert_eq!(output[5], "                         ^~~~~~");
-            }
-            _ => panic!("Expected successful interpretation"),
-        };
-    }
-
-    #[test]
-    fn annotate_other_expr2() {
-        let mut session = default_session();
-        let snippet = "
-(define-public (tainted (amount uint))
-    (begin
-        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
-        ;; #[allow(unchecked_data)]
-        (ok (+ amount u1))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unchecked_params)]
+            (define-private (my-transfer (amount uint))
+                (begin
+                    (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                    (ok true)
+                )
+            )
+            (define-public (tainted (amount uint))
+                (my-transfer amount)
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
@@ -2794,7 +2536,267 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:2:26: {} source of untrusted input here",
+                        "checker:2:31: {} source of untrusted input here",
+                        blue!("note:")
+                    )
+                );
+                assert_eq!(output[4], "(define-private (my-transfer (amount uint))");
+                assert_eq!(output[5], "                              ^~~~~~");
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn check_private_return() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unchecked_params)]
+            (define-private (my-func (amount uint))
+                (ok amount)
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((output, _)) => {
+                assert_eq!(output.len(), 6);
+                assert_eq!(
+                    output[0],
+                    format!(
+                        "checker:3:5: {} use of potentially unchecked data",
+                        yellow!("warning:")
+                    )
+                );
+                assert_eq!(output[1], "    (ok amount)");
+                assert_eq!(output[2], "    ^~~~~~~~~~~");
+                assert_eq!(
+                    output[3],
+                    format!(
+                        "checker:2:27: {} source of untrusted input here",
+                        blue!("note:")
+                    )
+                );
+                assert_eq!(output[4], "(define-private (my-func (amount uint))");
+                assert_eq!(output[5], "                          ^~~~~~");
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn check_private_return_cleaned() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unchecked_params)]
+            (define-private (cleaner (amount uint))
+                (begin
+                    (asserts! (< amount u10) (err 1))
+                    (ok amount)
+                )
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn check_private_return_clean() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unchecked_params)]
+            (define-private (cleaner (amount uint))
+                (begin
+                    (+ amount u1)
+                    (ok true)
+                )
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn unchecked_params_safe() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unchecked_params)]
+            (define-private (my-func (amount uint))
+                (ok true)
+            )
+            (define-public (tainted (amount uint))
+                (my-func amount)
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn unchecked_params_safe_after() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted (amount uint))
+                (my-func amount)
+            )
+            ;; #[allow(unchecked_params)]
+            (define-private (my-func (amount uint))
+                (ok true)
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn allow_unchecked_data() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (allow_tainted (amount uint))
+                ;; #[allow(unchecked_data)]
+                (stx-transfer? amount (as-contract tx-sender) tx-sender)
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn allow_unchecked_data_parent() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (allow_tainted (amount uint))
+                ;; #[allow(unchecked_data)]
+                (let ((x (+ amount u1)))
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            _ => panic!("Expected successful interpretation:"),
+        };
+    }
+
+    #[test]
+    fn allow_unchecked_data_function() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unchecked_data)]
+            (define-public (allow_tainted (amount uint))
+                (stx-transfer? amount (as-contract tx-sender) tx-sender)
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn annotate_other_expr() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted (amount uint))
+                (begin
+                    ;; #[allow(unchecked_data)]
+                    (+ amount u1)
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((output, _)) => {
+                assert_eq!(output.len(), 6);
+                assert_eq!(
+                    output[0],
+                    format!(
+                        "checker:5:24: {} use of potentially unchecked data",
+                        yellow!("warning:")
+                    )
+                );
+                assert_eq!(
+                    output[1],
+                    "        (stx-transfer? amount (as-contract tx-sender) tx-sender)"
+                );
+                assert_eq!(output[2], "                       ^~~~~~");
+                assert_eq!(
+                    output[3],
+                    format!(
+                        "checker:1:26: {} source of untrusted input here",
+                        blue!("note:")
+                    )
+                );
+                assert_eq!(output[4], "(define-public (tainted (amount uint))");
+                assert_eq!(output[5], "                         ^~~~~~");
+            }
+            _ => panic!("Expected successful interpretation"),
+        };
+    }
+
+    #[test]
+    fn annotate_other_expr2() {
+        let mut session = default_session();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted (amount uint))
+                (begin
+                    (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                    ;; #[allow(unchecked_data)]
+                    (ok (+ amount u1))
+                )
+            )
+        ").to_string();
+        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+            Ok((output, _)) => {
+                assert_eq!(output.len(), 6);
+                assert_eq!(
+                    output[0],
+                    format!(
+                        "checker:3:30: {} use of potentially unchecked data",
+                        yellow!("warning:")
+                    )
+                );
+                assert_eq!(
+                    output[1],
+                    "        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))"
+                );
+                assert_eq!(output[2], "                             ^~~~~~");
+                assert_eq!(
+                    output[3],
+                    format!(
+                        "checker:1:26: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -2815,22 +2817,22 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-public (tainted (amount uint))
-    (begin
-        (try! (my-filter amount))
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted (amount uint))
+                (begin
+                    (try! (my-filter amount))
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
 
-(define-private (my-filter (amount uint))
-    (begin
-        (asserts! (< amount u10) (err u100))
-        (ok true)
-    )
-)
-"
-        .to_string();
+            (define-private (my-filter (amount uint))
+                (begin
+                    (asserts! (< amount u10) (err u100))
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -2849,26 +2851,26 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-public (tainted (amount uint))
-    (begin
-        (try! (my-filter amount))
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (tainted (amount uint))
+                (begin
+                    (try! (my-filter amount))
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
 
-(define-private (my-filter (amount uint))
-    (my-filter-inner amount)
-)
+            (define-private (my-filter (amount uint))
+                (my-filter-inner amount)
+            )
 
-(define-private (my-filter-inner (amount uint))
-    (begin
-        (asserts! (< amount u10) (err u100))
-        (ok true)
-    )
-)
-"
-        .to_string();
+            (define-private (my-filter-inner (amount uint))
+                (begin
+                    (asserts! (< amount u10) (err u100))
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -2880,17 +2882,17 @@ mod tests {
     #[test]
     fn filter_all() {
         let mut session = default_session();
-        let snippet = "
-(define-data-var admin principal tx-sender)
-(define-public (filter_all (amount uint))
-    (begin
-        ;; #[filter(*)]
-        (asserts! (is-eq tx-sender (var-get admin)) (err u400))
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var admin principal tx-sender)
+            (define-public (filter_all (amount uint))
+                (begin
+                    ;; #[filter(*)]
+                    (asserts! (is-eq tx-sender (var-get admin)) (err u400))
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -2902,17 +2904,17 @@ mod tests {
     #[test]
     fn filter_one() {
         let mut session = default_session();
-        let snippet = "
-(define-data-var admin principal tx-sender)
-(define-public (filter_one (amount uint))
-    (begin
-        ;; #[filter(amount)]
-        (asserts! (is-eq tx-sender (var-get admin)) (err u400))
-        (stx-transfer? amount (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var admin principal tx-sender)
+            (define-public (filter_one (amount uint))
+                (begin
+                    ;; #[filter(amount)]
+                    (asserts! (is-eq tx-sender (var-get admin)) (err u400))
+                    (stx-transfer? amount (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -2924,17 +2926,17 @@ mod tests {
     #[test]
     fn filter_two() {
         let mut session = default_session();
-        let snippet = "
-(define-data-var admin principal tx-sender)
-(define-public (filter_two (amount1 uint) (amount2 uint))
-    (begin
-        ;; #[filter(amount1, amount2)]
-        (asserts! (is-eq tx-sender (var-get admin)) (err u400))
-        (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var admin principal tx-sender)
+            (define-public (filter_two (amount1 uint) (amount2 uint))
+                (begin
+                    ;; #[filter(amount1, amount2)]
+                    (asserts! (is-eq tx-sender (var-get admin)) (err u400))
+                    (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -2946,17 +2948,17 @@ mod tests {
     #[test]
     fn filter_all2() {
         let mut session = default_session();
-        let snippet = "
-(define-data-var admin principal tx-sender)
-(define-public (filter_all2 (amount1 uint) (amount2 uint))
-    (begin
-        ;; #[filter(*)]
-        (asserts! (is-eq tx-sender (var-get admin)) (err u400))
-        (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var admin principal tx-sender)
+            (define-public (filter_all2 (amount1 uint) (amount2 uint))
+                (begin
+                    ;; #[filter(*)]
+                    (asserts! (is-eq tx-sender (var-get admin)) (err u400))
+                    (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -2975,24 +2977,24 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-data-var admin principal tx-sender)
-(define-public (filter_one (amount1 uint) (amount2 uint))
-    (begin
-        ;; #[filter(amount2)]
-        (asserts! (is-eq tx-sender (var-get admin)) (err u400))
-        (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
-    )
-)
-        "
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var admin principal tx-sender)
+            (define-public (filter_one (amount1 uint) (amount2 uint))
+                (begin
+                    ;; #[filter(amount2)]
+                    (asserts! (is-eq tx-sender (var-get admin)) (err u400))
+                    (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:7:24: {} use of potentially unchecked data",
+                        "checker:6:24: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -3004,7 +3006,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:29: {} source of untrusted input here",
+                        "checker:2:29: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -3021,24 +3023,24 @@ mod tests {
     #[test]
     fn filter_trait() {
         let mut session = default_session();
-        let snippet = "
-(define-trait my-trait
-    (
-        (my-method (uint) (response uint uint))
-    )
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-trait my-trait
+                (
+                    (my-method (uint) (response uint uint))
+                )
+            )
 
-(define-data-var principal-check principal 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
+            (define-data-var principal-check principal 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
 
-(define-public (deposit (trait-contract <my-trait>))
-    (begin
-        (asserts! (is-eq (contract-of trait-contract) (var-get principal-check)) (err u0))
-        (try! (as-contract (contract-call? trait-contract my-method u1)))
-        (ok u1)
-    )
-)
-"
-        .to_string();
+            (define-public (deposit (trait-contract <my-trait>))
+                (begin
+                    (asserts! (is-eq (contract-of trait-contract) (var-get principal-check)) (err u0))
+                    (try! (as-contract (contract-call? trait-contract my-method u1)))
+                    (ok u1)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3050,16 +3052,16 @@ mod tests {
     #[test]
     fn check_after() {
         let mut session = default_session();
-        let snippet = "
-(define-public (filtered (amount uint))
-    (begin
-        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
-        (asserts! (< amount u100) (err u100))
-        (ok true)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (filtered (amount uint))
+                (begin
+                    (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                    (asserts! (< amount u100) (err u100))
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3078,22 +3080,22 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-private (my-transfer (amount uint))
-    (begin
-        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
-        (ok true)
-    )
-)
-(define-public (filtered (amount uint))
-    (begin
-        (try! (my-transfer amount))
-        (asserts! (< amount u100) (err u100))
-        (ok true)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (my-transfer (amount uint))
+                (begin
+                    (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))
+                    (ok true)
+                )
+            )
+            (define-public (filtered (amount uint))
+                (begin
+                    (try! (my-transfer amount))
+                    (asserts! (< amount u100) (err u100))
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3112,16 +3114,16 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-data-var owner principal tx-sender)
-(define-public (set-owner (address principal))
-    (begin
-        (asserts! (is-eq tx-sender (var-get owner)) (err u1))
-        (ok (var-set owner address))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var owner principal tx-sender)
+            (define-public (set-owner (address principal))
+                (begin
+                    (asserts! (is-eq tx-sender (var-get owner)) (err u1))
+                    (ok (var-set owner address))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3140,17 +3142,17 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-data-var owner principal tx-sender)
-(define-public (set-owner (address principal))
-    (begin
-        (var-set owner address)
-        (asserts! (is-eq tx-sender (var-get owner)) (err u1))
-        (ok true)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var owner principal tx-sender)
+            (define-public (set-owner (address principal))
+                (begin
+                    (var-set owner address)
+                    (asserts! (is-eq tx-sender (var-get owner)) (err u1))
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3169,23 +3171,23 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-data-var owner principal tx-sender)
-(define-public (set-owner (address principal))
-    (begin
-        (asserts! (is-eq tx-sender (var-get owner)) (err u1))
-        (ok (var-set owner address))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var owner principal tx-sender)
+            (define-public (set-owner (address principal))
+                (begin
+                    (asserts! (is-eq tx-sender (var-get owner)) (err u1))
+                    (ok (var-set owner address))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:6:28: {} use of potentially unchecked data",
+                        "checker:5:28: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -3194,7 +3196,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:28: {} source of untrusted input here",
+                        "checker:2:28: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -3215,16 +3217,16 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_caller = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-data-var owner principal tx-sender)
-(define-public (set-owner (address principal))
-    (begin
-        (asserts! (is-eq contract-caller (var-get owner)) (err u1))
-        (ok (var-set owner address))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var owner principal tx-sender)
+            (define-public (set-owner (address principal))
+                (begin
+                    (asserts! (is-eq contract-caller (var-get owner)) (err u1))
+                    (ok (var-set owner address))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3243,17 +3245,17 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_caller = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-data-var owner principal tx-sender)
-(define-public (set-owner (address principal))
-    (begin
-        (var-set owner address)
-        (asserts! (is-eq contract-caller (var-get owner)) (err u1))
-        (ok true)
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var owner principal tx-sender)
+            (define-public (set-owner (address principal))
+                (begin
+                    (var-set owner address)
+                    (asserts! (is-eq contract-caller (var-get owner)) (err u1))
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3272,23 +3274,23 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_caller = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-data-var owner principal tx-sender)
-(define-public (set-owner (address principal))
-    (begin
-        (asserts! (is-eq contract-caller (var-get owner)) (err u1))
-        (ok (var-set owner address))
-    )
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var owner principal tx-sender)
+            (define-public (set-owner (address principal))
+                (begin
+                    (asserts! (is-eq contract-caller (var-get owner)) (err u1))
+                    (ok (var-set owner address))
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:6:28: {} use of potentially unchecked data",
+                        "checker:5:28: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -3297,7 +3299,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:3:28: {} source of untrusted input here",
+                        "checker:2:28: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
@@ -3318,25 +3320,25 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-(define-private (write-data (data uint))
-    (begin
-        (asserts! (< u10 data) (err 400))
-        (ok true)
-    )
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (write-data (data uint))
+                (begin
+                    (asserts! (< u10 data) (err 400))
+                    (ok true)
+                )
+            )
 
-(define-data-var saved uint u0)
+            (define-data-var saved uint u0)
 
-(define-public (handle-one (arg1 uint))
-    (begin
-        (try! (write-data arg1))
-        (var-set saved arg1)
-        (ok true)
-    )
-)
-"
-        .to_string();
+            (define-public (handle-one (arg1 uint))
+                (begin
+                    (try! (write-data arg1))
+                    (var-set saved arg1)
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -3355,33 +3357,33 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        let snippet = "
-;; #[allow(unchecked_params)]
-(define-private (write-data (data uint))
-    (begin
-        (asserts! (< u10 data) (err 400))
-        (ok true)
-    )
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unchecked_params)]
+            (define-private (write-data (data uint))
+                (begin
+                    (asserts! (< u10 data) (err 400))
+                    (ok true)
+                )
+            )
 
-(define-data-var saved uint u0)
+            (define-data-var saved uint u0)
 
-(define-public (handle-one (arg1 uint))
-    (begin
-        (try! (write-data arg1))
-        (var-set saved arg1)
-        (ok true)
-    )
-)
-"
-        .to_string();
+            (define-public (handle-one (arg1 uint))
+                (begin
+                    (try! (write-data arg1))
+                    (var-set saved arg1)
+                    (ok true)
+                )
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
                 assert_eq!(output.len(), 6);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:15:24: {} use of potentially unchecked data",
+                        "checker:14:24: {} use of potentially unchecked data",
                         yellow!("warning:")
                     )
                 );
@@ -3390,7 +3392,7 @@ mod tests {
                 assert_eq!(
                     output[3],
                     format!(
-                        "checker:12:29: {} source of untrusted input here",
+                        "checker:11:29: {} source of untrusted input here",
                         blue!("note:")
                     )
                 );
