@@ -353,6 +353,45 @@ mod tests {
     }
 
     #[test]
+    fn used_by_set_and_delete() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map sessions principal uint)
+
+            (define-public (set-session (p principal) (id uint))
+                (ok (map-set sessions p id)))
+
+            (define-public (end-session (p principal))
+                (ok (map-delete sessions p)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn delete_only() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map sessions principal uint)
+
+            (define-public (end-session (p principal))
+                (ok (map-delete sessions p)))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let var_name = "sessions";
+        let (expected_message, _) = UnusedMap::make_diagnostic_strings_unused(&var_name.into());
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(var_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
     fn not_set() {
         #[rustfmt::skip]
         let snippet = indoc!("

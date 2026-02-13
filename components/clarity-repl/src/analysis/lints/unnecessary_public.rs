@@ -698,6 +698,51 @@ mod tests {
     }
 
     #[test]
+    fn no_warn_on_dynamic_contract_call() {
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
+        settings
+            .repl_settings
+            .analysis
+            .set_lint_level(UnnecessaryPublic::get_name(), LintLevel::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+
+        #[rustfmt::skip]
+        let trait_source = indoc!("
+            (define-trait action-trait (
+                (do-action () (response bool uint))
+            ))
+        ")
+        .to_string();
+
+        let trait_contract = ClarityContractBuilder::new()
+            .name("action-trait")
+            .code_source(trait_source)
+            .build();
+
+        session
+            .interpreter
+            .run(&trait_contract, None, false, None)
+            .expect("Invalid trait contract");
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait action-trait .action-trait.action-trait)
+
+            (define-public (run-action (action <action-trait>))
+                (contract-call? action do-action))
+        ")
+        .to_string();
+
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
     fn no_warn_on_read_only() {
         #[rustfmt::skip]
         let snippet = indoc!("

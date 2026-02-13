@@ -311,6 +311,22 @@ mod tests {
     }
 
     #[test]
+    fn both_ft_and_nft_unused() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-fungible-token my-ft)
+            (define-non-fungible-token my-nft uint)
+
+            (define-public (noop)
+                (ok true))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 2);
+    }
+
+    #[test]
     fn nft_used() {
         #[rustfmt::skip]
         let snippet = indoc!("
