@@ -27,6 +27,22 @@ enum Usage {
     Used,
 }
 
+impl From<&MapData<'_>> for Usage {
+    fn from(map_data: &MapData) -> Self {
+        if map_data.is_used() {
+            Self::Used
+        } else if map_data.map_get && !map_data.map_set {
+            Self::Unset
+        } else if !map_data.map_get && map_data.map_set {
+            Self::Unread
+        } else if !map_data.map_get && !map_data.map_set {
+            Self::Unused
+        } else {
+            unreachable!("Unhandled usage pattern: {:?}", map_data)
+        }
+    }
+}
+
 struct UnusedMapSettings {
     // TODO
 }
@@ -60,6 +76,19 @@ impl<'a> MapData<'a> {
             map_set: false,
             map_get: false,
         }
+    }
+
+    /// Decide if a map is "unused"
+    /// This means whether or not it can affect contract execution, which is still possible even if `map-get?` is never called.
+    /// For example, it might track unique hashes using `map-insert` and fail if the same hash is used twice
+    /// So the conditions we will use to determine if a map is used:
+    ///  - `map-insert` is called
+    ///  - `map-set` and either `map-delete` or `map-get?` are called
+    ///
+    /// TODO: If the `bool` return value from `map-insert` or `map-delete` is not bound to a variable or returned from a function,
+    ///       the map may still be unused
+    fn is_used(&self) -> bool {
+        self.map_insert || (self.map_set && (self.map_get || self.map_delete))
     }
 }
 
@@ -150,33 +179,6 @@ impl<'a> UnusedMap<'a> {
         }
     }
 
-    /// Decide if a map is "unused"
-    /// This means whether or not it can affect contract execution, which is still possible even if `map-get?` is never called.
-    /// For example, it might track unique hashes using `map-insert` and fail if the same hash is used twice
-    /// So the conditions we will use to determine if a map is used:
-    ///  - `map-insert` is called
-    ///  - `map-set` and either `map-delete` or `map-get?` are called
-    ///
-    /// TODO: If the `bool` return value from `map-insert` or `map-delete` is not bound to a variable or returned from a function,
-    ///       the map may still be unused
-    fn is_map_used(map_data: &MapData) -> bool {
-        map_data.map_insert || (map_data.map_set && (map_data.map_get || map_data.map_delete))
-    }
-
-    fn compute_map_usage(map_data: &MapData) -> Usage {
-        if Self::is_map_used(map_data) {
-            Usage::Used
-        } else if map_data.map_get && !map_data.map_set {
-            Usage::Unset
-        } else if !map_data.map_get && map_data.map_set {
-            Usage::Unread
-        } else if !map_data.map_get && !map_data.map_set {
-            Usage::Unused
-        } else {
-            unreachable!("Unhandled usage pattern: {:?}", map_data)
-        }
-    }
-
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
@@ -184,7 +186,7 @@ impl<'a> UnusedMap<'a> {
             if is_explicitly_unused(name) {
                 continue;
             }
-            let (message, suggestion) = match Self::compute_map_usage(data) {
+            let (message, suggestion) = match Usage::from(data) {
                 Usage::Used => continue,
                 Usage::Unset => Self::make_diagnostic_strings_unset(name),
                 Usage::Unread => Self::make_diagnostic_strings_unread(name),
