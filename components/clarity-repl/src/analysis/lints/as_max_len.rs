@@ -19,6 +19,7 @@ use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 pub struct AsMaxLenChecker<'a> {
     clarity_version: ClarityVersion,
+    // TODO: Why not use a `Vec<Diagnostic>`` here to simplify things
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
     annotations: &'a Vec<Annotation>,
     type_map: Option<&'a TypeMap>,
@@ -47,6 +48,7 @@ impl<'a> AsMaxLenChecker<'a> {
         traverse(&mut self, &contract_analysis.expressions);
 
         let mut diagnostics: Vec<Vec<Diagnostic>> = self.diagnostics.into_values().collect();
+        // TODO: Is it necessary to sort here? Aren't we traversing the file and generating errors in the correct order already?
         diagnostics.sort_by(|a, b| a[0].spans[0].cmp(&b[0].spans[0]));
         Ok(diagnostics.into_iter().flatten().collect())
     }
@@ -97,6 +99,7 @@ impl<'a> ASTVisitor<'a> for AsMaxLenChecker<'a> {
             if u128::from(max_len) <= length {
                 let diagnostic = Diagnostic {
                     level: self.level.clone(),
+                    // TODO: Can you factor out the message generation into a separate function like the other lints, so you can match it exactly in the unit tests?
                     message: format!(
                         "unnecessary `as-max-len?`: sequence already has a maximum length of {max_len}, \
                          which is within the specified limit of {length}"
@@ -133,6 +136,7 @@ impl AnalysisPass for AsMaxLenChecker<'_> {
 
 impl Lint for AsMaxLenChecker<'_> {
     fn get_name() -> LintName {
+        // TODO: Rename to UnnecessaryAsMaxLen. Rename file and allow annotation to match
         LintName::AsMaxLen
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
