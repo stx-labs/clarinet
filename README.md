@@ -100,7 +100,7 @@ specification when writing commit messages.
 **Note:** These conventions are helpful for any commit message, but all PR end up being merged with
 "squash and merge", giving an other chance to refine the commit messages.
 
-To start contributing, fork this repo and open a new branc:
+To start contributing, fork this repo and open a new branch:
 
 1. Fork this repo and clone the fork locally.
 1. Create a new branch
