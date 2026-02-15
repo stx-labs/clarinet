@@ -74,13 +74,13 @@ impl<'a> UnnecessaryAsMaxLen<'a> {
     fn add_diagnostic(&mut self, expr: &SymbolicExpression, max_len: u32, specified_len: u128) {
         self.diagnostics.push(Diagnostic {
             level: self.level.clone(),
-            message: Self::message(max_len, specified_len),
+            message: Self::make_diagnostic_message(max_len, specified_len),
             spans: vec![expr.span.clone()],
             suggestion: Some(Self::suggestion()),
         });
     }
 
-    fn message(max_len: u32, specified_len: u128) -> String {
+    fn make_diagnostic_message(max_len: u32, specified_len: u128) -> String {
         format!(
             "unnecessary `as-max-len?`: sequence already has a maximum length of {max_len}, \
              which is within the specified limit of {specified_len}"
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::message(5, 10)
+            UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
         );
         assert!(output[0].contains("warning:"));
     }
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::message(5, 5)
+            UnnecessaryAsMaxLen::make_diagnostic_message(5, 5)
         );
         assert!(output[0].contains("warning:"));
     }
@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::message(8, 20)
+            UnnecessaryAsMaxLen::make_diagnostic_message(8, 20)
         );
         assert!(output[0].contains("warning:"));
     }
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::message(10, 50)
+            UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
         );
         assert!(output[0].contains("warning:"));
     }
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::message(10, 50)
+            UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
         );
         assert!(output[0].contains("warning:"));
     }
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::message(5, 10)
+            UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
         );
         assert!(output[0].contains("warning:"));
     }
