@@ -1,8 +1,6 @@
 //! Lint to find unnecessary `as-max-len?` calls where the sequence's maximum
 //! possible size is already less than or equal to the specified length.
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::type_checker::contexts::TypeMap;
 use clarity::vm::analysis::types::ContractAnalysis;
@@ -17,17 +15,16 @@ use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-pub struct AsMaxLenChecker<'a> {
+pub struct UnnecessaryAsMaxLen<'a> {
     clarity_version: ClarityVersion,
-    // TODO: Why not use a `Vec<Diagnostic>`` here to simplify things
-    diagnostics: HashMap<u64, Vec<Diagnostic>>,
+    diagnostics: Vec<Diagnostic>,
     annotations: &'a Vec<Annotation>,
     type_map: Option<&'a TypeMap>,
     level: Level,
     active_annotation: Option<usize>,
 }
 
-impl<'a> AsMaxLenChecker<'a> {
+impl<'a> UnnecessaryAsMaxLen<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a Vec<Annotation>,
@@ -37,7 +34,7 @@ impl<'a> AsMaxLenChecker<'a> {
         Self {
             clarity_version,
             level,
-            diagnostics: HashMap::new(),
+            diagnostics: Vec::new(),
             annotations,
             type_map,
             active_annotation: None,
@@ -46,11 +43,7 @@ impl<'a> AsMaxLenChecker<'a> {
 
     fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
         traverse(&mut self, &contract_analysis.expressions);
-
-        let mut diagnostics: Vec<Vec<Diagnostic>> = self.diagnostics.into_values().collect();
-        // TODO: Is it necessary to sort here? Aren't we traversing the file and generating errors in the correct order already?
-        diagnostics.sort_by(|a, b| a[0].spans[0].cmp(&b[0].spans[0]));
-        Ok(diagnostics.into_iter().flatten().collect())
+        Ok(self.diagnostics)
     }
 
     fn set_active_annotation(&mut self, span: &Span) {
@@ -77,9 +70,29 @@ impl<'a> AsMaxLenChecker<'a> {
             _ => None,
         }
     }
+
+    fn add_diagnostic(&mut self, expr: &SymbolicExpression, max_len: u32, specified_len: u128) {
+        self.diagnostics.push(Diagnostic {
+            level: self.level.clone(),
+            message: Self::message(max_len, specified_len),
+            spans: vec![expr.span.clone()],
+            suggestion: Some(Self::suggestion()),
+        });
+    }
+
+    fn message(max_len: u32, specified_len: u128) -> String {
+        format!(
+            "unnecessary `as-max-len?`: sequence already has a maximum length of {max_len}, \
+             which is within the specified limit of {specified_len}"
+        )
+    }
+
+    fn suggestion() -> String {
+        "Remove the `as-max-len?` call and use the sequence directly".to_owned()
+    }
 }
 
-impl<'a> ASTVisitor<'a> for AsMaxLenChecker<'a> {
+impl<'a> ASTVisitor<'a> for UnnecessaryAsMaxLen<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
     }
@@ -97,19 +110,7 @@ impl<'a> ASTVisitor<'a> for AsMaxLenChecker<'a> {
 
         if let Some(max_len) = self.get_sequence_max_len(sequence) {
             if u128::from(max_len) <= length {
-                let diagnostic = Diagnostic {
-                    level: self.level.clone(),
-                    // TODO: Can you factor out the message generation into a separate function like the other lints, so you can match it exactly in the unit tests?
-                    message: format!(
-                        "unnecessary `as-max-len?`: sequence already has a maximum length of {max_len}, \
-                         which is within the specified limit of {length}"
-                    ),
-                    spans: vec![expr.span.clone()],
-                    suggestion: Some(
-                        "Remove the `as-max-len?` call and use the sequence directly".to_owned(),
-                    ),
-                };
-                self.diagnostics.insert(expr.id, vec![diagnostic]);
+                self.add_diagnostic(expr, max_len, length);
             }
         }
 
@@ -117,14 +118,14 @@ impl<'a> ASTVisitor<'a> for AsMaxLenChecker<'a> {
     }
 }
 
-impl AnalysisPass for AsMaxLenChecker<'_> {
+impl AnalysisPass for UnnecessaryAsMaxLen<'_> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let checker = AsMaxLenChecker::new(
+        let checker = UnnecessaryAsMaxLen::new(
             analysis_cache.contract_analysis.clarity_version,
             analysis_cache.annotations,
             analysis_cache.contract_analysis.type_map.as_ref(),
@@ -134,14 +135,15 @@ impl AnalysisPass for AsMaxLenChecker<'_> {
     }
 }
 
-impl Lint for AsMaxLenChecker<'_> {
+impl Lint for UnnecessaryAsMaxLen<'_> {
     fn get_name() -> LintName {
-        // TODO: Rename to UnnecessaryAsMaxLen. Rename file and allow annotation to match
-        LintName::AsMaxLen
+        LintName::UnnecessaryAsMaxLen
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
         match &annotation.kind {
-            AnnotationKind::Allow(warning_kinds) => warning_kinds.contains(&WarningKind::AsMaxLen),
+            AnnotationKind::Allow(warning_kinds) => {
+                warning_kinds.contains(&WarningKind::UnnecessaryAsMaxLen)
+            }
             _ => false,
         }
     }
@@ -152,7 +154,7 @@ mod tests {
     use clarity::vm::ExecutionResult;
     use indoc::indoc;
 
-    use super::AsMaxLenChecker;
+    use super::UnnecessaryAsMaxLen;
     use crate::analysis::linter::{Lint, LintLevel};
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -163,7 +165,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .set_lint_level(AsMaxLenChecker::get_name(), LintLevel::Warning);
+            .set_lint_level(UnnecessaryAsMaxLen::get_name(), LintLevel::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
@@ -182,8 +184,11 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].message,
+            UnnecessaryAsMaxLen::message(5, 10)
+        );
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains("unnecessary `as-max-len?`"));
     }
 
     #[test]
@@ -198,8 +203,11 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].message,
+            UnnecessaryAsMaxLen::message(5, 5)
+        );
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains("unnecessary `as-max-len?`"));
     }
 
     #[test]
@@ -228,7 +236,11 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("unnecessary `as-max-len?`"));
+        assert_eq!(
+            result.diagnostics[0].message,
+            UnnecessaryAsMaxLen::message(8, 20)
+        );
+        assert!(output[0].contains("warning:"));
     }
 
     #[test]
@@ -243,7 +255,11 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("unnecessary `as-max-len?`"));
+        assert_eq!(
+            result.diagnostics[0].message,
+            UnnecessaryAsMaxLen::message(10, 50)
+        );
+        assert!(output[0].contains("warning:"));
     }
 
     #[test]
@@ -258,7 +274,11 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("unnecessary `as-max-len?`"));
+        assert_eq!(
+            result.diagnostics[0].message,
+            UnnecessaryAsMaxLen::message(10, 50)
+        );
+        assert!(output[0].contains("warning:"));
     }
 
     #[test]
@@ -288,7 +308,11 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("unnecessary `as-max-len?`"));
+        assert_eq!(
+            result.diagnostics[0].message,
+            UnnecessaryAsMaxLen::message(5, 10)
+        );
+        assert!(output[0].contains("warning:"));
     }
 
     #[test]
@@ -296,7 +320,7 @@ mod tests {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (test-func (items (list 5 uint)))
-                ;; #[allow(as_max_len)]
+                ;; #[allow(unnecessary_as_max_len)]
                 (as-max-len? items u10)
             )
         ").to_string();

@@ -65,11 +65,11 @@ pub enum WarningKind {
     UncheckedData,
     UncheckedParams,
     // Linter. Keep sorted alphabetically
-    AsMaxLen,
     CaseConst,
     ErrorConst,
     Noop,
     Panic,
+    UnnecessaryAsMaxLen,
     UnnecessaryPublic,
     UnusedBinding,
     UnusedConst,
