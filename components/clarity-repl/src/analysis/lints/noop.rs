@@ -495,7 +495,7 @@ impl<'a> NoopChecker<'a> {
                 format!("dividing zero always evaluates to `{zero_str}`"),
                 format!("Replace with `{zero_str}`"),
             );
-            return;
+            // No return, we still want to check the other conditions
         }
 
         // Separate tail into constants and non-constants
