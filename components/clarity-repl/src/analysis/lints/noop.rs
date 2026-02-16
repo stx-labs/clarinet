@@ -1,4 +1,28 @@
 //! Lint to find expressions that have no effect (noops)
+//! 
+//! This lint checks for several logical and arithmetic operations that are considered "noop"s,
+//! grouped together in a single lint in order to minimize AST traversals
+//! 
+//! Here is a full list by category, and what they should be replaced by:
+//! 
+//! - Operations that always return `true` or `false`
+//!   - Comparison ops
+//!    - `(is-eq x)` -> `true`
+//!    - `(and ... false)` -> `false`
+//!    - `(or ... true)` -> `true`
+//! - Operations that always return one of the operands
+//!   - Comparison ops
+//!    - `(is-eq x true)` -> `x`
+//!    - `(is-eq x false)` -> `(not x)`
+//!   - Logical ops
+//!    - `(not (not x))` -> `x`
+//!    - `(and x)` -> `x`
+//!    - `(or x)` -> `x`
+//!   - Arithmetic ops
+//!    - `(+ x)`, `(+ x u0)`, `(+ x 1 -1)`, etc. -> `x`
+//!    - `(+ y)`, `(- x u0)`, `(- x 1 -1)`, etc. -> `x`
+//!    - `(* y)`, `(* x u1)`, `(* x u1 u1`), etc. -> `x`
+//!    - `(/ y)`, `(/ x u1)`, `(/ x u1 u1`), etc. -> `x`
 
 use std::collections::HashMap;
 
