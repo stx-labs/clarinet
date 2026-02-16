@@ -1,28 +1,28 @@
 //! Lint to find expressions that have no effect (noops)
-//! 
+//!
 //! This lint checks for several logical and arithmetic operations that are considered "noop"s,
 //! grouped together in a single lint in order to minimize AST traversals
-//! 
+//!
 //! Here is a full list by category, and what they should be replaced by:
-//! 
+//!
 //! - Operations that always return `true` or `false`
 //!   - Comparison ops
-//!    - `(is-eq x)` -> `true`
-//!    - `(and ... false)` -> `false`
-//!    - `(or ... true)` -> `true`
+//!     - `(is-eq x)` -> `true`
+//!     - `(and ... false)` -> `false`
+//!     - `(or ... true)` -> `true`
 //! - Operations that always return one of the operands
 //!   - Comparison ops
-//!    - `(is-eq x true)` -> `x`
-//!    - `(is-eq x false)` -> `(not x)`
+//!     - `(is-eq x true)` -> `x`
+//!     - `(is-eq x false)` -> `(not x)`
 //!   - Logical ops
-//!    - `(not (not x))` -> `x`
-//!    - `(and x)` -> `x`
-//!    - `(or x)` -> `x`
+//!     - `(not (not x))` -> `x`
+//!     - `(and x)` -> `x`
+//!     - `(or x)` -> `x`
 //!   - Arithmetic ops
-//!    - `(+ x)`, `(+ x u0)`, `(+ x 1 -1)`, etc. -> `x`
-//!    - `(+ y)`, `(- x u0)`, `(- x 1 -1)`, etc. -> `x`
-//!    - `(* y)`, `(* x u1)`, `(* x u1 u1`), etc. -> `x`
-//!    - `(/ y)`, `(/ x u1)`, `(/ x u1 u1`), etc. -> `x`
+//!     - `(+ x)`, `(+ x u0)`, `(+ x 1 -1)`, etc. -> `x`
+//!     - `(- x)`, `(- x u0)`, `(- x 1 -1)`, etc. -> `x`
+//!     - `(* x)`, `(* x u1)`, `(* x u1 u1)`, etc. -> `x`
+//!     - `(/ x)`, `(/ x u1)`, `(/ x u1 u1)`, etc. -> `x`
 
 use std::collections::HashMap;
 
@@ -31,7 +31,7 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{Span, SymbolicExpressionType};
-use clarity::vm::{ClarityVersion, SymbolicExpression};
+use clarity::vm::{ClarityVersion, SymbolicExpression, Value};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
@@ -101,36 +101,62 @@ impl<'a> NoopChecker<'a> {
             .unwrap_or(false)
     }
 
-    fn add_noop_diagnostic(&mut self, expr: &'a SymbolicExpression, message: String) {
+    fn add_noop_diagnostic(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        message: String,
+        suggestion: String,
+    ) {
         let diagnostic = Diagnostic {
             level: self.level.clone(),
             message,
             spans: vec![expr.span.clone()],
-            suggestion: Some("Remove this expression".to_string()),
+            suggestion: Some(suggestion),
         };
         self.diagnostics.insert(expr.id, vec![diagnostic]);
     }
 
-    fn check_bin_op(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        func: NativeFunctions,
-        operands: &'a [SymbolicExpression],
-    ) {
-        self.set_active_annotation(&expr.span);
+    /// Check if the expression is allowed by annotation, combining set_active_annotation + allow
+    fn check_allowed(&mut self, span: &Span) -> bool {
+        self.set_active_annotation(span);
+        self.allow()
+    }
 
-        if self.allow() {
-            return;
+    /// Format a SymbolicExpression back to Clarity source for use in suggestion text
+    fn format_source(expr: &SymbolicExpression) -> String {
+        match &expr.expr {
+            SymbolicExpressionType::Atom(name) => name.as_str().to_string(),
+            SymbolicExpressionType::LiteralValue(v) | SymbolicExpressionType::AtomValue(v) => {
+                match v {
+                    Value::Int(n) => format!("{n}"),
+                    Value::UInt(n) => format!("u{n}"),
+                    Value::Bool(b) => format!("{b}"),
+                    _ => "...".to_string(),
+                }
+            }
+            SymbolicExpressionType::List(exprs) => {
+                let inner: Vec<String> = exprs.iter().map(Self::format_source).collect();
+                format!("({})", inner.join(" "))
+            }
+            _ => "...".to_string(),
         }
+    }
 
-        if operands.len() < 2 {
-            self.add_noop_diagnostic(
-                expr,
-                format!(
-                    "`{}` with fewer than 2 operands has no effect",
-                    func.get_name()
-                ),
-            );
+    /// Extract a signed int literal value
+    fn as_int_literal(expr: &SymbolicExpression) -> Option<i128> {
+        if let Some(Value::Int(n)) = expr.match_literal_value() {
+            Some(*n)
+        } else {
+            None
+        }
+    }
+
+    /// Extract an unsigned int literal value
+    fn as_uint_literal(expr: &SymbolicExpression) -> Option<u128> {
+        if let Some(Value::UInt(n)) = expr.match_literal_value() {
+            Some(*n)
+        } else {
+            None
         }
     }
 
@@ -173,20 +199,39 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        let bool_val = if let Some(b) = Self::as_bool_literal(&operands[0]) {
-            Some(b)
+        let (bool_idx, other_idx) = if Self::as_bool_literal(&operands[0]).is_some() {
+            (0, 1)
+        } else if Self::as_bool_literal(&operands[1]).is_some() {
+            (1, 0)
         } else {
-            Self::as_bool_literal(&operands[1])
+            return;
         };
 
-        let Some(b) = bool_val else { return };
+        let b = Self::as_bool_literal(&operands[bool_idx]).unwrap();
+        let other = Self::format_source(&operands[other_idx]);
+
+        // Check if both operands are bool literals
+        if Self::as_bool_literal(&operands[other_idx]).is_some() {
+            let result = Self::as_bool_literal(&operands[other_idx]).unwrap() == b;
+            self.add_noop_diagnostic(
+                expr,
+                format!("comparing two boolean literals always returns `{result}`"),
+                format!("Replace with `{result}`"),
+            );
+            return;
+        }
 
         if b {
-            self.add_noop_diagnostic(expr, "comparing with `true` is unnecessary".to_string());
+            self.add_noop_diagnostic(
+                expr,
+                "comparing with `true` is unnecessary".to_string(),
+                format!("Replace with `{other}`"),
+            );
         } else {
             self.add_noop_diagnostic(
                 expr,
                 "comparing with `false` is unnecessary, use `not` instead".to_string(),
+                format!("Replace with `(not {other})`"),
             );
         }
     }
@@ -198,7 +243,210 @@ impl<'a> NoopChecker<'a> {
         operands: &'a [SymbolicExpression],
     ) {
         if operands.len() == 1 && Self::is_not_call(&operands[0]) {
-            self.add_noop_diagnostic(expr, "double negation is unnecessary".to_string());
+            let suggestion = if let SymbolicExpressionType::List(inner_exprs) = &operands[0].expr {
+                inner_exprs
+                    .get(1)
+                    .map(|inner| format!("Replace with `{}`", Self::format_source(inner)))
+                    .unwrap_or_else(|| "Remove this expression".to_string())
+            } else {
+                "Remove this expression".to_string()
+            };
+            self.add_noop_diagnostic(
+                expr,
+                "double negation is unnecessary".to_string(),
+                suggestion,
+            );
+        }
+    }
+
+    /// Check for `(and ... false)` or `(or ... true)` constant short-circuit
+    fn check_lazy_logical_constant(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        func: NativeFunctions,
+        operands: &'a [SymbolicExpression],
+    ) {
+        let target_val = match func {
+            NativeFunctions::And => false, // false short-circuits and
+            NativeFunctions::Or => true,   // true short-circuits or
+            _ => return,
+        };
+
+        let has_constant = operands
+            .iter()
+            .any(|op| Self::as_bool_literal(op) == Some(target_val));
+
+        if has_constant {
+            self.add_noop_diagnostic(
+                expr,
+                format!(
+                    "`{}` with a `{target_val}` operand always evaluates to `{target_val}`",
+                    func.get_name()
+                ),
+                format!("Replace with `{target_val}`"),
+            );
+        }
+    }
+
+    /// Check for arithmetic identity elements: `(+ x u0)` → `x`, `(* x u1)` → `x`, etc.
+    fn check_arithmetic_identity(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        func: NativeFunctions,
+        operands: &'a [SymbolicExpression],
+    ) {
+        match func {
+            NativeFunctions::Add => self.check_additive_identity(expr, operands),
+            NativeFunctions::Subtract => self.check_subtractive_identity(expr, operands),
+            NativeFunctions::Multiply => self.check_multiplicative_identity(expr, operands, true),
+            NativeFunctions::Divide => self.check_multiplicative_identity(expr, operands, false),
+            _ => {}
+        }
+    }
+
+    /// Check `(+ x u0)`, `(+ x 1 -1)` etc. — additive identity
+    fn check_additive_identity(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
+    ) {
+        let mut non_constants = Vec::new();
+
+        // Try unsigned first
+        let mut uint_sum: Option<u128> = Some(0);
+        let mut int_sum: Option<i128> = Some(0);
+
+        for op in operands {
+            if let Some(n) = Self::as_uint_literal(op) {
+                uint_sum = uint_sum.and_then(|s| s.checked_add(n));
+                int_sum = None; // can't mix types
+            } else if let Some(n) = Self::as_int_literal(op) {
+                int_sum = int_sum.and_then(|s| s.checked_add(n));
+                uint_sum = None; // can't mix types
+            } else {
+                non_constants.push(op);
+            }
+        }
+
+        let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
+
+        if sum_is_zero && non_constants.len() == 1 {
+            self.add_noop_diagnostic(
+                expr,
+                "adding zero has no effect".to_string(),
+                format!("Replace with `{}`", Self::format_source(non_constants[0])),
+            );
+        }
+    }
+
+    /// Check `(- x u0)`, `(- x 1 -1)` etc. — subtractive identity
+    /// Only positions 1+ are subtracted; position 0 is the base
+    fn check_subtractive_identity(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
+    ) {
+        if operands.len() < 2 {
+            return;
+        }
+
+        let tail = &operands[1..];
+
+        // All tail operands must be constants
+        if !tail
+            .iter()
+            .all(|op| Self::as_uint_literal(op).is_some() || Self::as_int_literal(op).is_some())
+        {
+            return;
+        }
+
+        // Check if all tail constants sum to zero
+        let uint_sum: Option<u128> = tail.iter().try_fold(0u128, |acc, op| {
+            Self::as_uint_literal(op).and_then(|n| acc.checked_add(n))
+        });
+        let int_sum: Option<i128> = tail.iter().try_fold(0i128, |acc, op| {
+            Self::as_int_literal(op).and_then(|n| acc.checked_add(n))
+        });
+
+        let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
+
+        if sum_is_zero {
+            self.add_noop_diagnostic(
+                expr,
+                "subtracting zero has no effect".to_string(),
+                format!("Replace with `{}`", Self::format_source(&operands[0])),
+            );
+        }
+    }
+
+    /// Check `(* x u1)`, `(/ x u1)` etc. — multiplicative identity
+    /// For `*` (commutative): all constants must multiply to 1
+    /// For `/` (non-commutative): only positions 1+ are divisors
+    fn check_multiplicative_identity(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
+        is_multiply: bool,
+    ) {
+        if is_multiply {
+            let mut non_constants = Vec::new();
+            let mut uint_product: Option<u128> = Some(1);
+            let mut int_product: Option<i128> = Some(1);
+
+            for op in operands {
+                if let Some(n) = Self::as_uint_literal(op) {
+                    uint_product = uint_product.and_then(|p| p.checked_mul(n));
+                    int_product = None;
+                } else if let Some(n) = Self::as_int_literal(op) {
+                    int_product = int_product.and_then(|p| p.checked_mul(n));
+                    uint_product = None;
+                } else {
+                    non_constants.push(op);
+                }
+            }
+
+            let product_is_one =
+                uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
+
+            if product_is_one && non_constants.len() == 1 {
+                self.add_noop_diagnostic(
+                    expr,
+                    "multiplying by one has no effect".to_string(),
+                    format!("Replace with `{}`", Self::format_source(non_constants[0])),
+                );
+            }
+        } else {
+            // Division: position 0 is dividend, positions 1+ are divisors
+            if operands.len() < 2 {
+                return;
+            }
+
+            let tail = &operands[1..];
+
+            if !tail
+                .iter()
+                .all(|op| Self::as_uint_literal(op).is_some() || Self::as_int_literal(op).is_some())
+            {
+                return;
+            }
+
+            let uint_product: Option<u128> = tail.iter().try_fold(1u128, |acc, op| {
+                Self::as_uint_literal(op).and_then(|n| acc.checked_mul(n))
+            });
+            let int_product: Option<i128> = tail.iter().try_fold(1i128, |acc, op| {
+                Self::as_int_literal(op).and_then(|n| acc.checked_mul(n))
+            });
+
+            let product_is_one =
+                uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
+
+            if product_is_one {
+                self.add_noop_diagnostic(
+                    expr,
+                    "dividing by one has no effect".to_string(),
+                    format!("Replace with `{}`", Self::format_source(&operands[0])),
+                );
+            }
         }
     }
 }
@@ -214,8 +462,34 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) -> bool {
-        self.check_bin_op(expr, func, operands);
-        if matches!(func, NativeFunctions::Equals) && !self.allow() {
+        if self.check_allowed(&expr.span) {
+            return true;
+        }
+
+        if operands.len() < 2 {
+            if matches!(func, NativeFunctions::Equals) {
+                // (is-eq x) always returns true
+                self.add_noop_diagnostic(
+                    expr,
+                    "`is-eq` with a single operand always returns `true`".to_string(),
+                    "Replace with `true`".to_string(),
+                );
+            } else {
+                let suggestion = if operands.len() == 1 {
+                    format!("Replace with `{}`", Self::format_source(&operands[0]))
+                } else {
+                    "Remove this expression".to_string()
+                };
+                self.add_noop_diagnostic(
+                    expr,
+                    format!(
+                        "`{}` with fewer than 2 operands has no effect",
+                        func.get_name()
+                    ),
+                    suggestion,
+                );
+            }
+        } else if matches!(func, NativeFunctions::Equals) {
             self.check_bool_comparison(expr, operands);
         }
         true
@@ -227,9 +501,33 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) -> bool {
-        if !Self::is_single_op_arithmetic(func) {
-            self.check_bin_op(expr, func, operands);
+        if Self::is_single_op_arithmetic(func) {
+            return true;
         }
+
+        if self.check_allowed(&expr.span) {
+            return true;
+        }
+
+        if operands.len() < 2 {
+            let suggestion = if operands.len() == 1 {
+                format!("Replace with `{}`", Self::format_source(&operands[0]))
+            } else {
+                "Remove this expression".to_string()
+            };
+            self.add_noop_diagnostic(
+                expr,
+                format!(
+                    "`{}` with fewer than 2 operands has no effect",
+                    func.get_name()
+                ),
+                suggestion,
+            );
+            return true;
+        }
+
+        // Check for identity elements in arithmetic ops
+        self.check_arithmetic_identity(expr, func, operands);
         true
     }
 
@@ -239,8 +537,7 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         _func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) -> bool {
-        self.set_active_annotation(&expr.span);
-        if !self.allow() {
+        if !self.check_allowed(&expr.span) {
             self.check_double_negation(expr, operands);
         }
         true
@@ -252,7 +549,28 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) -> bool {
-        self.check_bin_op(expr, func, operands);
+        if self.check_allowed(&expr.span) {
+            return true;
+        }
+
+        if operands.len() < 2 {
+            let suggestion = if operands.len() == 1 {
+                format!("Replace with `{}`", Self::format_source(&operands[0]))
+            } else {
+                "Remove this expression".to_string()
+            };
+            self.add_noop_diagnostic(
+                expr,
+                format!(
+                    "`{}` with fewer than 2 operands has no effect",
+                    func.get_name()
+                ),
+                suggestion,
+            );
+            return true;
+        }
+
+        self.check_lazy_logical_constant(expr, func, operands);
         true
     }
 }
@@ -326,7 +644,11 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains("`is-eq` with fewer than 2 operands has no effect"));
+        assert!(output[0].contains("`is-eq` with a single operand always returns `true`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `true`")
+        );
     }
 
     #[test]
@@ -589,6 +911,552 @@ mod tests {
                 (begin
                     ;; #[allow(noop)]
                     (not (not x))))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    // --- Suggestion text tests ---
+
+    #[test]
+    fn is_eq_single_operand_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (test-func)
+                (begin
+                    (is-eq u5)
+                    (ok true)
+                )
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `true`")
+        );
+    }
+
+    #[test]
+    fn single_operand_and_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (and x))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn single_operand_or_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (or x))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn single_operand_add_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (+ x))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn single_operand_sub_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (- x))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn double_negation_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (not (not x)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn is_eq_true_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (is-eq x true))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn is_eq_false_suggestion() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (is-eq x false))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(not x)`")
+        );
+    }
+
+    // --- and/or with constant operands ---
+
+    #[test]
+    fn and_with_false() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (and x false))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("`and` with a `false` operand always evaluates to `false`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `false`")
+        );
+    }
+
+    #[test]
+    fn and_with_false_first() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (and false x))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("`and` with a `false` operand always evaluates to `false`"));
+    }
+
+    #[test]
+    fn and_with_false_middle() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool) (y bool))
+                (and x false y))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("`and` with a `false` operand always evaluates to `false`"));
+    }
+
+    #[test]
+    fn or_with_true() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (or x true))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("`or` with a `true` operand always evaluates to `true`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `true`")
+        );
+    }
+
+    #[test]
+    fn or_with_true_first() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (or true x))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("`or` with a `true` operand always evaluates to `true`"));
+    }
+
+    /// Should NOT warn for `(and x y)` without false
+    #[test]
+    fn and_without_false() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool) (y bool))
+                (and x y))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn for `(or x y)` without true
+    #[test]
+    fn or_without_true() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool) (y bool))
+                (or x y))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_and_with_false_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (begin
+                    ;; #[allow(noop)]
+                    (and x false)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_or_with_true_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (begin
+                    ;; #[allow(noop)]
+                    (or x true)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    // --- Arithmetic identity element tests ---
+
+    #[test]
+    fn add_with_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (+ x u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("adding zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn add_with_signed_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (+ x 0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("adding zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn sub_with_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (- x u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("subtracting zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn mul_with_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (* x u1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn div_with_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (/ x u1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("dividing by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn add_constants_cancel() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (+ x 1 -1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("adding zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn sub_constants_cancel() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (- x 1 -1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("subtracting zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn mul_multiple_ones() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (* x u1 u1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn div_multiple_ones() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (/ x u1 u1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("dividing by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    // --- Arithmetic negative tests ---
+
+    /// Should NOT warn for `(+ x u1)` — not adding zero
+    #[test]
+    fn add_with_nonzero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (+ x u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn for `(* x u2)` — not multiplying by one
+    #[test]
+    fn mul_with_non_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (* x u2))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn for `(- u0 x)` — result is not x
+    #[test]
+    fn sub_zero_first() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (- u0 x))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn for `(/ u1 x)` — result is not x
+    #[test]
+    fn div_one_first() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (/ u1 x))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn when 2 non-constant operands remain after removing zero
+    #[test]
+    fn add_two_non_constants() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (+ x y u0))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_add_with_zero_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (begin
+                    ;; #[allow(noop)]
+                    (+ x u0)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_mul_with_one_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (begin
+                    ;; #[allow(noop)]
+                    (* x u1)))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
