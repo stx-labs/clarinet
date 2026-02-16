@@ -6,7 +6,7 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
-use clarity::vm::representations::Span;
+use clarity::vm::representations::{Span, SymbolicExpressionType};
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
@@ -115,6 +115,68 @@ impl<'a> NoopChecker<'a> {
     fn is_single_op_arithmetic(func: NativeFunctions) -> bool {
         matches!(func, NativeFunctions::Sqrti | NativeFunctions::Log2)
     }
+
+    /// Check if the expression is a boolean literal and return its value.
+    /// In Clarity, `true` and `false` are parsed as `Atom("true")` / `Atom("false")`
+    /// (reserved variable names), not as `AtomValue(Value::Bool(...))`.
+    fn as_bool_literal(expr: &SymbolicExpression) -> Option<bool> {
+        match &expr.expr {
+            SymbolicExpressionType::Atom(name) if name.as_str() == "true" => Some(true),
+            SymbolicExpressionType::Atom(name) if name.as_str() == "false" => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Check if the expression is a `(not ...)` call
+    fn is_not_call(expr: &SymbolicExpression) -> bool {
+        if let SymbolicExpressionType::List(exprs) = &expr.expr {
+            exprs
+                .first()
+                .and_then(|e| e.match_atom())
+                .is_some_and(|name| name.as_str() == "not")
+        } else {
+            false
+        }
+    }
+
+    /// Check for redundant boolean comparisons: `(is-eq x true)` or `(is-eq x false)`
+    fn check_bool_comparison(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
+    ) {
+        if operands.len() != 2 {
+            return;
+        }
+
+        let bool_val = if let Some(b) = Self::as_bool_literal(&operands[0]) {
+            Some(b)
+        } else {
+            Self::as_bool_literal(&operands[1])
+        };
+
+        let Some(b) = bool_val else { return };
+
+        if b {
+            self.add_noop_diagnostic(expr, "comparing with `true` is unnecessary".to_string());
+        } else {
+            self.add_noop_diagnostic(
+                expr,
+                "comparing with `false` is unnecessary, use `not` instead".to_string(),
+            );
+        }
+    }
+
+    /// Check for double negation: `(not (not x))`
+    fn check_double_negation(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
+    ) {
+        if operands.len() == 1 && Self::is_not_call(&operands[0]) {
+            self.add_noop_diagnostic(expr, "double negation is unnecessary".to_string());
+        }
+    }
 }
 
 impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
@@ -129,6 +191,9 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         operands: &'a [SymbolicExpression],
     ) -> bool {
         self.check_bin_op(expr, func, operands);
+        if matches!(func, NativeFunctions::Equals) && !self.allow() {
+            self.check_bool_comparison(expr, operands);
+        }
         true
     }
 
@@ -140,6 +205,19 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
     ) -> bool {
         if !Self::is_single_op_arithmetic(func) {
             self.check_bin_op(expr, func, operands);
+        }
+        true
+    }
+
+    fn visit_logical(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _func: NativeFunctions,
+        operands: &'a [SymbolicExpression],
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if !self.allow() {
+            self.check_double_negation(expr, operands);
         }
         true
     }
@@ -370,6 +448,123 @@ mod tests {
                     (ok true)
                 )
             )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn is_eq_with_true() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (is-eq x true))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("comparing with `true` is unnecessary"));
+    }
+
+    #[test]
+    fn is_eq_with_true_reversed() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (is-eq true x))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("comparing with `true` is unnecessary"));
+    }
+
+    #[test]
+    fn is_eq_with_false() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (is-eq x false))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("comparing with `false` is unnecessary, use `not` instead"));
+    }
+
+    #[test]
+    fn double_negation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (not (not x)))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("double negation is unnecessary"));
+    }
+
+    /// Should NOT warn for valid `is-eq` with non-boolean operands
+    #[test]
+    fn is_eq_non_bool() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (is-eq x u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn for single `not`
+    #[test]
+    fn single_not() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (not x))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_bool_comparison_with_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (begin
+                    ;; #[allow(noop)]
+                    (is-eq x true)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_double_negation_with_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (begin
+                    ;; #[allow(noop)]
+                    (not (not x))))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
