@@ -31,6 +31,7 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{Span, SymbolicExpressionType};
+use clarity::vm::variables::NativeVariables;
 use clarity::vm::{ClarityVersion, SymbolicExpression, Value};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
@@ -167,13 +168,13 @@ impl<'a> NoopChecker<'a> {
     }
 
     /// Check if the expression is a boolean literal and return its value.
-    /// In Clarity, `true` and `false` are parsed as `Atom("true")` / `Atom("false")`
-    /// (reserved variable names), not as `AtomValue(Value::Bool(...))`.
     fn as_bool_literal(expr: &SymbolicExpression) -> Option<bool> {
         match &expr.expr {
-            // TODO: Can we match booleans on some enum rather than hardcoded strings?
-            SymbolicExpressionType::Atom(name) if name.as_str() == "true" => Some(true),
-            SymbolicExpressionType::Atom(name) if name.as_str() == "false" => Some(false),
+            SymbolicExpressionType::Atom(name) => match NativeVariables::lookup_by_name(name) {
+                Some(NativeVariables::NativeTrue) => Some(true),
+                Some(NativeVariables::NativeFalse) => Some(false),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -184,8 +185,8 @@ impl<'a> NoopChecker<'a> {
             exprs
                 .first()
                 .and_then(|e| e.match_atom())
-                // TODO: Can we match `not` on some enum rather than a hardcoded string?
-                .is_some_and(|name| name.as_str() == "not")
+                .and_then(|name| NativeFunctions::lookup_by_name(name))
+                .is_some_and(|func| matches!(func, NativeFunctions::Not))
         } else {
             false
         }
@@ -282,8 +283,7 @@ impl<'a> NoopChecker<'a> {
             self.add_diagnostic(
                 expr,
                 format!(
-                    "`{}` with a `{target_val}` operand always evaluates to `{target_val}`",
-                    func.get_name()
+                    "`{func}` with a `{target_val}` operand always evaluates to `{target_val}`"
                 ),
                 format!("Replace with `{target_val}`"),
             );
@@ -300,23 +300,20 @@ impl<'a> NoopChecker<'a> {
         match func {
             NativeFunctions::Add => self.check_additive_identity(expr, operands),
             NativeFunctions::Subtract => self.check_subtractive_identity(expr, operands),
-            NativeFunctions::Multiply => self.check_multiplicative_identity(expr, operands, true),
-            NativeFunctions::Divide => self.check_multiplicative_identity(expr, operands, false),
+            NativeFunctions::Multiply => self.check_multiply_identity(expr, operands),
+            NativeFunctions::Divide => self.check_divide_identity(expr, operands),
             _ => {}
         }
     }
 
-    /// Check `(+ x u0)`, `(+ x 1 -1)` etc. — additive identity
+    /// Check `(+ x u0)`, `(+ x y 1 -1)` etc. — additive identity
     fn check_additive_identity(
         &mut self,
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
     ) {
-        // TODO: Does this catch `(+ x y 1 -1)` or `(x y u0 u0)` and suggest `(+ x y)` as a replacement?
-        //       If not please fix and add unit test
         let mut non_constants = Vec::new();
 
-        // Try unsigned first
         let mut uint_sum: Option<u128> = Some(0);
         let mut int_sum: Option<i128> = Some(0);
 
@@ -334,131 +331,171 @@ impl<'a> NoopChecker<'a> {
 
         let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
 
-        if sum_is_zero && non_constants.len() == 1 {
-            self.add_diagnostic(
-                expr,
-                "adding zero has no effect".to_string(),
-                format!("Replace with `{}`", Self::format_source(non_constants[0])),
-            );
+        if sum_is_zero && !non_constants.is_empty() && non_constants.len() < operands.len() {
+            let suggestion = if non_constants.len() == 1 {
+                format!("Replace with `{}`", Self::format_source(non_constants[0]))
+            } else {
+                let parts: Vec<String> = non_constants
+                    .iter()
+                    .map(|op| Self::format_source(op))
+                    .collect();
+                format!("Replace with `(+ {})`", parts.join(" "))
+            };
+            self.add_diagnostic(expr, "adding zero has no effect".to_string(), suggestion);
         }
     }
 
-    /// Check `(- x u0)`, `(- x 1 -1)` etc. — subtractive identity
+    /// Check `(- x u0)`, `(- x y 0)`, `(- x 1 -1)` etc. — subtractive identity
     /// Only positions 1+ are subtracted; position 0 is the base
     fn check_subtractive_identity(
         &mut self,
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
     ) {
-        // TODO: Does this catch `(- x y 0)` and suggest `(- x y)` as a replacement?
-        //       If not please fix and add unit test
-
         if operands.len() < 2 {
             return;
         }
 
         let tail = &operands[1..];
 
-        // All tail operands must be constants
-        if !tail
-            .iter()
-            .all(|op| Self::as_uint_literal(op).is_some() || Self::as_int_literal(op).is_some())
-        {
-            return;
+        // Separate tail into constants and non-constants
+        let mut tail_non_constants = Vec::new();
+        let mut uint_sum: Option<u128> = Some(0);
+        let mut int_sum: Option<i128> = Some(0);
+        let mut has_constants = false;
+
+        for op in tail {
+            if let Some(n) = Self::as_uint_literal(op) {
+                uint_sum = uint_sum.and_then(|s| s.checked_add(n));
+                int_sum = None;
+                has_constants = true;
+            } else if let Some(n) = Self::as_int_literal(op) {
+                int_sum = int_sum.and_then(|s| s.checked_add(n));
+                uint_sum = None;
+                has_constants = true;
+            } else {
+                tail_non_constants.push(op);
+            }
         }
 
-        // Check if all tail constants sum to zero
-        let uint_sum: Option<u128> = tail.iter().try_fold(0u128, |acc, op| {
-            Self::as_uint_literal(op).and_then(|n| acc.checked_add(n))
-        });
-        let int_sum: Option<i128> = tail.iter().try_fold(0i128, |acc, op| {
-            Self::as_int_literal(op).and_then(|n| acc.checked_add(n))
-        });
+        if !has_constants {
+            return;
+        }
 
         let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
 
         if sum_is_zero {
+            let suggestion = if tail_non_constants.is_empty() {
+                format!("Replace with `{}`", Self::format_source(&operands[0]))
+            } else {
+                let mut parts = vec![Self::format_source(&operands[0])];
+                parts.extend(tail_non_constants.iter().map(|op| Self::format_source(op)));
+                format!("Replace with `(- {})`", parts.join(" "))
+            };
             self.add_diagnostic(
                 expr,
                 "subtracting zero has no effect".to_string(),
-                format!("Replace with `{}`", Self::format_source(&operands[0])),
+                suggestion,
             );
         }
     }
 
-    /// Check `(* x u1)`, `(/ x u1)` etc. — multiplicative identity
-    /// For `*` (commutative): all constants must multiply to 1
-    /// For `/` (non-commutative): only positions 1+ are divisors
-    fn check_multiplicative_identity(
+    /// Check `(* x u1)`, `(* x y u1)` etc. — multiplicative identity (commutative)
+    fn check_multiply_identity(
         &mut self,
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
-        is_multiply: bool,
     ) {
-        // There is no code shared between these `if`/`else` conditions, they should be separate functions
-        if is_multiply {
-            // TODO: Does this catch `(* x y u1)` and suggest `(* x y)` as a replacement?
-            //       If not please fix and add unit test
-            let mut non_constants = Vec::new();
-            let mut uint_product: Option<u128> = Some(1);
-            let mut int_product: Option<i128> = Some(1);
+        let mut non_constants = Vec::new();
+        let mut uint_product: Option<u128> = Some(1);
+        let mut int_product: Option<i128> = Some(1);
 
-            for op in operands {
-                if let Some(n) = Self::as_uint_literal(op) {
-                    uint_product = uint_product.and_then(|p| p.checked_mul(n));
-                    int_product = None;
-                } else if let Some(n) = Self::as_int_literal(op) {
-                    int_product = int_product.and_then(|p| p.checked_mul(n));
-                    uint_product = None;
-                } else {
-                    non_constants.push(op);
-                }
+        for op in operands {
+            if let Some(n) = Self::as_uint_literal(op) {
+                uint_product = uint_product.and_then(|p| p.checked_mul(n));
+                int_product = None;
+            } else if let Some(n) = Self::as_int_literal(op) {
+                int_product = int_product.and_then(|p| p.checked_mul(n));
+                uint_product = None;
+            } else {
+                non_constants.push(op);
             }
+        }
 
-            let product_is_one =
-                uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
+        let product_is_one =
+            uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
 
-            if product_is_one && non_constants.len() == 1 {
-                self.add_diagnostic(
-                    expr,
-                    "multiplying by one has no effect".to_string(),
-                    format!("Replace with `{}`", Self::format_source(non_constants[0])),
-                );
+        if product_is_one && !non_constants.is_empty() && non_constants.len() < operands.len() {
+            let suggestion = if non_constants.len() == 1 {
+                format!("Replace with `{}`", Self::format_source(non_constants[0]))
+            } else {
+                let parts: Vec<String> = non_constants
+                    .iter()
+                    .map(|op| Self::format_source(op))
+                    .collect();
+                format!("Replace with `(* {})`", parts.join(" "))
+            };
+            self.add_diagnostic(
+                expr,
+                "multiplying by one has no effect".to_string(),
+                suggestion,
+            );
+        }
+    }
+
+    /// Check `(/ x u1)`, `(/ x y u1)` etc. — division identity (non-commutative)
+    /// Position 0 is dividend, positions 1+ are divisors
+    fn check_divide_identity(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
+    ) {
+        if operands.len() < 2 {
+            return;
+        }
+
+        let tail = &operands[1..];
+
+        // Separate tail into constants and non-constants
+        let mut tail_non_constants = Vec::new();
+        let mut uint_product: Option<u128> = Some(1);
+        let mut int_product: Option<i128> = Some(1);
+        let mut has_constants = false;
+
+        for op in tail {
+            if let Some(n) = Self::as_uint_literal(op) {
+                uint_product = uint_product.and_then(|p| p.checked_mul(n));
+                int_product = None;
+                has_constants = true;
+            } else if let Some(n) = Self::as_int_literal(op) {
+                int_product = int_product.and_then(|p| p.checked_mul(n));
+                uint_product = None;
+                has_constants = true;
+            } else {
+                tail_non_constants.push(op);
             }
-        } else {
-            // Division: position 0 is dividend, positions 1+ are divisors
-            if operands.len() < 2 {
-                return;
-            }
+        }
 
-            // TODO: Does this catch `(/ x y u1)` and suggest `(/ x y)` as a replacement?
-            //       If not please fix and add unit test
-            let tail = &operands[1..];
+        if !has_constants {
+            return;
+        }
 
-            if !tail
-                .iter()
-                .all(|op| Self::as_uint_literal(op).is_some() || Self::as_int_literal(op).is_some())
-            {
-                return;
-            }
+        let product_is_one =
+            uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
 
-            let uint_product: Option<u128> = tail.iter().try_fold(1u128, |acc, op| {
-                Self::as_uint_literal(op).and_then(|n| acc.checked_mul(n))
-            });
-            let int_product: Option<i128> = tail.iter().try_fold(1i128, |acc, op| {
-                Self::as_int_literal(op).and_then(|n| acc.checked_mul(n))
-            });
-
-            let product_is_one =
-                uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
-
-            if product_is_one {
-                self.add_diagnostic(
-                    expr,
-                    "dividing by one has no effect".to_string(),
-                    format!("Replace with `{}`", Self::format_source(&operands[0])),
-                );
-            }
+        if product_is_one {
+            let suggestion = if tail_non_constants.is_empty() {
+                format!("Replace with `{}`", Self::format_source(&operands[0]))
+            } else {
+                let mut parts = vec![Self::format_source(&operands[0])];
+                parts.extend(tail_non_constants.iter().map(|op| Self::format_source(op)));
+                format!("Replace with `(/ {})`", parts.join(" "))
+            };
+            self.add_diagnostic(
+                expr,
+                "dividing by one has no effect".to_string(),
+                suggestion,
+            );
         }
     }
 }
@@ -487,7 +524,9 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
                     "Replace with `true`".to_string(),
                 );
             } else {
-                // TODO: Are there any comparisons that are actually caught here, that aren't already illegal in Clarity?
+                // Comparison ops like >, >=, <, <= require exactly 2 operands
+                // (enforced by the Clarity type checker), so this branch is likely
+                // unreachable. Kept as a defensive fallback.
                 let suggestion = if operands.len() == 1 {
                     format!("Replace with `{}`", Self::format_source(&operands[0]))
                 } else {
@@ -1413,13 +1452,122 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
-    /// Should NOT warn when 2 non-constant operands remain after removing zero
+    /// `(+ x y u0)` should warn and suggest `(+ x y)`
     #[test]
-    fn add_two_non_constants() {
+    fn add_multi_operand_with_zero() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-read-only (test-func (x uint) (y uint))
                 (+ x y u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("adding zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(+ x y)`")
+        );
+    }
+
+    /// `(+ x y 1 -1)` should warn and suggest `(+ x y)`
+    #[test]
+    fn add_multi_operand_constants_cancel() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int) (y int))
+                (+ x y 1 -1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("adding zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(+ x y)`")
+        );
+    }
+
+    /// `(- x y 0)` should warn and suggest `(- x y)`
+    #[test]
+    fn sub_multi_operand_with_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (- x y u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("subtracting zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(- x y)`")
+        );
+    }
+
+    /// `(* x y u1)` should warn and suggest `(* x y)`
+    #[test]
+    fn mul_multi_operand_with_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (* x y u1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(* x y)`")
+        );
+    }
+
+    /// `(/ x y u1)` should warn and suggest `(/ x y)`
+    #[test]
+    fn div_multi_operand_with_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (/ x y u1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("dividing by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(/ x y)`")
+        );
+    }
+
+    /// Should NOT warn: `(+ x y u1)` — not adding zero
+    #[test]
+    fn add_multi_operand_non_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (+ x y u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn: `(- x y u1)` — not subtracting zero
+    #[test]
+    fn sub_multi_operand_non_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (- x y u1))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
