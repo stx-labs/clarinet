@@ -53,7 +53,7 @@ pub struct NoopChecker<'a> {
     clarity_version: ClarityVersion,
     /// Map expression ID to a generated diagnostic
     _settings: NoopCheckerSettings,
-    diagnostics: HashMap<u64, Vec<Diagnostic>>,
+    diagnostics: HashMap<u64, Diagnostic>,
     annotations: &'a Vec<Annotation>,
     /// Clarity diagnostic level
     level: Level,
@@ -82,11 +82,11 @@ impl<'a> NoopChecker<'a> {
         traverse(&mut self, &contract_analysis.expressions);
 
         // Collect all of the vecs of diagnostics into a vector
-        let mut diagnostics: Vec<Vec<Diagnostic>> = self.diagnostics.into_values().collect();
+        let mut diagnostics: Vec<Diagnostic> = self.diagnostics.into_values().collect();
         // Order the sets by the span of the error (the first diagnostic)
-        diagnostics.sort_by(|a, b| a[0].spans[0].cmp(&b[0].spans[0]));
+        diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         // Then flatten into one vector
-        Ok(diagnostics.into_iter().flatten().collect())
+        Ok(diagnostics)
     }
 
     // Check for annotations that should be attached to the given span
@@ -101,7 +101,7 @@ impl<'a> NoopChecker<'a> {
             .unwrap_or(false)
     }
 
-    fn add_noop_diagnostic(
+    fn add_diagnostic(
         &mut self,
         expr: &'a SymbolicExpression,
         message: String,
@@ -113,7 +113,7 @@ impl<'a> NoopChecker<'a> {
             spans: vec![expr.span.clone()],
             suggestion: Some(suggestion),
         };
-        self.diagnostics.insert(expr.id, vec![diagnostic]);
+        self.diagnostics.insert(expr.id, diagnostic);
     }
 
     /// Check if the expression is allowed by annotation, combining set_active_annotation + allow
@@ -125,7 +125,7 @@ impl<'a> NoopChecker<'a> {
     /// Format a SymbolicExpression back to Clarity source for use in suggestion text
     fn format_source(expr: &SymbolicExpression) -> String {
         match &expr.expr {
-            SymbolicExpressionType::Atom(name) => name.as_str().to_string(),
+            SymbolicExpressionType::Atom(name) => name.to_string(),
             SymbolicExpressionType::LiteralValue(v) | SymbolicExpressionType::AtomValue(v) => {
                 match v {
                     Value::Int(n) => format!("{n}"),
@@ -142,7 +142,7 @@ impl<'a> NoopChecker<'a> {
         }
     }
 
-    /// Extract a signed int literal value
+    /// Extract an `int` literal value
     fn as_int_literal(expr: &SymbolicExpression) -> Option<i128> {
         if let Some(Value::Int(n)) = expr.match_literal_value() {
             Some(*n)
@@ -151,7 +151,7 @@ impl<'a> NoopChecker<'a> {
         }
     }
 
-    /// Extract an unsigned int literal value
+    /// Extract a `uint` literal value
     fn as_uint_literal(expr: &SymbolicExpression) -> Option<u128> {
         if let Some(Value::UInt(n)) = expr.match_literal_value() {
             Some(*n)
@@ -171,6 +171,7 @@ impl<'a> NoopChecker<'a> {
     /// (reserved variable names), not as `AtomValue(Value::Bool(...))`.
     fn as_bool_literal(expr: &SymbolicExpression) -> Option<bool> {
         match &expr.expr {
+            // TODO: Can we match booleans on some enum rather than hardcoded strings?
             SymbolicExpressionType::Atom(name) if name.as_str() == "true" => Some(true),
             SymbolicExpressionType::Atom(name) if name.as_str() == "false" => Some(false),
             _ => None,
@@ -183,6 +184,7 @@ impl<'a> NoopChecker<'a> {
             exprs
                 .first()
                 .and_then(|e| e.match_atom())
+                // TODO: Can we match `not` on some enum rather than a hardcoded string?
                 .is_some_and(|name| name.as_str() == "not")
         } else {
             false
@@ -213,7 +215,7 @@ impl<'a> NoopChecker<'a> {
         // Check if both operands are bool literals
         if Self::as_bool_literal(&operands[other_idx]).is_some() {
             let result = Self::as_bool_literal(&operands[other_idx]).unwrap() == b;
-            self.add_noop_diagnostic(
+            self.add_diagnostic(
                 expr,
                 format!("comparing two boolean literals always returns `{result}`"),
                 format!("Replace with `{result}`"),
@@ -222,13 +224,13 @@ impl<'a> NoopChecker<'a> {
         }
 
         if b {
-            self.add_noop_diagnostic(
+            self.add_diagnostic(
                 expr,
                 "comparing with `true` is unnecessary".to_string(),
                 format!("Replace with `{other}`"),
             );
         } else {
-            self.add_noop_diagnostic(
+            self.add_diagnostic(
                 expr,
                 "comparing with `false` is unnecessary, use `not` instead".to_string(),
                 format!("Replace with `(not {other})`"),
@@ -251,7 +253,7 @@ impl<'a> NoopChecker<'a> {
             } else {
                 "Remove this expression".to_string()
             };
-            self.add_noop_diagnostic(
+            self.add_diagnostic(
                 expr,
                 "double negation is unnecessary".to_string(),
                 suggestion,
@@ -277,7 +279,7 @@ impl<'a> NoopChecker<'a> {
             .any(|op| Self::as_bool_literal(op) == Some(target_val));
 
         if has_constant {
-            self.add_noop_diagnostic(
+            self.add_diagnostic(
                 expr,
                 format!(
                     "`{}` with a `{target_val}` operand always evaluates to `{target_val}`",
@@ -310,6 +312,8 @@ impl<'a> NoopChecker<'a> {
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
     ) {
+        // TODO: Does this catch `(+ x y 1 -1)` or `(x y u0 u0)` and suggest `(+ x y)` as a replacement?
+        //       If not please fix and add unit test
         let mut non_constants = Vec::new();
 
         // Try unsigned first
@@ -331,7 +335,7 @@ impl<'a> NoopChecker<'a> {
         let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
 
         if sum_is_zero && non_constants.len() == 1 {
-            self.add_noop_diagnostic(
+            self.add_diagnostic(
                 expr,
                 "adding zero has no effect".to_string(),
                 format!("Replace with `{}`", Self::format_source(non_constants[0])),
@@ -346,6 +350,9 @@ impl<'a> NoopChecker<'a> {
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
     ) {
+        // TODO: Does this catch `(- x y 0)` and suggest `(- x y)` as a replacement?
+        //       If not please fix and add unit test
+
         if operands.len() < 2 {
             return;
         }
@@ -371,7 +378,7 @@ impl<'a> NoopChecker<'a> {
         let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
 
         if sum_is_zero {
-            self.add_noop_diagnostic(
+            self.add_diagnostic(
                 expr,
                 "subtracting zero has no effect".to_string(),
                 format!("Replace with `{}`", Self::format_source(&operands[0])),
@@ -388,7 +395,10 @@ impl<'a> NoopChecker<'a> {
         operands: &'a [SymbolicExpression],
         is_multiply: bool,
     ) {
+        // There is no code shared between these `if`/`else` conditions, they should be separate functions
         if is_multiply {
+            // TODO: Does this catch `(* x y u1)` and suggest `(* x y)` as a replacement?
+            //       If not please fix and add unit test
             let mut non_constants = Vec::new();
             let mut uint_product: Option<u128> = Some(1);
             let mut int_product: Option<i128> = Some(1);
@@ -409,7 +419,7 @@ impl<'a> NoopChecker<'a> {
                 uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
 
             if product_is_one && non_constants.len() == 1 {
-                self.add_noop_diagnostic(
+                self.add_diagnostic(
                     expr,
                     "multiplying by one has no effect".to_string(),
                     format!("Replace with `{}`", Self::format_source(non_constants[0])),
@@ -421,6 +431,8 @@ impl<'a> NoopChecker<'a> {
                 return;
             }
 
+            // TODO: Does this catch `(/ x y u1)` and suggest `(/ x y)` as a replacement?
+            //       If not please fix and add unit test
             let tail = &operands[1..];
 
             if !tail
@@ -441,7 +453,7 @@ impl<'a> NoopChecker<'a> {
                 uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
 
             if product_is_one {
-                self.add_noop_diagnostic(
+                self.add_diagnostic(
                     expr,
                     "dividing by one has no effect".to_string(),
                     format!("Replace with `{}`", Self::format_source(&operands[0])),
@@ -469,18 +481,19 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         if operands.len() < 2 {
             if matches!(func, NativeFunctions::Equals) {
                 // (is-eq x) always returns true
-                self.add_noop_diagnostic(
+                self.add_diagnostic(
                     expr,
                     "`is-eq` with a single operand always returns `true`".to_string(),
                     "Replace with `true`".to_string(),
                 );
             } else {
+                // TODO: Are there any comparisons that are actually caught here, that aren't already illegal in Clarity?
                 let suggestion = if operands.len() == 1 {
                     format!("Replace with `{}`", Self::format_source(&operands[0]))
                 } else {
                     "Remove this expression".to_string()
                 };
-                self.add_noop_diagnostic(
+                self.add_diagnostic(
                     expr,
                     format!(
                         "`{}` with fewer than 2 operands has no effect",
@@ -501,33 +514,21 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) -> bool {
-        if Self::is_single_op_arithmetic(func) {
-            return true;
-        }
-
-        if self.check_allowed(&expr.span) {
+        if Self::is_single_op_arithmetic(func) || self.check_allowed(&expr.span) {
             return true;
         }
 
         if operands.len() < 2 {
-            let suggestion = if operands.len() == 1 {
-                format!("Replace with `{}`", Self::format_source(&operands[0]))
-            } else {
-                "Remove this expression".to_string()
-            };
-            self.add_noop_diagnostic(
-                expr,
-                format!(
-                    "`{}` with fewer than 2 operands has no effect",
-                    func.get_name()
-                ),
-                suggestion,
-            );
+            // Variable length arithmetic ops with single operand have no effect
+            let message = format!("`{func}` with fewer than 2 operands has no effect",);
+            let suggestion = format!("Replace with `{}`", Self::format_source(&operands[0]));
+            self.add_diagnostic(expr, message, suggestion);
             return true;
+        } else {
+            // Check for identity elements in arithmetic ops
+            self.check_arithmetic_identity(expr, func, operands);
         }
 
-        // Check for identity elements in arithmetic ops
-        self.check_arithmetic_identity(expr, func, operands);
         true
     }
 
@@ -554,23 +555,15 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         }
 
         if operands.len() < 2 {
-            let suggestion = if operands.len() == 1 {
-                format!("Replace with `{}`", Self::format_source(&operands[0]))
-            } else {
-                "Remove this expression".to_string()
-            };
-            self.add_noop_diagnostic(
-                expr,
-                format!(
-                    "`{}` with fewer than 2 operands has no effect",
-                    func.get_name()
-                ),
-                suggestion,
-            );
-            return true;
+            // Variable length logical ops with single operand have no effect
+            let message = format!("`{func}` with fewer than 2 operands has no effect");
+            let suggestion = format!("Replace with `{}`", Self::format_source(&operands[0]));
+            self.add_diagnostic(expr, message, suggestion);
+        } else {
+            // Check for constants that make operation always true/false
+            self.check_lazy_logical_constant(expr, func, operands);
         }
 
-        self.check_lazy_logical_constant(expr, func, operands);
         true
     }
 }
