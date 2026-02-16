@@ -1,0 +1,24 @@
+[package]
+name = "clarity-static-cost"
+version.workspace = true
+edition = "2021"
+description = "Static cost analysis for Clarity smart contracts"
+
+[dependencies]
+clarity = { workspace = true, default-features = false, features = [
+    "developer-mode",
+    "devtools",
+    "rusqlite",
+    "testing",
+] }
+clarity-types = { workspace = true }
+stacks-common = { workspace = true, default-features = false }
+
+[dev-dependencies]
+stackslib = { workspace = true, default-features = false }
+rstest = "0.21"
+
+[lib]
+name = "clarity_static_cost"
+path = "src/lib.rs"
+crate-type = ["lib"]
