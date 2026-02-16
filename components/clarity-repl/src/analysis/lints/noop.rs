@@ -5,11 +5,15 @@
 //!
 //! Here is a full list by category, and what they should be replaced by:
 //!
-//! - Operations that always return `true` or `false`
+//! - Operations that always return `true`, `false`, or `0`
 //!   - Comparison ops
 //!     - `(is-eq x)` -> `true`
 //!     - `(and ... false)` -> `false`
 //!     - `(or ... true)` -> `true`
+//!   - Arithmetic ops
+//!     - `(* ... 0)` -> `0`
+//!     - `(/ 0 ...)` -> `0`
+//!     - `(/ ... 0)` -> Runtime error
 //! - Operations that always return one of the operands
 //!   - Comparison ops
 //!     - `(is-eq x true)` -> `x`
@@ -280,13 +284,10 @@ impl<'a> NoopChecker<'a> {
             .any(|op| Self::as_bool_literal(op) == Some(target_val));
 
         if has_constant {
-            self.add_diagnostic(
-                expr,
-                format!(
-                    "`{func}` with a `{target_val}` operand always evaluates to `{target_val}`"
-                ),
-                format!("Replace with `{target_val}`"),
+            let message = format!(
+                "`{func}` with a `{target_val}` operand always evaluates to `{target_val}`"
             );
+            self.add_diagnostic(expr, message, format!("Replace with `{target_val}`"));
         }
     }
 
@@ -329,20 +330,26 @@ impl<'a> NoopChecker<'a> {
             }
         }
 
-        let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
-
-        if sum_is_zero && !non_constants.is_empty() && non_constants.len() < operands.len() {
-            let suggestion = if non_constants.len() == 1 {
-                format!("Replace with `{}`", Self::format_source(non_constants[0]))
-            } else {
-                let parts: Vec<String> = non_constants
-                    .iter()
-                    .map(|op| Self::format_source(op))
-                    .collect();
-                format!("Replace with `(+ {})`", parts.join(" "))
-            };
-            self.add_diagnostic(expr, "adding zero has no effect".to_string(), suggestion);
+        let has_constants = non_constants.len() < operands.len();
+        if !has_constants || non_constants.is_empty() {
+            return;
         }
+
+        let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
+        if !sum_is_zero {
+            return;
+        }
+
+        let suggestion = if non_constants.len() == 1 {
+            format!("Replace with `{}`", Self::format_source(non_constants[0]))
+        } else {
+            let parts: Vec<String> = non_constants
+                .iter()
+                .map(|op| Self::format_source(op))
+                .collect();
+            format!("Replace with `(+ {})`", parts.join(" "))
+        };
+        self.add_diagnostic(expr, "adding zero has no effect".to_string(), suggestion);
     }
 
     /// Check `(- x u0)`, `(- x y 0)`, `(- x 1 -1)` etc. — subtractive identity
@@ -359,6 +366,7 @@ impl<'a> NoopChecker<'a> {
         let tail = &operands[1..];
 
         // Separate tail into constants and non-constants
+        // TODO: What if first arg is a constant?
         let mut tail_non_constants = Vec::new();
         let mut uint_sum: Option<u128> = Some(0);
         let mut int_sum: Option<i128> = Some(0);
@@ -383,21 +391,22 @@ impl<'a> NoopChecker<'a> {
         }
 
         let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
-
-        if sum_is_zero {
-            let suggestion = if tail_non_constants.is_empty() {
-                format!("Replace with `{}`", Self::format_source(&operands[0]))
-            } else {
-                let mut parts = vec![Self::format_source(&operands[0])];
-                parts.extend(tail_non_constants.iter().map(|op| Self::format_source(op)));
-                format!("Replace with `(- {})`", parts.join(" "))
-            };
-            self.add_diagnostic(
-                expr,
-                "subtracting zero has no effect".to_string(),
-                suggestion,
-            );
+        if !sum_is_zero {
+            return;
         }
+
+        let suggestion = if tail_non_constants.is_empty() {
+            format!("Replace with `{}`", Self::format_source(&operands[0]))
+        } else {
+            let mut parts = vec![Self::format_source(&operands[0])];
+            parts.extend(tail_non_constants.iter().map(|op| Self::format_source(op)));
+            format!("Replace with `(- {})`", parts.join(" "))
+        };
+        self.add_diagnostic(
+            expr,
+            "subtracting zero has no effect".to_string(),
+            suggestion,
+        );
     }
 
     /// Check `(* x u1)`, `(* x y u1)` etc. — multiplicative identity (commutative)
@@ -422,25 +431,31 @@ impl<'a> NoopChecker<'a> {
             }
         }
 
+        let has_constants = non_constants.len() < operands.len();
+        if !has_constants || non_constants.is_empty() {
+            return;
+        }
+
         let product_is_one =
             uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
-
-        if product_is_one && !non_constants.is_empty() && non_constants.len() < operands.len() {
-            let suggestion = if non_constants.len() == 1 {
-                format!("Replace with `{}`", Self::format_source(non_constants[0]))
-            } else {
-                let parts: Vec<String> = non_constants
-                    .iter()
-                    .map(|op| Self::format_source(op))
-                    .collect();
-                format!("Replace with `(* {})`", parts.join(" "))
-            };
-            self.add_diagnostic(
-                expr,
-                "multiplying by one has no effect".to_string(),
-                suggestion,
-            );
+        if !product_is_one {
+            return;
         }
+
+        let suggestion = if non_constants.len() == 1 {
+            format!("Replace with `{}`", Self::format_source(non_constants[0]))
+        } else {
+            let parts: Vec<String> = non_constants
+                .iter()
+                .map(|op| Self::format_source(op))
+                .collect();
+            format!("Replace with `(* {})`", parts.join(" "))
+        };
+        self.add_diagnostic(
+            expr,
+            "multiplying by one has no effect".to_string(),
+            suggestion,
+        );
     }
 
     /// Check `(/ x u1)`, `(/ x y u1)` etc. — division identity (non-commutative)
