@@ -410,6 +410,7 @@ impl<'a> NoopChecker<'a> {
     }
 
     /// Check `(* x u1)`, `(* x y u1)` etc. — multiplicative identity (commutative)
+    /// Also checks for `(* ... 0)` — multiply by zero (absorbing element)
     fn check_multiply_identity(
         &mut self,
         expr: &'a SymbolicExpression,
@@ -431,34 +432,48 @@ impl<'a> NoopChecker<'a> {
             }
         }
 
+        // Only check if we have both variable and constant arguments
         let has_constants = non_constants.len() < operands.len();
         if !has_constants || non_constants.is_empty() {
             return;
         }
 
-        let product_is_one =
-            uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
-        if !product_is_one {
+        // Check for zero
+        let uint_zero = uint_product.is_some_and(|p| p == 0);
+        let int_zero = int_product.is_some_and(|p| p == 0);
+        if uint_zero || int_zero {
+            let zero_str = if uint_zero { "u0" } else { "0" };
+            self.add_diagnostic(
+                expr,
+                format!("multiplying by zero always evaluates to `{zero_str}`"),
+                format!("Replace with `{zero_str}`"),
+            );
             return;
         }
 
-        let suggestion = if non_constants.len() == 1 {
-            format!("Replace with `{}`", Self::format_source(non_constants[0]))
-        } else {
-            let parts: Vec<String> = non_constants
-                .iter()
-                .map(|op| Self::format_source(op))
-                .collect();
-            format!("Replace with `(* {})`", parts.join(" "))
-        };
-        self.add_diagnostic(
-            expr,
-            "multiplying by one has no effect".to_string(),
-            suggestion,
-        );
+        // Check for identity
+        let product_is_one =
+            uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
+        if product_is_one {
+            let suggestion = if non_constants.len() == 1 {
+                format!("Replace with `{}`", Self::format_source(non_constants[0]))
+            } else {
+                let parts: Vec<String> = non_constants
+                    .iter()
+                    .map(|op| Self::format_source(op))
+                    .collect();
+                format!("Replace with `(* {})`", parts.join(" "))
+            };
+            self.add_diagnostic(
+                expr,
+                "multiplying by one has no effect".to_string(),
+                suggestion,
+            );
+        }
     }
 
     /// Check `(/ x u1)`, `(/ x y u1)` etc. — division identity (non-commutative)
+    /// Also checks for `(/ ... 0)` (division by zero) and `(/ 0 ...)` (zero dividend)
     /// Position 0 is dividend, positions 1+ are divisors
     fn check_divide_identity(
         &mut self,
@@ -469,9 +484,22 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        let tail = &operands[1..];
+        // Check for zero dividend: (/ 0 ...) -> 0
+        let uint_zero_dividend = Self::as_uint_literal(&operands[0]) == Some(0);
+        let int_zero_dividend = Self::as_int_literal(&operands[0]) == Some(0);
+
+        if uint_zero_dividend || int_zero_dividend {
+            let zero_str = if uint_zero_dividend { "u0" } else { "0" };
+            self.add_diagnostic(
+                expr,
+                format!("dividing zero always evaluates to `{zero_str}`"),
+                format!("Replace with `{zero_str}`"),
+            );
+            return;
+        }
 
         // Separate tail into constants and non-constants
+        let tail = &operands[1..];
         let mut tail_non_constants = Vec::new();
         let mut uint_product: Option<u128> = Some(1);
         let mut int_product: Option<i128> = Some(1);
@@ -495,9 +523,20 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
+        // Check for division by zero: (/ ... 0) -> runtime error
+        let product_is_zero =
+            uint_product.is_some_and(|p| p == 0) || int_product.is_some_and(|p| p == 0);
+        if product_is_zero {
+            self.add_diagnostic(
+                expr,
+                "division by zero will cause a runtime error".to_string(),
+                "Remove this expression or use a non-zero divisor".to_string(),
+            );
+            return;
+        }
+
         let product_is_one =
             uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
-
         if product_is_one {
             let suggestion = if tail_non_constants.is_empty() {
                 format!("Replace with `{}`", Self::format_source(&operands[0]))
@@ -1603,6 +1642,191 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    // --- Multiply by zero tests ---
+
+    #[test]
+    fn mul_with_zero_uint() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (* x u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by zero always evaluates to `u0`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `u0`")
+        );
+    }
+
+    #[test]
+    fn mul_with_zero_int() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (* x 0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by zero always evaluates to `0`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `0`")
+        );
+    }
+
+    #[test]
+    fn mul_with_zero_first() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (* u0 x))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by zero always evaluates to `u0`"));
+    }
+
+    #[test]
+    fn mul_multi_operand_with_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (* x y u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by zero always evaluates to `u0`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `u0`")
+        );
+    }
+
+    // --- Zero dividend tests ---
+
+    #[test]
+    fn div_zero_dividend_uint() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (/ u0 x))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("dividing zero always evaluates to `u0`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `u0`")
+        );
+    }
+
+    #[test]
+    fn div_zero_dividend_int() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (/ 0 x))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("dividing zero always evaluates to `0`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `0`")
+        );
+    }
+
+    #[test]
+    fn div_zero_dividend_multi_divisor() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (/ u0 x y))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("dividing zero always evaluates to `u0`"));
+    }
+
+    // --- Division by zero tests ---
+
+    #[test]
+    fn div_by_zero_uint() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (/ x u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("division by zero will cause a runtime error"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Remove this expression or use a non-zero divisor")
+        );
+    }
+
+    #[test]
+    fn div_by_zero_int() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (/ x 0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("division by zero will cause a runtime error"));
+    }
+
+    #[test]
+    fn div_by_zero_multi_divisor() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint) (y uint))
+                (/ x y u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("division by zero will cause a runtime error"));
+    }
+
+    /// Division by zero takes priority over zero dividend
+    #[test]
+    fn div_zero_by_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func)
+                (/ u0 u0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("division by zero will cause a runtime error"));
     }
 
     #[test]
