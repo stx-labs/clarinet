@@ -21,8 +21,8 @@
 //!     - `(is-eq x false)` -> `(not x)`
 //!   - Logical ops
 //!     - `(not (not x))` -> `x`
-//!     - `(and x)` -> `x`
-//!     - `(or x)` -> `x`
+//!     - `(and x)`, `(and x true)`, etc. -> `x`
+//!     - `(or x)`, `(or x false)`, etc. -> `x`
 //!   - Arithmetic ops
 //!     - `(+ x)`, `(+ x u0)`, `(+ x 1 -1)`, etc. -> `x`
 //!     - `(- x)`, `(- x u0)`, `(- x 1 -1)`, etc. -> `x`
@@ -286,6 +286,46 @@ impl<'a> NoopChecker<'a> {
         }
     }
 
+    /// Check for logical identity elements: `(and x true)` → `x`, `(or x false)` → `x`
+    fn check_lazy_logical_identity(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        func: NativeFunctions,
+        operands: &'a [SymbolicExpression],
+    ) {
+        let identity_val = match func {
+            NativeFunctions::And => true,  // true is identity for and
+            NativeFunctions::Or => false,  // false is identity for or
+            _ => return,
+        };
+
+        let non_constants: Vec<&SymbolicExpression> = operands
+            .iter()
+            .filter(|op| Self::as_bool_literal(op) != Some(identity_val))
+            .collect();
+
+        let has_constants = non_constants.len() < operands.len();
+        if !has_constants || non_constants.is_empty() {
+            return;
+        }
+
+        let identity_str = if identity_val { "true" } else { "false" };
+        let suggestion = if non_constants.len() == 1 {
+            format!("Replace with `{}`", Self::format_source(non_constants[0]))
+        } else {
+            let parts: Vec<String> = non_constants
+                .iter()
+                .map(|op| Self::format_source(op))
+                .collect();
+            format!("Replace with `({func} {})`", parts.join(" "))
+        };
+        self.add_diagnostic(
+            expr,
+            format!("`{identity_str}` is the identity element for `{func}` and has no effect"),
+            suggestion,
+        );
+    }
+
     /// Check for arithmetic identity elements: `(+ x u0)` → `x`, `(* x u1)` → `x`, etc.
     fn check_arithmetic_identity(
         &mut self,
@@ -296,8 +336,8 @@ impl<'a> NoopChecker<'a> {
         match func {
             NativeFunctions::Add => self.check_additive_identity(expr, operands),
             NativeFunctions::Subtract => self.check_subtractive_identity(expr, operands),
-            NativeFunctions::Multiply => self.check_multiply_identity(expr, operands),
-            NativeFunctions::Divide => self.check_divide_identity(expr, operands),
+            NativeFunctions::Multiply => self.check_multiply_identity_and_absorb(expr, operands),
+            NativeFunctions::Divide => self.check_divide_identity_and_zero(expr, operands),
             _ => {}
         }
     }
@@ -406,7 +446,7 @@ impl<'a> NoopChecker<'a> {
 
     /// Check `(* x u1)`, `(* x y u1)` etc. — multiplicative identity (commutative)
     /// Also checks for `(* ... 0)` — multiply by zero (absorbing element)
-    fn check_multiply_identity(
+    fn check_multiply_identity_and_absorb(
         &mut self,
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
@@ -470,7 +510,7 @@ impl<'a> NoopChecker<'a> {
     /// Check `(/ x u1)`, `(/ x y u1)` etc. — division identity (non-commutative)
     /// Also checks for `(/ ... 0)` (division by zero) and `(/ 0 ...)` (zero dividend)
     /// Position 0 is dividend, positions 1+ are divisors
-    fn check_divide_identity(
+    fn check_divide_identity_and_zero(
         &mut self,
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
@@ -650,6 +690,8 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
         } else {
             // Check for constants that make operation always true/false
             self.check_lazy_logical_constant(expr, func, operands);
+            // Check for identity elements: (and x true) -> x, (or x false) -> x
+            self.check_lazy_logical_identity(expr, func, operands);
         }
 
         true
@@ -1277,7 +1319,6 @@ mod tests {
         assert!(output[0].contains("`or` with a `true` operand always evaluates to `true`"));
     }
 
-    /// Should NOT warn: `true` is the identity element for `and`, not the absorbing element
     #[test]
     fn and_with_true() {
         #[rustfmt::skip]
@@ -1288,10 +1329,17 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].message,
+            "`true` is the identity element for `and` and has no effect"
+        );
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
     }
 
-    /// Should NOT warn: `false` is the identity element for `or`, not the absorbing element
     #[test]
     fn or_with_false() {
         #[rustfmt::skip]
@@ -1302,7 +1350,49 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].message,
+            "`false` is the identity element for `or` and has no effect"
+        );
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn and_multi_operand_with_true() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool) (y bool))
+                (and x y true))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(and x y)`")
+        );
+    }
+
+    #[test]
+    fn or_multi_operand_with_false() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool) (y bool))
+                (or x y false))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `(or x y)`")
+        );
     }
 
     /// Should NOT warn for `(and x y)` without false
