@@ -8,6 +8,7 @@
 //! - Operations that always return `true`, `false`, or `0`
 //!   - Comparison ops
 //!     - `(is-eq x)` -> `true`
+//!   - Logical ops
 //!     - `(and ... false)` -> `false`
 //!     - `(or ... true)` -> `true`
 //!   - Arithmetic ops
@@ -1146,6 +1147,62 @@ mod tests {
         );
     }
 
+    // --- is-eq with two boolean literals ---
+
+    #[test]
+    fn is_eq_two_true_literals() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func)
+                (is-eq true true))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("comparing two boolean literals always returns `true`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `true`")
+        );
+    }
+
+    #[test]
+    fn is_eq_true_false_literals() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func)
+                (is-eq true false))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("comparing two boolean literals always returns `false`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `false`")
+        );
+    }
+
+    #[test]
+    fn is_eq_two_false_literals() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func)
+                (is-eq false false))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("comparing two boolean literals always returns `true`"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `true`")
+        );
+    }
+
     // --- and/or with constant operands ---
 
     #[test]
@@ -1224,6 +1281,34 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("`or` with a `true` operand always evaluates to `true`"));
+    }
+
+    /// Should NOT warn: `true` is the identity element for `and`, not the absorbing element
+    #[test]
+    fn and_with_true() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (and x true))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    /// Should NOT warn: `false` is the identity element for `or`, not the absorbing element
+    #[test]
+    fn or_with_false() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x bool))
+                (or x false))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
     }
 
     /// Should NOT warn for `(and x y)` without false
@@ -1436,6 +1521,62 @@ mod tests {
         let snippet = indoc!("
             (define-read-only (test-func (x uint))
                 (/ x u1 u1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("dividing by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    // --- Signed int identity tests ---
+
+    #[test]
+    fn sub_with_signed_zero() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (- x 0))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("subtracting zero has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn mul_with_signed_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (* x 1))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("multiplying by one has no effect"));
+        assert_eq!(
+            result.diagnostics[0].suggestion.as_deref(),
+            Some("Replace with `x`")
+        );
+    }
+
+    #[test]
+    fn div_with_signed_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x int))
+                (/ x 1))
         ").to_string();
 
         let (output, result) = run_snippet(snippet);
@@ -1827,6 +1968,67 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("division by zero will cause a runtime error"));
+    }
+
+    /// Should NOT warn: `(/ x u2)` is not a noop
+    #[test]
+    fn div_with_non_one() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (/ x u2))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    // --- Annotation tests for new checks ---
+
+    #[test]
+    fn allow_mul_with_zero_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (begin
+                    ;; #[allow(noop)]
+                    (* x u0)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_div_by_zero_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (begin
+                    ;; #[allow(noop)]
+                    (/ x u0)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_div_zero_dividend_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (begin
+                    ;; #[allow(noop)]
+                    (/ u0 x)))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
     }
 
     #[test]
