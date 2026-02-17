@@ -1235,12 +1235,12 @@ pub fn main() {
             if cmd.json {
                 let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
                     .diags
-                    .iter()
-                    .filter_map(|(contract_id, diags)| {
-                        let (_, path) = deployment.contracts.get(contract_id)?;
-                        Some((path.to_string_lossy().to_string(), diags.clone()))
-                    })
+                    .into_iter()
                     .filter(|(_, diags)| !diags.is_empty())
+                    .filter_map(|(contract_id, diags)| {
+                        let (_, path) = deployment.contracts.get(&contract_id)?;
+                        Some((path.to_string_lossy().to_string(), diags))
+                    })
                     .collect();
                 let output = JsonCheckOutput {
                     success: artifacts.success,
