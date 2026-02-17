@@ -345,61 +345,52 @@ impl<'a> NoopChecker<'a> {
         }
     }
 
-    /// Check for `(and ... false)` or `(or ... true)` constant short-circuit
-    fn check_lazy_logical_constant(
+    /// Check for absorbing elements (`(and ... false)` → `false`, `(or ... true)` → `true`)
+    /// and identity elements (`(and x true)` → `x`, `(or x false)` → `x`) in a single pass.
+    fn check_lazy_logical_operands(
         &mut self,
         expr: &'a SymbolicExpression,
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) {
-        let target_val = match func {
-            NativeFunctions::And => false, // false short-circuits and
-            NativeFunctions::Or => true,   // true short-circuits or
+        let (absorber, identity) = match func {
+            NativeFunctions::And => (NativeVariables::NativeFalse, NativeVariables::NativeTrue),
+            NativeFunctions::Or => (NativeVariables::NativeTrue, NativeVariables::NativeFalse),
             _ => return,
         };
+        let absorber_val = matches!(absorber, NativeVariables::NativeTrue);
 
-        let has_constant = operands
-            .iter()
-            .any(|op| Self::as_bool_literal(op) == Some(target_val));
+        let mut has_absorber = false;
+        let mut has_identity = false;
+        let mut non_identity = Vec::new();
 
-        if has_constant {
-            let message = format!(
-                "`{func}` with a `{target_val}` operand always evaluates to `{target_val}`"
+        for op in operands {
+            match Self::as_bool_literal(op) {
+                Some(b) if b == absorber_val => {
+                    has_absorber = true;
+                    non_identity.push(op);
+                }
+                Some(_) => has_identity = true,
+                None => non_identity.push(op),
+            }
+        }
+
+        if has_absorber {
+            self.add_diagnostic(
+                expr,
+                format!("`{func}` with a `{absorber}` operand always evaluates to `{absorber}`"),
+                format!("Replace with `{absorber}`"),
             );
-            self.add_diagnostic(expr, message, format!("Replace with `{target_val}`"));
-        }
-    }
-
-    /// Check for logical identity elements: `(and x true)` → `x`, `(or x false)` → `x`
-    fn check_lazy_logical_identity(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        func: NativeFunctions,
-        operands: &'a [SymbolicExpression],
-    ) {
-        let identity_val = match func {
-            NativeFunctions::And => true, // true is identity for and
-            NativeFunctions::Or => false, // false is identity for or
-            _ => return,
-        };
-
-        let non_constants: Vec<&SymbolicExpression> = operands
-            .iter()
-            .filter(|op| Self::as_bool_literal(op) != Some(identity_val))
-            .collect();
-
-        let has_constants = non_constants.len() < operands.len();
-        if !has_constants || non_constants.is_empty() {
-            return;
         }
 
-        let identity_str = if identity_val { "true" } else { "false" };
-        let suggestion = Self::format_replacement_suggestion(func, &non_constants);
-        self.add_diagnostic(
-            expr,
-            format!("`{identity_str}` is the identity element for `{func}` and has no effect"),
-            suggestion,
-        );
+        if has_identity && !non_identity.is_empty() {
+            let suggestion = Self::format_replacement_suggestion(func, &non_identity);
+            self.add_diagnostic(
+                expr,
+                format!("`{identity}` is the identity element for `{func}` and has no effect"),
+                suggestion,
+            );
+        }
     }
 
     /// Check for arithmetic identity elements: `(+ x u0)` → `x`, `(* x u1)` → `x`, etc.
@@ -647,10 +638,7 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
             let suggestion = format!("Replace with `{}`", Self::format_source(&operands[0]));
             self.add_diagnostic(expr, message, suggestion);
         } else {
-            // Check for constants that make operation always true/false
-            self.check_lazy_logical_constant(expr, func, operands);
-            // Check for identity elements: (and x true) -> x, (or x false) -> x
-            self.check_lazy_logical_identity(expr, func, operands);
+            self.check_lazy_logical_operands(expr, func, operands);
         }
 
         true
