@@ -26,6 +26,7 @@ use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
 use clarity_repl::clarity::vm::costs::LimitedCostTracker;
+use clarity_repl::clarity::vm::diagnostic::Diagnostic;
 use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
 use clarity_repl::clarity::ClarityVersion;
 use clarity_repl::frontend::Terminal;
@@ -36,6 +37,7 @@ use clarity_repl::repl::{
     DEFAULT_EPOCH,
 };
 use clarity_repl::{analysis, repl};
+use serde::Serialize;
 use stacks_network::{self, DevnetOrchestrator};
 use toml_edit::DocumentMut;
 
@@ -48,6 +50,13 @@ use crate::devnet::start::{start, StartConfig};
 use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
 use crate::lsp::run_lsp;
+
+#[derive(Serialize)]
+struct JsonCheckOutput {
+    success: bool,
+    diagnostics: HashMap<String, Vec<Diagnostic>>,
+}
+
 /// Clarinet is a command line tool for Clarity smart contract development.
 #[derive(Parser, PartialEq, Clone, Debug)]
 #[clap(version = env!("CARGO_PKG_VERSION"), name = "clarinet", bin_name = "clarinet")]
@@ -514,6 +523,9 @@ struct Check {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
+    /// Output diagnostics in JSON format
+    #[clap(long = "json")]
+    pub json: bool,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1184,18 +1196,29 @@ pub fn main() {
             };
             diagnostics.append(&mut analysis_diagnostics);
 
-            let lines = contract.expect_in_memory_code_source().lines();
-            let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-            for d in diagnostics {
-                for line in output_diagnostic(&d, &file, &formatted_lines) {
-                    println!("{line}");
+            if cmd.json {
+                let output = JsonCheckOutput {
+                    success,
+                    diagnostics: HashMap::from([(file, diagnostics)]),
+                };
+                println!("{}", serde_json::to_string_pretty(&output).unwrap());
+                if !success {
+                    std::process::exit(1);
                 }
-            }
-
-            if success {
-                println!("{} Contract successfully checked", green!("✔"))
             } else {
-                std::process::exit(1);
+                let lines = contract.expect_in_memory_code_source().lines();
+                let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
+                for d in diagnostics {
+                    for line in output_diagnostic(&d, &file, &formatted_lines) {
+                        println!("{line}");
+                    }
+                }
+
+                if success {
+                    println!("{} Contract successfully checked", green!("✔"))
+                } else {
+                    std::process::exit(1);
+                }
             }
         }
         Command::Check(cmd) => {
@@ -1207,39 +1230,57 @@ pub fn main() {
                 cmd.use_computed_deployment_plan,
             );
 
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-            if diags_digest.has_feedbacks() {
-                println!("{}", diags_digest.message);
-            }
-
-            if diags_digest.warnings > 0 {
-                println!(
-                    "{} {} detected",
-                    yellow!("!"),
-                    pluralize!(diags_digest.warnings, "warning")
-                );
-            }
-            if diags_digest.errors > 0 {
-                println!(
-                    "{} {} detected",
-                    red!("x"),
-                    pluralize!(diags_digest.errors, "error")
-                );
-            } else {
-                println!(
-                    "{} {} checked",
-                    green!("✔"),
-                    pluralize!(diags_digest.contracts_checked, "contract"),
-                );
-            }
             let exit_code = match artifacts.success {
                 true => 0,
                 false => 1,
             };
 
-            if clarinetrc.enable_hints.unwrap_or(true) {
-                display_post_check_hint();
+            if cmd.json {
+                let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
+                    .diags
+                    .iter()
+                    .filter_map(|(contract_id, diags)| {
+                        let (_, path) = deployment.contracts.get(contract_id)?;
+                        Some((path.to_string_lossy().to_string(), diags.clone()))
+                    })
+                    .collect();
+                let output = JsonCheckOutput {
+                    success: artifacts.success,
+                    diagnostics,
+                };
+                println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            } else {
+                let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                if diags_digest.has_feedbacks() {
+                    println!("{}", diags_digest.message);
+                }
+
+                if diags_digest.warnings > 0 {
+                    println!(
+                        "{} {} detected",
+                        yellow!("!"),
+                        pluralize!(diags_digest.warnings, "warning")
+                    );
+                }
+                if diags_digest.errors > 0 {
+                    println!(
+                        "{} {} detected",
+                        red!("x"),
+                        pluralize!(diags_digest.errors, "error")
+                    );
+                } else {
+                    println!(
+                        "{} {} checked",
+                        green!("✔"),
+                        pluralize!(diags_digest.contracts_checked, "contract"),
+                    );
+                }
+
+                if clarinetrc.enable_hints.unwrap_or(true) {
+                    display_post_check_hint();
+                }
             }
+
             if manifest.project.telemetry {
                 #[cfg(feature = "telemetry")]
                 telemetry_report_event(DeveloperUsageEvent::CheckExecuted(
@@ -1429,7 +1470,7 @@ pub fn load_deployment_and_artifacts_or_exit(
             .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
             .and_then(|opt| match opt {
                 Some(deployment) => {
-                    println!("{} using {default_deployment_file}", yellow!("note:"));
+                    eprintln!("{} using {default_deployment_file}", yellow!("note:"));
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     Ok((deployment, None, artifacts))
                 }
