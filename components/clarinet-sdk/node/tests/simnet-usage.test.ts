@@ -643,7 +643,7 @@ describe("the simnet can execute commands", () => {
 //   it("initSimnet handles absolute path", async () => {
 //     const manifestPath = path.join(process.cwd(), "tests/fixtures/Clarinet.toml");
 //     const simnet = await initSimnet(manifestPath);
-//     expect(simnet.blockHeight).toBe(1);
+//     expect(simnet.blockHeight).toBe(3);
 //   });
 // });
 

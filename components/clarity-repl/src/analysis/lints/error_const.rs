@@ -325,6 +325,34 @@ mod tests {
     }
 
     #[test]
+    fn three_constants_all_duplicate() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant ERR_A (err u1))
+            (define-constant ERR_B (err u1))
+            (define-constant ERR_C (err u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        // ERR_B duplicates ERR_A, ERR_C duplicates ERR_A
+        assert_eq!(result.diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn err_prefix_with_string_value() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-constant ERR_BAD (err "bad"))
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        // Should not warn: the value IS an (err ...) expression
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
     fn allow_not_err_type_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("

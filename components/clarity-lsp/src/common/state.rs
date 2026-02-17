@@ -1,12 +1,12 @@
-use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::vec;
 
 use clarinet_deployments::{
     generate_default_deployment, initiate_session_from_manifest,
     update_session_with_deployment_plan,
 };
-use clarinet_files::{FileAccessor, FileLocation, ProjectManifest, StacksNetwork};
+use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::vm::ast::build_ast;
 use clarity::vm::costs::analysis::CostAnalysisNode;
 use clarity::vm::costs::ExecutionCost;
@@ -141,8 +141,7 @@ pub struct ContractState {
     contract_id: QualifiedContractIdentifier,
     analysis: Option<ContractAnalysis>,
     definitions: HashMap<ClarityName, Range>,
-    #[allow(dead_code)]
-    location: FileLocation,
+    location: PathBuf,
     clarity_version: ClarityVersion,
     cost_analysis: Option<HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>>,
 }
@@ -155,7 +154,7 @@ impl ContractState {
         diags: Vec<ClarityDiagnostic>,
         analysis: Option<ContractAnalysis>,
         definitions: HashMap<ClarityName, Range>,
-        location: FileLocation,
+        location: PathBuf,
         clarity_version: ClarityVersion,
         cost_analysis: Option<
             HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>,
@@ -277,8 +276,8 @@ fn get_cost_percents(cost: &ExecutionCost, block_limits: &ExecutionCost) -> Cost
 
 #[derive(Clone, Debug)]
 pub struct ContractMetadata {
-    pub base_location: FileLocation,
-    pub manifest_location: FileLocation,
+    pub base_location: PathBuf,
+    pub manifest_location: PathBuf,
     pub relative_path: String,
     pub clarity_version: ClarityVersion,
     pub deployer: ContractDeployer,
@@ -286,9 +285,9 @@ pub struct ContractMetadata {
 
 #[derive(Clone, Default, Debug)]
 pub struct EditorState {
-    pub protocols: HashMap<FileLocation, ProtocolState>,
-    pub contracts_lookup: HashMap<FileLocation, ContractMetadata>,
-    pub active_contracts: HashMap<FileLocation, ActiveContractData>,
+    pub protocols: HashMap<PathBuf, ProtocolState>,
+    pub contracts_lookup: HashMap<PathBuf, ContractMetadata>,
+    pub active_contracts: HashMap<PathBuf, ActiveContractData>,
     pub settings: InitializationOptions,
 }
 
@@ -302,27 +301,15 @@ impl EditorState {
         }
     }
 
-    pub fn index_protocol(&mut self, manifest_location: FileLocation, protocol: ProtocolState) {
-        let mut base_location = manifest_location.clone();
-
-        match base_location.borrow_mut() {
-            FileLocation::FileSystem { path } => {
-                let mut parent = path.clone();
-                parent.pop();
-                parent.pop();
-            }
-            FileLocation::Url { url } => {
-                let mut segments = url
-                    .path_segments_mut()
-                    .expect("could not find root location");
-                segments.pop();
-                segments.pop();
-            }
-        };
+    pub fn index_protocol(&mut self, manifest_location: PathBuf, protocol: ProtocolState) {
+        // Get the project directory (parent of Clarinet.toml)
+        let base_location = manifest_location
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
 
         for (contract_location, contract_state) in protocol.contracts.iter() {
-            let relative_path = contract_location
-                .get_relative_path_from_base(&base_location)
+            let relative_path = paths::get_relative_path(contract_location, &base_location)
                 .expect("could not find relative location");
 
             let deployer = match &contract_state.analysis {
@@ -360,7 +347,7 @@ impl EditorState {
         self.protocols.insert(manifest_location, protocol);
     }
 
-    pub fn clear_protocol(&mut self, manifest_location: &FileLocation) {
+    pub fn clear_protocol(&mut self, manifest_location: &Path) {
         if let Some(protocol) = self.protocols.remove(manifest_location) {
             for (contract_location, _) in protocol.contracts.iter() {
                 self.contracts_lookup.remove(contract_location);
@@ -370,8 +357,8 @@ impl EditorState {
 
     pub fn clear_protocol_associated_with_contract(
         &mut self,
-        contract_location: &FileLocation,
-    ) -> Option<FileLocation> {
+        contract_location: &Path,
+    ) -> Option<PathBuf> {
         match self.contracts_lookup.get(contract_location) {
             Some(contract_metadata) => {
                 let manifest_location = contract_metadata.manifest_location.clone();
@@ -384,7 +371,7 @@ impl EditorState {
 
     pub fn get_completion_items_for_contract(
         &self,
-        contract_location: &FileLocation,
+        contract_location: &Path,
         position: &Position,
     ) -> Vec<ls_types::CompletionItem> {
         let Some(active_contract) = self.active_contracts.get(contract_location) else {
@@ -425,7 +412,7 @@ impl EditorState {
 
     pub fn get_document_symbols_for_contract(
         &self,
-        contract_location: &FileLocation,
+        contract_location: &Path,
     ) -> Vec<DocumentSymbol> {
         let Some(active_contract) = self.active_contracts.get(contract_location) else {
             return vec![];
@@ -441,7 +428,7 @@ impl EditorState {
 
     pub fn get_definition_location(
         &self,
-        contract_location: &FileLocation,
+        contract_location: &Path,
         position: &Position,
     ) -> Option<ls_types::Location> {
         let contract = self.active_contracts.get(contract_location)?;
@@ -464,7 +451,10 @@ impl EditorState {
 
         match definitions.get(&position_hash)? {
             DefinitionLocation::Internal(range) => Some(Location {
-                uri: contract_location.to_url_string().ok()?.parse().ok()?,
+                uri: paths::path_to_url_string(contract_location)
+                    .ok()?
+                    .parse()
+                    .ok()?,
                 range: *range,
             }),
             DefinitionLocation::External(contract_identifier, name) => {
@@ -472,8 +462,7 @@ impl EditorState {
                 let protocol = self.protocols.get(&metadata.manifest_location)?;
                 let definition_contract_location =
                     protocol.locations_lookup.get(contract_identifier)?;
-                let uri = definition_contract_location
-                    .to_url_string()
+                let uri = paths::path_to_url_string(definition_contract_location)
                     .ok()?
                     .parse()
                     .ok()?;
@@ -507,7 +496,7 @@ impl EditorState {
 
     pub fn get_hover_data(
         &self,
-        contract_location: &FileLocation,
+        contract_location: &Path,
         position: &ls_types::Position,
     ) -> Option<Hover> {
         let contract = self.active_contracts.get(contract_location)?;
@@ -615,7 +604,7 @@ impl EditorState {
 
     pub fn get_signature_help(
         &self,
-        contract_location: &FileLocation,
+        contract_location: &Path,
         position: &ls_types::Position,
         active_signature: Option<u32>,
     ) -> Option<SignatureHelp> {
@@ -637,7 +626,7 @@ impl EditorState {
     pub fn get_aggregated_diagnostics(
         &self,
     ) -> (
-        Vec<(FileLocation, Vec<ClarityDiagnostic>)>,
+        Vec<(PathBuf, Vec<ClarityDiagnostic>)>,
         Option<(MessageType, String)>,
     ) {
         let mut contracts = vec![];
@@ -707,7 +696,7 @@ impl EditorState {
 
     pub fn insert_active_contract(
         &mut self,
-        contract_location: FileLocation,
+        contract_location: PathBuf,
         clarity_version: ClarityVersion,
         issuer: Option<StandardPrincipalData>,
         source: String,
@@ -719,7 +708,7 @@ impl EditorState {
 
     pub fn update_active_contract(
         &mut self,
-        contract_location: &FileLocation,
+        contract_location: &Path,
         source: &str,
         with_definitions: bool,
     ) -> Result<(), String> {
@@ -848,8 +837,8 @@ impl EditorState {
 
 #[derive(Clone, Default, Debug)]
 pub struct ProtocolState {
-    contracts: HashMap<FileLocation, ContractState>,
-    locations_lookup: HashMap<QualifiedContractIdentifier, FileLocation>,
+    contracts: HashMap<PathBuf, ContractState>,
+    locations_lookup: HashMap<QualifiedContractIdentifier, PathBuf>,
 }
 
 impl ProtocolState {
@@ -859,7 +848,7 @@ impl ProtocolState {
 
     pub fn consolidate(
         &mut self,
-        locations: &mut HashMap<QualifiedContractIdentifier, FileLocation>,
+        locations: &mut HashMap<QualifiedContractIdentifier, PathBuf>,
         asts: &mut BTreeMap<QualifiedContractIdentifier, ContractAST>,
         deps: &mut BTreeMap<QualifiedContractIdentifier, DependencySet>,
         diags: &mut HashMap<QualifiedContractIdentifier, Vec<ClarityDiagnostic>>,
@@ -908,10 +897,7 @@ impl ProtocolState {
         }
     }
 
-    pub fn get_contract_calls_for_contract(
-        &self,
-        contract_uri: &FileLocation,
-    ) -> Vec<CompletionItem> {
+    pub fn get_contract_calls_for_contract(&self, contract_uri: &Path) -> Vec<CompletionItem> {
         let mut contract_calls = vec![];
         for (url, contract_state) in self.contracts.iter() {
             if !contract_uri.eq(url) {
@@ -923,7 +909,7 @@ impl ProtocolState {
 }
 
 pub async fn build_state(
-    manifest_location: &FileLocation,
+    manifest_location: &Path,
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
 ) -> Result<(), String> {
@@ -960,7 +946,6 @@ pub async fn build_state(
             clarity_versions.insert(contract_id.clone(), contract_metadata.clarity_version);
         } else {
             let contract_name = contract_location
-                .to_path_buf()
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default()

@@ -2,7 +2,7 @@ extern crate console_error_panic_hook;
 use std::panic;
 use std::sync::{Arc, RwLock};
 
-use clarinet_files::{FileAccessor, WASMFileSystemAccessor};
+use clarinet_files::{paths, FileAccessor, WASMFileSystemAccessor};
 use js_sys::{Function as JsFunction, Promise};
 use ls_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
@@ -14,7 +14,7 @@ use ls_types::request::{
 };
 use ls_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, MessageType, PublishDiagnosticsParams,
+    DidSaveTextDocumentParams, PublishDiagnosticsParams,
 };
 use serde::Serialize;
 use serde_wasm_bindgen::{from_value as decode_from_js, to_value as encode_to_js, Serializer};
@@ -71,6 +71,7 @@ impl LspVscodeBridge {
                     }
                 };
                 let uri = &params.text_document.uri;
+
                 if let Some(contract_location) = get_contract_location(uri) {
                     LspNotification::ContractOpened(contract_location.clone())
                 } else if let Some(manifest_location) = get_manifest_location(uri) {
@@ -162,12 +163,8 @@ impl LspVscodeBridge {
                 if err.starts_with("No Clarinet.toml is associated to the contract") {
                     let _ = send_notification.call2(
                         &JsValue::NULL,
-                        &encode_to_js(&ls_types::notification::ShowMessage::METHOD).unwrap(),
-                        &encode_to_js(&ls_types::ShowMessageParams {
-                            typ: MessageType::WARNING,
-                            message: String::from(&err),
-                        })
-                        .unwrap(),
+                        &encode_to_js("clarity/noManifestWarning").unwrap(),
+                        &encode_to_js(&err).unwrap(),
                     );
                 }
                 return Err(JsValue::from(err));
@@ -177,7 +174,7 @@ impl LspVscodeBridge {
             }
 
             for (location, diags) in aggregated_diagnostics.into_iter() {
-                if let Ok(uri) = location.to_url_string()?.parse() {
+                if let Ok(uri) = paths::path_to_url_string(&location)?.parse() {
                     send_diagnostic.call1(
                         &JsValue::NULL,
                         &encode_to_js(&PublishDiagnosticsParams {

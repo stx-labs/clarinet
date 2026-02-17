@@ -8,6 +8,51 @@ import type { InsightsData, LanguageClient } from "./types";
 
 const { window, workspace } = vscode;
 
+const SUPPRESSED_WARNINGS_KEY = "clarityLsp.suppressedWarnings";
+
+function isWarningSuppressed(context: ExtensionContext, id: string): boolean {
+  const suppressed = context.globalState.get<string[]>(
+    SUPPRESSED_WARNINGS_KEY,
+    [],
+  );
+  return suppressed.includes(id);
+}
+
+async function suppressWarning(
+  context: ExtensionContext,
+  id: string,
+): Promise<void> {
+  const suppressed = context.globalState.get<string[]>(
+    SUPPRESSED_WARNINGS_KEY,
+    [],
+  );
+  if (!suppressed.includes(id)) {
+    await context.globalState.update(SUPPRESSED_WARNINGS_KEY, [
+      ...suppressed,
+      id,
+    ]);
+  }
+}
+
+async function showWarningOnce(
+  context: ExtensionContext,
+  id: string,
+  message: string,
+): Promise<void> {
+  if (isWarningSuppressed(context, id)) {
+    return;
+  }
+
+  const result = await vscode.window.showWarningMessage(
+    message,
+    "Don't show again",
+  );
+
+  if (result === "Don't show again") {
+    await suppressWarning(context, id);
+  }
+}
+
 function isValidInsight(data: InsightsData): data is InsightsData {
   return !!data && !!data.fnName && !!data.fnType && Array.isArray(data.fnArgs);
 }
@@ -118,6 +163,15 @@ export async function initClient(
   // Register no-op command for static cost code lens (display-only, no action on click)
   context.subscriptions.push(
     vscode.commands.registerCommand("clarity.staticCostLens", () => {}),
+  client.onNotification(
+    "clarity/noManifestWarning",
+    async (message: string) => {
+      await showWarningOnce(
+        context,
+        "clarity-lsp.no-clarinet-toml-associated",
+        message,
+      );
+    },
   );
 
   initVFS(client);

@@ -23,7 +23,7 @@ declare const __EXTENSION_URL__: string;
     new BrowserMessageWriter(self),
   );
 
-  initSync(await wasmModule);
+  initSync({ module: await wasmModule });
 
   const bridge = new LspVscodeBridge(
     connection.sendDiagnostics,

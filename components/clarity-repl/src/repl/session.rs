@@ -1394,7 +1394,7 @@ fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
 mod tests {
     use clarity::util::hash::hex_bytes;
     use clarity_types::types::TupleData;
-    use indoc::formatdoc;
+    use indoc::{formatdoc, indoc};
 
     use super::*;
     use crate::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
@@ -1696,21 +1696,24 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let settings = SessionSettings::default();
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
 
         let mut session = Session::new(settings);
 
         session.handle_command("::set_epoch 2.5");
 
         // setup contract state
-        let snippet = "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var x uint u0)
             (define-read-only (get-x)
                 (var-get x))
             (define-public (incr)
                 (begin
                     (var-set x (+ (var-get x) u1))
-                    (ok (var-get x))))";
+                    (ok (var-get x))))
+        ");
 
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet.to_string()),

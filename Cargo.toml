@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "components/chainhook-sdk",
+    "components/clarity-static-cost",
     "components/chainhook-types",
     "components/clarinet-cli",
     "components/clarinet-deployments",
@@ -20,15 +21,14 @@ members = [
 default-members = ["components/clarinet-cli"]
 
 [workspace.package]
-version = "3.13.1"
+version = "3.14.0"
 
 [workspace.dependencies]
-
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "179cc48101a3bbbd115407f0459a8866a8f7394d", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "179cc48101a3bbbd115407f0459a8866a8f7394d", package = "clarity-types" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "179cc48101a3bbbd115407f0459a8866a8f7394d", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "179cc48101a3bbbd115407f0459a8866a8f7394d", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "179cc48101a3bbbd115407f0459a8866a8f7394d", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "clarity-types" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "stackslib", default-features = false }
 
 aes-gcm = "0.10"
 argon2 = "0.5.3"

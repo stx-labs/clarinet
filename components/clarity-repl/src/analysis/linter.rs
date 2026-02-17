@@ -30,6 +30,8 @@ pub enum LintName {
     CaseConst,
     ErrorConst,
     Noop,
+    Panic,
+    UnnecessaryPublic,
     UnusedBinding,
     UnusedConst,
     UnusedDataVar,
@@ -78,10 +80,13 @@ impl LintGroup {
                     map.insert(*lint, value);
                 }
             }
-            Perf => {}
+            Perf => {
+                map.insert(LintName::UnnecessaryPublic, value);
+            }
             Safety => {
                 map.insert(LintName::ErrorConst, value);
                 map.insert(LintName::Noop, value);
+                map.insert(LintName::Panic, value);
             }
             Style => {
                 map.insert(LintName::CaseConst, value);

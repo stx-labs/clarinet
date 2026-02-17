@@ -109,7 +109,7 @@ impl LspNativeBridge {
         }
 
         for (location, diags) in aggregated_diagnostics {
-            if let Ok(url) = location.to_url_string() {
+            if let Ok(url) = clarinet_files::paths::path_to_url_string(&location) {
                 self.client
                     .publish_diagnostics(
                         url.parse().expect("Failed to parse URL"),

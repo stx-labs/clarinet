@@ -221,6 +221,19 @@ mod tests {
     }
 
     #[test]
+    fn multiple_unused_function_args() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (add (a uint) (b uint))
+                (+ u1 u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 2);
+    }
+
+    #[test]
     fn allow_unused_function_arg_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("

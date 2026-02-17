@@ -212,12 +212,15 @@ impl AnalysisPass for CallChecker<'_> {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use crate::analysis::Pass;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
     fn default_session() -> Session {
         let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
@@ -228,23 +231,23 @@ mod tests {
     #[test]
     fn define_private() {
         let mut session = default_session();
-        let snippet = "
-(define-private (foo (amount uint))
-    (ok amount)
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (foo (amount uint))
+                (ok amount)
+            )
 
-(define-public (main)
-    (ok (foo u1 u2))
-)
-"
-        .to_string();
+            (define-public (main)
+                (ok (foo u1 u2))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Err((output, _)) => {
                 assert_eq!(output.len(), 3);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:7:9: {}",
+                        "checker:6:9: {}",
                         format_err!(
                             "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
                         )
@@ -260,23 +263,23 @@ mod tests {
     #[test]
     fn define_read_only() {
         let mut session = default_session();
-        let snippet = "
-(define-read-only (foo (amount uint))
-    (ok amount)
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (foo (amount uint))
+                (ok amount)
+            )
 
-(define-public (main)
-    (ok (foo))
-)
-"
-        .to_string();
+            (define-public (main)
+                (ok (foo))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Err((output, _)) => {
                 assert_eq!(output.len(), 3);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:7:9: {}",
+                        "checker:6:9: {}",
                         format_err!(
                             "incorrect number of arguments in call to 'foo' (expected 1 got 0)"
                         )
@@ -292,23 +295,23 @@ mod tests {
     #[test]
     fn define_public() {
         let mut session = default_session();
-        let snippet = "
-(define-public (foo (amount uint))
-    (ok amount)
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (foo (amount uint))
+                (ok amount)
+            )
 
-(define-public (main)
-    (ok (foo u1 u2))
-)
-"
-        .to_string();
+            (define-public (main)
+                (ok (foo u1 u2))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Err((output, _)) => {
                 assert_eq!(output.len(), 3);
                 assert_eq!(
                     output[0],
                     format!(
-                        "checker:7:9: {}",
+                        "checker:6:9: {}",
                         format_err!(
                             "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
                         )
@@ -324,16 +327,16 @@ mod tests {
     #[test]
     fn correct_call() {
         let mut session = default_session();
-        let snippet = "
-(define-private (foo (amount uint))
-    (ok amount)
-)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (foo (amount uint))
+                (ok amount)
+            )
 
-(define-public (main)
-    (ok (foo u1))
-)
-"
-        .to_string();
+            (define-public (main)
+                (ok (foo u1))
+            )
+        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
                 assert_eq!(result.diagnostics.len(), 0);
@@ -345,19 +348,20 @@ mod tests {
     #[test]
     fn builtin_function_arg_count() {
         let mut session = default_session();
-        let snippet = "
-(define-map kv-store { key: int } { value: int })
-(define-private (incompatible-tuple) (tuple (k 1)))
-(define-private (kv-set (key int) (value int))
-    (map-set kv-store { key: key } { value: value } {value: 0}))"
-            .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map kv-store { key: int } { value: int })
+            (define-private (incompatible-tuple) (tuple (k 1)))
+            (define-private (kv-set (key int) (value int))
+                (map-set kv-store { key: key } { value: value } {value: 0}))
+        ").to_string();
         if let Err((err_output, _)) =
             session.formatted_interpretation(snippet, Some("checker".to_string()), false, None)
         {
             assert_eq!(
                 err_output[0],
                 format!(
-                    "checker:5:5: {}",
+                    "checker:4:5: {}",
                     format_err!(
                         "incorrect number of arguments in call to 'map-set' (expected 3 got 4)"
                     )
@@ -367,19 +371,20 @@ mod tests {
             panic!("expected error")
         }
 
-        let snippet = "
-(define-map kv-store { key: int } { value: int })
-(define-private (incompatible-tuple) (tuple (k 1)))
-(define-private (kv-add (key int) (value int))
-    (map-insert kv-store { key: key } { value: value } { value: 0}))"
-            .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map kv-store { key: int } { value: int })
+            (define-private (incompatible-tuple) (tuple (k 1)))
+            (define-private (kv-add (key int) (value int))
+                (map-insert kv-store { key: key } { value: value } { value: 0}))
+        ").to_string();
         if let Err((err_output, _)) =
             session.formatted_interpretation(snippet, Some("checker".to_string()), false, None)
         {
             assert_eq!(
                 err_output[0],
                 format!(
-                    "checker:5:5: {}",
+                    "checker:4:5: {}",
                     format_err!(
                         "incorrect number of arguments in call to 'map-insert' (expected 3 got 4)"
                     )
@@ -389,19 +394,20 @@ mod tests {
             panic!("expected error")
         }
 
-        let snippet = "
-(define-map kv-store { key: int } { value: int })
-(define-private (incompatible-tuple) (tuple (k 1)))
-(define-private (kv-del (key int))
-    (map-delete kv-store { key: 1 } {value: 0}))"
-            .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map kv-store { key: int } { value: int })
+            (define-private (incompatible-tuple) (tuple (k 1)))
+            (define-private (kv-del (key int))
+                (map-delete kv-store { key: 1 } {value: 0}))
+        ").to_string();
         if let Err((err_output, _)) =
             session.formatted_interpretation(snippet, Some("checker".to_string()), false, None)
         {
             assert_eq!(
                 err_output[0],
                 format!(
-                    "checker:5:5: {}",
+                    "checker:4:5: {}",
                     format_err!(
                         "incorrect number of arguments in call to 'map-delete' (expected 2 got 3)"
                     )

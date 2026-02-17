@@ -12,7 +12,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "license": "GPL-3.0-only",
-  "version": "3.13.1",
+  "version": "3.14.0",
   "private": true,
   "workspaces": [
     "client",
@@ -251,11 +251,11 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
     "@eslint/js": "^9.13.0",
-    "@swc/cli": "^0.7.5",
-    "@swc/core": "^1.7.40",
+    "@swc/cli": "^0.8.0",
+    "@swc/core": "^1.15.11",
     "@typescript-eslint/eslint-plugin": "^8.11.0",
     "@typescript-eslint/parser": "^8.11.0",
-    "@vscode/test-web": "0.0.78",
+    "@vscode/test-web": "0.0.79",
     "@vscode/vsce": "^3.2.2",
     "@wasm-tool/wasm-pack-plugin": "^1.6.0",
     "concurrently": "^9.1.2",
@@ -265,9 +265,9 @@
     "path-browserify": "^1.0.1",
     "regenerator-runtime": "^0.14.0",
     "rimraf": "^6.0.1",
-    "swc-loader": "^0.2.3",
+    "swc-loader": "^0.2.7",
     "typescript": "^5.0.2",
-    "webpack": "^5.104.1",
+    "webpack": "^5.105.0",
     "webpack-cli": "^6.0.1"
   }
 }

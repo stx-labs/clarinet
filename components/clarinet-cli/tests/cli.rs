@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use clarinet_files::{FileLocation, ProjectManifest, ProjectManifestFile};
+use clarinet_files::{ProjectManifest, ProjectManifestFile};
 use indoc::formatdoc;
 
 #[track_caller]
@@ -10,8 +10,7 @@ fn parse_manifest(project_dir: &Path) -> ProjectManifest {
     let manifest_path = project_dir.join("Clarinet.toml");
     let manifest_str = fs::read_to_string(&manifest_path).expect("Failed to read Clarinet.toml");
     let manifest_file: ProjectManifestFile = toml::from_str(&manifest_str).unwrap();
-    let location = FileLocation::from_path(manifest_path);
-    ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap()
+    ProjectManifest::from_project_manifest_file(manifest_file, &manifest_path, false).unwrap()
 }
 
 #[track_caller]

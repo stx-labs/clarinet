@@ -490,11 +490,8 @@ pub trait ASTVisitor<'a> {
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
                             args.get(1).unwrap_or(&DEFAULT_EXPR),
                         ),
-                        UnwrapErr => self.traverse_unwrap_err(
-                            expr,
-                            args.get(0).unwrap_or(&DEFAULT_EXPR),
-                            args.get(1).unwrap_or(&DEFAULT_EXPR),
-                        ),
+                        UnwrapErr => self
+                            .traverse_unwrap_err_panic(expr, args.get(0).unwrap_or(&DEFAULT_EXPR)),
                         Match => {
                             if args.len() == 4 {
                                 self.traverse_match_option(

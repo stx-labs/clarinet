@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::{fmt, slice};
 
+use clarity::types::StacksEpochId;
+use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType};
@@ -70,7 +72,11 @@ impl ClarityFormatter {
     /// formatting for files to ensure a newline at the end
     pub fn format_file(&self, source: &str) -> String {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
-        let pse = clarity::vm::ast::parser::v2::parse(trimmed_source).unwrap();
+        let pse = clarity::vm::ast::parser::v2::parse(
+            trimmed_source,
+            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+        )
+        .unwrap();
         let agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
         let result = agg.generate();
 
@@ -88,7 +94,11 @@ impl ClarityFormatter {
     }
     /// for range formatting within editors
     pub fn format_section(&self, source: &str) -> Result<String, String> {
-        let pse = clarity::vm::ast::parser::v2::parse(source).map_err(|e| e.to_string())?;
+        let pse = clarity::vm::ast::parser::v2::parse(
+            source,
+            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+        )
+        .map_err(|e| e.to_string())?;
 
         // range formatting specifies to the aggregator that we're
         // starting mid-source and thus should pre-populate
@@ -1604,7 +1614,6 @@ impl<'a> Aggregator<'a> {
     fn function(&self, exprs: &[PreSymbolicExpression]) -> String {
         let func_type = self.display_pse(exprs.first().unwrap(), "");
         let indentation = &self.settings.indentation.to_string();
-        let args_indent = format!("{indentation}{indentation}");
 
         let mut acc = format!("({func_type} (");
 
@@ -1613,6 +1622,8 @@ impl<'a> Aggregator<'a> {
             if let Some((name, args)) = def.split_first() {
                 acc.push_str(&self.display_pse(name, ""));
 
+                let args_indent = format!("{indentation}{indentation}");
+
                 // Keep everything on one line if there's only one argument
                 if args.len() == 1 {
                     acc.push(' ');
@@ -1620,6 +1631,7 @@ impl<'a> Aggregator<'a> {
                     acc.push(')');
                 } else {
                     let mut iter = args.iter().peekable();
+                    let mut prev_end_line = 0u32;
                     while let Some(arg) = iter.next() {
                         let trailing = get_trailing_comment(arg, &mut iter);
                         self.check_and_cache_ignored_expression(
@@ -1628,15 +1640,22 @@ impl<'a> Aggregator<'a> {
                             self.source,
                             &args_indent,
                         );
+                        // Preserve comment line positions: add newline before arg when it's on a
+                        // different line than the previous (comments must never be moved), or when
+                        // it's a list arg (each gets own line), or when it's the first arg
+                        let need_newline = prev_end_line == 0
+                            || arg.match_list().is_some()
+                            || arg.span().start_line > prev_end_line;
+                        if need_newline {
+                            acc.push_str(&format!("\n{args_indent}"));
+                        }
                         if arg.match_list().is_some() {
                             // expr args
-                            acc.push_str(&format!(
-                                "\n{}{}",
-                                args_indent,
-                                self.format_source_exprs(slice::from_ref(arg), &args_indent)
-                            ))
+                            acc.push_str(
+                                &self.format_source_exprs(slice::from_ref(arg), &args_indent),
+                            )
                         } else {
-                            // atom args
+                            // atom args (includes standalone comments)
                             acc.push_str(
                                 &self.format_source_exprs(slice::from_ref(arg), &args_indent),
                             )
@@ -1644,6 +1663,9 @@ impl<'a> Aggregator<'a> {
                         if let Some(comment) = trailing {
                             acc.push(' ');
                             acc.push_str(&self.display_pse(comment, ""));
+                            prev_end_line = comment.span().end_line;
+                        } else {
+                            prev_end_line = arg.span().end_line;
                         }
                     }
                     if args.is_empty() {
@@ -1738,13 +1760,15 @@ impl<'a> Aggregator<'a> {
                 // Don't break before an opening brace of a map
                 let is_map_opening = trimmed.starts_with("{");
 
-                // Check if the current expression is on a different line than the previous one
-                // in the original source code
-                let on_different_line_in_source =
-                    // i - 1 index is fine here because we're withing !first_on_line
-                    is_comment(expr) && list[i - 1].span().start_line != expr.span().start_line;
+                // Check if we need a line break to preserve comment/expr line positions:
+                // - current expr is a comment on a different line than previous
+                // - previous expr is a comment on a different line than current (comment stays alone)
+                let prev = &list[i - 1];
+                let on_different_line_in_source = (is_comment(expr)
+                    && prev.span().start_line != expr.span().start_line)
+                    || (is_comment(prev) && prev.span().start_line != expr.span().start_line);
 
-                // Add line break if comment was on different lines in source
+                // Add line break if comment/expr was on different lines in source
                 // or if the line would be too long
                 if on_different_line_in_source
                     || (!is_map_opening
@@ -1875,6 +1899,8 @@ mod tests_formatter {
     #[allow(unused_imports)]
     use std::assert_eq;
 
+    use clarity::types::StacksEpochId;
+    use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
     use indoc::indoc;
 
     use super::{ClarityFormatter, Settings};
@@ -2729,7 +2755,11 @@ mod tests_formatter {
     #[test]
     fn format_ast_without_source() {
         let src = "(define-private (noop) (begin (+ 1 2) (ok true)))";
-        let ast = clarity::vm::ast::parser::v2::parse(src).unwrap();
+        let ast = clarity::vm::ast::parser::v2::parse(
+            src,
+            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+        )
+        .unwrap();
         let formatter = ClarityFormatter::new(Settings::default());
         let expected = format_with_default(src);
         let result = formatter.format_ast(&ast);
@@ -2739,7 +2769,11 @@ mod tests_formatter {
     #[test]
     fn format_ast_without_source_handle_indentation() {
         let src = "  (begin (+ 1 2) (ok true))";
-        let ast = clarity::vm::ast::parser::v2::parse(src).unwrap();
+        let ast = clarity::vm::ast::parser::v2::parse(
+            src,
+            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+        )
+        .unwrap();
         let expected = format_with_default(src);
         let formatter = ClarityFormatter::new(Settings::default());
         let result = formatter.format_ast(&ast);
@@ -2865,7 +2899,11 @@ mod tests_formatter {
     fn test_list_type_signature() {
         fn assert_list_type_signature(src: &str, expected: bool) {
             let settings = Settings::default();
-            let exprs = clarity::vm::ast::parser::v2::parse(src).unwrap();
+            let exprs = clarity::vm::ast::parser::v2::parse(
+                src,
+                StackDepthLimits::for_epoch(StacksEpochId::latest()),
+            )
+            .unwrap();
             let aggregator = Aggregator::new(&settings, &exprs, Some(src));
             let list_exprs = exprs[0].match_list().unwrap();
             assert_eq!(aggregator.is_list_type_signature(list_exprs), expected);
@@ -2906,6 +2944,50 @@ mod tests_formatter {
               )
             )
             "#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_comment_args() {
+        // Comments must stay on their original lines (span.start_line preserved)
+        let src = indoc!(
+            r#"
+            (define-public (some-fn
+                (a uint)
+                ;; (b uint)
+              )
+              (ok true)
+            )
+            "#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+
+        let src = indoc!(
+            r#"
+            (define-public (some-fn
+                (a uint)
+                ;; documentation comment for b
+                (b uint)
+              )
+              (ok true)
+            )
+            "#
+        );
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_inline_comment_try() {
+        let src = indoc!(
+            r#"
+    (try! (contract-call? 'STV9K21TBFAK4KNRJXF5DFP8N7W46G4V9RJ5XDY2.sbtc-token
+      ;; /g/.aibtc-pre-faktory/dao_contract_token_prelaunch
+      transfer pre-fee tx-sender .aibtc-pre-faktory none
+    ))"#
         );
         let result = format_with_default(src);
         assert_eq!(src, result);

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clarinet_deployments::setup_session_with_deployment;
-use clarinet_files::{FileLocation, ProjectManifest, StacksNetwork};
+use clarinet_files::{ProjectManifest, StacksNetwork};
 use clarity_repl::repl::debug::dap::DAPDebugger;
 
 #[cfg(feature = "telemetry")]
@@ -12,7 +12,7 @@ pub fn run_dap() -> Result<(), String> {
     let mut dap = DAPDebugger::new();
     match dap.init() {
         Ok((manifest_location_str, expression)) => {
-            let manifest_location = FileLocation::from_path_string(&manifest_location_str)?;
+            let manifest_location = PathBuf::from(&manifest_location_str);
             let project_manifest = ProjectManifest::from_location(&manifest_location, false)?;
             let (deployment, artifacts) =
                 generate_default_deployment(&project_manifest, &StacksNetwork::Simnet, false)?;
@@ -33,11 +33,10 @@ pub fn run_dap() -> Result<(), String> {
                 ));
             }
 
-            for (contract_id, (_, location)) in deployment.contracts.iter() {
+            for (contract_id, (_, location)) in deployment.contracts {
                 dap.path_to_contract_id
-                    .insert(PathBuf::from(location.to_string()), contract_id.clone());
-                dap.contract_id_to_path
-                    .insert(contract_id.clone(), PathBuf::from(location.to_string()));
+                    .insert(location.clone(), contract_id.clone());
+                dap.contract_id_to_path.insert(contract_id, location);
             }
 
             // Begin execution of the expression in debug mode
