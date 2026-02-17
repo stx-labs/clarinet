@@ -1,6 +1,6 @@
 // Static cost analysis for Clarity contracts
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clarity::vm::ast::build_ast;
 use clarity::vm::contexts::Environment;
@@ -1118,6 +1118,86 @@ fn build_listlike_cost_analysis_tree(
     Ok(CostAnalysisNode::new(expr_node, cost, children))
 }
 
+/// Recursively collect all user-defined function calls within a cost analysis tree.
+fn collect_fn_calls(
+    node: &CostAnalysisNode,
+    visited_functions: &HashSet<String>,
+    trait_names: &HashMap<ClarityName, String>,
+    calls: &mut HashSet<String>,
+) {
+    if let CostExprNode::UserFunction(fn_name) = &node.expr {
+        if !is_function_definition(fn_name.as_str())
+            && !trait_names.contains_key(fn_name)
+            && visited_functions.contains(fn_name.as_str())
+        {
+            calls.insert(fn_name.to_string());
+        }
+    }
+    for child in &node.children {
+        collect_fn_calls(child, visited_functions, trait_names, calls);
+    }
+}
+
+/// DFS postorder visit for topological sort (callee before caller).
+fn topo_visit(
+    fn_name: &str,
+    call_graph: &HashMap<String, HashSet<String>>,
+    in_progress: &mut HashSet<String>,
+    finished: &mut HashSet<String>,
+    result: &mut Vec<String>,
+) {
+    if finished.contains(fn_name) || in_progress.contains(fn_name) {
+        return;
+    }
+    in_progress.insert(fn_name.to_string());
+    if let Some(callees) = call_graph.get(fn_name) {
+        let mut sorted_callees: Vec<&String> = callees.iter().collect();
+        sorted_callees.sort();
+        for callee in sorted_callees {
+            topo_visit(callee, call_graph, in_progress, finished, result);
+        }
+    }
+    in_progress.remove(fn_name);
+    finished.insert(fn_name.to_string());
+    result.push(fn_name.to_string()); // postorder: callee before caller
+}
+
+/// makes sure when the propagator processes a caller, the callee's
+/// trait counts are already finalized.
+fn topo_order(
+    costs: &HashMap<String, CostAnalysisNode>,
+    visited_functions: &HashSet<String>,
+    trait_names: &HashMap<ClarityName, String>,
+) -> Vec<String> {
+    let call_graph: HashMap<String, HashSet<String>> = costs
+        .iter()
+        .map(|(name, node)| {
+            let mut calls = HashSet::new();
+            collect_fn_calls(node, visited_functions, trait_names, &mut calls);
+            (name.clone(), calls)
+        })
+        .collect();
+
+    let mut result = Vec::new();
+    let mut in_progress = HashSet::new();
+    let mut finished = HashSet::new();
+
+    // Deterministic starting order
+    let mut fn_names: Vec<String> = costs.keys().cloned().collect();
+    fn_names.sort();
+
+    for fn_name in fn_names {
+        topo_visit(
+            &fn_name,
+            &call_graph,
+            &mut in_progress,
+            &mut finished,
+            &mut result,
+        );
+    }
+    result
+}
+
 pub(crate) fn get_trait_count(costs: &HashMap<String, CostAnalysisNode>) -> Option<TraitCount> {
     // First pass: collect trait counts and trait names
     let mut collector = TraitCountCollector::new();
@@ -1131,17 +1211,23 @@ pub(crate) fn get_trait_count(costs: &HashMap<String, CostAnalysisNode>) -> Opti
         collector.visit(cost_analysis_node, &context);
     }
 
-    // Second pass: propagate trait counts through function calls
-    // If function A calls function B and uses a map, filter, or fold with
-    // traits, the maximum will reflect that in A's trait call counts
+    // Second pass: propagate trait counts through function calls.
+    // Process functions in topological order (callees before callers) so that
+    // when we propagate a callee's counts to a caller, the callee's counts are
+    // already finalized. Without this ordering, HashMap iteration can visit a
+    // caller before its callee, resulting in the callee's partial (first-pass
+    // only) counts being propagated instead of the final counts.
+    let sorted_fns = topo_order(costs, &collector.visited_functions, &collector.trait_names);
     let mut propagator = TraitCountPropagator::new(
         &mut collector.trait_counts,
         &collector.trait_names,
         &collector.visited_functions,
     );
-    for (name, cost_analysis_node) in costs.iter() {
-        let context = TraitCountContext::new(name.clone(), (1, 1));
-        propagator.visit(cost_analysis_node, &context);
+    for fn_name in &sorted_fns {
+        if let Some(cost_analysis_node) = costs.get(fn_name) {
+            let context = TraitCountContext::new(fn_name.clone(), (1, 1));
+            propagator.visit(cost_analysis_node, &context);
+        }
     }
 
     Some(collector.trait_counts)
