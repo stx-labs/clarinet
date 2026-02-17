@@ -63,8 +63,12 @@ pub struct ProjectConfigFile {
     #[cfg_attr(feature = "json_schema", schemars(skip))]
     analysis: Option<Vec<clarity_repl::analysis::Pass>>,
     /// Directory for caching build artifacts
-    #[serde(default)]
-    cache_dir: Option<String>,
+    #[serde(default = "default_cache_dir")]
+    cache_dir: String,
+}
+
+fn default_cache_dir() -> String {
+    ".cache".to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -94,13 +98,15 @@ pub struct ProjectManifest {
     #[serde(rename = "repl")]
     pub repl_settings: repl::Settings,
     #[serde(skip_serializing)]
-    #[serde(default = "default_location")]
+    #[serde(default = "default_root_dir")]
+    pub root_dir: PathBuf,
+    #[serde(skip_serializing)]
     pub location: PathBuf,
     #[serde(skip_serializing, skip_deserializing)]
     pub contracts_settings: HashMap<PathBuf, ClarityContractMetadata>,
 }
 
-fn default_location() -> PathBuf {
+fn default_root_dir() -> PathBuf {
     std::env::temp_dir()
 }
 
@@ -176,19 +182,10 @@ pub struct ProjectConfig {
     pub telemetry: bool,
     pub requirements: Option<Vec<RequirementConfig>>,
     #[serde(rename = "cache_dir")]
-    #[serde(deserialize_with = "cache_location_deserializer")]
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
     pub boot_contracts: Vec<String>,
     pub override_boot_contracts_source: BTreeMap<String, String>,
-}
-
-fn cache_location_deserializer<'de, D>(des: D) -> Result<PathBuf, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let container: String = serde::Deserialize::deserialize(des)?;
-    Ok(PathBuf::from(container))
 }
 
 impl Serialize for ProjectConfig {
@@ -229,13 +226,9 @@ impl ProjectManifest {
             .read_file(location.to_string_lossy().to_string())
             .await?;
 
-        let project_manifest_file: ProjectManifestFile = match toml::from_slice(content.as_bytes())
-        {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(format!("Clarinet.toml file malformatted {e:?}"));
-            }
-        };
+        let project_manifest_file: ProjectManifestFile = toml::from_slice(content.as_bytes())
+            .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
+
         ProjectManifest::from_project_manifest_file(
             project_manifest_file,
             location,
@@ -249,12 +242,8 @@ impl ProjectManifest {
     ) -> Result<ProjectManifest, String> {
         let project_manifest_file_content = paths::read_content(location)?;
         let project_manifest_file: ProjectManifestFile =
-            match toml::from_slice(&project_manifest_file_content[..]) {
-                Ok(s) => s,
-                Err(e) => {
-                    return Err(format!("Clarinet.toml file malformatted {e:?}"));
-                }
-            };
+            toml::from_slice(&project_manifest_file_content[..])
+                .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
 
         ProjectManifest::from_project_manifest_file(
             project_manifest_file,
@@ -329,14 +318,13 @@ impl ProjectManifest {
         }
 
         let project_name = project_manifest_file.project.name;
-        let project_root_location = manifest_location
+        let root_path = manifest_location
             .parent()
             .ok_or_else(|| "unable to get parent of manifest location".to_string())?;
-        let cache_location = match project_manifest_file.project.cache_dir {
-            Some(ref path) => paths::try_parse_path(path, Some(project_root_location))
-                .ok_or_else(|| format!("unable to parse path {path}"))?,
-            None => project_root_location.join(".cache"),
-        };
+
+        let cache_dir = project_manifest_file.project.cache_dir;
+        let cache_location = paths::try_parse_path(&cache_dir, Some(root_path))
+            .ok_or_else(|| format!("unable to parse path {cache_dir}"))?;
 
         let mut override_boot_contracts_source = BTreeMap::new();
         if let Some(overrides) = project_manifest_file.project.override_boot_contracts_source {
@@ -380,6 +368,7 @@ impl ProjectManifest {
             project,
             contracts: BTreeMap::new(),
             repl_settings,
+            root_dir: root_path.to_path_buf(),
             location: manifest_location.to_path_buf(),
             contracts_settings: HashMap::new(),
         };
@@ -439,7 +428,7 @@ impl ProjectManifest {
                         deployer,
                         parsed_epoch.as_deref(),
                         parsed_clarity_version.as_deref(),
-                        project_root_location,
+                        root_path,
                         &mut config_contracts,
                         &mut contracts_settings,
                     )?;

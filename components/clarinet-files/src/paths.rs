@@ -65,7 +65,7 @@ pub fn try_parse_path(location_string: &str, project_root: Option<&Path>) -> Opt
 }
 
 /// Walk up from a path to find a directory containing Clarinet.toml.
-pub fn find_project_root(from: &Path) -> Result<PathBuf, String> {
+fn find_project_root(from: &Path) -> Result<PathBuf, String> {
     let mut path = from.to_path_buf();
     if path.is_file() {
         path.pop();
@@ -127,10 +127,6 @@ pub fn get_network_manifest_path(project_root: &Path, network: &StacksNetwork) -
         StacksNetwork::Testnet => "Testnet.toml",
         StacksNetwork::Mainnet => "Mainnet.toml",
     })
-}
-
-pub fn project_root_from_manifest_location(manifest_location: &Path) -> Result<PathBuf, String> {
-    find_project_root(manifest_location.parent().unwrap_or(Path::new(".")))
 }
 
 pub fn get_relative_path(path: &Path, base: &Path) -> Result<String, String> {

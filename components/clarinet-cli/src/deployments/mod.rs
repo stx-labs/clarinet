@@ -17,11 +17,10 @@ pub fn generate_default_deployment(
     hiro_system_kit::nestable_block_on(future)
 }
 
-pub fn check_deployments(manifest: &ProjectManifest) -> Result<(), String> {
-    let project_root_location = paths::project_root_from_manifest_location(&manifest.location)?;
-    let files = get_deployments_files(&project_root_location)?;
+pub fn check_deployments(project_root: &Path) -> Result<(), String> {
+    let files = get_deployments_files(project_root)?;
     for (path, relative_path) in files.into_iter() {
-        let _spec = match DeploymentSpecification::from_config_file(&path, &project_root_location) {
+        let _spec = match DeploymentSpecification::from_config_file(&path, project_root) {
             Ok(spec) => spec,
             Err(msg) => {
                 println!("{} {} syntax incorrect\n{}", red!("x"), relative_path, msg);
@@ -33,8 +32,8 @@ pub fn check_deployments(manifest: &ProjectManifest) -> Result<(), String> {
     Ok(())
 }
 
-fn get_deployments_files(project_root_location: &Path) -> Result<Vec<(PathBuf, String)>, String> {
-    let project_dir = project_root_location.to_path_buf();
+fn get_deployments_files(project_root: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+    let project_dir = project_root;
     let prefix_len = project_dir.to_string_lossy().len() + 1;
     let deployments_dir = project_dir.join("deployments");
     let Ok(paths) = fs::read_dir(&deployments_dir) else {

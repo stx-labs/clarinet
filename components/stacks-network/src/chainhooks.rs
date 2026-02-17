@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use chainhook_sdk::chainhooks::types::{ChainhookSpecificationNetworkMap, ChainhookStore};
 use chainhook_sdk::types::{BitcoinNetwork, StacksNetwork};
-use clarinet_files::paths;
 
 pub fn parse_chainhook_full_specification(
     path: &PathBuf,
@@ -21,10 +20,10 @@ pub fn parse_chainhook_full_specification(
 }
 
 pub fn load_chainhooks(
-    manifest_location: &Path,
+    project_root: &Path,
     networks: &(BitcoinNetwork, StacksNetwork),
 ) -> Result<ChainhookStore, String> {
-    let hook_files = get_chainhooks_files(manifest_location)?;
+    let hook_files = get_chainhooks_files(project_root)?;
     let mut stacks_chainhooks = vec![];
     let mut bitcoin_chainhooks = vec![];
     for (path, relative_path) in hook_files.into_iter() {
@@ -50,8 +49,7 @@ pub fn load_chainhooks(
     })
 }
 
-fn get_chainhooks_files(manifest_location: &Path) -> Result<Vec<(PathBuf, String)>, String> {
-    let project_root = paths::project_root_from_manifest_location(manifest_location)?;
+fn get_chainhooks_files(project_root: &Path) -> Result<Vec<(PathBuf, String)>, String> {
     let chainhooks_dir = project_root.join("chainhooks");
     let prefix_len = chainhooks_dir.to_string_lossy().len() + 1;
     let Ok(paths) = fs::read_dir(&chainhooks_dir) else {
