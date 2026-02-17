@@ -29,8 +29,6 @@
 //!     - `(* x)`, `(* x u1)`, `(* x u1 u1)`, etc. -> `x`
 //!     - `(/ x)`, `(/ x u1)`, `(/ x u1 u1)`, etc. -> `x`
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
@@ -57,9 +55,8 @@ impl NoopCheckerSettings {
 
 pub struct NoopChecker<'a> {
     clarity_version: ClarityVersion,
-    /// Map expression ID to a generated diagnostic
     _settings: NoopCheckerSettings,
-    diagnostics: HashMap<u64, Diagnostic>,
+    diagnostics: Vec<Diagnostic>,
     annotations: &'a Vec<Annotation>,
     /// Clarity diagnostic level
     level: Level,
@@ -77,7 +74,7 @@ impl<'a> NoopChecker<'a> {
             clarity_version,
             _settings: settings,
             level,
-            diagnostics: HashMap::new(),
+            diagnostics: Vec::new(),
             annotations,
             active_annotation: None,
         }
@@ -87,11 +84,8 @@ impl<'a> NoopChecker<'a> {
         // Traverse the entire AST
         traverse(&mut self, &contract_analysis.expressions);
 
-        // Collect all of the vecs of diagnostics into a vector
-        let mut diagnostics: Vec<Diagnostic> = self.diagnostics.into_values().collect();
-        // Order the sets by the span of the error (the first diagnostic)
+        let mut diagnostics = self.diagnostics;
         diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
-        // Then flatten into one vector
         Ok(diagnostics)
     }
 
@@ -119,7 +113,7 @@ impl<'a> NoopChecker<'a> {
             spans: vec![expr.span.clone()],
             suggestion: Some(suggestion),
         };
-        self.diagnostics.insert(expr.id, diagnostic);
+        self.diagnostics.push(diagnostic);
     }
 
     /// Check if the expression is allowed by annotation, combining set_active_annotation + allow
@@ -1955,7 +1949,7 @@ mod tests {
         assert!(output[0].contains("division by zero will cause a runtime error"));
     }
 
-    /// Division by zero takes priority over zero dividend
+    /// Both zero dividend and division by zero are reported
     #[test]
     fn div_zero_by_zero() {
         #[rustfmt::skip]
@@ -1964,10 +1958,39 @@ mod tests {
                 (/ u0 u0))
         ").to_string();
 
-        let (output, result) = run_snippet(snippet);
+        let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("division by zero will cause a runtime error"));
+        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(
+            result.diagnostics[0].message,
+            "dividing zero always evaluates to `u0`"
+        );
+        assert_eq!(
+            result.diagnostics[1].message,
+            "division by zero will cause a runtime error"
+        );
+    }
+
+    /// Both zero dividend and identity divisor are reported
+    #[test]
+    fn div_zero_dividend_with_identity_divisor() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (test-func (x uint))
+                (/ u0 x u1))
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(
+            result.diagnostics[0].message,
+            "dividing zero always evaluates to `u0`"
+        );
+        assert_eq!(
+            result.diagnostics[1].message,
+            "dividing by one has no effect"
+        );
     }
 
     /// Should NOT warn: `(/ x u2)` is not a noop
