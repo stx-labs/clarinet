@@ -77,10 +77,10 @@ enum Command {
     /// Load contracts in a REPL for an interactive session
     #[clap(name = "console", aliases = &["poke"], bin_name = "console")]
     Console(Console),
-    /// Check contracts syntax
+    /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
-    /// Start a local Devnet network for interacting with your contracts from your browser
+    /// Start a local Devnet network (deprecated, use 'clarinet devnet start')
     #[clap(name = "integrate", bin_name = "integrate")]
     Integrate(DevnetStart),
     /// Subcommands for Devnet usage
@@ -99,11 +99,13 @@ enum Command {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Formatter {
+    /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
     /// If specified, format only this file
     #[clap(long = "file", short = 'f')]
     pub file: Option<String>,
+    /// Maximum line length
     #[clap(long = "max-line-length", short = 'l')]
     pub max_line_length: Option<usize>,
     #[clap(long = "indent", short = 'i', conflicts_with = "use_tabs")]
@@ -199,7 +201,7 @@ enum Contracts {
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
 enum Requirements {
-    /// Interact with contracts published on Mainnet
+    /// Interact with contracts deployed on Mainnet
     #[clap(name = "add", bin_name = "add")]
     AddRequirement(AddRequirement),
 }
@@ -226,6 +228,7 @@ struct DevnetPackage {
     /// Output json file name
     #[clap(long = "name", short = 'n')]
     pub package_file_name: Option<String>,
+    /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
 }
@@ -291,7 +294,7 @@ struct GenerateDeployment {
         conflicts_with = "mainnet"
     )]
     pub devnet: bool,
-    /// Generate a deployment file for devnet, using settings/Testnet.toml
+    /// Generate a deployment file for testnet, using settings/Testnet.toml
     #[clap(
         long = "testnet",
         conflicts_with = "simnet",
@@ -299,7 +302,7 @@ struct GenerateDeployment {
         conflicts_with = "mainnet"
     )]
     pub testnet: bool,
-    /// Generate a deployment file for devnet, using settings/Mainnet.toml
+    /// Generate a deployment file for mainnet, using settings/Mainnet.toml
     #[clap(
         long = "mainnet",
         conflicts_with = "simnet",
@@ -515,7 +518,7 @@ struct Check {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Completions {
-    /// Specify which shell to generation completions script for
+    /// Specify which shell to generate completions script for
     #[clap(ignore_case = true)]
     pub shell: Shell,
 }
@@ -1190,7 +1193,7 @@ pub fn main() {
             }
 
             if success {
-                println!("{} Syntax of contract successfully checked", green!("✔"))
+                println!("{} Contract successfully checked", green!("✔"))
             } else {
                 std::process::exit(1);
             }
