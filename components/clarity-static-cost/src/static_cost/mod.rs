@@ -249,45 +249,86 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
         // Create separate paths for min and max to properly handle nodes with cost ranges
         let mut total_cost_min = node.cost.min.clone();
         let mut total_cost_max = node.cost.max.clone();
-        let mut has_branching_children = false;
+        // Paths that terminate early due to asserts! failure.
+        // These represent the full cost up to (and including) the asserts! call
+        // with the error expression evaluated, but without any subsequent siblings.
+        let mut terminated_paths: Vec<ExecutionCost> = vec![];
 
         for child_cost_node in &node.children {
-            // Recursively call calculate_total_cost_with_branching on children
-            // so that branching children (like If) are handled correctly
-            let child_summing = calculate_total_cost_with_branching(child_cost_node);
+            // Special handling for asserts!: it can short-circuit the parent block.
+            // Two execution paths:
+            //   "fail" path: asserts_node + condition + error → terminates here, no siblings follow
+            //   "succeed" path: asserts_node + condition (no error) → continues with remaining siblings
+            if matches!(
+                &child_cost_node.expr,
+                CostExprNode::NativeFunction(NativeFunctions::Asserts)
+            ) {
+                // "Fail" path: full Asserts cost (node + condition + error), then stop.
+                let asserts_full_summing = calculate_total_cost_with_summing(child_cost_node);
+                let asserts_full_static: StaticCost = asserts_full_summing.into();
+                let mut fail_min = total_cost_min.clone();
+                let _ = fail_min.add(&asserts_full_static.min);
+                terminated_paths.push(fail_min);
+                let mut fail_max = total_cost_max.clone();
+                let _ = fail_max.add(&asserts_full_static.max);
+                terminated_paths.push(fail_max);
 
-            if is_node_branching(child_cost_node) {
-                // For branching children, preserve all paths by combining each path
-                // with both min and max node costs
-                has_branching_children = true;
-                for child_path_cost in &child_summing.costs {
-                    // Create paths with node min cost
-                    let mut combined_path_min = total_cost_min.clone();
-                    let _ = combined_path_min.add(child_path_cost);
-                    summing_cost.add_cost(combined_path_min);
-
-                    // Create paths with node max cost
-                    let mut combined_path_max = total_cost_max.clone();
-                    let _ = combined_path_max.add(child_path_cost);
-                    summing_cost.add_cost(combined_path_max);
+                // "Succeed" path: asserts_node_cost + condition cost only (error is not evaluated).
+                // Update total_cost so remaining siblings are added on top.
+                let _ = total_cost_min.add(&child_cost_node.cost.min);
+                let _ = total_cost_max.add(&child_cost_node.cost.max);
+                if let Some(condition_node) = child_cost_node.children.first() {
+                    let cond_summing = calculate_total_cost_with_summing(condition_node);
+                    let cond_static: StaticCost = cond_summing.into();
+                    let _ = total_cost_min.add(&cond_static.min);
+                    let _ = total_cost_max.add(&cond_static.max);
                 }
-                // Update total_cost to the max child path for sequential addition with remaining children
-                let child_static_cost: StaticCost = child_summing.into();
-                let _ = total_cost_min.add(&child_static_cost.min);
-                let _ = total_cost_max.add(&child_static_cost.max);
             } else {
-                // For non-branching children, add sequentially using their min/max
-                let child_static_cost: StaticCost = child_summing.into();
-                let _ = total_cost_min.add(&child_static_cost.min);
-                let _ = total_cost_max.add(&child_static_cost.max);
+                // Recursively call calculate_total_cost_with_branching on children
+                // so that branching children (like If) are handled correctly
+                let child_summing = calculate_total_cost_with_branching(child_cost_node);
+
+                if is_node_branching(child_cost_node) {
+                    // For branching children, preserve all paths by combining each path
+                    // with both min and max node costs
+                    for child_path_cost in &child_summing.costs {
+                        // Create paths with node min cost
+                        let mut combined_path_min = total_cost_min.clone();
+                        let _ = combined_path_min.add(child_path_cost);
+                        summing_cost.add_cost(combined_path_min);
+
+                        // Create paths with node max cost
+                        let mut combined_path_max = total_cost_max.clone();
+                        let _ = combined_path_max.add(child_path_cost);
+                        summing_cost.add_cost(combined_path_max);
+                    }
+                    // Update total_cost to the max child path for sequential addition with remaining children
+                    let child_static_cost: StaticCost = child_summing.into();
+                    let _ = total_cost_min.add(&child_static_cost.min);
+                    let _ = total_cost_max.add(&child_static_cost.max);
+                } else {
+                    // For non-branching children, add sequentially using their min/max
+                    let child_static_cost: StaticCost = child_summing.into();
+                    let _ = total_cost_min.add(&child_static_cost.min);
+                    let _ = total_cost_max.add(&child_static_cost.max);
+                }
             }
         }
-        // Only add total_cost if we didn't have any branching children
-        // (if we had branching children, we already added all paths above)
-        if !has_branching_children {
-            summing_cost.add_cost(total_cost_min);
-            summing_cost.add_cost(total_cost_max);
+
+        // Add terminated paths from asserts! failures.
+        // These paths do not include any subsequent siblings (asserts! short-circuits the block).
+        for path in terminated_paths {
+            summing_cost.add_cost(path);
         }
+
+        // Always add the succeed path (total_cost after all children have been processed).
+        // When there are no asserts!/branching children this is the only path.
+        // When there are asserts! children, total_cost represents the path where all
+        // assertions passed and all siblings were evaluated.
+        // When there are If/Match children, total_cost == their min/max, which is
+        // already represented in summing_cost — adding it again is harmless.
+        summing_cost.add_cost(total_cost_min);
+        summing_cost.add_cost(total_cost_max);
     }
 
     summing_cost
