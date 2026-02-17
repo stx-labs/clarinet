@@ -102,7 +102,7 @@ impl<'a> UnusedPrivateFn<'a> {
     fn make_diagnostic_strings(name: &ClarityName) -> (String, Option<String>) {
         (
             format!("private function `{name}` is never used"),
-            Some("Remove this expression".to_string()),
+            Some("Remove this expression or suffix function name with '_' if this is intentional".to_string()),
         )
     }
 
