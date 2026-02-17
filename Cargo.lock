@@ -850,6 +850,7 @@ dependencies = [
  "clarinet-format",
  "clarity",
  "clarity-repl",
+ "clarity-static-cost",
  "clarity-types",
  "console_error_panic_hook",
  "js-sys",

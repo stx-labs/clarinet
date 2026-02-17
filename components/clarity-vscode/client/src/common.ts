@@ -163,6 +163,7 @@ export async function initClient(
   // Register no-op command for static cost code lens (display-only, no action on click)
   context.subscriptions.push(
     vscode.commands.registerCommand("clarity.staticCostLens", () => {}),
+  );
   client.onNotification(
     "clarity/noManifestWarning",
     async (message: string) => {

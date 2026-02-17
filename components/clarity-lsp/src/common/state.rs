@@ -8,7 +8,6 @@ use clarinet_deployments::{
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::vm::ast::build_ast;
-use clarity::vm::costs::analysis::CostAnalysisNode;
 use clarity::vm::costs::ExecutionCost;
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::clarity::analysis::ContractAnalysis;
@@ -19,6 +18,7 @@ use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::{ContractDeployer, DEFAULT_CLARITY_VERSION};
+use clarity_static_cost::static_cost::CostAnalysisNode;
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
@@ -141,6 +141,7 @@ pub struct ContractState {
     contract_id: QualifiedContractIdentifier,
     analysis: Option<ContractAnalysis>,
     definitions: HashMap<ClarityName, Range>,
+    #[allow(dead_code)]
     location: PathBuf,
     clarity_version: ClarityVersion,
     cost_analysis: Option<HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>>,
@@ -525,7 +526,7 @@ impl EditorState {
         })
     }
 
-    pub fn get_code_lenses(&self, contract_location: &FileLocation) -> Vec<ls_types::CodeLens> {
+    pub fn get_code_lenses(&self, contract_location: &Path) -> Vec<ls_types::CodeLens> {
         let mut code_lenses = Vec::new();
 
         if !self.settings.static_cost_analysis {
@@ -722,12 +723,12 @@ impl EditorState {
 
     pub fn get_function_cost_analysis(
         &self,
-        contract_location: &FileLocation,
+        contract_location: &Path,
         position: &ls_types::Position,
     ) -> Option<String> {
         crate::lsp_log!(
             "[LSP] get_function_cost_analysis called for {} at line {}",
-            contract_location,
+            contract_location.display(),
             position.line,
         );
 
@@ -1039,8 +1040,8 @@ async fn get_cost_analysis(
     clarity_version: ClarityVersion,
 ) -> Option<HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>> {
     use clarity::vm::contexts::{CallStack, ContractContext, Environment};
-    use clarity::vm::costs::analysis::static_cost;
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
+    use clarity_static_cost::static_cost::static_cost;
 
     crate::lsp_log!(
         "[LSP] get_cost_analysis called for contract: {} (clarity version: {:?})",

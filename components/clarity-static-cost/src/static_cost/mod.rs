@@ -17,9 +17,9 @@ use clarity::vm::{ClarityVersion, Value};
 use clarity_types::representations::SymbolicExpression;
 use clarity_types::types::{CharType, SequenceData};
 pub use cost_analysis::{
-    build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
-    static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost, SummingExecutionCost,
-    UserArgumentsContext,
+    build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_source,
+    static_cost_tree, static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost,
+    SummingExecutionCost, UserArgumentsContext,
 };
 pub use cost_functions::ClarityCostFunctionExt;
 pub use special_costs::get_cost_for_special_function;
