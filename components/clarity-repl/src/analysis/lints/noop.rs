@@ -53,6 +53,77 @@ impl NoopCheckerSettings {
     }
 }
 
+/// Result of separating operands into constants and non-constants,
+/// accumulating the constants using a checked arithmetic operation.
+struct SplitOperands<'a> {
+    non_constants: Vec<&'a SymbolicExpression>,
+    uint_acc: Option<u128>,
+    int_acc: Option<i128>,
+}
+
+impl<'a> SplitOperands<'a> {
+    fn accumulate(
+        operands: &'a [SymbolicExpression],
+        uint_init: u128,
+        int_init: i128,
+        uint_op: fn(u128, u128) -> Option<u128>,
+        int_op: fn(i128, i128) -> Option<i128>,
+    ) -> Self {
+        let mut non_constants = Vec::new();
+        let mut uint_acc = Some(uint_init);
+        let mut int_acc = Some(int_init);
+
+        for op in operands {
+            match op.match_literal_value() {
+                Some(Value::UInt(n)) => {
+                    uint_acc = uint_acc.and_then(|a| uint_op(a, *n));
+                    int_acc = None;
+                }
+                Some(Value::Int(n)) => {
+                    int_acc = int_acc.and_then(|a| int_op(a, *n));
+                    uint_acc = None;
+                }
+                _ => non_constants.push(op),
+            }
+        }
+
+        Self {
+            non_constants,
+            uint_acc,
+            int_acc,
+        }
+    }
+
+    fn sum_of(operands: &'a [SymbolicExpression]) -> Self {
+        Self::accumulate(operands, 0, 0, u128::checked_add, i128::checked_add)
+    }
+
+    fn product_of(operands: &'a [SymbolicExpression]) -> Self {
+        Self::accumulate(operands, 1, 1, u128::checked_mul, i128::checked_mul)
+    }
+
+    fn has_constants(&self, total: usize) -> bool {
+        self.non_constants.len() < total
+    }
+
+    fn is_zero(&self) -> bool {
+        self.uint_acc == Some(0) || self.int_acc == Some(0)
+    }
+
+    fn is_one(&self) -> bool {
+        self.uint_acc == Some(1) || self.int_acc == Some(1)
+    }
+
+    /// Returns "u0" or "0" depending on the accumulated type.
+    fn zero_str(&self) -> &'static str {
+        if self.uint_acc.is_some() {
+            "u0"
+        } else {
+            "0"
+        }
+    }
+}
+
 pub struct NoopChecker<'a> {
     clarity_version: ClarityVersion,
     _settings: NoopCheckerSettings,
@@ -139,6 +210,19 @@ impl<'a> NoopChecker<'a> {
                 format!("({})", inner.join(" "))
             }
             _ => "...".to_string(),
+        }
+    }
+
+    /// Format a replacement suggestion from remaining operands after removing identity elements.
+    fn format_replacement_suggestion(
+        func: impl std::fmt::Display,
+        remaining: &[&SymbolicExpression],
+    ) -> String {
+        if remaining.len() == 1 {
+            format!("Replace with `{}`", Self::format_source(remaining[0]))
+        } else {
+            let parts: Vec<String> = remaining.iter().map(|op| Self::format_source(op)).collect();
+            format!("Replace with `({func} {})`", parts.join(" "))
         }
     }
 
@@ -294,8 +378,8 @@ impl<'a> NoopChecker<'a> {
         operands: &'a [SymbolicExpression],
     ) {
         let identity_val = match func {
-            NativeFunctions::And => true,  // true is identity for and
-            NativeFunctions::Or => false,  // false is identity for or
+            NativeFunctions::And => true, // true is identity for and
+            NativeFunctions::Or => false, // false is identity for or
             _ => return,
         };
 
@@ -310,15 +394,7 @@ impl<'a> NoopChecker<'a> {
         }
 
         let identity_str = if identity_val { "true" } else { "false" };
-        let suggestion = if non_constants.len() == 1 {
-            format!("Replace with `{}`", Self::format_source(non_constants[0]))
-        } else {
-            let parts: Vec<String> = non_constants
-                .iter()
-                .map(|op| Self::format_source(op))
-                .collect();
-            format!("Replace with `({func} {})`", parts.join(" "))
-        };
+        let suggestion = Self::format_replacement_suggestion(func, &non_constants);
         self.add_diagnostic(
             expr,
             format!("`{identity_str}` is the identity element for `{func}` and has no effect"),
@@ -348,42 +424,14 @@ impl<'a> NoopChecker<'a> {
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
     ) {
-        let mut non_constants = Vec::new();
-
-        let mut uint_sum: Option<u128> = Some(0);
-        let mut int_sum: Option<i128> = Some(0);
-
-        for op in operands {
-            if let Some(n) = Self::as_uint_literal(op) {
-                uint_sum = uint_sum.and_then(|s| s.checked_add(n));
-                int_sum = None; // can't mix types
-            } else if let Some(n) = Self::as_int_literal(op) {
-                int_sum = int_sum.and_then(|s| s.checked_add(n));
-                uint_sum = None; // can't mix types
-            } else {
-                non_constants.push(op);
-            }
-        }
-
-        let has_constants = non_constants.len() < operands.len();
-        if !has_constants || non_constants.is_empty() {
+        let split = SplitOperands::sum_of(operands);
+        if !split.has_constants(operands.len())
+            || split.non_constants.is_empty()
+            || !split.is_zero()
+        {
             return;
         }
-
-        let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
-        if !sum_is_zero {
-            return;
-        }
-
-        let suggestion = if non_constants.len() == 1 {
-            format!("Replace with `{}`", Self::format_source(non_constants[0]))
-        } else {
-            let parts: Vec<String> = non_constants
-                .iter()
-                .map(|op| Self::format_source(op))
-                .collect();
-            format!("Replace with `(+ {})`", parts.join(" "))
-        };
+        let suggestion = Self::format_replacement_suggestion("+", &split.non_constants);
         self.add_diagnostic(expr, "adding zero has no effect".to_string(), suggestion);
     }
 
@@ -398,45 +446,16 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        let tail = &operands[1..];
-
-        // Separate tail into constants and non-constants
         // TODO: What if first arg is a constant?
-        let mut tail_non_constants = Vec::new();
-        let mut uint_sum: Option<u128> = Some(0);
-        let mut int_sum: Option<i128> = Some(0);
-        let mut has_constants = false;
-
-        for op in tail {
-            if let Some(n) = Self::as_uint_literal(op) {
-                uint_sum = uint_sum.and_then(|s| s.checked_add(n));
-                int_sum = None;
-                has_constants = true;
-            } else if let Some(n) = Self::as_int_literal(op) {
-                int_sum = int_sum.and_then(|s| s.checked_add(n));
-                uint_sum = None;
-                has_constants = true;
-            } else {
-                tail_non_constants.push(op);
-            }
-        }
-
-        if !has_constants {
+        let tail = &operands[1..];
+        let split = SplitOperands::sum_of(tail);
+        if !split.has_constants(tail.len()) || !split.is_zero() {
             return;
         }
 
-        let sum_is_zero = uint_sum.is_some_and(|s| s == 0) || int_sum.is_some_and(|s| s == 0);
-        if !sum_is_zero {
-            return;
-        }
-
-        let suggestion = if tail_non_constants.is_empty() {
-            format!("Replace with `{}`", Self::format_source(&operands[0]))
-        } else {
-            let mut parts = vec![Self::format_source(&operands[0])];
-            parts.extend(tail_non_constants.iter().map(|op| Self::format_source(op)));
-            format!("Replace with `(- {})`", parts.join(" "))
-        };
+        let mut remaining = vec![&operands[0]];
+        remaining.extend(&split.non_constants);
+        let suggestion = Self::format_replacement_suggestion("-", &remaining);
         self.add_diagnostic(
             expr,
             "subtracting zero has no effect".to_string(),
@@ -451,33 +470,13 @@ impl<'a> NoopChecker<'a> {
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
     ) {
-        let mut non_constants = Vec::new();
-        let mut uint_product: Option<u128> = Some(1);
-        let mut int_product: Option<i128> = Some(1);
-
-        for op in operands {
-            if let Some(n) = Self::as_uint_literal(op) {
-                uint_product = uint_product.and_then(|p| p.checked_mul(n));
-                int_product = None;
-            } else if let Some(n) = Self::as_int_literal(op) {
-                int_product = int_product.and_then(|p| p.checked_mul(n));
-                uint_product = None;
-            } else {
-                non_constants.push(op);
-            }
-        }
-
-        // Only check if we have both variable and constant arguments
-        let has_constants = non_constants.len() < operands.len();
-        if !has_constants || non_constants.is_empty() {
+        let split = SplitOperands::product_of(operands);
+        if !split.has_constants(operands.len()) || split.non_constants.is_empty() {
             return;
         }
 
-        // Check for zero
-        let uint_zero = uint_product.is_some_and(|p| p == 0);
-        let int_zero = int_product.is_some_and(|p| p == 0);
-        if uint_zero || int_zero {
-            let zero_str = if uint_zero { "u0" } else { "0" };
+        if split.is_zero() {
+            let zero_str = split.zero_str();
             self.add_diagnostic(
                 expr,
                 format!("multiplying by zero always evaluates to `{zero_str}`"),
@@ -486,19 +485,8 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        // Check for identity
-        let product_is_one =
-            uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
-        if product_is_one {
-            let suggestion = if non_constants.len() == 1 {
-                format!("Replace with `{}`", Self::format_source(non_constants[0]))
-            } else {
-                let parts: Vec<String> = non_constants
-                    .iter()
-                    .map(|op| Self::format_source(op))
-                    .collect();
-                format!("Replace with `(* {})`", parts.join(" "))
-            };
+        if split.is_one() {
+            let suggestion = Self::format_replacement_suggestion("*", &split.non_constants);
             self.add_diagnostic(
                 expr,
                 "multiplying by one has no effect".to_string(),
@@ -522,7 +510,6 @@ impl<'a> NoopChecker<'a> {
         // Check for zero dividend: (/ 0 ...) -> 0
         let uint_zero_dividend = Self::as_uint_literal(&operands[0]) == Some(0);
         let int_zero_dividend = Self::as_int_literal(&operands[0]) == Some(0);
-
         if uint_zero_dividend || int_zero_dividend {
             let zero_str = if uint_zero_dividend { "u0" } else { "0" };
             self.add_diagnostic(
@@ -533,35 +520,13 @@ impl<'a> NoopChecker<'a> {
             // No return, we still want to check the other conditions
         }
 
-        // Separate tail into constants and non-constants
         let tail = &operands[1..];
-        let mut tail_non_constants = Vec::new();
-        let mut uint_product: Option<u128> = Some(1);
-        let mut int_product: Option<i128> = Some(1);
-        let mut has_constants = false;
-
-        for op in tail {
-            if let Some(n) = Self::as_uint_literal(op) {
-                uint_product = uint_product.and_then(|p| p.checked_mul(n));
-                int_product = None;
-                has_constants = true;
-            } else if let Some(n) = Self::as_int_literal(op) {
-                int_product = int_product.and_then(|p| p.checked_mul(n));
-                uint_product = None;
-                has_constants = true;
-            } else {
-                tail_non_constants.push(op);
-            }
-        }
-
-        if !has_constants {
+        let split = SplitOperands::product_of(tail);
+        if !split.has_constants(tail.len()) {
             return;
         }
 
-        // Check for division by zero: (/ ... 0) -> runtime error
-        let product_is_zero =
-            uint_product.is_some_and(|p| p == 0) || int_product.is_some_and(|p| p == 0);
-        if product_is_zero {
+        if split.is_zero() {
             self.add_diagnostic(
                 expr,
                 "division by zero will cause a runtime error".to_string(),
@@ -570,16 +535,10 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        let product_is_one =
-            uint_product.is_some_and(|p| p == 1) || int_product.is_some_and(|p| p == 1);
-        if product_is_one {
-            let suggestion = if tail_non_constants.is_empty() {
-                format!("Replace with `{}`", Self::format_source(&operands[0]))
-            } else {
-                let mut parts = vec![Self::format_source(&operands[0])];
-                parts.extend(tail_non_constants.iter().map(|op| Self::format_source(op)));
-                format!("Replace with `(/ {})`", parts.join(" "))
-            };
+        if split.is_one() {
+            let mut remaining = vec![&operands[0]];
+            remaining.extend(&split.non_constants);
+            let suggestion = Self::format_replacement_suggestion("/", &remaining);
             self.add_diagnostic(
                 expr,
                 "dividing by one has no effect".to_string(),
