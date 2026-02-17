@@ -1230,10 +1230,7 @@ pub fn main() {
                 cmd.use_computed_deployment_plan,
             );
 
-            let exit_code = match artifacts.success {
-                true => 0,
-                false => 1,
-            };
+            let exit_code = i32::from(!artifacts.success);
 
             if cmd.json {
                 let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
@@ -1243,6 +1240,7 @@ pub fn main() {
                         let (_, path) = deployment.contracts.get(contract_id)?;
                         Some((path.to_string_lossy().to_string(), diags.clone()))
                     })
+                    .filter(|(_, diags)| !diags.is_empty())
                     .collect();
                 let output = JsonCheckOutput {
                     success: artifacts.success,
