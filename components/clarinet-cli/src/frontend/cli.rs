@@ -2893,4 +2893,95 @@ mod tests {
             assert_eq!(lints["unused_token"].as_str().unwrap(), "none");
         }
     }
+
+    #[test]
+    fn test_check_json_output() {
+        let snippet = indoc::indoc! {"
+            (define-constant A u1)
+            (define-constant B u2)
+
+            (define-read-only (get-val)
+                u0)
+        "};
+
+        let mut settings = repl::SessionSettings::default();
+        settings.repl_settings.analysis.enable_all_passes();
+
+        let mut session = repl::Session::new(settings.clone());
+        let contract_id = QualifiedContractIdentifier::transient();
+        let epoch = DEFAULT_EPOCH;
+        let contract = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(snippet.to_string()),
+            deployer: ContractDeployer::Transient,
+            name: "transient".to_string(),
+            clarity_version: ClarityVersion::default_for_epoch(epoch),
+            epoch: clarity_repl::repl::Epoch::Specific(epoch),
+        };
+        let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
+        let (annotations, mut annotation_diagnostics) = session
+            .interpreter
+            .collect_annotations(contract.expect_in_memory_code_source());
+        diagnostics.append(&mut annotation_diagnostics);
+
+        let mut contract_analysis = ContractAnalysis::new(
+            contract_id,
+            ast.expressions,
+            LimitedCostTracker::new_free(),
+            contract.epoch.resolve(),
+            contract.clarity_version,
+        );
+        let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
+        let mut analysis_diagnostics = match analysis::run_analysis(
+            &mut contract_analysis,
+            &mut analysis_db,
+            &annotations,
+            &settings.repl_settings.analysis,
+        ) {
+            Ok(diagnostics) => diagnostics,
+            Err(diagnostics) => {
+                success = false;
+                diagnostics
+            }
+        };
+        diagnostics.append(&mut analysis_diagnostics);
+
+        let filename = "test-contract.clar".to_string();
+        let output = JsonCheckOutput {
+            success,
+            diagnostics: HashMap::from([(filename.clone(), diagnostics)]),
+        };
+
+        // Verify both JSON formats parse correctly
+        for json_str in [
+            serde_json::to_string(&output).unwrap(),
+            serde_json::to_string_pretty(&output).unwrap(),
+        ] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&json_str).expect("JSON output should be valid JSON");
+
+            assert!(parsed["success"].is_boolean());
+            assert!(parsed["diagnostics"].is_object());
+            assert!(parsed["diagnostics"][&filename].is_array());
+
+            let diags = parsed["diagnostics"][&filename].as_array().unwrap();
+            assert!(
+                diags.len() >= 2,
+                "expected at least 2 diagnostics for unused constants A and B, got {}",
+                diags.len()
+            );
+
+            // Verify diagnostic structure
+            let diag = &diags[0];
+            assert!(diag["level"].is_string());
+            assert!(diag["message"].is_string());
+            assert!(diag["spans"].is_array());
+
+            // Verify at least one diagnostic mentions an unused constant
+            let messages: Vec<&str> = diags.iter().filter_map(|d| d["message"].as_str()).collect();
+            assert!(
+                messages.iter().any(|m| m.contains("never used")),
+                "expected a 'never used' diagnostic, got: {messages:?}"
+            );
+        }
+    }
 }
