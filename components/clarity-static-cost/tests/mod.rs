@@ -307,9 +307,10 @@ fn execute_contract_function_and_get_cost(
 fn test_pox_4_costs() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let pox_4_path = workspace_root
-        .join("contrib")
-        .join("boot-contracts-unit-tests")
-        .join("boot_contracts")
+        .join("clarity-repl")
+        .join("src")
+        .join("repl")
+        .join("boot")
         .join("pox-4.clar");
     let contract_source = std::fs::read_to_string(&pox_4_path)
         .unwrap_or_else(|e| panic!("Failed to read pox-4.clar file at {:?}: {}", pox_4_path, e));
