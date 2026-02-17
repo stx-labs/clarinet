@@ -51,6 +51,16 @@ use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
 use crate::lsp::run_lsp;
 
+#[derive(Clone, PartialEq, Debug, clap::ValueEnum)]
+enum OutputFormat {
+    /// Human-readable output (default)
+    Standard,
+    /// Minimal JSON output
+    Json,
+    /// Formatted, human-readable JSON output
+    JsonPretty,
+}
+
 #[derive(Serialize)]
 struct JsonCheckOutput {
     success: bool,
@@ -523,9 +533,9 @@ struct Check {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
-    /// Output diagnostics in JSON format
-    #[clap(long = "json")]
-    pub json: bool,
+    /// Set the output format
+    #[clap(long = "output", default_value = "standard")]
+    pub output_format: OutputFormat,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1196,28 +1206,36 @@ pub fn main() {
             };
             diagnostics.append(&mut analysis_diagnostics);
 
-            if cmd.json {
-                let output = JsonCheckOutput {
-                    success,
-                    diagnostics: HashMap::from([(file, diagnostics)]),
-                };
-                println!("{}", serde_json::to_string_pretty(&output).unwrap());
-                if !success {
-                    std::process::exit(1);
-                }
-            } else {
-                let lines = contract.expect_in_memory_code_source().lines();
-                let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-                for d in diagnostics {
-                    for line in output_diagnostic(&d, &file, &formatted_lines) {
-                        println!("{line}");
+            match cmd.output_format {
+                OutputFormat::Json | OutputFormat::JsonPretty => {
+                    let output = JsonCheckOutput {
+                        success,
+                        diagnostics: HashMap::from([(file, diagnostics)]),
+                    };
+                    let json = if cmd.output_format == OutputFormat::JsonPretty {
+                        serde_json::to_string_pretty(&output).unwrap()
+                    } else {
+                        serde_json::to_string(&output).unwrap()
+                    };
+                    println!("{json}");
+                    if !success {
+                        std::process::exit(1);
                     }
                 }
+                OutputFormat::Standard => {
+                    let lines = contract.expect_in_memory_code_source().lines();
+                    let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
+                    for d in diagnostics {
+                        for line in output_diagnostic(&d, &file, &formatted_lines) {
+                            println!("{line}");
+                        }
+                    }
 
-                if success {
-                    println!("{} Contract successfully checked", green!("✔"))
-                } else {
-                    std::process::exit(1);
+                    if success {
+                        println!("{} Contract successfully checked", green!("✔"))
+                    } else {
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -1232,50 +1250,58 @@ pub fn main() {
 
             let exit_code = i32::from(!artifacts.success);
 
-            if cmd.json {
-                let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
-                    .diags
-                    .into_iter()
-                    .filter(|(_, diags)| !diags.is_empty())
-                    .filter_map(|(contract_id, diags)| {
-                        let (_, path) = deployment.contracts.get(&contract_id)?;
-                        Some((path.to_string_lossy().to_string(), diags))
-                    })
-                    .collect();
-                let output = JsonCheckOutput {
-                    success: artifacts.success,
-                    diagnostics,
-                };
-                println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            } else {
-                let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-                if diags_digest.has_feedbacks() {
-                    println!("{}", diags_digest.message);
+            match cmd.output_format {
+                OutputFormat::Json | OutputFormat::JsonPretty => {
+                    let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
+                        .diags
+                        .into_iter()
+                        .filter(|(_, diags)| !diags.is_empty())
+                        .filter_map(|(contract_id, diags)| {
+                            let (_, path) = deployment.contracts.get(&contract_id)?;
+                            Some((path.to_string_lossy().to_string(), diags))
+                        })
+                        .collect();
+                    let output = JsonCheckOutput {
+                        success: artifacts.success,
+                        diagnostics,
+                    };
+                    let json = if cmd.output_format == OutputFormat::JsonPretty {
+                        serde_json::to_string_pretty(&output).unwrap()
+                    } else {
+                        serde_json::to_string(&output).unwrap()
+                    };
+                    println!("{json}");
                 }
+                OutputFormat::Standard => {
+                    let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                    if diags_digest.has_feedbacks() {
+                        println!("{}", diags_digest.message);
+                    }
 
-                if diags_digest.warnings > 0 {
-                    println!(
-                        "{} {} detected",
-                        yellow!("!"),
-                        pluralize!(diags_digest.warnings, "warning")
-                    );
-                }
-                if diags_digest.errors > 0 {
-                    println!(
-                        "{} {} detected",
-                        red!("x"),
-                        pluralize!(diags_digest.errors, "error")
-                    );
-                } else {
-                    println!(
-                        "{} {} checked",
-                        green!("✔"),
-                        pluralize!(diags_digest.contracts_checked, "contract"),
-                    );
-                }
+                    if diags_digest.warnings > 0 {
+                        println!(
+                            "{} {} detected",
+                            yellow!("!"),
+                            pluralize!(diags_digest.warnings, "warning")
+                        );
+                    }
+                    if diags_digest.errors > 0 {
+                        println!(
+                            "{} {} detected",
+                            red!("x"),
+                            pluralize!(diags_digest.errors, "error")
+                        );
+                    } else {
+                        println!(
+                            "{} {} checked",
+                            green!("✔"),
+                            pluralize!(diags_digest.contracts_checked, "contract"),
+                        );
+                    }
 
-                if clarinetrc.enable_hints.unwrap_or(true) {
-                    display_post_check_hint();
+                    if clarinetrc.enable_hints.unwrap_or(true) {
+                        display_post_check_hint();
+                    }
                 }
             }
 
