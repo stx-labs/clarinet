@@ -42,13 +42,19 @@ const FORMAT_IGNORE_SYNTAX: &str = "@format-ignore";
 pub struct Settings {
     pub indentation: Indentation,
     pub max_line_length: usize,
+    pub epoch: Option<StacksEpochId>,
 }
 
 impl Settings {
-    pub fn new(indentation: Indentation, max_line_length: usize) -> Self {
+    pub fn new(
+        indentation: Indentation,
+        max_line_length: usize,
+        epoch: Option<StacksEpochId>,
+    ) -> Self {
         Settings {
             indentation,
             max_line_length,
+            epoch,
         }
     }
 }
@@ -58,6 +64,7 @@ impl Default for Settings {
         Settings {
             indentation: Indentation::Space(2),
             max_line_length: 80,
+            epoch: Some(StacksEpochId::latest()),
         }
     }
 }
@@ -74,7 +81,7 @@ impl ClarityFormatter {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
         let pse = clarity::vm::ast::parser::v2::parse(
             trimmed_source,
-            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+            StackDepthLimits::for_epoch(self.settings.epoch.unwrap_or(StacksEpochId::latest())),
         )
         .unwrap();
         let agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
@@ -96,7 +103,7 @@ impl ClarityFormatter {
     pub fn format_section(&self, source: &str) -> Result<String, String> {
         let pse = clarity::vm::ast::parser::v2::parse(
             source,
-            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+            StackDepthLimits::for_epoch(self.settings.epoch.unwrap_or(StacksEpochId::latest())),
         )
         .map_err(|e| e.to_string())?;
 
@@ -2388,7 +2395,10 @@ mod tests_formatter {
     #[test]
     fn test_custom_tab_setting() {
         let src = "(begin (ok true))";
-        let result = format_with(&String::from(src), Settings::new(Indentation::Space(4), 80));
+        let result = format_with(
+            &String::from(src),
+            Settings::new(Indentation::Space(4), 80, None),
+        );
         assert_eq!(result, "(begin\n    (ok true)\n)");
     }
 
@@ -2402,11 +2412,17 @@ mod tests_formatter {
     #[test]
     fn test_ignore_formatting() {
         let src = ";; @format-ignore\n(    begin ( ok true))";
-        let result = format_with(&String::from(src), Settings::new(Indentation::Space(4), 80));
+        let result = format_with(
+            &String::from(src),
+            Settings::new(Indentation::Space(4), 80, None),
+        );
         assert_eq!(src, result);
 
         let src = ";; @format-ignore\n(list\n  u64\n  u64 u64\n)";
-        let result = format_with(&String::from(src), Settings::new(Indentation::Space(4), 80));
+        let result = format_with(
+            &String::from(src),
+            Settings::new(Indentation::Space(4), 80, None),
+        );
         assert_eq!(src, result);
     }
 
@@ -2419,11 +2435,17 @@ mod tests_formatter {
     #[test]
     fn test_traits() {
         let src = "(use-trait token-a-trait 'SPAXYA5XS51713FDTQ8H94EJ4V579CXMTRNBZKSF.token-a.token-trait)\n";
-        let result = format_with(&String::from(src), Settings::new(Indentation::Space(4), 80));
+        let result = format_with(
+            &String::from(src),
+            Settings::new(Indentation::Space(4), 80, None),
+        );
         assert_eq!(src, result);
 
         let src = "(impl-trait 'SPAXYA5XS51713FDTQ8H94EJ4V579CXMTRNBZKSF.token-a.token-trait)\n";
-        let result = format_with(&String::from(src), Settings::new(Indentation::Space(4), 80));
+        let result = format_with(
+            &String::from(src),
+            Settings::new(Indentation::Space(4), 80, None),
+        );
         assert_eq!(src, result);
     }
     #[test]
@@ -2447,7 +2469,10 @@ mod tests_formatter {
     #[test]
     fn test_as_contract() {
         let src = "(as-contract (contract-call? .tokens mint! u19))";
-        let result = format_with(&String::from(src), Settings::new(Indentation::Space(4), 80));
+        let result = format_with(
+            &String::from(src),
+            Settings::new(Indentation::Space(4), 80, None),
+        );
         assert_eq!(src, result);
     }
 
@@ -2901,7 +2926,7 @@ mod tests_formatter {
             let settings = Settings::default();
             let exprs = clarity::vm::ast::parser::v2::parse(
                 src,
-                StackDepthLimits::for_epoch(StacksEpochId::latest()),
+                StackDepthLimits::for_epoch(settings.epoch.unwrap_or(StacksEpochId::latest())),
             )
             .unwrap();
             let aggregator = Aggregator::new(&settings, &exprs, Some(src));

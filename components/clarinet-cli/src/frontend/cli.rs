@@ -32,8 +32,8 @@ use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{
-    clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
-    DEFAULT_EPOCH,
+    clarity_version_to_u8, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer,
+    Epoch, DEFAULT_EPOCH,
 };
 use clarity_repl::{analysis, repl};
 use stacks_network::{self, DevnetOrchestrator};
@@ -106,6 +106,8 @@ struct Formatter {
     pub file: Option<String>,
     #[clap(long = "max-line-length", short = 'l')]
     pub max_line_length: Option<usize>,
+    #[clap(long = "epoch")]
+    pub epoch: Option<String>,
     #[clap(long = "indent", short = 'i', conflicts_with = "use_tabs")]
     /// indentation size, e.g. 2
     pub indentation: Option<usize>,
@@ -1277,6 +1279,12 @@ pub fn main() {
             }
             if cmd.use_tabs {
                 settings.indentation = formatter::Indentation::Tab;
+            }
+            if let Some(epoch) = cmd.epoch {
+                settings.epoch = Some(epoch_from_str(&epoch).unwrap_or_else(|| {
+                    eprintln!("{} invalid epoch: {epoch}", red!("error:"));
+                    std::process::exit(1);
+                }));
             }
             let formatter = ClarityFormatter::new(settings);
 

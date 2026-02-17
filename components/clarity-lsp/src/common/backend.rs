@@ -406,6 +406,7 @@ pub fn process_request(
                 })
                 .unwrap_or(80);
             let formatting_options = clarinet_format::formatter::Settings {
+                epoch: Some(contract_data.epoch),
                 indentation: if !prefer_space {
                     clarinet_format::formatter::Indentation::Tab
                 } else {
@@ -463,6 +464,7 @@ pub fn process_request(
                 .unwrap_or(80);
             let prefer_space = param.options.insert_spaces;
             let formatting_options = clarinet_format::formatter::Settings {
+                epoch: Some(contract_data.epoch),
                 indentation: if !prefer_space {
                     clarinet_format::formatter::Indentation::Tab
                 } else {

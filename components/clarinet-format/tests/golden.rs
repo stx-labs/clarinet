@@ -38,6 +38,7 @@ fn from_metadata(metadata: &str) -> Settings {
     Settings {
         max_line_length,
         indentation: indent,
+        epoch: None,
     }
 }
 fn format_file_with_metadata(source: &str) -> String {
