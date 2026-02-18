@@ -59,9 +59,9 @@ enum ClaritySum {
     Signed(i128),
     /// Clarity `uint`
     Unsigned(u128),
-    /// Tried to mix `uint` and `int` or used non-integer type
+    /// Type error from mixing `uint` and `int` or using non-integer type
     /// Should not be possible, such cases should fail to parse
-    Mixed,
+    Error,
 }
 
 /// Result of separating operands into constants and non-constants,
@@ -86,16 +86,16 @@ impl<'a> SplitOperands<'a> {
                     acc = match acc {
                         None => Some(ClaritySum::Unsigned(*n)),
                         Some(ClaritySum::Unsigned(a)) => uint_op(a, *n).map(ClaritySum::Unsigned),
-                        Some(ClaritySum::Signed(_)) => Some(ClaritySum::Mixed),
-                        Some(ClaritySum::Mixed) => acc,
+                        Some(ClaritySum::Signed(_)) => Some(ClaritySum::Error),
+                        Some(ClaritySum::Error) => acc,
                     };
                 }
                 Some(Value::Int(n)) => {
                     acc = match acc {
                         None => Some(ClaritySum::Signed(*n)),
                         Some(ClaritySum::Signed(a)) => int_op(a, *n).map(ClaritySum::Signed),
-                        Some(ClaritySum::Unsigned(_)) => Some(ClaritySum::Mixed),
-                        Some(ClaritySum::Mixed) => acc,
+                        Some(ClaritySum::Unsigned(_)) => Some(ClaritySum::Error),
+                        Some(ClaritySum::Error) => acc,
                     };
                 }
                 _ => non_constants.push(op),
@@ -136,7 +136,7 @@ impl<'a> SplitOperands<'a> {
         self.acc.as_ref().and_then(|val| match val {
             ClaritySum::Unsigned(0) => Some("u0"),
             ClaritySum::Signed(0) => Some("0"),
-            ClaritySum::Unsigned(_) | ClaritySum::Signed(_) | ClaritySum::Mixed => None,
+            ClaritySum::Unsigned(_) | ClaritySum::Signed(_) | ClaritySum::Error => None,
         })
     }
 }
