@@ -58,6 +58,20 @@ pub struct SessionSettings {
 }
 
 impl SessionSettings {
+    /// Lightweight `SessionSettings` for unit tests that don't need lints or
+    /// analysis passes. Avoids the `HashMap`/`HashSet` allocations that
+    /// `SessionSettings::default()` performs.
+    #[cfg(test)]
+    pub(crate) fn for_unit_test() -> Self {
+        Self {
+            repl_settings: Settings {
+                analysis: analysis::Settings::empty(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     pub fn get_default_sender(&self) -> StandardPrincipalData {
         let address = match self.initial_deployer {
             Some(ref entry) => entry.address.clone(),

@@ -401,8 +401,7 @@ mod tests {
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
+        let mut settings = SessionSettings::for_unit_test();
         settings
             .repl_settings
             .analysis
@@ -414,8 +413,7 @@ mod tests {
     }
 
     fn run_snippet_with_other_contract(snippet: String) -> (Vec<String>, ExecutionResult) {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
+        let mut settings = SessionSettings::for_unit_test();
         settings
             .repl_settings
             .analysis
@@ -700,8 +698,7 @@ mod tests {
 
     #[test]
     fn no_warn_on_dynamic_contract_call() {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
+        let mut settings = SessionSettings::for_unit_test();
         settings
             .repl_settings
             .analysis

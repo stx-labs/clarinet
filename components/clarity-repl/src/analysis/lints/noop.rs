@@ -694,8 +694,7 @@ mod tests {
     use crate::repl::SessionSettings;
 
     fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
+        let mut settings = SessionSettings::for_unit_test();
         settings
             .repl_settings
             .analysis

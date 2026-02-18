@@ -219,8 +219,7 @@ mod tests {
     use crate::repl::SessionSettings;
 
     fn default_session() -> Session {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
+        let mut settings = SessionSettings::for_unit_test();
         settings
             .repl_settings
             .analysis

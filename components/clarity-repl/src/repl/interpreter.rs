@@ -1004,7 +1004,6 @@ mod tests {
 
     use super::*;
     use crate::analysis::Settings as AnalysisSettings;
-    use crate::repl::settings::RemoteDataSettings;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     #[track_caller]
@@ -1113,12 +1112,7 @@ mod tests {
 
     #[test]
     fn test_advance_stacks_chain_tip() {
-        let wasm_settings = Settings {
-            analysis: AnalysisSettings::default(),
-            remote_data: RemoteDataSettings::default(),
-            show_timings: false,
-        };
-        let mut interpreter = get_interpreter(Some(wasm_settings));
+        let mut interpreter = get_interpreter(None);
         interpreter.set_current_epoch(StacksEpochId::Epoch30);
         interpreter.advance_burn_chain_tip(1);
         let count = 5;

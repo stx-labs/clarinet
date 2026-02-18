@@ -1,13 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::analysis;
 use crate::repl::session::Session;
 use crate::repl::SessionSettings;
 
 fn get_coverage_report(contract: &str, snippets: Vec<String>) -> String {
-    let mut settings = SessionSettings::default();
-    settings.repl_settings.analysis = analysis::Settings::empty();
-    let mut session = Session::new(settings);
+    let mut session = Session::new(SessionSettings::for_unit_test());
     session.enable_coverage_hook();
     session.set_test_name("test_scenario".to_string());
 
@@ -689,9 +686,7 @@ fn filter_iterator() {
 
 #[test]
 fn multiple_test_files() {
-    let mut settings = SessionSettings::default();
-    settings.repl_settings.analysis = analysis::Settings::empty();
-    let mut session = Session::new(settings);
+    let mut session = Session::new(SessionSettings::for_unit_test());
     session.enable_coverage_hook();
 
     let contract = "(define-read-only (add) (+ 1 2))";
