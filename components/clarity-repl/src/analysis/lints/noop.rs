@@ -257,16 +257,20 @@ impl<'a> NoopChecker<'a> {
         }
     }
 
-    /// Check if the expression is a `(not ...)` call
-    fn is_not_call(expr: &SymbolicExpression) -> bool {
-        if let SymbolicExpressionType::List(exprs) = &expr.expr {
-            exprs
-                .first()
-                .and_then(|e| e.match_atom())
-                .and_then(|name| NativeFunctions::lookup_by_name(name))
-                .is_some_and(|func| matches!(func, NativeFunctions::Not))
+    /// Extract inner expr of `(not <inner>)`
+    fn get_not_inner_expr(expr: &SymbolicExpression) -> Option<&SymbolicExpression> {
+        let SymbolicExpressionType::List(exprs) = &expr.expr else {
+            return None;
+        };
+
+        let func = exprs.first()?.match_atom()?;
+        if matches!(
+            NativeFunctions::lookup_by_name(func),
+            Some(NativeFunctions::Not)
+        ) {
+            exprs.get(1)
         } else {
-            false
+            None
         }
     }
 
@@ -324,15 +328,8 @@ impl<'a> NoopChecker<'a> {
         expr: &'a SymbolicExpression,
         operands: &'a [SymbolicExpression],
     ) {
-        if operands.len() == 1 && Self::is_not_call(&operands[0]) {
-            let suggestion = if let SymbolicExpressionType::List(inner_exprs) = &operands[0].expr {
-                inner_exprs
-                    .get(1)
-                    .map(|inner| format!("Replace with `{}`", Self::format_source(inner)))
-                    .unwrap_or_else(|| "Remove this expression".to_string())
-            } else {
-                "Remove this expression".to_string()
-            };
+        if let Some(inner) = Self::get_not_inner_expr(&operands[0]) {
+            let suggestion = format!("Replace with `{}`", Self::format_source(inner));
             self.add_diagnostic(
                 expr,
                 "double negation is unnecessary".to_string(),
