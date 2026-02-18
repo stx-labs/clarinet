@@ -406,7 +406,6 @@ pub fn process_request(
                 })
                 .unwrap_or(80);
             let formatting_options = clarinet_format::formatter::Settings {
-                epoch: Some(contract_data.epoch),
                 indentation: if !prefer_space {
                     clarinet_format::formatter::Indentation::Tab
                 } else {
@@ -416,7 +415,7 @@ pub fn process_request(
             };
 
             let formatter = clarinet_format::formatter::ClarityFormatter::new(formatting_options);
-            let formatted_result = formatter.format_file(source);
+            let formatted_result = formatter.format_file(source, Some(contract_data.epoch));
             let text_edit = ls_types::TextEdit {
                 range: ls_types::Range {
                     start: ls_types::Position {
@@ -464,7 +463,6 @@ pub fn process_request(
                 .unwrap_or(80);
             let prefer_space = param.options.insert_spaces;
             let formatting_options = clarinet_format::formatter::Settings {
-                epoch: Some(contract_data.epoch),
                 indentation: if !prefer_space {
                     clarinet_format::formatter::Indentation::Tab
                 } else {
@@ -472,6 +470,7 @@ pub fn process_request(
                 },
                 max_line_length,
             };
+            let epoch = Some(contract_data.epoch);
 
             // extract the text of just this range
             let lines: Vec<&str> = source.lines().collect();
@@ -542,7 +541,7 @@ pub fn process_request(
             let formatter = clarinet_format::formatter::ClarityFormatter::new(formatting_options);
 
             // Try to format the range text, but handle panics/errors gracefully
-            let formatted_result = formatter.format_section(&range_text);
+            let formatted_result = formatter.format_section(&range_text, epoch);
 
             let formatted_result = match formatted_result {
                 Ok(formatted_text) => {

@@ -27,13 +27,13 @@ use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
 use clarity_repl::clarity::vm::costs::LimitedCostTracker;
 use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::ClarityVersion;
+use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{
-    clarity_version_to_u8, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer,
-    Epoch, DEFAULT_EPOCH,
+    clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
+    DEFAULT_EPOCH,
 };
 use clarity_repl::{analysis, repl};
 use stacks_network::{self, DevnetOrchestrator};
@@ -106,8 +106,6 @@ struct Formatter {
     pub file: Option<String>,
     #[clap(long = "max-line-length", short = 'l')]
     pub max_line_length: Option<usize>,
-    #[clap(long = "epoch")]
-    pub epoch: Option<String>,
     #[clap(long = "indent", short = 'i', conflicts_with = "use_tabs")]
     /// indentation size, e.g. 2
     pub indentation: Option<usize>,
@@ -129,33 +127,41 @@ struct Formatter {
 }
 
 impl Formatter {
-    fn get_input_sources(&self) -> Vec<FormatterInputSource> {
+    fn get_input_sources(&self, manifest: &ProjectManifest) -> Vec<FormatterInputSource> {
         if self.stdin {
             vec![FormatterInputSource::Stdin]
         } else if let Some(file) = &self.file {
-            vec![FormatterInputSource::File(file.clone())]
+            let epoch = manifest
+                .contracts
+                .values()
+                .find(|c| from_code_source(c.code_source.clone()) == *file)
+                .map(|c| c.epoch.resolve());
+            vec![FormatterInputSource::File(file.clone(), epoch)]
         } else {
-            // look for files at the default code path (./contracts/) if
-            // cmd.manifest_path is not specified OR if cmd.file is not specified
-            let manifest = load_manifest_or_exit(self.manifest_path.clone(), true);
-            let contracts = manifest.contracts.values().cloned();
-            contracts
-                .map(|c| from_code_source(c.code_source))
-                .map(FormatterInputSource::File)
+            manifest
+                .contracts
+                .values()
+                .cloned()
+                .map(|c| {
+                    FormatterInputSource::File(
+                        from_code_source(c.code_source),
+                        Some(c.epoch.resolve()),
+                    )
+                })
                 .collect()
         }
     }
 }
 
 enum FormatterInputSource {
-    File(String),
+    File(String, Option<StacksEpochId>),
     Stdin,
 }
 
 impl FormatterInputSource {
     fn get_input(&self) -> String {
         match self {
-            FormatterInputSource::File(path) => {
+            FormatterInputSource::File(path, _) => {
                 fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read file: {e}"))
             }
             FormatterInputSource::Stdin => io::stdin()
@@ -168,7 +174,14 @@ impl FormatterInputSource {
 
     fn file_path(&self) -> Option<&str> {
         match self {
-            FormatterInputSource::File(path) => Some(path),
+            FormatterInputSource::File(path, _) => Some(path),
+            FormatterInputSource::Stdin => None,
+        }
+    }
+
+    fn epoch(&self) -> Option<StacksEpochId> {
+        match self {
+            FormatterInputSource::File(_, epoch) => *epoch,
             FormatterInputSource::Stdin => None,
         }
     }
@@ -1267,7 +1280,8 @@ pub fn main() {
                 "{}",
                 format_warn!("This command is in beta. Feedback is welcome!"),
             );
-            let sources = cmd.get_input_sources();
+            let manifest = load_manifest_or_exit(cmd.manifest_path.clone(), false);
+            let sources = cmd.get_input_sources(&manifest);
             let mut settings = formatter::Settings::default();
 
             if let Some(max_line_length) = cmd.max_line_length {
@@ -1280,12 +1294,6 @@ pub fn main() {
             if cmd.use_tabs {
                 settings.indentation = formatter::Indentation::Tab;
             }
-            if let Some(epoch) = cmd.epoch {
-                settings.epoch = Some(epoch_from_str(&epoch).unwrap_or_else(|| {
-                    eprintln!("{} invalid epoch: {epoch}", red!("error:"));
-                    std::process::exit(1);
-                }));
-            }
             let formatter = ClarityFormatter::new(settings);
 
             let mut all_files_formatted = true;
@@ -1293,7 +1301,7 @@ pub fn main() {
 
             for source in sources {
                 let input = source.get_input();
-                let output = formatter.format(&input);
+                let output = formatter.format(&input, source.epoch());
 
                 if cmd.check {
                     if let Some(file_path) = source.file_path() {
