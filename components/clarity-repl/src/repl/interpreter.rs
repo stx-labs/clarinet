@@ -1009,11 +1009,9 @@ mod tests {
 
     #[track_caller]
     fn get_interpreter(settings: Option<Settings>) -> ClarityInterpreter {
-        ClarityInterpreter::new(
-            StandardPrincipalData::transient(),
-            settings.unwrap_or_default(),
-            None,
-        )
+        let mut settings = settings.unwrap_or_default();
+        settings.analysis = AnalysisSettings::empty();
+        ClarityInterpreter::new(StandardPrincipalData::transient(), settings, None)
     }
 
     #[track_caller]
@@ -1377,13 +1375,11 @@ mod tests {
         assert!(result.is_err());
 
         let diagnostics = result.unwrap_err();
-        // Expect error message from linter
-        // TODO: Disable linter for all unit tests in this file
-        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics.len(), 1);
 
         let message = format!("Runtime Error: Runtime error while interpreting {}.{}: Runtime(DivisionByZero, Some([FunctionIdentifier {{ identifier: \"_native_:native_div\" }}]))", StandardPrincipalData::transient(), contract.name);
         assert_eq!(
-            diagnostics[1],
+            diagnostics[0],
             Diagnostic {
                 level: vm::diagnostic::Level::Error,
                 message,

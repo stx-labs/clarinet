@@ -937,6 +937,7 @@ mod tests {
     use indoc::indoc;
 
     use super::*;
+    use crate::analysis;
     use crate::repl::session::Session;
     use crate::repl::{
         ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, SessionSettings,
@@ -980,7 +981,9 @@ mod tests {
 
     #[test]
     fn no_deps() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (hello)
@@ -1002,7 +1005,9 @@ mod tests {
 
     #[test]
     fn contract_call() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1040,7 +1045,9 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_local_trait() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1084,7 +1091,9 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_remote_trait() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1129,7 +1138,9 @@ mod tests {
 
     #[test]
     fn pass_contract_local() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1193,7 +1204,9 @@ mod tests {
 
     #[test]
     fn nested_trait_in_optional_type() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let trait_snippet = indoc!("
@@ -1222,7 +1235,9 @@ mod tests {
 
     #[test]
     fn nested_trait_in_response_type() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let trait_snippet = indoc!("
@@ -1251,7 +1266,9 @@ mod tests {
 
     #[test]
     fn nested_trait_in_tuple_type() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let trait_snippet = indoc!("
@@ -1280,7 +1297,9 @@ mod tests {
 
     #[test]
     fn nested_trait_in_list_type() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let trait_snippet = indoc!("
@@ -1310,7 +1329,9 @@ mod tests {
 
     #[test]
     fn nested_trait_in_composite_type() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let trait_snippet = indoc!("
@@ -1340,7 +1361,9 @@ mod tests {
 
     #[test]
     fn impl_trait() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1381,7 +1404,9 @@ mod tests {
 
     #[test]
     fn use_trait() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1419,7 +1444,9 @@ mod tests {
 
     #[test]
     fn unresolved_contract_call() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -1443,7 +1470,9 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_unresolved_trait() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet = indoc!("
@@ -1469,7 +1498,9 @@ mod tests {
 
     #[test]
     fn contract_call_top_level() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1502,7 +1533,9 @@ mod tests {
 
     #[test]
     fn avoid_bad_type() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("
@@ -1535,7 +1568,9 @@ mod tests {
 
     #[test]
     fn contract_stored_in_constant() {
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.analysis = analysis::Settings::empty();
+        let session = Session::new_without_boot_contracts(settings);
         let mut contracts = BTreeMap::new();
         #[rustfmt::skip]
         let snippet1 = indoc!("

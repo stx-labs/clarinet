@@ -125,9 +125,10 @@ impl Default for Settings {
     }
 }
 
+#[cfg(test)]
 impl Settings {
     // `Settings` with nothing enabled, used in unit tests
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             passes: HashSet::new(),
             lints: HashMap::new(),
