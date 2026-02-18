@@ -32,7 +32,7 @@ mod tests {
     use indoc::indoc;
 
     use super::{CaseConst, UnusedConst};
-    use crate::analysis::linter::{Lint};
+    use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 

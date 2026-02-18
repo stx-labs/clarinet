@@ -142,7 +142,9 @@ mod tests {
     use indoc::indoc;
 
     use super::CaseConst;
-    use crate::analysis::linter::{Lint, LintLevel};
+    use clarity_types::diagnostic::Level;
+
+    use crate::analysis::linter::Lint;
     use crate::analysis::util::CaseError;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -155,7 +157,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .set_lint_level(CaseConst::get_name(), LintLevel::Warning);
+            .set_lint_level(CaseConst::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings).formatted_interpretation(
             snippet,

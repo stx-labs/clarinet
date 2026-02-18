@@ -20,7 +20,7 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 use indexmap::IndexMap;
-use linter::{LintLevel, LintName};
+use linter::{LintLevel, LintMapBuilder, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -28,7 +28,7 @@ use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
 use crate::analysis::cache::AnalysisCache;
-use crate::analysis::linter::{LintGroup, LintMapBuilder};
+use crate::analysis::linter::LintGroup;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
@@ -103,12 +103,32 @@ impl Pass {
 // Each new pass should be included in this list
 static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
     lints: IndexMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        let lints = LintMapBuilder::new()
+            .apply_defaults()
+            .build()
+            .into_iter()
+            .filter_map(|(lint, lint_level)| {
+                let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
+                diag_level.map(|level| (lint, level))
+            })
+            .collect();
+
+        Self {
+            passes: HashSet::new(),
+            lints,
+            check_checker: check_checker::Settings::default(),
+        }
+    }
 }
 
 impl Settings {
