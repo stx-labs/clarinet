@@ -101,6 +101,8 @@ impl Pass {
 
 // Each new pass should be included in this list
 static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
+// Passes that should always be enabled
+static DEFAULT_PASSES: [Pass; 1] = [Pass::CallChecker];
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
@@ -113,14 +115,22 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let lints = LintMapBuilder::new().apply_defaults().build();
-
-        // Always enable Call Checker
-        let default_passes = [Pass::CallChecker];
-        let passes = HashSet::from(default_passes);
+        let passes = HashSet::from(DEFAULT_PASSES);
 
         Self {
             passes,
             lints,
+            check_checker: check_checker::Settings::default(),
+        }
+    }
+}
+
+impl Settings {
+    // `Settings` with nothing enabled, used in unit tests
+    fn empty() -> Self {
+        Self {
+            passes: HashSet::new(),
+            lints: HashMap::new(),
             check_checker: check_checker::Settings::default(),
         }
     }
