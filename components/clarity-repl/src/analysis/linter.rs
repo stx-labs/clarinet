@@ -37,6 +37,7 @@ pub enum LintName {
     UnusedDataVar,
     UnusedMap,
     UnusedPrivateFn,
+    UnnecessaryAsMaxLen,
     UnusedToken,
     UnusedTrait,
 }
@@ -81,6 +82,7 @@ impl LintGroup {
                 }
             }
             Perf => {
+                map.insert(LintName::UnnecessaryAsMaxLen, value);
                 map.insert(LintName::UnnecessaryPublic, value);
             }
             Safety => {
