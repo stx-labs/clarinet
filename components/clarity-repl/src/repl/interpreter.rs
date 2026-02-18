@@ -1377,11 +1377,13 @@ mod tests {
         assert!(result.is_err());
 
         let diagnostics = result.unwrap_err();
-        assert_eq!(diagnostics.len(), 1);
+        // Expect error message from linter
+        // TODO: Disable linter for all unit tests in this file
+        assert_eq!(diagnostics.len(), 2);
 
         let message = format!("Runtime Error: Runtime error while interpreting {}.{}: Runtime(DivisionByZero, Some([FunctionIdentifier {{ identifier: \"_native_:native_div\" }}]))", StandardPrincipalData::transient(), contract.name);
         assert_eq!(
-            diagnostics[0],
+            diagnostics[1],
             Diagnostic {
                 level: vm::diagnostic::Level::Error,
                 message,
