@@ -198,12 +198,7 @@ impl<'a> NoopChecker<'a> {
         match &expr.expr {
             SymbolicExpressionType::Atom(name) => name.to_string(),
             SymbolicExpressionType::LiteralValue(v) | SymbolicExpressionType::AtomValue(v) => {
-                match v {
-                    Value::Int(n) => format!("{n}"),
-                    Value::UInt(n) => format!("u{n}"),
-                    Value::Bool(b) => format!("{b}"),
-                    _ => "...".to_string(),
-                }
+                v.to_string()
             }
             SymbolicExpressionType::List(exprs) => {
                 let inner: Vec<String> = exprs.iter().map(Self::format_source).collect();
@@ -285,7 +280,7 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        let (bool_idx, other_idx) = if Self::as_bool_literal(&operands[0]).is_some() {
+        let (left_idx, right_idx) = if Self::as_bool_literal(&operands[0]).is_some() {
             (0, 1)
         } else if Self::as_bool_literal(&operands[1]).is_some() {
             (1, 0)
@@ -293,12 +288,11 @@ impl<'a> NoopChecker<'a> {
             return;
         };
 
-        let b = Self::as_bool_literal(&operands[bool_idx]).unwrap();
-        let other = Self::format_source(&operands[other_idx]);
+        let left = Self::as_bool_literal(&operands[left_idx]).unwrap();
 
         // Check if both operands are bool literals
-        if Self::as_bool_literal(&operands[other_idx]).is_some() {
-            let result = Self::as_bool_literal(&operands[other_idx]).unwrap() == b;
+        if let Some(right) = Self::as_bool_literal(&operands[right_idx]) {
+            let result = right == left;
             self.add_diagnostic(
                 expr,
                 format!("comparing two boolean literals always returns `{result}`"),
@@ -307,17 +301,19 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        if b {
+        let right_str = Self::format_source(&operands[right_idx]);
+
+        if left {
             self.add_diagnostic(
                 expr,
                 "comparing with `true` is unnecessary".to_string(),
-                format!("Replace with `{other}`"),
+                format!("Replace with `{right_str}`"),
             );
         } else {
             self.add_diagnostic(
                 expr,
                 "comparing with `false` is unnecessary, use `not` instead".to_string(),
-                format!("Replace with `(not {other})`"),
+                format!("Replace with `(not {right_str})`"),
             );
         }
     }
@@ -598,15 +594,14 @@ impl<'a> ASTVisitor<'a> for NoopChecker<'a> {
 
         if operands.len() < 2 {
             // Variable length arithmetic ops with single operand have no effect
-            let message = format!("`{func}` with fewer than 2 operands has no effect",);
+            let message = format!("`{func}` with fewer than 2 operands has no effect");
             let suggestion = format!("Replace with `{}`", Self::format_source(&operands[0]));
             self.add_diagnostic(expr, message, suggestion);
             return true;
-        } else {
-            // Check for identity elements in arithmetic ops
-            self.check_arithmetic_identity(expr, func, operands);
         }
 
+        // Check for identity elements in arithmetic ops
+        self.check_arithmetic_identity(expr, func, operands);
         true
     }
 
