@@ -28,10 +28,11 @@ pub use unused_trait::UnusedTrait;
 
 #[cfg(test)]
 mod tests {
+    use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::{CaseConst, UnusedConst};
-    use crate::analysis::linter::{Lint, LintLevel};
+    use crate::analysis::linter::{Lint};
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
@@ -48,11 +49,11 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .set_lint_level(UnusedConst::get_name(), LintLevel::Error);
+            .set_lint_level(UnusedConst::get_name(),Level::Error);
         settings
             .repl_settings
             .analysis
-            .set_lint_level(CaseConst::get_name(), LintLevel::Error);
+            .set_lint_level(CaseConst::get_name(), Level::Error);
 
         let (_, result) = Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
