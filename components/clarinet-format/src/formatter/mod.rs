@@ -70,11 +70,11 @@ impl ClarityFormatter {
         Self { settings }
     }
     /// formatting for files to ensure a newline at the end
-    pub fn format_file(&self, source: &str) -> String {
+    pub fn format_file(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
         let pse = clarity::vm::ast::parser::v2::parse(
             trimmed_source,
-            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+            StackDepthLimits::for_epoch(epoch.unwrap_or(StacksEpochId::latest())),
         )
         .unwrap();
         let agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
@@ -89,14 +89,18 @@ impl ClarityFormatter {
         agg.generate()
     }
     /// Alias `format_file` to `format`
-    pub fn format(&self, source: &str) -> String {
-        self.format_file(source)
+    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
+        self.format_file(source, epoch)
     }
     /// for range formatting within editors
-    pub fn format_section(&self, source: &str) -> Result<String, String> {
+    pub fn format_section(
+        &self,
+        source: &str,
+        epoch: Option<StacksEpochId>,
+    ) -> Result<String, String> {
         let pse = clarity::vm::ast::parser::v2::parse(
             source,
-            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+            StackDepthLimits::for_epoch(epoch.unwrap_or(StacksEpochId::latest())),
         )
         .map_err(|e| e.to_string())?;
 
@@ -1914,12 +1918,12 @@ mod tests_formatter {
 
     fn format_with_default(source: &str) -> String {
         let formatter = ClarityFormatter::new(Settings::default());
-        formatter.format_section(source).unwrap()
+        formatter.format_section(source, None).unwrap()
     }
 
     fn format_with(source: &str, settings: Settings) -> String {
         let formatter = ClarityFormatter::new(settings);
-        formatter.format_section(source).unwrap()
+        formatter.format_section(source, None).unwrap()
     }
 
     #[test]
