@@ -14,6 +14,7 @@ pub mod types;
 
 use std::path::Path;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::clarity::vm::ast::ContractAST;
@@ -30,7 +31,7 @@ use clarity_repl::repl::boot::{
 use clarity_repl::repl::session::ExecutionResultMap;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
-    SessionSettings, DEFAULT_EPOCH,
+    SessionSettings,
 };
 use types::{
     ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,

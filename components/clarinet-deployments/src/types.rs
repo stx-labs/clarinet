@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::clarity::util::hash::{hex_bytes, to_hex};
@@ -11,9 +12,7 @@ use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
-use clarity_repl::repl::{
-    clarity_version_from_u8, clarity_version_to_u8, Session, DEFAULT_CLARITY_VERSION,
-};
+use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
 use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};

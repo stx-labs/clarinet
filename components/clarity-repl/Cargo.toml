@@ -22,6 +22,7 @@ categories = [
 ]
 
 [dependencies]
+clarinet-defaults = { workspace = true }
 chrono = { workspace = true }
 colored = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }

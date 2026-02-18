@@ -17,6 +17,7 @@ reqwest = { workspace = true }
 stacks-common = { workspace = true, default-features = false }
 
 clarity-repl = { path = "../clarity-repl", default-features = false }
+clarinet-defaults = { workspace = true }
 clarinet-files = { path = "../clarinet-files" }
 
 [dev-dependencies]

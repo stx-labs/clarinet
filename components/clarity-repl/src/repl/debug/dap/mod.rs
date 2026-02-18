@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::vm::callables::FunctionIdentifier;
 use clarity::vm::contexts::{ContractContext, Environment, GlobalContext, LocalContext};
 use clarity::vm::errors::VmExecutionError;
@@ -23,7 +24,6 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 use self::codec::{DebugAdapterCodec, ParseError};
 use super::{extract_watch_variable, AccessType, DebugState, State};
-use crate::repl::DEFAULT_EPOCH;
 
 pub mod codec;
 

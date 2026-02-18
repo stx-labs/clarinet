@@ -23,6 +23,7 @@ wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 web-sys = { workspace = true, features = ["console"] }
 
+clarinet-defaults = { workspace = true }
 clarinet-files = { path = "../clarinet-files", default-features = false }
 clarity-repl = { path = "../clarity-repl", default-features = false }
 clarinet-deployments = { path = "../clarinet-deployments", default-features = false }

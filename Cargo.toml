@@ -6,6 +6,7 @@ members = [
     "components/clarinet-cli",
     "components/clarinet-deployments",
     "components/clarinet-files",
+    "components/clarinet-defaults",
     "components/clarinet-format",
     "components/clarinet-utils",
     "components/clarinet-sdk-wasm",
@@ -23,6 +24,7 @@ default-members = ["components/clarinet-cli"]
 version = "3.14.0"
 
 [workspace.dependencies]
+clarinet-defaults = { path = "components/clarinet-defaults" }
 clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "clarity", default-features = false }
 clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "clarity-types" }
 stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "stacks-common", default-features = false }

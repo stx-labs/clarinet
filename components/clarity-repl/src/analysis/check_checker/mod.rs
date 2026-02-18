@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{DiagnosableError, Diagnostic, Level};
@@ -19,7 +20,6 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
-use crate::repl::DEFAULT_EPOCH;
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]

@@ -18,6 +18,7 @@ schemars = { workspace = true, optional = true }
 
 clarity = { workspace = true, default-features = false }
 stacks-common = { workspace = true, default-features = false }
+clarinet-defaults = { workspace = true }
 clarinet-utils = { version = "1", path = "../clarinet-utils" }
 clarity-repl = { path = "../clarity-repl", default-features = false }
 

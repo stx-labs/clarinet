@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::panic;
 use std::path::{Path, PathBuf};
 
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
     DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
@@ -26,7 +27,7 @@ use clarity_repl::repl::session::CostsReport;
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
     clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
-    Session, SessionSettings, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
+    Session, SessionSettings,
 };
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
