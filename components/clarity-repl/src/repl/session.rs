@@ -1625,7 +1625,8 @@ mod tests {
 
     #[test]
     fn clarity_epoch_mismatch() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         let snippet = "(define-data-var x uint u0)";
 
         // can not use ClarityContractBuilder to build an invalid contract
@@ -1643,7 +1644,8 @@ mod tests {
 
     #[test]
     fn deploy_contract_with_wrong_epoch() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
 
         session.update_epoch(StacksEpochId::Epoch24);
 
@@ -1778,7 +1780,8 @@ mod tests {
 
     #[test]
     fn can_deploy_a_contract() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 
         // deploy default contract
@@ -1789,7 +1792,8 @@ mod tests {
 
     #[test]
     fn can_call_boot_contract_fn() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
         // call pox4 get-info
@@ -1820,7 +1824,8 @@ mod tests {
 
     #[test]
     fn can_call_public_contract_fn() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 
         // deploy default contract
@@ -1850,7 +1855,8 @@ mod tests {
 
     #[test]
     fn current_block_info_is_none() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
         session.advance_chain_tip(5);
         let result = run_session_snippet(&mut session, "(get-block-info? time block-height)");
@@ -1859,7 +1865,8 @@ mod tests {
 
     #[test]
     fn block_time_is_realistic_in_epoch_2_5() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
         session.advance_chain_tip(4);
@@ -1879,7 +1886,8 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch2_5() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
         let snippet = [
@@ -1911,7 +1919,8 @@ mod tests {
 
     #[test]
     fn get_burn_block_info_past() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch30);
 
         session.advance_burn_chain_tip(10);
@@ -1936,7 +1945,8 @@ mod tests {
     fn burn_block_height_behavior_epoch3_0() {
         // test that clarinet preserves the 3.0 and 3.1 special behavior of burn-block-height
         // https://github.com/stacks-network/stacks-core/pull/5524
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch30);
 
         let snippet = [
@@ -1968,7 +1978,8 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch3_0_contract_in_2_5() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
         let snippet = [
@@ -2012,7 +2023,8 @@ mod tests {
 
     #[test]
     fn test_parse_and_set_tx_sender() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
         let result = session.process_console_input(&format!("::set_tx_sender    {sender}"));
         assert!(result.1[0].contains(sender));
@@ -2023,7 +2035,8 @@ mod tests {
 
     #[test]
     fn test_call_contract_fn_undefined_function() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 
         // deploy a simple contract
@@ -2092,7 +2105,8 @@ mod tests {
 
     #[test]
     fn test_mint_ft() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 
         let token_name = "ctb";
