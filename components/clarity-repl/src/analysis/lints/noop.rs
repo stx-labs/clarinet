@@ -53,53 +53,64 @@ impl NoopCheckerSettings {
     }
 }
 
+/// Represents a sum of either Clarity `int` or `uint` types
+enum ClaritySum {
+    /// Clarity `int`
+    Signed(i128),
+    /// Clarity `uint`
+    Unsigned(u128),
+    /// Tried to mix `uint` and `int` or used non-integer type
+    /// Should not be possible, such cases should fail to parse
+    Mixed,
+}
+
 /// Result of separating operands into constants and non-constants,
 /// accumulating the constants using a checked arithmetic operation.
 struct SplitOperands<'a> {
     non_constants: Vec<&'a SymbolicExpression>,
-    uint_acc: Option<u128>,
-    int_acc: Option<i128>,
+    acc: Option<ClaritySum>,
 }
 
 impl<'a> SplitOperands<'a> {
     fn accumulate(
         operands: &'a [SymbolicExpression],
-        uint_init: u128,
-        int_init: i128,
         uint_op: fn(u128, u128) -> Option<u128>,
         int_op: fn(i128, i128) -> Option<i128>,
     ) -> Self {
         let mut non_constants = Vec::new();
-        let mut uint_acc = Some(uint_init);
-        let mut int_acc = Some(int_init);
+        let mut acc: Option<ClaritySum> = None;
 
         for op in operands {
             match op.match_literal_value() {
                 Some(Value::UInt(n)) => {
-                    uint_acc = uint_acc.and_then(|a| uint_op(a, *n));
-                    int_acc = None;
+                    acc = match acc {
+                        None => Some(ClaritySum::Unsigned(*n)),
+                        Some(ClaritySum::Unsigned(a)) => uint_op(a, *n).map(ClaritySum::Unsigned),
+                        Some(ClaritySum::Signed(_)) => Some(ClaritySum::Mixed),
+                        Some(ClaritySum::Mixed) => acc,
+                    };
                 }
                 Some(Value::Int(n)) => {
-                    int_acc = int_acc.and_then(|a| int_op(a, *n));
-                    uint_acc = None;
+                    acc = match acc {
+                        None => Some(ClaritySum::Signed(*n)),
+                        Some(ClaritySum::Signed(a)) => int_op(a, *n).map(ClaritySum::Signed),
+                        Some(ClaritySum::Unsigned(_)) => Some(ClaritySum::Mixed),
+                        Some(ClaritySum::Mixed) => acc,
+                    };
                 }
                 _ => non_constants.push(op),
             }
         }
 
-        Self {
-            non_constants,
-            uint_acc,
-            int_acc,
-        }
+        Self { non_constants, acc }
     }
 
     fn sum_of(operands: &'a [SymbolicExpression]) -> Self {
-        Self::accumulate(operands, 0, 0, u128::checked_add, i128::checked_add)
+        Self::accumulate(operands, u128::checked_add, i128::checked_add)
     }
 
     fn product_of(operands: &'a [SymbolicExpression]) -> Self {
-        Self::accumulate(operands, 1, 1, u128::checked_mul, i128::checked_mul)
+        Self::accumulate(operands, u128::checked_mul, i128::checked_mul)
     }
 
     fn has_constants(&self, total: usize) -> bool {
@@ -107,20 +118,26 @@ impl<'a> SplitOperands<'a> {
     }
 
     fn is_zero(&self) -> bool {
-        self.uint_acc == Some(0) || self.int_acc == Some(0)
+        matches!(
+            self.acc,
+            Some(ClaritySum::Unsigned(0)) | Some(ClaritySum::Signed(0))
+        )
     }
 
     fn is_one(&self) -> bool {
-        self.uint_acc == Some(1) || self.int_acc == Some(1)
+        matches!(
+            self.acc,
+            Some(ClaritySum::Unsigned(1)) | Some(ClaritySum::Signed(1))
+        )
     }
 
-    /// Returns "u0" or "0" depending on the accumulated type.
-    fn zero_str(&self) -> &'static str {
-        if self.uint_acc.is_some() {
-            "u0"
-        } else {
-            "0"
-        }
+    /// If `self.acc` is zero, returns correct string representation, depending on type
+    fn zero_str(&self) -> Option<&'static str> {
+        self.acc.as_ref().and_then(|val| match val {
+            ClaritySum::Unsigned(0) => Some("u0"),
+            ClaritySum::Signed(0) => Some("0"),
+            ClaritySum::Unsigned(_) | ClaritySum::Signed(_) | ClaritySum::Mixed => None,
+        })
     }
 }
 
@@ -459,8 +476,7 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        if split.is_zero() {
-            let zero_str = split.zero_str();
+        if let Some(zero_str) = split.zero_str() {
             self.add_diagnostic(
                 expr,
                 format!("multiplying by zero always evaluates to `{zero_str}`"),
