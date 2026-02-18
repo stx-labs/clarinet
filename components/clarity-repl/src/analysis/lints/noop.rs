@@ -447,7 +447,6 @@ impl<'a> NoopChecker<'a> {
             return;
         }
 
-        // TODO: What if first arg is a constant?
         let tail = &operands[1..];
         let split = SplitOperands::sum_of(tail);
         if !split.has_constants(tail.len()) || !split.is_zero() {
