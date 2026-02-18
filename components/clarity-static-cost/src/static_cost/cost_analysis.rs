@@ -1243,30 +1243,24 @@ mod tests {
     use super::super::is_node_branching;
     use super::*;
 
-    struct TestEnvironment {
-        store: MemoryBackingStore,
-        clarity_version: ClarityVersion,
-    }
-
-    impl TestEnvironment {
-        fn new(_epoch: StacksEpochId, clarity_version: ClarityVersion) -> Self {
-            Self {
-                store: MemoryBackingStore::new(),
-                clarity_version,
-            }
-        }
-
-        fn get_env(&mut self, epoch: StacksEpochId) -> OwnedEnvironment<'_, '_> {
-            let mut db = self.store.as_clarity_db();
-            db.begin();
-            db.set_clarity_epoch_version(epoch).unwrap();
-            db.commit().unwrap();
-            OwnedEnvironment::new(db, epoch)
-        }
-    }
-
-    fn create_test_env(epoch: StacksEpochId, clarity_version: ClarityVersion) -> TestEnvironment {
-        TestEnvironment::new(epoch, clarity_version)
+    /// Create a test environment and run a closure with it. Mirrors the integration test
+    /// pattern to avoid lifetime issues with returning OwnedEnvironment from a method.
+    fn with_test_environment<F, R>(
+        epoch: StacksEpochId,
+        _clarity_version: ClarityVersion,
+        f: F,
+    ) -> R
+    where
+        F: FnOnce(&mut OwnedEnvironment) -> R,
+    {
+        let mut memory_store = MemoryBackingStore::new();
+        let mut db = memory_store.as_clarity_db();
+        db.begin();
+        db.set_clarity_epoch_version(epoch).unwrap();
+        db.commit().unwrap();
+        let mut owned_env = OwnedEnvironment::new(db, epoch);
+        owned_env.begin();
+        f(&mut owned_env)
     }
 
     fn static_cost_native_test(
@@ -1280,24 +1274,23 @@ mod tests {
         let exprs = &ast.expressions;
         let user_args = UserArgumentsContext::new();
         let expr = &exprs[0];
-        let mut test_env = create_test_env(epoch, *clarity_version);
-        let mut owned_env = test_env.get_env(epoch);
-        owned_env.begin();
-        let contract_context =
-            ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
-        let mut env = owned_env.get_exec_environment(None, None, &contract_context);
-        let (_, cost_analysis_tree) = build_cost_analysis_tree(
-            &expr,
-            &user_args,
-            &cost_map,
-            clarity_version,
-            epoch,
-            &mut env,
-            0,
-        )?;
+        with_test_environment(epoch, *clarity_version, |owned_env| {
+            let contract_context =
+                ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
+            let mut env = owned_env.get_exec_environment(None, None, &contract_context);
+            let (_, cost_analysis_tree) = build_cost_analysis_tree(
+                &expr,
+                &user_args,
+                &cost_map,
+                clarity_version,
+                epoch,
+                &mut env,
+                0,
+            )?;
 
-        let summing_cost = calculate_total_cost_with_branching(&cost_analysis_tree);
-        Ok(summing_cost.into())
+            let summing_cost = calculate_total_cost_with_branching(&cost_analysis_tree);
+            Ok(summing_cost.into())
+        })
     }
 
     fn static_cost_test(
@@ -1309,17 +1302,16 @@ mod tests {
 
         let epoch = StacksEpochId::latest();
         let ast = make_ast(source, epoch, clarity_version)?;
-        let mut test_env = create_test_env(epoch, *clarity_version);
-        let mut owned_env = test_env.get_env(epoch);
-        owned_env.begin();
-        let contract_context =
-            ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
-        let mut env = owned_env.get_exec_environment(None, None, &contract_context);
-        let costs = static_cost_from_ast(&ast, clarity_version, epoch, &mut env)?;
-        Ok(costs
-            .into_iter()
-            .map(|(name, (cost, _trait_count))| (name, cost))
-            .collect())
+        with_test_environment(epoch, *clarity_version, |owned_env| {
+            let contract_context =
+                ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
+            let mut env = owned_env.get_exec_environment(None, None, &contract_context);
+            let costs = static_cost_from_ast(&ast, clarity_version, epoch, &mut env)?;
+            Ok(costs
+                .into_iter()
+                .map(|(name, (cost, _trait_count))| (name, cost))
+                .collect())
+        })
     }
 
     fn build_test_ast(src: &str) -> clarity::vm::ast::ContractAST {
@@ -1353,24 +1345,23 @@ mod tests {
         let user_args = UserArgumentsContext::new();
         let cost_map = HashMap::new(); // Empty cost map for tests
         let epoch = StacksEpochId::Epoch32;
-        let mut test_env = create_test_env(epoch, ClarityVersion::Clarity3);
-        let mut owned_env = test_env.get_env(epoch);
-        owned_env.begin();
-        let contract_context = ContractContext::new(
-            QualifiedContractIdentifier::transient(),
-            ClarityVersion::Clarity3,
-        );
-        let mut env = owned_env.get_exec_environment(None, None, &contract_context);
-        let (_, cost_tree) = build_cost_analysis_tree(
-            expr,
-            &user_args,
-            &cost_map,
-            &ClarityVersion::Clarity3,
-            epoch,
-            &mut env,
-            0,
-        )
-        .unwrap();
+        let (_, cost_tree) = with_test_environment(epoch, ClarityVersion::Clarity3, |owned_env| {
+            let contract_context = ContractContext::new(
+                QualifiedContractIdentifier::transient(),
+                ClarityVersion::Clarity3,
+            );
+            let mut env = owned_env.get_exec_environment(None, None, &contract_context);
+            build_cost_analysis_tree(
+                expr,
+                &user_args,
+                &cost_map,
+                &ClarityVersion::Clarity3,
+                epoch,
+                &mut env,
+                0,
+            )
+            .unwrap()
+        });
 
         // Root should be an If node
         assert!(matches!(
@@ -1416,24 +1407,23 @@ mod tests {
         let user_args = UserArgumentsContext::new();
         let cost_map = HashMap::new(); // Empty cost map for tests
         let epoch = StacksEpochId::Epoch32;
-        let mut test_env = create_test_env(epoch, ClarityVersion::Clarity3);
-        let mut owned_env = test_env.get_env(epoch);
-        owned_env.begin();
-        let contract_context = ContractContext::new(
-            QualifiedContractIdentifier::transient(),
-            ClarityVersion::Clarity3,
-        );
-        let mut env = owned_env.get_exec_environment(None, None, &contract_context);
-        let (_, cost_tree) = build_cost_analysis_tree(
-            expr,
-            &user_args,
-            &cost_map,
-            &ClarityVersion::Clarity3,
-            epoch,
-            &mut env,
-            0,
-        )
-        .unwrap();
+        let (_, cost_tree) = with_test_environment(epoch, ClarityVersion::Clarity3, |owned_env| {
+            let contract_context = ContractContext::new(
+                QualifiedContractIdentifier::transient(),
+                ClarityVersion::Clarity3,
+            );
+            let mut env = owned_env.get_exec_environment(None, None, &contract_context);
+            build_cost_analysis_tree(
+                expr,
+                &user_args,
+                &cost_map,
+                &ClarityVersion::Clarity3,
+                epoch,
+                &mut env,
+                0,
+            )
+            .unwrap()
+        });
 
         assert!(matches!(
             cost_tree.expr,
@@ -1465,24 +1455,23 @@ mod tests {
         let user_args = UserArgumentsContext::new();
         let cost_map = HashMap::new(); // Empty cost map for tests
         let epoch = StacksEpochId::Epoch32;
-        let mut test_env = create_test_env(epoch, ClarityVersion::Clarity3);
-        let mut owned_env = test_env.get_env(epoch);
-        owned_env.begin();
-        let contract_context = ContractContext::new(
-            QualifiedContractIdentifier::transient(),
-            ClarityVersion::Clarity3,
-        );
-        let mut env = owned_env.get_exec_environment(None, None, &contract_context);
-        let (_, cost_tree) = build_cost_analysis_tree(
-            expr,
-            &user_args,
-            &cost_map,
-            &ClarityVersion::Clarity3,
-            epoch,
-            &mut env,
-            0,
-        )
-        .unwrap();
+        let (_, cost_tree) = with_test_environment(epoch, ClarityVersion::Clarity3, |owned_env| {
+            let contract_context = ContractContext::new(
+                QualifiedContractIdentifier::transient(),
+                ClarityVersion::Clarity3,
+            );
+            let mut env = owned_env.get_exec_environment(None, None, &contract_context);
+            build_cost_analysis_tree(
+                expr,
+                &user_args,
+                &cost_map,
+                &ClarityVersion::Clarity3,
+                epoch,
+                &mut env,
+                0,
+            )
+            .unwrap()
+        });
 
         assert!(matches!(
             cost_tree.expr,
@@ -1504,24 +1493,23 @@ mod tests {
         let user_args = UserArgumentsContext::new();
         let cost_map = HashMap::new(); // Empty cost map for tests
         let epoch = StacksEpochId::Epoch32;
-        let mut test_env = create_test_env(epoch, ClarityVersion::Clarity3);
-        let mut owned_env = test_env.get_env(epoch);
-        owned_env.begin();
-        let contract_context = ContractContext::new(
-            QualifiedContractIdentifier::transient(),
-            ClarityVersion::Clarity3,
-        );
-        let mut env = owned_env.get_exec_environment(None, None, &contract_context);
-        let (_, cost_tree) = build_cost_analysis_tree(
-            expr,
-            &user_args,
-            &cost_map,
-            &ClarityVersion::Clarity3,
-            epoch,
-            &mut env,
-            0,
-        )
-        .unwrap();
+        let (_, cost_tree) = with_test_environment(epoch, ClarityVersion::Clarity3, |owned_env| {
+            let contract_context = ContractContext::new(
+                QualifiedContractIdentifier::transient(),
+                ClarityVersion::Clarity3,
+            );
+            let mut env = owned_env.get_exec_environment(None, None, &contract_context);
+            build_cost_analysis_tree(
+                expr,
+                &user_args,
+                &cost_map,
+                &ClarityVersion::Clarity3,
+                epoch,
+                &mut env,
+                0,
+            )
+            .unwrap()
+        });
 
         assert_eq!(cost_tree.children.len(), 3);
 
