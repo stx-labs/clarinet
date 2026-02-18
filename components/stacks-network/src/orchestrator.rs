@@ -460,7 +460,7 @@ impl DevnetOrchestrator {
                 &format!("http://localhost:{stacks_api_port}/doc"),
             );
 
-            match self.boot_stacks_api_container(ctx).await {
+            match self.boot_stacks_api_container(ctx, no_snapshot).await {
                 Ok(_) => {}
                 Err(message) => {
                     let _ = event_tx.send(DevnetEvent::FatalError(message.clone()));
@@ -1544,7 +1544,11 @@ db_path = "stacks-signer-{signer_id}.sqlite"
             }
         }
     }
-    pub async fn boot_stacks_api_container(&self, ctx: &Context) -> Result<(), String> {
+    pub async fn boot_stacks_api_container(
+        &self,
+        ctx: &Context,
+        no_snapshot: bool,
+    ) -> Result<(), String> {
         let container = self
             .stacks_api_container_id
             .as_ref()
@@ -1565,49 +1569,53 @@ db_path = "stacks-signer-{signer_id}.sqlite"
         };
 
         // Check if we need to import events
-        if let Some(events_path) = self.has_events_to_import(devnet_config) {
-            // Wait for API to be ready
-            // TODO: don't do this..
-            std::thread::sleep(Duration::from_secs(8));
+        if !no_snapshot {
+            if let Some(events_path) = self.has_events_to_import(devnet_config) {
+                // Wait for API to be ready
+                // TODO: don't do this..
+                std::thread::sleep(Duration::from_secs(8));
 
-            ctx.try_log(|logger| {
-                slog::info!(logger, "Importing events from {}", events_path.display())
-            });
-
-            // Copy the events file to the container
-            let container_name = format!("stacks-api.{}", self.network_name);
-            let copy_command = format!(
-                "docker cp {} {}:/tmp/events_cache.tsv",
-                events_path.display(),
-                container_name
-            );
-            let output = run_command(&copy_command)
-                .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
-
-            if !output.status.success() {
-                return Err(format!(
-                    "Copy command failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-
-            // Run the import command
-            let import_command = format!(
-                "docker exec {container_name} node /app/lib/index.js import-events --file /tmp/events_cache.tsv --wipe-db"
-            );
-            let output = run_command(&import_command)
-                .map_err(|e| format!("Failed to import events: {e}"))?;
-
-            if !output.status.success() {
                 ctx.try_log(|logger| {
-                    slog::warn!(
-                        logger,
-                        "Events import failed: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    )
+                    slog::info!(logger, "Importing events from {}", events_path.display())
                 });
-            } else {
-                ctx.try_log(|logger| slog::info!(logger, "Events import completed successfully"));
+
+                // Copy the events file to the container
+                let container_name = format!("stacks-api.{}", self.network_name);
+                let copy_command = format!(
+                    "docker cp {} {}:/tmp/events_cache.tsv",
+                    events_path.display(),
+                    container_name
+                );
+                let output = run_command(&copy_command)
+                    .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
+
+                if !output.status.success() {
+                    return Err(format!(
+                        "Copy command failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ));
+                }
+
+                // Run the import command
+                let import_command = format!(
+                    "docker exec {container_name} node /app/lib/index.js import-events --file /tmp/events_cache.tsv --wipe-db"
+                );
+                let output = run_command(&import_command)
+                    .map_err(|e| format!("Failed to import events: {e}"))?;
+
+                if !output.status.success() {
+                    ctx.try_log(|logger| {
+                        slog::warn!(
+                            logger,
+                            "Events import failed: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        )
+                    });
+                } else {
+                    ctx.try_log(|logger| {
+                        slog::info!(logger, "Events import completed successfully")
+                    });
+                }
             }
         }
         Ok(())
