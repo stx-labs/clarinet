@@ -71,7 +71,10 @@ impl<'a, 'b> UnusedBinding<'a, 'b> {
         };
         (
             msg,
-            Some("Remove this expression or suffix binding with '_' if this is intentional".to_string()),
+            Some(
+                "Remove this expression or suffix binding with '_' if this is intentional"
+                    .to_string(),
+            ),
         )
     }
 
