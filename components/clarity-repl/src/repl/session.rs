@@ -1429,13 +1429,14 @@ mod tests {
     #[test]
     fn initial_accounts() {
         let address = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
-        let mut settings = SessionSettings::default();
-        settings.initial_accounts = vec![Account {
-            address: address.to_owned(),
-            balance: 1000000,
-            name: "wallet_1".to_owned(),
-        }];
-        let session = Session::new(settings);
+        let session = Session::new(SessionSettings {
+            initial_accounts: vec![Account {
+                address: address.to_owned(),
+                balance: 1000000,
+                name: "wallet_1".to_owned(),
+            }],
+            ..Default::default()
+        });
         let balance = session.interpreter.get_balance_for_account(address, "STX");
         assert_eq!(balance, 1000000);
     }

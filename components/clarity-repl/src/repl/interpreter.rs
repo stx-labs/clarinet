@@ -1009,11 +1009,11 @@ mod tests {
 
     #[track_caller]
     fn get_interpreter(settings: Option<Settings>) -> ClarityInterpreter {
-        let settings = settings.unwrap_or_else(|| Settings {
-            analysis: AnalysisSettings::empty(),
-            ..Default::default()
-        });
-        ClarityInterpreter::new(StandardPrincipalData::transient(), settings, None)
+        ClarityInterpreter::new(
+            StandardPrincipalData::transient(),
+            settings.unwrap_or_default(),
+            None,
+        )
     }
 
     #[track_caller]
@@ -1116,7 +1116,7 @@ mod tests {
     #[test]
     fn test_advance_stacks_chain_tip() {
         let wasm_settings = Settings {
-            analysis: AnalysisSettings::empty(),
+            analysis: AnalysisSettings::default(),
             remote_data: RemoteDataSettings::default(),
             show_timings: false,
         };
