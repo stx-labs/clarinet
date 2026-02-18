@@ -44,7 +44,7 @@ mod tests {
             (define-constant this_is_regular_snake_case u100)
         ").to_string();
 
-        let mut settings = SessionSettings::for_unit_test();
+        let mut settings = SessionSettings::default();
         settings
             .repl_settings
             .analysis

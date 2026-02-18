@@ -1429,7 +1429,7 @@ mod tests {
     #[test]
     fn initial_accounts() {
         let address = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
-        let mut settings = SessionSettings::for_unit_test();
+        let mut settings = SessionSettings::default();
         settings.initial_accounts = vec![Account {
             address: address.to_owned(),
             balance: 1000000,
@@ -1442,7 +1442,7 @@ mod tests {
 
     #[test]
     fn epoch_switch() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch20);
         let diags = session
             .eval("(slice? \"blockstack\" u5 u10)".into(), false)
@@ -1468,7 +1468,7 @@ mod tests {
 
     #[test]
     fn test_parse_and_advance_stacks_chain_tip() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         let result = session.handle_command("::advance_stacks_chain_tip 1");
         assert_eq!(
             result,
@@ -1485,7 +1485,7 @@ mod tests {
 
     #[test]
     fn test_parse_and_advance_burn_chain_tip_pre_epoch3() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         let result = session.handle_command("::advance_burn_chain_tip 1");
         assert_eq!(
             result,
@@ -1507,7 +1507,7 @@ mod tests {
 
     #[test]
     fn test_parse_and_advance_burn_chain_tip_epoch3() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         session.handle_command("::set_epoch 3.0");
         let result = session.handle_command("::advance_burn_chain_tip 1");
         assert_eq!(
@@ -1529,7 +1529,7 @@ mod tests {
 
     #[test]
     fn set_epoch_command() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         let initial_block_height = session.interpreter.get_block_height();
         let initial_epoch = session.handle_command("::get_epoch");
         // initial epoch is 2.05
@@ -1568,7 +1568,7 @@ mod tests {
 
     #[test]
     fn encode_error() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         let result = session.encode("::encode { foo false }");
         assert_eq!(
             result,
@@ -1590,7 +1590,7 @@ mod tests {
 
     #[test]
     fn decode_simple() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
 
         let result = session.decode("::decode 0000000000000000 0000000000000000 2a");
         assert_eq!(result, "42".green().to_string());
@@ -1598,14 +1598,14 @@ mod tests {
 
     #[test]
     fn decode_map() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         let result = session.decode("::decode 0x0c00000002036261720403666f6f0d0000000568656c6c6f");
         assert_eq!(result, "{ bar: false, foo: \"hello\" }".green().to_string());
     }
 
     #[test]
     fn decode_error() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         let result = session.decode("::decode 42");
         assert_eq!(
             result,
@@ -1625,7 +1625,7 @@ mod tests {
 
     #[test]
     fn clarity_epoch_mismatch() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         let snippet = "(define-data-var x uint u0)";
 
@@ -1644,7 +1644,7 @@ mod tests {
 
     #[test]
     fn deploy_contract_with_wrong_epoch() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
 
         session.update_epoch(StacksEpochId::Epoch24);
@@ -1668,7 +1668,7 @@ mod tests {
 
     #[test]
     fn test_eval_clarity_string() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let mut session = Session::new(SessionSettings::default());
         let epoch = StacksEpochId::Epoch25;
         session.update_epoch(epoch);
 
@@ -1695,7 +1695,7 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
 
         session.handle_command("::set_epoch 2.5");
@@ -1781,7 +1781,7 @@ mod tests {
 
     #[test]
     fn can_deploy_a_contract() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 
@@ -1793,7 +1793,7 @@ mod tests {
 
     #[test]
     fn can_call_boot_contract_fn() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
@@ -1825,7 +1825,7 @@ mod tests {
 
     #[test]
     fn can_call_public_contract_fn() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 
@@ -1856,7 +1856,7 @@ mod tests {
 
     #[test]
     fn current_block_info_is_none() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
         session.advance_chain_tip(5);
@@ -1866,7 +1866,7 @@ mod tests {
 
     #[test]
     fn block_time_is_realistic_in_epoch_2_5() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
@@ -1887,7 +1887,7 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch2_5() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
@@ -1920,7 +1920,7 @@ mod tests {
 
     #[test]
     fn get_burn_block_info_past() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch30);
 
@@ -1946,7 +1946,7 @@ mod tests {
     fn burn_block_height_behavior_epoch3_0() {
         // test that clarinet preserves the 3.0 and 3.1 special behavior of burn-block-height
         // https://github.com/stacks-network/stacks-core/pull/5524
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch30);
 
@@ -1979,7 +1979,7 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch3_0_contract_in_2_5() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(StacksEpochId::Epoch25);
 
@@ -2024,7 +2024,7 @@ mod tests {
 
     #[test]
     fn test_parse_and_set_tx_sender() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
         let result = session.process_console_input(&format!("::set_tx_sender    {sender}"));
@@ -2036,7 +2036,7 @@ mod tests {
 
     #[test]
     fn test_call_contract_fn_undefined_function() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 
@@ -2106,7 +2106,7 @@ mod tests {
 
     #[test]
     fn test_mint_ft() {
-        let settings = SessionSettings::for_unit_test();
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         session.update_epoch(DEFAULT_EPOCH);
 

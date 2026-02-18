@@ -104,37 +104,12 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 // Passes that should always be enabled
 static DEFAULT_PASSES: [Pass; 1] = [Pass::CallChecker];
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
     lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        let lints = LintMapBuilder::new().apply_defaults().build();
-        let passes = HashSet::from(DEFAULT_PASSES);
-
-        Self {
-            passes,
-            lints,
-            check_checker: check_checker::Settings::default(),
-        }
-    }
-}
-
-#[cfg(test)]
-impl Settings {
-    // `Settings` with nothing enabled, used in unit tests
-    pub(crate) fn empty() -> Self {
-        Self {
-            passes: HashSet::new(),
-            lints: HashMap::new(),
-            check_checker: check_checker::Settings::default(),
-        }
-    }
 }
 
 impl Settings {
@@ -214,28 +189,28 @@ pub struct SettingsFile {
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let mut settings = Settings::default();
+        let mut lints = LintMapBuilder::new().apply_defaults().build();
 
         // Process lint groups first
         for (group, val) in from_file.lint_groups.unwrap_or_default() {
             if let Some(level) = LintLevel::from(val).into() {
-                group.insert_into(&mut settings.lints, level);
+                group.insert_into(&mut lints, level);
             } else {
-                group.remove_from(&mut settings.lints);
+                group.remove_from(&mut lints);
             }
         }
 
         // Individual lints can override group settings
         for (lint, val) in from_file.lints.unwrap_or_default() {
             if let Some(level) = LintLevel::from(val).into() {
-                settings.enable_lint(lint, level);
+                lints.insert(lint, level);
             } else {
-                settings.disable_lints(&lint);
+                lints.remove(&lint);
             }
         }
 
         // Add analysis passes listed in config file
-        let passes = from_file
+        let mut passes = from_file
             .passes
             .map(|file_passes| match file_passes {
                 OneOrList::One(pass) => HashSet::from([pass]),
@@ -247,19 +222,23 @@ impl From<SettingsFile> for Settings {
                 } else {
                     passes
                 }
-            });
+            })
+            .unwrap_or_default();
 
-        if let Some(p) = passes {
-            settings.passes.extend(p);
-        }
+        // Always enable default passes
+        passes.extend(DEFAULT_PASSES);
 
         // Each pass that has its own settings should be included here.
-        settings.check_checker = from_file
+        let check_checker = from_file
             .check_checker
             .map(check_checker::Settings::from)
-            .unwrap_or(settings.check_checker);
+            .unwrap_or_default();
 
-        settings
+        Self {
+            passes,
+            lints,
+            check_checker,
+        }
     }
 }
 

@@ -150,7 +150,7 @@ mod tests {
     fn run_snippet_no_panic(
         snippet: String,
     ) -> Result<(Vec<String>, ExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
-        let mut settings = SessionSettings::for_unit_test();
+        let mut settings = SessionSettings::default();
         settings
             .repl_settings
             .analysis

@@ -400,7 +400,7 @@ mod tests {
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
-        let mut settings = SessionSettings::for_unit_test();
+        let mut settings = SessionSettings::default();
         settings
             .repl_settings
             .analysis
