@@ -1,4 +1,6 @@
+use ::clarity::types::StacksEpochId;
 use ::clarity::vm::ast::parser;
+use ::clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
 use ::clarity::vm::representations::PreSymbolicExpressionType::Comment;
 
@@ -71,8 +73,10 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
 }
 
 pub fn remove_env_simnet(source: String) -> Result<String, String> {
-    let (pre_expressions, mut _diagnostics, success) =
-        parser::v2::parse_collect_diagnostics(&source);
+    let (pre_expressions, mut _diagnostics, success) = parser::v2::parse_collect_diagnostics(
+        &source,
+        StackDepthLimits::for_epoch(StacksEpochId::latest()),
+    );
 
     if !success {
         return Err("failed to parse pre_expressions from source".to_string());
