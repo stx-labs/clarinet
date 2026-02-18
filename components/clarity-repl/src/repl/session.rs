@@ -1695,7 +1695,8 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let mut session = Session::new(SessionSettings::for_unit_test());
+        let settings = SessionSettings::for_unit_test();
+        let mut session = Session::new(settings);
 
         session.handle_command("::set_epoch 2.5");
 

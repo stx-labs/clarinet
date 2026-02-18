@@ -1008,8 +1008,10 @@ mod tests {
 
     #[track_caller]
     fn get_interpreter(settings: Option<Settings>) -> ClarityInterpreter {
-        let mut settings = settings.unwrap_or_default();
-        settings.analysis = AnalysisSettings::empty();
+        let settings = settings.unwrap_or_else(|| Settings {
+            analysis: AnalysisSettings::empty(),
+            ..Default::default()
+        });
         ClarityInterpreter::new(StandardPrincipalData::transient(), settings, None)
     }
 
