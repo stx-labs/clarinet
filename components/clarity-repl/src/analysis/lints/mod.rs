@@ -49,11 +49,11 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .set_lint_level(UnusedConst::get_name(),Level::Error);
+            .enable_lint(UnusedConst::get_name(), Level::Error);
         settings
             .repl_settings
             .analysis
-            .set_lint_level(CaseConst::get_name(), Level::Error);
+            .enable_lint(CaseConst::get_name(), Level::Error);
 
         let (_, result) = Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)

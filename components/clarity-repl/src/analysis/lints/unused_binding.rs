@@ -148,12 +148,10 @@ impl Lint for UnusedBinding<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::ExecutionResult;
-    use clarity_types::diagnostic::Diagnostic;
+    use clarity_types::diagnostic::{Diagnostic, Level};
     use indoc::indoc;
 
     use super::UnusedBinding;
-    use clarity_types::diagnostic::Level;
-
     use crate::analysis::linter::Lint;
     use crate::analysis::lints::unused_binding::BindingType;
     use crate::repl::session::Session;
@@ -167,7 +165,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .set_lint_level(UnusedBinding::get_name(), Level::Warning);
+            .enable_lint(UnusedBinding::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings).formatted_interpretation(
             snippet,

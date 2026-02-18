@@ -390,11 +390,10 @@ impl Lint for UnusedTrait<'_> {
 mod tests {
     use clarity::types::StacksEpochId;
     use clarity::vm::ExecutionResult;
+    use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::UnusedTrait;
-    use clarity_types::diagnostic::Level;
-
     use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -406,7 +405,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .set_lint_level(UnusedTrait::get_name(), Level::Warning);
+            .enable_lint(UnusedTrait::get_name(), Level::Warning);
 
         // We need a trait in a separate contract for these tests
         #[rustfmt::skip]

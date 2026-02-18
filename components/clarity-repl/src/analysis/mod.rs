@@ -11,7 +11,7 @@ pub mod linter;
 pub mod lints;
 mod util;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
@@ -24,7 +24,6 @@ use linter::{LintLevel, LintMapBuilder, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::Serialize;
-use strum::VariantArray;
 
 use crate::analysis::annotation::Annotation;
 use crate::analysis::cache::AnalysisCache;
@@ -107,24 +106,20 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
-    lints: IndexMap<LintName, ClarityDiagnosticLevel>,
+    lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        let lints = LintMapBuilder::new()
-            .apply_defaults()
-            .build()
-            .into_iter()
-            .filter_map(|(lint, lint_level)| {
-                let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
-                diag_level.map(|level| (lint, level))
-            })
-            .collect();
+        let lints = LintMapBuilder::new().apply_defaults().build();
+
+        // Always enable Call Checker
+        let default_passes = [Pass::CallChecker];
+        let passes = HashSet::from(default_passes);
 
         Self {
-            passes: HashSet::new(),
+            passes,
             lints,
             check_checker: check_checker::Settings::default(),
         }
@@ -148,7 +143,7 @@ impl Settings {
         }
     }
 
-    pub fn set_lint_level(
+    pub fn enable_lint(
         &mut self,
         lint: LintName,
         level: ClarityDiagnosticLevel,
@@ -157,9 +152,11 @@ impl Settings {
     }
 
     pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
-        for lint in LintName::VARIANTS {
-            self.set_lint_level(*lint, level.clone());
-        }
+        LintGroup::All.insert_into(&mut self.lints, level);
+    }
+
+    pub fn disable_lints(&mut self, lint: &LintName) {
+        self.lints.remove(lint);
     }
 
     pub fn disable_all_lints(&mut self) {
@@ -206,34 +203,28 @@ pub struct SettingsFile {
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let mut lints = LintMapBuilder::new().apply_defaults().build();
+        let mut settings = Settings::default();
 
         // Process lint groups first
         for (group, val) in from_file.lint_groups.unwrap_or_default() {
-            group.insert_into(&mut lints, LintLevel::from(val));
+            if let Some(level) = LintLevel::from(val).into() {
+                group.insert_into(&mut settings.lints, level);
+            } else {
+                group.remove_from(&mut settings.lints);
+            }
         }
 
         // Individual lints can override group settings
         for (lint, val) in from_file.lints.unwrap_or_default() {
-            lints.insert(lint, LintLevel::from(val));
+            if let Some(level) = LintLevel::from(val).into() {
+                settings.enable_lint(lint, level);
+            } else {
+                settings.disable_lints(&lint);
+            }
         }
 
-        // Filter out explicitly disabled lints
-        let lints = lints
-            .into_iter()
-            .filter_map(|(lint, lint_level)| {
-                let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
-                diag_level.map(|level| (lint, level))
-            })
-            .collect();
-
-        // Each pass that has its own settings should be included here.
-        let check_checker = from_file
-            .check_checker
-            .map(check_checker::Settings::from)
-            .unwrap_or_default();
-
-        let mut passes = from_file
+        // Add analysis passes listed in config file
+        let passes = from_file
             .passes
             .map(|file_passes| match file_passes {
                 OneOrList::One(pass) => HashSet::from([pass]),
@@ -245,17 +236,19 @@ impl From<SettingsFile> for Settings {
                 } else {
                     passes
                 }
-            })
-            .unwrap_or_default();
+            });
 
-        // Always enable call checker
-        passes.insert(Pass::CallChecker);
-
-        Self {
-            lints,
-            passes,
-            check_checker,
+        if let Some(p) = passes {
+            settings.passes.extend(p);
         }
+
+        // Each pass that has its own settings should be included here.
+        settings.check_checker = from_file
+            .check_checker
+            .map(check_checker::Settings::from)
+            .unwrap_or(settings.check_checker);
+
+        settings
     }
 }
 

@@ -299,11 +299,10 @@ impl Lint for UnusedMap<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::ExecutionResult;
+    use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::UnusedMap;
-    use clarity_types::diagnostic::Level;
-
     use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -314,7 +313,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .set_lint_level(UnusedMap::get_name(), Level::Warning);
+            .enable_lint(UnusedMap::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
