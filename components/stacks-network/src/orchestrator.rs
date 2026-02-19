@@ -1560,12 +1560,11 @@ db_path = "stacks-signer-{signer_id}.sqlite"
             .await
             .map_err(|e| formatted_docker_error("unable to start stacks-api container", e))?;
 
-        let devnet_config = match &self.network_config {
-            Some(ref network_config) => match network_config.devnet {
-                Some(ref devnet_config) => devnet_config,
-                _ => return Ok(()),
-            },
-            _ => return Ok(()),
+        let Some(network_config) = &self.network_config else {
+            return Ok(());
+        };
+        let Some(devnet_config) = &network_config.devnet else {
+            return Ok(());
         };
 
         // Check if we need to import events
