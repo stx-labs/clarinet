@@ -6,8 +6,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use bollard::container::{
-    Config, CreateContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
-    PruneContainersOptions, WaitContainerOptions,
+    Config, CreateContainerOptions, InspectContainerOptions, KillContainerOptions,
+    ListContainersOptions, LogsOptions, PruneContainersOptions, WaitContainerOptions,
 };
 use bollard::errors::Error as DockerError;
 use bollard::image::CreateImageOptions;
@@ -452,16 +452,16 @@ impl DevnetOrchestrator {
                 }
             };
 
-            send_status_update(
-                &event_tx,
-                &self.logger,
-                "stacks-api",
-                Status::Green,
-                &format!("http://localhost:{stacks_api_port}/doc"),
-            );
-
             match self.boot_stacks_api_container(ctx, no_snapshot).await {
-                Ok(_) => {}
+                Ok(_) => {
+                    send_status_update(
+                        &event_tx,
+                        &self.logger,
+                        "stacks-api",
+                        Status::Green,
+                        &format!("http://localhost:{stacks_api_port}/doc"),
+                    );
+                }
                 Err(message) => {
                     let _ = event_tx.send(DevnetEvent::FatalError(message.clone()));
                     self.kill(ctx, Some(&message)).await;
@@ -1571,9 +1571,20 @@ db_path = "stacks-signer-{signer_id}.sqlite"
         // Check if we need to import events
         if !no_snapshot {
             if let Some(events_path) = self.has_events_to_import(devnet_config) {
-                // Wait for API to be ready
-                // TODO: don't do this..
-                std::thread::sleep(Duration::from_secs(8));
+                // Wait for the container to be running
+                loop {
+                    let is_running = docker
+                        .inspect_container(container, None::<InspectContainerOptions>)
+                        .await
+                        .ok()
+                        .and_then(|info| info.state)
+                        .and_then(|state| state.running)
+                        .unwrap_or(false);
+                    if is_running {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
 
                 ctx.try_log(|logger| {
                     slog::info!(logger, "Importing events from {}", events_path.display())
