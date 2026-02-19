@@ -1,5 +1,11 @@
 # Clarinet
 
+[![CI](https://github.com/stx-labs/clarinet/actions/workflows/ci.yaml/badge.svg)](https://github.com/stx-labs/clarinet/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/stx-labs/clarinet)](https://github.com/stx-labs/clarinet/releases/latest)
+[![npm](https://img.shields.io/npm/v/@stacks/clarinet-sdk)](https://www.npmjs.com/package/@stacks/clarinet-sdk)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/stackslabs.clarity-stacks?label=VSCode)](https://marketplace.visualstudio.com/items?itemName=stackslabs.clarity-stacks)
+
 Clarinet is the fastest way to build, test, and deploy smart contracts on the Stacks blockchain. It
 gives you a local devnet, REPL, testing framework, and debugging tools to ship high-quality Clarity
 code with confidence.
