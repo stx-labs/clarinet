@@ -220,7 +220,6 @@ mod tests {
 
     fn default_session() -> Session {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
