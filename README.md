@@ -18,14 +18,14 @@ code with confidence.
 
 ---
 
-### Documentation
+## Documentation
 
 - [Clarinet CLI](https://docs.stacks.co/clarinet)
 - [Clarinet JS SDK and testing framework](https://docs.stacks.co/clarinet/testing-with-clarinet-sdk)
 
 ---
 
-### Quickstart
+## Quickstart
 
 ```bash
 # Install Clarinet
@@ -76,12 +76,12 @@ clarinet console
 (contract-call? .counter get-count tx-sender)
 ```
 
-### Contributing
+## Contributing
 
 Contributions are welcome and appreciated. The following sections provide information on how you can
 contribute to Clarinet.
 
-#### Prerequisites
+### Prerequisites
 
 Before contributing to Clarinet, you need the following tools.
 Although it will work with older versions, the team always tries to keep up with the latest versions
@@ -92,7 +92,7 @@ of Rust and Node.js (LTS) tooling.
 - Node (>=v24.4.1)
 - NPM (>=11.5.2)
 
-#### Guide
+### Guide
 
 This repo follows the [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/#summary)
 specification when writing commit messages.
@@ -108,7 +108,7 @@ To start contributing, fork this repo and open a new branch:
    git checkout -b <my-branch>
    ```
 
-##### Contributing to the CLI
+#### Contributing to the CLI
 
 1. After making your changes, ensure the following:
    - `cargo build` runs successfully.
@@ -126,7 +126,7 @@ To start contributing, fork this repo and open a new branch:
      ```
 1. Submit a pull request against the `main` branch for review.
 
-##### Contributing to the JS SDK
+#### Contributing to the JS SDK
 
 For VSCode users, we recommend opening the following workspace
 `./components/clarinet-sdk/clarinet-sdk.code-workspace`. It's set up so that rust-analyzer uses the
@@ -141,7 +141,7 @@ wrapper around it: `./components/clarinet-sdk`.
 
 Learn more in the [SDK README.md](./components/clarinet-sdk/README.md).
 
-### Code of Conduct
+## Code of Conduct
 
 Please read our [Code of conduct](../../../.github/blob/main/CODE_OF_CONDUCT.md) since we expect
 project participants to adhere to it.
