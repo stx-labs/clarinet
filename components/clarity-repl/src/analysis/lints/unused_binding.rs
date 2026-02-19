@@ -69,7 +69,13 @@ impl<'a, 'b> UnusedBinding<'a, 'b> {
             BindingType::FunctionArg => format!("function parameter `{name}` is never used"),
             BindingType::LetBinding => format!("`let` binding `{name}` is never used"),
         };
-        (msg, Some("Remove this expression".to_string()))
+        (
+            msg,
+            Some(
+                "Remove this expression or suffix binding with '_' if this is intentional"
+                    .to_string(),
+            ),
+        )
     }
 
     fn make_diagnostic(
