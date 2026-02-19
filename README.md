@@ -113,14 +113,14 @@ To start contributing, fork this repo and open a new branch:
 1. After making your changes, ensure the following:
    - `cargo build` runs successfully.
    - `cargo tst` runs successfully.
-     - `cargo tst` is an alias declared in `./cargo/config`, it runs
+     - `cargo tst` is an alias declared in `./.cargo/config.toml`, it runs
        [cargo-nextest](https://crates.io/crates/cargo-nextest)
    - You have formatted your code with `cargo fmt-stacks`
-   - All functional tests in the `examples` directory pass.
+   - All functional tests in the `components/clarinet-cli/examples` directory pass.
      ```bash
-     for testdir in $(ls examples); do
-         pushd examples/${testdir}
-             ../../target/debug/clarinet check .
+     for testdir in $(ls components/clarinet-cli/examples); do
+         pushd components/clarinet-cli/examples/${testdir}
+             ../../../../target/debug/clarinet check .
          popd
      done
      ```
@@ -133,7 +133,7 @@ For VSCode users, we recommend opening the following workspace
 Wasm target.
 
 The SDK is divided between the Rust lib compiled to Wasm `./components/clarinet-sdk-wasm` and a TS
-wrapper around it: `./components/clarinet-sdk-wasm`.
+wrapper around it: `./components/clarinet-sdk`.
 
 1. Compile the Wasm package with `npm run build:sdk-wasm`
 1. Compile the SDK with `npm run build:sdk`
