@@ -125,20 +125,20 @@ impl Lint for UnusedConst<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::ExecutionResult;
+    use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::UnusedConst;
-    use crate::analysis::linter::{Lint, LintLevel};
+    use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
 
     fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
-            .set_lint_level(UnusedConst::get_name(), LintLevel::Warning);
+            .enable_lint(UnusedConst::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
