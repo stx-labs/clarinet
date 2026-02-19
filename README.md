@@ -4,17 +4,17 @@ Clarinet is the fastest way to build, test, and deploy smart contracts on the St
 gives you a local devnet, REPL, testing framework, and debugging tools to ship high-quality Clarity
 code with confidence.
 
-- 🧑‍💻 **Leverage a powerful CLI** Create new projects, manage your smart contracts and their
+- 🧑‍💻 **Leverage a powerful CLI:** Create new projects, manage your smart contracts and their
   dependencies using clarinet requirements, and interact with your code through the built-in REPL.
 
-- 🧪 **Write unit tests with the SDK** Use the Clarinet SDK to write unit tests in a familiar JS
+- 🧪 **Write unit tests with the SDK:** Use the Clarinet SDK to write unit tests in a familiar JS
   environment and validate contract behavior.
 
-- 🛠️ **Run a private blockchain environment** Spin up a local devnet with nodes, miners, and APIs so
+- 🛠️ **Run a private blockchain environment:** Spin up a local devnet with nodes, miners, and APIs so
   you can test and integrate your code.
 
-- 🔍 **VSCode extension**: Linter, step by step debugger, helps writing smart contracts
-  (autocompletion, documentation etc)
+- 🔍 **Enhance your editor with the VSCode extension:** Get linting, step-by-step debugging,
+  autocompletion, and documentation as you write smart contracts.
 
 ---
 
@@ -83,7 +83,7 @@ contribute to Clarinet.
 
 #### Prerequisites
 
-Before contributing to Clarinet, you need the following tools.  
+Before contributing to Clarinet, you need the following tools.
 Although it will work with older versions, the team always tries to keep up with the latest versions
 of Rust and Node.js (LTS) tooling.
 
@@ -98,7 +98,7 @@ This repo follows the [Conventional Commit](https://www.conventionalcommits.org/
 specification when writing commit messages.
 
 **Note:** These conventions are helpful for any commit message, but all PR end up being merged with
-"squash and merge", giving an other chance to refine the commit messages.
+"squash and merge", giving another chance to refine the commit messages.
 
 To start contributing, fork this repo and open a new branch:
 
@@ -139,7 +139,7 @@ wrapper around it: `./components/clarinet-sdk`.
 1. Compile the SDK with `npm run build:sdk`
 1. Test with `npm test`
 
-Learn more in the [SDK Readme.md](./components/clarinet-sdk/README.md).
+Learn more in the [SDK README.md](./components/clarinet-sdk/README.md).
 
 ### Code of Conduct
 
