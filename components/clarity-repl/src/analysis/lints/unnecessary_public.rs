@@ -438,7 +438,7 @@ mod tests {
 
         session
             .interpreter
-            .run(&other_contract, None, false, None)
+            .run(&other_contract, None, false, None, true)
             .expect("Invalid helper contract");
 
         session
@@ -721,7 +721,7 @@ mod tests {
 
         session
             .interpreter
-            .run(&trait_contract, None, false, None)
+            .run(&trait_contract, None, false, None, true)
             .expect("Invalid trait contract");
 
         #[rustfmt::skip]
