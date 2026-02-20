@@ -59,9 +59,9 @@ fn init_session() -> Session {
         epoch: Epoch::Specific(DEFAULT_EPOCH),
     };
 
-    let _ = session.deploy_contract(&contract, false, None);
+    let _ = session.deploy_contract(&contract, false, None, true);
 
-    let _ = session.deploy_contract(&contract, false, None);
+    let _ = session.deploy_contract(&contract, false, None, true);
     session.advance_burn_chain_tip(1);
 
     assert_eq!(session.interpreter.get_block_height(), 3);

@@ -14,7 +14,7 @@ fn can_run_boot_contracts() {
 
     for (_, (boot_contract, ast)) in boot_contracts_data {
         let res = interpreter
-            .run(&boot_contract, Some(&ast), false, None)
+            .run(&boot_contract, Some(&ast), false, None, false)
             .unwrap_or_else(|err| {
                 dbg!(&err);
                 panic!("failed to interpret {} boot contract", &boot_contract.name)

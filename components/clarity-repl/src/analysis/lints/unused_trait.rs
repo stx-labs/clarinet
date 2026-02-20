@@ -425,7 +425,7 @@ mod tests {
 
         session
             .interpreter
-            .run(&trait_contract, None, false, None)
+            .run(&trait_contract, None, false, None, true)
             .expect("Invalid trait contract");
 
         session

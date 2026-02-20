@@ -193,7 +193,14 @@ pub fn update_session_with_deployment_plan(
                         should_mint_sbtc = true;
                     }
                     let contract_ast = contracts_asts.as_ref().and_then(|m| m.get(&contract_id));
-                    let result = handle_emulated_contract_publish(session, tx, contract_ast, epoch);
+                    let is_project_contract = deployment.contracts.contains_key(&contract_id);
+                    let result = handle_emulated_contract_publish(
+                        session,
+                        tx,
+                        contract_ast,
+                        epoch,
+                        is_project_contract,
+                    );
                     contracts.insert(contract_id, result);
                 }
                 TransactionSpecification::EmulatedContractCall(tx) => {
@@ -227,6 +234,7 @@ fn handle_emulated_contract_publish(
     tx: &EmulatedContractPublishSpecification,
     contract_ast: Option<&ContractAST>,
     epoch: StacksEpochId,
+    run_repl_analysis: bool,
 ) -> Result<ExecutionResult, Vec<Diagnostic>> {
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.emulated_sender.to_string());
@@ -239,7 +247,7 @@ fn handle_emulated_contract_publish(
         epoch: clarity_repl::repl::Epoch::Specific(epoch),
     };
 
-    let result = session.deploy_contract(&contract, false, contract_ast);
+    let result = session.deploy_contract(&contract, false, contract_ast, run_repl_analysis);
 
     session.set_tx_sender(&default_tx_sender);
     result
@@ -1017,7 +1025,7 @@ mod tests {
             location: PathBuf::from("/contracts/contract_1.clar"),
         };
 
-        handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch)
+        handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch, true)
     }
 
     #[test]

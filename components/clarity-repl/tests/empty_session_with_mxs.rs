@@ -384,7 +384,7 @@ mod test_mxs_session_test {
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
         };
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, true);
         assert!(result.is_ok());
 
         let snippet = format!("(contract-call? '{deployer}.gbh get-block-height)");
@@ -420,7 +420,7 @@ mod test_mxs_session_test {
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch24),
         };
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, true);
         assert!(result.is_ok());
 
         // 107107 is a block in epoch 2.4
@@ -468,7 +468,7 @@ mod test_mxs_session_test {
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
         };
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, true);
         assert!(result.is_ok());
 
         // 107_107 is a block in epoch 2.4

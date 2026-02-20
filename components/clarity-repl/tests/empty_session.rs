@@ -83,7 +83,7 @@ fn it_handles_clarity2_block_height_in_epoch3() {
         clarity_version: ClarityVersion::Clarity2,
         epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
     };
-    let result = session.deploy_contract(&contract, false, None);
+    let result = session.deploy_contract(&contract, false, None, true);
     assert!(result.is_ok());
 
     let snippet = format!("(contract-call? '{deployer}.gbh get-block-height)");
@@ -122,7 +122,7 @@ fn it_handles_clarity2_get_block_info_in_epoch2() {
         clarity_version: ClarityVersion::Clarity2,
         epoch: repl::Epoch::Specific(StacksEpochId::Epoch24),
     };
-    let result = session.deploy_contract(&contract, false, None);
+    let result = session.deploy_contract(&contract, false, None, true);
     assert!(result.is_ok());
 
     let snippet = format!("(contract-call? '{deployer}.gbh get-block-hash u9)");
@@ -169,7 +169,7 @@ fn it_handles_clarity2_get_block_info_in_epoch3() {
         clarity_version: ClarityVersion::Clarity2,
         epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
     };
-    let result = session.deploy_contract(&contract, false, None);
+    let result = session.deploy_contract(&contract, false, None, true);
     assert!(result.is_ok());
 
     let snippet = format!("(contract-call? '{deployer}.gbh get-block-hash u41)");

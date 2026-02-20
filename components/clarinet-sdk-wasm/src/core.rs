@@ -919,7 +919,7 @@ impl SDK {
                 epoch: Epoch::Specific(current_epoch),
             };
 
-            match session.deploy_contract(&contract, track_costs, None) {
+            match session.deploy_contract(&contract, track_costs, None, true) {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(
