@@ -77,3 +77,105 @@ fn can_init_console_with_mxs() {
     assert_eq!(output[1], "false");
     assert_eq!(output[2], "true");
 }
+
+#[test]
+fn test_get_constant_command() {
+    let output = run_console_command(
+        &["-m", &format!("{}/tests/fixtures/mxs/Clarinet.toml", env!("CARGO_MANIFEST_DIR"))],
+        &[
+            "::get_constant counter MISSING_CONSTANT",
+        ],
+    );
+
+    assert!(!output.is_empty());
+    let output_text = output.join(" ");
+
+    // Should contain error message for missing constant
+    assert!(output_text.contains("not found") || output_text.contains("MISSING_CONSTANT"));
+    assert!(output_text.contains("Constant:") && output_text.contains("MISSING_CONSTANT"));
+    assert!(output_text.contains("contract:") && output_text.contains("counter"));
+}
+
+#[test]
+fn test_get_constant_command_found() {
+    let output = run_console_command(
+        &["-m", &format!("{}/tests/fixtures/mxs/Clarinet.toml", env!("CARGO_MANIFEST_DIR"))],
+        &[
+            "::get_constant counter MAX_COUNT",
+        ],
+    );
+
+    assert!(!output.is_empty());
+    let output_text = output.join(" ");
+
+    // Should contain the constant value
+    assert!(output_text.contains("Contract:"));
+    assert!(output_text.contains("counter"));
+    assert!(output_text.contains("Constant:"));
+    assert!(output_text.contains("MAX_COUNT"));
+    assert!(output_text.contains("Value:"));
+    assert!(output_text.contains("u100"));
+}
+
+#[test]
+fn test_get_data_var_command() {
+    let output = run_console_command(
+        &["-m", &format!("{}/tests/fixtures/mxs/Clarinet.toml", env!("CARGO_MANIFEST_DIR"))],
+        &[
+            "::get_data_var counter count",
+        ],
+    );
+
+    assert!(!output.is_empty());
+    let output_text = output.join(" ");
+
+    // Should contain the data variable value
+    assert!(output_text.contains("Contract:"));
+    assert!(output_text.contains("counter"));
+    assert!(output_text.contains("Data var:"));
+    assert!(output_text.contains("count"));
+    assert!(output_text.contains("Value:"));
+    assert!(output_text.contains("u0")); // Initial value should be u0
+}
+
+#[test]
+fn test_get_map_val_command_not_found() {
+    let output = run_console_command(
+        &["-m", &format!("{}/tests/fixtures/mxs/Clarinet.toml", env!("CARGO_MANIFEST_DIR"))],
+        &[
+            "::get_map_val counter test-map u1",
+        ],
+    );
+
+    assert!(!output.is_empty());
+    let output_text = output.join(" ");
+
+    // Should contain not found message for empty map
+    assert!(output_text.contains("Map entry not found") || output_text.contains("not found"));
+    assert!(output_text.contains("test-map"));
+    assert!(output_text.contains("u1"));
+}
+
+#[test]
+fn test_get_map_val_command_found() {
+    let output = run_console_command(
+        &["-m", &format!("{}/tests/fixtures/mxs/Clarinet.toml", env!("CARGO_MANIFEST_DIR"))],
+        &[
+            "(contract-call? .counter set-map-entry u1 u42)",
+            "::get_map_val counter test-map u1",
+        ],
+    );
+
+    assert!(!output.is_empty());
+    let output_text = output.join(" ");
+
+    // Should contain the map value
+    assert!(output_text.contains("Contract:"));
+    assert!(output_text.contains("counter"));
+    assert!(output_text.contains("Map:"));
+    assert!(output_text.contains("test-map"));
+    assert!(output_text.contains("Key:"));
+    assert!(output_text.contains("u1"));
+    assert!(output_text.contains("Value:"));
+    assert!(output_text.contains("some u42"));
+}
