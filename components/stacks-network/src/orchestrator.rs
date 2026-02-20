@@ -642,9 +642,9 @@ impl DevnetOrchestrator {
                 port_binding(devnet_config.bitcoin_node_p2p_port),
             ),
             // ZMQ block notifications
-            (format!("{}/tcp", 28332_u16), port_binding(28332)),
+            ("28332/tcp".to_string(), port_binding(28332)),
             // ZMQ transaction notifications
-            (format!("{}/tcp", 28333_u16), port_binding(28333)),
+            ("28333/tcp".to_string(), port_binding(28333)),
         ]);
 
         let bitcoind_conf = formatdoc!(
