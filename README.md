@@ -1,31 +1,37 @@
 # Clarinet
 
+[![CI](https://github.com/stx-labs/clarinet/actions/workflows/ci.yaml/badge.svg)](https://github.com/stx-labs/clarinet/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/stx-labs/clarinet)](https://github.com/stx-labs/clarinet/releases/latest)
+[![npm](https://img.shields.io/npm/v/@stacks/clarinet-sdk)](https://www.npmjs.com/package/@stacks/clarinet-sdk)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/stackslabs.clarity-stacks?label=VSCode)](https://marketplace.visualstudio.com/items?itemName=stackslabs.clarity-stacks)
+
 Clarinet is the fastest way to build, test, and deploy smart contracts on the Stacks blockchain. It
 gives you a local devnet, REPL, testing framework, and debugging tools to ship high-quality Clarity
 code with confidence.
 
-- 🧑‍💻 **Leverage a powerful CLI** Create new projects, manage your smart contracts and their
+- 🧑‍💻 **Leverage a powerful CLI:** Create new projects, manage your smart contracts and their
   dependencies using clarinet requirements, and interact with your code through the built-in REPL.
 
-- 🧪 **Write unit tests with the SDK** Use the Clarinet SDK to write unit tests in a familiar JS
+- 🧪 **Write unit tests with the SDK:** Use the Clarinet SDK to write unit tests in a familiar JS
   environment and validate contract behavior.
 
-- 🛠️ **Run a private blockchain environment** Spin up a local devnet with nodes, miners, and APIs so
+- 🛠️ **Run a private blockchain environment:** Spin up a local devnet with nodes, miners, and APIs so
   you can test and integrate your code.
 
-- 🔍 **VSCode extension**: Linter, step by step debugger, helps writing smart contracts
-  (autocompletion, documentation etc)
+- 🔍 **Enhance your editor with the VSCode extension:** Get linting, step-by-step debugging,
+  autocompletion, and documentation as you write smart contracts.
 
 ---
 
-### Documentation
+## Documentation
 
 - [Clarinet CLI](https://docs.stacks.co/clarinet)
 - [Clarinet JS SDK and testing framework](https://docs.stacks.co/clarinet/testing-with-clarinet-sdk)
 
 ---
 
-### Quickstart
+## Quickstart
 
 ```bash
 # Install Clarinet
@@ -76,14 +82,14 @@ clarinet console
 (contract-call? .counter get-count tx-sender)
 ```
 
-### Contributing
+## Contributing
 
 Contributions are welcome and appreciated. The following sections provide information on how you can
 contribute to Clarinet.
 
-#### Prerequisites
+### Prerequisites
 
-Before contributing to Clarinet, you need the following tools.  
+Before contributing to Clarinet, you need the following tools.
 Although it will work with older versions, the team always tries to keep up with the latest versions
 of Rust and Node.js (LTS) tooling.
 
@@ -92,13 +98,13 @@ of Rust and Node.js (LTS) tooling.
 - Node (>=v24.4.1)
 - NPM (>=11.5.2)
 
-#### Guide
+### Guide
 
 This repo follows the [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/#summary)
 specification when writing commit messages.
 
 **Note:** These conventions are helpful for any commit message, but all PR end up being merged with
-"squash and merge", giving an other chance to refine the commit messages.
+"squash and merge", giving another chance to refine the commit messages.
 
 To start contributing, fork this repo and open a new branch:
 
@@ -108,40 +114,40 @@ To start contributing, fork this repo and open a new branch:
    git checkout -b <my-branch>
    ```
 
-##### Contributing to the CLI
+#### Contributing to the CLI
 
 1. After making your changes, ensure the following:
    - `cargo build` runs successfully.
    - `cargo tst` runs successfully.
-     - `cargo tst` is an alias declared in `./cargo/config`, it runs
+     - `cargo tst` is an alias declared in `./.cargo/config.toml`, it runs
        [cargo-nextest](https://crates.io/crates/cargo-nextest)
    - You have formatted your code with `cargo fmt-stacks`
-   - All functional tests in the `examples` directory pass.
+   - All functional tests in the `components/clarinet-cli/examples` directory pass.
      ```bash
-     for testdir in $(ls examples); do
-         pushd examples/${testdir}
-             ../../target/debug/clarinet check .
+     for testdir in $(ls components/clarinet-cli/examples); do
+         pushd components/clarinet-cli/examples/${testdir}
+             ../../../../target/debug/clarinet check .
          popd
      done
      ```
 1. Submit a pull request against the `main` branch for review.
 
-##### Contributing to the JS SDK
+#### Contributing to the JS SDK
 
 For VSCode users, we recommend opening the following workspace
 `./components/clarinet-sdk/clarinet-sdk.code-workspace`. It's set up so that rust-analyzer uses the
 Wasm target.
 
 The SDK is divided between the Rust lib compiled to Wasm `./components/clarinet-sdk-wasm` and a TS
-wrapper around it: `./components/clarinet-sdk-wasm`.
+wrapper around it: `./components/clarinet-sdk`.
 
 1. Compile the Wasm package with `npm run build:sdk-wasm`
 1. Compile the SDK with `npm run build:sdk`
 1. Test with `npm test`
 
-Learn more in the [SDK Readme.md](./components/clarinet-sdk/README.md).
+Learn more in the [SDK README.md](./components/clarinet-sdk/README.md).
 
-### Code of Conduct
+## Code of Conduct
 
 Please read our [Code of conduct](../../../.github/blob/main/CODE_OF_CONDUCT.md) since we expect
 project participants to adhere to it.

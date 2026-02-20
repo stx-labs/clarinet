@@ -1696,9 +1696,7 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
-
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
 
         session.handle_command("::set_epoch 2.5");

@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::{fmt, slice};
 
+use clarity::types::StacksEpochId;
+use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType};
@@ -68,9 +70,13 @@ impl ClarityFormatter {
         Self { settings }
     }
     /// formatting for files to ensure a newline at the end
-    pub fn format_file(&self, source: &str) -> String {
+    pub fn format_file(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
-        let pse = clarity::vm::ast::parser::v2::parse(trimmed_source).unwrap();
+        let pse = clarity::vm::ast::parser::v2::parse(
+            trimmed_source,
+            StackDepthLimits::for_epoch(epoch.unwrap_or(StacksEpochId::latest())),
+        )
+        .unwrap();
         let agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
         let result = agg.generate();
 
@@ -83,12 +89,20 @@ impl ClarityFormatter {
         agg.generate()
     }
     /// Alias `format_file` to `format`
-    pub fn format(&self, source: &str) -> String {
-        self.format_file(source)
+    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
+        self.format_file(source, epoch)
     }
     /// for range formatting within editors
-    pub fn format_section(&self, source: &str) -> Result<String, String> {
-        let pse = clarity::vm::ast::parser::v2::parse(source).map_err(|e| e.to_string())?;
+    pub fn format_section(
+        &self,
+        source: &str,
+        epoch: Option<StacksEpochId>,
+    ) -> Result<String, String> {
+        let pse = clarity::vm::ast::parser::v2::parse(
+            source,
+            StackDepthLimits::for_epoch(epoch.unwrap_or(StacksEpochId::latest())),
+        )
+        .map_err(|e| e.to_string())?;
 
         // range formatting specifies to the aggregator that we're
         // starting mid-source and thus should pre-populate
@@ -1889,6 +1903,8 @@ mod tests_formatter {
     #[allow(unused_imports)]
     use std::assert_eq;
 
+    use clarity::types::StacksEpochId;
+    use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
     use indoc::indoc;
 
     use super::{ClarityFormatter, Settings};
@@ -1902,12 +1918,12 @@ mod tests_formatter {
 
     fn format_with_default(source: &str) -> String {
         let formatter = ClarityFormatter::new(Settings::default());
-        formatter.format_section(source).unwrap()
+        formatter.format_section(source, None).unwrap()
     }
 
     fn format_with(source: &str, settings: Settings) -> String {
         let formatter = ClarityFormatter::new(settings);
-        formatter.format_section(source).unwrap()
+        formatter.format_section(source, None).unwrap()
     }
 
     #[test]
@@ -2743,7 +2759,11 @@ mod tests_formatter {
     #[test]
     fn format_ast_without_source() {
         let src = "(define-private (noop) (begin (+ 1 2) (ok true)))";
-        let ast = clarity::vm::ast::parser::v2::parse(src).unwrap();
+        let ast = clarity::vm::ast::parser::v2::parse(
+            src,
+            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+        )
+        .unwrap();
         let formatter = ClarityFormatter::new(Settings::default());
         let expected = format_with_default(src);
         let result = formatter.format_ast(&ast);
@@ -2753,7 +2773,11 @@ mod tests_formatter {
     #[test]
     fn format_ast_without_source_handle_indentation() {
         let src = "  (begin (+ 1 2) (ok true))";
-        let ast = clarity::vm::ast::parser::v2::parse(src).unwrap();
+        let ast = clarity::vm::ast::parser::v2::parse(
+            src,
+            StackDepthLimits::for_epoch(StacksEpochId::latest()),
+        )
+        .unwrap();
         let expected = format_with_default(src);
         let formatter = ClarityFormatter::new(Settings::default());
         let result = formatter.format_ast(&ast);
@@ -2879,7 +2903,11 @@ mod tests_formatter {
     fn test_list_type_signature() {
         fn assert_list_type_signature(src: &str, expected: bool) {
             let settings = Settings::default();
-            let exprs = clarity::vm::ast::parser::v2::parse(src).unwrap();
+            let exprs = clarity::vm::ast::parser::v2::parse(
+                src,
+                StackDepthLimits::for_epoch(StacksEpochId::latest()),
+            )
+            .unwrap();
             let aggregator = Aggregator::new(&settings, &exprs, Some(src));
             let list_exprs = exprs[0].match_list().unwrap();
             assert_eq!(aggregator.is_list_type_signature(list_exprs), expected);

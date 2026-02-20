@@ -26,8 +26,9 @@ use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
 use clarity_repl::clarity::vm::costs::LimitedCostTracker;
+use clarity_repl::clarity::vm::diagnostic::Diagnostic;
 use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::ClarityVersion;
+use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -36,6 +37,7 @@ use clarity_repl::repl::{
     DEFAULT_EPOCH,
 };
 use clarity_repl::{analysis, repl};
+use serde::Serialize;
 use stacks_network::{self, DevnetOrchestrator};
 use toml_edit::DocumentMut;
 
@@ -48,6 +50,23 @@ use crate::devnet::start::{start, StartConfig};
 use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
 use crate::lsp::run_lsp;
+
+#[derive(Clone, PartialEq, Debug, clap::ValueEnum)]
+enum OutputFormat {
+    /// Human-readable output (default)
+    Standard,
+    /// Minimal JSON output
+    Json,
+    /// Formatted, human-readable JSON output
+    JsonPretty,
+}
+
+#[derive(Serialize)]
+struct JsonCheckOutput {
+    success: bool,
+    diagnostics: HashMap<String, Vec<Diagnostic>>,
+}
+
 /// Clarinet is a command line tool for Clarity smart contract development.
 #[derive(Parser, PartialEq, Clone, Debug)]
 #[clap(version = env!("CARGO_PKG_VERSION"), name = "clarinet", bin_name = "clarinet")]
@@ -77,10 +96,10 @@ enum Command {
     /// Load contracts in a REPL for an interactive session
     #[clap(name = "console", aliases = &["poke"], bin_name = "console")]
     Console(Console),
-    /// Check contracts syntax
+    /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
-    /// Start a local Devnet network for interacting with your contracts from your browser
+    /// Start a local Devnet network (deprecated, use 'clarinet devnet start')
     #[clap(name = "integrate", bin_name = "integrate")]
     Integrate(DevnetStart),
     /// Subcommands for Devnet usage
@@ -99,11 +118,13 @@ enum Command {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Formatter {
+    /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
     /// If specified, format only this file
     #[clap(long = "file", short = 'f')]
     pub file: Option<String>,
+    /// Maximum line length
     #[clap(long = "max-line-length", short = 'l')]
     pub max_line_length: Option<usize>,
     #[clap(long = "indent", short = 'i', conflicts_with = "use_tabs")]
@@ -127,33 +148,41 @@ struct Formatter {
 }
 
 impl Formatter {
-    fn get_input_sources(&self) -> Vec<FormatterInputSource> {
+    fn get_input_sources(&self, manifest: &ProjectManifest) -> Vec<FormatterInputSource> {
         if self.stdin {
             vec![FormatterInputSource::Stdin]
         } else if let Some(file) = &self.file {
-            vec![FormatterInputSource::File(file.clone())]
+            let epoch = manifest
+                .contracts
+                .values()
+                .find(|c| from_code_source(c.code_source.clone()) == *file)
+                .map(|c| c.epoch.resolve());
+            vec![FormatterInputSource::File(file.clone(), epoch)]
         } else {
-            // look for files at the default code path (./contracts/) if
-            // cmd.manifest_path is not specified OR if cmd.file is not specified
-            let manifest = load_manifest_or_exit(self.manifest_path.clone(), true);
-            let contracts = manifest.contracts.values().cloned();
-            contracts
-                .map(|c| from_code_source(c.code_source))
-                .map(FormatterInputSource::File)
+            manifest
+                .contracts
+                .values()
+                .cloned()
+                .map(|c| {
+                    FormatterInputSource::File(
+                        from_code_source(c.code_source),
+                        Some(c.epoch.resolve()),
+                    )
+                })
                 .collect()
         }
     }
 }
 
 enum FormatterInputSource {
-    File(String),
+    File(String, Option<StacksEpochId>),
     Stdin,
 }
 
 impl FormatterInputSource {
     fn get_input(&self) -> String {
         match self {
-            FormatterInputSource::File(path) => {
+            FormatterInputSource::File(path, _) => {
                 fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read file: {e}"))
             }
             FormatterInputSource::Stdin => io::stdin()
@@ -166,7 +195,14 @@ impl FormatterInputSource {
 
     fn file_path(&self) -> Option<&str> {
         match self {
-            FormatterInputSource::File(path) => Some(path),
+            FormatterInputSource::File(path, _) => Some(path),
+            FormatterInputSource::Stdin => None,
+        }
+    }
+
+    fn epoch(&self) -> Option<StacksEpochId> {
+        match self {
+            FormatterInputSource::File(_, epoch) => *epoch,
             FormatterInputSource::Stdin => None,
         }
     }
@@ -199,7 +235,7 @@ enum Contracts {
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
 enum Requirements {
-    /// Interact with contracts published on Mainnet
+    /// Interact with contracts deployed on Mainnet
     #[clap(name = "add", bin_name = "add")]
     AddRequirement(AddRequirement),
 }
@@ -226,6 +262,7 @@ struct DevnetPackage {
     /// Output json file name
     #[clap(long = "name", short = 'n')]
     pub package_file_name: Option<String>,
+    /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
 }
@@ -291,7 +328,7 @@ struct GenerateDeployment {
         conflicts_with = "mainnet"
     )]
     pub devnet: bool,
-    /// Generate a deployment file for devnet, using settings/Testnet.toml
+    /// Generate a deployment file for testnet, using settings/Testnet.toml
     #[clap(
         long = "testnet",
         conflicts_with = "simnet",
@@ -299,7 +336,7 @@ struct GenerateDeployment {
         conflicts_with = "mainnet"
     )]
     pub testnet: bool,
-    /// Generate a deployment file for devnet, using settings/Mainnet.toml
+    /// Generate a deployment file for mainnet, using settings/Mainnet.toml
     #[clap(
         long = "mainnet",
         conflicts_with = "simnet",
@@ -511,11 +548,14 @@ struct Check {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
+    /// Set the output format
+    #[clap(long = "output", default_value = "standard")]
+    pub output_format: OutputFormat,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Completions {
-    /// Specify which shell to generation completions script for
+    /// Specify which shell to generate completions script for
     #[clap(ignore_case = true)]
     pub shell: Shell,
 }
@@ -1170,18 +1210,37 @@ pub fn main() {
             };
             diagnostics.append(&mut analysis_diagnostics);
 
-            let lines = contract.expect_in_memory_code_source().lines();
-            let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-            for d in diagnostics {
-                for line in output_diagnostic(&d, &file, &formatted_lines) {
-                    println!("{line}");
+            match cmd.output_format {
+                OutputFormat::Json | OutputFormat::JsonPretty => {
+                    let output = JsonCheckOutput {
+                        success,
+                        diagnostics: HashMap::from([(file, diagnostics)]),
+                    };
+                    let json = if cmd.output_format == OutputFormat::JsonPretty {
+                        serde_json::to_string_pretty(&output).unwrap()
+                    } else {
+                        serde_json::to_string(&output).unwrap()
+                    };
+                    println!("{json}");
+                    if !success {
+                        std::process::exit(1);
+                    }
                 }
-            }
+                OutputFormat::Standard => {
+                    let lines = contract.expect_in_memory_code_source().lines();
+                    let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
+                    for d in diagnostics {
+                        for line in output_diagnostic(&d, &file, &formatted_lines) {
+                            println!("{line}");
+                        }
+                    }
 
-            if success {
-                println!("{} Syntax of contract successfully checked", green!("✔"))
-            } else {
-                std::process::exit(1);
+                    if success {
+                        println!("{} Contract successfully checked", green!("✔"))
+                    } else {
+                        std::process::exit(1);
+                    }
+                }
             }
         }
         Command::Check(cmd) => {
@@ -1193,39 +1252,63 @@ pub fn main() {
                 cmd.use_computed_deployment_plan,
             );
 
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-            if diags_digest.has_feedbacks() {
-                println!("{}", diags_digest.message);
+            let exit_code = i32::from(!artifacts.success);
+
+            match cmd.output_format {
+                OutputFormat::Json | OutputFormat::JsonPretty => {
+                    let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
+                        .diags
+                        .into_iter()
+                        .filter(|(_, diags)| !diags.is_empty())
+                        .filter_map(|(contract_id, diags)| {
+                            let (_, path) = deployment.contracts.get(&contract_id)?;
+                            Some((path.to_string_lossy().to_string(), diags))
+                        })
+                        .collect();
+                    let output = JsonCheckOutput {
+                        success: artifacts.success,
+                        diagnostics,
+                    };
+                    let json = if cmd.output_format == OutputFormat::JsonPretty {
+                        serde_json::to_string_pretty(&output).unwrap()
+                    } else {
+                        serde_json::to_string(&output).unwrap()
+                    };
+                    println!("{json}");
+                }
+                OutputFormat::Standard => {
+                    let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                    if diags_digest.has_feedbacks() {
+                        println!("{}", diags_digest.message);
+                    }
+
+                    if diags_digest.warnings > 0 {
+                        println!(
+                            "{} {} detected",
+                            yellow!("!"),
+                            pluralize!(diags_digest.warnings, "warning")
+                        );
+                    }
+                    if diags_digest.errors > 0 {
+                        println!(
+                            "{} {} detected",
+                            red!("x"),
+                            pluralize!(diags_digest.errors, "error")
+                        );
+                    } else {
+                        println!(
+                            "{} {} checked",
+                            green!("✔"),
+                            pluralize!(diags_digest.contracts_checked, "contract"),
+                        );
+                    }
+
+                    if clarinetrc.enable_hints.unwrap_or(true) {
+                        display_post_check_hint();
+                    }
+                }
             }
 
-            if diags_digest.warnings > 0 {
-                println!(
-                    "{} {} detected",
-                    yellow!("!"),
-                    pluralize!(diags_digest.warnings, "warning")
-                );
-            }
-            if diags_digest.errors > 0 {
-                println!(
-                    "{} {} detected",
-                    red!("x"),
-                    pluralize!(diags_digest.errors, "error")
-                );
-            } else {
-                println!(
-                    "{} {} checked",
-                    green!("✔"),
-                    pluralize!(diags_digest.contracts_checked, "contract"),
-                );
-            }
-            let exit_code = match artifacts.success {
-                true => 0,
-                false => 1,
-            };
-
-            if clarinetrc.enable_hints.unwrap_or(true) {
-                display_post_check_hint();
-            }
             if manifest.project.telemetry {
                 #[cfg(feature = "telemetry")]
                 telemetry_report_event(DeveloperUsageEvent::CheckExecuted(
@@ -1254,7 +1337,8 @@ pub fn main() {
                 "{}",
                 format_warn!("This command is in beta. Feedback is welcome!"),
             );
-            let sources = cmd.get_input_sources();
+            let manifest = load_manifest_or_exit(cmd.manifest_path.clone(), false);
+            let sources = cmd.get_input_sources(&manifest);
             let mut settings = formatter::Settings::default();
 
             if let Some(max_line_length) = cmd.max_line_length {
@@ -1274,7 +1358,7 @@ pub fn main() {
 
             for source in sources {
                 let input = source.get_input();
-                let output = formatter.format(&input);
+                let output = formatter.format(&input, source.epoch());
 
                 if cmd.check {
                     if let Some(file_path) = source.file_path() {
@@ -1415,7 +1499,7 @@ pub fn load_deployment_and_artifacts_or_exit(
             .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
             .and_then(|opt| match opt {
                 Some(deployment) => {
-                    println!("{} using {default_deployment_file}", yellow!("note:"));
+                    eprintln!("{} using {default_deployment_file}", yellow!("note:"));
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     Ok((deployment, None, artifacts))
                 }
@@ -2811,6 +2895,103 @@ mod tests {
             assert_eq!(lints["case_const"].as_str().unwrap(), "warn");
             assert_eq!(lints["noop"].as_str().unwrap(), "notice");
             assert_eq!(lints["unused_token"].as_str().unwrap(), "none");
+        }
+    }
+
+    #[test]
+    fn test_check_json_output() {
+        use clarity_repl::clarity::vm::diagnostic::Level as DiagnosticLevel;
+
+        let snippet = indoc::indoc! {"
+            (define-constant A u1)
+            (define-constant B u2)
+
+            (define-read-only (get-val)
+                u0)
+        "};
+
+        let mut settings = repl::SessionSettings::default();
+        settings.repl_settings.analysis.enable_all_passes();
+        settings
+            .repl_settings
+            .analysis
+            .enable_all_lints(DiagnosticLevel::Warning);
+
+        let mut session = repl::Session::new(settings.clone());
+        let contract_id = QualifiedContractIdentifier::transient();
+        let epoch = DEFAULT_EPOCH;
+        let contract = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(snippet.to_string()),
+            deployer: ContractDeployer::Transient,
+            name: "transient".to_string(),
+            clarity_version: ClarityVersion::default_for_epoch(epoch),
+            epoch: clarity_repl::repl::Epoch::Specific(epoch),
+        };
+        let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
+        let (annotations, mut annotation_diagnostics) = session
+            .interpreter
+            .collect_annotations(contract.expect_in_memory_code_source());
+        diagnostics.append(&mut annotation_diagnostics);
+
+        let mut contract_analysis = ContractAnalysis::new(
+            contract_id,
+            ast.expressions,
+            LimitedCostTracker::new_free(),
+            contract.epoch.resolve(),
+            contract.clarity_version,
+        );
+        let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
+        let mut analysis_diagnostics = match analysis::run_analysis(
+            &mut contract_analysis,
+            &mut analysis_db,
+            &annotations,
+            &settings.repl_settings.analysis,
+        ) {
+            Ok(diagnostics) => diagnostics,
+            Err(diagnostics) => {
+                success = false;
+                diagnostics
+            }
+        };
+        diagnostics.append(&mut analysis_diagnostics);
+
+        let filename = "test-contract.clar".to_string();
+        let output = JsonCheckOutput {
+            success,
+            diagnostics: HashMap::from([(filename.clone(), diagnostics)]),
+        };
+
+        // Verify both JSON formats parse correctly
+        for json_str in [
+            serde_json::to_string(&output).unwrap(),
+            serde_json::to_string_pretty(&output).unwrap(),
+        ] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&json_str).expect("JSON output should be valid JSON");
+
+            assert!(parsed["success"].is_boolean());
+            assert!(parsed["diagnostics"].is_object());
+            assert!(parsed["diagnostics"][&filename].is_array());
+
+            let diags = parsed["diagnostics"][&filename].as_array().unwrap();
+            assert!(
+                diags.len() >= 2,
+                "expected at least 2 diagnostics for unused constants A and B, got {}",
+                diags.len()
+            );
+
+            // Verify diagnostic structure
+            let diag = &diags[0];
+            assert!(diag["level"].is_string());
+            assert!(diag["message"].is_string());
+            assert!(diag["spans"].is_array());
+
+            // Verify at least one diagnostic mentions an unused constant
+            let messages: Vec<&str> = diags.iter().filter_map(|d| d["message"].as_str()).collect();
+            assert!(
+                messages.iter().any(|m| m.contains("never used")),
+                "expected a 'never used' diagnostic, got: {messages:?}"
+            );
         }
     }
 }
