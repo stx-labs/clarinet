@@ -1,7 +1,6 @@
-// Library API - items will be used when integrated with LSP, CLI, etc.
-
 mod cost_analysis;
 mod cost_functions;
+mod error;
 mod special_costs;
 mod trait_counter;
 
@@ -20,6 +19,7 @@ pub use cost_analysis::{
     static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost, SummingExecutionCost,
     UserArgumentsContext,
 };
+pub use error::StaticCostError;
 pub use cost_functions::ClarityCostFunctionExt;
 pub use special_costs::get_cost_for_special_function;
 use stacks_common::types::StacksEpochId;
@@ -42,22 +42,12 @@ pub(crate) fn calculate_function_cost(
     function_name: &str,
     cost_map: &HashMap<String, Option<StaticCost>>,
     _clarity_version: &ClarityVersion,
-) -> Result<StaticCost, String> {
+) -> StaticCost {
     match cost_map.get(function_name) {
-        Some(Some(cost)) => {
-            // Cost already computed
-            Ok(cost.clone())
-        }
-        Some(None) => {
-            // Should be impossible..
-            // Function exists but cost not yet computed, circular dependency?
-            // For now, return zero cost to avoid infinite recursion
-            Ok(StaticCost::ZERO)
-        }
-        None => {
-            // Function not found
-            Ok(StaticCost::ZERO)
-        }
+        Some(Some(cost)) => cost.clone(),
+        // Function exists but cost not yet computed (circular dependency?) or not found:
+        // return zero to avoid infinite recursion.
+        Some(None) | None => StaticCost::ZERO,
     }
 }
 
@@ -92,15 +82,15 @@ fn string_cost(length: usize) -> StaticCost {
 }
 
 /// Strings are the only Value's with costs associated
-pub(crate) fn calculate_value_cost(value: &Value) -> Result<StaticCost, String> {
+pub(crate) fn calculate_value_cost(value: &Value) -> StaticCost {
     match value {
         Value::Sequence(SequenceData::String(CharType::UTF8(data))) => {
-            Ok(string_cost(data.data.len()))
+            string_cost(data.data.len())
         }
         Value::Sequence(SequenceData::String(CharType::ASCII(data))) => {
-            Ok(string_cost(data.data.len()))
+            string_cost(data.data.len())
         }
-        _ => Ok(StaticCost::ZERO),
+        _ => StaticCost::ZERO,
     }
 }
 
@@ -121,7 +111,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
     env: Option<&clarity::vm::contexts::Environment>,
-) -> Result<StaticCost, String> {
+) -> Result<StaticCost, StaticCostError> {
     // Derive clarity_version from epoch for lookup_reserved_functions
     let clarity_version = ClarityVersion::default_for_epoch(epoch);
 
@@ -140,7 +130,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
         Some(CallableType::NativeFunction(_, _, cost_fn)) => {
             let cost = cost_fn
                 .eval_for_epoch(arg_count, epoch)
-                .map_err(|e| format!("Cost calculation error: {:?}", e))?;
+                .map_err(|e| StaticCostError::CostCalculation(format!("{e:?}")))?;
             let cost_with_lookup = add_lookup_cost(cost, epoch);
             Ok(StaticCost {
                 min: cost_with_lookup.clone(),
@@ -150,7 +140,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
         Some(CallableType::NativeFunction205(_, _, cost_fn, _)) => {
             let cost = cost_fn
                 .eval_for_epoch(arg_count, epoch)
-                .map_err(|e| format!("Cost calculation error: {:?}", e))?;
+                .map_err(|e| StaticCostError::CostCalculation(format!("{e:?}")))?;
             let cost_with_lookup = add_lookup_cost(cost, epoch);
             Ok(StaticCost {
                 min: cost_with_lookup.clone(),

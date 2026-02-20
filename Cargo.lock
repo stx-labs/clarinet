@@ -913,6 +913,7 @@ dependencies = [
  "rstest 0.21.0",
  "stacks-common",
  "stackslib",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
