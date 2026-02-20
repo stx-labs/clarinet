@@ -47,6 +47,8 @@ pub enum CostExprNode {
     UserArgument(ClarityName, TypeSignature), // (argument_name, argument_type)
     // User-defined functions
     UserFunction(ClarityName),
+    // A list expression whose head is itself a list (i.e. not a named function call)
+    NestedExpression,
 }
 
 #[derive(Debug, Clone)]
@@ -137,47 +139,45 @@ impl SummingExecutionCost {
 
     /// minimum cost across all paths
     pub fn min(&self) -> ExecutionCost {
-        if self.costs.is_empty() {
-            ExecutionCost::ZERO
-        } else {
-            self.costs
-                .iter()
-                .fold(self.costs[0].clone(), |acc, cost| ExecutionCost {
-                    runtime: acc.runtime.min(cost.runtime),
-                    write_length: acc.write_length.min(cost.write_length),
-                    write_count: acc.write_count.min(cost.write_count),
-                    read_length: acc.read_length.min(cost.read_length),
-                    read_count: acc.read_count.min(cost.read_count),
-                })
-        }
+        self.costs
+            .iter()
+            .cloned()
+            .reduce(|acc, cost| ExecutionCost {
+                runtime: acc.runtime.min(cost.runtime),
+                write_length: acc.write_length.min(cost.write_length),
+                write_count: acc.write_count.min(cost.write_count),
+                read_length: acc.read_length.min(cost.read_length),
+                read_count: acc.read_count.min(cost.read_count),
+            })
+            .unwrap_or(ExecutionCost::ZERO)
     }
 
     /// maximum cost across all paths
     pub fn max(&self) -> ExecutionCost {
-        if self.costs.is_empty() {
-            ExecutionCost::ZERO
-        } else {
-            self.costs
-                .iter()
-                .fold(self.costs[0].clone(), |acc, cost| ExecutionCost {
-                    runtime: acc.runtime.max(cost.runtime),
-                    write_length: acc.write_length.max(cost.write_length),
-                    write_count: acc.write_count.max(cost.write_count),
-                    read_length: acc.read_length.max(cost.read_length),
-                    read_count: acc.read_count.max(cost.read_count),
-                })
-        }
+        self.costs
+            .iter()
+            .cloned()
+            .reduce(|acc, cost| ExecutionCost {
+                runtime: acc.runtime.max(cost.runtime),
+                write_length: acc.write_length.max(cost.write_length),
+                write_count: acc.write_count.max(cost.write_count),
+                read_length: acc.read_length.max(cost.read_length),
+                read_count: acc.read_count.max(cost.read_count),
+            })
+            .unwrap_or(ExecutionCost::ZERO)
     }
 
     pub fn add_all(&self) -> ExecutionCost {
         self.costs
             .iter()
             .fold(ExecutionCost::ZERO, |mut acc, cost| {
-                let _ = acc.add(cost);
+                saturating_add_cost(&mut acc, cost);
                 acc
             })
     }
 }
+
+use super::saturating_add_cost;
 
 fn make_ast(
     source: &str,
@@ -197,13 +197,13 @@ fn make_ast(
     Ok(ast)
 }
 
-/// STatic execution cost for functions within Environment
-/// returns the top level cost for specific functions
-/// {some-function-name: (CostAnalysisNode, Some({some-function-name: (1,1)}))}
+/// Static execution cost for functions within Environment.
+/// Returns the static cost for each function in the contract.
+/// {some-function-name: (StaticCost, Some({some-function-name: (1,1)}))}
 pub fn static_cost(
     env: &mut Environment,
     contract_identifier: &QualifiedContractIdentifier,
-) -> Result<HashMap<String, (CostAnalysisNode, Option<TraitCount>)>, String> {
+) -> Result<HashMap<String, (StaticCost, Option<TraitCount>)>, String> {
     let contract_source = env
         .global_context
         .database
@@ -226,38 +226,7 @@ pub fn static_cost(
     let epoch = env.global_context.epoch_id;
     let ast = make_ast(&contract_source, epoch, clarity_version)?;
 
-    static_cost_tree_from_ast(&ast, clarity_version, epoch, env)
-}
-
-/// same idea as `static_cost` but returns the root of the cost analysis tree for each function
-/// Useful if you need to analyze specific nodes in the cost tree
-pub fn static_cost_tree(
-    env: &mut Environment,
-    contract_identifier: &QualifiedContractIdentifier,
-) -> Result<HashMap<String, (CostAnalysisNode, Option<TraitCount>)>, String> {
-    let contract_source = env
-        .global_context
-        .database
-        .get_contract_src(contract_identifier)
-        .ok_or_else(|| {
-            format!(
-                "Contract source ({:?}) not found in database",
-                contract_identifier.to_string(),
-            )
-        })?;
-
-    let contract = env
-        .global_context
-        .database
-        .get_contract(contract_identifier)
-        .map_err(|e| format!("Failed to get contract: {:?}", e))?;
-
-    let clarity_version = contract.contract_context.get_clarity_version();
-
-    let epoch = env.global_context.epoch_id;
-    let ast = make_ast(&contract_source, epoch, clarity_version)?;
-
-    static_cost_tree_from_ast(&ast, clarity_version, epoch, env)
+    static_cost_from_ast_with_source(&ast, clarity_version, epoch, Some(&contract_source), env)
 }
 
 /// Extract function signature arguments from a function definition expression.
@@ -301,8 +270,8 @@ fn compute_function_overhead_costs(
     function_name: &str,
     ast_expressions: &[SymbolicExpression],
     epoch: StacksEpochId,
-) -> (ExecutionCost, ExecutionCost) {
-    let mut overhead = (ExecutionCost::ZERO, ExecutionCost::ZERO);
+) -> StaticCost {
+    let mut overhead = StaticCost::ZERO;
 
     // Find the function definition in the AST that matches the function name
     let function_def = ast_expressions.iter().find(|expr| {
@@ -321,16 +290,16 @@ fn compute_function_overhead_costs(
         let load_cost = ClarityCostFunction::LoadContract
             .eval_for_epoch(size, epoch)
             .unwrap_or(ExecutionCost::ZERO);
-        overhead.0.add(&load_cost).ok();
-        overhead.1.add(&load_cost).ok();
+        saturating_add_cost(&mut overhead.min, &load_cost);
+        saturating_add_cost(&mut overhead.max, &load_cost);
     }
 
     // cost_user_function_application
     let application_cost = ClarityCostFunction::UserFunctionApplication
         .eval_for_epoch(arg_count as u64, epoch)
         .unwrap_or(ExecutionCost::ZERO);
-    overhead.0.add(&application_cost).ok();
-    overhead.1.add(&application_cost).ok();
+    saturating_add_cost(&mut overhead.min, &application_cost);
+    saturating_add_cost(&mut overhead.max, &application_cost);
 
     // Parse function signature for type checking costs
     if !signature_args.is_empty() {
@@ -341,8 +310,6 @@ fn compute_function_overhead_costs(
             &mut (),
         ) {
             Ok(sigs) => {
-                let mut total_type_check_cost = ExecutionCost::ZERO;
-                let mut total_type_check_min_cost = ExecutionCost::ZERO;
                 for (_, sig) in sigs.iter() {
                     let type_check_cost = ClarityCostFunction::InnerTypeCheckCost
                         .eval_for_epoch(sig.size().unwrap_or(0) as u64, epoch)
@@ -350,10 +317,8 @@ fn compute_function_overhead_costs(
                     let type_check_min_cost = ClarityCostFunction::InnerTypeCheckCost
                         .eval_for_epoch(sig.min_size().unwrap_or(0) as u64, epoch)
                         .unwrap_or(ExecutionCost::ZERO);
-                    total_type_check_cost.add(&type_check_cost).ok();
-                    total_type_check_min_cost.add(&type_check_min_cost).ok();
-                    overhead.0.add(&type_check_min_cost).ok();
-                    overhead.1.add(&type_check_cost).ok();
+                    saturating_add_cost(&mut overhead.min, &type_check_min_cost);
+                    saturating_add_cost(&mut overhead.max, &type_check_cost);
                 }
             }
             Err(_e) => {
@@ -396,7 +361,7 @@ pub fn static_cost_from_ast_with_source(
     // Convert CostAnalysisNode to StaticCost and add overhead costs
     let costs: HashMap<String, StaticCost> = cost_trees_with_traits
         .iter()
-        .filter_map(|(name, (cost_analysis_node, _))| {
+        .map(|(name, (cost_analysis_node, _))| {
             let summing_cost = calculate_total_cost_with_branching(cost_analysis_node);
             let mut static_cost: StaticCost = summing_cost.into();
 
@@ -406,10 +371,10 @@ pub fn static_cost_from_ast_with_source(
                 &contract_ast.expressions,
                 epoch,
             );
-            static_cost.min.add(&overhead.0).ok()?;
-            static_cost.max.add(&overhead.1).ok()?;
+            saturating_add_cost(&mut static_cost.min, &overhead.min);
+            saturating_add_cost(&mut static_cost.max, &overhead.max);
 
-            Some((name.clone(), static_cost))
+            (name.clone(), static_cost)
         })
         .collect();
 
@@ -579,10 +544,7 @@ pub fn build_cost_analysis_tree(
                     type_sig
                         .as_ref()
                         .map(|sig| calculate_variable_lookup_cost_from_type(sig, let_depth, epoch))
-                        .unwrap_or_else(|| {
-                            // Fallback to zero cost if type is unknown
-                            StaticCost::ZERO
-                        })
+                        .unwrap_or(StaticCost::ZERO)
                 }
             };
             let expr_node = parse_atom_expression(name, user_args)?;
@@ -638,8 +600,8 @@ fn calculate_variable_lookup_cost_from_type(
         .eval_for_epoch(let_depth, epoch)
         .unwrap_or(ExecutionCost::ZERO);
 
-    variable_size_min_cost.add(&lookup_variable_depth_cost).ok();
-    variable_size_cost.add(&lookup_variable_depth_cost).ok();
+    saturating_add_cost(&mut variable_size_min_cost, &lookup_variable_depth_cost);
+    saturating_add_cost(&mut variable_size_cost, &lookup_variable_depth_cost);
 
     StaticCost {
         min: variable_size_min_cost,
@@ -675,8 +637,11 @@ fn lookup_let_binding_types(
                     if let Some(binding_type) = binding_type {
                         extended_user_args.add_argument(var_name.clone(), binding_type);
                     }
-                    // If we can't determine the type, skip adding it to the context
-                    // This will result in a conservative cost estimate (zero cost for lookups)
+                    // If we can't determine the type (e.g. the binding value is a function call
+                    // or variable reference without a type sig), the variable is
+                    // omitted from the context. Any lookup of that variable will fall back to
+                    // ZERO but let bindings should not be able to use function
+                    // calls or variables with no binding type.
                 }
             }
         }
@@ -902,7 +867,7 @@ fn build_listlike_cost_analysis_tree(
             // Add the nested tree as a child (its cost will be included when summing children)
             children.insert(0, nested_tree);
             // The root cost is zero - the actual cost comes from the nested expression
-            let expr_node = CostExprNode::Atom(ClarityName::from("nested-expression"));
+            let expr_node = CostExprNode::NestedExpression;
             (expr_node, StaticCost::ZERO)
         }
         SymbolicExpressionType::Atom(name) => {
@@ -1022,7 +987,7 @@ fn build_listlike_cost_analysis_tree(
                 }
                 // If not a native function, treat as user-defined function and look it up
                 let expr_node = CostExprNode::UserFunction(name.clone());
-                let cost = calculate_function_cost(name.to_string(), cost_map, clarity_version)?;
+                let cost = calculate_function_cost(name.as_str(), cost_map, clarity_version)?;
                 (expr_node, cost)
             }
         }
@@ -1245,14 +1210,12 @@ mod tests {
 
     struct TestEnvironment {
         store: MemoryBackingStore,
-        clarity_version: ClarityVersion,
     }
 
     impl TestEnvironment {
-        fn new(_epoch: StacksEpochId, clarity_version: ClarityVersion) -> Self {
+        fn new(_epoch: StacksEpochId, _clarity_version: ClarityVersion) -> Self {
             Self {
                 store: MemoryBackingStore::new(),
-                clarity_version,
             }
         }
 
@@ -1393,7 +1356,7 @@ mod tests {
         assert!(matches!(left_val.expr, CostExprNode::AtomValue(_)));
         assert!(matches!(right_val.expr, CostExprNode::AtomValue(_)));
 
-        let ok_true_node = &cost_tree.children[2];
+        let ok_true_node = &cost_tree.children[1];
         assert!(matches!(
             ok_true_node.expr,
             CostExprNode::NativeFunction(NativeFunctions::ConsOkay)

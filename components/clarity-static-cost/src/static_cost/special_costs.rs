@@ -16,7 +16,6 @@ const TUPLE_FIELD_OVERHEAD_BYTES: u64 = 2;
 
 /// Get the serialized size of a reserved variable based on its type
 fn get_reserved_variable_size(native_var: NativeVariables) -> Option<(u64, u64)> {
-    use clarity::vm::variables::NativeVariables;
     match native_var {
         NativeVariables::TxSender
         | NativeVariables::ContractCaller
@@ -55,7 +54,6 @@ fn infer_field_type_from_binding(
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
 ) -> Option<TypeSignature> {
-    use clarity::vm::variables::NativeVariables;
     if binding_pair.len() != 2 {
         return None;
     }
@@ -183,7 +181,16 @@ fn infer_tuple_size_from_expression(
         }
     }
 
-    // fallback, try literal value size
+    // Try atom (variable reference) via user_args
+    if let Some(atom_name) = tuple_expr.match_atom() {
+        if let Some(type_sig) = user_args.and_then(|ua| ua.get_argument_type(atom_name)) {
+            let min = type_sig.min_size().unwrap_or(0) as u64;
+            let max = type_sig.size().unwrap_or(0) as u64;
+            return (min, max);
+        }
+    }
+
+    // Fallback: try literal value size
     if let Some(literal_value) = tuple_expr
         .match_atom_value()
         .or_else(|| tuple_expr.match_literal_value())
@@ -194,6 +201,11 @@ fn infer_tuple_size_from_expression(
         }
     }
 
+    // TODO: Remaining cases that can't be statically sized:
+    //   - atoms not present in user_args (e.g. let-bound variables, contract data variables)
+    //   - non-tuple list expressions (e.g. a function call used directly as a map key/value
+    //     argument, like `(map-set my-map (build-key arg) value)`)
+    // The cost will be underestimated for these.
     (0, 0)
 }
 

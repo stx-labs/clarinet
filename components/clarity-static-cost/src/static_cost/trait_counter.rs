@@ -150,6 +150,11 @@ pub trait TraitCountVisitor {
             CostExprNode::UserFunction(user_function) => {
                 self.visit_user_function(node, user_function, context);
             }
+            CostExprNode::NestedExpression => {
+                for child in &node.children {
+                    self.visit(child, context);
+                }
+            }
         }
     }
 }
@@ -678,17 +683,10 @@ impl<'a> TraitCountVisitor for TraitCountPropagator<'a> {
 
     fn visit_atom(
         &mut self,
-        node: &CostAnalysisNode,
+        _node: &CostAnalysisNode,
         _atom: &ClarityName,
-        context: &TraitCountContext,
+        _context: &TraitCountContext,
     ) {
-        // If this atom node has children (like "nested-expression" for lists),
-        // visit them to propagate trait counts
-        // This handles cases where let bindings are represented as Atom("nested-expression")
-        // with children representing the actual bindings
-        for child in &node.children {
-            self.visit(child, context);
-        }
     }
 
     fn visit_field_identifier(&mut self, _node: &CostAnalysisNode, _context: &TraitCountContext) {}

@@ -1,5 +1,4 @@
 // Library API - items will be used when integrated with LSP, CLI, etc.
-#![allow(dead_code)]
 
 mod cost_analysis;
 mod cost_functions;
@@ -17,7 +16,7 @@ use clarity::vm::{ClarityVersion, Value};
 use clarity_types::representations::SymbolicExpression;
 use clarity_types::types::{CharType, SequenceData};
 pub use cost_analysis::{
-    build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
+    build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_source,
     static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost, SummingExecutionCost,
     UserArgumentsContext,
 };
@@ -28,15 +27,23 @@ pub use trait_counter::{
     TraitCount, TraitCountCollector, TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
 
+pub(super) fn saturating_add_cost(a: &mut ExecutionCost, b: &ExecutionCost) {
+    a.runtime = a.runtime.saturating_add(b.runtime);
+    a.write_length = a.write_length.saturating_add(b.write_length);
+    a.write_count = a.write_count.saturating_add(b.write_count);
+    a.read_length = a.read_length.saturating_add(b.read_length);
+    a.read_count = a.read_count.saturating_add(b.read_count);
+}
+
 const STRING_COST_BASE: u64 = 36;
 const STRING_COST_MULTIPLIER: u64 = 3;
 
 pub(crate) fn calculate_function_cost(
-    function_name: String,
+    function_name: &str,
     cost_map: &HashMap<String, Option<StaticCost>>,
     _clarity_version: &ClarityVersion,
 ) -> Result<StaticCost, String> {
-    match cost_map.get(&function_name) {
+    match cost_map.get(function_name) {
         Some(Some(cost)) => {
             // Cost already computed
             Ok(cost.clone())
@@ -103,7 +110,7 @@ fn add_lookup_cost(mut cost: ExecutionCost, epoch: StacksEpochId) -> ExecutionCo
     let lookup_cost = ClarityCostFunction::LookupFunction
         .eval_for_epoch(0, epoch)
         .unwrap_or(ExecutionCost::ZERO);
-    cost.add(&lookup_cost).ok();
+    saturating_add_cost(&mut cost, &lookup_cost);
     cost
 }
 

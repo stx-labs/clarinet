@@ -246,6 +246,7 @@ fn print_cost_tree(node: &CostAnalysisNode, depth: usize) {
         CostExprNode::Atom(name) => format!("Atom({})", name),
         CostExprNode::FieldIdentifier(fid) => format!("FieldIdentifier({:?})", fid),
         CostExprNode::TraitReference(name) => format!("TraitReference({})", name),
+        CostExprNode::NestedExpression => "NestedExpression".to_string(),
     };
 
     // Calculate accumulated cost including children
