@@ -666,8 +666,7 @@ impl<'a> Aggregator<'a> {
                             if is_comment(next_item) {
                                 let count =
                                     next_item.span().start_column - arg.span().end_column - 1;
-                                let spaces = " ".repeat(count as usize);
-                                acc.push_str(&spaces);
+                                push_spaces(&mut acc, count);
                                 acc.push_str(&self.display_pse(next_item, previous_indentation));
                                 items_iter.next();
                             }
@@ -683,8 +682,7 @@ impl<'a> Aggregator<'a> {
                 if let Some(comment) = trailing {
                     if let Some(last_item) = method_list.last() {
                         let count = comment.span().start_column - last_item.span().end_column - 1;
-                        let spaces = " ".repeat(count as usize);
-                        acc.push_str(&spaces);
+                        push_spaces(&mut acc, count);
                         acc.push_str(&self.display_pse(comment, previous_indentation));
                     }
                 }
@@ -1087,8 +1085,7 @@ impl<'a> Aggregator<'a> {
                     .span()
                     .start_column
                     .saturating_sub(item.span().end_column + 1);
-                let spaces = " ".repeat(count as usize);
-                acc.push_str(&spaces);
+                push_spaces(&mut acc, count);
                 acc.push_str(&self.display_pse(comment, previous_indentation));
             }
             if let Some(next) = iter.peek() {
@@ -1235,8 +1232,7 @@ impl<'a> Aggregator<'a> {
                 .span()
                 .start_column
                 .saturating_sub(size_expr.span().end_column + 1);
-            let spaces = " ".repeat(count as usize);
-            acc.push_str(&spaces);
+            push_spaces(acc, count);
             acc.push_str(&self.display_pse(comment, previous_indentation));
         }
     }
@@ -1364,8 +1360,7 @@ impl<'a> Aggregator<'a> {
                     .span()
                     .start_column
                     .saturating_sub(item.span().end_column + 1);
-                let spaces = " ".repeat(count as usize);
-                acc.push_str(&spaces);
+                push_spaces(&mut acc, count);
                 acc.push_str(&self.display_pse(comment, previous_indentation));
             }
         }
@@ -1889,6 +1884,13 @@ fn contains_comments(exprs: &[PreSymbolicExpression]) -> bool {
     exprs.iter().any(is_comment)
 }
 
+/// Push `count` spaces directly into `acc`, avoiding a temporary String allocation.
+fn push_spaces(acc: &mut String, count: u32) {
+    for _ in 0..count {
+        acc.push(' ');
+    }
+}
+
 fn comment_piece(text: &str, pse: &PreSymbolicExpression) -> String {
     let (comment_part, rest) = text
         .find(|c| c != ';')
@@ -1896,8 +1898,13 @@ fn comment_piece(text: &str, pse: &PreSymbolicExpression) -> String {
     let comment_length = text.len() as u32;
     let space_count = pse.span().end_column - comment_length - pse.span().start_column - 1; // 1 to account for span starting at 1 instead of 0
     if space_count > 0 {
-        let spaces = " ".repeat(space_count as usize);
-        format!(";;{comment_part}{spaces}{rest}")
+        let mut result =
+            String::with_capacity(2 + comment_part.len() + space_count as usize + rest.len());
+        result.push_str(";;");
+        result.push_str(comment_part);
+        push_spaces(&mut result, space_count);
+        result.push_str(rest);
+        result
     } else {
         // remove the spaces if the comment has its own
         let spaces = if rest.starts_with(' ') { "" } else { " " };
