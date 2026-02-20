@@ -675,6 +675,7 @@ dependencies = [
  "bs58",
  "clap",
  "clap_complete",
+ "clarinet-defaults",
  "clarinet-deployments",
  "clarinet-files",
  "clarinet-format",
@@ -709,6 +710,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarinet-defaults"
+version = "3.14.0"
+dependencies = [
+ "clarity",
+]
+
+[[package]]
 name = "clarinet-deployments"
 version = "3.14.0"
 dependencies = [
@@ -717,6 +725,7 @@ dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",
+ "clarinet-defaults",
  "clarinet-files",
  "clarinet-utils",
  "clarity",
@@ -743,6 +752,7 @@ name = "clarinet-files"
 version = "3.14.0"
 dependencies = [
  "bitcoin",
+ "clarinet-defaults",
  "clarinet-utils",
  "clarity",
  "clarity-repl",
@@ -767,6 +777,7 @@ dependencies = [
 name = "clarinet-format"
 version = "0.1.0"
 dependencies = [
+ "clarinet-defaults",
  "clarity",
  "divan",
  "indoc",
@@ -777,6 +788,7 @@ dependencies = [
 name = "clarinet-sdk-wasm"
 version = "3.14.0"
 dependencies = [
+ "clarinet-defaults",
  "clarinet-deployments",
  "clarinet-files",
  "clarity",
@@ -840,6 +852,7 @@ dependencies = [
 name = "clarity-lsp"
 version = "3.14.0"
 dependencies = [
+ "clarinet-defaults",
  "clarinet-deployments",
  "clarinet-files",
  "clarinet-format",
@@ -864,6 +877,7 @@ version = "3.14.0"
 dependencies = [
  "bytes",
  "chrono",
+ "clarinet-defaults",
  "clarinet-deployments",
  "clarinet-files",
  "clarity",

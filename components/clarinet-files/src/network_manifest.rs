@@ -1191,7 +1191,7 @@ fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> St
 
 #[cfg(test)]
 mod tests {
-    use clarity_repl::repl::DEFAULT_EPOCH;
+    use clarinet_defaults::DEFAULT_EPOCH;
 
     use crate::{DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE};
 

@@ -33,6 +33,7 @@ toml = { workspace = true }
 toml_edit = { workspace = true }
 
 clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
+clarinet-defaults = { workspace = true }
 clarinet-files = { path = "../clarinet-files" }
 clarity-lsp = { path = "../clarity-lsp" }
 clarinet-format = { path = "../clarinet-format" }

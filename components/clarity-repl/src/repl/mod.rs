@@ -16,6 +16,7 @@ pub mod debug;
 use std::fmt::Display;
 use std::path::PathBuf;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::types::StacksEpochId;
 use clarity::vm::ClarityVersion;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
@@ -23,9 +24,6 @@ pub use interpreter::ClarityInterpreter;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 pub use session::Session;
 pub use settings::{SessionSettings, Settings, SettingsFile};
-
-pub const DEFAULT_CLARITY_VERSION: ClarityVersion = ClarityVersion::Clarity4;
-pub const DEFAULT_EPOCH: StacksEpochId = StacksEpochId::Epoch33;
 
 /// Convert ClarityVersion to its integer representation.
 pub fn clarity_version_to_u8(version: ClarityVersion) -> u8 {

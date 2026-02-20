@@ -7,6 +7,7 @@ use std::{env, process};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Generator, Shell};
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, get_initial_transactions_trackers, update_deployment_costs,
@@ -34,7 +35,6 @@ use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{
     clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
-    DEFAULT_EPOCH,
 };
 use clarity_repl::{analysis, repl};
 use serde::Serialize;
