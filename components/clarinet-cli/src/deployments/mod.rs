@@ -17,45 +17,33 @@ pub fn generate_default_deployment(
     hiro_system_kit::nestable_block_on(future)
 }
 
-pub fn check_deployments(manifest: &ProjectManifest) -> Result<(), String> {
-    let project_root_location = paths::project_root_from_manifest_location(&manifest.location)?;
-    let files = get_deployments_files(&project_root_location)?;
-    for (path, relative_path) in files.into_iter() {
-        let _spec = match DeploymentSpecification::from_config_file(&path, &project_root_location) {
-            Ok(spec) => spec,
-            Err(msg) => {
-                println!("{} {} syntax incorrect\n{}", red!("x"), relative_path, msg);
-                continue;
-            }
-        };
-        println!("{} {} successfully checked", green!("✔"), relative_path);
+pub fn check_deployments(project_root: &Path) -> Result<(), String> {
+    let deployments_path = project_root.join("deployments");
+    let entries = fs::read_dir(&deployments_path).map_err(|e| e.to_string())?;
+
+    let deployment_files_paths: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|p| {
+            matches!(
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref(),
+                Some("yml") | Some("yaml")
+            )
+        })
+        .collect();
+
+    for path in deployment_files_paths {
+        let rel_path = path.strip_prefix(project_root).unwrap().to_string_lossy();
+        if let Err(err_msg) = DeploymentSpecification::from_config_file(&path, project_root) {
+            eprintln!("{} {rel_path} syntax incorrect\n{err_msg}", red!("x"));
+            continue;
+        }
+        println!("{} {rel_path} successfully checked", green!("✔"));
     }
     Ok(())
-}
-
-fn get_deployments_files(project_root_location: &Path) -> Result<Vec<(PathBuf, String)>, String> {
-    let project_dir = project_root_location.to_path_buf();
-    let prefix_len = project_dir.to_string_lossy().len() + 1;
-    let deployments_dir = project_dir.join("deployments");
-    let Ok(paths) = fs::read_dir(&deployments_dir) else {
-        return Ok(vec![]);
-    };
-    let mut plans_paths = vec![];
-    for path in paths {
-        let file = path.unwrap().path();
-        let is_extension_valid = file
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext == "yml" || ext == "yaml");
-
-        if let Some(true) = is_extension_valid {
-            let relative_path = file.clone();
-            let (_, relative_path) = relative_path.to_str().unwrap().split_at(prefix_len);
-            plans_paths.push((file, relative_path.to_string()));
-        }
-    }
-
-    Ok(plans_paths)
 }
 
 pub fn write_deployment(

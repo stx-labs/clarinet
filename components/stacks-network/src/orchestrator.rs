@@ -80,8 +80,8 @@ impl DevnetOrchestrator {
     ) -> Result<DevnetOrchestrator, String> {
         let mut network_config = match network_manifest {
             Some(n) => Ok(n),
-            None => NetworkManifest::from_project_manifest_location(
-                &manifest.location,
+            None => NetworkManifest::from_project_root(
+                &manifest.root_dir,
                 &StacksNetwork::Devnet.get_networks(),
                 false,
                 Some(&manifest.project.cache_location),
