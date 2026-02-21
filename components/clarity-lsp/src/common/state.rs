@@ -647,32 +647,9 @@ pub async fn build_state(
     let contracts =
         update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
     for (contract_id, mut result) in contracts.into_iter() {
-        let is_project_contract = deployment.contracts.contains_key(&contract_id);
-
-        if !is_project_contract {
-            // For requirements, only collect error-level diagnostics
-            match result {
-                Ok(execution_result) => {
-                    let error_diags: Vec<_> = execution_result
-                        .diagnostics
-                        .into_iter()
-                        .filter(|d| d.level == ClarityLevel::Error)
-                        .collect();
-                    if !error_diags.is_empty() {
-                        artifacts.diags.insert(contract_id, error_diags);
-                    }
-                }
-                Err(ref mut diags) => {
-                    diags.retain(|d| d.level == ClarityLevel::Error);
-                    if !diags.is_empty() {
-                        artifacts.diags.insert(contract_id, diags.clone());
-                    }
-                }
-            }
+        let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
             continue;
-        }
-
-        let (_, contract_location) = deployment.contracts.get(&contract_id).unwrap();
+        };
         locations.insert(contract_id.clone(), contract_location.clone());
         if let Some(contract_metadata) = manifest.contracts_settings.get(contract_location) {
             clarity_versions.insert(contract_id.clone(), contract_metadata.clarity_version);
