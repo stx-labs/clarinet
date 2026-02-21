@@ -131,6 +131,7 @@ impl ClarityInterpreter {
         cached_ast: Option<&ContractAST>,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
+        run_repl_analysis: bool,
     ) -> Result<ExecutionResult, Vec<Diagnostic>> {
         let (ast, mut diagnostics, success) = match cached_ast {
             Some(ast) => (ast.clone(), vec![], true),
@@ -143,7 +144,7 @@ impl ClarityInterpreter {
         diagnostics.append(&mut annotation_diagnostics);
 
         let (analysis, mut analysis_diagnostics) =
-            match self.run_analysis(contract, &ast, &annotations) {
+            match self.run_analysis(contract, &ast, &annotations, run_repl_analysis) {
                 Ok((analysis, diagnostics)) => (analysis, diagnostics),
                 Err(diagnostic) => {
                     diagnostics.push(diagnostic);
@@ -263,6 +264,7 @@ impl ClarityInterpreter {
         contract: &ClarityContract,
         contract_ast: &ContractAST,
         annotations: &Vec<Annotation>,
+        run_repl_analysis: bool,
     ) -> Result<(ContractAnalysis, Vec<Diagnostic>), Diagnostic> {
         let mut analysis_db = AnalysisDatabase::new(&mut self.clarity_datastore);
 
@@ -279,14 +281,18 @@ impl ClarityInterpreter {
         )
         .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
-        // Run REPL-only analyses
-        let diagnostics = analysis::run_analysis(
-            &mut contract_analysis,
-            &mut analysis_db,
-            annotations,
-            &self.repl_settings.analysis,
-        )
-        .map_err(|mut diagnostics| diagnostics.pop().unwrap())?;
+        // Run REPL-only analyses (linter, check_checker, etc.)
+        let diagnostics = if run_repl_analysis {
+            analysis::run_analysis(
+                &mut contract_analysis,
+                &mut analysis_db,
+                annotations,
+                &self.repl_settings.analysis,
+            )
+            .map_err(|mut diagnostics| diagnostics.pop().unwrap())?
+        } else {
+            vec![]
+        };
 
         Ok((contract_analysis, diagnostics))
     }
@@ -1026,7 +1032,7 @@ mod tests {
         let (annotations, _) = interpreter.collect_annotations(source);
 
         let (analysis, _) = interpreter
-            .run_analysis(contract, &ast, &annotations)
+            .run_analysis(contract, &ast, &annotations, true)
             .unwrap();
 
         let result = interpreter
@@ -1345,7 +1351,7 @@ mod tests {
     fn test_run_valid_contract() {
         let mut interpreter = get_interpreter(None);
         let contract = ClarityContract::fixture();
-        let result = interpreter.run(&contract, None, false, None);
+        let result = interpreter.run(&contract, None, false, None, true);
         assert!(result.is_ok());
         assert!(result.unwrap().diagnostics.is_empty());
     }
@@ -1359,7 +1365,7 @@ mod tests {
         let contract = ClarityContractBuilder::default()
             .code_source(snippet.into())
             .build();
-        let result = interpreter.run(&contract, None, false, None);
+        let result = interpreter.run(&contract, None, false, None, true);
         assert!(result.is_err());
         let diagnostics = result.unwrap_err();
         assert_eq!(diagnostics.len(), 1);
@@ -1373,7 +1379,7 @@ mod tests {
         let contract = ClarityContractBuilder::default()
             .code_source(snippet.into())
             .build();
-        let result = interpreter.run(&contract, None, false, None);
+        let result = interpreter.run(&contract, None, false, None, true);
         assert!(result.is_err());
 
         let diagnostics = result.unwrap_err();
@@ -1426,7 +1432,7 @@ mod tests {
         let (annotations, _) = interpreter.collect_annotations(source);
 
         let (analysis, _) = interpreter
-            .run_analysis(&contract, &ast, &annotations)
+            .run_analysis(&contract, &ast, &annotations, true)
             .unwrap();
 
         let result = interpreter.execute(&contract, &ast, analysis, false, None);
@@ -1450,7 +1456,7 @@ mod tests {
         let call_contract = ClarityContractBuilder::default()
             .code_source("(contract-call? .contract incr)".to_owned())
             .build();
-        let _ = interpreter.run(&call_contract, None, false, None);
+        let _ = interpreter.run(&call_contract, None, false, None, true);
     }
 
     #[test]
@@ -1710,7 +1716,9 @@ mod tests {
             .epoch(StacksEpochId::Epoch25)
             .clarity_version(ClarityVersion::Clarity2)
             .build();
-        assert!(interpreter.run(&call_contract, None, false, None).is_ok());
+        assert!(interpreter
+            .run(&call_contract, None, false, None, true)
+            .is_ok());
     }
 
     #[test]
@@ -1762,7 +1770,9 @@ mod tests {
             .epoch(StacksEpochId::Epoch30)
             .clarity_version(ClarityVersion::Clarity3)
             .build();
-        assert!(interpreter.run(&call_contract, None, false, None).is_ok());
+        assert!(interpreter
+            .run(&call_contract, None, false, None, true)
+            .is_ok());
     }
 
     #[test]
@@ -1850,7 +1860,9 @@ mod tests {
             .epoch(StacksEpochId::Epoch30)
             .clarity_version(ClarityVersion::Clarity3)
             .build();
-        assert!(interpreter.run(&call_contract, None, false, None).is_ok());
+        assert!(interpreter
+            .run(&call_contract, None, false, None, true)
+            .is_ok());
     }
 
     #[test]
