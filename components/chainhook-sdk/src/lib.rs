@@ -1,11 +1,3 @@
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
-#[macro_use]
-extern crate serde_json;
-
 pub extern crate bitcoincore_rpc;
 pub extern crate bitcoincore_rpc_json;
 

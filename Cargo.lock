@@ -575,7 +575,6 @@ dependencies = [
  "regex",
  "reqwest",
  "serde",
- "serde_derive",
  "serde_json",
  "stacks-codec",
  "test-case",
@@ -589,7 +588,6 @@ version = "1.3.7"
 dependencies = [
  "hex",
  "serde",
- "serde_derive",
  "serde_json",
  "strum",
 ]
@@ -728,7 +726,6 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "serde",
- "serde_derive",
  "serde_json",
  "stacks-codec",
  "stacks-common",
@@ -753,7 +750,6 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde-wasm-bindgen",
- "serde_derive",
  "serde_json",
  "stacks-common",
  "toml",
@@ -832,7 +828,6 @@ dependencies = [
  "clarinet-files",
  "clarity-repl",
  "serde",
- "serde_derive",
  "serde_json",
 ]
 
@@ -890,7 +885,6 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde-wasm-bindgen",
- "serde_derive",
  "serde_json",
  "sha2 0.10.9",
  "strum",
@@ -4094,7 +4088,6 @@ dependencies = [
  "ratatui",
  "reqwest",
  "serde",
- "serde_derive",
  "serde_json",
  "signal-hook 0.4.3",
  "stacks-codec",
@@ -4120,7 +4113,6 @@ dependencies = [
  "mockito",
  "reqwest",
  "serde",
- "serde_derive",
  "serde_json",
  "stacks-codec",
  "stacks-common",

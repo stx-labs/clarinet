@@ -17,7 +17,7 @@ use chainhook_types::{
     DEFAULT_STACKS_NODE_RPC,
 };
 use hiro_system_kit::slog;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // Custom shutdown wrapper to replace Rocket's Shutdown
 pub struct Shutdown(tokio::sync::oneshot::Sender<()>);
