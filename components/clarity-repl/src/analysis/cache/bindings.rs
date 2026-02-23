@@ -9,7 +9,7 @@ use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BindingType {
@@ -124,7 +124,7 @@ impl<'a> ASTVisitor<'a> for BindingMapBuilder<'a> {
     fn traverse_let(
         &mut self,
         expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        bindings: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
         // Add `let` bindings to current scope and save them
@@ -133,15 +133,15 @@ impl<'a> ASTVisitor<'a> for BindingMapBuilder<'a> {
         //       This means the linter may consider a binding valid before it actually is
         //       This isn't a problem now, since interpretation will fail if you try to use a binding before it's declared,
         //       or try to re-declare an existing binding in a nested scope
-        for (name, expr) in bindings {
-            let annotation = get_index_of_span(self.annotations, &expr.span);
+        for (name, binding) in bindings {
+            let annotation = get_index_of_span(self.annotations, &binding.value.span);
             self.active_bindings
-                .insert(name, BindingData::new(expr, annotation));
+                .insert(name, BindingData::new(binding.value, annotation));
         }
 
         // Traverse expressions in bindings
-        for expr in bindings.values() {
-            if !self.traverse_expr(expr) {
+        for binding in bindings.values() {
+            if !self.traverse_expr(binding.value) {
                 return false;
             }
         }
@@ -158,12 +158,12 @@ impl<'a> ASTVisitor<'a> for BindingMapBuilder<'a> {
         }
 
         // Remove `let` bindings from current scope and save them
-        for name in bindings.keys() {
+        for (name, let_binding) in bindings {
             if let Some(data) = self.active_bindings.remove(name) {
                 let binding = Binding {
                     kind: BindingType::LetBinding,
                     name,
-                    span: data.expr.span.clone(),
+                    span: let_binding.name_span.clone(),
                 };
                 self.bindings.insert(binding, data);
             }
