@@ -288,46 +288,69 @@ fn test_formatter_check() {
     );
 }
 
+/// Run `clarinet check` with JSON output in the given directory and return the parsed JSON.
+#[track_caller]
+fn run_clarinet_check_json(args: &[&str], working_dir: &Path) -> serde_json::Value {
+    let mut full_args = vec!["check"];
+    full_args.extend_from_slice(args);
+    full_args.extend_from_slice(&["--output", "json"]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(&full_args)
+        .current_dir(working_dir)
+        .output()
+        .expect("Failed to execute clarinet check");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout).expect("clarinet check should produce valid JSON")
+}
+
+/// Extract all diagnostic messages from `clarinet check --output json` output.
+#[track_caller]
+fn collect_check_diagnostic_messages(json: &serde_json::Value) -> Vec<String> {
+    json["diagnostics"]
+        .as_object()
+        .expect("diagnostics should be an object")
+        .values()
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|d| d["message"].as_str())
+        .map(String::from)
+        .collect()
+}
+
+/// Strip a TOML section (and its contents up to the next section header) from a file.
+fn strip_toml_section(path: &Path, section_header: &str) {
+    let content = fs::read_to_string(path).unwrap();
+    let mut in_section = false;
+    let stripped: String = content
+        .lines()
+        .filter(|line| {
+            if line.starts_with(section_header) {
+                in_section = true;
+                return false;
+            }
+            if in_section && line.starts_with('[') {
+                in_section = false;
+            }
+            !in_section
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(path, stripped).expect("Failed to write file");
+}
+
 /// `clarinet check <file>` with no Clarinet.toml should emit lint warnings by default.
 #[test]
 fn test_check_single_file_default_lints() {
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
-    // Write a .clar file with an unused constant (no Clarinet.toml in the directory)
     let contract_path = temp_dir.path().join("unused.clar");
     fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n")
         .expect("Failed to write contract");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args([
-            "check",
-            contract_path.to_str().unwrap(),
-            "--output",
-            "json",
-        ])
-        .current_dir(temp_dir.path())
-        .output()
-        .expect("Failed to execute clarinet check");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).expect("clarinet check should produce valid JSON");
-
-    let diagnostics = parsed["diagnostics"]
-        .as_object()
-        .expect("diagnostics should be an object");
-
-    // Find the diagnostics array for our file (key is the file path)
-    let file_diags: Vec<&serde_json::Value> = diagnostics
-        .values()
-        .filter_map(|v| v.as_array())
-        .flatten()
-        .collect();
-
-    let messages: Vec<&str> = file_diags
-        .iter()
-        .filter_map(|d| d["message"].as_str())
-        .collect();
+    let json = run_clarinet_check_json(&[contract_path.to_str().unwrap()], temp_dir.path());
+    let messages = collect_check_diagnostic_messages(&json);
 
     assert!(
         messages.iter().any(|m| m.contains("never used")),
@@ -342,7 +365,6 @@ fn test_check_project_default_lints() {
     let temp_dir = create_new_project(project_name);
     let project_path = temp_dir.path().join(project_name);
 
-    // Add a contract to the project
     let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
         .args(["contract", "new", "my-contract"])
         .current_dir(&project_path)
@@ -350,57 +372,17 @@ fn test_check_project_default_lints() {
         .unwrap();
     assert!(output.status.success(), "clarinet contract new failed");
 
-    // Overwrite the contract with code that has an unused constant
     let contract_path = project_path.join("contracts").join("my-contract.clar");
     fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n")
         .expect("Failed to write contract");
 
-    // Strip the [repl.analysis] section so we test the no-config fallback.
-    // Remove lines from `[repl.analysis]` up to (but not including) the next
-    // section header, preserving everything else (e.g. [contracts]).
-    let manifest_path = project_path.join("Clarinet.toml");
-    let manifest_str = fs::read_to_string(&manifest_path).unwrap();
-    let mut in_repl_analysis = false;
-    let stripped: String = manifest_str
-        .lines()
-        .filter(|line| {
-            if line.starts_with("[repl.analysis]") {
-                in_repl_analysis = true;
-                return false;
-            }
-            if in_repl_analysis && line.starts_with('[') {
-                in_repl_analysis = false;
-            }
-            !in_repl_analysis
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    fs::write(&manifest_path, stripped).expect("Failed to write manifest");
+    strip_toml_section(
+        &project_path.join("Clarinet.toml"),
+        "[repl.analysis]",
+    );
 
-    let check_output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["check", "--output", "json"])
-        .current_dir(&project_path)
-        .output()
-        .expect("Failed to execute clarinet check");
-
-    let stdout = String::from_utf8_lossy(&check_output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).expect("clarinet check should produce valid JSON");
-
-    let diagnostics = parsed["diagnostics"]
-        .as_object()
-        .expect("diagnostics should be an object");
-
-    let file_diags: Vec<&serde_json::Value> = diagnostics
-        .values()
-        .filter_map(|v| v.as_array())
-        .flatten()
-        .collect();
-
-    let messages: Vec<&str> = file_diags
-        .iter()
-        .filter_map(|d| d["message"].as_str())
-        .collect();
+    let json = run_clarinet_check_json(&[], &project_path);
+    let messages = collect_check_diagnostic_messages(&json);
 
     assert!(
         messages.iter().any(|m| m.contains("never used")),
