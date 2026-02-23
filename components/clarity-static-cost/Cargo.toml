@@ -17,7 +17,7 @@ stacks-common = { workspace = true, default-features = false }
 
 [dev-dependencies]
 stackslib = { workspace = true, default-features = false }
-rstest = "0.21"
+rstest = "0.26.1"
 
 [lib]
 name = "clarity_static_cost"
