@@ -19,8 +19,8 @@ pub use cost_analysis::{
     static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost, SummingExecutionCost,
     UserArgumentsContext,
 };
-pub use error::StaticCostError;
 pub use cost_functions::ClarityCostFunctionExt;
+pub use error::StaticCostError;
 pub use special_costs::get_cost_for_special_function;
 use stacks_common::types::StacksEpochId;
 pub use trait_counter::{
@@ -84,9 +84,7 @@ fn string_cost(length: usize) -> StaticCost {
 /// Strings are the only Value's with costs associated
 pub(crate) fn calculate_value_cost(value: &Value) -> StaticCost {
     match value {
-        Value::Sequence(SequenceData::String(CharType::UTF8(data))) => {
-            string_cost(data.data.len())
-        }
+        Value::Sequence(SequenceData::String(CharType::UTF8(data))) => string_cost(data.data.len()),
         Value::Sequence(SequenceData::String(CharType::ASCII(data))) => {
             string_cost(data.data.len())
         }

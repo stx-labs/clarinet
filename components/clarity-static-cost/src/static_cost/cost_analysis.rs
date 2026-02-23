@@ -1,6 +1,6 @@
 // Static cost analysis for Clarity contracts
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use clarity::vm::ast::build_ast;
 use clarity::vm::contexts::Environment;
@@ -9,7 +9,8 @@ use clarity::vm::costs::ExecutionCost;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use clarity::vm::types::{
-    parse_name_type_pairs, QualifiedContractIdentifier, TypeSignature, TypeSignatureExt,
+    parse_name_type_pairs, QualifiedContractIdentifier, TupleTypeSignature, TypeSignature,
+    TypeSignatureExt,
 };
 use clarity::vm::variables::lookup_reserved_variable;
 use clarity::vm::{ClarityVersion, LocalContext, Value};
@@ -94,6 +95,10 @@ impl StaticCost {
 pub struct UserArgumentsContext {
     /// Map from argument name to argument type
     pub arguments: HashMap<ClarityName, TypeSignature>,
+    /// Map from map-name to (key_type, value_type), pre-populated from define-map declarations
+    pub map_types: HashMap<ClarityName, (TypeSignature, TypeSignature)>,
+    /// Map from data-var name to its value type, pre-populated from define-data-var declarations
+    pub data_var_types: HashMap<ClarityName, TypeSignature>,
 }
 
 impl UserArgumentsContext {
@@ -111,6 +116,27 @@ impl UserArgumentsContext {
 
     pub fn get_argument_type(&self, name: &ClarityName) -> Option<&TypeSignature> {
         self.arguments.get(name)
+    }
+
+    pub fn add_map_type(
+        &mut self,
+        name: ClarityName,
+        key_type: TypeSignature,
+        value_type: TypeSignature,
+    ) {
+        self.map_types.insert(name, (key_type, value_type));
+    }
+
+    pub fn get_map_type(&self, name: &ClarityName) -> Option<&(TypeSignature, TypeSignature)> {
+        self.map_types.get(name)
+    }
+
+    pub fn add_data_var_type(&mut self, name: ClarityName, value_type: TypeSignature) {
+        self.data_var_types.insert(name, value_type);
+    }
+
+    pub fn get_data_var_type(&self, name: &ClarityName) -> Option<&TypeSignature> {
+        self.data_var_types.get(name)
     }
 }
 
@@ -386,13 +412,44 @@ pub fn static_cost_tree_from_ast(
     env: &mut Environment,
 ) -> Result<HashMap<String, (CostAnalysisNode, Option<TraitCount>)>, StaticCostError> {
     let exprs = &ast.expressions;
-    let user_args = UserArgumentsContext::new();
-    let costs_map: HashMap<String, Option<StaticCost>> = HashMap::new();
+    let mut user_args = UserArgumentsContext::new();
+    let mut costs_map: HashMap<String, Option<StaticCost>> = HashMap::new();
     let mut costs: HashMap<String, Option<CostAnalysisNode>> = HashMap::new();
-    // first pass extracts the function names
-    for expr in exprs {
-        if let Some(function_name) = extract_function_name(expr) {
-            costs.insert(function_name, None);
+    // first pass: extract function names and collect define-map key/value types
+    {
+        let mut free_tracker = clarity::vm::costs::LimitedCostTracker::new_free();
+        for expr in exprs {
+            if let Some(list) = expr.match_list() {
+                let head = list.first().and_then(|f| f.match_atom());
+                if head.map(|a| a.as_str() == "define-map").unwrap_or(false) && list.len() >= 4 {
+                    if let Some(map_name) = list[1].match_atom() {
+                        let key_type =
+                            TypeSignature::parse_type_repr(epoch, &list[2], &mut free_tracker).ok();
+                        let value_type =
+                            TypeSignature::parse_type_repr(epoch, &list[3], &mut free_tracker).ok();
+                        if let (Some(k), Some(v)) = (key_type, value_type) {
+                            user_args.add_map_type(map_name.clone(), k, v);
+                        }
+                    }
+                }
+                if head
+                    .map(|a| a.as_str() == "define-data-var")
+                    .unwrap_or(false)
+                    && list.len() >= 3
+                {
+                    if let Some(var_name) = list[1].match_atom() {
+                        if let Ok(value_type) =
+                            TypeSignature::parse_type_repr(epoch, &list[2], &mut free_tracker)
+                        {
+                            user_args.add_data_var_type(var_name.clone(), value_type);
+                        }
+                    }
+                }
+                if let Some(function_name) = extract_function_name(expr) {
+                    costs.insert(function_name.clone(), None);
+                    costs_map.insert(function_name, None);
+                }
+            }
         }
     }
     // second pass computes the cost
@@ -407,6 +464,16 @@ pub fn static_cost_tree_from_ast(
                 env,
                 0,
             )?;
+            // Compute static cost for this function so subsequent calls can look it up.
+            // Include the overhead costs so that callers get the full cost
+            // of invoking this function. Note: LookupFunction is NOT added here because
+            // the dynamic VM does not charge it for user-defined function calls.
+            let mut sc: StaticCost =
+                calculate_total_cost_with_branching(&cost_analysis_tree).into();
+            let overhead = compute_function_overhead_costs(None, &function_name, exprs, epoch);
+            super::saturating_add_cost(&mut sc.min, &overhead.min);
+            super::saturating_add_cost(&mut sc.max, &overhead.max);
+            costs_map.insert(function_name.clone(), Some(sc));
             costs.insert(function_name, Some(cost_analysis_tree));
         }
     }
@@ -605,14 +672,18 @@ fn calculate_variable_lookup_cost_from_type(
 }
 
 /// Look up types for let-bound variables from the type_map in contract analysis.
-/// Falls back to inferring types from literal values when type_map is not available.
-/// Returns an extended UserArgumentsContext with the types added
+/// Falls back to inferring types from literal values and TupleCons expressions when
+/// type_map is not available.
+/// Bindings are processed incrementally so later bindings may reference earlier ones.
+/// Returns a context that includes `base_args` plus all newly-inferred bindings.
 fn lookup_let_binding_types(
     binding_list: &[SymbolicExpression],
     contract_analysis: Option<&clarity::vm::analysis::ContractAnalysis>,
+    base_args: &UserArgumentsContext,
     epoch: StacksEpochId,
 ) -> UserArgumentsContext {
-    let mut extended_user_args = UserArgumentsContext::new();
+    // Clone base_args so later bindings can reference outer args and earlier bindings.
+    let mut context = base_args.clone();
 
     for binding in binding_list.iter() {
         if let Some(binding_pair) = binding.match_list() {
@@ -624,25 +695,79 @@ fn lookup_let_binding_types(
                         .and_then(|type_map| type_map.get_type_expected(&binding_pair[1]))
                         .cloned()
                         .or_else(|| {
-                            // Fallback: infer type from literal value if type_map is not available
-                            // This handles the case where type_map wasn't persisted to the database
-                            infer_type_from_expression(&binding_pair[1], epoch).ok()
+                            // Fallback: infer type using the current accumulated context.
+                            // This handles TupleCons expressions like {key: a} and allows
+                            // later bindings to reference earlier ones.
+                            infer_type_from_expression_with_args(&binding_pair[1], &context, epoch)
+                                .ok()
                         });
 
-                    if let Some(binding_type) = binding_type {
-                        extended_user_args.add_argument(var_name.clone(), binding_type);
+                    if let Some(ty) = binding_type {
+                        context.add_argument(var_name.clone(), ty);
                     }
-                    // If we can't determine the type (e.g. the binding value is a function call
-                    // or variable reference without a type sig), the variable is
-                    // omitted from the context. Any lookup of that variable will fall back to
-                    // ZERO but let bindings should not be able to use function
-                    // calls or variables with no binding type.
+                    // If we can't determine the type (e.g. the binding value is a complex
+                    // function call), the variable is omitted from the context and its lookup
+                    // will fall back to ZERO.
                 }
             }
         }
     }
 
-    extended_user_args
+    context
+}
+
+/// Infer type from a SymbolicExpression, using `user_args` for atom lookups and
+/// TupleCons value expressions like `(tuple (key a))`.
+fn infer_type_from_expression_with_args(
+    expr: &SymbolicExpression,
+    user_args: &UserArgumentsContext,
+    epoch: StacksEpochId,
+) -> Result<TypeSignature, StaticCostError> {
+    match &expr.expr {
+        SymbolicExpressionType::Atom(name) => {
+            if let Some(t) = user_args.get_argument_type(name) {
+                return Ok(t.clone());
+            }
+            infer_type_from_expression(expr, epoch)
+        }
+        SymbolicExpressionType::List(exprs) => {
+            // Try TupleCons inference before falling back to type-annotation parsing.
+            if let Some(tuple_type) = infer_tuple_type_from_tuplecons(exprs, user_args, epoch) {
+                return Ok(tuple_type);
+            }
+            infer_type_from_expression(expr, epoch)
+        }
+        _ => infer_type_from_expression(expr, epoch),
+    }
+}
+
+/// Try to infer a `TupleType` from a TupleCons list like `(tuple (key a))`.
+/// Returns `None` if the expression is not a valid TupleCons or if any field type
+/// cannot be determined.
+fn infer_tuple_type_from_tuplecons(
+    exprs: &[SymbolicExpression],
+    user_args: &UserArgumentsContext,
+    epoch: StacksEpochId,
+) -> Option<TypeSignature> {
+    // First element must be the atom "tuple"
+    if exprs.first()?.match_atom()?.as_str() != "tuple" {
+        return None;
+    }
+
+    let mut field_map: BTreeMap<ClarityName, TypeSignature> = BTreeMap::new();
+    for field_expr in &exprs[1..] {
+        let pair = field_expr.match_list()?;
+        if pair.len() != 2 {
+            return None;
+        }
+        let field_name = pair[0].match_atom()?.clone();
+        let field_type = infer_type_from_expression_with_args(&pair[1], user_args, epoch).ok()?;
+        field_map.insert(field_name, field_type);
+    }
+
+    TupleTypeSignature::try_from(field_map)
+        .ok()
+        .map(TypeSignature::TupleType)
 }
 
 /// Infer type from a SymbolicExpression by examining its structure.
@@ -652,9 +777,8 @@ pub(crate) fn infer_type_from_expression(
     epoch: StacksEpochId,
 ) -> Result<TypeSignature, StaticCostError> {
     match &expr.expr {
-        SymbolicExpressionType::LiteralValue(value) => {
-            TypeSignature::literal_type_of(value).map_err(|e| StaticCostError::TypeParse(format!("{e:?}")))
-        }
+        SymbolicExpressionType::LiteralValue(value) => TypeSignature::literal_type_of(value)
+            .map_err(|e| StaticCostError::TypeParse(format!("{e:?}"))),
         SymbolicExpressionType::AtomValue(value) => {
             TypeSignature::type_of(value).map_err(|e| StaticCostError::TypeParse(format!("{e:?}")))
         }
@@ -670,9 +794,9 @@ pub(crate) fn infer_type_from_expression(
             TypeSignature::parse_type_repr(epoch, expr, &mut free_tracker)
                 .map_err(|e| StaticCostError::TypeParse(format!("{e:?}")))
         }
-        SymbolicExpressionType::TraitReference(_, _) | SymbolicExpressionType::Field(_) => {
-            Err(StaticCostError::MalformedAst("cannot infer type from trait reference or field"))
-        }
+        SymbolicExpressionType::TraitReference(_, _) | SymbolicExpressionType::Field(_) => Err(
+            StaticCostError::MalformedAst("cannot infer type from trait reference or field"),
+        ),
     }
 }
 
@@ -687,22 +811,27 @@ fn parse_atom_expression(name: &ClarityName, user_args: &UserArgumentsContext) -
 /// Build an expression tree for function definitions like (define-public (foo (a u64)) (ok a))
 fn build_function_definition_cost_analysis_tree(
     list: &[SymbolicExpression],
-    _user_args: &UserArgumentsContext,
+    outer_user_args: &UserArgumentsContext,
     cost_map: &HashMap<String, Option<StaticCost>>,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
     env: &mut Environment,
 ) -> Result<(String, CostAnalysisNode), StaticCostError> {
-    let define_type = list[0]
-        .match_atom()
-        .ok_or(StaticCostError::MalformedAst("expected atom for define type"))?;
-    let signature = list[1]
-        .match_list()
-        .ok_or(StaticCostError::MalformedAst("expected list for function signature"))?;
+    let define_type = list[0].match_atom().ok_or(StaticCostError::MalformedAst(
+        "expected atom for define type",
+    ))?;
+    let signature = list[1].match_list().ok_or(StaticCostError::MalformedAst(
+        "expected list for function signature",
+    ))?;
     let body = &list[2];
 
     let mut children = Vec::new();
-    let mut function_user_args = UserArgumentsContext::new();
+    // Start with contract-level context (carries map_types and data_var_types) but no argument bindings.
+    let mut function_user_args = UserArgumentsContext {
+        arguments: HashMap::new(),
+        map_types: outer_user_args.map_types.clone(),
+        data_var_types: outer_user_args.data_var_types.clone(),
+    };
 
     // Process function arguments: (a u64)
     // Use a free cost tracker since we're just parsing types
@@ -712,7 +841,9 @@ fn build_function_definition_cost_analysis_tree(
             if arg_list.len() == 2 {
                 let arg_name = arg_list[0]
                     .match_atom()
-                    .ok_or(StaticCostError::MalformedAst("expected atom for argument name"))?;
+                    .ok_or(StaticCostError::MalformedAst(
+                        "expected atom for argument name",
+                    ))?;
 
                 let arg_type_expr = &arg_list[1];
 
@@ -744,22 +875,36 @@ fn build_function_definition_cost_analysis_tree(
         0,
     )?;
 
-    // If the body is a Let expression and the last child (return value) is ConsOkay,
-    // exclude ConsOkay's function cost (199) but keep its lookup cost (16)
-    // This matches dynamic execution behavior where cost_ok_cons is NOT charged
-    // when ok is the return value of a let expression
-    if let CostExprNode::NativeFunction(NativeFunctions::Let) = body_tree.expr {
+    // If the function body is a `let` whose last child is `(ok ...)` wrapping a
+    // non-storage expression, the dynamic VM does not charge OkCons — only the
+    // LookupFunction cost for `ok` is incurred.  Reduce ConsOkay to just that
+    // lookup cost in this case.
+    if let CostExprNode::NativeFunction(NativeFunctions::Let) = &body_tree.expr {
         if let Some(last_child) = body_tree.children.last() {
-            if let CostExprNode::NativeFunction(NativeFunctions::ConsOkay) = last_child.expr {
-                // Keep only the lookup cost (16), exclude the function cost (199)
-                let lookup_cost = ClarityCostFunction::LookupFunction
-                    .eval_for_epoch(0, epoch)
-                    .unwrap_or(ExecutionCost::ZERO);
-                let last_idx = body_tree.children.len() - 1;
-                body_tree.children[last_idx].cost = StaticCost {
-                    min: lookup_cost.clone(),
-                    max: lookup_cost,
-                };
+            if let CostExprNode::NativeFunction(NativeFunctions::ConsOkay) = &last_child.expr {
+                let has_storage_child = last_child.children.iter().any(|c| {
+                    matches!(
+                        &c.expr,
+                        CostExprNode::NativeFunction(
+                            NativeFunctions::SetEntry
+                                | NativeFunctions::InsertEntry
+                                | NativeFunctions::DeleteEntry
+                                | NativeFunctions::SetVar
+                                | NativeFunctions::FetchVar
+                                | NativeFunctions::FetchEntry
+                        )
+                    )
+                });
+                if !has_storage_child {
+                    let lookup_cost = ClarityCostFunction::LookupFunction
+                        .eval_for_epoch(0, epoch)
+                        .unwrap_or(ExecutionCost::ZERO);
+                    let last_idx = body_tree.children.len() - 1;
+                    body_tree.children[last_idx].cost = StaticCost {
+                        min: lookup_cost.clone(),
+                        max: lookup_cost,
+                    };
+                }
             }
         }
     }
@@ -802,7 +947,9 @@ fn build_function_definition_cost_analysis_tree(
     // Get the function name from the signature
     let function_name = signature[0]
         .match_atom()
-        .ok_or(StaticCostError::MalformedAst("expected atom for function name"))?;
+        .ok_or(StaticCostError::MalformedAst(
+            "expected atom for function name",
+        ))?;
 
     // Create the function definition node with zero cost (function definitions themselves don't have execution cost)
     Ok((
@@ -880,16 +1027,14 @@ fn build_listlike_cost_analysis_tree(
                             .flatten();
 
                         if let Some(binding_list) = exprs[1].match_list() {
-                            // Look up types for let-bound variables from type_map
-                            let binding_types = lookup_let_binding_types(
+                            // Look up types for let-bound variables from type_map.
+                            // Builds incrementally so later bindings can reference earlier ones.
+                            extended_user_args = lookup_let_binding_types(
                                 binding_list,
                                 contract_analysis.as_ref(),
+                                user_args,
                                 epoch,
                             );
-                            // Merge types into extended_user_args
-                            for (name, type_expr) in binding_types.arguments {
-                                extended_user_args.add_argument(name, type_expr);
-                            }
                         }
 
                         let (_, binding_tree) = build_cost_analysis_tree(
@@ -899,7 +1044,7 @@ fn build_listlike_cost_analysis_tree(
                             clarity_version,
                             epoch,
                             env,
-                            let_depth,
+                            let_depth + 1,
                         )?;
                         children.push(binding_tree);
                     }
@@ -971,10 +1116,23 @@ fn build_listlike_cost_analysis_tree(
                     )?;
                     children.push(child_tree);
                 }
-                // If not a native function, treat as user-defined function and look it up
-                let expr_node = CostExprNode::UserFunction(name.clone());
-                let cost = calculate_function_cost(name.as_str(), cost_map, clarity_version);
-                (expr_node, cost)
+                // If not a native function, check if it's a known user-defined function
+                // or a callable (trait) argument used in call position.
+                // Names not in cost_map and not callable args are tuple field names
+                // or similar non-function atoms.
+                let is_callable_arg = user_args.get_argument_type(name).is_some_and(|t| {
+                    matches!(
+                        t,
+                        TypeSignature::CallableType(_) | TypeSignature::TraitReferenceType(_)
+                    )
+                });
+                if cost_map.contains_key(name.as_str()) || is_callable_arg {
+                    let expr_node = CostExprNode::UserFunction(name.clone());
+                    let cost = calculate_function_cost(name.as_str(), cost_map, clarity_version);
+                    (expr_node, cost)
+                } else {
+                    (CostExprNode::Atom(name.clone()), StaticCost::ZERO)
+                }
             }
         }
         SymbolicExpressionType::AtomValue(value) => {

@@ -683,10 +683,15 @@ impl<'a> TraitCountVisitor for TraitCountPropagator<'a> {
 
     fn visit_atom(
         &mut self,
-        _node: &CostAnalysisNode,
+        node: &CostAnalysisNode,
         _atom: &ClarityName,
-        _context: &TraitCountContext,
+        context: &TraitCountContext,
     ) {
+        // Recurse into children so we propagate trait counts from function calls
+        // nested under non-function atoms (e.g. let-bound variable binding values).
+        for child in &node.children {
+            self.visit(child, context);
+        }
     }
 
     fn visit_field_identifier(&mut self, _node: &CostAnalysisNode, _context: &TraitCountContext) {}

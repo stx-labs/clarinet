@@ -671,6 +671,26 @@ fn test_against_dynamic_cost_analysis() {
             "allow-contract-caller",
             &allow_contract_caller_args,
         ),
+        // let-bound variable used directly as map key atom (not in user_args)
+        (
+            r#"(define-map my-map { key: uint } uint)
+               (define-public (let-bound-key (a uint))
+                 (let ((k { key: a }))
+                   (ok (map-set my-map k u1))))
+            "#,
+            "let-bound-key",
+            &uint_value,
+        ),
+        // contract data variable (var-get) used as map value — a list expression, not a tuple/atom
+        (
+            r#"(define-data-var stored-val uint u0)
+               (define-map my-map uint uint)
+               (define-public (contract-data-val)
+                 (ok (map-set my-map u1 (var-get stored-val))))
+            "#,
+            "contract-data-val",
+            &[],
+        ),
     ];
 
     let mut failures = Vec::new();

@@ -201,11 +201,14 @@ fn infer_tuple_size_from_expression(
         }
     }
 
-    // TODO: Remaining cases that can't be statically sized:
-    //   - atoms not present in user_args (e.g. let-bound variables, contract data variables)
-    //   - non-tuple list expressions (e.g. a function call used directly as a map key/value
-    //     argument, like `(map-set my-map (build-key arg) value)`)
-    // The cost will be underestimated for these.
+    // No size could be determined from the expression alone.
+    // Callers that have map_types in UserArgumentsContext will use the declared
+    // map type before reaching this fallback, so returning (0, 0) here only
+    // affects calls without that context (e.g. FetchEntry, which accepts any key).
+    eprintln!(
+        "Warning: inference failed for tuple expression `{}`",
+        tuple_expr
+    );
     (0, 0)
 }
 
@@ -272,13 +275,8 @@ pub fn get_cost_for_special_function(
             }
         }
         NativeFunctions::TupleCons => {
-            // TupleCons cost is based on the number of bindings (tuple fields)
-            // Extract the binding list length from args[0] which should be a list of bindings
-            let binding_len = args
-                .first()
-                .and_then(|e| e.match_list())
-                .map(|binding_list| binding_list.len() as u64)
-                .unwrap_or(args.len() as u64);
+            // TupleCons cost is based on the number of fields (arguments)
+            let binding_len = args.len() as u64;
             let cost = ClarityCostFunction::TupleCons
                 .eval_for_epoch(binding_len, epoch)
                 .unwrap_or(ExecutionCost::ZERO);
@@ -337,7 +335,7 @@ pub fn get_cost_for_special_function(
             }
         }
         NativeFunctions::FetchVar => {
-            let cost = cost_fetch_var(args, epoch);
+            let cost = cost_fetch_var(args, epoch, env, user_args);
             StaticCost {
                 min: cost.clone(),
                 max: cost,
@@ -604,11 +602,25 @@ pub fn cost_replace_at(args: &[SymbolicExpression], epoch: StacksEpochId) -> Exe
         .unwrap_or(ExecutionCost::ZERO)
 }
 
-// FetchVar cost is epoch-dependent: v200 uses type size, v205 uses actual result size
-// TODO
-pub fn cost_fetch_var(_args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
+// FetchVar cost uses the serialized size of the stored variable's value type
+pub fn cost_fetch_var(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    _env: Option<&clarity::vm::contexts::Environment>,
+    user_args: Option<&UserArgumentsContext>,
+) -> ExecutionCost {
+    let size = args
+        .first()
+        .and_then(|arg| arg.match_atom())
+        .and_then(|var_name| {
+            user_args?
+                .get_data_var_type(var_name)
+                .and_then(|type_sig| type_sig.max_serialized_size().ok())
+                .map(|s| s as u64)
+        })
+        .unwrap_or(0);
     ClarityCostFunction::FetchVar
-        .eval_for_epoch(0, epoch)
+        .eval_for_epoch(size, epoch)
         .unwrap_or(ExecutionCost::ZERO)
 }
 
@@ -653,20 +665,41 @@ pub fn cost_set_entry(
                 {
                     let key_type = &map_metadata.key_type;
                     let value_type = &map_metadata.value_type;
-                    // Use TypeSignature min_size and max_size for accurate ranges
+                    // Use serialized sizes: key stored as-is, value stored as Optional(value)
                     let key_min = key_type.min_size().unwrap_or(0) as u64;
-                    let key_max = key_type.size().unwrap_or(0) as u64;
+                    let key_max = key_type.max_serialized_size().unwrap_or(0) as u64;
                     let value_min = value_type.min_size().unwrap_or(0) as u64;
-                    let value_max = value_type.size().unwrap_or(0) as u64;
+                    let value_max = TypeSignature::new_option(value_type.clone())
+                        .ok()
+                        .and_then(|t| t.max_serialized_size().ok())
+                        .unwrap_or(0) as u64;
                     min_size = key_min + value_min;
                     max_size = key_max + value_max;
                 }
             }
         }
 
-        // Fallback: infer types from tuple bindings and use TypeSignature sizes
+        // Fallback: look up map type from define-map declarations collected during AST scan
         if min_size == 0 && max_size == 0 {
-            // Infer sizes from key and value tuple expressions
+            if let Some(ua) = user_args {
+                if let Some(map_name) = args[0].match_atom() {
+                    if let Some((key_type, value_type)) = ua.get_map_type(map_name) {
+                        let key_min = key_type.min_size().unwrap_or(0) as u64;
+                        let key_max = key_type.max_serialized_size().unwrap_or(0) as u64;
+                        let value_min = value_type.min_size().unwrap_or(0) as u64;
+                        let value_max = TypeSignature::new_option(value_type.clone())
+                            .ok()
+                            .and_then(|t| t.max_serialized_size().ok())
+                            .unwrap_or(0) as u64;
+                        min_size = key_min + value_min;
+                        max_size = key_max + value_max;
+                    }
+                }
+            }
+        }
+
+        // Last resort: infer types from the key/value expressions themselves
+        if min_size == 0 && max_size == 0 {
             let (key_min, key_max) = infer_tuple_size_from_expression(&args[1], epoch, user_args);
             let (value_min, value_max) =
                 infer_tuple_size_from_expression(&args[2], epoch, user_args);
