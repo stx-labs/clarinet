@@ -376,10 +376,7 @@ fn test_check_project_default_lints() {
     fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n")
         .expect("Failed to write contract");
 
-    strip_toml_section(
-        &project_path.join("Clarinet.toml"),
-        "[repl.analysis]",
-    );
+    strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
 
     let json = run_clarinet_check_json(&[], &project_path);
     let messages = collect_check_diagnostic_messages(&json);
