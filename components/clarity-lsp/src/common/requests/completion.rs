@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, OnceLock};
 
 use clarity::vm::types::{BlockInfoProperty, FunctionType, TypeSignatureExt};
-use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};
 use clarity_repl::clarity::analysis::ContractAnalysis;
 use clarity_repl::clarity::docs::{
     make_api_reference, make_define_reference, make_keyword_reference,
@@ -335,12 +335,13 @@ impl<'a> ASTVisitor<'a> for ContractDefinedData {
     fn visit_let(
         &mut self,
         expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        bindings: &HashMap<&'a ClarityName, LetBinding<'a>>,
         _body: &'a [SymbolicExpression],
     ) -> bool {
         if is_position_within_span(&self.position, &expr.span, 0) {
-            for (name, value) in bindings {
-                self.locals.push((name.to_string(), value.to_string()));
+            for (name, binding) in bindings {
+                self.locals
+                    .push((name.to_string(), binding.value.to_string()));
             }
         }
         true

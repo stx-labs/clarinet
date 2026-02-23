@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use clarity::vm::ClarityVersion;
-use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor};
+use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding};
 use clarity_repl::clarity::representations::Span;
 use clarity_repl::clarity::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use ls_types::{DocumentSymbol, SymbolKind};
@@ -338,19 +338,19 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_let(
         &mut self,
         expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        bindings: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
         let mut children: Vec<DocumentSymbol> = Vec::new();
 
         let mut bindings_children: Vec<DocumentSymbol> = Vec::new();
-        for (name, expr) in bindings.iter() {
+        for (name, binding) in bindings.iter() {
             bindings_children.push(build_symbol(
                 name.as_str(),
                 None,
                 ClaritySymbolKind::LET_BINDING,
-                &expr.span,
-                self.children_map.remove(&expr.id),
+                &binding.value.span,
+                self.children_map.remove(&binding.value.id),
             ))
         }
         if !bindings_children.is_empty() {
