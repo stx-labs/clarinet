@@ -333,10 +333,10 @@ fn compute_function_overhead_costs(
             Ok(sigs) => {
                 for (_, sig) in sigs.iter() {
                     let type_check_cost = ClarityCostFunction::InnerTypeCheckCost
-                        .eval_for_epoch(sig.size().unwrap_or(0) as u64, epoch)
+                        .eval_for_epoch(u64::from(sig.size().unwrap_or(0)), epoch)
                         .unwrap_or(ExecutionCost::ZERO);
                     let type_check_min_cost = ClarityCostFunction::InnerTypeCheckCost
-                        .eval_for_epoch(sig.min_size().unwrap_or(0) as u64, epoch)
+                        .eval_for_epoch(u64::from(sig.min_size().unwrap_or(0)), epoch)
                         .unwrap_or(ExecutionCost::ZERO);
                     saturating_add_cost(&mut overhead.min, &type_check_min_cost);
                     saturating_add_cost(&mut overhead.max, &type_check_cost);
@@ -648,8 +648,8 @@ fn calculate_variable_lookup_cost_from_type(
     let_depth: u64,
     epoch: StacksEpochId,
 ) -> StaticCost {
-    let type_size = type_sig.size().unwrap_or(0) as u64;
-    let type_min_size = type_sig.min_size().unwrap_or(0) as u64;
+    let type_size = u64::from(type_sig.size().unwrap_or(0));
+    let type_min_size = u64::from(type_sig.min_size().unwrap_or(0));
 
     let mut variable_size_cost = ClarityCostFunction::LookupVariableSize
         .eval_for_epoch(type_size, epoch)
@@ -705,9 +705,6 @@ fn lookup_let_binding_types(
                     if let Some(ty) = binding_type {
                         context.add_argument(var_name.clone(), ty);
                     }
-                    // If we can't determine the type (e.g. the binding value is a complex
-                    // function call), the variable is omitted from the context and its lookup
-                    // will fall back to ZERO.
                 }
             }
         }
