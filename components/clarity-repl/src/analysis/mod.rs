@@ -292,3 +292,48 @@ where
     conn.commit().expect("Failed to commit");
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Unit tests (using `SessionSettings::default()`) should have all lints disabled.
+    #[test]
+    fn default_settings_have_no_lints() {
+        let settings = Settings::default();
+        assert!(settings.lints.is_empty());
+        assert!(settings.passes.is_empty());
+    }
+
+    /// `clarinet check <file>` with no Clarinet.toml uses `Settings::with_default_lints()`.
+    #[test]
+    fn with_default_lints_enables_default_lints() {
+        let settings = Settings::with_default_lints();
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    /// A Clarinet.toml with no `[repl.analysis]` section deserializes as
+    /// `SettingsFile::default()`, which should produce the same defaults.
+    #[test]
+    fn settings_from_empty_settings_file_enables_default_lints() {
+        let settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    /// A Clarinet.toml with an empty `[repl.analysis]` section is equivalent
+    /// to `SettingsFile` with all `None` fields — same result as above.
+    #[test]
+    fn settings_from_empty_analysis_section_enables_default_lints() {
+        let file = SettingsFile {
+            passes: None,
+            lint_groups: None,
+            lints: None,
+            check_checker: None,
+        };
+        let settings = Settings::from(file);
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+}
