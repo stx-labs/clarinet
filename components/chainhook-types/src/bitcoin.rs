@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::TransactionIdentifier;
 
 /// A transaction input, which defines old coins to be consumed

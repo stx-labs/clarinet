@@ -35,6 +35,7 @@ use clarity::util::hash::{hex_bytes, Hash160};
 use clarity::vm::types::{BuffData, PrincipalData, SequenceData, TupleData};
 use clarity::vm::{ClarityName, Value as ClarityValue};
 use hiro_system_kit::{self, slog, yellow};
+use serde::Deserialize;
 use serde_json::json;
 use stacks_common::address::AddressHashMode;
 use stacks_common::types::chainstate::{StacksPrivateKey, StacksPublicKey};

@@ -7,7 +7,7 @@ use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use libsecp256k1::PublicKey;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use toml::value::Value;
 
 use super::FileAccessor;

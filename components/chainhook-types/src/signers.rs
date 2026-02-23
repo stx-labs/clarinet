@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::StacksTransactionData;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

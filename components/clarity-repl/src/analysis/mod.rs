@@ -23,7 +23,7 @@ use indexmap::IndexMap;
 use linter::{LintLevel, LintMapBuilder, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::analysis::annotation::Annotation;
 use crate::analysis::cache::AnalysisCache;

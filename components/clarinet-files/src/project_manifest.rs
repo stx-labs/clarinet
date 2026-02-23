@@ -10,7 +10,7 @@ use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::ser::SerializeMap;
-use serde::{Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 

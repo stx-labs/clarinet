@@ -8,6 +8,7 @@ use clarity::types::StacksEpochId;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use super::remote_data::HttpClient;
 use crate::analysis;

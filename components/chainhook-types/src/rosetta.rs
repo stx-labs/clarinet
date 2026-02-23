@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 
+use serde::{Deserialize, Serialize};
+
 use super::bitcoin::{TxIn, TxOut};
 use crate::contract_interface::ContractInterface;
 use crate::events::*;

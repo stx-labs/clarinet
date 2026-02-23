@@ -15,6 +15,7 @@ use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIden
 use clarity_types::Value;
 use colored::Colorize;
 use comfy_table::Table;
+use serde::Serialize;
 
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;

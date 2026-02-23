@@ -1,11 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt::Write;
 
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
 pub mod diagnostic_digest;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod onchain;

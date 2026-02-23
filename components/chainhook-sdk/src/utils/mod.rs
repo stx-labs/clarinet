@@ -9,7 +9,7 @@ use chainhook_types::{
 };
 use hiro_system_kit::slog::{self, Logger};
 use reqwest::RequestBuilder;
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 
 #[derive(Clone)]
 pub struct Context {
