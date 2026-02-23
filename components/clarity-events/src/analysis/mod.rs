@@ -13,7 +13,7 @@ use clarity_repl::clarity::{ClarityVersion, SymbolicExpressionType};
 use clarity_repl::repl::clarity_values::value_to_string;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 
 pub struct Settings {
     pub clarity_version: ClarityVersion,

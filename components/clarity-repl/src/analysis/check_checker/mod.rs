@@ -14,6 +14,7 @@ use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_types::types::TypeSignature;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};

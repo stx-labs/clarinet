@@ -2,6 +2,8 @@
 // `clarity-vm` repository's [ContractInterface](https://github.com/stacks-network/stacks-blockchain/blob/eca1cfe81f0c0989ebd3e53c32e3e5d70ed83757/clarity/src/vm/analysis/contract_interface_builder/mod.rs#L368) type.
 // We've copied it here rather than using `clarity-vm` as a dependency to avoid circular dependencies.
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContractInterface {
     pub functions: Vec<ContractInterfaceFunction>,

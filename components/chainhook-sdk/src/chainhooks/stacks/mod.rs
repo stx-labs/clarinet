@@ -15,7 +15,8 @@ use clarity::vm::ClarityName;
 use hiro_system_kit::slog;
 use regex::Regex;
 use reqwest::{Client, Method, RequestBuilder};
-use serde_json::Value as JsonValue;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value as JsonValue};
 
 use super::types::{
     append_error_context, validate_txid, BlockIdentifierIndexRule, ChainhookInstance,

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use strum::{EnumString, VariantArray};
 
 use crate::analysis::annotation::Annotation;

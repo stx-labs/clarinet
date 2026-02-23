@@ -6,6 +6,7 @@ use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::functions::NativeFunctions::{self, Filter, Fold, Map};
 use clarity::vm::{EvalHook, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
+use serde::{Deserialize, Serialize};
 
 type ExprCoverage = HashMap<u64, u64>;
 type ExecutableLines = HashMap<u32, Vec<u64>>;
