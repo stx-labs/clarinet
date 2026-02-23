@@ -672,7 +672,6 @@ checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 name = "clarinet-cli"
 version = "3.14.0"
 dependencies = [
- "bs58",
  "clap",
  "clap_complete",
  "clarinet-deployments",
@@ -684,19 +683,14 @@ dependencies = [
  "colored",
  "crossbeam-channel",
  "crossterm",
- "ctrlc",
  "hiro-system-kit",
  "indoc",
- "libc",
  "mac_address",
- "nix 0.30.1",
- "rand 0.8.5",
  "ratatui",
  "rpassword",
  "segment",
  "serde",
  "serde_json",
- "signal-hook 0.4.3",
  "similar",
  "stacks-network",
  "tempfile",
@@ -705,7 +699,6 @@ dependencies = [
  "toml",
  "toml_edit",
  "tower-lsp-server",
- "winapi 0.3.9",
 ]
 
 [[package]]
@@ -889,7 +882,6 @@ dependencies = [
  "rustyline",
  "schemars 1.2.1",
  "serde",
- "serde-wasm-bindgen",
  "serde_derive",
  "serde_json",
  "sha2 0.10.9",
