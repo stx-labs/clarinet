@@ -202,56 +202,45 @@ pub struct SettingsFile {
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let mut lints = LintMapBuilder::new().apply_defaults().build();
+        let mut settings = Self::with_default_lints();
 
         // Process lint groups first
         for (group, val) in from_file.lint_groups.unwrap_or_default() {
             if let Some(level) = LintLevel::from(val).into() {
-                group.insert_into(&mut lints, level);
+                group.insert_into(&mut settings.lints, level);
             } else {
-                group.remove_from(&mut lints);
+                group.remove_from(&mut settings.lints);
             }
         }
 
         // Individual lints can override group settings
         for (lint, val) in from_file.lints.unwrap_or_default() {
             if let Some(level) = LintLevel::from(val).into() {
-                lints.insert(lint, level);
+                settings.lints.insert(lint, level);
             } else {
-                lints.remove(&lint);
+                settings.lints.remove(&lint);
             }
         }
 
         // Add analysis passes listed in config file
-        let mut passes = from_file
-            .passes
-            .map(|file_passes| match file_passes {
+        if let Some(file_passes) = from_file.passes {
+            let passes = match file_passes {
                 OneOrList::One(pass) => HashSet::from([pass]),
                 OneOrList::List(passes) => HashSet::from_iter(passes),
-            })
-            .map(|passes| {
-                if passes.contains(&Pass::All) {
-                    HashSet::from(ALL_PASSES)
-                } else {
-                    passes
-                }
-            })
-            .unwrap_or_default();
-
-        // Always enable default passes
-        passes.extend(DEFAULT_PASSES);
+            };
+            if passes.contains(&Pass::All) {
+                settings.passes = HashSet::from(ALL_PASSES);
+            } else {
+                settings.passes.extend(passes);
+            }
+        }
 
         // Each pass that has its own settings should be included here.
-        let check_checker = from_file
-            .check_checker
-            .map(check_checker::Settings::from)
-            .unwrap_or_default();
-
-        Self {
-            passes,
-            lints,
-            check_checker,
+        if let Some(check_checker) = from_file.check_checker {
+            settings.check_checker = check_checker::Settings::from(check_checker);
         }
+
+        settings
     }
 }
 
