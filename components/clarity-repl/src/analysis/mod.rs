@@ -113,6 +113,19 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Construct `Settings` with the same default lints and passes used
+    /// when deserializing from an empty `SettingsFile`.
+    pub fn with_default_lints() -> Self {
+        let lints = LintMapBuilder::new().apply_defaults().build();
+        let passes = HashSet::from(DEFAULT_PASSES);
+
+        Self {
+            passes,
+            lints,
+            check_checker: check_checker::Settings::default(),
+        }
+    }
+
     pub fn enable_all_passes(&mut self) {
         self.passes = HashSet::from(ALL_PASSES)
     }

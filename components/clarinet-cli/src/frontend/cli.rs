@@ -1176,7 +1176,13 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
-            let mut settings = repl::SessionSettings::default();
+            let mut settings = repl::SessionSettings {
+                repl_settings: repl::Settings {
+                    analysis: analysis::Settings::with_default_lints(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
             settings.repl_settings.analysis.enable_all_passes();
 
             let mut session = repl::Session::new(settings.clone());
