@@ -745,6 +745,20 @@ fn test_against_dynamic_cost_analysis() {
             "mint-nft",
             &[],
         ),
+        // branching inside begin with subsequent siblings — verifies that
+        // the cost of expressions after an if is included in the static estimate
+        (
+            indoc! {r#"
+                (define-public (if-then-add)
+                  (begin
+                    (if (> u3 u0) u1 u2)
+                    (ok (+ u1 u2))
+                  )
+                )
+            "#},
+            "if-then-add",
+            &[],
+        ),
     ];
 
     let mut failures = Vec::new();

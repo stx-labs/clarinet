@@ -284,34 +284,14 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                     let _ = total_cost_max.add(&cond_static.max);
                 }
             } else {
-                // Recursively call calculate_total_cost_with_branching on children
-                // so that branching children (like If) are handled correctly
+                // Recursively process children (which may themselves be branching).
+                // Branching children (If/Match) produce a range of costs; we fold
+                // their min/max into total_cost_min/max so that subsequent siblings
+                // are added on top of the full accumulated cost.
                 let child_summing = calculate_total_cost_with_branching(child_cost_node);
-
-                if is_node_branching(child_cost_node) {
-                    // For branching children, preserve all paths by combining each path
-                    // with both min and max node costs
-                    for child_path_cost in &child_summing.costs {
-                        // Create paths with node min cost
-                        let mut combined_path_min = total_cost_min.clone();
-                        let _ = combined_path_min.add(child_path_cost);
-                        summing_cost.add_cost(combined_path_min);
-
-                        // Create paths with node max cost
-                        let mut combined_path_max = total_cost_max.clone();
-                        let _ = combined_path_max.add(child_path_cost);
-                        summing_cost.add_cost(combined_path_max);
-                    }
-                    // Update total_cost to the max child path for sequential addition with remaining children
-                    let child_static_cost: StaticCost = child_summing.into();
-                    let _ = total_cost_min.add(&child_static_cost.min);
-                    let _ = total_cost_max.add(&child_static_cost.max);
-                } else {
-                    // For non-branching children, add sequentially using their min/max
-                    let child_static_cost: StaticCost = child_summing.into();
-                    let _ = total_cost_min.add(&child_static_cost.min);
-                    let _ = total_cost_max.add(&child_static_cost.max);
-                }
+                let child_static_cost: StaticCost = child_summing.into();
+                let _ = total_cost_min.add(&child_static_cost.min);
+                let _ = total_cost_max.add(&child_static_cost.max);
             }
         }
 
@@ -321,12 +301,10 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
             summing_cost.add_cost(path);
         }
 
-        // Always add the succeed path (total_cost after all children have been processed).
-        // When there are no asserts!/branching children this is the only path.
-        // When there are asserts! children, total_cost represents the path where all
+        // Add the succeed path: total_cost after all children have been processed.
+        // When there are no asserts! children this is the only path.
+        // When there are asserts! children, this represents the path where all
         // assertions passed and all siblings were evaluated.
-        // When there are If/Match children, total_cost == their min/max, which is
-        // already represented in summing_cost — adding it again is harmless.
         summing_cost.add_cost(total_cost_min);
         summing_cost.add_cost(total_cost_max);
     }
