@@ -910,6 +910,7 @@ version = "3.14.0"
 dependencies = [
  "clarity",
  "clarity-types",
+ "indoc",
  "rstest 0.26.1",
  "stacks-common",
  "stackslib",

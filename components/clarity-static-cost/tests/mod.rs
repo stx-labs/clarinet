@@ -10,6 +10,7 @@ use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
     static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, UserArgumentsContext,
 };
+use indoc::indoc;
 #[cfg(test)]
 use rstest::rstest;
 use stacks_common::types::StacksEpochId;
@@ -38,9 +39,11 @@ where
 
 #[test]
 fn test_build_cost_analysis_tree_function_definition() {
-    let src = r#"(define-public (somefunc (a uint))
-  (ok (+ a 1))
-)"#;
+    let src = indoc! {r#"
+        (define-public (somefunc (a uint))
+          (ok (+ a 1))
+        )
+    "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
     let ast = ast::parse(
@@ -81,12 +84,14 @@ fn test_build_cost_analysis_tree_function_definition() {
 
 #[test]
 fn test_let_cost() {
-    let src = r#"(define-public (let (a uint))
-  (let ((a 1) (b 2)) (+ a b))
-)
-(define-public (let2 (a uint))
-  (let ((a 1) (b 2) (c 3)) (+ a b))
-)"#;
+    let src = indoc! {r#"
+        (define-public (let (a uint))
+          (let ((a 1) (b 2)) (+ a b))
+        )
+        (define-public (let2 (a uint))
+          (let ((a 1) (b 2) (c 3)) (+ a b))
+        )
+    "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
     let epoch = StacksEpochId::Epoch33;
@@ -111,15 +116,17 @@ fn test_let_cost() {
 
 #[test]
 fn test_dependent_function_calls() {
-    let src = r#"(define-public (add-one (a uint))
-  (begin
-    (print "somefunc")
-    (somefunc a)
-  )
-)
-(define-private (somefunc (a uint))
-  (ok (+ a 1))
-)"#;
+    let src = indoc! {r#"
+        (define-public (add-one (a uint))
+          (begin
+            (print "somefunc")
+            (somefunc a)
+          )
+        )
+        (define-private (somefunc (a uint))
+          (ok (+ a 1))
+        )
+    "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
     let epoch = StacksEpochId::Epoch32;
@@ -153,14 +160,15 @@ fn test_dependent_function_calls() {
 
 #[test]
 fn test_get_trait_count_direct() {
-    let src = r#"(define-trait trait-name (
-    (send (uint principal) (response uint uint))
-))
-(define-public (something (trait <trait-name>) (addresses (list 10 principal)))
-    (map (send u500 trait) addresses)
-)
-(define-private (send (trait <trait-name>) (addr principal)) (trait addr))
-"#;
+    let src = indoc! {r#"
+        (define-trait trait-name (
+            (send (uint principal) (response uint uint))
+        ))
+        (define-public (something (trait <trait-name>) (addresses (list 10 principal)))
+            (map (send u500 trait) addresses)
+        )
+        (define-private (send (trait <trait-name>) (addr principal)) (trait addr))
+    "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
     let epoch = StacksEpochId::Epoch32;
@@ -198,14 +206,15 @@ fn test_get_trait_count_direct() {
 #[rstest]
 fn test_trait_counting() {
     // map, fold, filter over traits counting
-    let src = r#"(define-trait trait-name (
-    (send (uint principal) (response uint uint))
-))
-(define-public (something (trait <trait-name>) (addresses (list 10 principal)))
-    (map (send u500 trait) addresses)
-)
-(define-private (send (trait <trait-name>) (addr principal)) (trait addr))
-"#;
+    let src = indoc! {r#"
+        (define-trait trait-name (
+            (send (uint principal) (response uint uint))
+        ))
+        (define-public (something (trait <trait-name>) (addresses (list 10 principal)))
+            (map (send u500 trait) addresses)
+        )
+        (define-private (send (trait <trait-name>) (addr principal)) (trait addr))
+    "#};
     let contract_id = QualifiedContractIdentifier::local("trait-counting").unwrap();
     let epoch = StacksEpochId::Epoch32;
     let ast =
@@ -539,156 +548,201 @@ fn test_against_dynamic_cost_analysis() {
     // Define test cases as (source, function_name, args)
     let test_cases: Vec<(&str, &str, &[clarity_types::Value])> = vec![
         (
-            r#"(define-public (let-func (a uint))
-            (let ((b 1))
-                (ok (+ a b))
-        ))
-        "#,
+            indoc! {r#"
+                (define-public (let-func (a uint))
+                  (let ((b 1))
+                    (ok (+ a b))
+                  )
+                )
+            "#},
             "let-func",
             &uint_value,
         ),
         (
-            r#"(define-public (if-func (a (string-ascii 10)) (b uint))
-            (if (> b u0)
-                (ok a)
-                (ok "aaaaaaaaaa")
-        ))
-        "#,
+            indoc! {r#"
+                (define-public (if-func (a (string-ascii 10)) (b uint))
+                  (if (> b u0)
+                    (ok a)
+                    (ok "aaaaaaaaaa")
+                  )
+                )
+            "#},
             "if-func",
             &if_args,
         ),
         (
-            r#"(define-public (simple-str-min (a (string-ascii 10)))
-            (ok a)
-        )"#,
+            indoc! {r#"
+                (define-public (simple-str-min (a (string-ascii 10)))
+                  (ok a)
+                )
+            "#},
             "simple-str-min",
             &value,
         ),
         (
-            r#"(define-public (simple-str (a (string-ascii 10)) (b uint))
-            (ok a)
-        )"#,
+            indoc! {r#"
+                (define-public (simple-str (a (string-ascii 10)) (b uint))
+                  (ok a)
+                )
+            "#},
             "simple-str",
             &multi_arg_value,
         ),
         (
-            r#"(define-public (simple-constant)
-                (ok u1)
-            )"#,
+            indoc! {r#"
+                (define-public (simple-constant)
+                  (ok u1)
+                )
+            "#},
             "simple-constant",
             &[],
         ),
         (
-            r#"(define-public (nested-ops)
-                (* (+ u1 u2) (- u3 u4))
-            )"#,
+            indoc! {r#"
+                (define-public (nested-ops)
+                  (* (+ u1 u2) (- u3 u4))
+                )
+            "#},
             "nested-ops",
             &[],
         ),
         (
-            r#"(define-public (string-concat)
-                (ok (concat "hello" "world"))
-            )"#,
+            indoc! {r#"
+                (define-public (string-concat)
+                  (ok (concat "hello" "world"))
+                )
+            "#},
             "string-concat",
             &[],
         ),
         (
-            r#"(define-public (string-len)
-                (ok (len "hello"))
-            )"#,
+            indoc! {r#"
+                (define-public (string-len)
+                  (ok (len "hello"))
+                )
+            "#},
             "string-len",
             &[],
         ),
         (
-            r#"(define-public (if-simple)
-                (if (> 3 0) (ok u1) (ok u2))
-            )"#,
+            indoc! {r#"
+                (define-public (if-simple)
+                  (if (> 3 0) (ok u1) (ok u2))
+                )
+            "#},
             "if-simple",
             &[],
         ),
         (
-            r#"(define-public (if-no-ok)
-                (if (> 3 0) u1 u2)
-            )"#,
+            indoc! {r#"
+                (define-public (if-no-ok)
+                  (if (> 3 0) u1 u2)
+                )
+            "#},
             "if-no-ok",
             &[],
         ),
         (
-            r#"(define-public (if-one-ok)
-                (if (> 3 0) (ok u1) u2)
-            )"#,
+            indoc! {r#"
+                (define-public (if-one-ok)
+                  (if (> 3 0) (ok u1) u2)
+                )
+            "#},
             "if-one-ok",
             &[],
         ),
         (
-            r#"(define-public (if-other-branch-ok)
-                (if (> 3 0) u1 (ok u2))
-            )"#,
+            indoc! {r#"
+                (define-public (if-other-branch-ok)
+                  (if (> 3 0) u1 (ok u2))
+                )
+            "#},
             "if-other-branch-ok",
             &[],
         ),
         (
-            r#"(define-public (if-with-ok-concat)
-                (if (> 3 0) (ok (concat "hello" "world")) (ok u1))
-            )"#,
+            indoc! {r#"
+                (define-public (if-with-ok-concat)
+                  (if (> 3 0) (ok (concat "hello" "world")) (ok u1))
+                )
+            "#},
             "if-with-ok-concat",
             &[],
         ),
         (
-            r#"(define-public (if-with-ok-string)
-                (if (> 3 0) (ok "asdf") (ok u1))
-            )"#,
+            indoc! {r#"
+                (define-public (if-with-ok-string)
+                  (if (> 3 0) (ok "asdf") (ok u1))
+                )
+            "#},
             "if-with-ok-string",
             &[],
         ),
         (
-            r#"(define-public (if-both-ok-concat)
-                (if (> 3 0) (ok (concat "hello" "world")) (ok (concat "foo" "bar")))
-            )"#,
+            indoc! {r#"
+                (define-public (if-both-ok-concat)
+                  (if (> 3 0) (ok (concat "hello" "world")) (ok (concat "foo" "bar")))
+                )
+            "#},
             "if-both-ok-concat",
             &[],
         ),
         (
-            r#"(define-public (branching)
-                (if (> 3 0) (ok (concat "hello" "world")) (ok "asdf"))
-            )"#,
+            indoc! {r#"
+                (define-public (branching)
+                  (if (> 3 0) (ok (concat "hello" "world")) (ok "asdf"))
+                )
+            "#},
             "branching",
             &[],
         ),
         (
-            r#"(define-constant ERR_STACKING_PERMISSION_DENIED 9)
-               (define-map allowance-contract-callers
-                   { sender: principal, contract-caller: principal }
-                   { until-burn-ht: (optional uint) })
-               (define-public (allow-contract-caller (caller principal) (until-burn-ht (optional uint)))
-                 (begin
-                   (asserts! (is-eq tx-sender contract-caller)
-                             (err ERR_STACKING_PERMISSION_DENIED))
-                   (ok (map-set allowance-contract-callers
-                              { sender: tx-sender, contract-caller: caller }
-                              { until-burn-ht: until-burn-ht }))))
-               "#,
+            indoc! {r#"
+                (define-constant ERR_STACKING_PERMISSION_DENIED 9)
+                (define-map allowance-contract-callers
+                    { sender: principal, contract-caller: principal }
+                    { until-burn-ht: (optional uint) })
+                (define-public (allow-contract-caller (caller principal) (until-burn-ht (optional uint)))
+                  (begin
+                    (asserts! (is-eq tx-sender contract-caller)
+                              (err ERR_STACKING_PERMISSION_DENIED))
+                    (ok (map-set allowance-contract-callers
+                               { sender: tx-sender, contract-caller: caller }
+                               { until-burn-ht: until-burn-ht }))))
+            "#},
             "allow-contract-caller",
             &allow_contract_caller_args,
         ),
         // let-bound variable used directly as map key atom (not in user_args)
         (
-            r#"(define-map my-map { key: uint } uint)
-               (define-public (let-bound-key (a uint))
-                 (let ((k { key: a }))
-                   (ok (map-set my-map k u1))))
-            "#,
+            indoc! {r#"
+                (define-map my-map { key: uint } uint)
+                (define-public (let-bound-key (a uint))
+                  (let ((k { key: a }))
+                    (ok (map-set my-map k u1))))
+            "#},
             "let-bound-key",
             &uint_value,
         ),
         // contract data variable (var-get) used as map value — a list expression, not a tuple/atom
         (
-            r#"(define-data-var stored-val uint u0)
-               (define-map my-map uint uint)
-               (define-public (contract-data-val)
-                 (ok (map-set my-map u1 (var-get stored-val))))
-            "#,
+            indoc! {r#"
+                (define-data-var stored-val uint u0)
+                (define-map my-map uint uint)
+                (define-public (contract-data-val)
+                  (ok (map-set my-map u1 (var-get stored-val))))
+            "#},
             "contract-data-val",
+            &[],
+        ),
+        // nft-mint? cost is based on asset-identifier size
+        (
+            indoc! {r#"
+                (define-non-fungible-token my-nft uint)
+                (define-public (mint-nft)
+                  (nft-mint? my-nft u1 tx-sender))
+            "#},
+            "mint-nft",
             &[],
         ),
     ];
@@ -720,39 +774,39 @@ fn test_trait_counts_simplified() {
     // This focuses on the key scenarios:
     // 1. CONTEXT function with trait parameters and struct parameter with trait field
     // 2. mint function that calls CONTEXT and uses trait parameters
-    let contract_src = r#"
-(use-trait ft-trait       'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.sip-010-trait-ft-standard.sip-010-trait)
-(use-trait lp-token-trait 'SP1Y5YSTAHZ88XYK1VPDH24GY0HPX5J4JECTMY4A1.ft-plus-trait.ft-plus-trait)
-(use-trait oracle-trait   'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.oracle-trait.oracle-trait)
+    let contract_src = indoc! {r#"
+        (use-trait ft-trait       'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.sip-010-trait-ft-standard.sip-010-trait)
+        (use-trait lp-token-trait 'SP1Y5YSTAHZ88XYK1VPDH24GY0HPX5J4JECTMY4A1.ft-plus-trait.ft-plus-trait)
+        (use-trait oracle-trait   'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.oracle-trait.oracle-trait)
 
-(define-private (call-get-decimals (token <ft-trait>))
-  (unwrap-panic (contract-call? token get-decimals)))
+        (define-private (call-get-decimals (token <ft-trait>))
+          (unwrap-panic (contract-call? token get-decimals)))
 
-(define-private
-  (CONTEXT
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (ctx          { oracle: <oracle-trait> }))
-  (let ((base-decimals  (call-get-decimals base-token))
-        (quote-decimals (call-get-decimals quote-token))
-        (oracle1        (get oracle ctx))
-        (price          (try! (contract-call? oracle1 price u1 u2))))
-    (ok {
-        base-decimals : base-decimals,
-        quote-decimals: quote-decimals,
-        price         : price,
-        })))
+        (define-private
+          (CONTEXT
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (ctx          { oracle: <oracle-trait> }))
+          (let ((base-decimals  (call-get-decimals base-token))
+                (quote-decimals (call-get-decimals quote-token))
+                (oracle1        (get oracle ctx))
+                (price          (try! (contract-call? oracle1 price u1 u2))))
+            (ok {
+                base-decimals : base-decimals,
+                quote-decimals: quote-decimals,
+                price         : price,
+                })))
 
-(define-public
-  (mint
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (lp-token     <lp-token-trait>)
-    (ctx0         { oracle: <oracle-trait> }))
-  (let ((ctx (try! (CONTEXT base-token quote-token ctx0))))
-    (contract-call? .gl-core mint u1 base-token quote-token lp-token ctx)
-  ))
-"#;
+        (define-public
+          (mint
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (lp-token     <lp-token-trait>)
+            (ctx0         { oracle: <oracle-trait> }))
+          (let ((ctx (try! (CONTEXT base-token quote-token ctx0))))
+            (contract-call? .gl-core mint u1 base-token quote-token lp-token ctx)
+          ))
+    "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
     let epoch = StacksEpochId::Epoch32;
@@ -812,17 +866,17 @@ fn test_trait_counts_simplified() {
 fn test_trait_counts_let_bound_variable() {
     // Test that trait counts are correctly propagated when functions are called
     // inside let bindings.
-    let contract_src = r#"
-(use-trait ft-trait 'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.sip-010-trait-ft-standard.sip-010-trait)
+    let contract_src = indoc! {r#"
+        (use-trait ft-trait 'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.sip-010-trait-ft-standard.sip-010-trait)
 
-(define-private (helper (token <ft-trait>))
-  (contract-call? token get-decimals))
+        (define-private (helper (token <ft-trait>))
+          (contract-call? token get-decimals))
 
-(define-public (main (token <ft-trait>))
-  (let ((result (try! (helper token))))
-    (ok result)
-  ))
-"#;
+        (define-public (main (token <ft-trait>))
+          (let ((result (try! (helper token))))
+            (ok result)
+          ))
+    "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
     let epoch = StacksEpochId::Epoch32;
@@ -872,154 +926,154 @@ fn test_trait_counts_let_bound_variable() {
 
 #[test]
 fn test_trait_counts_for_gl_contract() {
-    let contract_src = r#"
-(use-trait ft-trait       'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.sip-010-trait-ft-standard.sip-010-trait)
-(use-trait lp-token-trait 'SP1Y5YSTAHZ88XYK1VPDH24GY0HPX5J4JECTMY4A1.ft-plus-trait.ft-plus-trait)
-(use-trait oracle-trait   .gl-oracle-trait-pyth.oracle-trait)
+    let contract_src = indoc! {r#"
+        (use-trait ft-trait       'SP2AKWJYC7BNY18W1XXKPGP0YVEK63QJG4793Z2D4.sip-010-trait-ft-standard.sip-010-trait)
+        (use-trait lp-token-trait 'SP1Y5YSTAHZ88XYK1VPDH24GY0HPX5J4JECTMY4A1.ft-plus-trait.ft-plus-trait)
+        (use-trait oracle-trait   .gl-oracle-trait-pyth.oracle-trait)
 
-(define-constant err-lock        (err u701))
-(define-constant err-oracle      (err u702))
-(define-constant err-permissions (err u700))
+        (define-constant err-lock        (err u701))
+        (define-constant err-oracle      (err u702))
+        (define-constant err-permissions (err u700))
 
-(define-private (call-get-decimals (token <ft-trait>))
-  (unwrap-panic (contract-call? token get-decimals)))
+        (define-private (call-get-decimals (token <ft-trait>))
+          (unwrap-panic (contract-call? token get-decimals)))
 
-(define-data-var owner principal tx-sender)
-(define-read-only (get-owner) (var-get owner))
-(define-public (set-owner (new-owner principal))
-  (begin
-   (try! (OWNER))
-   (ok (var-set owner new-owner)) ))
+        (define-data-var owner principal tx-sender)
+        (define-read-only (get-owner) (var-get owner))
+        (define-public (set-owner (new-owner principal))
+          (begin
+           (try! (OWNER))
+           (ok (var-set owner new-owner)) ))
 
-(define-private
- (OWNER)
- (begin
-  (asserts! (is-eq contract-caller (get-owner)) err-permissions)
-  (ok true)))
+        (define-private
+         (OWNER)
+         (begin
+          (asserts! (is-eq contract-caller (get-owner)) err-permissions)
+          (ok true)))
 
-(define-data-var oracle principal .gl-oracle-pyth)
-(define-public (set-oracle (oracle0 <oracle-trait>))
-  (begin
-    (try! (OWNER))
-    (ok (var-set oracle (contract-of oracle0)))))
+        (define-data-var oracle principal .gl-oracle-pyth)
+        (define-public (set-oracle (oracle0 <oracle-trait>))
+          (begin
+            (try! (OWNER))
+            (ok (var-set oracle (contract-of oracle0)))))
 
-;; (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
+        ;; (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
 
-(define-private
-  (CONTEXT
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (desired      uint)
-    (slippage     uint)
-    (ctx          {
-                  identifier: (buff 32),
-                  message   : (buff 8192),
-                  oracle    : <oracle-trait>,
-                  }))
-  (let ((base-decimals  (call-get-decimals base-token))
-        (quote-decimals (call-get-decimals quote-token))
-        (oracle1        (get oracle ctx))
-        (price          (try! (contract-call? oracle1 price quote-decimals desired slippage
-                                (get identifier ctx)
-                                (get message ctx)))) )
+        (define-private
+          (CONTEXT
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (desired      uint)
+            (slippage     uint)
+            (ctx          {
+                          identifier: (buff 32),
+                          message   : (buff 8192),
+                          oracle    : <oracle-trait>,
+                          }))
+          (let ((base-decimals  (call-get-decimals base-token))
+                (quote-decimals (call-get-decimals quote-token))
+                (oracle1        (get oracle ctx))
+                (price          (try! (contract-call? oracle1 price quote-decimals desired slippage
+                                        (get identifier ctx)
+                                        (get message ctx)))) )
 
-  (asserts! (is-eq (contract-of oracle1) (var-get oracle)) err-oracle)
+          (asserts! (is-eq (contract-of oracle1) (var-get oracle)) err-oracle)
 
-  (ok {
-      price         : price,
-      base-decimals : base-decimals,
-      quote-decimals: quote-decimals,
-      })))
+          (ok {
+              price         : price,
+              base-decimals : base-decimals,
+              quote-decimals: quote-decimals,
+              })))
 
-(define-map LOCK principal uint)
+        (define-map LOCK principal uint)
 
-(define-private (check-unlocked)
-  (if (is-eq
-        (default-to u0 (map-get? LOCK tx-sender))
-        stacks-block-height)
-    err-lock
-    (ok true)
-  ))
+        (define-private (check-unlocked)
+          (if (is-eq
+                (default-to u0 (map-get? LOCK tx-sender))
+                stacks-block-height)
+            err-lock
+            (ok true)
+          ))
 
-(define-private (lock)
-  (begin
-    (try! (check-unlocked))
-    (ok (map-set LOCK  tx-sender stacks-block-height))))
+        (define-private (lock)
+          (begin
+            (try! (check-unlocked))
+            (ok (map-set LOCK  tx-sender stacks-block-height))))
 
-(define-public
-  (mint
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (lp-token     <lp-token-trait>)
-    (base-amt     uint)
-    (quote-amt    uint)
-    (desired      uint)
-    (slippage     uint)
-    (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
+        (define-public
+          (mint
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (lp-token     <lp-token-trait>)
+            (base-amt     uint)
+            (quote-amt    uint)
+            (desired      uint)
+            (slippage     uint)
+            (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
 
-    (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
-      (try! (lock))
-      (contract-call? .gl-core mint u1 base-token quote-token lp-token base-amt quote-amt ctx)
-    ))
+            (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
+              (try! (lock))
+              (contract-call? .gl-core mint u1 base-token quote-token lp-token base-amt quote-amt ctx)
+            ))
 
-(define-public
-  (burn
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (lp-token    <lp-token-trait>)
-    (lp-amt       uint)
-    (desired      uint)
-    (slippage     uint)
-    (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
+        (define-public
+          (burn
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (lp-token    <lp-token-trait>)
+            (lp-amt       uint)
+            (desired      uint)
+            (slippage     uint)
+            (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
 
-    (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
-      (try! (lock))
-      (contract-call? .gl-core burn u1 base-token quote-token lp-token lp-amt ctx)
-    ))
+            (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
+              (try! (lock))
+              (contract-call? .gl-core burn u1 base-token quote-token lp-token lp-amt ctx)
+            ))
 
-(define-public
-  (open
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (long         bool)
-    (collateral   uint)
-    (leverage     uint)
-    (desired      uint)
-    (slippage     uint)
-    (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
+        (define-public
+          (open
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (long         bool)
+            (collateral   uint)
+            (leverage     uint)
+            (desired      uint)
+            (slippage     uint)
+            (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
 
-  (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
-    (try! (lock))
-     (contract-call? .gl-core open u1 base-token quote-token long collateral leverage ctx)
-  ))
+          (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
+            (try! (lock))
+             (contract-call? .gl-core open u1 base-token quote-token long collateral leverage ctx)
+          ))
 
-(define-public
-  (close
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (position-id  uint)
-    (desired      uint)
-    (slippage     uint)
-    (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
+        (define-public
+          (close
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (position-id  uint)
+            (desired      uint)
+            (slippage     uint)
+            (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
 
-    (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
-      (try! (lock))
-      (contract-call? .gl-core close u1 base-token quote-token position-id ctx)
-    ))
+            (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
+              (try! (lock))
+              (contract-call? .gl-core close u1 base-token quote-token position-id ctx)
+            ))
 
-(define-public
-  (liquidate
-    (base-token   <ft-trait>)
-    (quote-token  <ft-trait>)
-    (position-id  uint)
-    (desired      uint)
-    (slippage     uint)
-    (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
+        (define-public
+          (liquidate
+            (base-token   <ft-trait>)
+            (quote-token  <ft-trait>)
+            (position-id  uint)
+            (desired      uint)
+            (slippage     uint)
+            (ctx0         { identifier: (buff 32), message: (buff 8192), oracle: <oracle-trait> }))
 
-  (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
-    (contract-call? .gl-core liquidate u1 base-token quote-token position-id ctx)
-  ))
-"#;
+          (let ((ctx (try! (CONTEXT base-token quote-token desired slippage ctx0))))
+            (contract-call? .gl-core liquidate u1 base-token quote-token position-id ctx)
+          ))
+    "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
     let epoch = StacksEpochId::Epoch32;
