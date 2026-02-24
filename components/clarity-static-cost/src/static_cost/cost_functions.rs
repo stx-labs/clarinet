@@ -148,7 +148,7 @@ pub fn from_native_function(native_function: NativeFunctions) -> ClarityCostFunc
         NativeFunctions::BurnAsset => ClarityCostFunction::NftBurn,
         NativeFunctions::GetStxBalance => ClarityCostFunction::StxBalance,
         NativeFunctions::StxTransfer => ClarityCostFunction::StxTransfer,
-        NativeFunctions::StxBurn => ClarityCostFunction::Unimplemented,
+        NativeFunctions::StxBurn => ClarityCostFunction::StxTransfer,
         NativeFunctions::BitwiseAnd => ClarityCostFunction::BitwiseAnd,
         NativeFunctions::BitwiseOr => ClarityCostFunction::BitwiseOr,
         NativeFunctions::BitwiseNot => ClarityCostFunction::BitwiseNot,

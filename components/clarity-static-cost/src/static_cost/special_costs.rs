@@ -380,7 +380,15 @@ pub fn get_cost_for_special_function(
         NativeFunctions::Equals => cost_equals(args, epoch, user_args),
         NativeFunctions::MintAsset => cost_mint_asset(args, epoch, user_args),
         native_function => {
-            let cost = from_native_function(native_function)
+            let cost_fn = from_native_function(native_function);
+            if matches!(cost_fn, ClarityCostFunction::Unimplemented) {
+                eprintln!(
+                    "warning: no cost function implemented for {:?}, using zero cost",
+                    native_function
+                );
+                return StaticCost::ZERO;
+            }
+            let cost = cost_fn
                 .eval_for_epoch(args.len() as u64, epoch)
                 .unwrap_or(ExecutionCost::ZERO);
             StaticCost {
