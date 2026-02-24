@@ -27,7 +27,7 @@ pub use trait_counter::{
     TraitCount, TraitCountCollector, TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
 
-pub(super) fn saturating_add_cost(a: &mut ExecutionCost, b: &ExecutionCost) {
+pub(crate) fn saturating_add_cost(a: &mut ExecutionCost, b: &ExecutionCost) {
     a.runtime = a.runtime.saturating_add(b.runtime);
     a.write_length = a.write_length.saturating_add(b.write_length);
     a.write_count = a.write_count.saturating_add(b.write_count);
