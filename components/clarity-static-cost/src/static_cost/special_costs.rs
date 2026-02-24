@@ -378,13 +378,7 @@ pub fn get_cost_for_special_function(
         | NativeFunctions::CmpGreater
         | NativeFunctions::CmpLess => cost_comparison(native_function, args, epoch, user_args),
         NativeFunctions::Equals => cost_equals(args, epoch, user_args),
-        NativeFunctions::MintAsset => {
-            let cost = cost_mint_asset(args, epoch);
-            StaticCost {
-                min: cost.clone(),
-                max: cost,
-            }
-        }
+        NativeFunctions::MintAsset => cost_mint_asset(args, epoch, user_args),
         native_function => {
             let cost = from_native_function(native_function)
                 .eval_for_epoch(args.len() as u64, epoch)
@@ -853,19 +847,22 @@ pub fn cost_equals(
     // Sum all argument sizes (min and max separately)
     let mut total_min_size = 0u64;
     let mut total_max_size = 0u64;
+    let mut any_resolved = false;
 
     for arg in args.iter() {
         let (min_size, max_size) = get_argument_sizes(arg, epoch, user_args);
         if let Some(min) = min_size {
             total_min_size = total_min_size.saturating_add(min);
+            any_resolved = true;
         }
         if let Some(max) = max_size {
             total_max_size = total_max_size.saturating_add(max);
+            any_resolved = true;
         }
     }
 
-    // Fallback to args.len() if we couldn't determine sizes
-    if total_min_size == 0 && total_max_size == 0 {
+    // Fallback to args.len() if we couldn't determine any sizes
+    if !any_resolved {
         let size = args.len() as u64;
         total_min_size = size;
         total_max_size = size;
@@ -884,14 +881,34 @@ pub fn cost_equals(
     }
 }
 
-// MintAsset cost is based on asset_size
-pub fn cost_mint_asset(args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
-    let size = args
-        .get(2)
-        .and_then(|arg| arg.match_atom_value().or_else(|| arg.match_literal_value()))
-        .and_then(|asset_value| asset_value.size().ok().map(u64::from))
-        .unwrap_or(0);
-    ClarityCostFunction::NftMint
-        .eval_for_epoch(size, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+// MintAsset cost is based on asset identifier size.
+// args layout (function name already stripped): [asset-class, asset-identifier, recipient]
+// Note: from v2.05 onwards the VM uses Value::serialized_size() which includes the
+// consensus type-prefix byte, while get_argument_sizes uses Value::size() /
+// TypeSignature::size() which do not.  We add 1 to compensate.
+pub fn cost_mint_asset(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    user_args: Option<&UserArgumentsContext>,
+) -> StaticCost {
+    let (min_size, max_size) = args
+        .get(1)
+        .map(|arg| get_argument_sizes(arg, epoch, user_args))
+        .unwrap_or((None, None));
+
+    // +1 for consensus serialization type-prefix byte (v2.05+ uses serialized_size)
+    let min_size = min_size.map_or(1, |s| s + 1);
+    let max_size = max_size.map_or(min_size, |s| s + 1);
+
+    let min_cost = ClarityCostFunction::NftMint
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::NftMint
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }

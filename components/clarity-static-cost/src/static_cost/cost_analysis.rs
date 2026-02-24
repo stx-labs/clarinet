@@ -152,10 +152,6 @@ impl SummingExecutionCost {
         Self::default()
     }
 
-    pub fn from_single(cost: ExecutionCost) -> Self {
-        Self { costs: vec![cost] }
-    }
-
     pub fn add_cost(&mut self, cost: ExecutionCost) {
         self.costs.push(cost);
     }
@@ -201,6 +197,12 @@ impl SummingExecutionCost {
                 saturating_add_cost(&mut acc, cost);
                 acc
             })
+    }
+}
+
+impl From<ExecutionCost> for SummingExecutionCost {
+    fn from(cost: ExecutionCost) -> Self {
+        Self { costs: vec![cost] }
     }
 }
 
@@ -1123,10 +1125,16 @@ fn build_listlike_cost_analysis_tree(
                         TypeSignature::CallableType(_) | TypeSignature::TraitReferenceType(_)
                     )
                 });
-                if cost_map.contains_key(name.as_str()) || is_callable_arg {
+                if cost_map.contains_key(name.as_str()) {
                     let expr_node = CostExprNode::UserFunction(name.clone());
-                    let cost = calculate_function_cost(name.as_str(), cost_map, clarity_version);
+                    let cost = calculate_function_cost(name.as_str(), cost_map)?;
                     (expr_node, cost)
+                } else if is_callable_arg {
+                    // Callable (trait) arguments used in call position — the actual
+                    // cost depends on which contract implements the trait, so we
+                    // can't determine it statically.
+                    let expr_node = CostExprNode::UserFunction(name.clone());
+                    (expr_node, StaticCost::ZERO)
                 } else {
                     (CostExprNode::Atom(name.clone()), StaticCost::ZERO)
                 }

@@ -41,13 +41,18 @@ const STRING_COST_MULTIPLIER: u64 = 3;
 pub(crate) fn calculate_function_cost(
     function_name: &str,
     cost_map: &HashMap<String, Option<StaticCost>>,
-    _clarity_version: &ClarityVersion,
-) -> StaticCost {
+) -> Result<StaticCost, StaticCostError> {
     match cost_map.get(function_name) {
-        Some(Some(cost)) => cost.clone(),
-        // Function exists but cost not yet computed (circular dependency?) or not found:
-        // return zero to avoid infinite recursion.
-        Some(None) | None => StaticCost::ZERO,
+        Some(Some(cost)) => Ok(cost.clone()),
+        // Function exists but cost not yet computed — Clarity does not allow forward
+        // references or recursion, so this indicates a bug in the analysis.
+        Some(None) => Err(StaticCostError::CostCalculation(format!(
+            "cost for function '{function_name}' not yet computed (possible circular dependency)"
+        ))),
+        // Function not found in cost map at all.
+        None => Err(StaticCostError::CostCalculation(format!(
+            "function '{function_name}' not found in cost map"
+        ))),
     }
 }
 
@@ -177,7 +182,7 @@ pub(crate) fn calculate_total_cost_with_summing(node: &CostAnalysisNode) -> Summ
         summing
     } else {
         // Node has fixed cost, use single path
-        SummingExecutionCost::from_single(node.cost.min.clone())
+        SummingExecutionCost::from(node.cost.min.clone())
     };
 
     for child in &node.children {
