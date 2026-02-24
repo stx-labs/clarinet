@@ -6,12 +6,20 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+axum = { version = "0.8.6", features = ["json"] }
+tower = "0.5.2"
+base64 = { workspace = true }
 bitcoincore-rpc = { workspace= true }
+bitcoincore-rpc-json = { workspace = true }
 bollard = "0.17"
+hex = "0.4.3"
+regex = { workspace = true }
+miniscript = "11.0.0"
+strum = { workspace = true, features = ["derive"] }
 colored = { workspace = true }
 dirs = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = ["preserve_order"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true, features = ["preserve_order", "arbitrary_precision"] }
 yaml_serde = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3.20"
@@ -32,12 +40,10 @@ flate2 = "1.1.1"
 tar = "0.4.44"
 indoc = { workspace = true }
 
-clarity = { workspace = true, default-features = false }
+clarity = { workspace = true, default-features = false, features = ["slog_json"] }
 stacks-common = { workspace = true, default-features = false }
 stackslib = { workspace = true }
 
-chainhook-sdk = { path = "../chainhook-sdk" }
-chainhook-types = { path = "../chainhook-types" }
 stacks-rpc-client = { path = "../stacks-rpc-client" }
 clarinet-files = { path = "../clarinet-files" }
 clarinet-deployments = { path = "../clarinet-deployments" }
@@ -48,7 +54,13 @@ libc = "0.2.173"
 [target.'cfg(unix)'.dependencies]
 signal-hook = { workspace = true, features = ["iterator"] }
 
+[features]
+default = []
+stacks-signers = []
+
 [dev-dependencies]
+assert-json-diff = "2.0.2"
+test-case = "3.1.0"
 pretty_assertions = { workspace = true }
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 

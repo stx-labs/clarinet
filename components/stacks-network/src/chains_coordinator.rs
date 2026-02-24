@@ -9,18 +9,18 @@ use std::{fs, str};
 
 use base58::FromBase58;
 use bitcoincore_rpc::bitcoin::Address;
-use chainhook_sdk::chainhooks::types::ChainhookStore;
-use chainhook_sdk::indexer::stacks::standardize_stacks_serialized_block;
-use chainhook_sdk::indexer::StacksChainContext;
-use chainhook_sdk::observer::{
+use crate::chainhook::hooks::types::ChainhookStore;
+use crate::chainhook::indexer::stacks::standardize_stacks_serialized_block;
+use crate::chainhook::indexer::StacksChainContext;
+use crate::chainhook::observer::{
     start_event_observer, EventObserverConfig, ObserverCommand, ObserverEvent, PredicatesConfig,
     StacksChainMempoolEvent, StacksObserverStartupContext,
 };
-use chainhook_sdk::types::{
-    BitcoinBlockSignaling, BitcoinChainEvent, StacksChainEvent, StacksNodeConfig,
+use crate::chainhook::types::{
+    BitcoinBlockSignaling, BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig,
+    StacksTransactionKind,
 };
-use chainhook_sdk::utils::Context;
-use chainhook_types::{StacksBlockData, StacksTransactionKind};
+use crate::chainhook::utils::Context;
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, DeploymentCommand, DeploymentEvent, TransactionStatus,
 };
@@ -148,8 +148,8 @@ impl DevnetEventObserverConfig {
             }),
 
             display_stacks_ingestion_logs: true,
-            bitcoin_network: chainhook_types::BitcoinNetwork::Regtest,
-            stacks_network: chainhook_types::StacksNetwork::Devnet,
+            bitcoin_network: crate::chainhook::types::BitcoinNetwork::Regtest,
+            stacks_network: crate::chainhook::types::StacksNetwork::Devnet,
             prometheus_monitoring_port: None,
             predicates_config: PredicatesConfig::default(),
         };
@@ -264,15 +264,15 @@ pub async fn start_chains_coordinator(
                 .join("events_export")
                 .join("events_cache.tsv");
 
-            let mut chain_ctx = StacksChainContext::new(&chainhook_types::StacksNetwork::Devnet);
+            let mut chain_ctx = StacksChainContext::new(&crate::chainhook::types::StacksNetwork::Devnet);
             if let Ok(file_content) = fs::read_to_string(&events_cache_path) {
                 for line in file_content.lines() {
                     let parts: Vec<&str> = line.split('\t').collect();
                     if parts.get(2).unwrap_or(&"") == &"/new_block" {
                         let maybe_block = standardize_stacks_serialized_block(
-                            &chainhook_sdk::indexer::IndexerConfig {
-                                bitcoin_network: chainhook_types::BitcoinNetwork::Regtest,
-                                stacks_network: chainhook_types::StacksNetwork::Devnet,
+                            &crate::chainhook::indexer::IndexerConfig {
+                                bitcoin_network: crate::chainhook::types::BitcoinNetwork::Regtest,
+                                stacks_network: crate::chainhook::types::StacksNetwork::Devnet,
                                 bitcoind_rpc_url: config
                                     .devnet_config
                                     .bitcoin_node_image_url

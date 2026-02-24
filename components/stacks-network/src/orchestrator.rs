@@ -15,8 +15,8 @@ use bollard::models::{HostConfig, PortBinding};
 use bollard::network::{CreateNetworkOptions, PruneNetworksOptions};
 use bollard::service::Ipam;
 use bollard::Docker;
-use chainhook_sdk::bitcoin::hex::DisplayHex;
-use chainhook_sdk::utils::Context;
+use bitcoincore_rpc::bitcoin::hex::DisplayHex;
+use crate::chainhook::utils::Context;
 use clarinet_deployments::types::BurnchainEpochConfig;
 use clarinet_files::{
     DevnetConfig, DevnetConfigFile, NetworkManifest, ProjectManifest, StacksNetwork,

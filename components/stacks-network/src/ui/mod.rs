@@ -12,8 +12,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use app::App;
-use chainhook_sdk::types::StacksChainEvent;
-use chainhook_sdk::utils::Context;
+use crate::chainhook::types::StacksChainEvent;
+use crate::chainhook::utils::Context;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{

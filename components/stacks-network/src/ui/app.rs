@@ -1,7 +1,7 @@
-use chainhook_sdk::types::{
+use crate::chainhook::types::{
     StacksBlockData, StacksMicroblockData, StacksTransactionData, StacksTransactionKind,
 };
-use chainhook_sdk::utils::Context;
+use crate::chainhook::utils::Context;
 use hiro_system_kit::slog;
 use ratatui::prelude::*;
 
