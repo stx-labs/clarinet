@@ -37,6 +37,11 @@ pub struct UnnecessaryPublic<'a, 'b, 'c> {
     found_side_effect: bool,
     /// Names of functions (public or private) whose bodies contain state-modifying operations,
     /// either directly or transitively via calls to other functions with side effects.
+    ///
+    /// --- IMPORTANT ---
+    /// This assumes `ASTVisitor` traverses called functions before the functions that call them.
+    /// This should always be the case as the Clarity interpreter *should* topologically sort functions by dependency before traversal
+    /// -----------------
     fns_with_side_effects: HashSet<String>,
 }
 
