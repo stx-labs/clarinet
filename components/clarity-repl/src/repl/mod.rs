@@ -20,7 +20,8 @@ use clarity::types::StacksEpochId;
 use clarity::vm::ClarityVersion;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 pub use interpreter::ClarityInterpreter;
-use serde::ser::{Serialize, SerializeMap, Serializer};
+use serde::ser::{SerializeMap, Serializer};
+use serde::{Deserialize, Serialize};
 pub use session::Session;
 pub use settings::{SessionSettings, Settings, SettingsFile};
 

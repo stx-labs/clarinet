@@ -13,8 +13,8 @@ use hiro_system_kit::slog;
 use miniscript::bitcoin::secp256k1::Secp256k1;
 use miniscript::Descriptor;
 use reqwest::{Client, Method, RequestBuilder};
-use serde::{de, Deserialize, Deserializer};
-use serde_json::Value as JsonValue;
+use serde::{de, Deserialize, Deserializer, Serialize};
+use serde_json::{json, Value as JsonValue};
 
 use super::types::{
     append_error_context, validate_txid, ChainhookInstance, ExactMatchingRule, HookAction,

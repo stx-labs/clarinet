@@ -12,7 +12,6 @@ colored = { workspace = true }
 dirs = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
-serde_derive = { workspace = true }
 yaml_serde = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3.20"

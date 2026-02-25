@@ -8,7 +8,6 @@ clarinet-files = { path = "../clarinet-files", default-features = false }
 clarity-repl = { path = "../clarity-repl", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
-serde_derive = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { workspace = true, features = ["derive"] }
