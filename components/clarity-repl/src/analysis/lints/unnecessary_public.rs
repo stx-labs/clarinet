@@ -42,7 +42,7 @@ pub struct UnnecessaryPublic<'a, 'b, 'c> {
     /// This assumes `ASTVisitor` traverses called functions before the functions that call them.
     /// This should always be the case as the Clarity interpreter *should* topologically sort functions by dependency before traversal
     /// -----------------
-    fns_with_side_effects: HashSet<String>,
+    fns_with_side_effects: HashSet<&'a ClarityName>,
 }
 
 impl<'a, 'b, 'c> UnnecessaryPublic<'a, 'b, 'c> {
@@ -99,7 +99,7 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         self.traverse_expr(body);
 
         if self.found_side_effect {
-            self.fns_with_side_effects.insert(name.to_string());
+            self.fns_with_side_effects.insert(name);
         }
 
         true
@@ -186,7 +186,7 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         self.traverse_expr(body);
 
         if self.found_side_effect {
-            self.fns_with_side_effects.insert(name.to_string());
+            self.fns_with_side_effects.insert(name);
         } else {
             self.set_active_annotation(&expr.span);
             if !self.allow() {
@@ -346,7 +346,7 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         name: &'a ClarityName,
         _args: &'a [SymbolicExpression],
     ) -> bool {
-        if self.fns_with_side_effects.contains(name.as_str()) {
+        if self.fns_with_side_effects.contains(name) {
             self.found_side_effect = true;
             return false;
         }
