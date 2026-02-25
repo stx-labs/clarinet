@@ -8,6 +8,8 @@
 //! - No `nft-mint?`, `nft-burn?`, `nft-transfer?`
 //! - No `contract-call?` to a public (non-read-only) function
 //! - No dynamic `contract-call?` (trait-based dispatch, conservatively assumed to have side effects)
+//! - No call to a user-defined function (public or private) with side effects
+//! - No `map`, `fold`, or `filter` over a function with side effects
 
 use std::collections::{HashMap, HashSet};
 
@@ -347,6 +349,49 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         _args: &'a [SymbolicExpression],
     ) -> bool {
         if self.fns_with_side_effects.contains(name) {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
+    }
+
+    // --- Higher-order functions that take a function name ---
+    // If the applied function has side effects, so does the call.
+
+    fn visit_map(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequences: &'a [SymbolicExpression],
+    ) -> bool {
+        if self.fns_with_side_effects.contains(func) {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
+    }
+
+    fn visit_fold(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequence: &'a SymbolicExpression,
+        _initial: &'a SymbolicExpression,
+    ) -> bool {
+        if self.fns_with_side_effects.contains(func) {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
+    }
+
+    fn visit_filter(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequence: &'a SymbolicExpression,
+    ) -> bool {
+        if self.fns_with_side_effects.contains(func) {
             self.found_side_effect = true;
             return false;
         }
@@ -974,5 +1019,90 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_on_public_with_map_over_side_effecting_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+            (define-private (do-increment (x uint))
+                (begin
+                    (var-set counter (+ (var-get counter) u1))
+                    x
+                )
+            )
+            (define-public (increment-all (items (list 10 uint)))
+                (ok (map do-increment items))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_on_public_with_fold_over_side_effecting_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+            (define-private (accumulate (x uint) (acc uint))
+                (begin
+                    (var-set counter (+ (var-get counter) u1))
+                    (+ x acc)
+                )
+            )
+            (define-public (sum-all (items (list 10 uint)))
+                (ok (fold accumulate items u0))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_on_public_with_filter_over_side_effecting_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+            (define-private (check-and-count (x uint))
+                (begin
+                    (var-set counter (+ (var-get counter) u1))
+                    (> x u5)
+                )
+            )
+            (define-public (filter-large (items (list 10 uint)))
+                (ok (filter check-and-count items))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_on_public_with_map_over_read_only_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (double (x uint))
+                (* x u2)
+            )
+            (define-public (double-all (items (list 10 uint)))
+                (ok (map double items))
+            )
+        ")
+        .to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("could be declared as `define-read-only`"));
     }
 }
