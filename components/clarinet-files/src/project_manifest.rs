@@ -315,7 +315,10 @@ impl ProjectManifest {
         let mut repl_settings = if let Some(repl_settings) = project_manifest_file.repl {
             repl::Settings::from(repl_settings)
         } else {
-            repl::Settings::default()
+            repl::Settings {
+                analysis: clarity_repl::analysis::Settings::with_default_lints(),
+                ..Default::default()
+            }
         };
 
         // when performing static analysis, we never want to enable remote data fetching
