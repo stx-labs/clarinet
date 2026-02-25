@@ -112,7 +112,7 @@ impl From<SettingsFile> for Settings {
         let analysis = file
             .analysis
             .map(analysis::Settings::from)
-            .unwrap_or_default();
+            .unwrap_or_else(analysis::Settings::with_default_lints);
 
         let remote_data = file
             .remote_data
