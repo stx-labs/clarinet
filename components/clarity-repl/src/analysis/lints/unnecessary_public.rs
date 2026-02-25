@@ -669,6 +669,25 @@ mod tests {
     fn no_warn_on_public_calling_public_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
+            (define-data-var count uint u0)
+            (define-public (increment)
+                (ok (var-set count (+ (var-get count) u1)))
+            )
+            (define-public (increment2)
+                (increment)
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet_with_other_contract(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_on_public_contract_call_public_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-public (call-other)
                 (contract-call? .other-contract do-something)
             )
@@ -681,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn warn_on_public_calling_read_only_fn() {
+    fn warn_on_public_contract_call_read_only_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (call-other)
