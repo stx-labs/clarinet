@@ -1726,4 +1726,74 @@ mod tests {
         let result = extract_function_name(expr);
         assert_eq!(result, None);
     }
+
+    /// Verify that hash function costs vary with input buffer size.
+    /// The runtime charges based on the serialized size of the input value,
+    /// so (sha256 0x00) should cost less than (sha256 0x0011223344...).
+    /// If these fail, it means static analysis is passing arg_count (always 1)
+    /// instead of the input byte length.
+    #[test]
+    fn test_hash_function_costs_vary_with_buffer_size() {
+        let v = &ClarityVersion::Clarity3;
+
+        // Small buffer (1 byte)
+        let small = static_cost_native_test("(sha256 0x00)", v).unwrap();
+        // Large buffer (32 bytes)
+        let large = static_cost_native_test(
+            "(sha256 0x0102030405060708091011121314151617181920212223242526272829303132)",
+            v,
+        )
+        .unwrap();
+
+        assert!(
+            large.min.runtime > small.min.runtime,
+            "sha256: 32-byte input should cost more than 1-byte input, \
+             but got small={}, large={}; \
+             static analysis likely passes arg_count instead of input size",
+            small.min.runtime,
+            large.min.runtime,
+        );
+    }
+
+    #[test]
+    fn test_hash160_cost_varies_with_buffer_size() {
+        let v = &ClarityVersion::Clarity3;
+
+        let small = static_cost_native_test("(hash160 0x00)", v).unwrap();
+        let large = static_cost_native_test(
+            "(hash160 0x0102030405060708091011121314151617181920212223242526272829303132)",
+            v,
+        )
+        .unwrap();
+
+        assert!(
+            large.min.runtime > small.min.runtime,
+            "hash160: 32-byte input should cost more than 1-byte input, \
+             but got small={}, large={}; \
+             static analysis likely passes arg_count instead of input size",
+            small.min.runtime,
+            large.min.runtime,
+        );
+    }
+
+    #[test]
+    fn test_keccak256_cost_varies_with_buffer_size() {
+        let v = &ClarityVersion::Clarity3;
+
+        let small = static_cost_native_test("(keccak256 0x00)", v).unwrap();
+        let large = static_cost_native_test(
+            "(keccak256 0x0102030405060708091011121314151617181920212223242526272829303132)",
+            v,
+        )
+        .unwrap();
+
+        assert!(
+            large.min.runtime > small.min.runtime,
+            "keccak256: 32-byte input should cost more than 1-byte input, \
+             but got small={}, large={}; \
+             static analysis likely passes arg_count instead of input size",
+            small.min.runtime,
+            large.min.runtime,
+        );
+    }
 }
