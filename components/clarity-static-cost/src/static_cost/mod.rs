@@ -119,7 +119,16 @@ pub(crate) fn calculate_function_cost_from_native_function(
     let clarity_version = ClarityVersion::default_for_epoch(epoch);
 
     // Handle Equals specially - it uses cost_input_sized_vararg which sums serialized sizes
-    if native_function == NativeFunctions::Equals {
+    // Handle hash functions specially - cost depends on input byte size, not arg count
+    if matches!(
+        native_function,
+        NativeFunctions::Equals
+            | NativeFunctions::Hash160
+            | NativeFunctions::Sha256
+            | NativeFunctions::Sha512
+            | NativeFunctions::Sha512Trunc256
+            | NativeFunctions::Keccak256
+    ) {
         let cost = get_cost_for_special_function(native_function, args, epoch, user_args, env);
         let cost_with_lookup_min = add_lookup_cost(cost.min.clone(), epoch);
         let cost_with_lookup_max = add_lookup_cost(cost.max.clone(), epoch);

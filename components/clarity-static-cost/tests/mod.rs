@@ -759,6 +759,61 @@ fn test_against_dynamic_cost_analysis() {
             "if-then-add",
             &[],
         ),
+        // --- hash function tests ---
+        // sha256 with small (1-byte) buffer
+        (
+            indoc! {r#"
+                (define-public (sha256-small)
+                  (ok (sha256 0x00)))
+            "#},
+            "sha256-small",
+            &[],
+        ),
+        // sha256 with large (32-byte) buffer
+        (
+            indoc! {r#"
+                (define-public (sha256-large)
+                  (ok (sha256 0x0102030405060708091011121314151617181920212223242526272829303132)))
+            "#},
+            "sha256-large",
+            &[],
+        ),
+        // hash160 with small (1-byte) buffer
+        (
+            indoc! {r#"
+                (define-public (hash160-small)
+                  (ok (hash160 0x00)))
+            "#},
+            "hash160-small",
+            &[],
+        ),
+        // hash160 with large (32-byte) buffer
+        (
+            indoc! {r#"
+                (define-public (hash160-large)
+                  (ok (hash160 0x0102030405060708091011121314151617181920212223242526272829303132)))
+            "#},
+            "hash160-large",
+            &[],
+        ),
+        // keccak256 with small (1-byte) buffer
+        (
+            indoc! {r#"
+                (define-public (keccak256-small)
+                  (ok (keccak256 0x00)))
+            "#},
+            "keccak256-small",
+            &[],
+        ),
+        // keccak256 with large (32-byte) buffer
+        (
+            indoc! {r#"
+                (define-public (keccak256-large)
+                  (ok (keccak256 0x0102030405060708091011121314151617181920212223242526272829303132)))
+            "#},
+            "keccak256-large",
+            &[],
+        ),
     ];
 
     let mut failures = Vec::new();

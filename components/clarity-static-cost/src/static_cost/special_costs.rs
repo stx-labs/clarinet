@@ -379,6 +379,44 @@ pub fn get_cost_for_special_function(
         | NativeFunctions::CmpLess => cost_comparison(native_function, args, epoch, user_args),
         NativeFunctions::Equals => cost_equals(args, epoch, user_args),
         NativeFunctions::MintAsset => cost_mint_asset(args, epoch, user_args),
+        NativeFunctions::Hash160
+        | NativeFunctions::Sha256
+        | NativeFunctions::Sha512
+        | NativeFunctions::Sha512Trunc256
+        | NativeFunctions::Keccak256 => {
+            // Runtime charges based on serialized_size (cost_input_sized_vararg),
+            // which includes a type prefix byte that value.size() omits.
+            let cost_fn = from_native_function(native_function);
+            let (min_size, max_size) = args
+                .first()
+                .map(|arg| {
+                    // For literals, use serialized_size to match runtime behavior
+                    if let Some(value) =
+                        arg.match_atom_value().or_else(|| arg.match_literal_value())
+                    {
+                        if let Ok(size) = value.serialized_size() {
+                            let s = u64::from(size);
+                            return (Some(s), Some(s));
+                        }
+                    }
+                    // For variables, fall back to get_argument_sizes
+                    get_argument_sizes(arg, epoch, user_args)
+                })
+                .unwrap_or((None, None));
+            let fallback = u64::try_from(args.len()).unwrap_or(0);
+            let min_size = min_size.unwrap_or(fallback);
+            let max_size = max_size.unwrap_or(fallback);
+            let min_cost = cost_fn
+                .eval_for_epoch(min_size, epoch)
+                .unwrap_or(ExecutionCost::ZERO);
+            let max_cost = cost_fn
+                .eval_for_epoch(max_size, epoch)
+                .unwrap_or(ExecutionCost::ZERO);
+            StaticCost {
+                min: min_cost,
+                max: max_cost,
+            }
+        }
         native_function => {
             let cost_fn = from_native_function(native_function);
             if matches!(cost_fn, ClarityCostFunction::Unimplemented) {
