@@ -192,13 +192,20 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         } else {
             self.set_active_annotation(&expr.span);
             if !self.allow() {
+                // Highlight just the `define-public` keyword, not the entire expression
+                let keyword_span = expr
+                    .match_list()
+                    .and_then(|list| list.first())
+                    .map(|kw| kw.span.clone())
+                    .unwrap_or_else(|| expr.span.clone());
+
                 self.diagnostics.push(Diagnostic {
                     level: self.level.clone(),
                     message: format!(
                         "function `{}` could be declared as `define-read-only`",
                         name,
                     ),
-                    spans: vec![expr.span.clone()],
+                    spans: vec![keyword_span],
                     suggestion: Some("Replace `define-public` with `define-read-only`".to_string()),
                 });
             }
@@ -537,6 +544,27 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
         assert!(output[0].contains("could be declared as `define-read-only`"));
+    }
+
+    #[test]
+    fn diagnostic_highlights_define_public_keyword() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (get-value)
+                (ok u1)
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        let span = &result.diagnostics[0].spans[0];
+        // Should highlight only `define-public`, not the entire expression
+        assert_eq!(span.start_line, 1);
+        assert_eq!(span.start_column, 2);
+        assert_eq!(span.end_line, 1);
+        assert_eq!(span.end_column, 14);
     }
 
     #[test]
