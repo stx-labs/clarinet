@@ -2,6 +2,7 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
@@ -26,7 +27,7 @@ use clarity_types::Value;
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
 use super::settings::{ApiUrl, RemoteNetworkInfo};
-use super::{ClarityContract, DEFAULT_EPOCH};
+use super::ClarityContract;
 use crate::analysis::annotation::{Annotation, AnnotationKind};
 use crate::analysis::ast_dependency_detector::{ASTDependencyDetector, Dependency};
 use crate::analysis::{self};

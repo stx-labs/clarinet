@@ -1393,6 +1393,7 @@ fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
+    use clarinet_defaults::DEFAULT_EPOCH;
     use clarity::util::hash::hex_bytes;
     use clarity_types::types::TupleData;
     use indoc::{formatdoc, indoc};
@@ -1400,7 +1401,6 @@ mod tests {
     use super::*;
     use crate::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
     use crate::repl::settings::Account;
-    use crate::repl::DEFAULT_EPOCH;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     #[track_caller]
