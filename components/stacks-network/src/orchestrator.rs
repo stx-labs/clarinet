@@ -1584,6 +1584,8 @@ db_path = "stacks-signer-{signer_id}.sqlite"
                     }
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
+                // the container seems to need an extra second to be really ready
+                tokio::time::sleep(Duration::from_millis(1000)).await;
 
                 ctx.try_log(|logger| {
                     slog::info!(logger, "Importing events from {}", events_path.display())
