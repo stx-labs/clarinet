@@ -1,3 +1,4 @@
+mod bitcoin_rpc_client;
 mod chainhooks;
 pub mod chains_coordinator;
 mod command;
