@@ -1,4 +1,5 @@
 pub mod clarinetrc;
+pub mod error;
 pub mod paths;
 
 #[cfg(not(target_arch = "wasm32"))]

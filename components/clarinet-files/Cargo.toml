@@ -12,6 +12,7 @@ rpassword = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 toml = { workspace = true }
+thiserror = "2"
 url = { version = "2.5.4", features = ["serde"] }
 schemars = { workspace = true, optional = true }
 

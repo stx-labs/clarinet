@@ -2,6 +2,7 @@ use std::fs::{self, File};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::error::FileLocationError;
 use crate::{FileAccessor, StacksNetwork};
 
 /// Parse a URI string to a PathBuf.
@@ -65,7 +66,7 @@ pub fn try_parse_path(location_string: &str, project_root: Option<&Path>) -> Opt
 }
 
 /// Walk up from a path to find a directory containing Clarinet.toml.
-pub fn find_project_root(from: &Path) -> Result<PathBuf, String> {
+pub fn find_project_root(from: &Path) -> Result<PathBuf, FileLocationError> {
     let mut path = from.to_path_buf();
     if path.is_file() {
         path.pop();
@@ -78,10 +79,9 @@ pub fn find_project_root(from: &Path) -> Result<PathBuf, String> {
         }
         path.pop();
         if !path.pop() {
-            return Err(format!(
-                "unable to find root location from {}",
-                from.display()
-            ));
+            return Err(FileLocationError::ProjectRootNotFound {
+                path: from.to_path_buf(),
+            });
         }
     }
 }
@@ -90,7 +90,7 @@ pub fn find_project_root(from: &Path) -> Result<PathBuf, String> {
 pub async fn find_manifest_location_async(
     from: &Path,
     file_accessor: &dyn FileAccessor,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, FileLocationError> {
     let mut current = from.parent().map(|p| p.to_path_buf());
     while let Some(ref dir) = current {
         let candidate = dir.join("Clarinet.toml");
@@ -106,16 +106,16 @@ pub async fn find_manifest_location_async(
         }
         current = next;
     }
-    Err(format!(
-        "No Clarinet.toml is associated to the contract {}",
-        from.file_name()
-            .map(|f| f.to_string_lossy())
-            .unwrap_or_default()
-    ))
+    Err(FileLocationError::ManifestNotFound {
+        name: from
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    })
 }
 
 /// Find the manifest location from a path (non-async, native only).
-pub fn find_manifest_location(from: &Path) -> Result<PathBuf, String> {
+pub fn find_manifest_location(from: &Path) -> Result<PathBuf, FileLocationError> {
     let root = find_project_root(from)?;
     Ok(root.join("Clarinet.toml"))
 }
@@ -129,57 +129,79 @@ pub fn get_network_manifest_path(project_root: &Path, network: &StacksNetwork) -
     })
 }
 
-pub fn project_root_from_manifest_location(manifest_location: &Path) -> Result<PathBuf, String> {
+pub fn project_root_from_manifest_location(
+    manifest_location: &Path,
+) -> Result<PathBuf, FileLocationError> {
     find_project_root(manifest_location.parent().unwrap_or(Path::new(".")))
 }
 
-pub fn get_relative_path(path: &Path, base: &Path) -> Result<String, String> {
+pub fn get_relative_path(path: &Path, base: &Path) -> Result<String, FileLocationError> {
     path.strip_prefix(base)
         .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|_| format!("{} is not under {}", path.display(), base.display()))
+        .map_err(|_| FileLocationError::StripPrefixFailed {
+            path: path.to_path_buf(),
+            base: base.to_path_buf(),
+        })
 }
 
-pub fn read_content(path: &Path) -> Result<Vec<u8>, String> {
-    let file =
-        File::open(path).map_err(|e| format!("unable to read file {}\n{:?}", path.display(), e))?;
+pub fn read_content(path: &Path) -> Result<Vec<u8>, FileLocationError> {
+    let file = File::open(path).map_err(|source| FileLocationError::Io {
+        path: path.to_path_buf(),
+        operation: "open",
+        source,
+    })?;
     let mut reader = BufReader::new(file);
     let mut buffer = vec![];
     reader
         .read_to_end(&mut buffer)
-        .map_err(|e| format!("unable to read file {}\n{:?}", path.display(), e))?;
+        .map_err(|source| FileLocationError::Io {
+            path: path.to_path_buf(),
+            operation: "read",
+            source,
+        })?;
     Ok(buffer)
 }
 
-pub fn read_content_as_utf8(path: &Path) -> Result<String, String> {
+pub fn read_content_as_utf8(path: &Path) -> Result<String, FileLocationError> {
     let content = read_content(path)?;
-    String::from_utf8(content)
-        .map_err(|e| format!("unable to read content as utf8 {}\n{e:?}", path.display()))
+    String::from_utf8(content).map_err(|source| FileLocationError::Utf8 {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
-pub fn write_content(path: &Path, content: &[u8]) -> Result<(), String> {
+pub fn write_content(path: &Path, content: &[u8]) -> Result<(), FileLocationError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            format!(
-                "unable to create parent directory {}\n{e}",
-                parent.display()
-            )
+        fs::create_dir_all(parent).map_err(|source| FileLocationError::Io {
+            path: parent.to_path_buf(),
+            operation: "create directory",
+            source,
         })?;
     }
-    let mut file =
-        File::create(path).map_err(|e| format!("unable to open file {}\n{e}", path.display()))?;
+    let mut file = File::create(path).map_err(|source| FileLocationError::Io {
+        path: path.to_path_buf(),
+        operation: "create",
+        source,
+    })?;
     file.write_all(content)
-        .map_err(|e| format!("unable to write file {}\n{e}", path.display()))?;
+        .map_err(|source| FileLocationError::Io {
+            path: path.to_path_buf(),
+            operation: "write",
+            source,
+        })?;
     Ok(())
 }
 
 /// Convert a PathBuf to a URL string.
 /// On native, converts a filesystem path to a `file://` URI.
 /// On WASM, the PathBuf already contains the full URI string, so return it as-is.
-pub fn path_to_url_string(path: &Path) -> Result<String, String> {
+pub fn path_to_url_string(path: &Path) -> Result<String, FileLocationError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         url::Url::from_file_path(path)
-            .map_err(|_| format!("unable to convert path {} to url", path.display()))
+            .map_err(|_| FileLocationError::PathToUrl {
+                path: path.to_path_buf(),
+            })
             .map(String::from)
     }
     #[cfg(target_arch = "wasm32")]
