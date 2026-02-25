@@ -11,7 +11,7 @@ pub mod linter;
 pub mod lints;
 mod util;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use call_checker::CallChecker;
 use check_checker::CheckChecker;
@@ -20,15 +20,14 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 use indexmap::IndexMap;
-use linter::{LintLevel, LintName};
+use linter::{LintLevel, LintMapBuilder, LintName};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
-use serde::Serialize;
-use strum::VariantArray;
+use serde::{Deserialize, Serialize};
 
 use crate::analysis::annotation::Annotation;
 use crate::analysis::cache::AnalysisCache;
-use crate::analysis::linter::{LintGroup, LintMapBuilder};
+use crate::analysis::linter::LintGroup;
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
@@ -102,20 +101,31 @@ impl Pass {
 
 // Each new pass should be included in this list
 static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
+// Passes that should always be enabled
+static DEFAULT_PASSES: [Pass; 1] = [Pass::CallChecker];
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
-    lint_groups: IndexMap<LintGroup, BoolOr<LintLevel>>,
-    lints: IndexMap<LintName, BoolOr<LintLevel>>,
+    lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
-    /// TODO: Fix writing `Clarinet.toml` and remove this
-    #[serde(skip)]
-    disable_default_lints: bool,
 }
 
 impl Settings {
+    /// Construct `Settings` with the same default lints and passes used
+    /// when deserializing from an empty `SettingsFile`.
+    pub fn with_default_lints() -> Self {
+        let lints = LintMapBuilder::new().apply_defaults().build();
+        let passes = HashSet::from(DEFAULT_PASSES);
+
+        Self {
+            passes,
+            lints,
+            check_checker: check_checker::Settings::default(),
+        }
+    }
+
     pub fn enable_all_passes(&mut self) {
         self.passes = HashSet::from(ALL_PASSES)
     }
@@ -132,27 +142,23 @@ impl Settings {
         }
     }
 
-    pub fn set_lint_level(
+    pub fn enable_lint(
         &mut self,
         lint: LintName,
-        level: LintLevel,
-    ) -> Option<BoolOr<LintLevel>> {
-        let value = BoolOr::Value(level);
-        self.lints.insert(lint, value)
+        level: ClarityDiagnosticLevel,
+    ) -> Option<ClarityDiagnosticLevel> {
+        self.lints.insert(lint, level)
     }
 
-    pub fn set_all_lint_levels(&mut self, level: LintLevel) {
-        for lint in LintName::VARIANTS {
-            self.set_lint_level(*lint, level);
-        }
+    pub fn enable_all_lints(&mut self, level: ClarityDiagnosticLevel) {
+        LintGroup::All.insert_into(&mut self.lints, level);
     }
 
-    pub fn disable_default_lints(&mut self) {
-        self.disable_default_lints = true;
+    pub fn disable_lints(&mut self, lint: &LintName) {
+        self.lints.remove(lint);
     }
 
     pub fn disable_all_lints(&mut self) {
-        self.disable_default_lints();
         self.lints.clear();
     }
 }
@@ -196,42 +202,45 @@ pub struct SettingsFile {
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // WARNING: Try to avoid any processing or applying defaults here!
-        // Any changes to `Settings` will be written out to file if `clarinet contract new` is run!
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        let mut settings = Self::with_default_lints();
 
-        // Each pass that has its own settings should be included here.
-        let check_checker = from_file
-            .check_checker
-            .map(check_checker::Settings::from)
-            .unwrap_or_default();
+        // Process lint groups first
+        for (group, val) in from_file.lint_groups.unwrap_or_default() {
+            if let Some(level) = LintLevel::from(val).into() {
+                group.insert_into(&mut settings.lints, level);
+            } else {
+                group.remove_from(&mut settings.lints);
+            }
+        }
 
-        let mut passes = from_file
-            .passes
-            .map(|file_passes| match file_passes {
+        // Individual lints can override group settings
+        for (lint, val) in from_file.lints.unwrap_or_default() {
+            if let Some(level) = LintLevel::from(val).into() {
+                settings.lints.insert(lint, level);
+            } else {
+                settings.lints.remove(&lint);
+            }
+        }
+
+        // Add analysis passes listed in config file
+        if let Some(file_passes) = from_file.passes {
+            let passes = match file_passes {
                 OneOrList::One(pass) => HashSet::from([pass]),
                 OneOrList::List(passes) => HashSet::from_iter(passes),
-            })
-            .map(|passes| {
-                if passes.contains(&Pass::All) {
-                    HashSet::from(ALL_PASSES)
-                } else {
-                    passes
-                }
-            })
-            .unwrap_or_default();
-
-        // Always enable call checker
-        passes.insert(Pass::CallChecker);
-
-        Self {
-            lints: from_file.lints.unwrap_or_default(),
-            lint_groups: from_file.lint_groups.unwrap_or_default(),
-            passes,
-            check_checker,
-            disable_default_lints: false,
+            };
+            if passes.contains(&Pass::All) {
+                settings.passes = HashSet::from(ALL_PASSES);
+            } else {
+                settings.passes.extend(passes);
+            }
         }
+
+        // Each pass that has its own settings should be included here.
+        if let Some(check_checker) = from_file.check_checker {
+            settings.check_checker = check_checker::Settings::from(check_checker);
+        }
+
+        settings
     }
 }
 
@@ -241,29 +250,6 @@ pub fn run_analysis(
     annotations: &Vec<Annotation>,
     settings: &Settings,
 ) -> AnalysisResult {
-    // FIXME: Ugly hack to not use defaults in unit tests
-    let mut lints = if !settings.disable_default_lints {
-        LintMapBuilder::new().apply_defaults().build()
-    } else {
-        LintMapBuilder::new().build()
-    };
-
-    // Process lint groups first
-    for (group, val) in &settings.lint_groups {
-        group.insert_into(&mut lints, LintLevel::from(val.clone()));
-    }
-
-    // Individual lints can override group settings
-    for (lint, val) in &settings.lints {
-        lints.insert(*lint, LintLevel::from(val.clone()));
-    }
-
-    // Filter out explicitly disabled lints
-    let lints = lints.into_iter().filter_map(|(lint, lint_level)| {
-        let diag_level: Option<ClarityDiagnosticLevel> = lint_level.into();
-        diag_level.map(|level| (lint, level))
-    });
-
     let mut errors: Vec<Diagnostic> = vec![];
     let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel)> = vec![];
 
@@ -272,9 +258,9 @@ pub fn run_analysis(
         passes.push((f, pass.default_level()));
     }
 
-    for (name, level) in lints {
-        let lint = AnalysisPassFn::from(&name);
-        passes.push((lint, level));
+    for (name, level) in &settings.lints {
+        let lint = AnalysisPassFn::from(name);
+        passes.push((lint, level.clone()));
     }
 
     // Create shared cache for all passes/lints
@@ -305,4 +291,49 @@ where
     })?;
     conn.commit().expect("Failed to commit");
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Unit tests (using `SessionSettings::default()`) should have all lints disabled.
+    #[test]
+    fn default_settings_have_no_lints() {
+        let settings = Settings::default();
+        assert!(settings.lints.is_empty());
+        assert!(settings.passes.is_empty());
+    }
+
+    /// `clarinet check <file>` with no Clarinet.toml uses `Settings::with_default_lints()`.
+    #[test]
+    fn with_default_lints_enables_default_lints() {
+        let settings = Settings::with_default_lints();
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    /// A Clarinet.toml with no `[repl.analysis]` section deserializes as
+    /// `SettingsFile::default()`, which should produce the same defaults.
+    #[test]
+    fn settings_from_empty_settings_file_enables_default_lints() {
+        let settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    /// A Clarinet.toml with an empty `[repl.analysis]` section is equivalent
+    /// to `SettingsFile` with all `None` fields — same result as above.
+    #[test]
+    fn settings_from_empty_analysis_section_enables_default_lints() {
+        let file = SettingsFile {
+            passes: None,
+            lint_groups: None,
+            lints: None,
+            check_checker: None,
+        };
+        let settings = Settings::from(file);
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
 }

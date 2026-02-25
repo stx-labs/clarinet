@@ -40,7 +40,6 @@ jobs:
         run: npx vsce package --out clarity.vsix
 
       - name: Publish to VSCode Marketplace
-        continue-on-error: true
         run: npx vsce publish --packagePath clarity.vsix --pat ${{ secrets.VSCE_TOKEN }}
 
       - name: Publish to Open VSX

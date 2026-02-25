@@ -1176,7 +1176,13 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
-            let mut settings = repl::SessionSettings::default();
+            let mut settings = repl::SessionSettings {
+                repl_settings: repl::Settings {
+                    analysis: analysis::Settings::with_default_lints(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
             settings.repl_settings.analysis.enable_all_passes();
 
             let mut session = repl::Session::new(settings.clone());
@@ -2912,6 +2918,8 @@ mod tests {
 
     #[test]
     fn test_check_json_output() {
+        use clarity_repl::clarity::vm::diagnostic::Level as DiagnosticLevel;
+
         let snippet = indoc::indoc! {"
             (define-constant A u1)
             (define-constant B u2)
@@ -2922,6 +2930,10 @@ mod tests {
 
         let mut settings = repl::SessionSettings::default();
         settings.repl_settings.analysis.enable_all_passes();
+        settings
+            .repl_settings
+            .analysis
+            .enable_all_lints(DiagnosticLevel::Warning);
 
         let mut session = repl::Session::new(settings.clone());
         let contract_id = QualifiedContractIdentifier::transient();

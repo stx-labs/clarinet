@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use strum::{EnumString, VariantArray};
 
 use crate::analysis::annotation::Annotation;
@@ -72,41 +72,43 @@ pub enum LintGroup {
 }
 
 impl LintGroup {
-    pub fn insert_into<T: Copy>(&self, map: &mut HashMap<LintName, T>, value: T) {
+    /// Returns lints which belong to group
+    pub fn lints(&self) -> &[LintName] {
         use LintGroup::*;
 
         match self {
-            All => {
-                for lint in LintName::VARIANTS {
-                    map.insert(*lint, value);
-                }
-            }
-            Perf => {
-                map.insert(LintName::UnnecessaryAsMaxLen, value);
-                map.insert(LintName::UnnecessaryPublic, value);
-            }
-            Safety => {
-                map.insert(LintName::ErrorConst, value);
-                map.insert(LintName::Noop, value);
-                map.insert(LintName::Panic, value);
-            }
-            Style => {
-                map.insert(LintName::CaseConst, value);
-            }
-            Unused => {
-                map.insert(LintName::UnusedConst, value);
-                map.insert(LintName::UnusedDataVar, value);
-                map.insert(LintName::UnusedBinding, value);
-                map.insert(LintName::UnusedMap, value);
-                map.insert(LintName::UnusedPrivateFn, value);
-                map.insert(LintName::UnusedToken, value);
-                map.insert(LintName::UnusedTrait, value);
-            }
+            All => LintName::VARIANTS,
+            Perf => &[LintName::UnnecessaryAsMaxLen, LintName::UnnecessaryPublic],
+            Safety => &[LintName::ErrorConst, LintName::Noop, LintName::Panic],
+            Style => &[LintName::CaseConst],
+            Unused => &[
+                LintName::UnusedConst,
+                LintName::UnusedDataVar,
+                LintName::UnusedBinding,
+                LintName::UnusedMap,
+                LintName::UnusedPrivateFn,
+                LintName::UnusedToken,
+                LintName::UnusedTrait,
+            ],
+        }
+    }
+
+    /// Insert all members into map at given level
+    pub fn insert_into<T: Clone>(&self, map: &mut HashMap<LintName, T>, value: T) {
+        for lint in self.lints() {
+            map.insert(*lint, value.clone());
+        }
+    }
+
+    /// Remove all members from map at given level
+    pub fn remove_from<T>(&self, map: &mut HashMap<LintName, T>) {
+        for lint in self.lints() {
+            map.remove(lint);
         }
     }
 }
 
-pub type LintMap = HashMap<LintName, LintLevel>;
+pub type LintMap = HashMap<LintName, ClarityDiagnosticLevel>;
 
 pub struct LintMapBuilder {
     map: LintMap,
@@ -121,9 +123,9 @@ impl LintMapBuilder {
     }
 
     pub fn apply_defaults(mut self) -> Self {
-        LintGroup::Unused.insert_into(&mut self.map, LintLevel::Warning);
-        LintGroup::Perf.insert_into(&mut self.map, LintLevel::Warning);
-        LintGroup::Safety.insert_into(&mut self.map, LintLevel::Warning);
+        LintGroup::Unused.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
+        LintGroup::Perf.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
+        LintGroup::Safety.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
         //LintGroup::Style.insert_into(&mut map, LintLevel::Notice);
 
         self
@@ -195,7 +197,7 @@ mod tests {
             if matches!(group, LintGroup::All) {
                 continue;
             }
-            group.insert_into(&mut lints, LintLevel::default());
+            group.insert_into(&mut lints, ClarityDiagnosticLevel::Warning);
         }
 
         for lint in LintName::VARIANTS {

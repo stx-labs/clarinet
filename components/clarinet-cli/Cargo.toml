@@ -16,20 +16,16 @@ categories = [
 ]
 
 [dependencies]
-bs58 = { workspace = true }
 colored = { workspace = true }
 crossbeam-channel = "0.5.6"
 crossterm = { workspace = true }
-ctrlc = "3.1.9"
 indoc = { workspace = true }
-rand = { workspace = true }
 ratatui = { workspace = true }
 rpassword = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 similar = "2.1.0"
 tokio = { workspace = true }
-toml = { workspace = true }
 toml_edit = { workspace = true }
 
 clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
@@ -41,11 +37,6 @@ clarinet-utils = { path = "../clarinet-utils" }
 hiro-system-kit = { path = "../hiro-system-kit" }
 stacks-network = { path = "../stacks-network" }
 
-[target.'cfg(unix)'.dependencies]
-nix = "0.30.1"
-signal-hook = { workspace = true, features = ["iterator"] }
-libc = "0.2"
-
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { workspace = true, features = ["derive"] }
 clap_complete = { version = "4.4.4" }
@@ -53,28 +44,13 @@ tower-lsp-server = { version = "0.23.0" }
 segment = { version = "0.2.4", optional = true }
 mac_address = { version = "1.1.8", optional = true }
 
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.9", features = [
-    "knownfolders",
-    "mswsock",
-    "objbase",
-    "shlobj",
-    "tlhelp32",
-    "winbase",
-    "winerror",
-    "winsock2",
-    "std",
-    "handleapi",
-    "ws2ipdef",
-    "ws2tcpip",
-] }
-
 # Must match condition in bin.rs EXACTLY
 [target.'cfg(not(any(target_env = "msvc", target_os = "macos")))'.dependencies]
 tikv-jemallocator = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+toml = { workspace = true }
 
 [package.metadata.winres]
 OriginalFilename = "clarinet.exe"
