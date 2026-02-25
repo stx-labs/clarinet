@@ -30,6 +30,7 @@ use futures::stream::TryStreamExt;
 use hiro_system_kit::{slog, slog_term, Drain};
 use indoc::formatdoc;
 
+use crate::bitcoin_rpc_client::BitcoinRpcClient;
 use crate::command::run_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 
@@ -1461,7 +1462,7 @@ impl DevnetOrchestrator {
                     if is_running {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
                 }
                 // the container seems to need an extra second to be really ready
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -1906,14 +1907,35 @@ impl DevnetOrchestrator {
         )?;
 
         // Start all containers in parallel
-        let _ = tokio::join!(
-            docker.start_container::<String>(&bitcoin_node_c_id, None),
-            docker.start_container::<String>(bitcoin_explorer_c_id, None),
-            docker.start_container::<String>(postgres_c_id, None),
-            docker.start_container::<String>(stacks_api_c_id, None),
-            docker.start_container::<String>(stacks_explorer_c_id, None),
-            docker.start_container::<String>(&stacks_node_c_id, None),
-        );
+        // let _ = tokio::join!(
+        //     docker.start_container::<String>(&bitcoin_node_c_id, None),
+        //     docker.start_container::<String>(bitcoin_explorer_c_id, None),
+        //     docker.start_container::<String>(postgres_c_id, None),
+        //     docker.start_container::<String>(stacks_api_c_id, None),
+        //     docker.start_container::<String>(stacks_explorer_c_id, None),
+        //     docker.start_container::<String>(&stacks_node_c_id, None),
+        // );
+        let _ = docker
+            .start_container::<String>(&bitcoin_node_c_id, None)
+            .await;
+
+        let _ = docker
+            .start_container::<String>(bitcoin_explorer_c_id, None)
+            .await;
+
+        let _ = docker.start_container::<String>(postgres_c_id, None).await;
+
+        let _ = docker
+            .start_container::<String>(stacks_api_c_id, None)
+            .await;
+
+        let _ = docker
+            .start_container::<String>(stacks_explorer_c_id, None)
+            .await;
+
+        let _ = docker
+            .start_container::<String>(&stacks_node_c_id, None)
+            .await;
 
         Ok((bitcoin_node_c_id, stacks_node_c_id))
     }
@@ -2022,93 +2044,70 @@ impl DevnetOrchestrator {
             self.services_map_hosts.as_ref().unwrap().bitcoin_node_host
         );
 
-        let base_bitcoin_request = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("Unable to build http client")
-            .post(&bitcoin_node_url)
-            .timeout(Duration::from_secs(3))
-            .basic_auth(
-                &devnet_config.bitcoin_node_username,
-                Some(&devnet_config.bitcoin_node_password),
-            )
-            .header("Content-Type", "application/json")
-            .header("Host", &bitcoin_node_url[7..]);
+        let btc_rpc = BitcoinRpcClient::new(
+            bitcoin_node_url,
+            devnet_config.bitcoin_node_username.clone(),
+            devnet_config.bitcoin_node_password.clone(),
+        );
 
         let _ = devnet_event_tx.send(DevnetEvent::info("Configuring bitcoin-node".to_string()));
 
         const MAX_ERRORS: u32 = 30;
 
         // Wait for the bitcoin node to be responsive
-        bitcoin_rpc_with_retry(
-            &base_bitcoin_request,
-            &json!({ "jsonrpc": "1.0", "id": "stacks-network", "method": "getnetworkinfo", "params": [] }),
-            MAX_ERRORS,
-            devnet_event_tx,
-        )
-        .await?;
+        btc_rpc
+            .call_with_retry("getnetworkinfo", json!([]), MAX_ERRORS, devnet_event_tx)
+            .await?;
 
         // Only generate blocks if we're NOT using cached data
         if no_snapshot {
             let _ = devnet_event_tx.send(DevnetEvent::info(
                 "Initializing blockchain with fresh blocks".to_string(),
             ));
-            bitcoin_rpc_with_retry(
-                &base_bitcoin_request,
-                &json!({ "jsonrpc": "1.0", "id": "stacks-network", "method": "generatetoaddress", "params": [json!(3), json!(miner_address)] }),
-                MAX_ERRORS,
-                devnet_event_tx,
-            )
-            .await?;
-            bitcoin_rpc_with_retry(
-                &base_bitcoin_request,
-                &json!({ "jsonrpc": "1.0", "id": "stacks-network", "method": "generatetoaddress", "params": [json!(97), json!(faucet_address)] }),
-                MAX_ERRORS,
-                devnet_event_tx,
-            )
-            .await?;
-            bitcoin_rpc_with_retry(
-                &base_bitcoin_request,
-                &json!({ "jsonrpc": "1.0", "id": "stacks-network", "method": "generatetoaddress", "params": [json!(1), json!(miner_address)] }),
-                MAX_ERRORS,
-                devnet_event_tx,
-            )
-            .await?;
+            btc_rpc
+                .call_with_retry(
+                    "generatetoaddress",
+                    json!([3, miner_address]),
+                    MAX_ERRORS,
+                    devnet_event_tx,
+                )
+                .await?;
+            btc_rpc
+                .call_with_retry(
+                    "generatetoaddress",
+                    json!([97, faucet_address]),
+                    MAX_ERRORS,
+                    devnet_event_tx,
+                )
+                .await?;
+            btc_rpc
+                .call_with_retry(
+                    "generatetoaddress",
+                    json!([1, miner_address]),
+                    MAX_ERRORS,
+                    devnet_event_tx,
+                )
+                .await?;
         } else {
             let _ = devnet_event_tx.send(DevnetEvent::info(
                 "Using snapshot - skipping initial address seeding".to_string(),
             ));
         }
 
-        let clone_base_bitcoin_request = || {
-            base_bitcoin_request
-                .try_clone()
-                .expect("request body is not a stream and should always be cloneable")
-        };
-
         let mut error_count = 0;
         loop {
-            let rpc_load_call = clone_base_bitcoin_request()
-                .json(&json!({
-                    "jsonrpc": "1.0",
-                    "id": "stacks-network",
-                    "method": "loadwallet",
-                    "params": json!(vec![&devnet_config.miner_wallet_name])
-                }))
-                .send()
+            let rpc_load_call = btc_rpc
+                .call("loadwallet", json!([&devnet_config.miner_wallet_name]))
                 .await
                 .map_err(|e| format!("unable to send 'loadwallet' request ({e})"));
 
-            let rpc_create_call = clone_base_bitcoin_request()
-            .json(&json!({
-                "jsonrpc": "1.0",
-                "id": "stacks-network",
-                "method": "createwallet",
-                "params": json!({ "wallet_name": devnet_config.miner_wallet_name, "disable_private_keys": true })
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("unable to send 'createwallet' request ({e})"));
+            let rpc_create_call = btc_rpc
+                .call(
+                    "createwallet",
+                    json!({ "wallet_name": devnet_config.miner_wallet_name, "disable_private_keys": true }),
+                )
+                .await
+                .map_err(|e| format!("unable to send 'createwallet' request ({e})"));
 
             match rpc_create_call {
                 Ok(r) => {
@@ -2167,21 +2166,21 @@ impl DevnetOrchestrator {
                     }
                 }
             }
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::time::sleep(Duration::from_millis(1000)).await;
             let _ = devnet_event_tx.send(DevnetEvent::info("Waiting for bitcoin-node".to_string()));
         }
 
         // Register descriptors for miner, faucet, and all accounts
         register_descriptor(
             &miner_address.assume_checked_ref().to_string(),
-            &base_bitcoin_request,
+            &btc_rpc,
             MAX_ERRORS,
             devnet_event_tx,
         )
         .await?;
         register_descriptor(
             &faucet_address.assume_checked_ref().to_string(),
-            &base_bitcoin_request,
+            &btc_rpc,
             MAX_ERRORS,
             devnet_event_tx,
         )
@@ -2192,7 +2191,7 @@ impl DevnetOrchestrator {
                 .map_err(|e| format!("unable to create address: {e:?}"))?;
             register_descriptor(
                 &address.assume_checked_ref().to_string(),
-                &base_bitcoin_request,
+                &btc_rpc,
                 MAX_ERRORS,
                 devnet_event_tx,
             )
@@ -2202,14 +2201,8 @@ impl DevnetOrchestrator {
         // Before generating a block, verify the chain is fully synced.
         let mut error_count = 0;
         loop {
-            let response: JsonRpcResponse = clone_base_bitcoin_request()
-                .json(&json!({
-                    "jsonrpc": "1.0",
-                    "id": "stacks-network",
-                    "method": "getblockchaininfo",
-                    "params": []
-                }))
-                .send()
+            let response: JsonRpcResponse = btc_rpc
+                .call("getblockchaininfo", json!([]))
                 .await
                 .map_err(|e| format!("unable to send 'getblockchaininfo' request ({e})"))?
                 .json()
@@ -2234,7 +2227,7 @@ impl DevnetOrchestrator {
                 return Err("Blockchain verification timeout".to_string());
             }
 
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::time::sleep(Duration::from_millis(1000)).await;
             let _ = devnet_event_tx.send(DevnetEvent::info(format!(
                 "Verification progress: {:.2}%",
                 verification_progress * 100.0
@@ -2245,13 +2238,14 @@ impl DevnetOrchestrator {
             let _ = devnet_event_tx.send(DevnetEvent::info(
                 "Using cached blockchain data - mining one block".to_string(),
             ));
-            bitcoin_rpc_with_retry(
-                &base_bitcoin_request,
-                &json!({ "jsonrpc": "1.0", "id": "stacks-network", "method": "generatetoaddress", "params": [json!(1), json!(miner_address)] }),
-                MAX_ERRORS,
-                devnet_event_tx,
-            )
-            .await?;
+            btc_rpc
+                .call_with_retry(
+                    "generatetoaddress",
+                    json!([1, miner_address]),
+                    MAX_ERRORS,
+                    devnet_event_tx,
+                )
+                .await?;
         }
         Ok(())
     }
@@ -2346,54 +2340,17 @@ fn port_binding(port: u16) -> Option<Vec<PortBinding>> {
     }])
 }
 
-async fn bitcoin_rpc_with_retry(
-    base_request: &reqwest::RequestBuilder,
-    body: &serde_json::Value,
-    max_errors: u32,
-    event_tx: &Sender<DevnetEvent>,
-) -> Result<(), String> {
-    let mut error_count = 0;
-    loop {
-        let req = base_request
-            .try_clone()
-            .expect("request body is not a stream and should always be cloneable")
-            .json(body);
-
-        let Err(e) = req.send().await else {
-            return Ok(());
-        };
-
-        error_count += 1;
-        if error_count > max_errors {
-            return Err(e.to_string());
-        }
-        if error_count > 1 {
-            let _ = event_tx.send(DevnetEvent::error(e.to_string()));
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let _ = event_tx.send(DevnetEvent::info("Waiting for bitcoin-node".to_string()));
-    }
-}
-
 async fn register_descriptor(
     address_str: &str,
-    base: &reqwest::RequestBuilder,
+    client: &BitcoinRpcClient,
     max_errors: u32,
     event_tx: &Sender<DevnetEvent>,
 ) -> Result<(), String> {
     use serde_json::json;
 
     let descriptor = format!("addr({address_str})");
-    let response: JsonRpcResponse = base
-        .try_clone()
-        .expect("request body is not a stream and should always be cloneable")
-        .json(&json!({
-            "jsonrpc": "1.0",
-            "id": "stacks-network",
-            "method": "getdescriptorinfo",
-            "params": [json!(descriptor)]
-        }))
-        .send()
+    let response: JsonRpcResponse = client
+        .call("getdescriptorinfo", json!([descriptor]))
         .await
         .map_err(|e| format!("unable to send 'getdescriptorinfo' request ({e})"))?
         .json()
@@ -2412,19 +2369,19 @@ async fn register_descriptor(
         "Registering {descriptor}#{checksum}"
     )));
 
-    let payload = json!({
-        "jsonrpc": "1.0",
-        "id": "stacks-network",
-        "method": "importdescriptors",
-        "params": {
-            "requests": [{
-                "desc": format!("{descriptor}#{checksum}"),
-                "timestamp": 0,
-            }]
-        }
-    });
-
-    bitcoin_rpc_with_retry(base, &payload, max_errors, event_tx).await
+    client
+        .call_with_retry(
+            "importdescriptors",
+            json!({
+                "requests": [{
+                    "desc": format!("{descriptor}#{checksum}"),
+                    "timestamp": 0,
+                }]
+            }),
+            max_errors,
+            event_tx,
+        )
+        .await
 }
 
 fn formatted_docker_error(message: &str, error: DockerError) -> String {
