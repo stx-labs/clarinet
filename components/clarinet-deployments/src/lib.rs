@@ -43,7 +43,12 @@ pub fn setup_session_with_deployment(
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> DeploymentGenerationArtifacts {
     let mut session = initiate_session_from_manifest(manifest);
-    let contracts = update_session_with_deployment_plan(&mut session, deployment, contracts_asts);
+    let contracts = update_session_with_deployment_plan(
+        &mut session,
+        &manifest.contracts,
+        deployment,
+        contracts_asts,
+    );
 
     let deps = BTreeMap::new();
     let mut diags = HashMap::new();
@@ -160,6 +165,7 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
 
 pub fn update_session_with_deployment_plan(
     session: &mut Session,
+    project_contracts: &BTreeMap<String, ClarityContract>,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> ExecutionResultMap {
@@ -193,16 +199,14 @@ pub fn update_session_with_deployment_plan(
                         should_mint_sbtc = true;
                     }
                     let contract_ast = contracts_asts.as_ref().and_then(|m| m.get(&contract_id));
-                    let is_requirement = tx
-                        .location
-                        .components()
-                        .any(|c| c.as_os_str() == "requirements");
+                    let is_project_contract =
+                        project_contracts.contains_key(tx.contract_name.as_str());
                     let result = handle_emulated_contract_publish(
                         session,
                         tx,
                         contract_ast,
                         epoch,
-                        !is_requirement,
+                        is_project_contract,
                     );
                     contracts.insert(contract_id, result);
                 }
