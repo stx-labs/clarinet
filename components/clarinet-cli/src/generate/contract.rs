@@ -1,14 +1,19 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use clarinet_files::paths;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_CLARITY_VERSION,
 };
 use indoc::{formatdoc, indoc};
 
 use super::changes::{Changes, FileCreation, FileDeletion, TOMLEdition};
+
+pub fn project_root_from_manifest_location(manifest_location: &Path) -> &Path {
+    manifest_location
+        .parent()
+        .expect("couldn't find project root directory")
+}
 
 pub struct GetChangesForRmContract {
     manifest_location: PathBuf,
@@ -32,7 +37,7 @@ impl GetChangesForRmContract {
     }
     fn rm_test(&mut self) -> Result<(), String> {
         let name = format!("{}.test.ts", self.contract_name);
-        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
+        let root = project_root_from_manifest_location(&self.manifest_location);
         let f = root.join("tests").join(&name);
         if !f.exists() {
             return Ok(());
@@ -46,7 +51,7 @@ impl GetChangesForRmContract {
     }
     fn rm_template_contract(&mut self) -> Result<(), String> {
         let name = format!("{}.clar", self.contract_name);
-        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
+        let root = project_root_from_manifest_location(&self.manifest_location);
         let f = root.join("contracts").join(&name);
         if !f.exists() {
             return Err(format!("{} doesn't exist", f.display()));
@@ -80,16 +85,14 @@ impl GetChangesForRmContract {
 pub struct GetChangesForNewContract {
     manifest_location: PathBuf,
     contract_name: String,
-    source: Option<String>,
     changes: Vec<Changes>,
 }
 
 impl GetChangesForNewContract {
-    pub fn new(manifest_location: PathBuf, contract_name: String, source: Option<String>) -> Self {
+    pub fn new(manifest_location: PathBuf, contract_name: String) -> Self {
         Self {
             manifest_location,
             contract_name: contract_name.replace('.', "_"),
-            source,
             changes: vec![],
         }
     }
@@ -104,43 +107,39 @@ impl GetChangesForNewContract {
     }
 
     fn create_template_contract(&mut self) -> Result<(), String> {
-        let content = if let Some(ref source) = self.source {
-            source.to_string()
-        } else {
-            formatdoc! {"
-                ;; title: {}
-                ;; version:
-                ;; summary:
-                ;; description:
+        let content = formatdoc! {"
+            ;; title: {}
+            ;; version:
+            ;; summary:
+            ;; description:
 
-                ;; traits
-                ;;
+            ;; traits
+            ;;
 
-                ;; token definitions
-                ;;
+            ;; token definitions
+            ;;
 
-                ;; constants
-                ;;
+            ;; constants
+            ;;
 
-                ;; data vars
-                ;;
+            ;; data vars
+            ;;
 
-                ;; data maps
-                ;;
+            ;; data maps
+            ;;
 
-                ;; public functions
-                ;;
+            ;; public functions
+            ;;
 
-                ;; read only functions
-                ;;
+            ;; read only functions
+            ;;
 
-                ;; private functions
-                ;;
+            ;; private functions
+            ;;
 
-            ", self.contract_name}
-        };
+        ", self.contract_name};
         let name = format!("{}.clar", self.contract_name);
-        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
+        let root = project_root_from_manifest_location(&self.manifest_location);
         let new_file = root.join("contracts").join(&name);
         if new_file.exists() {
             return Err(format!("{} already exists", new_file.display()));
@@ -180,7 +179,7 @@ impl GetChangesForNewContract {
         .into();
 
         let name = format!("{}.test.ts", self.contract_name);
-        let root = paths::project_root_from_manifest_location(&self.manifest_location).unwrap();
+        let root = project_root_from_manifest_location(&self.manifest_location);
         let new_file = root.join("tests").join(&name);
         if new_file.exists() {
             return Err(format!("{} already exists", new_file.display()));

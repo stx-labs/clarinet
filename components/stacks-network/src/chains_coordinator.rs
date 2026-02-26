@@ -127,8 +127,8 @@ impl DevnetEventObserverConfig {
         ctx.try_log(|logger| slog::info!(logger, "Checking contracts"));
         let network_manifest = match network_manifest {
             Some(n) => n,
-            None => NetworkManifest::from_project_manifest_location(
-                &manifest.location,
+            None => NetworkManifest::from_project_root(
+                &manifest.root_dir,
                 &StacksNetwork::Devnet.get_networks(),
                 false,
                 Some(&manifest.project.cache_location),

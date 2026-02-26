@@ -345,16 +345,13 @@ pub struct AccountConfig {
 }
 
 impl NetworkManifest {
-    pub fn from_project_manifest_location(
-        project_manifest_location: &Path,
+    pub fn from_project_root(
+        project_root: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
         cache_location: Option<&Path>,
         devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
-        let project_root = project_manifest_location
-            .parent()
-            .ok_or_else(|| "unable to get parent of manifest location".to_string())?;
         let network_manifest_location = paths::get_network_manifest_path(project_root, &networks.1);
         NetworkManifest::from_location(
             &network_manifest_location,
@@ -365,16 +362,13 @@ impl NetworkManifest {
         )
     }
 
-    pub async fn from_project_manifest_location_using_file_accessor(
-        location: &Path,
+    pub async fn from_project_root_using_file_accessor(
+        project_root: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
         file_accessor: &dyn FileAccessor,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_location = location
-            .parent()
-            .ok_or_else(|| "unable to get parent of manifest location".to_string())?
-            .join("settings/Devnet.toml");
+        let network_manifest_location = project_root.join("settings/Devnet.toml");
         let content = file_accessor
             .read_file(network_manifest_location.to_string_lossy().to_string())
             .await?;

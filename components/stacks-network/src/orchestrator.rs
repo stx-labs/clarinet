@@ -80,8 +80,8 @@ impl DevnetOrchestrator {
     ) -> Result<DevnetOrchestrator, String> {
         let mut network_config = match network_manifest {
             Some(n) => Ok(n),
-            None => NetworkManifest::from_project_manifest_location(
-                &manifest.location,
+            None => NetworkManifest::from_project_root(
+                &manifest.root_dir,
                 &StacksNetwork::Devnet.get_networks(),
                 false,
                 Some(&manifest.project.cache_location),
@@ -1584,6 +1584,8 @@ db_path = "stacks-signer-{signer_id}.sqlite"
                     }
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
+                // the container seems to need an extra second to be really ready
+                tokio::time::sleep(Duration::from_millis(1000)).await;
 
                 ctx.try_log(|logger| {
                     slog::info!(logger, "Importing events from {}", events_path.display())
