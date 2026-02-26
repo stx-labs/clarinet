@@ -344,10 +344,12 @@ fn compute_function_overhead_costs(
                     saturating_add_cost(&mut overhead.max, &type_check_cost);
                 }
             }
-            Err(_e) => {
+            Err(e) => {
                 // This should probably only be hit for contracts that don't
                 // type check anyway. We continue so the other costs are still
                 // calculated.
+                eprintln!("Error parsing function signature: {e:?}");
+                eprintln!("Signature: {signature_args:?}");
             }
         }
     }

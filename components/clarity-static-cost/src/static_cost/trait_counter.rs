@@ -542,9 +542,6 @@ pub struct TraitCountPropagator<'a> {
     trait_names: &'a HashMap<ClarityName, String>,
     /// Set of all function names from the contract (used to distinguish function calls from let-bound variables)
     visited_functions: &'a HashSet<String>,
-    /// Map from let-bound variable names to their trait counts
-    #[allow(dead_code)]
-    let_binding_trait_counts: HashMap<String, MinMaxTraitCount>,
     /// Track which function calls have already been processed to avoid double-counting
     processed_calls: std::collections::HashSet<(String, String)>,
 }
@@ -559,7 +556,6 @@ impl<'a> TraitCountPropagator<'a> {
             trait_counts,
             trait_names,
             visited_functions,
-            let_binding_trait_counts: HashMap::new(),
             processed_calls: std::collections::HashSet::new(),
         }
     }
