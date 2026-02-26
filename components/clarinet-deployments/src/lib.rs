@@ -193,13 +193,16 @@ pub fn update_session_with_deployment_plan(
                         should_mint_sbtc = true;
                     }
                     let contract_ast = contracts_asts.as_ref().and_then(|m| m.get(&contract_id));
-                    let is_project_contract = deployment.contracts.contains_key(&contract_id);
+                    let is_requirement = tx
+                        .location
+                        .components()
+                        .any(|c| c.as_os_str() == "requirements");
                     let result = handle_emulated_contract_publish(
                         session,
                         tx,
                         contract_ast,
                         epoch,
-                        is_project_contract,
+                        !is_requirement,
                     );
                     contracts.insert(contract_id, result);
                 }
