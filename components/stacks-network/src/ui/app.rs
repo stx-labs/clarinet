@@ -1,11 +1,11 @@
-use chainhook_sdk::types::{
-    StacksBlockData, StacksMicroblockData, StacksTransactionData, StacksTransactionKind,
-};
-use chainhook_sdk::utils::Context;
 use hiro_system_kit::slog;
 use ratatui::prelude::*;
 
 use super::util::{StatefulList, TabsState};
+use crate::chainhook::types::{
+    StacksBlockData, StacksMicroblockData, StacksTransactionData, StacksTransactionKind,
+};
+use crate::chainhook::utils::Context;
 use crate::event::ServiceStatusData;
 use crate::{LogData, MempoolAdmissionData};
 
