@@ -8,8 +8,10 @@
 //! - No `nft-mint?`, `nft-burn?`, `nft-transfer?`
 //! - No `contract-call?` to a public (non-read-only) function
 //! - No dynamic `contract-call?` (trait-based dispatch, conservatively assumed to have side effects)
+//! - No call to a user-defined function (public or private) with side effects
+//! - No `map`, `fold`, or `filter` over a function with side effects
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
@@ -33,8 +35,16 @@ pub struct UnnecessaryPublic<'a, 'b, 'c> {
     epoch: StacksEpochId,
     level: Level,
     active_annotation: Option<usize>,
-    /// Set to `true` when traversing a public function body that contains a state-modifying op
+    /// Set to `true` when traversing a function body that contains a state-modifying op
     found_side_effect: bool,
+    /// Names of functions (public or private) whose bodies contain state-modifying operations,
+    /// either directly or transitively via calls to other functions with side effects.
+    ///
+    /// --- IMPORTANT ---
+    /// This assumes `ASTVisitor` traverses called functions before the functions that call them.
+    /// This should always be the case as the Clarity interpreter *should* topologically sort functions by dependency before traversal
+    /// -----------------
+    fns_with_side_effects: HashSet<&'a ClarityName>,
 }
 
 impl<'a, 'b, 'c> UnnecessaryPublic<'a, 'b, 'c> {
@@ -54,6 +64,7 @@ impl<'a, 'b, 'c> UnnecessaryPublic<'a, 'b, 'c> {
             epoch,
             active_annotation: None,
             found_side_effect: false,
+            fns_with_side_effects: HashSet::new(),
         }
     }
 
@@ -78,14 +89,21 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         &self.clarity_version
     }
 
-    // Skip private function bodies, we only care about public functions
+    // Traverse private function bodies to record side effects (but don't emit diagnostics)
     fn traverse_define_private(
         &mut self,
         _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
+        name: &'a ClarityName,
         _parameters: Option<Vec<TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
+        body: &'a SymbolicExpression,
     ) -> bool {
+        self.found_side_effect = false;
+        self.traverse_expr(body);
+
+        if self.found_side_effect {
+            self.fns_with_side_effects.insert(name);
+        }
+
         true
     }
 
@@ -169,16 +187,25 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         // If a side effect is found, traversal short-circuits via `false` returns.
         self.traverse_expr(body);
 
-        if !self.found_side_effect {
+        if self.found_side_effect {
+            self.fns_with_side_effects.insert(name);
+        } else {
             self.set_active_annotation(&expr.span);
             if !self.allow() {
+                // Highlight just the `define-public` keyword, not the entire expression
+                let keyword_span = expr
+                    .match_list()
+                    .and_then(|list| list.first())
+                    .map(|kw| kw.span.clone())
+                    .unwrap_or_else(|| expr.span.clone());
+
                 self.diagnostics.push(Diagnostic {
                     level: self.level.clone(),
                     message: format!(
                         "function `{}` could be declared as `define-read-only`",
                         name,
                     ),
-                    spans: vec![expr.span.clone()],
+                    spans: vec![keyword_span],
                     suggestion: Some("Replace `define-public` with `define-read-only`".to_string()),
                 });
             }
@@ -322,6 +349,62 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
         false
     }
 
+    fn visit_call_user_defined(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
+        _args: &'a [SymbolicExpression],
+    ) -> bool {
+        if self.fns_with_side_effects.contains(name) {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
+    }
+
+    // --- Higher-order functions that take a function name ---
+    // If the applied function has side effects, so does the call.
+
+    fn visit_map(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequences: &'a [SymbolicExpression],
+    ) -> bool {
+        if self.fns_with_side_effects.contains(func) {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
+    }
+
+    fn visit_fold(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequence: &'a SymbolicExpression,
+        _initial: &'a SymbolicExpression,
+    ) -> bool {
+        if self.fns_with_side_effects.contains(func) {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
+    }
+
+    fn visit_filter(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        func: &'a ClarityName,
+        _sequence: &'a SymbolicExpression,
+    ) -> bool {
+        if self.fns_with_side_effects.contains(func) {
+            self.found_side_effect = true;
+            return false;
+        }
+        true
+    }
+
     fn visit_static_contract_call(
         &mut self,
         _expr: &'a SymbolicExpression,
@@ -461,6 +544,27 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
         assert!(output[0].contains("could be declared as `define-read-only`"));
+    }
+
+    #[test]
+    fn diagnostic_highlights_define_public_keyword() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (get-value)
+                (ok u1)
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        let span = &result.diagnostics[0].spans[0];
+        // Should highlight only `define-public`, not the entire expression
+        assert_eq!(span.start_line, 1);
+        assert_eq!(span.start_column, 2);
+        assert_eq!(span.end_line, 1);
+        assert_eq!(span.end_column, 14);
     }
 
     #[test]
@@ -666,7 +770,83 @@ mod tests {
     }
 
     #[test]
-    fn no_warn_on_public_calling_public_fn() {
+    fn no_warn_on_public_calling_public_fn_with_side_effects() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var count uint u0)
+            (define-public (increment2)
+                (increment)
+            )
+            (define-public (increment)
+                (ok (var-set count (+ (var-get count) u1)))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet_with_other_contract(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_on_public_calling_public_fn_with_no_side_effects() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (increment2)
+                (increment)
+            )
+            (define-public (increment)
+                (ok true)
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet_with_other_contract(snippet);
+
+        // Should be a warning for BOTH functions
+        assert_eq!(result.diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn no_warn_on_public_calling_private_fn_with_side_effects() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var count uint u0)
+            (define-public (increment2)
+                (increment)
+            )
+            (define-private (increment)
+                (ok (var-set count (+ (var-get count) u1)))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet_with_other_contract(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_on_public_calling_private_fn_with_no_side_effects() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (increment2)
+                (increment)
+            )
+            (define-private (increment)
+                (ok true)
+            )
+        ")
+        .to_string();
+
+        let (output, result) = run_snippet_with_other_contract(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("could be declared as `define-read-only`"));
+    }
+
+    #[test]
+    fn no_warn_on_public_contract_call_public_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (call-other)
@@ -681,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn warn_on_public_calling_read_only_fn() {
+    fn warn_on_public_contract_call_read_only_fn() {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (call-other)
@@ -867,5 +1047,90 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_on_public_with_map_over_side_effecting_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+            (define-private (do-increment (x uint))
+                (begin
+                    (var-set counter (+ (var-get counter) u1))
+                    x
+                )
+            )
+            (define-public (increment-all (items (list 10 uint)))
+                (ok (map do-increment items))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_on_public_with_fold_over_side_effecting_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+            (define-private (accumulate (x uint) (acc uint))
+                (begin
+                    (var-set counter (+ (var-get counter) u1))
+                    (+ x acc)
+                )
+            )
+            (define-public (sum-all (items (list 10 uint)))
+                (ok (fold accumulate items u0))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_on_public_with_filter_over_side_effecting_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var counter uint u0)
+            (define-private (check-and-count (x uint))
+                (begin
+                    (var-set counter (+ (var-get counter) u1))
+                    (> x u5)
+                )
+            )
+            (define-public (filter-large (items (list 10 uint)))
+                (ok (filter check-and-count items))
+            )
+        ")
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_on_public_with_map_over_read_only_fn() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (double (x uint))
+                (* x u2)
+            )
+            (define-public (double-all (items (list 10 uint)))
+                (ok (map double items))
+            )
+        ")
+        .to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("could be declared as `define-read-only`"));
     }
 }

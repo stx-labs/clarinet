@@ -4,13 +4,6 @@ use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::bitcoin::{self, Address, Amount, BlockHash};
 use bitcoincore_rpc::jsonrpc::error::RpcError;
 use bitcoincore_rpc_json::GetRawTransactionResultVoutScriptPubKey;
-use crate::chainhook::types::bitcoin::{OutPoint, TxIn, TxOut};
-use crate::chainhook::types::{
-    BitcoinBlockData, BitcoinBlockMetadata, BitcoinNetwork, BitcoinTransactionData,
-    BitcoinTransactionMetadata, BlockCommitmentData, BlockHeader, BlockIdentifier,
-    KeyRegistrationData, LockSTXData, PoxReward, StacksBaseChainOperation,
-    StacksBlockCommitmentData, TransactionIdentifier, TransferSTXData,
-};
 use hiro_system_kit::slog;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
@@ -22,6 +15,13 @@ use crate::chainhook::hooks::bitcoin::{
 };
 use crate::chainhook::hooks::types::PoxConfig;
 use crate::chainhook::observer::BitcoinConfig;
+use crate::chainhook::types::bitcoin::{OutPoint, TxIn, TxOut};
+use crate::chainhook::types::{
+    BitcoinBlockData, BitcoinBlockMetadata, BitcoinNetwork, BitcoinTransactionData,
+    BitcoinTransactionMetadata, BlockCommitmentData, BlockHeader, BlockIdentifier,
+    KeyRegistrationData, LockSTXData, PoxReward, StacksBaseChainOperation,
+    StacksBlockCommitmentData, TransactionIdentifier, TransferSTXData,
+};
 use crate::chainhook::utils::Context;
 
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]

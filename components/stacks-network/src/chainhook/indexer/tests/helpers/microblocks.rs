@@ -1,8 +1,7 @@
+use super::BlockEvent;
 use crate::chainhook::types::{
     BlockIdentifier, StacksMicroblockData, StacksMicroblockMetadata, StacksTransactionData,
 };
-
-use super::BlockEvent;
 
 pub fn generate_test_microblock(
     fork_id: u8,

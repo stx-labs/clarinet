@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use crate::chainhook::types::StacksNetwork;
 use test_case::test_case;
 
 use crate::chainhook::hooks::stacks::{
@@ -10,6 +9,7 @@ use crate::chainhook::hooks::stacks::{
     StacksPrintEventBasedPredicate,
 };
 use crate::chainhook::hooks::types::{HttpHook, *};
+use crate::chainhook::types::StacksNetwork;
 
 static TXID_NO_PREFIX: LazyLock<String> =
     LazyLock::new(|| "1234567890123456789012345678901234567890123456789012345678901234".into());

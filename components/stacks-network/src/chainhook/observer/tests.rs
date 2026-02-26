@@ -1,11 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::mpsc::{channel, Sender};
 
-use crate::chainhook::types::{
-    BitcoinBlockSignaling, BitcoinNetwork, BlockchainEvent, BlockchainUpdatedWithHeaders,
-    StacksBlockUpdate, StacksChainEvent, StacksChainUpdatedWithBlocksData, StacksNetwork,
-    StacksNodeConfig,
-};
 use hiro_system_kit;
 
 use super::{ObserverEvent, PredicatesConfig, DEFAULT_INGESTION_PORT};
@@ -28,6 +23,11 @@ use crate::chainhook::indexer::tests::helpers::{accounts, bitcoin_blocks, stacks
 use crate::chainhook::observer::{
     start_observer_commands_handler, EventObserverConfig, ObserverCommand,
     PredicateDeregisteredEvent,
+};
+use crate::chainhook::types::{
+    BitcoinBlockSignaling, BitcoinNetwork, BlockchainEvent, BlockchainUpdatedWithHeaders,
+    StacksBlockUpdate, StacksChainEvent, StacksChainUpdatedWithBlocksData, StacksNetwork,
+    StacksNodeConfig,
 };
 use crate::chainhook::utils::{AbstractBlock, Context};
 

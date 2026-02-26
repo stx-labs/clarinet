@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
+use bitcoincore_rpc::bitcoin::hex::DisplayHex;
 use bollard::container::{
     Config, CreateContainerOptions, InspectContainerOptions, KillContainerOptions,
     ListContainersOptions, LogsOptions, PruneContainersOptions, WaitContainerOptions,
@@ -15,8 +16,6 @@ use bollard::models::{HostConfig, PortBinding};
 use bollard::network::{CreateNetworkOptions, PruneNetworksOptions};
 use bollard::service::Ipam;
 use bollard::Docker;
-use bitcoincore_rpc::bitcoin::hex::DisplayHex;
-use crate::chainhook::utils::Context;
 use clarinet_deployments::types::BurnchainEpochConfig;
 use clarinet_files::{
     DevnetConfig, DevnetConfigFile, NetworkManifest, ProjectManifest, StacksNetwork,
@@ -30,6 +29,7 @@ use indoc::formatdoc;
 use reqwest::RequestBuilder;
 use serde_json::Value as JsonValue;
 
+use crate::chainhook::utils::Context;
 use crate::command::run_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 
@@ -80,8 +80,8 @@ impl DevnetOrchestrator {
     ) -> Result<DevnetOrchestrator, String> {
         let mut network_config = match network_manifest {
             Some(n) => Ok(n),
-            None => NetworkManifest::from_project_manifest_location(
-                &manifest.location,
+            None => NetworkManifest::from_project_root(
+                &manifest.root_dir,
                 &StacksNetwork::Devnet.get_networks(),
                 false,
                 Some(&manifest.project.cache_location),
@@ -1584,6 +1584,8 @@ db_path = "stacks-signer-{signer_id}.sqlite"
                     }
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
+                // the container seems to need an extra second to be really ready
+                tokio::time::sleep(Duration::from_millis(1000)).await;
 
                 ctx.try_log(|logger| {
                     slog::info!(logger, "Importing events from {}", events_path.display())

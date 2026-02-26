@@ -1,11 +1,6 @@
 use std::collections::HashMap;
 
 use assert_json_diff::assert_json_eq;
-use crate::chainhook::types::{
-    StacksBlockUpdate, StacksChainEvent, StacksChainUpdatedWithBlocksData, StacksNetwork,
-    StacksTransactionData, StacksTransactionEvent, StacksTransactionEventPayload,
-    StacksTransactionEventPosition,
-};
 use serde_json::Value as JsonValue;
 use test_case::test_case;
 
@@ -19,9 +14,16 @@ use super::stacks::{
 };
 use super::types::{ExactMatchingRule, FileHook};
 use crate::chainhook::hooks::stacks::serialize_stacks_payload_to_json;
-use crate::chainhook::hooks::tests::fixtures::{get_expected_occurrence, get_test_event_payload_by_type};
+use crate::chainhook::hooks::tests::fixtures::{
+    get_expected_occurrence, get_test_event_payload_by_type,
+};
 use crate::chainhook::hooks::types::HookAction;
 use crate::chainhook::observer::EventObserverConfig;
+use crate::chainhook::types::{
+    StacksBlockUpdate, StacksChainEvent, StacksChainUpdatedWithBlocksData, StacksNetwork,
+    StacksTransactionData, StacksTransactionEvent, StacksTransactionEventPayload,
+    StacksTransactionEventPosition,
+};
 use crate::chainhook::utils::{AbstractStacksBlock, Context};
 
 pub mod fixtures;

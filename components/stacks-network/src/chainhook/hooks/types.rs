@@ -1,13 +1,15 @@
 use std::str::FromStr;
 
-use crate::chainhook::types::{BitcoinNetwork, StacksNetwork};
 use serde::ser::{SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
 
 use crate::chainhook::hooks::bitcoin::{
     BitcoinChainhookInstance, BitcoinChainhookSpecificationNetworkMap,
 };
-use crate::chainhook::hooks::stacks::{StacksChainhookInstance, StacksChainhookSpecificationNetworkMap};
+use crate::chainhook::hooks::stacks::{
+    StacksChainhookInstance, StacksChainhookSpecificationNetworkMap,
+};
+use crate::chainhook::types::{BitcoinNetwork, StacksNetwork};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ChainhookStore {

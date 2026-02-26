@@ -4,10 +4,6 @@ pub mod stacks;
 
 use std::collections::{HashMap, VecDeque};
 
-use crate::chainhook::types::{
-    BitcoinBlockSignaling, BitcoinNetwork, BlockHeader, BlockIdentifier, BlockchainEvent,
-    StacksBlockData, StacksChainEvent, StacksNetwork, StacksNodeConfig,
-};
 use hiro_system_kit::slog;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -15,6 +11,10 @@ use stacks::StacksBlockPool;
 
 use self::fork_scratch_pad::ForkScratchPad;
 use crate::chainhook::hooks::types::PoxConfig;
+use crate::chainhook::types::{
+    BitcoinBlockSignaling, BitcoinNetwork, BlockHeader, BlockIdentifier, BlockchainEvent,
+    StacksBlockData, StacksChainEvent, StacksNetwork, StacksNodeConfig,
+};
 use crate::chainhook::utils::{AbstractBlock, Context};
 
 #[derive(Deserialize, Debug, Clone, Default)]

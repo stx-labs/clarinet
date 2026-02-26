@@ -9,18 +9,6 @@ use std::{fs, str};
 
 use base58::FromBase58;
 use bitcoincore_rpc::bitcoin::Address;
-use crate::chainhook::hooks::types::ChainhookStore;
-use crate::chainhook::indexer::stacks::standardize_stacks_serialized_block;
-use crate::chainhook::indexer::StacksChainContext;
-use crate::chainhook::observer::{
-    start_event_observer, EventObserverConfig, ObserverCommand, ObserverEvent, PredicatesConfig,
-    StacksChainMempoolEvent, StacksObserverStartupContext,
-};
-use crate::chainhook::types::{
-    BitcoinBlockSignaling, BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig,
-    StacksTransactionKind,
-};
-use crate::chainhook::utils::Context;
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, DeploymentCommand, DeploymentEvent, TransactionStatus,
 };
@@ -47,6 +35,18 @@ use stackslib::util_lib::signed_structured_data::pox4::{
 };
 
 use super::ChainsCoordinatorCommand;
+use crate::chainhook::hooks::types::ChainhookStore;
+use crate::chainhook::indexer::stacks::standardize_stacks_serialized_block;
+use crate::chainhook::indexer::StacksChainContext;
+use crate::chainhook::observer::{
+    start_event_observer, EventObserverConfig, ObserverCommand, ObserverEvent, PredicatesConfig,
+    StacksChainMempoolEvent, StacksObserverStartupContext,
+};
+use crate::chainhook::types::{
+    BitcoinBlockSignaling, BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig,
+    StacksTransactionKind,
+};
+use crate::chainhook::utils::Context;
 use crate::command::run_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::orchestrator::{
@@ -127,8 +127,8 @@ impl DevnetEventObserverConfig {
         ctx.try_log(|logger| slog::info!(logger, "Checking contracts"));
         let network_manifest = match network_manifest {
             Some(n) => n,
-            None => NetworkManifest::from_project_manifest_location(
-                &manifest.location,
+            None => NetworkManifest::from_project_root(
+                &manifest.root_dir,
                 &StacksNetwork::Devnet.get_networks(),
                 false,
                 Some(&manifest.project.cache_location),
@@ -264,7 +264,8 @@ pub async fn start_chains_coordinator(
                 .join("events_export")
                 .join("events_cache.tsv");
 
-            let mut chain_ctx = StacksChainContext::new(&crate::chainhook::types::StacksNetwork::Devnet);
+            let mut chain_ctx =
+                StacksChainContext::new(&crate::chainhook::types::StacksNetwork::Devnet);
             if let Ok(file_content) = fs::read_to_string(&events_cache_path) {
                 for line in file_content.lines() {
                     let parts: Vec<&str> = line.split('\t').collect();

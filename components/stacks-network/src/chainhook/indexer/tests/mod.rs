@@ -2,11 +2,12 @@ pub mod helpers;
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::chainhook::types::{BitcoinBlockData, BlockchainEvent, StacksBlockData, StacksChainEvent};
-
 use self::helpers::BlockEvent;
 use super::fork_scratch_pad::ForkScratchPad;
 use super::StacksBlockPool;
+use crate::chainhook::types::{
+    BitcoinBlockData, BlockchainEvent, StacksBlockData, StacksChainEvent,
+};
 use crate::chainhook::utils::{AbstractBlock, Context};
 
 pub type StacksChainEventExpectation = Box<dyn Fn(Option<StacksChainEvent>)>;

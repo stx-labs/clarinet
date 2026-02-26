@@ -3,14 +3,14 @@ use std::collections::HashSet;
 use base58::FromBase58;
 use bitcoincore_rpc::bitcoin::blockdata::opcodes;
 use bitcoincore_rpc::bitcoin::blockdata::script::Builder as BitcoinScriptBuilder;
+
+use super::accounts;
 use crate::chainhook::types::bitcoin::TxOut;
 use crate::chainhook::types::{
     BitcoinTransactionData, BitcoinTransactionMetadata, StacksContractCallData,
     StacksTransactionData, StacksTransactionKind, StacksTransactionMetadata,
     StacksTransactionReceipt, TransactionIdentifier,
 };
-
-use super::accounts;
 
 pub fn generate_test_tx_stacks_contract_call(
     txid: u64,

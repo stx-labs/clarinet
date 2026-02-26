@@ -1,5 +1,3 @@
-use crate::chainhook::types::bitcoin::TxOut;
-use crate::chainhook::types::BitcoinNetwork;
 use test_case::test_case;
 
 use super::super::types::MatchingRule;
@@ -7,7 +5,8 @@ use super::*;
 use crate::chainhook::indexer::tests::helpers::accounts;
 use crate::chainhook::indexer::tests::helpers::bitcoin_blocks::generate_test_bitcoin_block;
 use crate::chainhook::indexer::tests::helpers::transactions::generate_test_tx_bitcoin_p2pkh_transfer;
-use crate::chainhook::types::BitcoinTransactionMetadata;
+use crate::chainhook::types::bitcoin::TxOut;
+use crate::chainhook::types::{BitcoinNetwork, BitcoinTransactionMetadata};
 mod hook_spec_validation;
 
 #[test_case(

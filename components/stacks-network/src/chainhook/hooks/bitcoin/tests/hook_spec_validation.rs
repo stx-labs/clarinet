@@ -1,10 +1,10 @@
 use std::sync::LazyLock;
 
-use crate::chainhook::types::BitcoinNetwork;
 use test_case::test_case;
 
 use super::*;
 use crate::chainhook::hooks::types::{ChainhookSpecificationNetworkMap, HttpHook};
+use crate::chainhook::types::BitcoinNetwork;
 
 static INVALID_URL_ERR: LazyLock<String> = LazyLock::new(|| {
     "invalid 'http_post' data: url string must be a valid Url: relative URL without a base".into()

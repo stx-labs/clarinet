@@ -6,7 +6,6 @@ use std::io::Cursor;
 use std::str;
 
 pub use blocks_pool::StacksBlockPool;
-use crate::chainhook::types::*;
 use clarity::codec::StacksMessageCodec;
 use clarity::vm::types::{SequenceData, Value as ClarityValue};
 use hiro_system_kit::slog;
@@ -16,6 +15,7 @@ use stacks_codec::codec::{StacksTransaction, TransactionAuth, TransactionPayload
 
 use crate::chainhook::hooks::stacks::try_decode_clarity_value;
 use crate::chainhook::indexer::{AssetClassCache, IndexerConfig, StacksChainContext};
+use crate::chainhook::types::*;
 use crate::chainhook::utils::Context;
 
 #[derive(Deserialize, Serialize)]

@@ -12,8 +12,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use app::App;
-use crate::chainhook::types::StacksChainEvent;
-use crate::chainhook::utils::Context;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -23,6 +21,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use super::DevnetEvent;
+use crate::chainhook::types::StacksChainEvent;
+use crate::chainhook::utils::Context;
 use crate::chains_coordinator::BitcoinMiningCommand;
 use crate::ChainsCoordinatorCommand;
 

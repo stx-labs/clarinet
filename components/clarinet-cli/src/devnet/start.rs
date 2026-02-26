@@ -6,9 +6,9 @@ use std::sync::mpsc::{self, channel, Sender};
 
 use clarinet_deployments::types::DeploymentSpecification;
 use hiro_system_kit::{slog, slog_async, slog_term, Drain};
-use stacks_network::Context;
 use stacks_network::{
-    do_run_local_devnet, ChainsCoordinatorCommand, DevnetEvent, DevnetOrchestrator, LogData,
+    do_run_local_devnet, ChainsCoordinatorCommand, Context, DevnetEvent, DevnetOrchestrator,
+    LogData,
 };
 
 pub struct StartConfig {

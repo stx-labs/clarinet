@@ -1,9 +1,8 @@
+use super::BlockEvent;
 use crate::chainhook::types::{
     BlockIdentifier, StacksBlockData, StacksBlockMetadata, StacksBlockMetadataRewardSet,
     StacksBlockMetadataRewardSetSigner, StacksTransactionData,
 };
-
-use super::BlockEvent;
 
 pub fn generate_test_stacks_block(
     fork_id: u8,

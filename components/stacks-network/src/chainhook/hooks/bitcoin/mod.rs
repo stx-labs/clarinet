@@ -4,10 +4,6 @@ use std::time::Duration;
 
 use bitcoincore_rpc_json::bitcoin::address::Payload;
 use bitcoincore_rpc_json::bitcoin::Address;
-use crate::chainhook::types::{
-    BitcoinBlockData, BitcoinChainEvent, BitcoinNetwork, BitcoinTransactionData, BlockIdentifier,
-    StacksBaseChainOperation, TransactionIdentifier,
-};
 use hex::FromHex;
 use hiro_system_kit::slog;
 use miniscript::bitcoin::secp256k1::Secp256k1;
@@ -21,6 +17,10 @@ use super::types::{
     MatchingRule, PoxConfig, TxinPredicate,
 };
 use crate::chainhook::observer::EventObserverConfig;
+use crate::chainhook::types::{
+    BitcoinBlockData, BitcoinChainEvent, BitcoinNetwork, BitcoinTransactionData, BlockIdentifier,
+    StacksBaseChainOperation, TransactionIdentifier,
+};
 use crate::chainhook::utils::{Context, MAX_BLOCK_HEIGHTS_ENTRIES};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

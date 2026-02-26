@@ -1,6 +1,5 @@
-use crate::chainhook::types::StacksTransactionEventPayload;
-
 use crate::chainhook::indexer::stacks::NewEvent;
+use crate::chainhook::types::StacksTransactionEventPayload;
 
 pub fn create_new_event_from_stacks_event(event: StacksTransactionEventPayload) -> NewEvent {
     let mut event_type = String::new();

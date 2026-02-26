@@ -728,7 +728,7 @@ pub fn main() {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
                 // Ensure that all the deployments can correctly be deserialized.
                 println!("Checking deployments");
-                let res = check_deployments(&manifest);
+                let res = check_deployments(&manifest.root_dir);
                 if let Err(message) = res {
                     eprintln!("{}", format_err!(message));
                     process::exit(1);
@@ -780,14 +780,13 @@ pub fn main() {
                     };
                 }
 
-                let project_root =
-                    paths::project_root_from_manifest_location(&manifest.location).unwrap();
+                let project_root = &manifest.root_dir;
                 let default_deployment_path =
                     project_root.join(get_default_deployment_path(&network));
 
                 let write_plan = if default_deployment_path.exists() {
                     let existing_deployment =
-                        load_deployment(&project_root, &default_deployment_path).unwrap_or_else(
+                        load_deployment(project_root, &default_deployment_path).unwrap_or_else(
                             |message| {
                                 eprintln!(
                                     "{}",
@@ -802,7 +801,7 @@ pub fn main() {
                     should_existing_plan_be_replaced(
                         &existing_deployment,
                         &deployment,
-                        &project_root,
+                        project_root,
                     )
                 } else {
                     true
@@ -812,7 +811,7 @@ pub fn main() {
                     let res = write_deployment(
                         &deployment,
                         &default_deployment_path,
-                        &project_root,
+                        project_root,
                         false,
                     );
                     if let Err(message) = res {
@@ -823,7 +822,7 @@ pub fn main() {
                     println!(
                         "{} {}",
                         green!("Generated file"),
-                        paths::get_relative_path(&default_deployment_path, &project_root).unwrap()
+                        paths::get_relative_path(&default_deployment_path, project_root).unwrap()
                     );
                 }
             }
@@ -840,8 +839,7 @@ pub fn main() {
                     None
                 };
 
-                let project_root =
-                    paths::project_root_from_manifest_location(&manifest.location).unwrap();
+                let project_root = &manifest.root_dir;
 
                 let result = match (&network, cmd.deployment_plan_path) {
                     (None, None) => {
@@ -865,15 +863,15 @@ pub fn main() {
                                             eprintln!("{}", red!(message));
                                             std::process::exit(1);
                                         });
-                                write_deployment(&deployment, &default_deployment_path, &project_root, true)?;
-                                println!("{} {}", green!("Generated file"), paths::get_relative_path(&default_deployment_path, &project_root).unwrap());
+                                write_deployment(&deployment, &default_deployment_path, project_root, true)?;
+                                println!("{} {}", green!("Generated file"), paths::get_relative_path(&default_deployment_path, project_root).unwrap());
                                 Ok(deployment)
                             }
                         })
                     }
                     (None, Some(deployment_plan_path)) => {
                         let deployment_path = project_root.join(&deployment_plan_path);
-                        load_deployment(&project_root, &deployment_path)
+                        load_deployment(project_root, &deployment_path)
                     }
                     (_, _) => unreachable!()
                 };
@@ -891,7 +889,7 @@ pub fn main() {
 
                 println!(
                     "The following deployment plan will be applied:\n{}\n\n",
-                    DeploymentSynthesis::from_deployment(&deployment, &project_root)
+                    DeploymentSynthesis::from_deployment(&deployment, project_root)
                 );
 
                 if !cmd.use_on_disk_deployment_plan {
@@ -929,8 +927,8 @@ pub fn main() {
                 };
                 let network_moved = network.clone();
                 let manifest = manifest_moved;
-                let res = NetworkManifest::from_project_manifest_location(
-                    &manifest.location,
+                let res = NetworkManifest::from_project_root(
+                    &manifest.root_dir,
                     &network_moved.get_networks(),
                     manifest.use_mainnet_wallets(),
                     Some(&manifest.project.cache_location),
@@ -1012,18 +1010,12 @@ pub fn main() {
             Contracts::NewContract(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
 
-                let changes = match generate::get_changes_for_new_contract(
-                    manifest.location,
-                    cmd.name,
-                    None,
-                    true,
-                ) {
-                    Ok(changes) => changes,
-                    Err(message) => {
-                        eprintln!("{}", format_err!(message));
-                        std::process::exit(1);
-                    }
-                };
+                let changes =
+                    generate::get_changes_for_new_contract(manifest.location, cmd.name, true)
+                        .unwrap_or_else(|message| {
+                            eprintln!("{}", format_err!(message));
+                            std::process::exit(1);
+                        });
 
                 if !execute_changes(changes) {
                     std::process::exit(1);
@@ -1035,14 +1027,11 @@ pub fn main() {
             Contracts::RemoveContract(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
                 let contract_name = cmd.name.clone();
-                let changes =
-                    match generate::get_changes_for_rm_contract(manifest.location, cmd.name) {
-                        Ok(changes) => changes,
-                        Err(message) => {
-                            eprintln!("{}", format_err!(message));
-                            std::process::exit(1);
-                        }
-                    };
+                let changes = generate::get_changes_for_rm_contract(manifest.location, cmd.name)
+                    .unwrap_or_else(|message| {
+                        eprintln!("{}", format_err!(message));
+                        std::process::exit(1);
+                    });
 
                 let mut answer = String::new();
                 println!(
@@ -1176,7 +1165,13 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
-            let mut settings = repl::SessionSettings::default();
+            let mut settings = repl::SessionSettings {
+                repl_settings: repl::Settings {
+                    analysis: analysis::Settings::with_default_lints(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
             settings.repl_settings.analysis.enable_all_passes();
 
             let mut session = repl::Session::new(settings.clone());
@@ -1538,10 +1533,9 @@ pub fn load_deployment_and_artifacts_or_exit(
             })
         }
         Some(path) => {
-            let project_root = paths::project_root_from_manifest_location(&manifest.location)
-                .expect("unable to retrieve project root");
+            let project_root = &manifest.root_dir;
             let deployment_location = project_root.join(path);
-            load_deployment(&project_root, &deployment_location)
+            load_deployment(project_root, &deployment_location)
                 .map(|deployment| {
                     let artifacts = setup_session_with_deployment(manifest, &deployment, None);
                     (
@@ -1611,7 +1605,7 @@ fn load_deployment_if_exists(
     force_on_disk: bool,
     force_computed: bool,
 ) -> Result<Option<DeploymentSpecification>, String> {
-    let project_root = paths::project_root_from_manifest_location(&manifest.location)?;
+    let project_root = &manifest.root_dir;
     let default_deployment_location = project_root.join(get_default_deployment_path(network));
     if !default_deployment_location.exists() {
         return Ok(None);
@@ -1624,11 +1618,11 @@ fn load_deployment_if_exists(
 
                 let current_version = paths::read_content(&default_deployment_location)?;
                 let updated_version = deployment
-                    .to_file_content(&project_root)
+                    .to_file_content(project_root)
                     .map_err(|err| format!("failed serializing deployment\n{err}"))?;
 
                 if updated_version == current_version {
-                    return load_deployment(&project_root, &default_deployment_location).map(Some);
+                    return load_deployment(project_root, &default_deployment_location).map(Some);
                 }
 
                 if !force_computed {
@@ -1656,7 +1650,7 @@ fn load_deployment_if_exists(
                     let mut buffer = String::new();
                     std::io::stdin().read_line(&mut buffer).unwrap();
                     if buffer.starts_with('n') {
-                        load_deployment(&project_root, &default_deployment_location).map(Some)
+                        load_deployment(project_root, &default_deployment_location).map(Some)
                     } else {
                         paths::write_content(&default_deployment_location, &updated_version)?;
                         Ok(Some(deployment))
@@ -1672,11 +1666,11 @@ fn load_deployment_if_exists(
                     red!("error:"),
                     message
                 );
-                load_deployment(&project_root, &default_deployment_location).map(Some)
+                load_deployment(project_root, &default_deployment_location).map(Some)
             }
         }
     } else {
-        load_deployment(&project_root, &default_deployment_location).map(Some)
+        load_deployment(project_root, &default_deployment_location).map(Some)
     }
 }
 
@@ -2047,7 +2041,7 @@ fn display_deploy_hint() {
 
 fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let manifest = load_manifest_or_exit(cmd.manifest_path, false);
-    let project_root = paths::project_root_from_manifest_location(&manifest.location).unwrap();
+    let project_root = &manifest.root_dir;
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {
         None => {
@@ -2085,11 +2079,11 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                                 eprintln!("{}", red!(message));
                                 std::process::exit(1);
                             });
-                    write_deployment(&deployment, &default_deployment_path, &project_root, true)?;
+                    write_deployment(&deployment, &default_deployment_path, project_root, true)?;
                     println!(
                         "{} {}",
                         green!("Generated file"),
-                        paths::get_relative_path(&default_deployment_path, &project_root).unwrap()
+                        paths::get_relative_path(&default_deployment_path, project_root).unwrap()
                     );
                     Ok(deployment)
                 }
@@ -2097,7 +2091,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         }
         Some(deployment_plan_path) => {
             let deployment_path = project_root.join(&deployment_plan_path);
-            load_deployment(&project_root, &deployment_path)
+            load_deployment(project_root, &deployment_path)
         }
     };
 

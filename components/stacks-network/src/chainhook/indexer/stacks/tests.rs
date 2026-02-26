@@ -1,14 +1,14 @@
+use test_case::test_case;
+
+use super::super::tests::{helpers, process_stacks_blocks_and_check_expectations};
+use super::NewEvent;
+use crate::chainhook::indexer::tests::helpers::stacks_events::create_new_event_from_stacks_event;
 use crate::chainhook::types::{
     DataMapDeleteEventData, DataMapInsertEventData, DataMapUpdateEventData, DataVarSetEventData,
     FTBurnEventData, FTMintEventData, FTTransferEventData, NFTBurnEventData, NFTMintEventData,
     NFTTransferEventData, STXBurnEventData, STXLockEventData, STXMintEventData,
     STXTransferEventData, SmartContractEventData, StacksTransactionEventPayload,
 };
-use test_case::test_case;
-
-use super::super::tests::{helpers, process_stacks_blocks_and_check_expectations};
-use super::NewEvent;
-use crate::chainhook::indexer::tests::helpers::stacks_events::create_new_event_from_stacks_event;
 
 #[test]
 fn test_stacks_vector_001() {
@@ -399,13 +399,12 @@ fn into_chainhook_event_rejects_invalid_missing_event() {
 #[test]
 #[cfg(feature = "stacks-signers")]
 fn parses_block_response_signer_message() {
-    use crate::chainhook::types::{BlockResponseData, StacksSignerMessage};
-
     use super::standardize_stacks_stackerdb_chunks;
     use crate::chainhook::indexer::stacks::{
         NewSignerModifiedSlot, NewStackerDbChunkIssuerId, NewStackerDbChunkIssuerSlots,
         NewStackerDbChunks, NewStackerDbChunksContractId,
     };
+    use crate::chainhook::types::{BlockResponseData, StacksSignerMessage};
     use crate::chainhook::utils::Context;
 
     let new_chunks = NewStackerDbChunks {

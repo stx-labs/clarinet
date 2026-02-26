@@ -2,11 +2,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::time::Duration;
 
-use crate::chainhook::types::{
-    BlockIdentifier, StacksChainEvent, StacksNetwork, StacksNonConsensusEventData,
-    StacksTransactionData, StacksTransactionEvent, StacksTransactionEventPayload,
-    StacksTransactionKind, TransactionIdentifier,
-};
 use clarity::codec::StacksMessageCodec;
 use clarity::vm::types::{
     CharType, PrincipalData, QualifiedContractIdentifier, SequenceData, Value as ClarityValue,
@@ -23,6 +18,11 @@ use super::types::{
     ExactMatchingRule, HookAction,
 };
 use crate::chainhook::observer::EventObserverConfig;
+use crate::chainhook::types::{
+    BlockIdentifier, StacksChainEvent, StacksNetwork, StacksNonConsensusEventData,
+    StacksTransactionData, StacksTransactionEvent, StacksTransactionEventPayload,
+    StacksTransactionKind, TransactionIdentifier,
+};
 use crate::chainhook::utils::{AbstractStacksBlock, Context, MAX_BLOCK_HEIGHTS_ENTRIES};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

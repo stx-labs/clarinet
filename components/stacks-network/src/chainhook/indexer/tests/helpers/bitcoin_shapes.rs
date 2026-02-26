@@ -1,8 +1,8 @@
-use crate::chainhook::types::{BitcoinBlockData, BlockchainEvent};
 use hiro_system_kit::slog;
 
 use super::super::BlockchainEventExpectation;
 use super::bitcoin_blocks;
+use crate::chainhook::types::{BitcoinBlockData, BlockchainEvent};
 use crate::chainhook::utils::Context;
 
 pub fn expect_no_chain_update() -> BlockchainEventExpectation {

@@ -10,14 +10,15 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use bitcoincore_rpc::bitcoin::{BlockHash, Txid};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
+use hiro_system_kit::slog;
+use serde::{Deserialize, Serialize};
+
 use crate::chainhook::types::{
     BitcoinBlockData, BitcoinBlockSignaling, BitcoinChainEvent, BitcoinChainUpdatedWithBlocksData,
     BitcoinChainUpdatedWithReorgData, BitcoinNetwork, BlockIdentifier, BlockchainEvent, Chain,
     StacksBlockData, StacksChainEvent, StacksNetwork, StacksNodeConfig, TransactionIdentifier,
     DEFAULT_STACKS_NODE_RPC,
 };
-use hiro_system_kit::slog;
-use serde::{Deserialize, Serialize};
 
 // Custom shutdown wrapper to replace Rocket's Shutdown
 pub struct Shutdown(tokio::sync::oneshot::Sender<()>);
