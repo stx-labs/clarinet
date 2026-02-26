@@ -34,7 +34,7 @@ pub fn start(
     String,
 > {
     let hooks = match load_chainhooks(
-        &config.devnet.manifest.location,
+        &config.devnet.manifest.root_dir,
         &(BitcoinNetwork::Regtest, StacksNetwork::Devnet),
     ) {
         Ok(hooks) => hooks,

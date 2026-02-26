@@ -280,16 +280,16 @@ pub async fn generate_default_deployment(
     file_accessor: Option<&dyn FileAccessor>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
     let network_manifest = match file_accessor {
-        None => NetworkManifest::from_project_manifest_location(
-            &manifest.location,
+        None => NetworkManifest::from_project_root(
+            &manifest.root_dir,
             &network.get_networks(),
             manifest.use_mainnet_wallets(),
             Some(&manifest.project.cache_location),
             None,
         )?,
         Some(file_accessor) => {
-            NetworkManifest::from_project_manifest_location_using_file_accessor(
-                &manifest.location,
+            NetworkManifest::from_project_root_using_file_accessor(
+                &manifest.root_dir,
                 &network.get_networks(),
                 manifest.use_mainnet_wallets(),
                 file_accessor,
@@ -419,12 +419,7 @@ pub async fn generate_default_deployment(
                 continue;
             }
 
-            // Resolve the relative path to the project root
-            let project_root = manifest
-                .location
-                .parent()
-                .ok_or_else(|| "Failed to get project root".to_string())?;
-            let resolved_path = project_root.join(file_path);
+            let resolved_path = manifest.root_dir.join(file_path);
             let resolved_path_string = resolved_path.to_string_lossy().to_string();
 
             // Load and validate the custom boot contract
@@ -684,17 +679,13 @@ pub async fn generate_default_deployment(
     let mut contracts = HashMap::new();
     let mut contracts_sources = HashMap::new();
 
-    let base_dir = manifest
-        .location
-        .parent()
-        .ok_or_else(|| "unable to get parent directory of manifest".to_string())?;
-
+    let project_root = &manifest.root_dir;
     let sources: HashMap<String, String> = match file_accessor {
         None => {
             let mut sources = HashMap::new();
             for (_, contract_config) in manifest.contracts.iter() {
                 let contract_location =
-                    base_dir.join(contract_config.expect_contract_path_as_str());
+                    project_root.join(contract_config.expect_contract_path_as_str());
                 let source = paths::read_content_as_utf8(&contract_location).map_err(|_| {
                     format!("unable to find contract at {}", contract_location.display())
                 })?;
@@ -708,7 +699,7 @@ pub async fn generate_default_deployment(
                 .values()
                 .map(|contract_config| {
                     let contract_location =
-                        base_dir.join(contract_config.expect_contract_path_as_str());
+                        project_root.join(contract_config.expect_contract_path_as_str());
                     contract_location.to_string_lossy().to_string()
                 })
                 .collect();
@@ -739,7 +730,7 @@ pub async fn generate_default_deployment(
             ));
         };
 
-        let contract_location = base_dir.join(contract_config.expect_contract_path_as_str());
+        let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
         let source = sources
             .get(&contract_location.to_string_lossy().to_string())
             .ok_or(format!(
