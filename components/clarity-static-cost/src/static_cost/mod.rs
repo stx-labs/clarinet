@@ -202,7 +202,7 @@ pub(crate) fn calculate_total_cost_with_summing(node: &CostAnalysisNode) -> Summ
         for current_path in current_paths {
             for child_path in &child_summing.costs {
                 let mut combined_path = current_path.clone();
-                let _ = combined_path.add(child_path);
+                saturating_add_cost(&mut combined_path, child_path);
                 summing_cost.add_cost(combined_path);
             }
         }
@@ -228,7 +228,7 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
 
                     // Add the root cost + condition cost to each branch
                     let mut root_and_condition = node.cost.min.clone();
-                    let _ = root_and_condition.add(&condition_total);
+                    saturating_add_cost(&mut root_and_condition, &condition_total);
 
                     for child_cost_node in node.children.iter().skip(1) {
                         let branch_cost = calculate_total_cost_with_summing(child_cost_node);
@@ -236,7 +236,7 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                         // This preserves all branch paths so we can correctly compute min/max
                         for branch_path in &branch_cost.costs {
                             let mut path_cost = root_and_condition.clone();
-                            let _ = path_cost.add(branch_path);
+                            saturating_add_cost(&mut path_cost, branch_path);
                             summing_cost.add_cost(path_cost);
                         }
                     }
@@ -248,7 +248,7 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                 for child_cost_node in &node.children {
                     let child_summing = calculate_total_cost_with_summing(child_cost_node);
                     let combined_cost = child_summing.add_all();
-                    let _ = total_cost.add(&combined_cost);
+                    saturating_add_cost(&mut total_cost, &combined_cost);
                 }
                 summing_cost.add_cost(total_cost);
             }
@@ -276,21 +276,21 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                 let asserts_full_summing = calculate_total_cost_with_summing(child_cost_node);
                 let asserts_full_static: StaticCost = asserts_full_summing.into();
                 let mut fail_min = total_cost_min.clone();
-                let _ = fail_min.add(&asserts_full_static.min);
+                saturating_add_cost(&mut fail_min, &asserts_full_static.min);
                 terminated_paths.push(fail_min);
                 let mut fail_max = total_cost_max.clone();
-                let _ = fail_max.add(&asserts_full_static.max);
+                saturating_add_cost(&mut fail_max, &asserts_full_static.max);
                 terminated_paths.push(fail_max);
 
                 // "Succeed" path: asserts_node_cost + condition cost only (error is not evaluated).
                 // Update total_cost so remaining siblings are added on top.
-                let _ = total_cost_min.add(&child_cost_node.cost.min);
-                let _ = total_cost_max.add(&child_cost_node.cost.max);
+                saturating_add_cost(&mut total_cost_min, &child_cost_node.cost.min);
+                saturating_add_cost(&mut total_cost_max, &child_cost_node.cost.max);
                 if let Some(condition_node) = child_cost_node.children.first() {
                     let cond_summing = calculate_total_cost_with_summing(condition_node);
                     let cond_static: StaticCost = cond_summing.into();
-                    let _ = total_cost_min.add(&cond_static.min);
-                    let _ = total_cost_max.add(&cond_static.max);
+                    saturating_add_cost(&mut total_cost_min, &cond_static.min);
+                    saturating_add_cost(&mut total_cost_max, &cond_static.max);
                 }
             } else {
                 // Recursively process children (which may themselves be branching).
@@ -299,8 +299,8 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                 // are added on top of the full accumulated cost.
                 let child_summing = calculate_total_cost_with_branching(child_cost_node);
                 let child_static_cost: StaticCost = child_summing.into();
-                let _ = total_cost_min.add(&child_static_cost.min);
-                let _ = total_cost_max.add(&child_static_cost.max);
+                saturating_add_cost(&mut total_cost_min, &child_static_cost.min);
+                saturating_add_cost(&mut total_cost_max, &child_static_cost.max);
             }
         }
 
