@@ -421,8 +421,7 @@ pub fn get_cost_for_special_function(
             let cost_fn = from_native_function(native_function);
             if matches!(cost_fn, ClarityCostFunction::Unimplemented) {
                 eprintln!(
-                    "warning: no cost function implemented for {:?}, using zero cost",
-                    native_function
+                    "warning: no cost function implemented for {native_function:?}, using zero cost",
                 );
                 return StaticCost::ZERO;
             }
