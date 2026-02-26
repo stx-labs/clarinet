@@ -57,7 +57,9 @@ fn main() {
         .unwrap_or_else(|e| panic!("deployment plan malformatted {e:?}"));
 
     let chainhooks = match load_chainhooks(
-        &manifest_location,
+        manifest_location
+            .parent()
+            .expect("failed to get project root"),
         &(BitcoinNetwork::Regtest, StacksNetwork::Devnet),
     ) {
         Ok(hooks) => hooks,
