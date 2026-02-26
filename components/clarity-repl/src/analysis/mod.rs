@@ -113,6 +113,19 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Construct `Settings` with the same default lints and passes used
+    /// when deserializing from an empty `SettingsFile`.
+    pub fn with_default_lints() -> Self {
+        let lints = LintMapBuilder::new().apply_defaults().build();
+        let passes = HashSet::from(DEFAULT_PASSES);
+
+        Self {
+            passes,
+            lints,
+            check_checker: check_checker::Settings::default(),
+        }
+    }
+
     pub fn enable_all_passes(&mut self) {
         self.passes = HashSet::from(ALL_PASSES)
     }
@@ -189,56 +202,45 @@ pub struct SettingsFile {
 
 impl From<SettingsFile> for Settings {
     fn from(from_file: SettingsFile) -> Self {
-        let mut lints = LintMapBuilder::new().apply_defaults().build();
+        let mut settings = Self::with_default_lints();
 
         // Process lint groups first
         for (group, val) in from_file.lint_groups.unwrap_or_default() {
             if let Some(level) = LintLevel::from(val).into() {
-                group.insert_into(&mut lints, level);
+                group.insert_into(&mut settings.lints, level);
             } else {
-                group.remove_from(&mut lints);
+                group.remove_from(&mut settings.lints);
             }
         }
 
         // Individual lints can override group settings
         for (lint, val) in from_file.lints.unwrap_or_default() {
             if let Some(level) = LintLevel::from(val).into() {
-                lints.insert(lint, level);
+                settings.lints.insert(lint, level);
             } else {
-                lints.remove(&lint);
+                settings.lints.remove(&lint);
             }
         }
 
         // Add analysis passes listed in config file
-        let mut passes = from_file
-            .passes
-            .map(|file_passes| match file_passes {
+        if let Some(file_passes) = from_file.passes {
+            let passes = match file_passes {
                 OneOrList::One(pass) => HashSet::from([pass]),
                 OneOrList::List(passes) => HashSet::from_iter(passes),
-            })
-            .map(|passes| {
-                if passes.contains(&Pass::All) {
-                    HashSet::from(ALL_PASSES)
-                } else {
-                    passes
-                }
-            })
-            .unwrap_or_default();
-
-        // Always enable default passes
-        passes.extend(DEFAULT_PASSES);
+            };
+            if passes.contains(&Pass::All) {
+                settings.passes = HashSet::from(ALL_PASSES);
+            } else {
+                settings.passes.extend(passes);
+            }
+        }
 
         // Each pass that has its own settings should be included here.
-        let check_checker = from_file
-            .check_checker
-            .map(check_checker::Settings::from)
-            .unwrap_or_default();
-
-        Self {
-            passes,
-            lints,
-            check_checker,
+        if let Some(check_checker) = from_file.check_checker {
+            settings.check_checker = check_checker::Settings::from(check_checker);
         }
+
+        settings
     }
 }
 
@@ -289,4 +291,49 @@ where
     })?;
     conn.commit().expect("Failed to commit");
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Unit tests (using `SessionSettings::default()`) should have all lints disabled.
+    #[test]
+    fn default_settings_have_no_lints() {
+        let settings = Settings::default();
+        assert!(settings.lints.is_empty());
+        assert!(settings.passes.is_empty());
+    }
+
+    /// `clarinet check <file>` with no Clarinet.toml uses `Settings::with_default_lints()`.
+    #[test]
+    fn with_default_lints_enables_default_lints() {
+        let settings = Settings::with_default_lints();
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    /// A Clarinet.toml with no `[repl.analysis]` section deserializes as
+    /// `SettingsFile::default()`, which should produce the same defaults.
+    #[test]
+    fn settings_from_empty_settings_file_enables_default_lints() {
+        let settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    /// A Clarinet.toml with an empty `[repl.analysis]` section is equivalent
+    /// to `SettingsFile` with all `None` fields — same result as above.
+    #[test]
+    fn settings_from_empty_analysis_section_enables_default_lints() {
+        let file = SettingsFile {
+            passes: None,
+            lint_groups: None,
+            lints: None,
+            check_checker: None,
+        };
+        let settings = Settings::from(file);
+        assert!(!settings.lints.is_empty());
+        assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
 }
