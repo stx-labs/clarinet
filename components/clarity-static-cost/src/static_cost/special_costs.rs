@@ -342,20 +342,8 @@ pub fn get_cost_for_special_function(
                 max: cost,
             }
         }
-        NativeFunctions::SetVar => {
-            let cost = cost_set_var(args, epoch);
-            StaticCost {
-                min: cost.clone(),
-                max: cost,
-            }
-        }
-        NativeFunctions::FetchEntry => {
-            let cost = cost_fetch_entry(args, epoch);
-            StaticCost {
-                min: cost.clone(),
-                max: cost,
-            }
-        }
+        NativeFunctions::SetVar => cost_set_var(args, epoch, user_args),
+        NativeFunctions::FetchEntry => cost_fetch_entry(args, epoch, env, user_args),
         NativeFunctions::SetEntry => cost_set_entry(args, epoch, env, user_args),
         NativeFunctions::InsertEntry => cost_insert_entry(args, epoch, env, user_args),
         NativeFunctions::DeleteEntry => cost_delete_entry(args, epoch, env, user_args),
@@ -664,21 +652,104 @@ pub fn cost_fetch_var(
         .unwrap_or(ExecutionCost::ZERO)
 }
 
-// SetVar cost is epoch-dependent and uses result size
-// TODO
-pub fn cost_set_var(_args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
-    ClarityCostFunction::SetVar
-        .eval_for_epoch(0, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+// SetVar cost uses the serialized size of the variable's value type.
+// Runtime charges based on serialized_byte_len of the stored value (includes type prefix).
+pub fn cost_set_var(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    user_args: Option<&UserArgumentsContext>,
+) -> StaticCost {
+    // SetVar args: [var-name, value]
+    let (min_size, max_size) = args
+        .first()
+        .and_then(|arg| arg.match_atom())
+        .and_then(|var_name| {
+            let type_sig = user_args?.get_data_var_type(var_name)?;
+            let min = u64::from(type_sig.min_size().unwrap_or(0));
+            let max = type_sig
+                .max_serialized_size()
+                .ok()
+                .map(u64::from)
+                .unwrap_or(0);
+            Some((min, max))
+        })
+        .unwrap_or((0, 0));
+
+    let min_cost = ClarityCostFunction::SetVar
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::SetVar
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }
 
-// FetchEntry cost is epoch-dependent and uses result size
-// TODO
-pub fn cost_fetch_entry(_args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
-    // Static analysis can't determine actual stored size, so we use 0 as fallback
-    ClarityCostFunction::FetchEntry
-        .eval_for_epoch(0, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+// FetchEntry cost uses the serialized sizes of the map's key and value types.
+// Runtime charges based on serialized_byte_len of the result:
+//   key not found → key_serialized_size only
+//   key found     → key_serialized_size + value_serialized_size
+pub fn cost_fetch_entry(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    env: Option<&clarity::vm::contexts::Environment>,
+    user_args: Option<&UserArgumentsContext>,
+) -> StaticCost {
+    // FetchEntry args: [map-name, key]
+    let mut min_size = 0u64;
+    let mut max_size = 0u64;
+
+    if let Some(map_name) = args.first().and_then(|arg| arg.match_atom()) {
+        // Try environment first
+        if let Some(environment) = env {
+            if let Some(map_metadata) = environment.contract_context.meta_data_map.get(map_name) {
+                let key_type = &map_metadata.key_type;
+                let value_type = &map_metadata.value_type;
+                // min: key not found case, only key size charged
+                min_size = u64::from(key_type.min_size().unwrap_or(0));
+                // max: key found case, key + Optional(value) sizes charged
+                // Values are stored as Optional(value_type) in the DB
+                let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
+                let value_max = TypeSignature::new_option(value_type.clone())
+                    .ok()
+                    .and_then(|t| t.max_serialized_size().ok())
+                    .map(u64::from)
+                    .unwrap_or(0);
+                max_size = key_max + value_max;
+            }
+        }
+
+        // Fallback to user_args
+        if min_size == 0 && max_size == 0 {
+            if let Some(ua) = user_args {
+                if let Some((key_type, value_type)) = ua.get_map_type(map_name) {
+                    min_size = u64::from(key_type.min_size().unwrap_or(0));
+                    let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
+                    let value_max = TypeSignature::new_option(value_type.clone())
+                        .ok()
+                        .and_then(|t| t.max_serialized_size().ok())
+                        .map(u64::from)
+                        .unwrap_or(0);
+                    max_size = key_max + value_max;
+                }
+            }
+        }
+    }
+
+    let min_cost = ClarityCostFunction::FetchEntry
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::FetchEntry
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }
 
 // SetEntry cost is epoch-dependent and uses result size

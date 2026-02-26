@@ -814,6 +814,50 @@ fn test_against_dynamic_cost_analysis() {
             "keccak256-large",
             &[],
         ),
+        // --- var-set tests ---
+        // var-set with uint data variable
+        (
+            indoc! {r#"
+                (define-data-var my-var uint u0)
+                (define-public (set-var-uint)
+                  (ok (var-set my-var u42)))
+            "#},
+            "set-var-uint",
+            &[],
+        ),
+        // var-set with bool data variable
+        (
+            indoc! {r#"
+                (define-data-var my-flag bool false)
+                (define-public (set-var-bool)
+                  (ok (var-set my-flag true)))
+            "#},
+            "set-var-bool",
+            &[],
+        ),
+        // --- map-get? tests ---
+        // map-get? with uint key/value (key not found)
+        (
+            indoc! {r#"
+                (define-map my-map uint uint)
+                (define-public (fetch-entry-uint)
+                  (ok (map-get? my-map u1)))
+            "#},
+            "fetch-entry-uint",
+            &[],
+        ),
+        // map-get? after map-set (key found)
+        (
+            indoc! {r#"
+                (define-map my-map uint uint)
+                (define-public (fetch-entry-after-set)
+                  (begin
+                    (map-set my-map u1 u42)
+                    (ok (map-get? my-map u1))))
+            "#},
+            "fetch-entry-after-set",
+            &[],
+        ),
     ];
 
     let mut failures = Vec::new();
