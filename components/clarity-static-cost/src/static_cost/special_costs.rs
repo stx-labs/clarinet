@@ -786,8 +786,8 @@ pub fn cost_set_entry(
                         .and_then(|t| t.max_serialized_size().ok())
                         .map(u64::from)
                         .unwrap_or(0);
-                    min_size = key_min + value_min;
-                    max_size = key_max + value_max;
+                    min_size = key_min.saturating_add(value_min);
+                    max_size = key_max.saturating_add(value_max);
                 }
             }
         }
@@ -805,8 +805,8 @@ pub fn cost_set_entry(
                             .and_then(|t| t.max_serialized_size().ok())
                             .map(u64::from)
                             .unwrap_or(0);
-                        min_size = key_min + value_min;
-                        max_size = key_max + value_max;
+                        min_size = key_min.saturating_add(value_min);
+                        max_size = key_max.saturating_add(value_max);
                     }
                 }
             }
@@ -818,8 +818,8 @@ pub fn cost_set_entry(
             let (value_min, value_max) =
                 infer_tuple_size_from_expression(&args[2], epoch, user_args);
 
-            min_size = key_min + value_min;
-            max_size = key_max + value_max;
+            min_size = key_min.saturating_add(value_min);
+            max_size = key_max.saturating_add(value_max);
         }
     }
 
