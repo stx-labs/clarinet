@@ -1,3 +1,38 @@
+#### 2026-02-27
+
+##### New Features
+
+- **linter:**
+  - Find more noops in `noop` lint (#2206) (f84e5a5f)
+  - Add `unnecessary_as_max_len` lint (#2205) (5f86c579)
+- Add `clarinet check --output=<format>` to output as JSON or other formats (#2211) (3b39cfd0)
+
+##### Bug Fixes
+
+- **linter:** False positives from `unnecessary_public` lint (#2243) (dfa3f2b1)
+- devnet timing (#2242) (033c2203)
+- `cargo check` defaults (#2235) (188898cc)
+- Highlight binding name instead of expression in `unused_binding` lint (#2230) (e8e7ec6d)
+- Start api container when ready (#2220) (4d0f78b5)
+- Add suggestion to suffix item with '_' to some `unused_\*` lints (#2212) (86f5a8c5)
+
+##### Performance Improvements
+
+- **clarinet-format:** Reduce temporary `String` allocations (15% perf improvement) (#2224) (4b65600c)
+
+##### Refactors
+
+- Project root and manifest path handling (#2209) (b7a55a78)
+- Remove FileLocation (#2182) (2ffa3c43)
+
+##### Continuous Integration
+
+- Prevent silent error on vsce publish (#2221) (b82533a9)
+
+##### Documentation Changes
+
+- Correct typo in contributing guide - 'branc' to 'branch' (#2202) (17f39913)
+
 #### [3.14.0](https://github.com/stx-labs/clarinet/compare/v3.13.1...v3.14.0) 2026-02-12
 
 ##### New Features
