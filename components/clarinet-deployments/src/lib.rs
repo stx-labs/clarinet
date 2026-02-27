@@ -199,8 +199,12 @@ pub fn update_session_with_deployment_plan(
                         should_mint_sbtc = true;
                     }
                     let contract_ast = contracts_asts.as_ref().and_then(|m| m.get(&contract_id));
-                    let is_project_contract =
-                        project_contracts.contains_key(tx.contract_name.as_str());
+                    let is_project_contract = project_contracts
+                        .get(tx.contract_name.as_str())
+                        .is_some_and(|contract| match &contract.code_source {
+                            ClarityCodeSource::ContractOnDisk(path) => tx.location.ends_with(path),
+                            _ => false,
+                        });
                     let result = handle_emulated_contract_publish(
                         session,
                         tx,
