@@ -414,8 +414,12 @@ impl SDK {
             session.enable_coverage_hook();
         }
         session.enable_logger_hook();
-        let executed_contracts =
-            update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
+        let executed_contracts = update_session_with_deployment_plan(
+            &mut session,
+            &manifest.contracts,
+            &deployment,
+            Some(&artifacts.asts),
+        );
 
         let mut accounts = HashMap::new();
         if let Some(ref spec) = deployment.genesis {
@@ -919,7 +923,7 @@ impl SDK {
                 epoch: Epoch::Specific(current_epoch),
             };
 
-            match session.deploy_contract(&contract, track_costs, None) {
+            match session.deploy_contract(&contract, track_costs, None, true) {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(
