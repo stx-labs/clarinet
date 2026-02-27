@@ -213,16 +213,24 @@ fn infer_tuple_size_from_expression(
     (0, 0)
 }
 
-/// Get min/max serialized sizes from an argument expression
-/// Checks literal values, user arguments, and reserved variables
+/// Get min/max sizes from an argument expression.
+/// When `serialized` is true, uses `Value::serialized_size()` /
+/// `TypeSignature::max_serialized_size()` (includes consensus type-prefix byte),
+/// matching runtime cost functions like hashes and IndexOf (Basically aanything that uses `cost_input_sized_vararg`)
 fn get_argument_sizes(
     arg: &SymbolicExpression,
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
+    serialized: bool,
 ) -> (Option<u64>, Option<u64>) {
     // Try literal value first
     if let Some(value) = arg.match_atom_value().or_else(|| arg.match_literal_value()) {
-        if let Ok(size) = value.size() {
+        let size = if serialized {
+            value.serialized_size().map_err(|_| ())
+        } else {
+            value.size().map_err(|_| ())
+        };
+        if let Ok(size) = size {
             let s = u64::from(size);
             return (Some(s), Some(s));
         }
@@ -232,7 +240,15 @@ fn get_argument_sizes(
     if let Some(var_name) = arg.match_atom() {
         if let Some(type_sig) = user_args.and_then(|ua| ua.get_argument_type(var_name)) {
             let min = type_sig.min_size().map(u64::from).unwrap_or(0);
-            let max = type_sig.size().map(u64::from).unwrap_or(0);
+            let max = if serialized {
+                type_sig
+                    .max_serialized_size()
+                    .ok()
+                    .map(u64::from)
+                    .unwrap_or(0)
+            } else {
+                type_sig.size().map(u64::from).unwrap_or(0)
+            };
             return (Some(min), Some(max));
         }
 
@@ -395,24 +411,10 @@ pub fn get_cost_for_special_function(
         | NativeFunctions::Sha512
         | NativeFunctions::Sha512Trunc256
         | NativeFunctions::Keccak256 => {
-            // Runtime charges based on serialized_size (cost_input_sized_vararg),
-            // which includes a type prefix byte that value.size() omits.
             let cost_fn = from_native_function(native_function);
             let (min_size, max_size) = args
                 .first()
-                .map(|arg| {
-                    // For literals, use serialized_size to match runtime behavior
-                    if let Some(value) =
-                        arg.match_atom_value().or_else(|| arg.match_literal_value())
-                    {
-                        if let Ok(size) = value.serialized_size() {
-                            let s = u64::from(size);
-                            return (Some(s), Some(s));
-                        }
-                    }
-                    // For variables, fall back to get_argument_sizes
-                    get_argument_sizes(arg, epoch, user_args)
-                })
+                .map(|arg| get_argument_sizes(arg, epoch, user_args, true))
                 .unwrap_or((None, None));
             let fallback = u64::try_from(args.len()).unwrap_or(0);
             let min_size = min_size.unwrap_or(fallback);
@@ -884,11 +886,11 @@ pub fn cost_comparison(
         // Try to get min/max sizes from literal values first, then from variable types
         let (min_a, max_a) = args
             .first()
-            .map(|arg| get_argument_sizes(arg, epoch, user_args))
+            .map(|arg| get_argument_sizes(arg, epoch, user_args, false))
             .unwrap_or((None, None));
         let (min_b, max_b) = args
             .get(1)
-            .map(|arg| get_argument_sizes(arg, epoch, user_args))
+            .map(|arg| get_argument_sizes(arg, epoch, user_args, false))
             .unwrap_or((None, None));
 
         // For v2, cost is based on min(a.size(), b.size())
@@ -927,8 +929,7 @@ pub fn cost_comparison(
     }
 }
 
-// Equals cost is epoch-dependent and uses sum of all argument sizes
-// For static analysis, we calculate min/max sizes from TypeSignature
+// Equals cost uses sum of all argument serialized sizes (via cost_input_sized_vararg)
 pub fn cost_equals(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
@@ -940,7 +941,7 @@ pub fn cost_equals(
     let mut any_resolved = false;
 
     for arg in args.iter() {
-        let (min_size, max_size) = get_argument_sizes(arg, epoch, user_args);
+        let (min_size, max_size) = get_argument_sizes(arg, epoch, user_args, true);
         if let Some(min) = min_size {
             total_min_size = total_min_size.saturating_add(min);
             any_resolved = true;
@@ -973,9 +974,6 @@ pub fn cost_equals(
 
 // MintAsset cost is based on asset identifier size.
 // args layout (function name already stripped): [asset-class, asset-identifier, recipient]
-// Note: from v2.05 onwards the VM uses Value::serialized_size() which includes the
-// consensus type-prefix byte, while get_argument_sizes uses Value::size() /
-// TypeSignature::size() which do not.  We add 1 to compensate.
 pub fn cost_mint_asset(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
@@ -983,12 +981,11 @@ pub fn cost_mint_asset(
 ) -> StaticCost {
     let (min_size, max_size) = args
         .get(1)
-        .map(|arg| get_argument_sizes(arg, epoch, user_args))
+        .map(|arg| get_argument_sizes(arg, epoch, user_args, true))
         .unwrap_or((None, None));
 
-    // +1 for consensus serialization type-prefix byte (v2.05+ uses serialized_size)
-    let min_size = min_size.map_or(1, |s| s + 1);
-    let max_size = max_size.map_or(min_size, |s| s + 1);
+    let min_size = min_size.unwrap_or(0);
+    let max_size = max_size.unwrap_or(min_size);
 
     let min_cost = ClarityCostFunction::NftMint
         .eval_for_epoch(min_size, epoch)
