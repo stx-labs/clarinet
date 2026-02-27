@@ -225,14 +225,19 @@ fn get_argument_sizes(
 ) -> (Option<u64>, Option<u64>) {
     // Try literal value first
     if let Some(value) = arg.match_atom_value().or_else(|| arg.match_literal_value()) {
-        let size = if serialized {
-            value.serialized_size().map_err(|_| ())
+        let result = if serialized {
+            value.serialized_size().map_err(|e| format!("{e}"))
         } else {
-            value.size().map_err(|_| ())
+            value.size().map_err(|e| format!("{e}"))
         };
-        if let Ok(size) = size {
-            let s = u64::from(size);
-            return (Some(s), Some(s));
+        match result {
+            Ok(size) => {
+                let s = u64::from(size);
+                return (Some(s), Some(s));
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to compute size for `{value}`: {e}");
+            }
         }
     }
 
