@@ -230,7 +230,6 @@ fn get_argument_sizes(
 
     // Try variable name
     if let Some(var_name) = arg.match_atom() {
-        // Try to get type from user_args and use min_size/max_size
         if let Some(type_sig) = user_args.and_then(|ua| ua.get_argument_type(var_name)) {
             let min = type_sig.min_size().map(u64::from).unwrap_or(0);
             let max = type_sig.size().map(u64::from).unwrap_or(0);
@@ -249,6 +248,33 @@ fn get_argument_sizes(
     }
 
     (None, None)
+}
+
+/// Resolve the TypeSignature of a data variable from its name in args.
+fn resolve_data_var_type<'a>(
+    args: &[SymbolicExpression],
+    user_args: Option<&'a UserArgumentsContext>,
+) -> Option<&'a TypeSignature> {
+    let var_name = args.first().and_then(|arg| arg.match_atom())?;
+    user_args?.get_data_var_type(var_name)
+}
+
+/// Resolve key and value TypeSignatures for a map, trying environment first then user context.
+fn resolve_map_types(
+    args: &[SymbolicExpression],
+    env: Option<&clarity::vm::contexts::Environment>,
+    user_args: Option<&UserArgumentsContext>,
+) -> Option<(TypeSignature, TypeSignature)> {
+    let map_name = args.first().and_then(|arg| arg.match_atom())?;
+
+    // Try environment first
+    if let Some(map_metadata) = env.and_then(|e| e.contract_context.meta_data_map.get(map_name)) {
+        return Some((map_metadata.key_type.clone(), map_metadata.value_type.clone()));
+    }
+
+    // Fallback to user_args
+    let (key_type, value_type) = user_args?.get_map_type(map_name)?;
+    Some((key_type.clone(), value_type.clone()))
 }
 
 pub fn get_cost_for_special_function(
@@ -637,15 +663,9 @@ pub fn cost_fetch_var(
     _env: Option<&clarity::vm::contexts::Environment>,
     user_args: Option<&UserArgumentsContext>,
 ) -> ExecutionCost {
-    let size = args
-        .first()
-        .and_then(|arg| arg.match_atom())
-        .and_then(|var_name| {
-            user_args?
-                .get_data_var_type(var_name)
-                .and_then(|type_sig| type_sig.max_serialized_size().ok())
-                .map(u64::from)
-        })
+    let size = resolve_data_var_type(args, user_args)
+        .and_then(|type_sig| type_sig.max_serialized_size().ok())
+        .map(u64::from)
         .unwrap_or(0);
     ClarityCostFunction::FetchVar
         .eval_for_epoch(size, epoch)
@@ -660,18 +680,15 @@ pub fn cost_set_var(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // SetVar args: [var-name, value]
-    let (min_size, max_size) = args
-        .first()
-        .and_then(|arg| arg.match_atom())
-        .and_then(|var_name| {
-            let type_sig = user_args?.get_data_var_type(var_name)?;
+    let (min_size, max_size) = resolve_data_var_type(args, user_args)
+        .map(|type_sig| {
             let min = u64::from(type_sig.min_size().unwrap_or(0));
             let max = type_sig
                 .max_serialized_size()
                 .ok()
                 .map(u64::from)
                 .unwrap_or(0);
-            Some((min, max))
+            (min, max)
         })
         .unwrap_or((0, 0));
 
@@ -699,45 +716,20 @@ pub fn cost_fetch_entry(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // FetchEntry args: [map-name, key]
-    let mut min_size = 0u64;
-    let mut max_size = 0u64;
-
-    if let Some(map_name) = args.first().and_then(|arg| arg.match_atom()) {
-        // Try environment first
-        if let Some(environment) = env {
-            if let Some(map_metadata) = environment.contract_context.meta_data_map.get(map_name) {
-                let key_type = &map_metadata.key_type;
-                let value_type = &map_metadata.value_type;
-                // min: key not found case, only key size charged
-                min_size = u64::from(key_type.min_size().unwrap_or(0));
-                // max: key found case, key + Optional(value) sizes charged
-                // Values are stored as Optional(value_type) in the DB
-                let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
-                let value_max = TypeSignature::new_option(value_type.clone())
-                    .ok()
-                    .and_then(|t| t.max_serialized_size().ok())
-                    .map(u64::from)
-                    .unwrap_or(0);
-                max_size = key_max + value_max;
-            }
-        }
-
-        // Fallback to user_args
-        if min_size == 0 && max_size == 0 {
-            if let Some(ua) = user_args {
-                if let Some((key_type, value_type)) = ua.get_map_type(map_name) {
-                    min_size = u64::from(key_type.min_size().unwrap_or(0));
-                    let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
-                    let value_max = TypeSignature::new_option(value_type.clone())
-                        .ok()
-                        .and_then(|t| t.max_serialized_size().ok())
-                        .map(u64::from)
-                        .unwrap_or(0);
-                    max_size = key_max + value_max;
-                }
-            }
-        }
-    }
+    let (min_size, max_size) = resolve_map_types(args, env, user_args)
+        .map(|(key_type, value_type)| {
+            // min: key not found case, only key size charged
+            let min = u64::from(key_type.min_size().unwrap_or(0));
+            // max: key found case, key + Optional(value) sizes charged
+            let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
+            let value_max = TypeSignature::new_option(value_type)
+                .ok()
+                .and_then(|t| t.max_serialized_size().ok())
+                .map(u64::from)
+                .unwrap_or(0);
+            (min, key_max + value_max)
+        })
+        .unwrap_or((0, 0));
 
     let min_cost = ClarityCostFunction::FetchEntry
         .eval_for_epoch(min_size, epoch)
@@ -761,66 +753,30 @@ pub fn cost_set_entry(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // SetEntry args: [map-name, key, value]
-    // For epoch 3.3+, cost is based on serialized entry size
-    // We calculate min/max from TypeSignature sizes
-
-    let mut min_size = 0u64;
-    let mut max_size = 0u64;
-
-    if args.len() >= 3 {
-        // Try to get map types from contract context (doesn't require mutable access)
-        if let Some(environment) = env {
-            if let Some(map_name) = args[0].match_atom() {
-                // Get map metadata from contract context
-                if let Some(map_metadata) = environment.contract_context.meta_data_map.get(map_name)
-                {
-                    let key_type = &map_metadata.key_type;
-                    let value_type = &map_metadata.value_type;
-                    // Use serialized sizes: key stored as-is, value stored as Optional(value)
-                    let key_min = u64::from(key_type.min_size().unwrap_or(0));
-                    let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
-                    let value_min = u64::from(value_type.min_size().unwrap_or(0));
-                    let value_max = TypeSignature::new_option(value_type.clone())
-                        .ok()
-                        .and_then(|t| t.max_serialized_size().ok())
-                        .map(u64::from)
-                        .unwrap_or(0);
-                    min_size = key_min.saturating_add(value_min);
-                    max_size = key_max.saturating_add(value_max);
-                }
-            }
-        }
-
-        // Fallback: look up map type from define-map declarations collected during AST scan
-        if min_size == 0 && max_size == 0 {
-            if let Some(ua) = user_args {
-                if let Some(map_name) = args[0].match_atom() {
-                    if let Some((key_type, value_type)) = ua.get_map_type(map_name) {
-                        let key_min = u64::from(key_type.min_size().unwrap_or(0));
-                        let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
-                        let value_min = u64::from(value_type.min_size().unwrap_or(0));
-                        let value_max = TypeSignature::new_option(value_type.clone())
-                            .ok()
-                            .and_then(|t| t.max_serialized_size().ok())
-                            .map(u64::from)
-                            .unwrap_or(0);
-                        min_size = key_min.saturating_add(value_min);
-                        max_size = key_max.saturating_add(value_max);
-                    }
-                }
-            }
-        }
-
-        // Last resort: infer types from the key/value expressions themselves
-        if min_size == 0 && max_size == 0 {
-            let (key_min, key_max) = infer_tuple_size_from_expression(&args[1], epoch, user_args);
-            let (value_min, value_max) =
-                infer_tuple_size_from_expression(&args[2], epoch, user_args);
-
-            min_size = key_min.saturating_add(value_min);
-            max_size = key_max.saturating_add(value_max);
-        }
-    }
+    let (min_size, max_size) = if args.len() >= 3 {
+        resolve_map_types(args, env, user_args)
+            .map(|(key_type, value_type)| {
+                let key_min = u64::from(key_type.min_size().unwrap_or(0));
+                let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
+                let value_min = u64::from(value_type.min_size().unwrap_or(0));
+                let value_max = TypeSignature::new_option(value_type)
+                    .ok()
+                    .and_then(|t| t.max_serialized_size().ok())
+                    .map(u64::from)
+                    .unwrap_or(0);
+                (key_min.saturating_add(value_min), key_max.saturating_add(value_max))
+            })
+            .unwrap_or_else(|| {
+                // Last resort: infer types from the key/value expressions themselves
+                let (key_min, key_max) =
+                    infer_tuple_size_from_expression(&args[1], epoch, user_args);
+                let (value_min, value_max) =
+                    infer_tuple_size_from_expression(&args[2], epoch, user_args);
+                (key_min.saturating_add(value_min), key_max.saturating_add(value_max))
+            })
+    } else {
+        (0, 0)
+    };
 
     let min_cost = ClarityCostFunction::SetEntry
         .eval_for_epoch(min_size, epoch)
