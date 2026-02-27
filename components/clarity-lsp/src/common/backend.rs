@@ -734,6 +734,67 @@ mod lsp_tests {
             .ends_with("test.clar\""));
     }
 
+    struct TestFileAccessor {
+        contract: String,
+        manifest: String,
+    }
+
+    impl FileAccessor for TestFileAccessor {}
+
+    #[tokio::test]
+    async fn test_env_simnet() {
+        let with_env_simnet = r#"
+(define-public (mint (amount uint) (recipient principal))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+        (minty-fresh amount recipient)
+    )
+)
+;; mint post comment
+
+;; #[env(simnet)]
+(define-public (minty-fresh (amount uint) (recipient principal)) ;; eol
+    (begin
+        (ft-mint? drachma amount recipient)
+    )
+)
+"#;
+
+        let without_env_simnet = r#"
+(define-public (mint (amount uint) (recipient principal))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+        (minty-fresh amount recipient)
+    )
+)
+;; mint post comment
+
+"#;
+        let source = without_env_simnet;
+        let mut editor_state_input = create_test_editor_state(source.to_owned());
+
+        let path = get_root_path().join("test.clar");
+        let contract_location = FileLocation::FileSystem { path: path.clone() };
+
+        let notification = LspNotification::ContractSaved(contract_location);
+        let response = process_notification(notification, &mut editor_state_input, None)
+            .await
+            .expect("Failed to process notification");
+
+        let response_json = json!(response);
+        println!("{response_json}");
+        assert!(false);
+        /*
+        assert!(response_json
+            .get("Definition")
+            .expect("Expected 'Definition' key")
+            .get("uri")
+            .expect("Expected 'uri' key")
+            .to_string()
+        .ends_with("test.clar\""));
+        */
+    }
+
     #[test]
     fn test_custom_boot_contract_recognition() {
         let manifest_content = r#"
