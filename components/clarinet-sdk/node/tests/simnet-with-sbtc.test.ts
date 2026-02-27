@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, afterAll } from "vitest";
 
 // test the built package and not the source code
 // makes it simpler to handle wasm build
@@ -32,6 +32,10 @@ beforeEach(async () => {
 
 afterEach(() => {
   deleteExistingDeploymentPlan();
+});
+
+afterAll(() => {
+  simnet.free();
 });
 
 describe("sbtc funding", () => {
