@@ -862,24 +862,18 @@ sbtc_balance = 1_000_000_000
         let response_json = json!(response);
         println!("full respeonse: {response_json}");
 
-        let aggregate_diagnostics = response_json
+        let path = response_json
             .get("aggregated_diagnostics")
             .expect("Expected 'aggregate_diagnostics' key")
             .get(0)
             .expect("Expected at least one element in outer array")
-            .to_string();
-
-        println!("only diags: {aggregate_diagnostics}");
-
-        let aggregate_diagnostics_json = json!(aggregate_diagnostics);
-        let path = aggregate_diagnostics_json
             .get(0)
             .expect("Expected at least one element in inner array")
             .get("path")
             .expect("Expected 'path' key")
             .to_string();
 
-        assert_eq!(path, "contracts/test.clar");
+        assert_eq!(path, "\"contracts/test.clar\"");
     }
 
     #[test]
