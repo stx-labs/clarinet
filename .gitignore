@@ -12,6 +12,8 @@ npm-debug.log*
 **/settings/Testnet.toml
 **/.requirements
 **/.cache
+!components/clarinet-sdk/node/tests/fixtures/.cache
+!components/clarinet-sdk/node/tests/fixtures/.cache/**
 **/.build
 *.tar.gz
 !components/stacks-network/data/devnet_default_snapshot.tar.gz
