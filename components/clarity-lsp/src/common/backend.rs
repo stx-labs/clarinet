@@ -735,15 +735,87 @@ mod lsp_tests {
     }
 
     struct TestFileAccessor {
+        project_manifest: String,
+        network_manifest: String,
         contract: String,
-        manifest: String,
     }
 
-    impl FileAccessor for TestFileAccessor {}
+    impl TestFileAccessor {
+        fn new(contract: String) -> Self {
+            let project_manifest = r#"
+[project]
+name = 'test-project'
+
+[contracts.counter]
+path = 'contracts/test.clar'
+epoch = 'latest'
+clarity_version = 3
+"#
+            .to_string();
+
+            let network_manifest = r#"
+[network]
+name = "devnet"
+deployment_fee_rate = 10
+
+[accounts.deployer]
+mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
+balance = 100_000_000_000_000
+sbtc_balance = 1_000_000_000
+"#.to_string();
+
+            Self {
+                project_manifest,
+                network_manifest,
+                contract,
+            }
+        }
+    }
+
+    impl FileAccessor for TestFileAccessor {
+        fn file_exists(&self, _path: String) -> clarinet_files::FileAccessorResult<bool> {
+            Box::pin(async { Ok(true) })
+        }
+
+        fn read_file(&self, path: String) -> clarinet_files::FileAccessorResult<String> {
+            let content = if path.ends_with("Clarinet.toml") {
+                self.project_manifest.clone()
+            } else if path.ends_with("Devnet.toml") {
+                self.network_manifest.clone()
+            } else {
+                self.contract.clone()
+            };
+            Box::pin(async { Ok(content) })
+        }
+
+        fn read_files(
+            &self,
+            contracts_paths: Vec<String>,
+        ) -> clarinet_files::FileAccessorResult<HashMap<String, String>> {
+            let contract = self.contract.clone();
+            Box::pin(async move {
+                Ok(contracts_paths
+                    .into_iter()
+                    .map(|path| (path, contract.clone()))
+                    .collect())
+            })
+        }
+
+        fn write_file(
+            &self,
+            _path: String,
+            _content: &[u8],
+        ) -> clarinet_files::FileAccessorResult<()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
 
     #[tokio::test]
     async fn test_env_simnet() {
         let with_env_simnet = r#"
+(define-fungible-token drachma)
+(define-constant CONTRACT-OWNER tx-sender)
+(define-constant ERR-OWNER-ONLY (err u100))
 (define-public (mint (amount uint) (recipient principal))
     (begin
         (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
@@ -759,40 +831,55 @@ mod lsp_tests {
     )
 )
 "#;
+        /*
+                let without_env_simnet = r#"
+        (define-fungible-token drachma)
+        (define-constant CONTRACT-OWNER tx-sender)
+        (define-constant ERR-OWNER-ONLY (err u100))
+        (define-public (mint (amount uint) (recipient principal))
+            (begin
+                (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                (minty-fresh amount recipient)
+            )
+        )
+        ;; mint post comment
 
-        let without_env_simnet = r#"
-(define-public (mint (amount uint) (recipient principal))
-    (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
-        (minty-fresh amount recipient)
-    )
-)
-;; mint post comment
+        "#;
+        */
+        let file_accessor = TestFileAccessor::new(with_env_simnet.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
 
-"#;
-        let source = without_env_simnet;
-        let mut editor_state_input = create_test_editor_state(source.to_owned());
-
-        let path = get_root_path().join("test.clar");
-        let contract_location = FileLocation::FileSystem { path: path.clone() };
+        let contract_location = FileLocation::FileSystem {
+            path: "test.clar".into(),
+        };
 
         let notification = LspNotification::ContractSaved(contract_location);
-        let response = process_notification(notification, &mut editor_state_input, None)
-            .await
-            .expect("Failed to process notification");
+        let response =
+            process_notification(notification, &mut editor_state_input, Some(&file_accessor))
+                .await
+                .expect("Failed to process notification");
 
         let response_json = json!(response);
-        println!("{response_json}");
-        assert!(false);
-        /*
-        assert!(response_json
-            .get("Definition")
-            .expect("Expected 'Definition' key")
-            .get("uri")
-            .expect("Expected 'uri' key")
-            .to_string()
-        .ends_with("test.clar\""));
-        */
+        println!("full respeonse: {response_json}");
+
+        let aggregate_diagnostics = response_json
+            .get("aggregated_diagnostics")
+            .expect("Expected 'aggregate_diagnostics' key")
+            .get(0)
+            .expect("Expected at least one element in outer array")
+            .to_string();
+
+        println!("only diags: {aggregate_diagnostics}");
+
+        let aggregate_diagnostics_json = json!(aggregate_diagnostics);
+        let path = aggregate_diagnostics_json
+            .get(0)
+            .expect("Expected at least one element in inner array")
+            .get("path")
+            .expect("Expected 'path' key")
+            .to_string();
+
+        assert_eq!(path, "contracts/test.clar");
     }
 
     #[test]
