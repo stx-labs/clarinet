@@ -269,7 +269,10 @@ fn resolve_map_types(
 
     // Try environment first
     if let Some(map_metadata) = env.and_then(|e| e.contract_context.meta_data_map.get(map_name)) {
-        return Some((map_metadata.key_type.clone(), map_metadata.value_type.clone()));
+        return Some((
+            map_metadata.key_type.clone(),
+            map_metadata.value_type.clone(),
+        ));
     }
 
     // Fallback to user_args
@@ -361,13 +364,7 @@ pub fn get_cost_for_special_function(
                 max: cost,
             }
         }
-        NativeFunctions::FetchVar => {
-            let cost = cost_fetch_var(args, epoch, env, user_args);
-            StaticCost {
-                min: cost.clone(),
-                max: cost,
-            }
-        }
+        NativeFunctions::FetchVar => cost_fetch_var(args, epoch, user_args),
         NativeFunctions::SetVar => cost_set_var(args, epoch, user_args),
         NativeFunctions::FetchEntry => cost_fetch_entry(args, epoch, env, user_args),
         NativeFunctions::SetEntry => cost_set_entry(args, epoch, env, user_args),
@@ -656,20 +653,35 @@ pub fn cost_replace_at(args: &[SymbolicExpression], epoch: StacksEpochId) -> Exe
         .unwrap_or(ExecutionCost::ZERO)
 }
 
-// FetchVar cost uses the serialized size of the stored variable's value type
+// FetchVar cost uses the serialized size of the stored variable's value type.
 pub fn cost_fetch_var(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
-    _env: Option<&clarity::vm::contexts::Environment>,
     user_args: Option<&UserArgumentsContext>,
-) -> ExecutionCost {
-    let size = resolve_data_var_type(args, user_args)
-        .and_then(|type_sig| type_sig.max_serialized_size().ok())
-        .map(u64::from)
-        .unwrap_or(0);
-    ClarityCostFunction::FetchVar
-        .eval_for_epoch(size, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+) -> StaticCost {
+    let (min_size, max_size) = resolve_data_var_type(args, user_args)
+        .map(|type_sig| {
+            let min = u64::from(type_sig.min_size().unwrap_or(0));
+            let max = type_sig
+                .max_serialized_size()
+                .ok()
+                .map(u64::from)
+                .unwrap_or(0);
+            (min, max)
+        })
+        .unwrap_or((0, 0));
+
+    let min_cost = ClarityCostFunction::FetchVar
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::FetchVar
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }
 
 // SetVar cost uses the serialized size of the variable's value type.
@@ -727,7 +739,7 @@ pub fn cost_fetch_entry(
                 .and_then(|t| t.max_serialized_size().ok())
                 .map(u64::from)
                 .unwrap_or(0);
-            (min, key_max + value_max)
+            (min, key_max.saturating_add(value_max))
         })
         .unwrap_or((0, 0));
 
@@ -764,7 +776,10 @@ pub fn cost_set_entry(
                     .and_then(|t| t.max_serialized_size().ok())
                     .map(u64::from)
                     .unwrap_or(0);
-                (key_min.saturating_add(value_min), key_max.saturating_add(value_max))
+                (
+                    key_min.saturating_add(value_min),
+                    key_max.saturating_add(value_max),
+                )
             })
             .unwrap_or_else(|| {
                 // Last resort: infer types from the key/value expressions themselves
@@ -772,7 +787,10 @@ pub fn cost_set_entry(
                     infer_tuple_size_from_expression(&args[1], epoch, user_args);
                 let (value_min, value_max) =
                     infer_tuple_size_from_expression(&args[2], epoch, user_args);
-                (key_min.saturating_add(value_min), key_max.saturating_add(value_max))
+                (
+                    key_min.saturating_add(value_min),
+                    key_max.saturating_add(value_max),
+                )
             })
     } else {
         (0, 0)
