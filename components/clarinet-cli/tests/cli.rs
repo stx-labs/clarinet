@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 use clarinet_files::{ProjectManifest, ProjectManifestFile};
-use indoc::formatdoc;
+use indoc::{formatdoc, indoc};
 
 #[track_caller]
 fn parse_manifest(project_dir: &Path) -> ProjectManifest {
@@ -385,4 +385,148 @@ fn test_check_project_default_lints() {
         messages.iter().any(|m| m.contains("never used")),
         "expected an unused constant lint warning from default lints, got: {messages:?}"
     );
+}
+
+/// `clarinet check` should emit lint warnings for project contracts but not for requirements,
+/// even when a requirement has the same contract name as a project contract.
+#[test]
+fn test_check_skips_requirement_lint_warnings() {
+    let project_name = "test_skip_req_warnings";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    // Create a project contract
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    // Write lint-triggering code (unused constant) to the project contract
+    let project_contract = project_path.join("contracts").join("my-contract.clar");
+    fs::write(
+        &project_contract,
+        "(define-constant PROJECT_UNUSED_CONST u42)\n",
+    )
+    .unwrap();
+
+    // Strip [repl.analysis] so default lints are used
+    strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
+
+    // Create requirement contract files in the cache directory.
+    // Requirement A: a uniquely-named requirement.
+    // Requirement B: a requirement with the SAME contract name as the project contract
+    //   but deployed from a different address. This tests that we don't confuse
+    //   two contracts that share a name but differ in sender and path.
+    let cache_req_dir = project_path.join(".cache").join("requirements");
+    fs::create_dir_all(&cache_req_dir).unwrap();
+
+    fs::write(
+        cache_req_dir.join("other-req.clar"),
+        "(define-constant REQ_A_UNUSED u99)\n",
+    )
+    .unwrap();
+
+    fs::write(
+        cache_req_dir.join("my-contract.clar"),
+        "(define-constant REQ_B_UNUSED u100)\n",
+    )
+    .unwrap();
+
+    // Write a deployment plan that includes all three contracts.
+    // Requirements are listed as emulated-contract-publish entries with a different
+    // emulated-sender and paths under .cache/requirements/.
+    // Using --use-on-disk-deployment-plan forces clarinet to use this file directly,
+    // which (unlike computed deployments) includes ALL contracts in the diagnostics output.
+    let deployment_yaml = indoc! {r#"
+        ---
+        id: 0
+        name: "Test deployment with requirements"
+        network: simnet
+        genesis:
+          wallets:
+            - name: deployer
+              address: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+              balance: "100000000000000"
+              sbtc-balance: "0"
+          contracts:
+            - genesis
+            - lockup
+            - bns
+            - cost-voting
+            - costs
+            - pox
+            - costs-2
+            - pox-2
+            - costs-3
+            - pox-3
+            - pox-4
+            - signers
+            - signers-voting
+            - costs-4
+        plan:
+          batches:
+            - id: 0
+              transactions:
+                - transaction-type: emulated-contract-publish
+                  contract-name: other-req
+                  emulated-sender: SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE
+                  path: .cache/requirements/other-req.clar
+                  clarity-version: 1
+                - transaction-type: emulated-contract-publish
+                  contract-name: my-contract
+                  emulated-sender: SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE
+                  path: .cache/requirements/my-contract.clar
+                  clarity-version: 1
+                - transaction-type: emulated-contract-publish
+                  contract-name: my-contract
+                  emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+                  path: contracts/my-contract.clar
+                  clarity-version: 1
+              epoch: "2.0"
+    "#};
+    let deployment_dir = project_path.join("deployments");
+    fs::create_dir_all(&deployment_dir).unwrap();
+    fs::write(
+        deployment_dir.join("default.simnet-plan.yaml"),
+        deployment_yaml,
+    )
+    .unwrap();
+
+    // Run clarinet check with JSON output and the on-disk deployment plan
+    let json = run_clarinet_check_json(&["--use-on-disk-deployment-plan"], &project_path);
+
+    let diagnostics = json["diagnostics"]
+        .as_object()
+        .expect("diagnostics should be an object");
+
+    // Project contract should have lint warnings
+    let has_project_warning = diagnostics
+        .iter()
+        .filter(|(path, _)| path.ends_with("contracts/my-contract.clar"))
+        .flat_map(|(_, diags)| diags.as_array().unwrap())
+        .any(|d| {
+            d["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("never used"))
+        });
+    assert!(
+        has_project_warning,
+        "expected an unused constant lint warning for the project contract, got diagnostics: {diagnostics:?}"
+    );
+
+    // Requirement contracts should NOT have any diagnostics.
+    // With run_repl_analysis=false, requirements only get standard Clarity analysis
+    // (which produces no warnings for unused constants), so they should not appear
+    // in the JSON output at all (entries with empty diagnostics are filtered out).
+    for (path, diags) in diagnostics {
+        if path.contains("requirements") {
+            let diag_list = diags.as_array().unwrap();
+            assert!(
+                diag_list.is_empty(),
+                "expected no diagnostics for requirement at {path}, got: {diag_list:?}"
+            );
+        }
+    }
 }
