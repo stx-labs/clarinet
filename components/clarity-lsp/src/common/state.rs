@@ -644,12 +644,8 @@ pub async fn build_state(
             .await?;
 
     let mut session = initiate_session_from_manifest(&manifest);
-    let contracts = update_session_with_deployment_plan(
-        &mut session,
-        &manifest.contracts,
-        &deployment,
-        Some(&artifacts.asts),
-    );
+    let contracts =
+        update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
     for (contract_id, mut result) in contracts.into_iter() {
         let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
             continue;

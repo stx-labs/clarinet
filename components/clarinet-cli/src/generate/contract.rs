@@ -207,6 +207,7 @@ impl GetChangesForNewContract {
             name: self.contract_name.clone(),
             clarity_version: DEFAULT_CLARITY_VERSION,
             epoch: clarity_repl::repl::Epoch::Latest,
+            is_requirement: false,
         };
         let mut contracts_to_add = HashMap::new();
         contracts_to_add.insert(self.contract_name.clone(), contract_config);

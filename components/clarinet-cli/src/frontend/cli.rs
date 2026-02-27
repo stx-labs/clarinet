@@ -1198,6 +1198,7 @@ pub fn main() {
                 name: "transient".to_string(),
                 clarity_version: ClarityVersion::default_for_epoch(epoch),
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             };
             let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
             let (annotations, mut annotation_diagnostics) = session
@@ -1515,18 +1516,18 @@ pub fn load_deployment_and_artifacts_or_exit(
             )
             .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
             .and_then(|opt| match opt {
-                Some(deployment) => {
+                Some(mut deployment) => {
                     eprintln!("{} using {default_deployment_file}", yellow!("note:"));
-                    let artifacts = setup_session_with_deployment(manifest, &deployment, None);
+                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
                     Ok((deployment, None, artifacts))
                 }
                 None => {
-                    let (deployment, ast_artifacts) =
+                    let (mut deployment, ast_artifacts) =
                         generate_default_deployment(manifest, &StacksNetwork::Simnet, false)?;
                     if ast_artifacts.success {
                         let mut artifacts = setup_session_with_deployment(
                             manifest,
-                            &deployment,
+                            &mut deployment,
                             Some(&ast_artifacts.asts),
                         );
                         for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
@@ -1548,8 +1549,8 @@ pub fn load_deployment_and_artifacts_or_exit(
                 .expect("unable to retrieve project root");
             let deployment_location = project_root.join(path);
             load_deployment(&project_root, &deployment_location)
-                .map(|deployment| {
-                    let artifacts = setup_session_with_deployment(manifest, &deployment, None);
+                .map(|mut deployment| {
+                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
                     (
                         deployment,
                         Some(deployment_location.to_string_lossy().to_string()),
@@ -2237,6 +2238,7 @@ mod tests {
                 deployer: ContractDeployer::DefaultDeployer,
                 clarity_version: ClarityVersion::Clarity2,
                 epoch: Epoch::Latest,
+                is_requirement: false,
             }
         }
 
@@ -2712,6 +2714,7 @@ mod tests {
                 deployer: ContractDeployer::LabeledDeployer("wallet_1".to_string()),
                 clarity_version: ClarityVersion::Clarity3,
                 epoch: Epoch::Specific(clarity_repl::clarity::StacksEpochId::Epoch25),
+                is_requirement: false,
             };
 
             add_contract_to_doc(&mut doc, "special", &contract);
@@ -2944,6 +2947,7 @@ mod tests {
             name: "transient".to_string(),
             clarity_version: ClarityVersion::default_for_epoch(epoch),
             epoch: clarity_repl::repl::Epoch::Specific(epoch),
+            is_requirement: false,
         };
         let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
         let (annotations, mut annotation_diagnostics) = session

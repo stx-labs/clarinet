@@ -92,7 +92,7 @@ fn deploy_boot_contracts(
     };
 
     for (contract_id, (contract, ast)) in boot_contracts_data {
-        let result = interpreter.run(&contract, Some(&ast), false, None, false);
+        let result = interpreter.run(&contract, Some(&ast), false, None);
         if let Err(errs) = &result {
             for e in errs {
                 ueprint!("Error deploying boot contract {contract_id}: {}", e.message);
@@ -557,7 +557,6 @@ impl Session {
         contract: &ClarityContract,
         cost_track: bool,
         ast: Option<&ContractAST>,
-        run_repl_analysis: bool,
     ) -> Result<ExecutionResult, Vec<Diagnostic>> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         if contract.epoch.resolve() != current_epoch {
@@ -600,9 +599,7 @@ impl Session {
         let contract_id =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
 
-        let result =
-            self.interpreter
-                .run(contract, ast, cost_track, Some(hooks), run_repl_analysis);
+        let result = self.interpreter.run(contract, ast, cost_track, Some(hooks));
 
         result.inspect(|result| {
             if let EvaluationResult::Contract(contract_result) = &result.result {
@@ -699,6 +696,7 @@ impl Session {
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
+            is_requirement: false,
         };
         let contract_identifier =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
@@ -716,7 +714,7 @@ impl Session {
 
         let result = self
             .interpreter
-            .run(&contract, None, cost_track, Some(hooks), true);
+            .run(&contract, None, cost_track, Some(hooks));
 
         result.inspect(|result| {
             if let EvaluationResult::Contract(contract_result) = &result.result {
@@ -749,13 +747,14 @@ impl Session {
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
+            is_requirement: false,
         };
         let contract_identifier =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
 
         let result = self
             .interpreter
-            .run(&contract, None, cost_track, eval_hooks, true);
+            .run(&contract, None, cost_track, eval_hooks);
 
         match result {
             Ok(result) => {
@@ -1641,9 +1640,10 @@ mod tests {
             deployer: ContractDeployer::Address("ST000000000000000000002AMW42H".into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: Epoch::Specific(StacksEpochId::Epoch2_05),
+            is_requirement: false,
         };
 
-        let result = session.deploy_contract(&contract, false, None, true);
+        let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_err(), "Expected error for clarity mismatch");
     }
 
@@ -1661,7 +1661,7 @@ mod tests {
             .clarity_version(ClarityVersion::Clarity2)
             .build();
 
-        let result = session.deploy_contract(&contract, false, None, true);
+        let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.len() == 1);
@@ -1723,9 +1723,10 @@ mod tests {
             deployer: ContractDeployer::Address("ST000000000000000000002AMW42H".into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: Epoch::Specific(StacksEpochId::Epoch25),
+            is_requirement: false,
         };
 
-        let _ = session.deploy_contract(&contract, false, None, true);
+        let _ = session.deploy_contract(&contract, false, None);
 
         // assert data-var is set to 0
         assert_eq!(
@@ -1792,7 +1793,7 @@ mod tests {
 
         // deploy default contract
         let contract = ClarityContractBuilder::default().build();
-        let result = session.deploy_contract(&contract, false, None, true);
+        let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_ok());
     }
 
@@ -1836,7 +1837,7 @@ mod tests {
 
         // deploy default contract
         let contract = ClarityContractBuilder::default().build();
-        let _ = session.deploy_contract(&contract, false, None, true);
+        let _ = session.deploy_contract(&contract, false, None);
 
         let result = session.call_contract_fn(
             "contract",
@@ -1909,9 +1910,7 @@ mod tests {
             .epoch(StacksEpochId::Epoch25)
             .build();
 
-        session
-            .deploy_contract(&contract, false, None, true)
-            .unwrap();
+        session.deploy_contract(&contract, false, None).unwrap();
         session.advance_burn_chain_tip(10);
 
         let result = run_session_snippet(&mut session, "block-height");
@@ -1970,9 +1969,7 @@ mod tests {
             .epoch(StacksEpochId::Epoch30)
             .build();
 
-        session
-            .deploy_contract(&contract, false, None, true)
-            .unwrap();
+        session.deploy_contract(&contract, false, None).unwrap();
         session.advance_burn_chain_tip(10);
 
         let result = run_session_snippet(&mut session, "stacks-block-height");
@@ -2006,9 +2003,7 @@ mod tests {
             .epoch(StacksEpochId::Epoch25)
             .build();
 
-        session
-            .deploy_contract(&contract, false, None, true)
-            .unwrap();
+        session.deploy_contract(&contract, false, None).unwrap();
         session.advance_burn_chain_tip(10);
 
         session.update_epoch(StacksEpochId::Epoch30);
@@ -2053,7 +2048,7 @@ mod tests {
 
         // deploy a simple contract
         let contract = ClarityContractBuilder::default().build();
-        let _ = session.deploy_contract(&contract, false, None, true);
+        let _ = session.deploy_contract(&contract, false, None);
 
         // try to call a non-existent function
         let result = session.call_contract_fn(
@@ -2131,7 +2126,7 @@ mod tests {
             (test-mint)"#
         );
         let contract = ClarityContractBuilder::default().code_source(src).build();
-        let deploy_result = session.deploy_contract(&contract, false, None, true);
+        let deploy_result = session.deploy_contract(&contract, false, None);
         assert!(deploy_result.is_ok());
         let ExecutionResult { result, .. } = deploy_result.unwrap();
 

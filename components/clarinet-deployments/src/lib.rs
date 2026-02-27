@@ -39,16 +39,26 @@ use self::types::{
 
 pub fn setup_session_with_deployment(
     manifest: &ProjectManifest,
-    deployment: &DeploymentSpecification,
+    deployment: &mut DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> DeploymentGenerationArtifacts {
+    // Mark contracts not in the project manifest as requirements.
+    // This is needed when the deployment plan is loaded from YAML,
+    // where `is_requirement` is not serialized. We match by location
+    // (absolute path) rather than contract name because requirements
+    // can share a name with a project contract.
+    for batch in deployment.plan.batches.iter_mut() {
+        for tx in batch.transactions.iter_mut() {
+            if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
+                if !manifest.contracts_settings.contains_key(&spec.location) {
+                    spec.is_requirement = true;
+                }
+            }
+        }
+    }
+
     let mut session = initiate_session_from_manifest(manifest);
-    let contracts = update_session_with_deployment_plan(
-        &mut session,
-        &manifest.contracts,
-        deployment,
-        contracts_asts,
-    );
+    let contracts = update_session_with_deployment_plan(&mut session, deployment, contracts_asts);
 
     let deps = BTreeMap::new();
     let mut diags = HashMap::new();
@@ -165,7 +175,6 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
 
 pub fn update_session_with_deployment_plan(
     session: &mut Session,
-    project_contracts: &BTreeMap<String, ClarityContract>,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> ExecutionResultMap {
@@ -199,19 +208,7 @@ pub fn update_session_with_deployment_plan(
                         should_mint_sbtc = true;
                     }
                     let contract_ast = contracts_asts.as_ref().and_then(|m| m.get(&contract_id));
-                    let is_project_contract = project_contracts
-                        .get(tx.contract_name.as_str())
-                        .is_some_and(|contract| match &contract.code_source {
-                            ClarityCodeSource::ContractOnDisk(path) => tx.location.ends_with(path),
-                            _ => false,
-                        });
-                    let result = handle_emulated_contract_publish(
-                        session,
-                        tx,
-                        contract_ast,
-                        epoch,
-                        is_project_contract,
-                    );
+                    let result = handle_emulated_contract_publish(session, tx, contract_ast, epoch);
                     contracts.insert(contract_id, result);
                 }
                 TransactionSpecification::EmulatedContractCall(tx) => {
@@ -245,7 +242,6 @@ fn handle_emulated_contract_publish(
     tx: &EmulatedContractPublishSpecification,
     contract_ast: Option<&ContractAST>,
     epoch: StacksEpochId,
-    run_repl_analysis: bool,
 ) -> Result<ExecutionResult, Vec<Diagnostic>> {
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.emulated_sender.to_string());
@@ -256,9 +252,10 @@ fn handle_emulated_contract_publish(
         name: tx.contract_name.to_string(),
         clarity_version: tx.clarity_version,
         epoch: clarity_repl::repl::Epoch::Specific(epoch),
+        is_requirement: tx.is_requirement,
     };
 
-    let result = session.deploy_contract(&contract, false, contract_ast, run_repl_analysis);
+    let result = session.deploy_contract(&contract, false, contract_ast);
 
     session.set_tx_sender(&default_tx_sender);
     result
@@ -479,6 +476,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.clone(),
                 clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             };
 
             let (_, diagnostics, ast_success) = interpreter.build_ast(&temp_contract);
@@ -557,6 +555,7 @@ pub async fn generate_default_deployment(
                                 source: source.clone(),
                                 location: contract_location,
                                 clarity_version,
+                                is_requirement: true,
                             };
 
                             emulated_contracts_publish.insert(contract_id.clone(), data);
@@ -610,6 +609,7 @@ pub async fn generate_default_deployment(
                         deployer: ContractDeployer::ContractIdentifier(contract_id.clone()),
                         clarity_version,
                         epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                        is_requirement: true,
                     };
                     let (ast, _, _) = interpreter.build_ast(&contract);
                     (clarity_version, ast)
@@ -779,6 +779,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.to_string(),
                 clarity_version: contract_config.clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             },
         );
 
@@ -790,6 +791,7 @@ pub async fn generate_default_deployment(
                     source,
                     location: contract_location,
                     clarity_version: contract_config.clarity_version,
+                    is_requirement: false,
                 },
             )
         } else {
@@ -1034,9 +1036,10 @@ mod tests {
             source: source.to_string(),
             clarity_version: ClarityVersion::Clarity2,
             location: PathBuf::from("/contracts/contract_1.clar"),
+            is_requirement: false,
         };
 
-        handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch, true)
+        handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch)
     }
 
     #[test]

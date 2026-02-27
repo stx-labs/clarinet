@@ -383,8 +383,9 @@ mod test_mxs_session_test {
             deployer: repl::ContractDeployer::Address(deployer.into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
+            is_requirement: false,
         };
-        let result = session.deploy_contract(&contract, false, None, true);
+        let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_ok());
 
         let snippet = format!("(contract-call? '{deployer}.gbh get-block-height)");
@@ -419,8 +420,9 @@ mod test_mxs_session_test {
             deployer: repl::ContractDeployer::Address(deployer.into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch24),
+            is_requirement: false,
         };
-        let result = session.deploy_contract(&contract, false, None, true);
+        let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_ok());
 
         // 107107 is a block in epoch 2.4
@@ -467,8 +469,9 @@ mod test_mxs_session_test {
             deployer: repl::ContractDeployer::Address(deployer.into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
+            is_requirement: false,
         };
-        let result = session.deploy_contract(&contract, false, None, true);
+        let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_ok());
 
         // 107_107 is a block in epoch 2.4

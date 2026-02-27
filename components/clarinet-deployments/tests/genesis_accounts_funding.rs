@@ -9,7 +9,7 @@ use clarity::types::chainstate::StacksAddress;
 use clarity::types::Address;
 use clarity::vm::types::StandardPrincipalData;
 use clarity_repl::clarity::{ClarityVersion, ContractName};
-use clarity_repl::repl::{ClarityContract, Session, SessionSettings};
+use clarity_repl::repl::{Session, SessionSettings};
 
 static SBTC_DEPLOYER: LazyLock<StandardPrincipalData> = LazyLock::new(|| {
     StandardPrincipalData::from(
@@ -51,7 +51,7 @@ fn fund_geneis_account_with_stx() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &BTreeMap::new(), &deployment, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -73,7 +73,7 @@ fn does_not_fund_sbtc_without_sbtc_contract() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &BTreeMap::new(), &deployment, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -103,6 +103,7 @@ fn can_fund_initial_sbtc_balance() {
                     clarity_version: ClarityVersion::Clarity3,
                     location: PathBuf::from("./fixtures/sbtc-registry.clar"),
                     emulated_sender: SBTC_DEPLOYER.clone(),
+                    is_requirement: false,
                 },
             )
         })
@@ -124,7 +125,7 @@ fn can_fund_initial_sbtc_balance() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![batch], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &BTreeMap::new(), &deployment, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 2);

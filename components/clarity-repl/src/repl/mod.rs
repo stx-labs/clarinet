@@ -194,6 +194,8 @@ pub struct ClarityContract {
     pub deployer: ContractDeployer,
     pub clarity_version: ClarityVersion,
     pub epoch: Epoch,
+    #[serde(skip)]
+    pub is_requirement: bool,
 }
 
 impl Serialize for ClarityContract {

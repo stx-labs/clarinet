@@ -414,12 +414,8 @@ impl SDK {
             session.enable_coverage_hook();
         }
         session.enable_logger_hook();
-        let executed_contracts = update_session_with_deployment_plan(
-            &mut session,
-            &manifest.contracts,
-            &deployment,
-            Some(&artifacts.asts),
-        );
+        let executed_contracts =
+            update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
 
         let mut accounts = HashMap::new();
         if let Some(ref spec) = deployment.genesis {
@@ -921,9 +917,10 @@ impl SDK {
                 deployer: ContractDeployer::Address(args.sender.to_string()),
                 clarity_version,
                 epoch: Epoch::Specific(current_epoch),
+                is_requirement: false,
             };
 
-            match session.deploy_contract(&contract, track_costs, None, true) {
+            match session.deploy_contract(&contract, track_costs, None) {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(

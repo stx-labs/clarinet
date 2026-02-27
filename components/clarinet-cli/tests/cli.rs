@@ -517,9 +517,10 @@ fn test_check_skips_requirement_lint_warnings() {
     );
 
     // Requirement contracts should NOT have any diagnostics.
-    // With run_repl_analysis=false, requirements only get standard Clarity analysis
-    // (which produces no warnings for unused constants), so they should not appear
-    // in the JSON output at all (entries with empty diagnostics are filtered out).
+    // Since requirements have is_requirement=true, REPL analysis (lints) is skipped.
+    // They only get standard Clarity analysis (which produces no warnings for unused
+    // constants), so they should not appear in the JSON output at all (entries with
+    // empty diagnostics are filtered out).
     for (path, diags) in diagnostics {
         if path.contains("requirements") {
             let diag_list = diags.as_array().unwrap();
