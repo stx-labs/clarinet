@@ -6,10 +6,10 @@ use clarity_repl::clarity::diagnostic::Diagnostic;
 use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
 use ls_types::{
-    CompletionItem, CompletionParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-    DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams, Hover, HoverParams,
-    InitializeParams, InitializeResult, Location, MessageType, ServerInfo, SignatureHelp,
-    SignatureHelpParams, TextEdit,
+    CodeLens, CodeLensParams, CompletionItem, CompletionParams, DocumentFormattingParams,
+    DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams,
+    Hover, HoverParams, InitializeParams, InitializeResult, Location, MessageType, ServerInfo,
+    SignatureHelp, SignatureHelpParams, TextEdit,
 };
 use serde::{Deserialize, Serialize};
 
@@ -285,6 +285,17 @@ pub async fn process_notification(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct FunctionAnalysisParams {
+    pub path: String,
+    pub line: u32,
+    pub char: u32,
+}
+
+impl FunctionAnalysisParams {
+    pub const METHOD: &'static str = "clarity/getFunctionAnalysis";
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum LspRequest {
     Completion(CompletionParams),
     SignatureHelp(SignatureHelpParams),
@@ -293,7 +304,9 @@ pub enum LspRequest {
     DocumentSymbol(DocumentSymbolParams),
     DocumentFormatting(DocumentFormattingParams),
     DocumentRangeFormatting(DocumentRangeFormattingParams),
+    CodeLens(CodeLensParams),
     Initialize(Box<InitializeParams>),
+    FunctionAnalysis(FunctionAnalysisParams),
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -305,7 +318,9 @@ pub enum LspRequestResponse {
     DocumentFormatting(Option<Vec<TextEdit>>),
     DocumentRangeFormatting(Option<Vec<TextEdit>>),
     Hover(Option<Hover>),
+    CodeLens(Vec<CodeLens>),
     Initialize(Box<InitializeResult>),
+    FunctionAnalysis(Option<String>),
 }
 
 pub fn process_request(
@@ -576,6 +591,45 @@ pub fn process_request(
                 .unwrap_or_default();
             Ok(LspRequestResponse::Hover(hover_data))
         }
+
+        LspRequest::CodeLens(params) => {
+            let file_url = params.text_document.uri;
+            let Some(contract_location) = get_contract_location(&file_url) else {
+                return Ok(LspRequestResponse::CodeLens(vec![]));
+            };
+            let code_lenses = editor_state
+                .try_read(|es| es.get_code_lenses(&contract_location))
+                .unwrap_or_default();
+            Ok(LspRequestResponse::CodeLens(code_lenses))
+        }
+
+        LspRequest::FunctionAnalysis(params) => {
+            eprintln!(
+                "[LSP] FunctionAnalysis request received: path={}, line={}, char={}",
+                params.path, params.line, params.char
+            );
+            let file_url = params
+                .path
+                .parse()
+                .map_err(|e| format!("Invalid URI: {e}"))?;
+            let Some(contract_location) = get_contract_location(&file_url) else {
+                eprintln!("[LSP] Could not get contract location from URI");
+                return Ok(LspRequestResponse::FunctionAnalysis(None));
+            };
+            let position = ls_types::Position {
+                line: params.line.saturating_sub(1),
+                character: params.char.saturating_sub(1),
+            };
+            let cost_analysis = editor_state
+                .try_read(|es| es.get_function_cost_analysis(&contract_location, &position))
+                .unwrap_or_default();
+            eprintln!(
+                "[LSP] FunctionAnalysis response: {}",
+                cost_analysis.as_deref().unwrap_or("None")
+            );
+            Ok(LspRequestResponse::FunctionAnalysis(cost_analysis))
+        }
+
         _ => Err(format!("Unexpected command: {command:?}")),
     }
 }

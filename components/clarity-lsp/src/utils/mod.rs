@@ -17,6 +17,21 @@ macro_rules! log {
 #[cfg(target_arch = "wasm32")]
 pub(crate) use log;
 
+/// Logs for both browser and native depending on context
+#[macro_export]
+macro_rules! lsp_log {
+    ( $( $t:tt )* ) => {
+        #[cfg(target_arch = "wasm32")]
+        {
+            web_sys::console::log_1(&format!( $( $t )* ).into());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            eprintln!( $( $t )* );
+        }
+    };
+}
+
 pub fn clarity_diagnostics_to_lsp_type(diagnostics: &Vec<ClarityDiagnostic>) -> Vec<LspDiagnostic> {
     let mut dst = vec![];
     for d in diagnostics {
