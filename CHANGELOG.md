@@ -9,12 +9,13 @@
 
 ##### Bug Fixes
 
-- **linter:** False positives from `unnecessary_public` lint (#2243) (dfa3f2b1)
+- **linter:**
+  - False positives from `unnecessary_public` lint (#2243) (dfa3f2b1)
+  - Highlight binding name instead of expression in `unused_binding` lint (#2230) (e8e7ec6d)
+  - Add suggestion to suffix item with '_' to some `unused_\*` lints (#2212) (86f5a8c5)
 - devnet timing (#2242) (033c2203)
-- `cargo check` defaults (#2235) (188898cc)
-- Highlight binding name instead of expression in `unused_binding` lint (#2230) (e8e7ec6d)
+- Always apply `cargo check` defaults (#2235) (188898cc)
 - Start api container when ready (#2220) (4d0f78b5)
-- Add suggestion to suffix item with '_' to some `unused_\*` lints (#2212) (86f5a8c5)
 
 ##### Performance Improvements
 
