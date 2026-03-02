@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-static-cost"
-version = "3.14.0"
+version = "3.14.1"
 dependencies = [
  "clarity",
  "clarity-types",
