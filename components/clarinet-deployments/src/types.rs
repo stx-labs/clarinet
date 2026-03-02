@@ -891,7 +891,7 @@ pub struct EmulatedContractPublishSpecification {
 impl EmulatedContractPublishSpecification {
     pub fn from_specifications(
         specs: &EmulatedContractPublishSpecificationFile,
-        project_root_location: &Path,
+        project_root: &Path,
         source: Option<String>,
     ) -> Result<EmulatedContractPublishSpecification, String> {
         let Ok(contract_name) = ContractName::try_from(specs.contract_name.to_string()) else {
@@ -909,7 +909,7 @@ impl EmulatedContractPublishSpecification {
             ));
         };
 
-        let location = paths::try_parse_path(&specs.path, Some(project_root_location))
+        let location = paths::try_parse_path(&specs.path, Some(project_root))
             .ok_or(format!("unable to parse path '{}'", specs.path))?;
 
         let source = match source {
@@ -1017,10 +1017,10 @@ pub mod contracts_serde {
 
 impl DeploymentSpecification {
     pub fn from_config_file(
-        deployment_location: &Path,
-        project_root_location: &Path,
+        deployment_path: &Path,
+        project_root: &Path,
     ) -> Result<DeploymentSpecification, String> {
-        let spec_file_content = paths::read_content(deployment_location)?;
+        let spec_file_content = paths::read_content(deployment_path)?;
 
         let specification_file: DeploymentSpecificationFile =
             yaml_serde::from_slice(&spec_file_content[..])
@@ -1039,20 +1039,18 @@ impl DeploymentSpecification {
             }
         };
 
-        let deployment_spec = DeploymentSpecification::from_specifications(
+        DeploymentSpecification::from_specifications(
             &specification_file,
             &network,
-            project_root_location,
+            project_root,
             None,
-        )?;
-
-        Ok(deployment_spec)
+        )
     }
 
     pub fn from_specifications(
         specs: &DeploymentSpecificationFile,
         network: &StacksNetwork,
-        project_root_location: &Path,
+        project_root: &Path,
         contracts_sources: Option<&HashMap<String, String>>,
     ) -> Result<DeploymentSpecification, String> {
         let mut contracts = BTreeMap::new();
@@ -1070,7 +1068,7 @@ impl DeploymentSpecification {
                                 }
                                 TransactionSpecificationFile::EmulatedContractPublish(spec) => {
                                     let source = contracts_sources.as_ref().map(|contracts_sources| {
-                                        let contract_path = paths::try_parse_path(&spec.path, Some(project_root_location))
+                                        let contract_path = paths::try_parse_path(&spec.path, Some(project_root))
                                             .expect("failed to get contract path");
                                         let contract_path_str = contract_path.to_string_lossy().to_string();
                                         contracts_sources
@@ -1079,7 +1077,7 @@ impl DeploymentSpecification {
                                             .unwrap_or_else(|| panic!("missing contract source for {}", spec.path))
                                     });
 
-                                    let spec = EmulatedContractPublishSpecification::from_specifications(spec, project_root_location, source)?;
+                                    let spec = EmulatedContractPublishSpecification::from_specifications(spec, project_root, source)?;
                                     let contract_id = QualifiedContractIdentifier::new(spec.emulated_sender.clone(), spec.contract_name.clone());
                                     contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
                                     TransactionSpecification::EmulatedContractPublish(spec)
@@ -1123,11 +1121,11 @@ impl DeploymentSpecification {
                                     if matches!(network, StacksNetwork::Mainnet) {
                                         return Err(format!("{} only supports transactions of type 'contract-call' and 'contract-publish", specs.network.to_lowercase()))
                                     }
-                                    let spec = RequirementPublishSpecification::from_specifications(spec, project_root_location)?;
+                                    let spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
                                     TransactionSpecification::RequirementPublish(spec)
                                 }
                                 TransactionSpecificationFile::ContractPublish(spec) => {
-                                    let spec = ContractPublishSpecification::from_specifications(spec, project_root_location)?;
+                                    let spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
                                     let source = remove_env_simnet(spec.source.clone())?;
