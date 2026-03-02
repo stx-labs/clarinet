@@ -70,19 +70,11 @@ impl<'a, 'b> CaseBinding<'a, 'b> {
         message: String,
         error: &CaseError,
     ) -> Diagnostic {
-        let suggestion = match error {
-            CaseError::Empty => "Give the binding a name".to_owned(),
-            CaseError::IllegalCharacter(b) => {
-                format!("Remove the illegal character '{c}'", c = char::from(*b))
-            }
-            CaseError::ConsecutiveUnderscores => "Remove the consecutive underscores".to_owned(),
-            CaseError::ConsecutiveHyphens => "Remove the consecutive hyphens".to_owned(),
-        };
         Diagnostic {
             level,
             message,
             spans: vec![expr.span.clone()],
-            suggestion: Some(suggestion),
+            suggestion: Some(error.suggestion()),
         }
     }
 

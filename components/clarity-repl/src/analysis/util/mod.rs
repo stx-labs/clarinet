@@ -12,6 +12,19 @@ pub enum CaseError {
     ConsecutiveHyphens,
 }
 
+impl CaseError {
+    pub fn suggestion(&self) -> String {
+        match self {
+            CaseError::Empty => "Give the identifier a name".to_owned(),
+            CaseError::IllegalCharacter(b) => {
+                format!("Remove the illegal character '{}'", char::from(*b))
+            }
+            CaseError::ConsecutiveUnderscores => "Remove the consecutive underscores".to_owned(),
+            CaseError::ConsecutiveHyphens => "Remove the consecutive hyphens".to_owned(),
+        }
+    }
+}
+
 /// Returns error if identifier is not in SCREAMING_SNAME_CASE
 ///
 /// An identifier is considered SCREAMING_SNAKE_CASE if...
