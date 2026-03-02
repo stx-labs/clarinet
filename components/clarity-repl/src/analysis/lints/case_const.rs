@@ -78,6 +78,7 @@ impl<'a, 'b> CaseConst<'a, 'b> {
                 format!("Remove the illegal character '{c}'", c = char::from(*b))
             }
             CaseError::ConsecutiveUnderscores => "Remove the consecutive underscores".to_owned(),
+            CaseError::ConsecutiveHyphens => "Remove the consecutive hyphens".to_owned(),
         };
         Diagnostic {
             level,

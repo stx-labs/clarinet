@@ -27,6 +27,7 @@ use crate::analysis::annotation::Annotation;
 #[strum(serialize_all = "snake_case")]
 pub enum LintName {
     // Keep sorted alphabetically
+    CaseBinding,
     CaseConst,
     ErrorConst,
     Noop,
@@ -80,7 +81,7 @@ impl LintGroup {
             All => LintName::VARIANTS,
             Perf => &[LintName::UnnecessaryAsMaxLen, LintName::UnnecessaryPublic],
             Safety => &[LintName::ErrorConst, LintName::Noop, LintName::Panic],
-            Style => &[LintName::CaseConst],
+            Style => &[LintName::CaseBinding, LintName::CaseConst],
             Unused => &[
                 LintName::UnusedConst,
                 LintName::UnusedDataVar,
