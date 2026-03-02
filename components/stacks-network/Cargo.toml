@@ -13,7 +13,6 @@ bitcoincore-rpc = { workspace= true }
 bitcoincore-rpc-json = { workspace = true }
 bollard = "0.17"
 hex = "0.4.3"
-regex = { workspace = true }
 miniscript = "11.0.0"
 strum = { workspace = true, features = ["derive"] }
 colored = { workspace = true }
@@ -59,9 +58,7 @@ default = []
 stacks-signers = []
 
 [dev-dependencies]
-assert-json-diff = "2.0.2"
 test-case = "3.1.0"
-pretty_assertions = { workspace = true }
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 
 [lib]

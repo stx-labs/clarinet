@@ -4128,7 +4128,6 @@ dependencies = [
 name = "stacks-network"
 version = "3.14.1"
 dependencies = [
- "assert-json-diff",
  "axum",
  "base58",
  "base64 0.22.1",
@@ -4152,10 +4151,8 @@ dependencies = [
  "indoc",
  "libc",
  "miniscript",
- "pretty_assertions",
  "rand 0.8.5",
  "ratatui",
- "regex",
  "reqwest",
  "serde",
  "serde_json",

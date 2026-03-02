@@ -12,7 +12,6 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-use chainhook::hooks::types::ChainhookStore;
 pub use chainhook::observer::MempoolAdmissionData;
 use chainhook::observer::ObserverCommand;
 pub use chainhook::types::{BitcoinNetwork, StacksNetwork};
@@ -204,14 +203,12 @@ async fn do_run_devnet(
 
     // The event observer should be able to send some events to the UI thread,
     // and should be able to be terminated
-    let hooks = ChainhookStore::default();
     let devnet_path = devnet_config.working_dir.clone();
     let observer_config = DevnetEventObserverConfig::new(
         devnet_config.clone(),
         devnet.manifest.clone(),
         config.network_manifest,
         config.deployment,
-        hooks,
         &config.ctx,
         config.ip_address_setup,
     );
