@@ -61,7 +61,7 @@ impl<'a, 'b> CaseBinding<'a, 'b> {
     }
 
     fn make_diagnostic_message(name: &ClarityName, error: &CaseError) -> String {
-        format!("binding `{name}` is not kebab-case: {error:?}")
+        format!("binding `{name}` is not kebab-case: {error}")
     }
 
     fn make_diagnostic(

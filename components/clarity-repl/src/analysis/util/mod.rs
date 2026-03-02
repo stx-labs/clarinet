@@ -1,14 +1,16 @@
 //! Utility functions used by analysis passes/lints
 
-#[derive(Debug, PartialEq)]
+use thiserror::Error;
+
+#[derive(Debug, Error, PartialEq)]
 pub enum CaseError {
-    /// Empty string
+    #[error("identifier is empty")]
     Empty,
-    /// Identifier contains character not allowed in this case
+    #[error("contains illegal character '{}'", char::from(*.0))]
     IllegalCharacter(u8),
-    /// Identifier contains more than one consecutive underscore
+    #[error("contains consecutive underscores")]
     ConsecutiveUnderscores,
-    /// Identifier contains more than one consecutive hyphen
+    #[error("contains consecutive hyphens")]
     ConsecutiveHyphens,
 }
 

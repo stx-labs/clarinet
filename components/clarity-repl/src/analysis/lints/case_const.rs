@@ -63,7 +63,7 @@ impl<'a, 'b> CaseConst<'a, 'b> {
     }
 
     fn make_diagnostic_message(name: &ClarityName, error: &CaseError) -> String {
-        format!("constant `{name}` is not SCREAMING_SNAKE_CASE: {error:?}")
+        format!("constant `{name}` is not SCREAMING_SNAKE_CASE: {error}")
     }
 
     fn make_diagnostic(
