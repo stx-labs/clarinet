@@ -9,8 +9,7 @@ license = "GPL-3.0"
 dirs = { workspace = true }
 libsecp256k1 = { workspace = true }
 rpassword = { workspace = true }
-serde = { workspace = true }
-serde_derive = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 toml = { workspace = true }
 url = { version = "2.5.4", features = ["serde"] }

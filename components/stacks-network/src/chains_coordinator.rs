@@ -35,6 +35,7 @@ use clarity::util::hash::{hex_bytes, Hash160};
 use clarity::vm::types::{BuffData, PrincipalData, SequenceData, TupleData};
 use clarity::vm::{ClarityName, Value as ClarityValue};
 use hiro_system_kit::{self, slog, yellow};
+use serde::Deserialize;
 use serde_json::json;
 use stacks_common::address::AddressHashMode;
 use stacks_common::types::chainstate::{StacksPrivateKey, StacksPublicKey};
@@ -126,8 +127,8 @@ impl DevnetEventObserverConfig {
         ctx.try_log(|logger| slog::info!(logger, "Checking contracts"));
         let network_manifest = match network_manifest {
             Some(n) => n,
-            None => NetworkManifest::from_project_manifest_location(
-                &manifest.location,
+            None => NetworkManifest::from_project_root(
+                &manifest.root_dir,
                 &StacksNetwork::Devnet.get_networks(),
                 false,
                 Some(&manifest.project.cache_location),

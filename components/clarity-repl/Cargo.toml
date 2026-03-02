@@ -29,7 +29,6 @@ regex = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
-serde_derive = { workspace = true }
 serde_json = { workspace = true, features = ["unbounded_depth"] }
 sha2 = "0.10"
 strum = { workspace = true, features = ["derive"] }
@@ -64,7 +63,6 @@ pox-locking = { workspace = true, default-features = false }
 comfy-table = { version = "=7.2.2", default-features = false }
 js-sys = { version = "0.3" }
 hiro-system-kit = { path = "../hiro-system-kit", default-features = false }
-serde-wasm-bindgen = { workspace = true }
 wasm-bindgen = { workspace = true }
 web-sys = { workspace = true }
 

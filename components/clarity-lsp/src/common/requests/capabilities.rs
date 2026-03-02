@@ -78,12 +78,11 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             }),
             false => None,
         },
-        code_lens_provider: match initialization_options.static_cost_analysis {
-            true => Some(ls_types::CodeLensOptions {
+        code_lens_provider: initialization_options.static_cost_analysis.then(|| {
+            ls_types::CodeLensOptions {
                 resolve_provider: Some(false),
-            }),
-            false => None,
-        },
+            }
+        }),
         ..ServerCapabilities::default()
     }
 }

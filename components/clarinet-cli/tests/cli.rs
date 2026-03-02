@@ -287,3 +287,102 @@ fn test_formatter_check() {
         "Check should fail for non-existent file"
     );
 }
+
+/// Run `clarinet check` with JSON output in the given directory and return the parsed JSON.
+#[track_caller]
+fn run_clarinet_check_json(args: &[&str], working_dir: &Path) -> serde_json::Value {
+    let mut full_args = vec!["check"];
+    full_args.extend_from_slice(args);
+    full_args.extend_from_slice(&["--output", "json"]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(&full_args)
+        .current_dir(working_dir)
+        .output()
+        .expect("Failed to execute clarinet check");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout).expect("clarinet check should produce valid JSON")
+}
+
+/// Extract all diagnostic messages from `clarinet check --output json` output.
+#[track_caller]
+fn collect_check_diagnostic_messages(json: &serde_json::Value) -> Vec<String> {
+    json["diagnostics"]
+        .as_object()
+        .expect("diagnostics should be an object")
+        .values()
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|d| d["message"].as_str())
+        .map(String::from)
+        .collect()
+}
+
+/// Strip a TOML section (and its contents up to the next section header) from a file.
+fn strip_toml_section(path: &Path, section_header: &str) {
+    let content = fs::read_to_string(path).unwrap();
+    let mut in_section = false;
+    let stripped: String = content
+        .lines()
+        .filter(|line| {
+            if line.starts_with(section_header) {
+                in_section = true;
+                return false;
+            }
+            if in_section && line.starts_with('[') {
+                in_section = false;
+            }
+            !in_section
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(path, stripped).expect("Failed to write file");
+}
+
+/// `clarinet check <file>` with no Clarinet.toml should emit lint warnings by default.
+#[test]
+fn test_check_single_file_default_lints() {
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+    let contract_path = temp_dir.path().join("unused.clar");
+    fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n")
+        .expect("Failed to write contract");
+
+    let json = run_clarinet_check_json(&[contract_path.to_str().unwrap()], temp_dir.path());
+    let messages = collect_check_diagnostic_messages(&json);
+
+    assert!(
+        messages.iter().any(|m| m.contains("never used")),
+        "expected an unused constant lint warning from default lints, got: {messages:?}"
+    );
+}
+
+/// `clarinet check` in a project with no `[repl.analysis]` section should emit lint warnings.
+#[test]
+fn test_check_project_default_lints() {
+    let project_name = "test_default_lints";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n")
+        .expect("Failed to write contract");
+
+    strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
+
+    let json = run_clarinet_check_json(&[], &project_path);
+    let messages = collect_check_diagnostic_messages(&json);
+
+    assert!(
+        messages.iter().any(|m| m.contains("never used")),
+        "expected an unused constant lint warning from default lints, got: {messages:?}"
+    );
+}

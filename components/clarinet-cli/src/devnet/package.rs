@@ -3,7 +3,7 @@ use std::process;
 
 use clarinet_deployments::get_default_deployment_path;
 use clarinet_deployments::types::DeploymentSpecification;
-use clarinet_files::{paths, NetworkManifest, ProjectManifest, StacksNetwork};
+use clarinet_files::{NetworkManifest, ProjectManifest, StacksNetwork};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,17 +41,16 @@ fn pack_to_stdout(package: ConfigurationPackage) -> Result<(), String> {
 }
 
 pub fn pack(file_name: Option<String>, project_manifest: ProjectManifest) -> Result<(), String> {
-    let project_root = paths::project_root_from_manifest_location(&project_manifest.location)
-        .map_err(|e| format!("failed to get project root location: {e}"))?;
+    let project_root = &project_manifest.root_dir;
     let default_deployment_path =
         project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
 
     let deployment_manifest =
-        DeploymentSpecification::from_config_file(&default_deployment_path, &project_root)
+        DeploymentSpecification::from_config_file(&default_deployment_path, project_root)
             .map_err(|e| format!("failed to create deployment plan: {e}"))?;
 
-    let network_manifest = NetworkManifest::from_project_manifest_location(
-        &project_manifest.location,
+    let network_manifest = NetworkManifest::from_project_root(
+        project_root,
         &StacksNetwork::Devnet.get_networks(),
         false,
         None,

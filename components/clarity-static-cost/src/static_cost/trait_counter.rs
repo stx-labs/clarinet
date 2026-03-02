@@ -150,6 +150,11 @@ pub trait TraitCountVisitor {
             CostExprNode::UserFunction(user_function) => {
                 self.visit_user_function(node, user_function, context);
             }
+            CostExprNode::NestedExpression => {
+                for child in &node.children {
+                    self.visit(child, context);
+                }
+            }
         }
     }
 }
@@ -537,9 +542,6 @@ pub struct TraitCountPropagator<'a> {
     trait_names: &'a HashMap<ClarityName, String>,
     /// Set of all function names from the contract (used to distinguish function calls from let-bound variables)
     visited_functions: &'a HashSet<String>,
-    /// Map from let-bound variable names to their trait counts
-    #[allow(dead_code)]
-    let_binding_trait_counts: HashMap<String, MinMaxTraitCount>,
     /// Track which function calls have already been processed to avoid double-counting
     processed_calls: std::collections::HashSet<(String, String)>,
 }
@@ -554,7 +556,6 @@ impl<'a> TraitCountPropagator<'a> {
             trait_counts,
             trait_names,
             visited_functions,
-            let_binding_trait_counts: HashMap::new(),
             processed_calls: std::collections::HashSet::new(),
         }
     }
@@ -682,10 +683,8 @@ impl<'a> TraitCountVisitor for TraitCountPropagator<'a> {
         _atom: &ClarityName,
         context: &TraitCountContext,
     ) {
-        // If this atom node has children (like "nested-expression" for lists),
-        // visit them to propagate trait counts
-        // This handles cases where let bindings are represented as Atom("nested-expression")
-        // with children representing the actual bindings
+        // Recurse into children so we propagate trait counts from function calls
+        // nested under non-function atoms (e.g. let-bound variable binding values).
         for child in &node.children {
             self.visit(child, context);
         }

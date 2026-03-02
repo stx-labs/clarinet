@@ -18,7 +18,7 @@ use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::{ContractDeployer, DEFAULT_CLARITY_VERSION};
-use clarity_static_cost::static_cost::CostAnalysisNode;
+use clarity_static_cost::static_cost::StaticCost;
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
@@ -144,7 +144,7 @@ pub struct ContractState {
     #[allow(dead_code)]
     location: PathBuf,
     clarity_version: ClarityVersion,
-    cost_analysis: Option<HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>>,
+    cost_analysis: Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>>,
 }
 
 impl ContractState {
@@ -157,9 +157,7 @@ impl ContractState {
         definitions: HashMap<ClarityName, Range>,
         location: PathBuf,
         clarity_version: ClarityVersion,
-        cost_analysis: Option<
-            HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>,
-        >,
+        cost_analysis: Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>>,
     ) -> ContractState {
         let mut errors = vec![];
         let mut warnings = vec![];
@@ -209,42 +207,7 @@ pub struct CostPercents {
 }
 
 fn u64_to_f64(value: u64) -> f64 {
-    // XXX Not sure if there's a safer conversion
     value as f64
-}
-
-// Compute total cost from a CostAnalysisNode tree by summing all children's costs
-fn compute_total_cost_from_tree(cost_node: &CostAnalysisNode) -> ExecutionCost {
-    let mut total = cost_node.cost.max.clone();
-
-    // Recursively sum costs from all children
-    for child in &cost_node.children {
-        let child_cost = compute_total_cost_from_tree(child);
-        total.runtime += child_cost.runtime;
-        total.read_count += child_cost.read_count;
-        total.read_length += child_cost.read_length;
-        total.write_count += child_cost.write_count;
-        total.write_length += child_cost.write_length;
-    }
-
-    total
-}
-
-// Compute total min cost from a CostAnalysisNode tree by summing all children's costs
-fn compute_total_min_cost_from_tree(cost_node: &CostAnalysisNode) -> ExecutionCost {
-    let mut total = cost_node.cost.min.clone();
-
-    // Recursively sum costs from all children
-    for child in &cost_node.children {
-        let child_cost = compute_total_min_cost_from_tree(child);
-        total.runtime += child_cost.runtime;
-        total.read_count += child_cost.read_count;
-        total.read_length += child_cost.read_length;
-        total.write_count += child_cost.write_count;
-        total.write_length += child_cost.write_length;
-    }
-
-    total
 }
 
 // Format a number with abbreviation (e.g., 2.6k instead of 2,634)
@@ -508,15 +471,6 @@ impl EditorState {
         let documentation =
             get_expression_documentation(&position, contract.expressions.as_ref()?)?;
 
-        // TODO: this is where we'd add cost analysis hover data
-        // let cost_info = self.get_function_cost_info_for_hover(contract_location, position);
-
-        // let mut hover_content = documentation;
-        // if let Some(cost_text) = cost_info {
-        //     hover_content.push_str("\n\n---\n\n");
-        //     hover_content.push_str(&cost_text);
-        // }
-
         Some(Hover {
             contents: ls_types::HoverContents::Markup(ls_types::MarkupContent {
                 kind: ls_types::MarkupKind::Markdown,
@@ -590,8 +544,8 @@ impl EditorState {
         code_lenses
     }
 
-    fn format_cost_for_codelens(cost_node: &CostAnalysisNode) -> String {
-        let total_cost = compute_total_cost_from_tree(cost_node);
+    fn format_cost_for_codelens(cost_node: &StaticCost) -> String {
+        let total_cost = &cost_node.max;
 
         format!(
             "runtime: {}, read count: {}, read length: {}, write count: {}, write length: {}",
@@ -779,9 +733,9 @@ impl EditorState {
         };
 
         let block_limits = BLOCK_LIMIT_MAINNET;
-        let total_cost_max = compute_total_cost_from_tree(cost_node);
-        let total_cost_min = compute_total_min_cost_from_tree(cost_node);
-        let percents = get_cost_percents(&total_cost_max, &block_limits);
+        let total_cost_max = &cost_node.max;
+        let total_cost_min = &cost_node.min;
+        let percents = get_cost_percents(total_cost_max, &block_limits);
 
         // Extract trait count from the stored data
         // TraitCount is HashMap<String, (u64, u64)>, so we use the size as the count
@@ -858,7 +812,7 @@ impl ProtocolState {
         clarity_versions: &mut HashMap<QualifiedContractIdentifier, ClarityVersion>,
         cost_analyses: &mut HashMap<
             QualifiedContractIdentifier,
-            HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>,
+            HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
         >,
     ) {
         // Remove old paths
@@ -1038,7 +992,7 @@ async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
-) -> Option<HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>> {
+) -> Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>> {
     use clarity::vm::contexts::{CallStack, ContractContext, Environment};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
     use clarity_static_cost::static_cost::static_cost;
@@ -1063,7 +1017,7 @@ async fn get_cost_analysis(
     global_context.begin();
 
     let cost_result: Result<
-        HashMap<String, (CostAnalysisNode, Option<HashMap<String, (u64, u64)>>)>,
+        HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
         clarity::vm::errors::VmExecutionError,
     > = global_context.execute(|g| {
         let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
@@ -1078,7 +1032,7 @@ async fn get_cost_analysis(
             None,
         );
 
-        // Use static_cost which returns (CostAnalysisNode, Option<TraitCount>)
+        // Use static_cost which returns (StaticCost, Option<TraitCount>)
         // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
         static_cost(&mut env, contract_id).map_err(|e| {
             crate::lsp_log!("[LSP] static_cost failed with error: {}", e);

@@ -13,7 +13,8 @@ use chainhook_types::{
 };
 use hiro_system_kit::slog;
 use reqwest::Client as HttpClient;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::fork_scratch_pad::CONFIRMED_SEGMENT_MINIMUM_LENGTH;
 use crate::chainhooks::bitcoin::{

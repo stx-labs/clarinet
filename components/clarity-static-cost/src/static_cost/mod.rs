@@ -1,8 +1,6 @@
-// Library API - items will be used when integrated with LSP, CLI, etc.
-#![allow(dead_code)]
-
 mod cost_analysis;
 mod cost_functions;
+mod error;
 mod special_costs;
 mod trait_counter;
 
@@ -18,39 +16,43 @@ use clarity_types::representations::SymbolicExpression;
 use clarity_types::types::{CharType, SequenceData};
 pub use cost_analysis::{
     build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_source,
-    static_cost_tree, static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost,
-    SummingExecutionCost, UserArgumentsContext,
+    static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost, SummingExecutionCost,
+    UserArgumentsContext,
 };
 pub use cost_functions::ClarityCostFunctionExt;
+pub use error::StaticCostError;
 pub use special_costs::get_cost_for_special_function;
 use stacks_common::types::StacksEpochId;
 pub use trait_counter::{
     TraitCount, TraitCountCollector, TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
 
+pub(crate) fn saturating_add_cost(a: &mut ExecutionCost, b: &ExecutionCost) {
+    a.runtime = a.runtime.saturating_add(b.runtime);
+    a.write_length = a.write_length.saturating_add(b.write_length);
+    a.write_count = a.write_count.saturating_add(b.write_count);
+    a.read_length = a.read_length.saturating_add(b.read_length);
+    a.read_count = a.read_count.saturating_add(b.read_count);
+}
+
 const STRING_COST_BASE: u64 = 36;
 const STRING_COST_MULTIPLIER: u64 = 3;
 
 pub(crate) fn calculate_function_cost(
-    function_name: String,
+    function_name: &str,
     cost_map: &HashMap<String, Option<StaticCost>>,
-    _clarity_version: &ClarityVersion,
-) -> Result<StaticCost, String> {
-    match cost_map.get(&function_name) {
-        Some(Some(cost)) => {
-            // Cost already computed
-            Ok(cost.clone())
-        }
-        Some(None) => {
-            // Should be impossible..
-            // Function exists but cost not yet computed, circular dependency?
-            // For now, return zero cost to avoid infinite recursion
-            Ok(StaticCost::ZERO)
-        }
-        None => {
-            // Function not found
-            Ok(StaticCost::ZERO)
-        }
+) -> Result<StaticCost, StaticCostError> {
+    match cost_map.get(function_name) {
+        Some(Some(cost)) => Ok(cost.clone()),
+        // Function exists but cost not yet computed — Clarity does not allow forward
+        // references or recursion, so this indicates a bug in the analysis.
+        Some(None) => Err(StaticCostError::CostCalculation(format!(
+            "cost for function '{function_name}' not yet computed (possible circular dependency)"
+        ))),
+        // Function not found in cost map at all.
+        None => Err(StaticCostError::CostCalculation(format!(
+            "function '{function_name}' not found in cost map"
+        ))),
     }
 }
 
@@ -85,15 +87,13 @@ fn string_cost(length: usize) -> StaticCost {
 }
 
 /// Strings are the only Value's with costs associated
-pub(crate) fn calculate_value_cost(value: &Value) -> Result<StaticCost, String> {
+pub(crate) fn calculate_value_cost(value: &Value) -> StaticCost {
     match value {
-        Value::Sequence(SequenceData::String(CharType::UTF8(data))) => {
-            Ok(string_cost(data.data.len()))
-        }
+        Value::Sequence(SequenceData::String(CharType::UTF8(data))) => string_cost(data.data.len()),
         Value::Sequence(SequenceData::String(CharType::ASCII(data))) => {
-            Ok(string_cost(data.data.len()))
+            string_cost(data.data.len())
         }
-        _ => Ok(StaticCost::ZERO),
+        _ => StaticCost::ZERO,
     }
 }
 
@@ -103,7 +103,7 @@ fn add_lookup_cost(mut cost: ExecutionCost, epoch: StacksEpochId) -> ExecutionCo
     let lookup_cost = ClarityCostFunction::LookupFunction
         .eval_for_epoch(0, epoch)
         .unwrap_or(ExecutionCost::ZERO);
-    cost.add(&lookup_cost).ok();
+    saturating_add_cost(&mut cost, &lookup_cost);
     cost
 }
 
@@ -114,12 +114,21 @@ pub(crate) fn calculate_function_cost_from_native_function(
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
     env: Option<&clarity::vm::contexts::Environment>,
-) -> Result<StaticCost, String> {
+) -> Result<StaticCost, StaticCostError> {
     // Derive clarity_version from epoch for lookup_reserved_functions
     let clarity_version = ClarityVersion::default_for_epoch(epoch);
 
     // Handle Equals specially - it uses cost_input_sized_vararg which sums serialized sizes
-    if native_function == NativeFunctions::Equals {
+    // Handle hash functions specially - cost depends on input byte size, not arg count
+    if matches!(
+        native_function,
+        NativeFunctions::Equals
+            | NativeFunctions::Hash160
+            | NativeFunctions::Sha256
+            | NativeFunctions::Sha512
+            | NativeFunctions::Sha512Trunc256
+            | NativeFunctions::Keccak256
+    ) {
         let cost = get_cost_for_special_function(native_function, args, epoch, user_args, env);
         let cost_with_lookup_min = add_lookup_cost(cost.min.clone(), epoch);
         let cost_with_lookup_max = add_lookup_cost(cost.max.clone(), epoch);
@@ -133,7 +142,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
         Some(CallableType::NativeFunction(_, _, cost_fn)) => {
             let cost = cost_fn
                 .eval_for_epoch(arg_count, epoch)
-                .map_err(|e| format!("Cost calculation error: {:?}", e))?;
+                .map_err(|e| StaticCostError::CostCalculation(format!("{e:?}")))?;
             let cost_with_lookup = add_lookup_cost(cost, epoch);
             Ok(StaticCost {
                 min: cost_with_lookup.clone(),
@@ -143,7 +152,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
         Some(CallableType::NativeFunction205(_, _, cost_fn, _)) => {
             let cost = cost_fn
                 .eval_for_epoch(arg_count, epoch)
-                .map_err(|e| format!("Cost calculation error: {:?}", e))?;
+                .map_err(|e| StaticCostError::CostCalculation(format!("{e:?}")))?;
             let cost_with_lookup = add_lookup_cost(cost, epoch);
             Ok(StaticCost {
                 min: cost_with_lookup.clone(),
@@ -182,7 +191,7 @@ pub(crate) fn calculate_total_cost_with_summing(node: &CostAnalysisNode) -> Summ
         summing
     } else {
         // Node has fixed cost, use single path
-        SummingExecutionCost::from_single(node.cost.min.clone())
+        SummingExecutionCost::from(node.cost.min.clone())
     };
 
     for child in &node.children {
@@ -193,7 +202,7 @@ pub(crate) fn calculate_total_cost_with_summing(node: &CostAnalysisNode) -> Summ
         for current_path in current_paths {
             for child_path in &child_summing.costs {
                 let mut combined_path = current_path.clone();
-                let _ = combined_path.add(child_path);
+                saturating_add_cost(&mut combined_path, child_path);
                 summing_cost.add_cost(combined_path);
             }
         }
@@ -219,7 +228,7 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
 
                     // Add the root cost + condition cost to each branch
                     let mut root_and_condition = node.cost.min.clone();
-                    let _ = root_and_condition.add(&condition_total);
+                    saturating_add_cost(&mut root_and_condition, &condition_total);
 
                     for child_cost_node in node.children.iter().skip(1) {
                         let branch_cost = calculate_total_cost_with_summing(child_cost_node);
@@ -227,7 +236,7 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                         // This preserves all branch paths so we can correctly compute min/max
                         for branch_path in &branch_cost.costs {
                             let mut path_cost = root_and_condition.clone();
-                            let _ = path_cost.add(branch_path);
+                            saturating_add_cost(&mut path_cost, branch_path);
                             summing_cost.add_cost(path_cost);
                         }
                     }
@@ -239,7 +248,7 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                 for child_cost_node in &node.children {
                     let child_summing = calculate_total_cost_with_summing(child_cost_node);
                     let combined_cost = child_summing.add_all();
-                    let _ = total_cost.add(&combined_cost);
+                    saturating_add_cost(&mut total_cost, &combined_cost);
                 }
                 summing_cost.add_cost(total_cost);
             }
@@ -267,51 +276,31 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                 let asserts_full_summing = calculate_total_cost_with_summing(child_cost_node);
                 let asserts_full_static: StaticCost = asserts_full_summing.into();
                 let mut fail_min = total_cost_min.clone();
-                let _ = fail_min.add(&asserts_full_static.min);
+                saturating_add_cost(&mut fail_min, &asserts_full_static.min);
                 terminated_paths.push(fail_min);
                 let mut fail_max = total_cost_max.clone();
-                let _ = fail_max.add(&asserts_full_static.max);
+                saturating_add_cost(&mut fail_max, &asserts_full_static.max);
                 terminated_paths.push(fail_max);
 
                 // "Succeed" path: asserts_node_cost + condition cost only (error is not evaluated).
                 // Update total_cost so remaining siblings are added on top.
-                let _ = total_cost_min.add(&child_cost_node.cost.min);
-                let _ = total_cost_max.add(&child_cost_node.cost.max);
+                saturating_add_cost(&mut total_cost_min, &child_cost_node.cost.min);
+                saturating_add_cost(&mut total_cost_max, &child_cost_node.cost.max);
                 if let Some(condition_node) = child_cost_node.children.first() {
                     let cond_summing = calculate_total_cost_with_summing(condition_node);
                     let cond_static: StaticCost = cond_summing.into();
-                    let _ = total_cost_min.add(&cond_static.min);
-                    let _ = total_cost_max.add(&cond_static.max);
+                    saturating_add_cost(&mut total_cost_min, &cond_static.min);
+                    saturating_add_cost(&mut total_cost_max, &cond_static.max);
                 }
             } else {
-                // Recursively call calculate_total_cost_with_branching on children
-                // so that branching children (like If) are handled correctly
+                // Recursively process children (which may themselves be branching).
+                // Branching children (If/Match) produce a range of costs; we fold
+                // their min/max into total_cost_min/max so that subsequent siblings
+                // are added on top of the full accumulated cost.
                 let child_summing = calculate_total_cost_with_branching(child_cost_node);
-
-                if is_node_branching(child_cost_node) {
-                    // For branching children, preserve all paths by combining each path
-                    // with both min and max node costs
-                    for child_path_cost in &child_summing.costs {
-                        // Create paths with node min cost
-                        let mut combined_path_min = total_cost_min.clone();
-                        let _ = combined_path_min.add(child_path_cost);
-                        summing_cost.add_cost(combined_path_min);
-
-                        // Create paths with node max cost
-                        let mut combined_path_max = total_cost_max.clone();
-                        let _ = combined_path_max.add(child_path_cost);
-                        summing_cost.add_cost(combined_path_max);
-                    }
-                    // Update total_cost to the max child path for sequential addition with remaining children
-                    let child_static_cost: StaticCost = child_summing.into();
-                    let _ = total_cost_min.add(&child_static_cost.min);
-                    let _ = total_cost_max.add(&child_static_cost.max);
-                } else {
-                    // For non-branching children, add sequentially using their min/max
-                    let child_static_cost: StaticCost = child_summing.into();
-                    let _ = total_cost_min.add(&child_static_cost.min);
-                    let _ = total_cost_max.add(&child_static_cost.max);
-                }
+                let child_static_cost: StaticCost = child_summing.into();
+                saturating_add_cost(&mut total_cost_min, &child_static_cost.min);
+                saturating_add_cost(&mut total_cost_max, &child_static_cost.max);
             }
         }
 
@@ -321,12 +310,10 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
             summing_cost.add_cost(path);
         }
 
-        // Always add the succeed path (total_cost after all children have been processed).
-        // When there are no asserts!/branching children this is the only path.
-        // When there are asserts! children, total_cost represents the path where all
+        // Add the succeed path: total_cost after all children have been processed.
+        // When there are no asserts! children this is the only path.
+        // When there are asserts! children, this represents the path where all
         // assertions passed and all siblings were evaluated.
-        // When there are If/Match children, total_cost == their min/max, which is
-        // already represented in summing_cost — adding it again is harmless.
         summing_cost.add_cost(total_cost_min);
         summing_cost.add_cost(total_cost_max);
     }

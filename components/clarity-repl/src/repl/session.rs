@@ -15,6 +15,7 @@ use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIden
 use clarity_types::Value;
 use colored::Colorize;
 use comfy_table::Table;
+use serde::Serialize;
 
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
@@ -1696,9 +1697,7 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
-
+        let settings = SessionSettings::default();
         let mut session = Session::new(settings);
 
         session.handle_command("::set_epoch 2.5");

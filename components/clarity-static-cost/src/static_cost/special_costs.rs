@@ -16,7 +16,6 @@ const TUPLE_FIELD_OVERHEAD_BYTES: u64 = 2;
 
 /// Get the serialized size of a reserved variable based on its type
 fn get_reserved_variable_size(native_var: NativeVariables) -> Option<(u64, u64)> {
-    use clarity::vm::variables::NativeVariables;
     match native_var {
         NativeVariables::TxSender
         | NativeVariables::ContractCaller
@@ -24,7 +23,8 @@ fn get_reserved_variable_size(native_var: NativeVariables) -> Option<(u64, u64)>
             // Reserved variables are always standard principals (not contract principals)
             // Standard principal serializes as: 1 byte version + 20 bytes hash = 21 bytes
             // TypeSignature::PrincipalType.min_size() returns 20 (hash part), add 1 for version byte
-            let principal_min = TypeSignature::PrincipalType.min_size().unwrap_or(20) as u64 + 1;
+            let principal_min =
+                u64::from(TypeSignature::PrincipalType.min_size().unwrap_or(20)) + 1;
             // Since reserved variables are always standard principals, min and max are the same
             Some((principal_min, principal_min))
         }
@@ -36,12 +36,12 @@ fn get_reserved_variable_size(native_var: NativeVariables) -> Option<(u64, u64)>
         | NativeVariables::ChainId
         | NativeVariables::StacksBlockTime => {
             // UIntType has the same min and max size
-            let uint_size = TypeSignature::UIntType.size().unwrap_or(16) as u64;
+            let uint_size = u64::from(TypeSignature::UIntType.size().unwrap_or(16));
             Some((uint_size, uint_size))
         }
         NativeVariables::NativeTrue | NativeVariables::NativeFalse => {
             // BoolType has the same min and max size
-            let bool_size = TypeSignature::BoolType.size().unwrap_or(1) as u64;
+            let bool_size = u64::from(TypeSignature::BoolType.size().unwrap_or(1));
             Some((bool_size, bool_size))
         }
         _ => None,
@@ -55,7 +55,6 @@ fn infer_field_type_from_binding(
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
 ) -> Option<TypeSignature> {
-    use clarity::vm::variables::NativeVariables;
     if binding_pair.len() != 2 {
         return None;
     }
@@ -145,8 +144,8 @@ fn infer_tuple_size_from_expression(
                             infer_field_type_from_binding(binding_pair, epoch, user_args)
                         {
                             // Use TypeSignature min_size and max_size
-                            let field_min = field_type.min_size().unwrap_or(0) as u64;
-                            let field_max = field_type.size().unwrap_or(0) as u64;
+                            let field_min = u64::from(field_type.min_size().unwrap_or(0));
+                            let field_max = u64::from(field_type.size().unwrap_or(0));
                             tuple_min_size = tuple_min_size
                                 .saturating_add(field_min)
                                 .saturating_add(name_len);
@@ -159,7 +158,7 @@ fn infer_tuple_size_from_expression(
                         {
                             // Fallback: use literal value size
                             if let Ok(size) = literal_value.size() {
-                                let s = size as u64;
+                                let s = u64::from(size);
                                 tuple_min_size =
                                     tuple_min_size.saturating_add(s).saturating_add(name_len);
                                 tuple_max_size =
@@ -176,49 +175,86 @@ fn infer_tuple_size_from_expression(
             if let Ok(expr_type) =
                 super::cost_analysis::infer_type_from_expression(tuple_expr, epoch)
             {
-                let expr_min = expr_type.min_size().unwrap_or(0) as u64;
-                let expr_max = expr_type.size().unwrap_or(0) as u64;
+                let expr_min = u64::from(expr_type.min_size().unwrap_or(0));
+                let expr_max = u64::from(expr_type.size().unwrap_or(0));
                 return (expr_min, expr_max);
             }
         }
     }
 
-    // fallback, try literal value size
+    // Try atom (variable reference) via user_args
+    if let Some(atom_name) = tuple_expr.match_atom() {
+        if let Some(type_sig) = user_args.and_then(|ua| ua.get_argument_type(atom_name)) {
+            let min = u64::from(type_sig.min_size().unwrap_or(0));
+            let max = u64::from(type_sig.size().unwrap_or(0));
+            return (min, max);
+        }
+    }
+
+    // Fallback: try literal value size
     if let Some(literal_value) = tuple_expr
         .match_atom_value()
         .or_else(|| tuple_expr.match_literal_value())
     {
         if let Ok(size) = literal_value.size() {
-            let s = size as u64;
+            let s = u64::from(size);
             return (s, s);
         }
     }
 
+    // No size could be determined from the expression alone.
+    // Callers that have map_types in UserArgumentsContext will use the declared
+    // map type before reaching this fallback, so returning (0, 0) here only
+    // affects calls without that context (e.g. FetchEntry, which accepts any key).
+    eprintln!(
+        "Warning: inference failed for tuple expression `{}`",
+        tuple_expr
+    );
     (0, 0)
 }
 
-/// Get min/max serialized sizes from an argument expression
-/// Checks literal values, user arguments, and reserved variables
+/// Get min/max sizes from an argument expression.
+/// When `serialized` is true, uses `Value::serialized_size()` /
+/// `TypeSignature::max_serialized_size()` (includes consensus type-prefix byte),
+/// matching runtime cost functions like hashes and IndexOf (Basically aanything that uses `cost_input_sized_vararg`)
 fn get_argument_sizes(
     arg: &SymbolicExpression,
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
+    serialized: bool,
 ) -> (Option<u64>, Option<u64>) {
     // Try literal value first
     if let Some(value) = arg.match_atom_value().or_else(|| arg.match_literal_value()) {
-        if let Ok(size) = value.size() {
-            let s = size as u64;
-            return (Some(s), Some(s));
+        let result = if serialized {
+            value.serialized_size().map_err(|e| format!("{e}"))
+        } else {
+            value.size().map_err(|e| format!("{e}"))
+        };
+        match result {
+            Ok(size) => {
+                let s = u64::from(size);
+                return (Some(s), Some(s));
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to compute size for `{value}`: {e}");
+            }
         }
     }
 
     // Try variable name
     if let Some(var_name) = arg.match_atom() {
-        // Try to get type from user_args and use min_size/max_size
         if let Some(type_sig) = user_args.and_then(|ua| ua.get_argument_type(var_name)) {
-            let min = type_sig.min_size().ok().map(|s| s as u64);
-            let max = type_sig.size().ok().map(|s| s as u64);
-            return (min, max);
+            let min = type_sig.min_size().map(u64::from).unwrap_or(0);
+            let max = if serialized {
+                type_sig
+                    .max_serialized_size()
+                    .ok()
+                    .map(u64::from)
+                    .unwrap_or(0)
+            } else {
+                type_sig.size().map(u64::from).unwrap_or(0)
+            };
+            return (Some(min), Some(max));
         }
 
         // Try reserved variables
@@ -233,6 +269,36 @@ fn get_argument_sizes(
     }
 
     (None, None)
+}
+
+/// Resolve the TypeSignature of a data variable from its name in args.
+fn resolve_data_var_type<'a>(
+    args: &[SymbolicExpression],
+    user_args: Option<&'a UserArgumentsContext>,
+) -> Option<&'a TypeSignature> {
+    let var_name = args.first().and_then(|arg| arg.match_atom())?;
+    user_args?.get_data_var_type(var_name)
+}
+
+/// Resolve key and value TypeSignatures for a map, trying environment first then user context.
+fn resolve_map_types(
+    args: &[SymbolicExpression],
+    env: Option<&clarity::vm::contexts::Environment>,
+    user_args: Option<&UserArgumentsContext>,
+) -> Option<(TypeSignature, TypeSignature)> {
+    let map_name = args.first().and_then(|arg| arg.match_atom())?;
+
+    // Try environment first
+    if let Some(map_metadata) = env.and_then(|e| e.contract_context.meta_data_map.get(map_name)) {
+        return Some((
+            map_metadata.key_type.clone(),
+            map_metadata.value_type.clone(),
+        ));
+    }
+
+    // Fallback to user_args
+    let (key_type, value_type) = user_args?.get_map_type(map_name)?;
+    Some((key_type.clone(), value_type.clone()))
 }
 
 pub fn get_cost_for_special_function(
@@ -260,13 +326,8 @@ pub fn get_cost_for_special_function(
             }
         }
         NativeFunctions::TupleCons => {
-            // TupleCons cost is based on the number of bindings (tuple fields)
-            // Extract the binding list length from args[0] which should be a list of bindings
-            let binding_len = args
-                .first()
-                .and_then(|e| e.match_list())
-                .map(|binding_list| binding_list.len() as u64)
-                .unwrap_or(args.len() as u64);
+            // TupleCons cost is based on the number of fields (arguments)
+            let binding_len = args.len() as u64;
             let cost = ClarityCostFunction::TupleCons
                 .eval_for_epoch(binding_len, epoch)
                 .unwrap_or(ExecutionCost::ZERO);
@@ -324,27 +385,9 @@ pub fn get_cost_for_special_function(
                 max: cost,
             }
         }
-        NativeFunctions::FetchVar => {
-            let cost = cost_fetch_var(args, epoch);
-            StaticCost {
-                min: cost.clone(),
-                max: cost,
-            }
-        }
-        NativeFunctions::SetVar => {
-            let cost = cost_set_var(args, epoch);
-            StaticCost {
-                min: cost.clone(),
-                max: cost,
-            }
-        }
-        NativeFunctions::FetchEntry => {
-            let cost = cost_fetch_entry(args, epoch);
-            StaticCost {
-                min: cost.clone(),
-                max: cost,
-            }
-        }
+        NativeFunctions::FetchVar => cost_fetch_var(args, epoch, user_args),
+        NativeFunctions::SetVar => cost_set_var(args, epoch, user_args),
+        NativeFunctions::FetchEntry => cost_fetch_entry(args, epoch, env, user_args),
         NativeFunctions::SetEntry => cost_set_entry(args, epoch, env, user_args),
         NativeFunctions::InsertEntry => cost_insert_entry(args, epoch, env, user_args),
         NativeFunctions::DeleteEntry => cost_delete_entry(args, epoch, env, user_args),
@@ -367,15 +410,40 @@ pub fn get_cost_for_special_function(
         | NativeFunctions::CmpGreater
         | NativeFunctions::CmpLess => cost_comparison(native_function, args, epoch, user_args),
         NativeFunctions::Equals => cost_equals(args, epoch, user_args),
-        NativeFunctions::MintAsset => {
-            let cost = cost_mint_asset(args, epoch);
+        NativeFunctions::MintAsset => cost_mint_asset(args, epoch, user_args),
+        NativeFunctions::Hash160
+        | NativeFunctions::Sha256
+        | NativeFunctions::Sha512
+        | NativeFunctions::Sha512Trunc256
+        | NativeFunctions::Keccak256 => {
+            let cost_fn = from_native_function(native_function);
+            let (min_size, max_size) = args
+                .first()
+                .map(|arg| get_argument_sizes(arg, epoch, user_args, true))
+                .unwrap_or((None, None));
+            let fallback = u64::try_from(args.len()).unwrap_or(0);
+            let min_size = min_size.unwrap_or(fallback);
+            let max_size = max_size.unwrap_or(fallback);
+            let min_cost = cost_fn
+                .eval_for_epoch(min_size, epoch)
+                .unwrap_or(ExecutionCost::ZERO);
+            let max_cost = cost_fn
+                .eval_for_epoch(max_size, epoch)
+                .unwrap_or(ExecutionCost::ZERO);
             StaticCost {
-                min: cost.clone(),
-                max: cost,
+                min: min_cost,
+                max: max_cost,
             }
         }
         native_function => {
-            let cost = from_native_function(native_function)
+            let cost_fn = from_native_function(native_function);
+            if matches!(cost_fn, ClarityCostFunction::Unimplemented) {
+                eprintln!(
+                    "warning: no cost function implemented for {native_function:?}, using zero cost",
+                );
+                return StaticCost::ZERO;
+            }
+            let cost = cost_fn
                 .eval_for_epoch(args.len() as u64, epoch)
                 .unwrap_or(ExecutionCost::ZERO);
             StaticCost {
@@ -418,7 +486,7 @@ pub fn contract_call_cost(args: &[SymbolicExpression], epoch: StacksEpochId) -> 
                 // Calculate the size of the value
                 // Value::size() returns u32, so we convert to u64
                 if let Ok(size) = value.size() {
-                    total_size = total_size.saturating_add(size as u64);
+                    total_size = total_size.saturating_add(u64::from(size));
                 }
             }
         }
@@ -446,7 +514,7 @@ pub fn cost_list_cons(args: &[SymbolicExpression], epoch: StacksEpochId) -> Exec
     for arg in args {
         if let Some(value) = arg.match_atom_value().or_else(|| arg.match_literal_value()) {
             if let Ok(size) = value.size() {
-                total_size = total_size.saturating_add(size as u64);
+                total_size = total_size.saturating_add(u64::from(size));
             }
         }
     }
@@ -485,8 +553,8 @@ pub fn cost_append(args: &[SymbolicExpression], epoch: StacksEpochId) -> Executi
                 .and_then(|arg| arg.match_atom_value().or_else(|| arg.match_literal_value()))
                 .and_then(|elem_value| {
                     // Try to get sizes from values
-                    let seq_size = seq_value.size().ok()? as u64;
-                    let elem_size = elem_value.size().ok()? as u64;
+                    let seq_size = u64::from(seq_value.size().ok()?);
+                    let elem_size = u64::from(elem_value.size().ok()?);
                     Some(std::cmp::max(seq_size, elem_size))
                 })
         })
@@ -524,8 +592,8 @@ pub fn cost_concat(args: &[SymbolicExpression], epoch: StacksEpochId) -> Executi
                 args.get(1)
                     .and_then(|arg| arg.match_atom_value().or_else(|| arg.match_literal_value()))
                     .and_then(|seq2| {
-                        let size1 = seq1.size().ok()? as u64;
-                        let size2 = seq2.size().ok()? as u64;
+                        let size1 = u64::from(seq1.size().ok()?);
+                        let size2 = u64::from(seq2.size().ok()?);
                         size1.checked_add(size2)
                     })
             })
@@ -556,7 +624,7 @@ pub fn cost_slice(args: &[SymbolicExpression], epoch: StacksEpochId) -> Executio
                             {
                                 if right >= left {
                                     let slice_len = (right - left) as u64;
-                                    let elem_size = seq.element_size().ok()? as u64;
+                                    let elem_size = u64::from(seq.element_size().ok()?);
                                     Some(slice_len * elem_size)
                                 } else {
                                     Some(0)
@@ -581,7 +649,7 @@ pub fn cost_replace_at(args: &[SymbolicExpression], epoch: StacksEpochId) -> Exe
         .and_then(|seq_val| {
             if let Value::Sequence(seq) = seq_val {
                 // Try to get element size from sequence
-                seq.element_size().ok().map(|s| s as u64)
+                seq.element_size().ok().map(u64::from)
             } else {
                 None
             }
@@ -592,29 +660,107 @@ pub fn cost_replace_at(args: &[SymbolicExpression], epoch: StacksEpochId) -> Exe
         .unwrap_or(ExecutionCost::ZERO)
 }
 
-// FetchVar cost is epoch-dependent: v200 uses type size, v205 uses actual result size
-// TODO
-pub fn cost_fetch_var(_args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
-    ClarityCostFunction::FetchVar
-        .eval_for_epoch(0, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+// FetchVar cost uses the serialized size of the stored variable's value type.
+pub fn cost_fetch_var(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    user_args: Option<&UserArgumentsContext>,
+) -> StaticCost {
+    let (min_size, max_size) = resolve_data_var_type(args, user_args)
+        .map(|type_sig| {
+            let min = u64::from(type_sig.min_size().unwrap_or(0));
+            let max = type_sig
+                .max_serialized_size()
+                .ok()
+                .map(u64::from)
+                .unwrap_or(0);
+            (min, max)
+        })
+        .unwrap_or((0, 0));
+
+    let min_cost = ClarityCostFunction::FetchVar
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::FetchVar
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }
 
-// SetVar cost is epoch-dependent and uses result size
-// TODO
-pub fn cost_set_var(_args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
-    ClarityCostFunction::SetVar
-        .eval_for_epoch(0, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+// SetVar cost uses the serialized size of the variable's value type.
+// Runtime charges based on serialized_byte_len of the stored value (includes type prefix).
+pub fn cost_set_var(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    user_args: Option<&UserArgumentsContext>,
+) -> StaticCost {
+    // SetVar args: [var-name, value]
+    let (min_size, max_size) = resolve_data_var_type(args, user_args)
+        .map(|type_sig| {
+            let min = u64::from(type_sig.min_size().unwrap_or(0));
+            let max = type_sig
+                .max_serialized_size()
+                .ok()
+                .map(u64::from)
+                .unwrap_or(0);
+            (min, max)
+        })
+        .unwrap_or((0, 0));
+
+    let min_cost = ClarityCostFunction::SetVar
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::SetVar
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }
 
-// FetchEntry cost is epoch-dependent and uses result size
-// TODO
-pub fn cost_fetch_entry(_args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
-    // Static analysis can't determine actual stored size, so we use 0 as fallback
-    ClarityCostFunction::FetchEntry
-        .eval_for_epoch(0, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+// FetchEntry cost uses the serialized sizes of the map's key and value types.
+// Runtime charges based on serialized_byte_len of the result:
+//   key not found → key_serialized_size only
+//   key found     → key_serialized_size + value_serialized_size
+pub fn cost_fetch_entry(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    env: Option<&clarity::vm::contexts::Environment>,
+    user_args: Option<&UserArgumentsContext>,
+) -> StaticCost {
+    // FetchEntry args: [map-name, key]
+    let (min_size, max_size) = resolve_map_types(args, env, user_args)
+        .map(|(key_type, value_type)| {
+            // min: key not found case, only key size charged
+            let min = u64::from(key_type.min_size().unwrap_or(0));
+            // max: key found case, key + Optional(value) sizes charged
+            let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
+            let value_max = TypeSignature::new_option(value_type)
+                .ok()
+                .and_then(|t| t.max_serialized_size().ok())
+                .map(u64::from)
+                .unwrap_or(0);
+            (min, key_max.saturating_add(value_max))
+        })
+        .unwrap_or((0, 0));
+
+    let min_cost = ClarityCostFunction::FetchEntry
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::FetchEntry
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }
 
 // SetEntry cost is epoch-dependent and uses result size
@@ -626,43 +772,36 @@ pub fn cost_set_entry(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // SetEntry args: [map-name, key, value]
-    // For epoch 3.3+, cost is based on serialized entry size
-    // We calculate min/max from TypeSignature sizes
-
-    let mut min_size = 0u64;
-    let mut max_size = 0u64;
-
-    if args.len() >= 3 {
-        // Try to get map types from contract context (doesn't require mutable access)
-        if let Some(environment) = env {
-            if let Some(map_name) = args[0].match_atom() {
-                // Get map metadata from contract context
-                if let Some(map_metadata) = environment.contract_context.meta_data_map.get(map_name)
-                {
-                    let key_type = &map_metadata.key_type;
-                    let value_type = &map_metadata.value_type;
-                    // Use TypeSignature min_size and max_size for accurate ranges
-                    let key_min = key_type.min_size().unwrap_or(0) as u64;
-                    let key_max = key_type.size().unwrap_or(0) as u64;
-                    let value_min = value_type.min_size().unwrap_or(0) as u64;
-                    let value_max = value_type.size().unwrap_or(0) as u64;
-                    min_size = key_min + value_min;
-                    max_size = key_max + value_max;
-                }
-            }
-        }
-
-        // Fallback: infer types from tuple bindings and use TypeSignature sizes
-        if min_size == 0 && max_size == 0 {
-            // Infer sizes from key and value tuple expressions
-            let (key_min, key_max) = infer_tuple_size_from_expression(&args[1], epoch, user_args);
-            let (value_min, value_max) =
-                infer_tuple_size_from_expression(&args[2], epoch, user_args);
-
-            min_size = key_min + value_min;
-            max_size = key_max + value_max;
-        }
-    }
+    let (min_size, max_size) = if args.len() >= 3 {
+        resolve_map_types(args, env, user_args)
+            .map(|(key_type, value_type)| {
+                let key_min = u64::from(key_type.min_size().unwrap_or(0));
+                let key_max = u64::from(key_type.max_serialized_size().unwrap_or(0));
+                let value_min = u64::from(value_type.min_size().unwrap_or(0));
+                let value_max = TypeSignature::new_option(value_type)
+                    .ok()
+                    .and_then(|t| t.max_serialized_size().ok())
+                    .map(u64::from)
+                    .unwrap_or(0);
+                (
+                    key_min.saturating_add(value_min),
+                    key_max.saturating_add(value_max),
+                )
+            })
+            .unwrap_or_else(|| {
+                // Last resort: infer types from the key/value expressions themselves
+                let (key_min, key_max) =
+                    infer_tuple_size_from_expression(&args[1], epoch, user_args);
+                let (value_min, value_max) =
+                    infer_tuple_size_from_expression(&args[2], epoch, user_args);
+                (
+                    key_min.saturating_add(value_min),
+                    key_max.saturating_add(value_max),
+                )
+            })
+    } else {
+        (0, 0)
+    };
 
     let min_cost = ClarityCostFunction::SetEntry
         .eval_for_epoch(min_size, epoch)
@@ -706,7 +845,7 @@ pub fn cost_print(args: &[SymbolicExpression], epoch: StacksEpochId) -> Executio
     let size = args
         .first()
         .and_then(|arg| arg.match_atom_value().or_else(|| arg.match_literal_value()))
-        .and_then(|value| value.size().ok().map(|s| s as u64))
+        .and_then(|value| value.size().ok().map(u64::from))
         .unwrap_or(0);
     ClarityCostFunction::Print
         .eval_for_epoch(size, epoch)
@@ -718,7 +857,7 @@ pub fn cost_to_ascii(args: &[SymbolicExpression], epoch: StacksEpochId) -> Execu
     let size = args
         .first()
         .and_then(|arg| arg.match_atom_value().or_else(|| arg.match_literal_value()))
-        .and_then(|value| value.size().ok().map(|s| s as u64))
+        .and_then(|value| value.size().ok().map(u64::from))
         .unwrap_or(0);
     ClarityCostFunction::ToAscii
         .eval_for_epoch(size, epoch)
@@ -752,11 +891,11 @@ pub fn cost_comparison(
         // Try to get min/max sizes from literal values first, then from variable types
         let (min_a, max_a) = args
             .first()
-            .map(|arg| get_argument_sizes(arg, epoch, user_args))
+            .map(|arg| get_argument_sizes(arg, epoch, user_args, false))
             .unwrap_or((None, None));
         let (min_b, max_b) = args
             .get(1)
-            .map(|arg| get_argument_sizes(arg, epoch, user_args))
+            .map(|arg| get_argument_sizes(arg, epoch, user_args, false))
             .unwrap_or((None, None));
 
         // For v2, cost is based on min(a.size(), b.size())
@@ -795,8 +934,7 @@ pub fn cost_comparison(
     }
 }
 
-// Equals cost is epoch-dependent and uses sum of all argument sizes
-// For static analysis, we calculate min/max sizes from TypeSignature
+// Equals cost uses sum of all argument serialized sizes (via cost_input_sized_vararg)
 pub fn cost_equals(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
@@ -805,19 +943,22 @@ pub fn cost_equals(
     // Sum all argument sizes (min and max separately)
     let mut total_min_size = 0u64;
     let mut total_max_size = 0u64;
+    let mut any_resolved = false;
 
     for arg in args.iter() {
-        let (min_size, max_size) = get_argument_sizes(arg, epoch, user_args);
+        let (min_size, max_size) = get_argument_sizes(arg, epoch, user_args, true);
         if let Some(min) = min_size {
             total_min_size = total_min_size.saturating_add(min);
+            any_resolved = true;
         }
         if let Some(max) = max_size {
             total_max_size = total_max_size.saturating_add(max);
+            any_resolved = true;
         }
     }
 
-    // Fallback to args.len() if we couldn't determine sizes
-    if total_min_size == 0 && total_max_size == 0 {
+    // Fallback to args.len() if we couldn't determine any sizes
+    if !any_resolved {
         let size = args.len() as u64;
         total_min_size = size;
         total_max_size = size;
@@ -836,14 +977,30 @@ pub fn cost_equals(
     }
 }
 
-// MintAsset cost is based on asset_size
-pub fn cost_mint_asset(args: &[SymbolicExpression], epoch: StacksEpochId) -> ExecutionCost {
-    let size = args
-        .get(2)
-        .and_then(|arg| arg.match_atom_value().or_else(|| arg.match_literal_value()))
-        .and_then(|asset_value| asset_value.size().ok().map(|s| s as u64))
-        .unwrap_or(0);
-    ClarityCostFunction::NftMint
-        .eval_for_epoch(size, epoch)
-        .unwrap_or(ExecutionCost::ZERO)
+// MintAsset cost is based on asset identifier size.
+// args layout (function name already stripped): [asset-class, asset-identifier, recipient]
+pub fn cost_mint_asset(
+    args: &[SymbolicExpression],
+    epoch: StacksEpochId,
+    user_args: Option<&UserArgumentsContext>,
+) -> StaticCost {
+    let (min_size, max_size) = args
+        .get(1)
+        .map(|arg| get_argument_sizes(arg, epoch, user_args, true))
+        .unwrap_or((None, None));
+
+    let min_size = min_size.unwrap_or(0);
+    let max_size = max_size.unwrap_or(min_size);
+
+    let min_cost = ClarityCostFunction::NftMint
+        .eval_for_epoch(min_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    let max_cost = ClarityCostFunction::NftMint
+        .eval_for_epoch(max_size, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+
+    StaticCost {
+        min: min_cost,
+        max: max_cost,
+    }
 }

@@ -12,7 +12,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "license": "GPL-3.0-only",
-  "version": "3.14.0",
+  "version": "3.14.1",
   "private": true,
   "workspaces": [
     "client",
@@ -127,9 +127,9 @@
           },
           "clarity-lsp.staticCostAnalysis": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "order": 0,
-            "description": "Show static cost analysis (runtime, read/write counts) as code lens above function definitions."
+            "description": "Show static cost analysis (runtime, read/write counts) above function definitions."
           },
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",

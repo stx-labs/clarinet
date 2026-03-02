@@ -5,6 +5,7 @@ edition = "2021"
 description = "Static cost analysis for Clarity smart contracts"
 
 [dependencies]
+thiserror = "2"
 clarity = { workspace = true, default-features = false, features = [
     "developer-mode",
     "devtools",
@@ -13,9 +14,14 @@ clarity-types = { workspace = true }
 stacks-common = { workspace = true, default-features = false }
 
 [dev-dependencies]
-clarity = { workspace = true, default-features = false, features = ["testing"] }
+clarity = { workspace = true, default-features = false, features = [
+    "developer-mode",
+    "devtools",
+    "testing",
+] }
 stackslib = { workspace = true, default-features = false }
-rstest = "0.21"
+rstest = "0.26.1"
+indoc = { workspace = true }
 
 [lib]
 name = "clarity_static_cost"

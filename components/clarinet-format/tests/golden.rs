@@ -47,7 +47,7 @@ fn format_file_with_metadata(source: &str) -> String {
 
     let real_source = lines.collect::<Vec<&str>>().join("\n");
     let formatter = ClarityFormatter::new(settings);
-    formatter.format_file(&real_source)
+    formatter.format_file(&real_source, None)
 }
 #[test]
 fn test_irl_contracts() {

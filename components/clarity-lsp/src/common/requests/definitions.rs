@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use clarity::vm::ClarityVersion;
-use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};
 use clarity_repl::clarity::functions::define::DefineFunctions;
 use clarity_repl::clarity::vm::types::{
     QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
@@ -519,30 +519,19 @@ impl<'a> ASTVisitor<'a> for Definitions {
     fn traverse_let(
         &mut self,
         expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        bindings: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        let local_scope = || -> Option<HashMap<ClarityName, Range>> {
-            let mut result = HashMap::new();
-
-            let binding_exprs = expr.match_list()?.get(1)?.match_list()?;
-            for binding in binding_exprs {
-                if let Some(name) = binding
-                    .match_list()
-                    .and_then(|l| l.split_first())
-                    .and_then(|(name, _)| name.match_atom())
-                {
-                    result.insert(name.to_owned(), span_to_range(&binding.span));
-                }
-            }
-            Some(result)
-        };
-        if let Some(local_scope) = local_scope() {
+        let local_scope: HashMap<ClarityName, Range> = bindings
+            .iter()
+            .map(|(name, binding)| ((*name).clone(), span_to_range(&binding.name_span)))
+            .collect();
+        if !local_scope.is_empty() {
             self.local.insert(expr.id, local_scope);
         }
 
         for binding in bindings.values() {
-            if !self.traverse_expr(binding) {
+            if !self.traverse_expr(binding.value) {
                 return false;
             }
         }
@@ -742,7 +731,7 @@ mod definitions_visitor_tests {
         assert_eq!(tokens.keys().next(), Some(&(1, 22)));
         assert_eq!(
             tokens.values().next(),
-            Some(&DefinitionLocation::Internal(new_range(0, 6, 0, 15)))
+            Some(&DefinitionLocation::Internal(new_range(0, 7, 0, 11)))
         );
     }
 

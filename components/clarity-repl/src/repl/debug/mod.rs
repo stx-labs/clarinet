@@ -11,6 +11,7 @@ use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{eval, ClarityVersion, ContractName, SymbolicExpressionType};
 use clarity_types::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity_types::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::repl::diagnostic::output_diagnostic;
 

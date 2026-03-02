@@ -24,6 +24,7 @@ impl ClarityCostFunctionExt for ClarityCostFunction {
         epoch: StacksEpochId,
     ) -> Result<ExecutionCost, VmExecutionError> {
         match epoch {
+            StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
             StacksEpochId::Epoch20 => self.eval::<Costs1>(n),
             StacksEpochId::Epoch2_05 => self.eval::<Costs2>(n),
             StacksEpochId::Epoch21
@@ -36,7 +37,6 @@ impl ClarityCostFunctionExt for ClarityCostFunction {
             | StacksEpochId::Epoch32 => self.eval::<Costs3>(n),
             StacksEpochId::Epoch33 => self.eval::<Costs4>(n),
             StacksEpochId::Epoch34 => self.eval::<Costs4>(n),
-            StacksEpochId::Epoch10 => self.eval::<Costs1>(n),
         }
     }
 }
@@ -148,7 +148,7 @@ pub fn from_native_function(native_function: NativeFunctions) -> ClarityCostFunc
         NativeFunctions::BurnAsset => ClarityCostFunction::NftBurn,
         NativeFunctions::GetStxBalance => ClarityCostFunction::StxBalance,
         NativeFunctions::StxTransfer => ClarityCostFunction::StxTransfer,
-        NativeFunctions::StxBurn => ClarityCostFunction::Unimplemented,
+        NativeFunctions::StxBurn => ClarityCostFunction::StxTransfer,
         NativeFunctions::BitwiseAnd => ClarityCostFunction::BitwiseAnd,
         NativeFunctions::BitwiseOr => ClarityCostFunction::BitwiseOr,
         NativeFunctions::BitwiseNot => ClarityCostFunction::BitwiseNot,

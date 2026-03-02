@@ -1,8 +1,3 @@
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
 mod chainhooks;
 pub mod chains_coordinator;
 mod command;
