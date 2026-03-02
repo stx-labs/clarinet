@@ -1,7 +1,0 @@
-**/settings/Mainnet.toml
-**/settings/Testnet.toml
-.cache/**
-!.cache/requirements/
-!.cache/requirements/**
-history.txt
-**/deployments/default.simnet-plan.yaml

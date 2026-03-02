@@ -639,9 +639,14 @@ pub async fn build_state(
         }
     };
 
-    let (deployment, mut artifacts) =
-        generate_default_deployment(&manifest, &StacksNetwork::Simnet, false, file_accessor)
-            .await?;
+    let (deployment, mut artifacts) = generate_default_deployment(
+        &manifest,
+        &StacksNetwork::Simnet,
+        false,
+        file_accessor,
+        None,
+    )
+    .await?;
 
     let mut session = initiate_session_from_manifest(&manifest);
     let contracts =
