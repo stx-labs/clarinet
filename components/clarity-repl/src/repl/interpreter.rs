@@ -279,14 +279,18 @@ impl ClarityInterpreter {
         )
         .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
-        // Run REPL-only analyses
-        let diagnostics = analysis::run_analysis(
-            &mut contract_analysis,
-            &mut analysis_db,
-            annotations,
-            &self.repl_settings.analysis,
-        )
-        .map_err(|mut diagnostics| diagnostics.pop().unwrap())?;
+        // Run REPL-only analyses (linter, check_checker, etc.)
+        let diagnostics = if !contract.is_requirement {
+            analysis::run_analysis(
+                &mut contract_analysis,
+                &mut analysis_db,
+                annotations,
+                &self.repl_settings.analysis,
+            )
+            .map_err(|mut diagnostics| diagnostics.pop().unwrap())?
+        } else {
+            vec![]
+        };
 
         Ok((contract_analysis, diagnostics))
     }
