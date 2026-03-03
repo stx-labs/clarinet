@@ -1906,36 +1906,14 @@ impl DevnetOrchestrator {
             },
         )?;
 
-        // Start all containers in parallel
-        // let _ = tokio::join!(
-        //     docker.start_container::<String>(&bitcoin_node_c_id, None),
-        //     docker.start_container::<String>(bitcoin_explorer_c_id, None),
-        //     docker.start_container::<String>(postgres_c_id, None),
-        //     docker.start_container::<String>(stacks_api_c_id, None),
-        //     docker.start_container::<String>(stacks_explorer_c_id, None),
-        //     docker.start_container::<String>(&stacks_node_c_id, None),
-        // );
-        let _ = docker
-            .start_container::<String>(&bitcoin_node_c_id, None)
-            .await;
-
-        let _ = docker
-            .start_container::<String>(bitcoin_explorer_c_id, None)
-            .await;
-
-        let _ = docker.start_container::<String>(postgres_c_id, None).await;
-
-        let _ = docker
-            .start_container::<String>(stacks_api_c_id, None)
-            .await;
-
-        let _ = docker
-            .start_container::<String>(stacks_explorer_c_id, None)
-            .await;
-
-        let _ = docker
-            .start_container::<String>(&stacks_node_c_id, None)
-            .await;
+        let _ = tokio::join!(
+            docker.start_container::<String>(&bitcoin_node_c_id, None),
+            docker.start_container::<String>(bitcoin_explorer_c_id, None),
+            docker.start_container::<String>(postgres_c_id, None),
+            docker.start_container::<String>(stacks_api_c_id, None),
+            docker.start_container::<String>(stacks_explorer_c_id, None),
+            docker.start_container::<String>(&stacks_node_c_id, None),
+        );
 
         Ok((bitcoin_node_c_id, stacks_node_c_id))
     }
