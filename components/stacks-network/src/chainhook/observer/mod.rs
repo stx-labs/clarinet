@@ -16,7 +16,7 @@ use crate::chainhook::indexer::bitcoin::{
 };
 use crate::chainhook::indexer::{Indexer, IndexerConfig};
 use crate::chainhook::types::{
-    BitcoinBlockData, BitcoinBlockSignaling, BitcoinChainEvent, BitcoinChainUpdatedWithBlocksData,
+    BitcoinBlockData, BitcoinChainEvent, BitcoinChainUpdatedWithBlocksData,
     BitcoinChainUpdatedWithReorgData, BitcoinNetwork, BlockIdentifier, BlockchainEvent,
     StacksBlockData, StacksChainEvent, StacksNetwork, StacksNodeConfig, DEFAULT_STACKS_NODE_RPC,
 };
@@ -38,7 +38,7 @@ pub struct EventObserverConfig {
     pub bitcoind_rpc_username: String,
     pub bitcoind_rpc_password: String,
     pub bitcoind_rpc_url: String,
-    pub bitcoin_block_signaling: BitcoinBlockSignaling,
+    pub stacks_node_config: StacksNodeConfig,
     pub display_stacks_ingestion_logs: bool,
     pub bitcoin_network: BitcoinNetwork,
     pub stacks_network: StacksNetwork,
@@ -52,10 +52,10 @@ impl Default for EventObserverConfig {
             bitcoind_rpc_username: "devnet".into(),
             bitcoind_rpc_password: "devnet".into(),
             bitcoind_rpc_url: "http://localhost:18443".into(),
-            bitcoin_block_signaling: BitcoinBlockSignaling::Stacks(StacksNodeConfig::new(
+            stacks_node_config: StacksNodeConfig::new(
                 DEFAULT_STACKS_NODE_RPC.to_string(),
                 DEFAULT_INGESTION_PORT,
-            )),
+            ),
             display_stacks_ingestion_logs: false,
             bitcoin_network: BitcoinNetwork::Regtest,
             stacks_network: StacksNetwork::Devnet,
@@ -71,15 +71,11 @@ impl EventObserverConfig {
             password: self.bitcoind_rpc_password.clone(),
             rpc_url: self.bitcoind_rpc_url.clone(),
             network: self.bitcoin_network.clone(),
-            bitcoin_block_signaling: self.bitcoin_block_signaling.clone(),
         }
     }
 
     pub fn get_stacks_node_config(&self) -> &StacksNodeConfig {
-        match self.bitcoin_block_signaling {
-            BitcoinBlockSignaling::Stacks(ref config) => config,
-            _ => unreachable!(),
-        }
+        &self.stacks_node_config
     }
 }
 
@@ -143,7 +139,6 @@ pub struct BitcoinConfig {
     pub password: String,
     pub rpc_url: String,
     pub network: BitcoinNetwork,
-    pub bitcoin_block_signaling: BitcoinBlockSignaling,
 }
 
 #[derive(Debug, Clone)]
@@ -166,60 +161,48 @@ pub fn start_event_observer(
     stacks_startup_context: Option<StacksObserverStartupContext>,
     ctx: Context,
 ) -> Result<(), Box<dyn Error>> {
-    match config.bitcoin_block_signaling {
-        BitcoinBlockSignaling::Stacks(ref _url) => {
-            let context_cloned = ctx.clone();
-            let event_observer_config_moved = config.clone();
-            let observer_commands_tx_moved = observer_commands_tx.clone();
+    let context_cloned = ctx.clone();
+    let event_observer_config_moved = config.clone();
+    let observer_commands_tx_moved = observer_commands_tx.clone();
 
-            let _ = std::thread::Builder::new()
-                .name("Chainhook event observer".to_string())
-                .spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(start_stacks_event_observer(
-                        event_observer_config_moved,
-                        observer_commands_tx_moved,
-                        observer_commands_rx,
-                        observer_events_tx.clone(),
-                        stacks_startup_context.unwrap_or_default(),
-                        context_cloned.clone(),
-                    ))
-                    .unwrap_or_else(|e| {
-                        if let Some(tx) = observer_events_tx {
-                            context_cloned.try_log(|logger| {
-                                slog::crit!(
-                                    logger,
-                                    "Chainhook event observer thread failed with error: {e}",
-                                )
-                            });
-                            let _ = tx.send(ObserverEvent::Terminate);
-                        }
+    let _ = std::thread::Builder::new()
+        .name("Chainhook event observer".to_string())
+        .spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(start_stacks_event_observer(
+                event_observer_config_moved,
+                observer_commands_tx_moved,
+                observer_commands_rx,
+                observer_events_tx.clone(),
+                stacks_startup_context.unwrap_or_default(),
+                context_cloned.clone(),
+            ))
+            .unwrap_or_else(|e| {
+                if let Some(tx) = observer_events_tx {
+                    context_cloned.try_log(|logger| {
+                        slog::crit!(
+                            logger,
+                            "Chainhook event observer thread failed with error: {e}",
+                        )
                     });
-                })
-                .expect("unable to spawn thread");
+                    let _ = tx.send(ObserverEvent::Terminate);
+                }
+            });
+        })
+        .expect("unable to spawn thread");
 
-            ctx.try_log(|logger| {
-                slog::info!(
-                    logger,
-                    "Listening on port {} for Stacks chain events",
-                    config.get_stacks_node_config().ingestion_port
-                )
-            });
+    ctx.try_log(|logger| {
+        slog::info!(
+            logger,
+            "Listening on port {} for Stacks chain events",
+            config.get_stacks_node_config().ingestion_port
+        )
+    });
 
-            ctx.try_log(|logger| {
-                slog::info!(logger, "Observing Bitcoin chain events via Stacks node")
-            });
-        }
-        BitcoinBlockSignaling::ZeroMQ(ref url) => {
-            ctx.try_log(|logger| {
-                slog::warn!(
-                    logger,
-                    "ZeroMQ bitcoin block signaling ({}) is not supported; use Stacks signaling instead",
-                    url
-                )
-            });
-        }
-    }
+    ctx.try_log(|logger| {
+        slog::info!(logger, "Observing Bitcoin chain events via Stacks node")
+    });
+
     Ok(())
 }
 
@@ -237,7 +220,7 @@ pub async fn start_stacks_event_observer(
         bitcoind_rpc_password: config.bitcoind_rpc_password.clone(),
         stacks_network: StacksNetwork::Devnet,
         bitcoin_network: BitcoinNetwork::Regtest,
-        bitcoin_block_signaling: config.bitcoin_block_signaling.clone(),
+        stacks_node_config: config.stacks_node_config.clone(),
     };
 
     let mut indexer = Indexer::new(indexer_config.clone());

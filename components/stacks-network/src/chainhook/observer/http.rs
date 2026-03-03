@@ -60,12 +60,6 @@ pub async fn handle_new_bitcoin_block(
         bitcoin_config,
         ctx,
     } = app_state;
-    if bitcoin_config
-        .bitcoin_block_signaling
-        .should_ignore_bitcoin_block_signaling_through_stacks()
-    {
-        return success_response();
-    }
 
     try_info!(ctx, "POST /new_burn_block");
     // Standardize the structure of the block, and identify the

@@ -12,8 +12,8 @@ use stacks::StacksBlockPool;
 use self::fork_scratch_pad::ForkScratchPad;
 use crate::chainhook::hooks::types::PoxConfig;
 use crate::chainhook::types::{
-    BitcoinBlockSignaling, BitcoinNetwork, BlockHeader, BlockIdentifier, BlockchainEvent,
-    StacksBlockData, StacksChainEvent, StacksNetwork, StacksNodeConfig,
+    BitcoinNetwork, BlockHeader, BlockIdentifier, BlockchainEvent, StacksBlockData,
+    StacksChainEvent, StacksNetwork, StacksNodeConfig,
 };
 use crate::chainhook::utils::{AbstractBlock, Context};
 
@@ -62,15 +62,12 @@ pub struct IndexerConfig {
     pub bitcoind_rpc_url: String,
     pub bitcoind_rpc_username: String,
     pub bitcoind_rpc_password: String,
-    pub bitcoin_block_signaling: BitcoinBlockSignaling,
+    pub stacks_node_config: StacksNodeConfig,
 }
 
 impl IndexerConfig {
     pub fn get_stacks_node_config(&self) -> &StacksNodeConfig {
-        match self.bitcoin_block_signaling {
-            BitcoinBlockSignaling::Stacks(ref config) => config,
-            _ => unreachable!(),
-        }
+        &self.stacks_node_config
     }
 }
 

@@ -913,12 +913,6 @@ impl BitcoinNetwork {
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
-pub enum BitcoinBlockSignaling {
-    Stacks(StacksNodeConfig),
-    ZeroMQ(String),
-}
-
-#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct StacksNodeConfig {
     pub rpc_url: String,
     pub ingestion_port: u16,
@@ -940,12 +934,3 @@ impl StacksNodeConfig {
     }
 }
 
-impl BitcoinBlockSignaling {
-    pub fn should_ignore_bitcoin_block_signaling_through_stacks(&self) -> bool {
-        !matches!(self, BitcoinBlockSignaling::Stacks(_))
-    }
-
-    pub fn is_bitcoind_zmq_block_signaling_expected(&self) -> bool {
-        !matches!(self, BitcoinBlockSignaling::ZeroMQ(_))
-    }
-}

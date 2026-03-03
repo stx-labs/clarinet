@@ -42,7 +42,7 @@ use crate::chainhook::observer::{
     StacksChainMempoolEvent, StacksObserverStartupContext,
 };
 use crate::chainhook::types::{
-    BitcoinBlockSignaling, BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig,
+    BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig,
     StacksTransactionKind,
 };
 use crate::chainhook::utils::Context;
@@ -139,10 +139,10 @@ impl DevnetEventObserverConfig {
             bitcoind_rpc_username: devnet_config.bitcoin_node_username.clone(),
             bitcoind_rpc_password: devnet_config.bitcoin_node_password.clone(),
             bitcoind_rpc_url: format!("http://{}", services_map_hosts.bitcoin_node_host),
-            bitcoin_block_signaling: BitcoinBlockSignaling::Stacks(StacksNodeConfig {
+            stacks_node_config: StacksNodeConfig {
                 rpc_url: format!("http://{}", services_map_hosts.stacks_node_host),
                 ingestion_port: devnet_config.orchestrator_ingestion_port,
-            }),
+            },
 
             display_stacks_ingestion_logs: true,
             bitcoin_network: crate::chainhook::types::BitcoinNetwork::Regtest,
@@ -264,12 +264,10 @@ pub async fn start_chains_coordinator(
                                     .devnet_config
                                     .bitcoin_node_password
                                     .clone(),
-                                bitcoin_block_signaling: BitcoinBlockSignaling::Stacks(
-                                    StacksNodeConfig {
-                                        rpc_url: config.devnet_config.stacks_node_image_url.clone(),
-                                        ingestion_port: 3999,
-                                    },
-                                ),
+                                stacks_node_config: StacksNodeConfig {
+                                    rpc_url: config.devnet_config.stacks_node_image_url.clone(),
+                                    ingestion_port: 3999,
+                                },
                             },
                             parts.get(3).unwrap_or(&""),
                             &mut chain_ctx,
