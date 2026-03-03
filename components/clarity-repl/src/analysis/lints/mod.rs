@@ -1,3 +1,4 @@
+mod case_binding;
 mod case_const;
 mod error_const;
 mod noop;
@@ -12,6 +13,7 @@ mod unused_private_fn;
 mod unused_token;
 mod unused_trait;
 
+pub use case_binding::CaseBinding;
 pub use case_const::CaseConst;
 pub use error_const::ErrorConst;
 pub use noop::NoopChecker;
