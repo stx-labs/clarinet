@@ -917,6 +917,7 @@ impl SDK {
                 deployer: ContractDeployer::Address(args.sender.to_string()),
                 clarity_version,
                 epoch: Epoch::Specific(current_epoch),
+                is_requirement: false,
             };
 
             match session.deploy_contract(&contract, track_costs, None) {

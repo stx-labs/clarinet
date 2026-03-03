@@ -26,6 +26,7 @@ impl ClarityContract {
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: DEFAULT_CLARITY_VERSION,
             epoch: Epoch::Specific(DEFAULT_EPOCH),
+            is_requirement: false,
         }
     }
 }

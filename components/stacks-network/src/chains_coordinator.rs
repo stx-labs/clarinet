@@ -42,8 +42,7 @@ use crate::chainhook::observer::{
     StacksChainMempoolEvent, StacksObserverStartupContext,
 };
 use crate::chainhook::types::{
-    BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig,
-    StacksTransactionKind,
+    BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig, StacksTransactionKind,
 };
 use crate::chainhook::utils::Context;
 use crate::command::run_command;

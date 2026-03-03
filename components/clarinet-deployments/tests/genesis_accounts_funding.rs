@@ -103,6 +103,7 @@ fn can_fund_initial_sbtc_balance() {
                     clarity_version: ClarityVersion::Clarity3,
                     location: PathBuf::from("./fixtures/sbtc-registry.clar"),
                     emulated_sender: SBTC_DEPLOYER.clone(),
+                    is_requirement: false,
                 },
             )
         })

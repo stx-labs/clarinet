@@ -199,9 +199,7 @@ pub fn start_event_observer(
         )
     });
 
-    ctx.try_log(|logger| {
-        slog::info!(logger, "Observing Bitcoin chain events via Stacks node")
-    });
+    ctx.try_log(|logger| slog::info!(logger, "Observing Bitcoin chain events via Stacks node"));
 
     Ok(())
 }
