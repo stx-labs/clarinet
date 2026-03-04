@@ -28,7 +28,8 @@ use super::requests::completion::{
     build_completion_item_list, get_contract_calls, ContractDefinedData,
 };
 use super::requests::definitions::{
-    get_definitions, get_public_function_and_trait_definitions, DefinitionLocation,
+    get_all_function_definitions, get_definitions, get_public_function_and_trait_definitions,
+    get_trait_definitions, DefinitionLocation,
 };
 use super::requests::document_symbols::ASTSymbols;
 use super::requests::helpers::get_atom_or_field_start_at_position;
@@ -928,7 +929,8 @@ pub async fn build_state(
                 if let EvaluationResult::Contract(contract_result) = execution_result.result {
                     if let Some(ast) = artifacts.asts.get(&contract_id) {
                         let mut v = HashMap::new();
-                        get_public_function_and_trait_definitions(&mut v, &ast.expressions);
+                        get_all_function_definitions(&mut v, &ast.expressions);
+                        get_trait_definitions(&mut v, &ast.expressions);
                         definitions.insert(contract_id.clone(), v);
                     }
                     analyses.insert(contract_id.clone(), Some(contract_result.contract.analysis));
