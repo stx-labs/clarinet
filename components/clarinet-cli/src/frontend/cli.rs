@@ -14,7 +14,7 @@ use clarinet_deployments::onchain::{
 };
 use clarinet_deployments::types::{DeploymentGenerationArtifacts, DeploymentSpecification};
 use clarinet_deployments::{
-    get_default_deployment_path, load_deployment, load_deployment_and_artifacts,
+    get_default_deployment_path, load_deployment, setup_session_with_deployment,
 };
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
@@ -1556,21 +1556,76 @@ pub fn load_deployment_and_artifacts_or_exit(
         None
     };
 
-    let future = load_deployment_and_artifacts(
-        manifest,
-        deployment_plan_path.as_deref(),
-        existing_deployment,
-        force_remove_env_simnet,
-        None,
-    );
-
-    match hiro_system_kit::nestable_block_on(future) {
-        Ok((deployment, path, artifacts, found_env_simnet)) => {
-            ((deployment, path, artifacts), found_env_simnet)
+    // If we already have a deployment (from disk) or a specific path, handle
+    // synchronously to avoid wrapping reqwest::blocking::Client creation inside
+    // a tokio block_on context.
+    if let Some(ref path) = deployment_plan_path {
+        let project_root = &manifest.root_dir;
+        let deployment_location = project_root.join(path);
+        match load_deployment(project_root, &deployment_location) {
+            Ok(mut deployment) => {
+                let mut found_env_simnet = false;
+                if force_remove_env_simnet {
+                    found_env_simnet |= deployment.remove_env_simnet();
+                }
+                let artifacts =
+                    setup_session_with_deployment(manifest, &mut deployment, None);
+                (
+                    (
+                        deployment,
+                        Some(deployment_location.to_string_lossy().to_string()),
+                        artifacts,
+                    ),
+                    found_env_simnet,
+                )
+            }
+            Err(e) => {
+                eprintln!("{}", format_err!(format!("loading {path} failed with error: {e}")));
+                process::exit(1);
+            }
         }
-        Err(e) => {
-            eprintln!("{}", format_err!(e));
-            process::exit(1);
+    } else if let Some(mut deployment) = existing_deployment {
+        let mut found_env_simnet = false;
+        if force_remove_env_simnet {
+            found_env_simnet |= deployment.remove_env_simnet();
+        }
+        let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+        ((deployment, None, artifacts), found_env_simnet)
+    } else {
+        // Generate the deployment async, then run setup_session synchronously
+        // to avoid reqwest::blocking::Client panicking inside a tokio block_on.
+        let future = clarinet_deployments::generate_default_deployment(
+            manifest,
+            &StacksNetwork::Simnet,
+            false,
+            None,
+            force_remove_env_simnet,
+        );
+
+        let (mut deployment, ast_artifacts, found_env_simnet) =
+            match hiro_system_kit::nestable_block_on(future) {
+                Ok(result) => result,
+                Err(e) => {
+                    eprintln!("{}", format_err!(e));
+                    process::exit(1);
+                }
+            };
+
+        if ast_artifacts.success {
+            let mut artifacts = setup_session_with_deployment(
+                manifest,
+                &mut deployment,
+                Some(&ast_artifacts.asts),
+            );
+            for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
+                if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
+                    parser_diags.append(diags);
+                }
+                artifacts.diags.insert(contract_id, parser_diags);
+            }
+            ((deployment, None, artifacts), found_env_simnet)
+        } else {
+            ((deployment, None, ast_artifacts), found_env_simnet)
         }
     }
 }
