@@ -1568,8 +1568,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                 if force_remove_env_simnet {
                     found_env_simnet |= deployment.remove_env_simnet();
                 }
-                let artifacts =
-                    setup_session_with_deployment(manifest, &mut deployment, None);
+                let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
                 (
                     (
                         deployment,
@@ -1580,7 +1579,10 @@ pub fn load_deployment_and_artifacts_or_exit(
                 )
             }
             Err(e) => {
-                eprintln!("{}", format_err!(format!("loading {path} failed with error: {e}")));
+                eprintln!(
+                    "{}",
+                    format_err!(format!("loading {path} failed with error: {e}"))
+                );
                 process::exit(1);
             }
         }
@@ -1612,11 +1614,8 @@ pub fn load_deployment_and_artifacts_or_exit(
             };
 
         if ast_artifacts.success {
-            let mut artifacts = setup_session_with_deployment(
-                manifest,
-                &mut deployment,
-                Some(&ast_artifacts.asts),
-            );
+            let mut artifacts =
+                setup_session_with_deployment(manifest, &mut deployment, Some(&ast_artifacts.asts));
             for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
                 if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
                     parser_diags.append(diags);
