@@ -294,6 +294,7 @@ pub async fn generate_default_deployment(
     network: &StacksNetwork,
     no_batch: bool,
     file_accessor: Option<&dyn FileAccessor>,
+    api_url: Option<&str>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
     let network_manifest = match file_accessor {
         None => NetworkManifest::from_project_root(
@@ -536,6 +537,7 @@ pub async fn generate_default_deployment(
                             &contract_id,
                             &manifest.project.cache_location,
                             &file_accessor,
+                            api_url,
                         )
                         .await?;
 

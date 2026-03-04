@@ -28,6 +28,7 @@ pub async fn retrieve_contract(
     contract_id: &QualifiedContractIdentifier,
     cache_location: &Path,
     file_accessor: &Option<&dyn FileAccessor>,
+    api_url: Option<&str>,
 ) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
     let contract_deployer = contract_id.issuer.to_address();
     let contract_name = contract_id.name.to_string();
@@ -69,7 +70,8 @@ pub async fn retrieve_contract(
         .unwrap()
         .is_mainnet();
 
-    let contract = fetch_contract(is_mainnet, &contract_deployer, &contract_name).await?;
+    let base_url = api_url.unwrap_or_else(|| default_api_url(is_mainnet));
+    let contract = fetch_contract(base_url, &contract_deployer, &contract_name).await?;
 
     let epoch = epoch_for_height(is_mainnet, contract.block_height);
     let clarity_version = match contract.clarity_version {
@@ -129,13 +131,15 @@ struct Contract {
     clarity_version: Option<u8>,
 }
 
-async fn fetch_contract(is_mainnet: bool, deployer: &str, name: &str) -> Result<Contract, String> {
-    let base_url = if is_mainnet {
+fn default_api_url(is_mainnet: bool) -> &'static str {
+    if is_mainnet {
         "https://api.hiro.so"
     } else {
         "https://api.testnet.hiro.so"
-    };
+    }
+}
 
+async fn fetch_contract(base_url: &str, deployer: &str, name: &str) -> Result<Contract, String> {
     let url = format!("{base_url}/extended/v1/contract/{deployer}.{name}");
     let response = reqwest::get(&url)
         .await
@@ -150,4 +154,127 @@ async fn fetch_contract(is_mainnet: bool, deployer: &str, name: &str) -> Result<
         .json()
         .await
         .map_err(|e| format!("Unable to parse contract json data {url}: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use mockito::Server;
+
+    use super::*;
+
+    const TEST_DEPLOYER: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
+    const TEST_CONTRACT_NAME: &str = "test-contract";
+    const TEST_SOURCE: &str = "(define-public (hello) (ok u1))";
+
+    #[tokio::test]
+    async fn test_fetch_contract_from_mock_server() {
+        let mut server = Server::new_async().await;
+
+        let mock = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "source_code": TEST_SOURCE,
+                    "block_height": 175232,
+                    "clarity_version": 3
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let contract = fetch_contract(&server.url(), TEST_DEPLOYER, TEST_CONTRACT_NAME)
+            .await
+            .unwrap();
+
+        assert_eq!(contract.source_code, TEST_SOURCE);
+        assert_eq!(contract.block_height, 175232);
+        assert_eq!(contract.clarity_version, Some(3));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_fetch_contract_returns_error_on_404() {
+        let mut server = Server::new_async().await;
+
+        let mock = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let result = fetch_contract(&server.url(), TEST_DEPLOYER, TEST_CONTRACT_NAME).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("404"));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_contract_fetches_and_caches() {
+        let mut server = Server::new_async().await;
+
+        let mock = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "source_code": TEST_SOURCE,
+                    "block_height": 175232,
+                    "clarity_version": 3
+                })
+                .to_string(),
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(cache_dir.path().join("requirements")).unwrap();
+
+        let contract_id =
+            QualifiedContractIdentifier::parse(&format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"))
+                .unwrap();
+
+        // First call: fetches from mock server and caches
+        let (source, _epoch, clarity_version, location) =
+            retrieve_contract(&contract_id, cache_dir.path(), &None, Some(&server.url()))
+                .await
+                .unwrap();
+
+        assert_eq!(source, TEST_SOURCE);
+        assert_eq!(clarity_version, ClarityVersion::Clarity3);
+        assert!(location.to_string_lossy().contains(TEST_CONTRACT_NAME));
+        mock.assert_async().await;
+
+        // Verify cache files were written
+        let cached_source = std::fs::read_to_string(
+            cache_dir
+                .path()
+                .join("requirements")
+                .join(format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}.clar")),
+        )
+        .unwrap();
+        assert_eq!(cached_source, TEST_SOURCE);
+
+        // Second call: should use cache (mock expects exactly 1 call)
+        let (source2, _, clarity_version2, _) =
+            retrieve_contract(&contract_id, cache_dir.path(), &None, Some(&server.url()))
+                .await
+                .unwrap();
+
+        assert_eq!(source2, TEST_SOURCE);
+        assert_eq!(clarity_version2, ClarityVersion::Clarity3);
+    }
 }
