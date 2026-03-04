@@ -5,8 +5,8 @@ use bitcoincore_rpc::bitcoin::blockdata::opcodes;
 use bitcoincore_rpc::bitcoin::blockdata::script::Builder as BitcoinScriptBuilder;
 
 use super::accounts;
-use crate::chainhook::types::bitcoin::TxOut;
-use crate::chainhook::types::{
+use crate::types::bitcoin::TxOut;
+use crate::types::{
     BitcoinTransactionData, BitcoinTransactionMetadata, StacksContractCallData,
     StacksTransactionData, StacksTransactionKind, StacksTransactionMetadata,
     StacksTransactionReceipt, TransactionIdentifier,
@@ -62,7 +62,7 @@ pub fn generate_test_tx_stacks_contract_call(
             },
             description: format!("contract call {}::{}", contract_identifier, method),
             sponsor: None,
-            position: crate::chainhook::types::StacksTransactionPosition::anchor_block(0),
+            position: crate::types::StacksTransactionPosition::anchor_block(0),
             proof: None,
             contract_abi: None,
         },

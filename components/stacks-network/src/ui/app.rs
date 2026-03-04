@@ -1,11 +1,11 @@
 use hiro_system_kit::slog;
+use observer::types::{
+    StacksBlockData, StacksMicroblockData, StacksTransactionData, StacksTransactionKind,
+};
+use observer::utils::Context;
 use ratatui::prelude::*;
 
 use super::util::{StatefulList, TabsState};
-use crate::chainhook::types::{
-    StacksBlockData, StacksMicroblockData, StacksTransactionData, StacksTransactionKind,
-};
-use crate::chainhook::utils::Context;
 use crate::event::ServiceStatusData;
 use crate::{LogData, MempoolAdmissionData};
 

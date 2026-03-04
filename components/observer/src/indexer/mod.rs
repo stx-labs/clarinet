@@ -10,12 +10,12 @@ use serde_json::Value as JsonValue;
 use stacks::StacksBlockPool;
 
 use self::fork_scratch_pad::ForkScratchPad;
-use crate::chainhook::hooks::types::PoxConfig;
-use crate::chainhook::types::{
+use crate::hooks::types::PoxConfig;
+use crate::types::{
     BitcoinNetwork, BlockHeader, BlockIdentifier, BlockchainEvent, StacksBlockData,
     StacksChainEvent, StacksNetwork, StacksNodeConfig,
 };
-use crate::chainhook::utils::{AbstractBlock, Context};
+use crate::utils::{AbstractBlock, Context};
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct AssetClassCache {
@@ -169,7 +169,7 @@ impl Indexer {
         receipt_time_ms: u128,
         ctx: &Context,
     ) -> Result<Option<StacksChainEvent>, String> {
-        use crate::chainhook::types::{
+        use crate::types::{
             StacksChainUpdatedWithNonConsensusEventsData, StacksNonConsensusEventData,
             StacksNonConsensusEventPayloadData,
         };

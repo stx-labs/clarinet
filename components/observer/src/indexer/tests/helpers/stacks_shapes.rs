@@ -2,8 +2,8 @@ use hiro_system_kit::slog;
 
 use super::super::StacksChainEventExpectation;
 use super::{microblocks, stacks_blocks, BlockEvent};
-use crate::chainhook::types::{StacksBlockData, StacksChainEvent};
-use crate::chainhook::utils::Context;
+use crate::types::{StacksBlockData, StacksChainEvent};
+use crate::utils::Context;
 
 pub fn expect_no_chain_update() -> StacksChainEventExpectation {
     Box::new(move |chain_event_to_check: Option<StacksChainEvent>| {

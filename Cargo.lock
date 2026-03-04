@@ -2769,6 +2769,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "observer"
+version = "3.14.1"
+dependencies = [
+ "axum",
+ "base58",
+ "base64 0.22.1",
+ "bitcoincore-rpc",
+ "bitcoincore-rpc-json",
+ "clarity",
+ "crossbeam-channel",
+ "hex",
+ "hiro-system-kit",
+ "miniscript",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "stacks-codec",
+ "strum",
+ "test-case",
+ "tokio",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4151,6 +4174,7 @@ dependencies = [
  "indoc",
  "libc",
  "miniscript",
+ "observer",
  "rand 0.8.5",
  "ratatui",
  "reqwest",

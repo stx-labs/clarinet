@@ -1,8 +1,8 @@
-pub mod chainhook;
 pub mod chains_coordinator;
 mod command;
 mod event;
 mod log;
+pub use observer;
 mod orchestrator;
 mod snapshot_extractor;
 mod ui;
@@ -12,10 +12,6 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-pub use chainhook::observer::MempoolAdmissionData;
-use chainhook::observer::ObserverCommand;
-pub use chainhook::types::{BitcoinNetwork, StacksNetwork};
-pub use chainhook::utils::Context;
 use chains_coordinator::{start_chains_coordinator, BitcoinMiningCommand};
 use clarinet_deployments::types::DeploymentSpecification;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
@@ -23,6 +19,10 @@ use clarinet_files::NetworkManifest;
 pub use event::DevnetEvent;
 use hiro_system_kit::slog;
 pub use log::{LogData, LogLevel};
+pub use observer::event_handler::MempoolAdmissionData;
+use observer::event_handler::ObserverCommand;
+pub use observer::types::{BitcoinNetwork, StacksNetwork};
+pub use observer::utils::Context;
 pub use orchestrator::DevnetOrchestrator;
 use orchestrator::ServicesMapHosts;
 

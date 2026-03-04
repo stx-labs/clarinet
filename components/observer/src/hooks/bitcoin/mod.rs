@@ -1,5 +1,5 @@
 use super::types::PoxConfig;
-use crate::chainhook::types::BitcoinNetwork;
+use crate::types::BitcoinNetwork;
 
 pub fn get_stacks_canonical_magic_bytes(network: &BitcoinNetwork) -> [u8; 2] {
     match network {

@@ -1,4 +1,4 @@
-use crate::chainhook::types::{
+use crate::types::{
     BitcoinBlockData, BitcoinBlockMetadata, BitcoinTransactionData, BlockIdentifier,
 };
 
@@ -50,7 +50,7 @@ pub fn generate_test_bitcoin_block(
         timestamp: 0,
         transactions,
         metadata: BitcoinBlockMetadata {
-            network: crate::chainhook::types::BitcoinNetwork::Regtest,
+            network: crate::types::BitcoinNetwork::Regtest,
         },
     }
 }

@@ -10,19 +10,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::fork_scratch_pad::CONFIRMED_SEGMENT_MINIMUM_LENGTH;
-use crate::chainhook::hooks::bitcoin::{
+use crate::event_handler::BitcoinConfig;
+use crate::hooks::bitcoin::{
     get_canonical_pox_config, get_stacks_canonical_magic_bytes, StacksOpcodes,
 };
-use crate::chainhook::hooks::types::PoxConfig;
-use crate::chainhook::observer::BitcoinConfig;
-use crate::chainhook::types::bitcoin::{OutPoint, TxIn, TxOut};
-use crate::chainhook::types::{
+use crate::hooks::types::PoxConfig;
+use crate::types::bitcoin::{OutPoint, TxIn, TxOut};
+use crate::types::{
     BitcoinBlockData, BitcoinBlockMetadata, BitcoinNetwork, BitcoinTransactionData,
     BitcoinTransactionMetadata, BlockCommitmentData, BlockHeader, BlockIdentifier,
     KeyRegistrationData, LockSTXData, PoxReward, StacksBaseChainOperation,
     StacksBlockCommitmentData, TransactionIdentifier, TransferSTXData,
 };
-use crate::chainhook::utils::Context;
+use crate::utils::Context;
 
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -214,7 +214,7 @@ pub async fn retrieve_block_hash(
 ) -> Result<String, String> {
     let body = json!({
         "jsonrpc": "1.0",
-        "id": "chainhook-cli",
+        "id": "clarinet-observer",
         "method": "getblockhash",
         "params": [block_height]
     });
@@ -236,7 +236,7 @@ pub async fn retrieve_block_hash(
     Ok(block_hash)
 }
 
-// not used internally by chainhook; exported for ordhook
+// not used internally by the observer; exported for ordhook
 pub async fn try_download_block_bytes_with_retry(
     http_client: HttpClient,
     block_height: u64,
@@ -284,7 +284,7 @@ pub async fn download_block(
 ) -> Result<Vec<u8>, String> {
     let body = json!({
         "jsonrpc": "1.0",
-        "id": "chainhook-cli",
+        "id": "clarinet-observer",
         "method": "getblock",
         "params": [block_hash, 3]
     });

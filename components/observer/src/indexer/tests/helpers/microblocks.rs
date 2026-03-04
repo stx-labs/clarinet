@@ -1,5 +1,5 @@
 use super::BlockEvent;
-use crate::chainhook::types::{
+use crate::types::{
     BlockIdentifier, StacksMicroblockData, StacksMicroblockMetadata, StacksTransactionData,
 };
 

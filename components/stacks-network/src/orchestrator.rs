@@ -26,10 +26,10 @@ use clarity::types::PrivateKey;
 use futures::stream::TryStreamExt;
 use hiro_system_kit::{slog, slog_term, Drain};
 use indoc::formatdoc;
+use observer::utils::Context;
 use reqwest::RequestBuilder;
 use serde_json::Value as JsonValue;
 
-use crate::chainhook::utils::Context;
 use crate::command::run_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 
@@ -1066,7 +1066,7 @@ events_keys = ["stackerdb", "block_proposal", "burn_blocks"]
         stacks_conf.push_str(&format!(
             r#"
 # Add orchestrator (docker-host) as an event observer
-# Also used by the devnet chainhook instance
+# Also used by the devnet observer instance
 [[events_observer]]
 endpoint = "host.docker.internal:{orchestrator_ingestion_port}"
 events_keys = ["*"]

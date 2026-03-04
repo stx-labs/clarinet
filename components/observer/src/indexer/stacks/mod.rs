@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use stacks_codec::codec::{StacksTransaction, TransactionAuth, TransactionPayload};
 
-use crate::chainhook::hooks::stacks::try_decode_clarity_value;
-use crate::chainhook::indexer::{AssetClassCache, IndexerConfig, StacksChainContext};
-use crate::chainhook::types::*;
-use crate::chainhook::utils::Context;
+use crate::hooks::stacks::try_decode_clarity_value;
+use crate::indexer::{AssetClassCache, IndexerConfig, StacksChainContext};
+use crate::types::*;
+use crate::utils::Context;
 
 #[derive(Deserialize, Serialize)]
 pub struct NewBlock {
@@ -156,7 +156,7 @@ pub struct NewEvent {
 }
 
 impl NewEvent {
-    pub fn into_chainhook_event(&self) -> Result<StacksTransactionEvent, String> {
+    pub fn into_observer_event(&self) -> Result<StacksTransactionEvent, String> {
         if let Some(ref event_data) = self.stx_mint_event {
             let data: STXMintEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
@@ -429,7 +429,7 @@ pub fn standardize_stacks_block(
             };
         let events = tx_events
             .iter()
-            .map(|e| e.into_chainhook_event())
+            .map(|e| e.into_observer_event())
             .collect::<Result<Vec<StacksTransactionEvent>, String>>()?;
         let (receipt, operations) = get_standardized_stacks_receipt(
             &tx.txid,
@@ -606,7 +606,7 @@ pub fn standardize_stacks_microblock_trail(
 
         let events = tx_events
             .iter()
-            .map(|e| e.into_chainhook_event())
+            .map(|e| e.into_observer_event())
             .collect::<Result<Vec<StacksTransactionEvent>, String>>()?;
         let (receipt, operations) = get_standardized_stacks_receipt(
             &tx.txid,

@@ -1,9 +1,9 @@
 use std::sync::mpsc::Sender;
 
 use hiro_system_kit::slog;
+use observer::event_handler::MempoolAdmissionData;
+use observer::types::{BitcoinChainEvent, StacksChainEvent};
 
-use crate::chainhook::observer::MempoolAdmissionData;
-use crate::chainhook::types::{BitcoinChainEvent, StacksChainEvent};
 use crate::chains_coordinator::BitcoinMiningCommand;
 use crate::log::{LogData, LogLevel};
 

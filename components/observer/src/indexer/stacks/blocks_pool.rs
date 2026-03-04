@@ -3,15 +3,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use hiro_system_kit::slog;
 
-use crate::chainhook::indexer::fork_scratch_pad::CONFIRMED_SEGMENT_MINIMUM_LENGTH;
-use crate::chainhook::indexer::{ChainSegment, ChainSegmentIncompatibility};
-use crate::chainhook::types::{
+use crate::indexer::fork_scratch_pad::CONFIRMED_SEGMENT_MINIMUM_LENGTH;
+use crate::indexer::{ChainSegment, ChainSegmentIncompatibility};
+use crate::types::{
     BlockIdentifier, StacksBlockData, StacksBlockUpdate, StacksChainEvent,
     StacksChainUpdatedWithBlocksData, StacksChainUpdatedWithMicroblocksData,
     StacksChainUpdatedWithMicroblocksReorgData, StacksChainUpdatedWithReorgData,
     StacksMicroblockData,
 };
-use crate::chainhook::utils::Context;
+use crate::utils::Context;
 
 pub struct StacksBlockPool {
     canonical_fork_id: usize,

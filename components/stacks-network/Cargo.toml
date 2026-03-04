@@ -48,6 +48,7 @@ clarinet-files = { path = "../clarinet-files" }
 clarinet-deployments = { path = "../clarinet-deployments" }
 hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
 stacks-codec = { path = "../stacks-codec" }
+observer = { path = "../observer" }
 libc = "0.2.173"
 
 [target.'cfg(unix)'.dependencies]
@@ -55,7 +56,7 @@ signal-hook = { workspace = true, features = ["iterator"] }
 
 [features]
 default = []
-stacks-signers = []
+stacks-signers = ["observer/stacks-signers"]
 
 [dev-dependencies]
 test-case = "3.1.0"

@@ -10,17 +10,17 @@ use std::sync::{Arc, Mutex, RwLock};
 use hiro_system_kit::slog;
 use serde::{Deserialize, Serialize};
 
-use crate::chainhook::indexer::bitcoin::{
+use crate::indexer::bitcoin::{
     build_http_client, download_and_parse_block_with_retry, standardize_bitcoin_block,
     BitcoinBlockFullBreakdown,
 };
-use crate::chainhook::indexer::{Indexer, IndexerConfig};
-use crate::chainhook::types::{
+use crate::indexer::{Indexer, IndexerConfig};
+use crate::types::{
     BitcoinBlockData, BitcoinChainEvent, BitcoinChainUpdatedWithBlocksData,
     BitcoinChainUpdatedWithReorgData, BitcoinNetwork, BlockIdentifier, BlockchainEvent,
     StacksBlockData, StacksChainEvent, StacksNetwork, StacksNodeConfig, DEFAULT_STACKS_NODE_RPC,
 };
-use crate::chainhook::utils::Context;
+use crate::utils::Context;
 
 pub struct Shutdown(tokio::sync::oneshot::Sender<()>);
 
@@ -166,7 +166,7 @@ pub fn start_event_observer(
     let observer_commands_tx_moved = observer_commands_tx.clone();
 
     let _ = std::thread::Builder::new()
-        .name("Chainhook event observer".to_string())
+        .name("Event observer".to_string())
         .spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(start_stacks_event_observer(
@@ -180,10 +180,7 @@ pub fn start_event_observer(
             .unwrap_or_else(|e| {
                 if let Some(tx) = observer_events_tx {
                     context_cloned.try_log(|logger| {
-                        slog::crit!(
-                            logger,
-                            "Chainhook event observer thread failed with error: {e}",
-                        )
+                        slog::crit!(logger, "Event observer thread failed with error: {e}",)
                     });
                     let _ = tx.send(ObserverEvent::Terminate);
                 }

@@ -2,8 +2,8 @@ use test_case::test_case;
 
 use super::super::tests::{helpers, process_stacks_blocks_and_check_expectations};
 use super::NewEvent;
-use crate::chainhook::indexer::tests::helpers::stacks_events::create_new_event_from_stacks_event;
-use crate::chainhook::types::{
+use crate::indexer::tests::helpers::stacks_events::create_new_event_from_stacks_event;
+use crate::types::{
     DataMapDeleteEventData, DataMapInsertEventData, DataMapUpdateEventData, DataVarSetEventData,
     FTBurnEventData, FTMintEventData, FTTransferEventData, NFTBurnEventData, NFTMintEventData,
     NFTTransferEventData, STXBurnEventData, STXLockEventData, STXMintEventData,
@@ -360,16 +360,16 @@ fn test_stacks_vector_055() {
     topic: "print".to_string(),
     hex_value: String::new(),
 }); "smart_contract_print_event")]
-fn new_events_can_be_converted_into_chainhook_event(original_event: StacksTransactionEventPayload) {
+fn new_events_can_be_converted_into_observer_event(original_event: StacksTransactionEventPayload) {
     let new_event = create_new_event_from_stacks_event(original_event.clone());
-    let event = new_event.into_chainhook_event().unwrap();
+    let event = new_event.into_observer_event().unwrap();
     let original_event_serialized = serde_json::to_string(&original_event).unwrap();
     let event_serialized = serde_json::to_string(&event.event_payload).unwrap();
     assert_eq!(original_event_serialized, event_serialized);
 }
 
 #[test]
-fn into_chainhook_event_rejects_invalid_missing_event() {
+fn into_observer_event_rejects_invalid_missing_event() {
     let new_event = NewEvent {
         txid: String::new(),
         committed: false,
@@ -392,7 +392,7 @@ fn into_chainhook_event_rejects_invalid_missing_event() {
         contract_event: None,
     };
     new_event
-        .into_chainhook_event()
+        .into_observer_event()
         .expect_err("expected error on missing event");
 }
 
@@ -400,12 +400,12 @@ fn into_chainhook_event_rejects_invalid_missing_event() {
 #[cfg(feature = "stacks-signers")]
 fn parses_block_response_signer_message() {
     use super::standardize_stacks_stackerdb_chunks;
-    use crate::chainhook::indexer::stacks::{
+    use crate::indexer::stacks::{
         NewSignerModifiedSlot, NewStackerDbChunkIssuerId, NewStackerDbChunkIssuerSlots,
         NewStackerDbChunks, NewStackerDbChunksContractId,
     };
-    use crate::chainhook::types::{BlockResponseData, StacksSignerMessage};
-    use crate::chainhook::utils::Context;
+    use crate::types::{BlockResponseData, StacksSignerMessage};
+    use crate::utils::Context;
 
     let new_chunks = NewStackerDbChunks {
         contract_id: NewStackerDbChunksContractId {
