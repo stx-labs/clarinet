@@ -4,7 +4,10 @@ use std::path::Path;
 use clarity::vm::contexts::{ContractContext, OwnedEnvironment};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::database::MemoryBackingStore;
-use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::types::{
+    ListData, ListTypeData, PrincipalData, QualifiedContractIdentifier, SequenceData,
+    StandardPrincipalData, TypeSignature,
+};
 use clarity::vm::{ast, ClarityVersion};
 use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
@@ -539,6 +542,11 @@ fn test_against_dynamic_cost_analysis() {
         clarity_types::Value::string_ascii_from_bytes("a".to_string().into_bytes()).unwrap(),
         clarity_types::Value::UInt(1),
     ];
+    let list_32_uint_value = clarity_types::Value::Sequence(SequenceData::List(ListData {
+        data: vec![clarity_types::Value::UInt(1); 32],
+        type_signature: ListTypeData::new_list(TypeSignature::UIntType, 32).unwrap(),
+    }));
+    let list_32_uint_args = [list_32_uint_value];
     let allow_contract_caller_args = [
         clarity_types::Value::Principal(
             PrincipalData::Standard(StandardPrincipalData::transient()),
@@ -857,6 +865,27 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "fetch-entry-after-set",
             &[],
+        ),
+        // map over a list calling a private function with var-set
+        (
+            indoc! {r#"
+                (define-data-var count uint u0)
+
+                (define-private (add (n uint))
+                  (begin
+                    (var-set count (+ (var-get count) n))
+                  )
+                )
+
+                (define-public (add-many-32 (ns (list 32 uint)))
+                  (begin
+                    (map add ns)
+                    (ok true)
+                  )
+                )
+            "#},
+            "add-many-32",
+            &list_32_uint_args,
         ),
     ];
 
