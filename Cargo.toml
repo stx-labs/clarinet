@@ -63,6 +63,7 @@ yaml_serde = "0.10.3"
 signal-hook = "0.4.3"
 strum = "0.27.2"
 tempfile = "3.24.0"
+thiserror = "2"
 toml = { version = "0.5.6", features = ["preserve_order"] }
 toml_edit = "0.22"
 tokio = { version = "1.47.0", features = ["full"] }
