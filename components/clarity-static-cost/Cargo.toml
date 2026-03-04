@@ -5,13 +5,13 @@ edition = "2021"
 description = "Static cost analysis for Clarity smart contracts"
 
 [dependencies]
-thiserror = "2"
 clarity = { workspace = true, default-features = false, features = [
     "developer-mode",
     "devtools",
 ] }
 clarity-types = { workspace = true }
 stacks-common = { workspace = true, default-features = false }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 clarity = { workspace = true, default-features = false, features = [

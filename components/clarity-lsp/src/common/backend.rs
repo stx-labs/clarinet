@@ -623,10 +623,6 @@ pub fn process_request(
             let cost_analysis = editor_state
                 .try_read(|es| es.get_function_cost_analysis(&contract_location, &position))
                 .unwrap_or_default();
-            eprintln!(
-                "[LSP] FunctionAnalysis response: {}",
-                cost_analysis.as_deref().unwrap_or("None")
-            );
             Ok(LspRequestResponse::FunctionAnalysis(cost_analysis))
         }
 

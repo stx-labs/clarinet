@@ -78,7 +78,7 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             }),
             false => None,
         },
-        code_lens_provider: initialization_options.static_cost_analysis.then(|| {
+        code_lens_provider: initialization_options.static_cost_analysis.then_some({
             ls_types::CodeLensOptions {
                 resolve_provider: Some(false),
             }
