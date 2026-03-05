@@ -41,23 +41,28 @@ pub fn setup_session_with_deployment(
     manifest: &ProjectManifest,
     deployment: &mut DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
+    enable_analysis: bool,
 ) -> DeploymentGenerationArtifacts {
-    // Mark contracts not in the project manifest as requirements.
+    // Mark contracts not in the project manifest as requirements
+    // so that REPL analysis (linting) is skipped for them.
     // This is needed when the deployment plan is loaded from YAML,
-    // where `is_requirement` is not serialized. We match by location
+    // where `skip_analysis` is not serialized. We match by location
     // (absolute path) rather than contract name because requirements
     // can share a name with a project contract.
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
-                if !manifest.contracts_settings.contains_key(&spec.location) {
-                    spec.is_requirement = true;
+                if !enable_analysis || !manifest.contracts_settings.contains_key(&spec.location) {
+                    spec.skip_analysis = true;
                 }
             }
         }
     }
 
     let mut session = initiate_session_from_manifest(manifest);
+    if !enable_analysis {
+        session.interpreter.repl_settings.analysis.disable_all();
+    }
     let contracts = update_session_with_deployment_plan(&mut session, deployment, contracts_asts);
 
     let deps = BTreeMap::new();
@@ -252,7 +257,7 @@ fn handle_emulated_contract_publish(
         name: tx.contract_name.to_string(),
         clarity_version: tx.clarity_version,
         epoch: clarity_repl::repl::Epoch::Specific(epoch),
-        is_requirement: tx.is_requirement,
+        skip_analysis: tx.skip_analysis,
     };
 
     let result = session.deploy_contract(&contract, false, contract_ast);
@@ -471,7 +476,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.clone(),
                 clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                is_requirement: false,
+                skip_analysis: false,
             };
 
             let (_, diagnostics, ast_success) = interpreter.build_ast(&temp_contract);
@@ -550,7 +555,7 @@ pub async fn generate_default_deployment(
                                 source: source.clone(),
                                 location: contract_location,
                                 clarity_version,
-                                is_requirement: true,
+                                skip_analysis: true,
                             };
 
                             emulated_contracts_publish.insert(contract_id.clone(), data);
@@ -604,7 +609,7 @@ pub async fn generate_default_deployment(
                         deployer: ContractDeployer::ContractIdentifier(contract_id.clone()),
                         clarity_version,
                         epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                        is_requirement: true,
+                        skip_analysis: true,
                     };
                     let (ast, _, _) = interpreter.build_ast(&contract);
                     (clarity_version, ast)
@@ -770,7 +775,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.to_string(),
                 clarity_version: contract_config.clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                is_requirement: false,
+                skip_analysis: false,
             },
         );
 
@@ -782,7 +787,7 @@ pub async fn generate_default_deployment(
                     source,
                     location: contract_location,
                     clarity_version: contract_config.clarity_version,
-                    is_requirement: false,
+                    skip_analysis: false,
                 },
             )
         } else {
@@ -1027,7 +1032,7 @@ mod tests {
             source: source.to_string(),
             clarity_version: ClarityVersion::Clarity2,
             location: PathBuf::from("/contracts/contract_1.clar"),
-            is_requirement: false,
+            skip_analysis: false,
         };
 
         handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch)

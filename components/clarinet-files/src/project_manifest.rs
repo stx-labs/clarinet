@@ -167,7 +167,7 @@ where
             deployer,
             clarity_version,
             epoch,
-            is_requirement: false,
+            skip_analysis: false,
         };
 
         map.insert(contract_name, cc);
@@ -280,7 +280,7 @@ impl ProjectManifest {
                 code_source,
                 clarity_version: parsed_clarity_version,
                 epoch: epoch.clone(),
-                is_requirement: false,
+                skip_analysis: false,
             },
         );
 

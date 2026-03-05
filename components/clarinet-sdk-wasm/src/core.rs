@@ -410,6 +410,7 @@ impl SDK {
             .await?;
 
         let mut session = initiate_session_from_manifest(&manifest);
+        session.interpreter.repl_settings.analysis.disable_all();
         if self.options.track_coverage {
             session.enable_coverage_hook();
         }
@@ -917,7 +918,7 @@ impl SDK {
                 deployer: ContractDeployer::Address(args.sender.to_string()),
                 clarity_version,
                 epoch: Epoch::Specific(current_epoch),
-                is_requirement: false,
+                skip_analysis: false,
             };
 
             match session.deploy_contract(&contract, track_costs, None) {

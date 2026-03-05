@@ -885,7 +885,7 @@ pub struct EmulatedContractPublishSpecification {
     pub clarity_version: ClarityVersion,
     pub location: PathBuf,
     #[serde(skip)]
-    pub is_requirement: bool,
+    pub skip_analysis: bool,
 }
 
 impl EmulatedContractPublishSpecification {
@@ -924,7 +924,7 @@ impl EmulatedContractPublishSpecification {
             source,
             location,
             clarity_version,
-            is_requirement: false,
+            skip_analysis: false,
         })
     }
 }

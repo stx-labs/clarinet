@@ -162,6 +162,15 @@ impl Settings {
     pub fn disable_all_lints(&mut self) {
         self.lints.clear();
     }
+
+    pub fn disable_all_passes(&mut self) {
+        self.passes.clear();
+    }
+
+    pub fn disable_all(&mut self) {
+        self.disable_all_lints();
+        self.disable_all_passes();
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
