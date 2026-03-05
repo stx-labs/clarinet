@@ -271,6 +271,16 @@ fn print_cost_tree(node: &CostAnalysisNode, depth: usize) {
     }
     let total_with_children = node.cost.min.runtime + child_total;
 
+    // Calculate accumulated cost including children
+    let mut child_total = 0u64;
+    for child in &node.children {
+        child_total += child.cost.min.runtime;
+        for grandchild in &child.children {
+            child_total += grandchild.cost.min.runtime;
+        }
+    }
+    let total_with_children = node.cost.min.runtime + child_total;
+
     println!(
         "{}{} -> node_cost: {}, children_sum: {}, total: {}",
         indent, node_name, node.cost.min.runtime, child_total, total_with_children
@@ -494,25 +504,32 @@ fn run_cost_analysis_test(
         print_cost_tree(cost_tree, 0);
     }
 
-    if static_cost.min.runtime > static_cost.max.runtime {
-        return Err(format!(
-            "Static cost min {} should be <= max {}",
-            static_cost.min.runtime, static_cost.max.runtime
-        ));
-    }
+    let fields: &[(&str, fn(&ExecutionCost) -> u64)] = &[
+        ("runtime", |c| c.runtime),
+        ("write_length", |c| c.write_length),
+        ("write_count", |c| c.write_count),
+        ("read_length", |c| c.read_length),
+        ("read_count", |c| c.read_count),
+    ];
 
-    if dynamic_cost.runtime < static_cost.min.runtime {
-        return Err(format!(
-            "Dynamic cost runtime {} is LESS than static min runtime {}",
-            dynamic_cost.runtime, static_cost.min.runtime
-        ));
-    }
+    for &(name, get) in fields {
+        let min = get(&static_cost.min);
+        let max = get(&static_cost.max);
+        let dynamic = get(&dynamic_cost);
 
-    if dynamic_cost.runtime > static_cost.max.runtime {
-        return Err(format!(
-            "Dynamic cost runtime {} is MORE than static max runtime {}",
-            dynamic_cost.runtime, static_cost.max.runtime
-        ));
+        if min > max {
+            return Err(format!("{name}: static min {min} should be <= max {max}"));
+        }
+        if dynamic < min {
+            return Err(format!(
+                "{name}: dynamic {dynamic} is LESS than static min {min}"
+            ));
+        }
+        if dynamic > max {
+            return Err(format!(
+                "{name}: dynamic {dynamic} is MORE than static max {max}"
+            ));
+        }
     }
 
     Ok(())
@@ -822,7 +839,6 @@ fn test_against_dynamic_cost_analysis() {
             "keccak256-large",
             &[],
         ),
-        // --- var-set tests ---
         // var-set with uint data variable
         (
             indoc! {r#"
@@ -841,6 +857,26 @@ fn test_against_dynamic_cost_analysis() {
                   (ok (var-set my-flag true)))
             "#},
             "set-var-bool",
+            &[],
+        ),
+        // var-set with short string literal
+        (
+            indoc! {r#"
+                (define-data-var message (string-ascii 521) "")
+                (define-public (set-var-short)
+                  (ok (var-set message "hello")))
+            "#},
+            "set-var-short",
+            &[],
+        ),
+        // var-set with longer string literal
+        (
+            indoc! {r#"
+                (define-data-var message (string-ascii 521) "")
+                (define-public (set-var-long)
+                  (ok (var-set message "hello world")))
+            "#},
+            "set-var-long",
             &[],
         ),
         // --- map-get? tests ---

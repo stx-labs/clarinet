@@ -308,9 +308,13 @@ fn compute_function_overhead_costs(
         .unwrap_or((0, &[]));
 
     // cost_load_contract
-    if let Some(size) = contract_size {
+    // The VM's get_contract_size() returns source_size + data_size, where
+    // data_size accounts for memory used by define-map, define-data-var, etc.
+    if let Some(source_size) = contract_size {
+        let data_size = compute_contract_data_size(ast_expressions);
+        let total_size = source_size.saturating_add(data_size);
         let load_cost = ClarityCostFunction::LoadContract
-            .eval_for_epoch(size, epoch)
+            .eval_for_epoch(total_size, epoch)
             .unwrap_or(ExecutionCost::ZERO);
         saturating_add_cost(&mut overhead.min, &load_cost);
         saturating_add_cost(&mut overhead.max, &load_cost);
@@ -495,6 +499,42 @@ pub fn static_cost_tree_from_ast(
         .into_iter()
         .map(|(name, node)| (name, (node, trait_count.clone())))
         .collect())
+}
+
+/// Compute the `data_size` that the VM accumulates during `eval_all`.
+///
+/// In the VM, `total_memory_use` (stored as `contract_context.data_size`) only
+/// includes memory from `DefineResult::Variable` (i.e. `define-constant`).
+/// Maps, data-vars, tokens, and NFTs call `global_context.add_memory()` but do
+/// **not** add to `total_memory_use`.  The `data_size` is later returned by
+/// `get_contract_size()` alongside the source-code length.
+fn compute_contract_data_size(ast_expressions: &[SymbolicExpression]) -> u64 {
+    let mut data_size: u64 = 0;
+
+    for expr in ast_expressions {
+        let Some(list) = expr.match_list() else {
+            continue;
+        };
+        let is_constant = list
+            .first()
+            .and_then(|f| f.match_atom())
+            .map(|a| a.as_str() == "define-constant")
+            .unwrap_or(false);
+        if !is_constant {
+            continue;
+        }
+        // VM charges value.get_memory_use() = value.size() for the constant's value
+        if let Some(value) = list
+            .get(2)
+            .and_then(|e| e.match_atom_value().or_else(|| e.match_literal_value()))
+        {
+            if let Ok(s) = value.size() {
+                data_size = data_size.saturating_add(u64::from(s));
+            }
+        }
+    }
+
+    data_size
 }
 
 /// Extract function name from a symbolic expression
