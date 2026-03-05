@@ -346,4 +346,26 @@ mod tests {
         assert!(!settings.lints.is_empty());
         assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
     }
+
+    #[test]
+    fn disable_all_clears_lints_and_passes() {
+        let mut settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert!(!settings.passes.is_empty());
+
+        settings.disable_all();
+        assert!(settings.lints.is_empty());
+        assert!(settings.passes.is_empty());
+    }
+
+    #[test]
+    fn disable_all_passes_preserves_lints() {
+        let mut settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert!(!settings.passes.is_empty());
+
+        settings.disable_all_passes();
+        assert!(!settings.lints.is_empty(), "lints should be preserved");
+        assert!(settings.passes.is_empty());
+    }
 }

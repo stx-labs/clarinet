@@ -1510,7 +1510,12 @@ pub fn load_deployment_and_artifacts_or_exit(
             .and_then(|opt| match opt {
                 Some(mut deployment) => {
                     eprintln!("{} using {default_deployment_file}", yellow!("note:"));
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None, enable_analysis);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     Ok((deployment, None, artifacts))
                 }
                 None => {
@@ -1542,7 +1547,12 @@ pub fn load_deployment_and_artifacts_or_exit(
             let deployment_location = project_root.join(path);
             load_deployment(project_root, &deployment_location)
                 .map(|mut deployment| {
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None, enable_analysis);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     (
                         deployment,
                         Some(deployment_location.to_string_lossy().to_string()),

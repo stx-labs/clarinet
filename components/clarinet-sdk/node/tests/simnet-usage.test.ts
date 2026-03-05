@@ -468,6 +468,22 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(opASt.expressions).toHaveLength(1);
   });
 
+  // Deploying a contract with lint-triggering code (unused constant) should
+  // succeed without errors in the SDK, confirming that REPL analysis (linting)
+  // is disabled during `npm test`.
+  it("deploys lint-triggering contract without errors", () => {
+    simnet.setEpoch(latestEpochStr);
+    const source = "(define-constant MY_UNUSED_CONST u42)\n(define-public (noop) (ok true))\n";
+    const res = simnet.deployContract("lint-test", source, null, deployerAddr);
+    // The contract should deploy successfully — the unused constant should NOT
+    // cause an error because linting is disabled in the SDK path.
+    expect(res.result).toStrictEqual(Cl.bool(true));
+
+    // Verify the contract is callable
+    const callRes = simnet.callPublicFn("lint-test", "noop", [], address1);
+    expect(callRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  });
+
   it("can deploy contract with a given clarity_version", () => {
     const source = "(define-public (add (a uint) (b uint)) (ok (+ a b)))\n";
 

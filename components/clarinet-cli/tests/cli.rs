@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use clarinet_files::{ProjectManifest, ProjectManifestFile};
 use indoc::{formatdoc, indoc};
@@ -530,4 +531,67 @@ fn test_check_skips_requirement_lint_warnings() {
             );
         }
     }
+}
+
+/// `clarinet console` should NOT produce lint warnings even for contracts
+/// that would trigger them under `clarinet check`. This verifies that
+/// analysis is disabled in the console codepath.
+#[test]
+fn test_console_does_not_emit_lint_warnings() {
+    let project_name = "test_console_no_lints";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    // Create a contract with lint-triggering code (unused constant)
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n").unwrap();
+
+    // Strip [repl.analysis] so default lints would be active (if analysis were enabled)
+    strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
+
+    // First, verify that `clarinet check` DOES produce lint warnings for this contract
+    let json = run_clarinet_check_json(&[], &project_path);
+    let check_messages = collect_check_diagnostic_messages(&json);
+    assert!(
+        check_messages.iter().any(|m| m.contains("never used")),
+        "sanity check: clarinet check should produce lint warnings, got: {check_messages:?}"
+    );
+
+    // Now run `clarinet console`, send a simple expression, and exit
+    let mut child = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["console"])
+        .current_dir(&project_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to start console");
+
+    let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+    stdin.write_all(b"(+ 1 2)\n").expect("Failed to write");
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("Failed to read output");
+    assert!(
+        output.status.success(),
+        "console should exit successfully, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}\n{stderr}");
+
+    // Console output should NOT contain lint warnings
+    assert!(
+        !combined.contains("never used"),
+        "console should not emit lint warnings, got:\nstdout: {stdout}\nstderr: {stderr}"
+    );
 }
