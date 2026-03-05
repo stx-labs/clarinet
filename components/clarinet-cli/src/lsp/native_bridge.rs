@@ -100,11 +100,13 @@ impl LspNativeBridge {
     async fn after_receive_lsp_notification(&self) {
         let mut aggregated_diagnostics = vec![];
         let mut notification = None;
+        let mut code_lens_refresh = false;
         if let Ok(response_rx) = self.response_rx.lock() {
             if let Ok(LspResponse::Notification(ref mut notification_response)) = response_rx.recv()
             {
                 aggregated_diagnostics.append(&mut notification_response.aggregated_diagnostics);
                 notification = notification_response.notification.take();
+                code_lens_refresh = notification_response.code_lens_refresh;
             }
         }
 
@@ -122,6 +124,10 @@ impl LspNativeBridge {
 
         if let Some((level, message)) = notification {
             self.client.show_message(level, message).await;
+        }
+
+        if code_lens_refresh {
+            let _ = self.client.code_lens_refresh().await;
         }
     }
 }

@@ -65,6 +65,7 @@ pub enum LspNotification {
 pub struct LspNotificationResponse {
     pub aggregated_diagnostics: Vec<(PathBuf, Vec<Diagnostic>)>,
     pub notification: Option<(MessageType, String)>,
+    pub code_lens_refresh: bool,
 }
 
 impl LspNotificationResponse {
@@ -72,6 +73,7 @@ impl LspNotificationResponse {
         LspNotificationResponse {
             aggregated_diagnostics: vec![],
             notification: Some((MessageType::ERROR, format!("Internal error: {message}"))),
+            code_lens_refresh: false,
         }
     }
 }
@@ -99,6 +101,7 @@ pub async fn process_notification(
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
                         notification,
+                        code_lens_refresh: false,
                     })
                 }
                 Err(e) => Ok(LspNotificationResponse::error(&e)),
@@ -117,6 +120,7 @@ pub async fn process_notification(
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
                         notification,
+                        code_lens_refresh: true,
                     })
                 }
                 Err(e) => Ok(LspNotificationResponse::error(&e)),
@@ -226,6 +230,7 @@ pub async fn process_notification(
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
                         notification,
+                        code_lens_refresh: true,
                     })
                 }
                 Err(e) => Ok(LspNotificationResponse::error(&e)),
@@ -262,6 +267,7 @@ pub async fn process_notification(
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
                         notification,
+                        code_lens_refresh: true,
                     })
                 }
                 Err(e) => Ok(LspNotificationResponse::error(&e)),

@@ -150,6 +150,7 @@ impl LspVscodeBridge {
         let mut editor_state_lock = EditorStateInput::RwLock(self.editor_state_lock.clone());
         let send_diagnostic = self.client_diagnostic_tx.clone();
         let send_notification = self.client_notification_tx.clone();
+        let send_request = self.backend_to_client_tx.clone();
         let file_accessor: Box<dyn FileAccessor> = Box::new(WASMFileSystemAccessor::new(
             self.backend_to_client_tx.clone(),
         ));
@@ -183,6 +184,16 @@ impl LspVscodeBridge {
                             version: None,
                         })?,
                     )?;
+                }
+            }
+
+            if let Ok(ref response) = result {
+                if response.code_lens_refresh {
+                    let _ = send_request.call2(
+                        &JsValue::NULL,
+                        &JsValue::from_str("workspace/codeLens/refresh"),
+                        &JsValue::NULL,
+                    );
                 }
             }
 
