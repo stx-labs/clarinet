@@ -2,6 +2,7 @@ import {
   DidOpenTextDocumentParams,
   DidCloseTextDocumentNotification,
   DidOpenTextDocumentNotification,
+  DidSaveTextDocumentNotification,
   InitializeRequest,
 } from "vscode-languageserver";
 import type { Connection } from "vscode-languageserver";
@@ -31,9 +32,16 @@ export function initConnection(
   const notifications: [string, unknown][] = [];
   async function consumeNotification() {
     const notification = notifications[notifications.length - 1];
-    if (!notifications) return;
+    if (!notification) return;
+    const [method] = notification;
     try {
       await bridge.onNotification(...notification);
+      if (
+        method === DidSaveTextDocumentNotification.method ||
+        method === DidOpenTextDocumentNotification.method
+      ) {
+        connection.sendRequest("workspace/codeLens/refresh").catch(() => {});
+      }
     } catch (err) {
       console.warn(err);
     }
