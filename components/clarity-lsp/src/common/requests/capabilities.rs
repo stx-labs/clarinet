@@ -30,7 +30,7 @@ impl Default for InitializationOptions {
             go_to_definition: true,
             hover: true,
             signature_help: true,
-            static_cost_analysis: true,
+            static_cost_analysis: false,
         }
     }
 }

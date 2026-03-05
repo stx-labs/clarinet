@@ -595,18 +595,18 @@ pub fn get_definitions(
     definitions_visitor.tokens
 }
 
-pub fn get_all_function_definitions(
-    definitions: &mut HashMap<ClarityName, Range>,
-    expressions: &[SymbolicExpression],
-) {
-    get_function_definitions(definitions, expressions, true);
-}
-
 pub fn get_public_function_definitions(
     definitions: &mut HashMap<ClarityName, Range>,
     expressions: &[SymbolicExpression],
 ) {
     get_function_definitions(definitions, expressions, false);
+}
+
+pub fn get_all_function_definitions(
+    definitions: &mut HashMap<ClarityName, Range>,
+    expressions: &[SymbolicExpression],
+) {
+    get_function_definitions(definitions, expressions, true);
 }
 
 fn get_function_definitions(

@@ -457,26 +457,22 @@ impl EditorState {
         }
 
         // Get the contract metadata to find the manifest
-        let contract_metadata = match self.contracts_lookup.get(contract_location) {
-            Some(md) => md,
-            None => return code_lenses,
+        let Some(contract_metadata) = self.contracts_lookup.get(contract_location) else {
+            return code_lenses;
         };
 
         // Get the protocol state to find the contract state
-        let protocol_state = match self.protocols.get(&contract_metadata.manifest_location) {
-            Some(ps) => ps,
-            None => return code_lenses,
+        let Some(protocol_state) = self.protocols.get(&contract_metadata.manifest_location) else {
+            return code_lenses;
         };
 
-        let contract_state = match protocol_state.contracts.get(contract_location) {
-            Some(cs) => cs,
-            None => return code_lenses,
+        let Some(contract_state) = protocol_state.contracts.get(contract_location) else {
+            return code_lenses;
         };
 
         // Get the stored cost analysis
-        let cost_analysis = match contract_state.cost_analysis.as_ref() {
-            Some(ca) => ca,
-            None => return code_lenses,
+        let Some(cost_analysis) = contract_state.cost_analysis.as_ref() else {
+            return code_lenses;
         };
 
         // Compute current function ranges from the live editor content so we can
@@ -842,14 +838,14 @@ pub async fn build_state(
         if let Some(cost_analysis) =
             get_cost_analysis(&mut session, contract_id, clarity_version).await
         {
-            crate::lsp_log!(
+            clarity_repl::uprint!(
                 "[LSP] Cost analysis completed for {}: {} functions analyzed",
                 contract_id,
                 cost_analysis.len()
             );
             cost_analyses.insert(contract_id.clone(), cost_analysis);
         } else {
-            crate::lsp_log!("[LSP] Cost analysis failed for contract: {}", contract_id);
+            clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
         }
     }
 
@@ -877,7 +873,7 @@ async fn get_cost_analysis(
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
     use clarity_static_cost::static_cost::static_cost;
 
-    crate::lsp_log!(
+    clarity_repl::uprint!(
         "[LSP] get_cost_analysis called for contract: {} (clarity version: {:?})",
         contract_id,
         clarity_version
@@ -887,9 +883,10 @@ async fn get_cost_analysis(
 
     let mut global_context = session
         .interpreter
+        // TODO: use actual epoch
         .get_global_context(clarity_repl::clarity::StacksEpochId::Epoch21, false)
         .map_err(|e| {
-            crate::lsp_log!("[LSP] Failed to get global context: {}", e);
+            clarity_repl::uprint!("[LSP] Failed to get global context: {}", e);
             e
         })
         .ok()?;
@@ -915,7 +912,7 @@ async fn get_cost_analysis(
         // Use static_cost which returns (StaticCost, Option<TraitCount>)
         // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
         static_cost(&mut env, contract_id).map_err(|e| {
-            crate::lsp_log!("[LSP] static_cost failed with error: {}", e);
+            clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
             let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
             VmExecutionError::Internal(VmInternalError::Expect(error_msg))
         })
@@ -923,7 +920,7 @@ async fn get_cost_analysis(
 
     cost_result
         .map_err(|e| {
-            crate::lsp_log!("[LSP] Cost analysis failed with error: {:?}", e);
+            clarity_repl::uprint!("[LSP] Cost analysis failed with error: {:?}", e);
         })
         .ok()
 }
