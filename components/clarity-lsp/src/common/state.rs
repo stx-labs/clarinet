@@ -880,11 +880,11 @@ async fn get_cost_analysis(
     );
 
     let tx_sender: clarity_types::types::PrincipalData = session.interpreter.get_tx_sender().into();
+    let epoch = session.interpreter.datastore.get_current_epoch();
 
     let mut global_context = session
         .interpreter
-        // TODO: use actual epoch
-        .get_global_context(clarity_repl::clarity::StacksEpochId::Epoch21, false)
+        .get_global_context(epoch, false)
         .map_err(|e| {
             clarity_repl::uprint!("[LSP] Failed to get global context: {}", e);
             e
