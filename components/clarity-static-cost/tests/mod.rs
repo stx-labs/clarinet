@@ -386,7 +386,9 @@ fn test_pox_4_costs() {
 }
 
 // Helper function to run static and dynamic cost analysis on a contract function
-// Returns Ok(()) if costs are within expected range, Err with message otherwise
+// Returns Ok(()) if costs are within expected range, Err with message otherwise.
+// When `exact` is true, asserts that min == max == dynamic for all fields
+// (appropriate when all values are known statically with no user input).
 #[cfg(test)]
 fn run_cost_analysis_test(
     src: &str,
@@ -394,6 +396,7 @@ fn run_cost_analysis_test(
     args: &[clarity_types::Value],
     epoch: StacksEpochId,
     clarity_version: ClarityVersion,
+    exact: bool,
 ) -> Result<(), String> {
     let contract_id = QualifiedContractIdentifier::local("test-contract").unwrap();
 
@@ -517,18 +520,31 @@ fn run_cost_analysis_test(
         let max = get(&static_cost.max);
         let dynamic = get(&dynamic_cost);
 
-        if min > max {
-            return Err(format!("{name}: static min {min} should be <= max {max}"));
-        }
-        if dynamic < min {
-            return Err(format!(
-                "{name}: dynamic {dynamic} is LESS than static min {min}"
-            ));
-        }
-        if dynamic > max {
-            return Err(format!(
-                "{name}: dynamic {dynamic} is MORE than static max {max}"
-            ));
+        if exact {
+            if min != max {
+                return Err(format!(
+                    "{name}: expected exact cost but min {min} != max {max}"
+                ));
+            }
+            if dynamic != min {
+                return Err(format!(
+                    "{name}: expected exact cost {min} but dynamic is {dynamic}"
+                ));
+            }
+        } else {
+            if min > max {
+                return Err(format!("{name}: static min {min} should be <= max {max}"));
+            }
+            if dynamic < min {
+                return Err(format!(
+                    "{name}: dynamic {dynamic} is LESS than static min {min}"
+                ));
+            }
+            if dynamic > max {
+                return Err(format!(
+                    "{name}: dynamic {dynamic} is MORE than static max {max}"
+                ));
+            }
         }
     }
 
@@ -570,8 +586,9 @@ fn test_against_dynamic_cost_analysis() {
         ),
         clarity_types::Value::none(),
     ];
-    // Define test cases as (source, function_name, args)
-    let test_cases: Vec<(&str, &str, &[clarity_types::Value])> = vec![
+    // Define test cases as (source, function_name, args, exact)
+    // When `exact` is true, asserts min == max == dynamic (all values known statically).
+    let test_cases: Vec<(&str, &str, &[clarity_types::Value], bool)> = vec![
         (
             indoc! {r#"
                 (define-public (let-func (a uint))
@@ -582,6 +599,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "let-func",
             &uint_value,
+            false,
         ),
         (
             indoc! {r#"
@@ -594,6 +612,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-func",
             &if_args,
+            false,
         ),
         (
             indoc! {r#"
@@ -603,6 +622,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "simple-str-min",
             &value,
+            false,
         ),
         (
             indoc! {r#"
@@ -612,6 +632,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "simple-str",
             &multi_arg_value,
+            false,
         ),
         (
             indoc! {r#"
@@ -621,6 +642,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "simple-constant",
             &[],
+            true,
         ),
         (
             indoc! {r#"
@@ -630,6 +652,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "nested-ops",
             &[],
+            true,
         ),
         (
             indoc! {r#"
@@ -639,6 +662,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "string-concat",
             &[],
+            true,
         ),
         (
             indoc! {r#"
@@ -648,6 +672,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "string-len",
             &[],
+            true,
         ),
         (
             indoc! {r#"
@@ -657,6 +682,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-simple",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -666,6 +692,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-no-ok",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -675,6 +702,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-one-ok",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -684,6 +712,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-other-branch-ok",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -693,6 +722,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-with-ok-concat",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -702,6 +732,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-with-ok-string",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -711,6 +742,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-both-ok-concat",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -720,6 +752,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "branching",
             &[],
+            false,
         ),
         (
             indoc! {r#"
@@ -737,6 +770,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "allow-contract-caller",
             &allow_contract_caller_args,
+            false,
         ),
         // let-bound variable used directly as map key atom (not in user_args)
         (
@@ -748,6 +782,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "let-bound-key",
             &uint_value,
+            false,
         ),
         // contract data variable (var-get) used as map value — a list expression, not a tuple/atom
         (
@@ -759,6 +794,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "contract-data-val",
             &[],
+            false,
         ),
         // nft-mint? cost is based on asset-identifier size
         (
@@ -769,6 +805,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "mint-nft",
             &[],
+            true,
         ),
         // branching inside begin with subsequent siblings — verifies that
         // the cost of expressions after an if is included in the static estimate
@@ -783,6 +820,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "if-then-add",
             &[],
+            false,
         ),
         // --- hash function tests ---
         // sha256 with small (1-byte) buffer
@@ -793,6 +831,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "sha256-small",
             &[],
+            true,
         ),
         // sha256 with large (32-byte) buffer
         (
@@ -802,6 +841,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "sha256-large",
             &[],
+            true,
         ),
         // hash160 with small (1-byte) buffer
         (
@@ -811,6 +851,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "hash160-small",
             &[],
+            true,
         ),
         // hash160 with large (32-byte) buffer
         (
@@ -820,6 +861,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "hash160-large",
             &[],
+            true,
         ),
         // keccak256 with small (1-byte) buffer
         (
@@ -829,6 +871,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "keccak256-small",
             &[],
+            true,
         ),
         // keccak256 with large (32-byte) buffer
         (
@@ -838,6 +881,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "keccak256-large",
             &[],
+            true,
         ),
         // var-set with uint data variable
         (
@@ -848,6 +892,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "set-var-uint",
             &[],
+            true,
         ),
         // var-set with bool data variable
         (
@@ -858,6 +903,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "set-var-bool",
             &[],
+            true,
         ),
         // var-set with short string literal
         (
@@ -868,6 +914,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "set-var-short",
             &[],
+            true,
         ),
         // var-set with longer string literal
         (
@@ -878,6 +925,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "set-var-long",
             &[],
+            true,
         ),
         // --- map-get? tests ---
         // map-get? with uint key/value (key not found)
@@ -889,6 +937,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "fetch-entry-uint",
             &[],
+            false,
         ),
         // map-get? after map-set (key found)
         (
@@ -901,6 +950,7 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "fetch-entry-after-set",
             &[],
+            false,
         ),
         // map over a list calling a private function with var-set
         (
@@ -922,12 +972,13 @@ fn test_against_dynamic_cost_analysis() {
             "#},
             "add-many-32",
             &list_32_uint_args,
+            false,
         ),
     ];
 
     let mut failures = Vec::new();
-    for (src, function_name, args) in test_cases {
-        match run_cost_analysis_test(src, function_name, args, epoch, clarity_version) {
+    for (src, function_name, args, exact) in test_cases {
+        match run_cost_analysis_test(src, function_name, args, epoch, clarity_version, exact) {
             Ok(()) => println!("Passed: {}", function_name),
             Err(e) => {
                 eprintln!("✗ Test case {} failed: {}", function_name, e);

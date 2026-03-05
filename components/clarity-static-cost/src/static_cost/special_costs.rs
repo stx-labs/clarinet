@@ -699,6 +699,24 @@ pub fn cost_set_var(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // SetVar args: [var-name, value]
+    // If the value expression is a literal, use its exact serialized size
+    // since the runtime cost is based on the actual stored value.
+    if let Some(exact_size) = args.get(1).and_then(|e| {
+        e.match_atom_value()
+            .or_else(|| e.match_literal_value())
+            .and_then(|v| v.serialized_size().ok())
+            .map(u64::from)
+    }) {
+        let cost = ClarityCostFunction::SetVar
+            .eval_for_epoch(exact_size, epoch)
+            .unwrap_or(ExecutionCost::ZERO);
+        return StaticCost {
+            min: cost.clone(),
+            max: cost,
+        };
+    }
+
+    // Fall back to type-based range when the value isn't a literal
     let (min_size, max_size) = resolve_data_var_type(args, user_args)
         .map(|type_sig| {
             let min = u64::from(type_sig.min_size().unwrap_or(0));
