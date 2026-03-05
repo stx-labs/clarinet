@@ -910,6 +910,160 @@ fn test_against_dynamic_cost_analysis() {
     }
 }
 
+/// Test that contract-call? includes the cost of the called function from
+/// the target contract.
+/// The static cost of the caller function should include the callee's cost,
+/// and the dynamic cost should fall within the static min/max range.
+#[test]
+fn test_contract_call_includes_callee_cost() {
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+
+    let callee_src = indoc! {r#"
+        (define-data-var count uint u0)
+
+        (define-private (add (n uint))
+          (begin
+            (var-set count (+ (var-get count) n))
+          )
+        )
+
+        (define-public (add-many-32 (ns (list 32 uint)))
+          (begin
+            (map add ns)
+            (ok true)
+          )
+        )
+    "#};
+
+    let caller_src = indoc! {r#"
+        (define-public (call-counter (ns (list 32 uint)))
+          (contract-call? .counter add-many-32 ns)
+        )
+    "#};
+
+    let deployer = StandardPrincipalData::transient();
+    let callee_id = QualifiedContractIdentifier::new(deployer.clone(), "counter".into());
+    let caller_id = QualifiedContractIdentifier::new(deployer, "caller".into());
+
+    // Set up environment with cost tracking
+    let mut memory_store = MemoryBackingStore::new();
+    let mut db = memory_store.as_clarity_db();
+    db.begin();
+    db.set_clarity_epoch_version(epoch).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.set_tenure_height(1).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.setup_block_metadata(Some(1)).unwrap();
+    db.commit().unwrap();
+
+    let costs_contract_id = boot_code_id("costs", false);
+    let costs_4_contract_id = boot_code_id("costs-4", false);
+    let cost_voting_contract_id = boot_code_id("cost-voting", false);
+    {
+        let mut temp_env = OwnedEnvironment::new(db, epoch);
+        temp_env
+            .initialize_versioned_contract(
+                costs_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS,
+                None,
+            )
+            .expect("Failed to initialize costs contract");
+        temp_env
+            .initialize_versioned_contract(
+                costs_4_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS_4,
+                None,
+            )
+            .expect("Failed to initialize costs-4 contract");
+        temp_env
+            .initialize_versioned_contract(
+                cost_voting_contract_id,
+                clarity_version,
+                &BOOT_CODE_COST_VOTING_TESTNET.to_string(),
+                None,
+            )
+            .expect("Failed to initialize cost-voting contract");
+        let (extracted_db, _) = temp_env.destruct().unwrap();
+        db = extracted_db;
+    }
+
+    let mut owned_env = OwnedEnvironment::new_max_limit(db, epoch, false);
+
+    // Deploy callee first, then caller
+    owned_env
+        .initialize_versioned_contract(callee_id.clone(), clarity_version, callee_src, None)
+        .expect("Failed to deploy counter contract");
+    owned_env
+        .initialize_versioned_contract(caller_id.clone(), clarity_version, caller_src, None)
+        .expect("Failed to deploy caller contract");
+
+    // Run dynamic cost analysis on the caller (pass 32 elements to match the
+    // max list length that static analysis uses for worst-case costing)
+    let list_value = clarity_types::Value::Sequence(SequenceData::List(ListData {
+        data: vec![clarity_types::Value::UInt(1); 32],
+        type_signature: ListTypeData::new_list(TypeSignature::UIntType, 32).unwrap(),
+    }));
+    let dynamic_cost = execute_contract_function_and_get_cost(
+        &mut owned_env,
+        &caller_id,
+        "call-counter",
+        &[list_value],
+    );
+
+    // Run static cost analysis on the caller.
+    // We need an active DB transaction so that get_contract_call_target_cost
+    // can look up the callee contract source from the database.
+    let caller_ast = ast::build_ast(&caller_id, caller_src, &mut (), clarity_version, epoch)
+        .expect("Failed to build caller AST");
+    owned_env.begin();
+    let static_cost_map = {
+        let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
+        let mut env = owned_env.get_exec_environment(None, None, &contract_context);
+        static_cost_from_ast_with_source(
+            &caller_ast,
+            &clarity_version,
+            epoch,
+            Some(caller_src),
+            &mut env,
+        )
+        .expect("Failed to get static cost analysis")
+    };
+    let _ = owned_env.commit();
+
+    let (static_cost, _) = static_cost_map
+        .get("call-counter")
+        .expect("call-counter not found in static cost map");
+
+    println!("\n=== Contract-call? cost test ===");
+    println!("static cost: {:?}", static_cost);
+    println!("dynamic cost: {:?}", dynamic_cost);
+
+    assert!(
+        static_cost.max.runtime > 1000,
+        "Static cost should include callee function cost, got max runtime: {}",
+        static_cost.max.runtime
+    );
+
+    // Dynamic cost should fall within the static range
+    assert!(
+        dynamic_cost.runtime >= static_cost.min.runtime,
+        "Dynamic cost runtime {} is LESS than static min runtime {}",
+        dynamic_cost.runtime,
+        static_cost.min.runtime
+    );
+    assert!(
+        dynamic_cost.runtime <= static_cost.max.runtime,
+        "Dynamic cost runtime {} is MORE than static max runtime {}",
+        dynamic_cost.runtime,
+        static_cost.max.runtime
+    );
+}
+
 #[test]
 fn test_trait_counts_simplified() {
     // Simplified test case to debug trait counting

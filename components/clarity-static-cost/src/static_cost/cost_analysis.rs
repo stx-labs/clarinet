@@ -9,8 +9,8 @@ use clarity::vm::costs::ExecutionCost;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use clarity::vm::types::{
-    parse_name_type_pairs, QualifiedContractIdentifier, SequenceSubtype, TupleTypeSignature,
-    TypeSignature, TypeSignatureExt,
+    parse_name_type_pairs, PrincipalData, QualifiedContractIdentifier, SequenceSubtype,
+    TupleTypeSignature, TypeSignature, TypeSignatureExt,
 };
 use clarity::vm::variables::lookup_reserved_variable;
 use clarity::vm::{ClarityVersion, LocalContext, Value};
@@ -26,7 +26,6 @@ use super::{
     TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
 // TODO:
-// contract-call? - get source from database
 // unwrap evaluates both branches (https://github.com/clarity-lang/reference/issues/59)
 
 const FUNCTION_DEFINITION_KEYWORDS: &[&str] =
@@ -510,6 +509,37 @@ fn extract_function_name(expr: &SymbolicExpression) -> Option<String> {
             .and_then(|name| name.match_atom())
             .map(|name| name.to_string())
     })
+}
+
+/// Look up the cost of the function targeted by a `contract-call?`.
+///
+/// `args` corresponds to `exprs[1..]` of the contract-call expression:
+///   args[0] = target contract — either an AtomValue(Principal(Contract(..)))
+///             for static dispatch, or a Field(TraitIdentifier) / trait ref
+///             for dynamic dispatch
+///   args[1] = function name   (Atom)
+///   args[2..] = call arguments
+///
+/// Returns `None` for dynamic (trait-based) dispatch or if the target
+/// contract / function cannot be resolved.
+fn get_contract_call_target_cost(
+    args: &[SymbolicExpression],
+    env: &mut Environment,
+) -> Option<StaticCost> {
+    let first = args.first()?;
+    let function_name = args.get(1)?.match_atom()?;
+
+    let contract_id = match first
+        .match_atom_value()
+        .or_else(|| first.match_literal_value())
+    {
+        Some(Value::Principal(PrincipalData::Contract(id))) => id.clone(),
+        _ => first.match_field()?.contract_identifier.clone(),
+    };
+
+    let costs = static_cost(env, &contract_id).ok()?;
+    let (cost, _trait_count) = costs.get(function_name.as_str())?;
+    Some(cost.clone())
 }
 
 pub fn build_cost_analysis_tree(
@@ -1160,6 +1190,15 @@ fn build_listlike_cost_analysis_tree(
                         multiply_cost(&mut multiplied_max, list_max_len);
                         super::saturating_add_cost(&mut cost.min, &multiplied_min);
                         super::saturating_add_cost(&mut cost.max, &multiplied_max);
+                    }
+                }
+
+                // For contract-call?, add the cost of the called function from
+                // the target contract.
+                if native_function == NativeFunctions::ContractCall {
+                    if let Some(called_fn_cost) = get_contract_call_target_cost(&exprs[1..], env) {
+                        super::saturating_add_cost(&mut cost.min, &called_fn_cost.min);
+                        super::saturating_add_cost(&mut cost.max, &called_fn_cost.max);
                     }
                 }
 
