@@ -169,27 +169,6 @@
         "path": "./syntaxes/clarity.tmLanguage.json"
       }
     ],
-    "viewsContainers": {
-      "panel": [
-        {
-          "id": "clarityPanel",
-          "title": "Clarity",
-          "icon": "assets/images/file-icon/clar-dark-theme.svg",
-          "when": "config.clariy-lsp.panels.insights-panel"
-        }
-      ]
-    },
-    "views": {
-      "clarityPanel": [
-        {
-          "type": "webview",
-          "id": "clariy-lsp.clarityInsightsView",
-          "icon": "",
-          "name": "Insights",
-          "when": "config.clariy-lsp.panels.insights-panel"
-        }
-      ]
-    },
     "commands": [],
     "breakpoints": [
       {

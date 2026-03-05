@@ -285,17 +285,6 @@ pub async fn process_notification(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FunctionAnalysisParams {
-    pub path: String,
-    pub line: u32,
-    pub char: u32,
-}
-
-impl FunctionAnalysisParams {
-    pub const METHOD: &'static str = "clarity/getFunctionAnalysis";
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub enum LspRequest {
     Completion(CompletionParams),
     SignatureHelp(SignatureHelpParams),
@@ -306,7 +295,6 @@ pub enum LspRequest {
     DocumentRangeFormatting(DocumentRangeFormattingParams),
     CodeLens(CodeLensParams),
     Initialize(Box<InitializeParams>),
-    FunctionAnalysis(FunctionAnalysisParams),
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -320,7 +308,6 @@ pub enum LspRequestResponse {
     Hover(Option<Hover>),
     CodeLens(Vec<CodeLens>),
     Initialize(Box<InitializeResult>),
-    FunctionAnalysis(Option<String>),
 }
 
 pub fn process_request(
@@ -601,29 +588,6 @@ pub fn process_request(
                 .try_read(|es| es.get_code_lenses(&contract_location))
                 .unwrap_or_default();
             Ok(LspRequestResponse::CodeLens(code_lenses))
-        }
-
-        LspRequest::FunctionAnalysis(params) => {
-            eprintln!(
-                "[LSP] FunctionAnalysis request received: path={}, line={}, char={}",
-                params.path, params.line, params.char
-            );
-            let file_url = params
-                .path
-                .parse()
-                .map_err(|e| format!("Invalid URI: {e}"))?;
-            let Some(contract_location) = get_contract_location(&file_url) else {
-                eprintln!("[LSP] Could not get contract location from URI");
-                return Ok(LspRequestResponse::FunctionAnalysis(None));
-            };
-            let position = ls_types::Position {
-                line: params.line.saturating_sub(1),
-                character: params.char.saturating_sub(1),
-            };
-            let cost_analysis = editor_state
-                .try_read(|es| es.get_function_cost_analysis(&contract_location, &position))
-                .unwrap_or_default();
-            Ok(LspRequestResponse::FunctionAnalysis(cost_analysis))
         }
 
         _ => Err(format!("Unexpected command: {command:?}")),
