@@ -93,7 +93,7 @@ pub fn do_start_ui(
         }
     });
 
-    let mut app = App::new("Clarinet", devnet_path, ctx);
+    let mut app = App::new("Clarinet", devnet_path, ctx.clone());
 
     terminal
         .clear()

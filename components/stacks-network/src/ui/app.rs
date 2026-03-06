@@ -27,11 +27,11 @@ pub struct App<'a> {
     pub mempool: StatefulList<MempoolAdmissionData>,
     pub logs: StatefulList<LogData>,
     pub services: StatefulList<ServiceStatusData>,
-    pub ctx: &'a Context,
+    pub ctx: Context,
 }
 
 impl<'a> App<'a> {
-    pub fn new(title: &'a str, devnet_path: &'a str, ctx: &'a Context) -> App<'a> {
+    pub fn new(title: &'a str, devnet_path: &'a str, ctx: Context) -> App<'a> {
         App {
             title,
             devnet_path,
