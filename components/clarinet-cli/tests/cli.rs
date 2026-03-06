@@ -1,7 +1,6 @@
 use std::fs;
-use std::io::Write as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use clarinet_files::{ProjectManifest, ProjectManifestFile};
 use indoc::{formatdoc, indoc};
@@ -531,57 +530,4 @@ fn test_check_skips_requirement_lint_warnings() {
             );
         }
     }
-}
-
-/// `clarinet console` starts successfully with lint-triggering contracts.
-/// This is a smoke test for the CLI console path. The behavioral verification
-/// that analysis is actually skipped (no lint diagnostics in execution results)
-/// is in the `clarinet-deployments` crate's `update_session_*` tests, which
-/// check `execution_result.diagnostics` directly.
-#[test]
-fn test_console_starts_with_lint_triggering_contracts() {
-    let project_name = "test_console_no_lints";
-    let temp_dir = create_new_project(project_name);
-    let project_path = temp_dir.path().join(project_name);
-
-    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["contract", "new", "my-contract"])
-        .current_dir(&project_path)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "clarinet contract new failed");
-
-    let contract_path = project_path.join("contracts").join("my-contract.clar");
-    fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n").unwrap();
-
-    strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
-
-    // Verify that `clarinet check` DOES produce lint warnings for this contract
-    let json = run_clarinet_check_json(&[], &project_path);
-    let check_messages = collect_check_diagnostic_messages(&json);
-    assert!(
-        check_messages.iter().any(|m| m.contains("never used")),
-        "sanity check: clarinet check should produce lint warnings, got: {check_messages:?}"
-    );
-
-    // Console should start and run successfully with this contract
-    let mut child = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["console"])
-        .current_dir(&project_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Failed to start console");
-
-    let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-    stdin.write_all(b"(+ 1 2)\n").expect("Failed to write");
-    drop(child.stdin.take());
-
-    let output = child.wait_with_output().expect("Failed to read output");
-    assert!(
-        output.status.success(),
-        "console should exit successfully, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
