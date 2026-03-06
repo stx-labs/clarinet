@@ -732,6 +732,181 @@ mod lsp_tests {
             .ends_with("test.clar\""));
     }
 
+    struct TestFileAccessor {
+        project_manifest: String,
+        network_manifest: String,
+        contract: String,
+    }
+
+    impl TestFileAccessor {
+        fn new(contract: String) -> Self {
+            let project_manifest = r#"
+[project]
+name = 'test-project'
+
+[contracts.counter]
+path = 'contracts/test.clar'
+epoch = 'latest'
+clarity_version = 3
+"#
+            .to_string();
+
+            let network_manifest = r#"
+[network]
+name = "devnet"
+deployment_fee_rate = 10
+
+[accounts.deployer]
+mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
+balance = 100_000_000_000_000
+sbtc_balance = 1_000_000_000
+"#.to_string();
+
+            Self {
+                project_manifest,
+                network_manifest,
+                contract,
+            }
+        }
+    }
+
+    impl FileAccessor for TestFileAccessor {
+        fn file_exists(&self, _path: String) -> clarinet_files::FileAccessorResult<bool> {
+            Box::pin(async { Ok(true) })
+        }
+
+        fn read_file(&self, path: String) -> clarinet_files::FileAccessorResult<String> {
+            let content = if path.ends_with("Clarinet.toml") {
+                self.project_manifest.clone()
+            } else if path.ends_with("Devnet.toml") {
+                self.network_manifest.clone()
+            } else {
+                self.contract.clone()
+            };
+            Box::pin(async { Ok(content) })
+        }
+
+        fn read_files(
+            &self,
+            contracts_paths: Vec<String>,
+        ) -> clarinet_files::FileAccessorResult<HashMap<String, String>> {
+            let contract = self.contract.clone();
+            Box::pin(async move {
+                Ok(contracts_paths
+                    .into_iter()
+                    .map(|path| (path, contract.clone()))
+                    .collect())
+            })
+        }
+
+        fn write_file(
+            &self,
+            _path: String,
+            _content: &[u8],
+        ) -> clarinet_files::FileAccessorResult<()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_env_simnet() {
+        let with_env_simnet = r#"
+(define-fungible-token drachma)
+(define-constant CONTRACT-OWNER tx-sender)
+(define-constant ERR-OWNER-ONLY (err u100))
+(define-public (mint (amount uint) (recipient principal))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+        (minty-fresh amount recipient)
+    )
+)
+;; mint post comment
+
+;; #[env(simnet)]
+(define-public (minty-fresh (amount uint) (recipient principal)) ;; eol
+    (begin
+        (ft-mint? drachma amount recipient)
+    )
+)
+"#;
+        /*
+                let without_env_simnet = r#"
+        (define-fungible-token drachma)
+        (define-constant CONTRACT-OWNER tx-sender)
+        (define-constant ERR-OWNER-ONLY (err u100))
+        (define-public (mint (amount uint) (recipient principal))
+            (begin
+                (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                (minty-fresh amount recipient)
+            )
+        )
+        ;; mint post comment
+
+        "#;
+        */
+        let file_accessor = TestFileAccessor::new(with_env_simnet.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        let contract_location = PathBuf::from("test.clar".to_string());
+        let notification = LspNotification::ContractSaved(contract_location);
+        let response =
+            process_notification(notification, &mut editor_state_input, Some(&file_accessor))
+                .await
+                .expect("Failed to process notification");
+
+        let response_json = json!(response);
+        let aggregated_diagnostics = response_json
+            .get("aggregated_diagnostics")
+            .expect("Expected 'aggregate_diagnostics' key");
+        let Some(aggregate_array) = aggregated_diagnostics.as_array() else {
+            panic!("aggregated_diagnostics should be an array");
+        };
+        assert_eq!(aggregate_array.len(), 1);
+
+        let element = aggregate_array
+            .get(0)
+            .expect("Expected an element in outer array");
+        let Some(element_array) = element.as_array() else {
+            panic!("element should be an array");
+        };
+        assert_eq!(
+            element_array.len(),
+            2,
+            "Element array should have two items"
+        );
+
+        let path = element_array
+            .get(0)
+            .expect("Fai;ed to get path in element array")
+            .to_string();
+        assert_eq!(path, "\"contracts/test.clar\"");
+
+        let diagnostics = element_array
+            .get(1)
+            .expect("Fai;ed to get diagnostics in element array");
+        let Some(diagnostics_array) = diagnostics.as_array() else {
+            panic!("diagnostics should be an array");
+        };
+        assert_eq!(
+            diagnostics_array.len(),
+            1,
+            "Diagnostics array should have one item"
+        );
+        let diagnostic = diagnostics_array
+            .get(0)
+            .expect("Failed to get expected diagnostic");
+        let level = diagnostic
+            .get("level")
+            .expect("Failed to find \"level\": in diagnostic")
+            .to_string();
+        assert_eq!(level, "\"Error\"");
+
+        let message = diagnostic
+            .get("message")
+            .expect("Failed to find \"message\": in diagnostic");
+        assert_eq!(message, "MAINNET: use of unresolved function 'minty-fresh'");
+    }
+
     #[test]
     fn test_custom_boot_contract_recognition() {
         let manifest_content = r#"
