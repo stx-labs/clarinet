@@ -9,8 +9,8 @@ use ls_types::notification::{
     Initialized, Notification,
 };
 use ls_types::request::{
-    Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest, Initialize,
-    RangeFormatting, Request, SignatureHelpRequest,
+    CodeLensRequest, Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest,
+    Initialize, RangeFormatting, Request, SignatureHelpRequest,
 };
 use ls_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
@@ -147,9 +147,15 @@ impl LspVscodeBridge {
             }
         };
 
+        let should_refresh_code_lens = matches!(
+            method.as_str(),
+            DidOpenTextDocument::METHOD | DidSaveTextDocument::METHOD
+        );
+
         let mut editor_state_lock = EditorStateInput::RwLock(self.editor_state_lock.clone());
         let send_diagnostic = self.client_diagnostic_tx.clone();
         let send_notification = self.client_notification_tx.clone();
+        let send_request = self.backend_to_client_tx.clone();
         let file_accessor: Box<dyn FileAccessor> = Box::new(WASMFileSystemAccessor::new(
             self.backend_to_client_tx.clone(),
         ));
@@ -184,6 +190,13 @@ impl LspVscodeBridge {
                         })?,
                     )?;
                 }
+            }
+
+            if should_refresh_code_lens {
+                let _ = send_request.call1(
+                    &JsValue::NULL,
+                    &encode_to_js("workspace/codeLens/refresh").unwrap(),
+                );
             }
 
             Ok(JsValue::TRUE)
@@ -273,6 +286,16 @@ impl LspVscodeBridge {
                     &EditorStateInput::RwLock(self.editor_state_lock.clone()),
                 );
                 if let Ok(LspRequestResponse::Hover(response)) = lsp_response {
+                    return response.serialize(&serializer).map_err(|_| JsValue::NULL);
+                }
+            }
+
+            CodeLensRequest::METHOD => {
+                let lsp_response = process_request(
+                    LspRequest::CodeLens(decode_from_js(js_params)?),
+                    &EditorStateInput::RwLock(self.editor_state_lock.clone()),
+                );
+                if let Ok(LspRequestResponse::CodeLens(response)) = lsp_response {
                     return response.serialize(&serializer).map_err(|_| JsValue::NULL);
                 }
             }

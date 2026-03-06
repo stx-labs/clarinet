@@ -6,10 +6,10 @@ use clarity_repl::clarity::diagnostic::Diagnostic;
 use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
 use ls_types::{
-    CompletionItem, CompletionParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-    DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams, Hover, HoverParams,
-    InitializeParams, InitializeResult, Location, MessageType, ServerInfo, SignatureHelp,
-    SignatureHelpParams, TextEdit,
+    CodeLens, CodeLensParams, CompletionItem, CompletionParams, DocumentFormattingParams,
+    DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams,
+    Hover, HoverParams, InitializeParams, InitializeResult, Location, MessageType, ServerInfo,
+    SignatureHelp, SignatureHelpParams, TextEdit,
 };
 use serde::{Deserialize, Serialize};
 
@@ -293,6 +293,7 @@ pub enum LspRequest {
     DocumentSymbol(DocumentSymbolParams),
     DocumentFormatting(DocumentFormattingParams),
     DocumentRangeFormatting(DocumentRangeFormattingParams),
+    CodeLens(CodeLensParams),
     Initialize(Box<InitializeParams>),
 }
 
@@ -305,6 +306,7 @@ pub enum LspRequestResponse {
     DocumentFormatting(Option<Vec<TextEdit>>),
     DocumentRangeFormatting(Option<Vec<TextEdit>>),
     Hover(Option<Hover>),
+    CodeLens(Vec<CodeLens>),
     Initialize(Box<InitializeResult>),
 }
 
@@ -576,6 +578,18 @@ pub fn process_request(
                 .unwrap_or_default();
             Ok(LspRequestResponse::Hover(hover_data))
         }
+
+        LspRequest::CodeLens(params) => {
+            let file_url = params.text_document.uri;
+            let Some(contract_location) = get_contract_location(&file_url) else {
+                return Ok(LspRequestResponse::CodeLens(vec![]));
+            };
+            let code_lenses = editor_state
+                .try_read(|es| es.get_code_lenses(&contract_location))
+                .unwrap_or_default();
+            Ok(LspRequestResponse::CodeLens(code_lenses))
+        }
+
         _ => Err(format!("Unexpected command: {command:?}")),
     }
 }
