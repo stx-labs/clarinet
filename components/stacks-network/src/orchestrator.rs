@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
@@ -57,6 +58,7 @@ pub struct DevnetOrchestrator {
     docker_client: Option<Docker>,
     services_map_hosts: Option<ServicesMapHosts>,
     save_container_logs: bool,
+    container_index: Cell<u32>,
 }
 #[derive(Clone, Debug)]
 pub struct ServicesMapHosts {
@@ -175,6 +177,7 @@ impl DevnetOrchestrator {
             postgres_container_id: None,
             services_map_hosts: None,
             save_container_logs: false,
+            container_index: Cell::new(0),
         })
     }
 
@@ -203,8 +206,24 @@ impl DevnetOrchestrator {
         Ok(())
     }
 
-    fn project_labels(&self, reset: bool) -> HashMap<String, String> {
-        let mut labels = HashMap::from([("project".to_string(), self.network_name.clone())]);
+    fn project_labels(&self, service: &str, reset: bool) -> HashMap<String, String> {
+        self.container_index.set(self.container_index.get() + 1);
+        let mut labels = HashMap::from([
+            ("project".to_string(), self.network_name.clone()),
+            // the docker.compose.* labels make the project behave like a docker compose one
+            // so users can do `docker compose -p <self.name> logs -f`
+            ("com.docker.compose.project".to_string(), self.name.clone()),
+            ("com.docker.compose.config-hash".to_string(), "".to_string()),
+            ("com.docker.compose.oneoff".to_string(), "False".to_string()),
+            (
+                "com.docker.compose.service".to_string(),
+                service.to_string(),
+            ),
+            (
+                "com.docker.compose.container-number".to_string(),
+                self.container_index.get().to_string(),
+            ),
+        ]);
         if reset {
             labels.insert("reset".to_string(), "true".to_string());
         }
@@ -705,7 +724,7 @@ impl DevnetOrchestrator {
             ),
         ]);
 
-        let labels = self.project_labels(true);
+        let labels = self.project_labels("bitcoin-node", true);
 
         let mut env = vec![];
         if devnet_config.bitcoin_controller_automining_disabled {
@@ -1076,7 +1095,7 @@ impl DevnetOrchestrator {
             ),
         ]);
 
-        let labels = self.project_labels(true);
+        let labels = self.project_labels("stacks-node", true);
 
         let mut binds = vec![format!(
             "{}/conf:/src/stacks-node/",
@@ -1225,7 +1244,7 @@ impl DevnetOrchestrator {
         fs::create_dir_all(stacks_signer_data_path)
             .map_err(|e| format!("unable to create stacks directory: {e:?}"))?;
 
-        let labels = self.project_labels(true);
+        let labels = self.project_labels(&format!("stacks-signer-{signer_id}"), true);
 
         let mut binds = vec![format!(
             "{}/conf:/src/stacks-signer/",
@@ -1344,7 +1363,7 @@ impl DevnetOrchestrator {
             HashMap::new(),
         )]);
 
-        let labels = self.project_labels(true);
+        let labels = self.project_labels("stacks-api", true);
 
         let mut env = vec![
             format!("STACKS_CORE_RPC_HOST=stacks-node.{}", self.network_name),
@@ -1533,7 +1552,7 @@ impl DevnetOrchestrator {
 
         let exposed_ports = HashMap::new();
 
-        let labels = self.project_labels(true);
+        let labels = self.project_labels("postgres", true);
 
         let config = Config {
             labels: Some(labels),
@@ -1609,7 +1628,7 @@ impl DevnetOrchestrator {
 
         let exposed_ports = HashMap::from([(format!("{explorer_guest_port}/tcp"), HashMap::new())]);
 
-        let labels = self.project_labels(false);
+        let labels = self.project_labels("stacks-explorer", false);
 
         let mut env = vec![
             format!(
@@ -1707,7 +1726,7 @@ impl DevnetOrchestrator {
             HashMap::new(),
         )]);
 
-        let labels = self.project_labels(false);
+        let labels = self.project_labels("bitcoin-explorer", false);
 
         let config = Config {
             labels: Some(labels),
