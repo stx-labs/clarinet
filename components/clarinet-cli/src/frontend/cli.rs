@@ -1090,6 +1090,7 @@ pub fn main() {
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
                             cmd.use_computed_deployment_plan,
+                            false,
                         );
 
                         if !artifacts.success {
@@ -1187,7 +1188,7 @@ pub fn main() {
                 name: "transient".to_string(),
                 clarity_version: ClarityVersion::default_for_epoch(epoch),
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                is_requirement: false,
+                skip_analysis: false,
             };
             let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
             let (annotations, mut annotation_diagnostics) = session
@@ -1257,6 +1258,7 @@ pub fn main() {
                 &cmd.deployment_plan_path,
                 cmd.use_on_disk_deployment_plan,
                 cmd.use_computed_deployment_plan,
+                true,
             );
 
             let exit_code = i32::from(!artifacts.success);
@@ -1489,6 +1491,7 @@ pub fn load_deployment_and_artifacts_or_exit(
     deployment_plan_path: &Option<String>,
     force_on_disk: bool,
     force_computed: bool,
+    enable_analysis: bool,
 ) -> (
     DeploymentSpecification,
     Option<String>,
@@ -1507,7 +1510,12 @@ pub fn load_deployment_and_artifacts_or_exit(
             .and_then(|opt| match opt {
                 Some(mut deployment) => {
                     eprintln!("{} using {default_deployment_file}", yellow!("note:"));
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     Ok((deployment, None, artifacts))
                 }
                 None => {
@@ -1518,6 +1526,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                             manifest,
                             &mut deployment,
                             Some(&ast_artifacts.asts),
+                            enable_analysis,
                         );
                         for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
                             // Merge parser's diags with analysis' diags.
@@ -1538,7 +1547,12 @@ pub fn load_deployment_and_artifacts_or_exit(
             let deployment_location = project_root.join(path);
             load_deployment(project_root, &deployment_location)
                 .map(|mut deployment| {
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     (
                         deployment,
                         Some(deployment_location.to_string_lossy().to_string()),
@@ -2226,7 +2240,7 @@ mod tests {
                 deployer: ContractDeployer::DefaultDeployer,
                 clarity_version: ClarityVersion::Clarity2,
                 epoch: Epoch::Latest,
-                is_requirement: false,
+                skip_analysis: false,
             }
         }
 
@@ -2702,7 +2716,7 @@ mod tests {
                 deployer: ContractDeployer::LabeledDeployer("wallet_1".to_string()),
                 clarity_version: ClarityVersion::Clarity3,
                 epoch: Epoch::Specific(clarity_repl::clarity::StacksEpochId::Epoch25),
-                is_requirement: false,
+                skip_analysis: false,
             };
 
             add_contract_to_doc(&mut doc, "special", &contract);
@@ -2935,7 +2949,7 @@ mod tests {
             name: "transient".to_string(),
             clarity_version: ClarityVersion::default_for_epoch(epoch),
             epoch: clarity_repl::repl::Epoch::Specific(epoch),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
         let (annotations, mut annotation_diagnostics) = session
