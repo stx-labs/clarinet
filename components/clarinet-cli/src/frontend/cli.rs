@@ -2104,7 +2104,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         }
     };
 
-    let orchestrator = match DevnetOrchestrator::new(manifest, None, None, true, cmd.no_dashboard) {
+    let orchestrator = match DevnetOrchestrator::new(manifest, None, None, true) {
         Ok(orchestrator) => orchestrator,
         Err(e) => {
             eprintln!("{}", format_err!(e));

@@ -27,7 +27,7 @@ use clarinet_files::{
 use clarity::types::chainstate::StacksPrivateKey;
 use clarity::types::PrivateKey;
 use futures::stream::TryStreamExt;
-use hiro_system_kit::{slog, slog_term, Drain};
+use hiro_system_kit::slog;
 use indoc::formatdoc;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
@@ -46,7 +46,6 @@ pub struct DevnetOrchestrator {
     pub network_config: Option<NetworkManifest>,
     pub termination_success_tx: Option<Sender<bool>>,
     pub can_exit: bool,
-    pub logger: Option<slog::Logger>,
     stacks_node_container_id: Option<String>,
     stacks_signers_containers_ids: Vec<String>,
     stacks_api_container_id: Option<String>,
@@ -77,7 +76,6 @@ impl DevnetOrchestrator {
         network_manifest: Option<NetworkManifest>,
         devnet_override: Option<DevnetConfigFile>,
         should_use_docker: bool,
-        log_to_stdout: bool,
     ) -> Result<DevnetOrchestrator, String> {
         let mut network_config = match network_manifest {
             Some(n) => Ok(n),
@@ -149,14 +147,6 @@ impl DevnetOrchestrator {
             false => None,
         };
 
-        let logger = if log_to_stdout {
-            let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
-            let logger =
-                slog::Logger::root(slog_term::FullFormat::new(plain).build().fuse(), slog::o!());
-            Some(logger)
-        } else {
-            None
-        };
         Ok(DevnetOrchestrator {
             name,
             network_name,
@@ -164,7 +154,6 @@ impl DevnetOrchestrator {
             network_config: Some(network_config),
             docker_client,
             can_exit: true,
-            logger,
             termination_success_tx: None,
             stacks_node_container_id: None,
             stacks_signers_containers_ids: vec![],
@@ -358,56 +347,20 @@ impl DevnetOrchestrator {
         let stacks_explorer_port = devnet_config.stacks_explorer_port;
         let stacks_api_port = devnet_config.stacks_api_port;
 
-        send_status_update(
-            &event_tx,
-            &self.logger,
-            "bitcoin-node",
-            Status::Red,
-            "initializing",
-        );
+        send_status_update(&event_tx, "bitcoin-node", Status::Red, "initializing");
 
-        send_status_update(
-            &event_tx,
-            &self.logger,
-            "stacks-node",
-            Status::Red,
-            "initializing",
-        );
+        send_status_update(&event_tx, "stacks-node", Status::Red, "initializing");
 
-        send_status_update(
-            &event_tx,
-            &self.logger,
-            "stacks-signers",
-            Status::Red,
-            "initializing",
-        );
+        send_status_update(&event_tx, "stacks-signers", Status::Red, "initializing");
 
         if !disable_stacks_api {
-            send_status_update(
-                &event_tx,
-                &self.logger,
-                "stacks-api",
-                Status::Red,
-                "initializing",
-            );
+            send_status_update(&event_tx, "stacks-api", Status::Red, "initializing");
         }
         if !disable_stacks_explorer {
-            send_status_update(
-                &event_tx,
-                &self.logger,
-                "stacks-explorer",
-                Status::Red,
-                "initializing",
-            );
+            send_status_update(&event_tx, "stacks-explorer", Status::Red, "initializing");
         }
         if !disable_bitcoin_explorer {
-            send_status_update(
-                &event_tx,
-                &self.logger,
-                "bitcoin-explorer",
-                Status::Red,
-                "initializing",
-            );
+            send_status_update(&event_tx, "bitcoin-explorer", Status::Red, "initializing");
         }
 
         let _ = event_tx.send(DevnetEvent::info(format!(
@@ -419,20 +372,13 @@ impl DevnetOrchestrator {
         let _ = event_tx.send(DevnetEvent::info("Starting bitcoin-node".to_string()));
         send_status_update(
             &event_tx,
-            &self.logger,
             "bitcoin-node",
             Status::Yellow,
             "preparing container",
         );
         let res = self.prepare_bitcoin_node_container(ctx, no_snapshot).await;
         self.or_fatal(res, &event_tx, ctx).await?;
-        send_status_update(
-            &event_tx,
-            &self.logger,
-            "bitcoin-node",
-            Status::Yellow,
-            "booting",
-        );
+        send_status_update(&event_tx, "bitcoin-node", Status::Yellow, "booting");
         let res = self
             .boot_bitcoin_node_container(&event_tx, no_snapshot)
             .await;
@@ -452,7 +398,6 @@ impl DevnetOrchestrator {
         if !disable_stacks_api {
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "stacks-api",
                 Status::Yellow,
                 "preparing container",
@@ -464,7 +409,6 @@ impl DevnetOrchestrator {
             self.or_fatal(res, &event_tx, ctx).await?;
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "stacks-api",
                 Status::Green,
                 &format!("http://localhost:{stacks_api_port}/doc"),
@@ -473,22 +417,10 @@ impl DevnetOrchestrator {
 
         // Start stacks-node
         let _ = event_tx.send(DevnetEvent::info("Starting stacks-node".to_string()));
-        send_status_update(
-            &event_tx,
-            &self.logger,
-            "stacks-node",
-            Status::Yellow,
-            "updating image",
-        );
+        send_status_update(&event_tx, "stacks-node", Status::Yellow, "updating image");
         let res = self.prepare_stacks_node_container(boot_index, ctx).await;
         self.or_fatal(res, &event_tx, ctx).await?;
-        send_status_update(
-            &event_tx,
-            &self.logger,
-            "stacks-node",
-            Status::Yellow,
-            "booting",
-        );
+        send_status_update(&event_tx, "stacks-node", Status::Yellow, "booting");
         let res = self
             .boot_stacks_node_container(&event_tx, no_snapshot)
             .await;
@@ -501,7 +433,6 @@ impl DevnetOrchestrator {
             let _ = event_tx.send(DevnetEvent::info(format!("Starting stacks-signer-{i}")));
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "stacks-signers",
                 Status::Yellow,
                 "updating image",
@@ -512,7 +443,6 @@ impl DevnetOrchestrator {
             self.or_fatal(res, &event_tx, ctx).await?;
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "stacks-signers",
                 Status::Yellow,
                 &format!("booting signer {i}"),
@@ -526,19 +456,12 @@ impl DevnetOrchestrator {
             signers_count,
             if signers_count > 1 { "s" } else { "" }
         );
-        send_status_update(
-            &event_tx,
-            &self.logger,
-            "stacks-signers",
-            Status::Green,
-            &message,
-        );
+        send_status_update(&event_tx, "stacks-signers", Status::Green, &message);
 
         // Start stacks-explorer
         if !disable_stacks_explorer {
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "stacks-explorer",
                 Status::Yellow,
                 "preparing container",
@@ -550,7 +473,6 @@ impl DevnetOrchestrator {
             self.or_fatal(res, &event_tx, ctx).await?;
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "stacks-explorer",
                 Status::Green,
                 &format!("http://localhost:{stacks_explorer_port}"),
@@ -561,7 +483,6 @@ impl DevnetOrchestrator {
         if !disable_bitcoin_explorer {
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "bitcoin-explorer",
                 Status::Yellow,
                 "preparing container",
@@ -573,7 +494,6 @@ impl DevnetOrchestrator {
             self.or_fatal(res, &event_tx, ctx).await?;
             send_status_update(
                 &event_tx,
-                &self.logger,
                 "bitcoin-explorer",
                 Status::Green,
                 &format!("http://localhost:{bitcoin_explorer_port}"),
@@ -588,21 +508,9 @@ impl DevnetOrchestrator {
                     break;
                 }
                 Ok(false) => {
-                    send_status_update(
-                        &event_tx,
-                        &self.logger,
-                        "bitcoin-node",
-                        Status::Yellow,
-                        "restarting",
-                    );
+                    send_status_update(&event_tx, "bitcoin-node", Status::Yellow, "restarting");
 
-                    send_status_update(
-                        &event_tx,
-                        &self.logger,
-                        "stacks-node",
-                        Status::Yellow,
-                        "restarting",
-                    );
+                    send_status_update(&event_tx, "stacks-node", Status::Yellow, "restarting");
 
                     let _ = event_tx.send(DevnetEvent::debug("Killing containers".into()));
                     let _ = self.stop_containers().await;
