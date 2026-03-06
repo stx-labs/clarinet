@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -533,16 +533,17 @@ fn test_check_skips_requirement_lint_warnings() {
     }
 }
 
-/// `clarinet console` should NOT produce lint warnings even for contracts
-/// that would trigger them under `clarinet check`. This verifies that
-/// analysis is disabled in the console codepath.
+/// `clarinet console` starts successfully with lint-triggering contracts.
+/// This is a smoke test for the CLI console path. The behavioral verification
+/// that analysis is actually skipped (no lint diagnostics in execution results)
+/// is in the `clarinet-deployments` crate's `update_session_*` tests, which
+/// check `execution_result.diagnostics` directly.
 #[test]
-fn test_console_does_not_emit_lint_warnings() {
+fn test_console_starts_with_lint_triggering_contracts() {
     let project_name = "test_console_no_lints";
     let temp_dir = create_new_project(project_name);
     let project_path = temp_dir.path().join(project_name);
 
-    // Create a contract with lint-triggering code (unused constant)
     let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
         .args(["contract", "new", "my-contract"])
         .current_dir(&project_path)
@@ -553,10 +554,9 @@ fn test_console_does_not_emit_lint_warnings() {
     let contract_path = project_path.join("contracts").join("my-contract.clar");
     fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n").unwrap();
 
-    // Strip [repl.analysis] so default lints would be active (if analysis were enabled)
     strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
 
-    // First, verify that `clarinet check` DOES produce lint warnings for this contract
+    // Verify that `clarinet check` DOES produce lint warnings for this contract
     let json = run_clarinet_check_json(&[], &project_path);
     let check_messages = collect_check_diagnostic_messages(&json);
     assert!(
@@ -564,7 +564,7 @@ fn test_console_does_not_emit_lint_warnings() {
         "sanity check: clarinet check should produce lint warnings, got: {check_messages:?}"
     );
 
-    // Now run `clarinet console`, send a simple expression, and exit
+    // Console should start and run successfully with this contract
     let mut child = Command::new(env!("CARGO_BIN_EXE_clarinet"))
         .args(["console"])
         .current_dir(&project_path)
@@ -583,15 +583,5 @@ fn test_console_does_not_emit_lint_warnings() {
         output.status.success(),
         "console should exit successfully, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}\n{stderr}");
-
-    // Console output should NOT contain lint warnings
-    assert!(
-        !combined.contains("never used"),
-        "console should not emit lint warnings, got:\nstdout: {stdout}\nstderr: {stderr}"
     );
 }

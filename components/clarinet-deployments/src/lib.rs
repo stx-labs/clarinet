@@ -1237,21 +1237,22 @@ mod tests {
         );
     }
 
-    /// When `enable_analysis=false`, `setup_session_with_deployment` should
-    /// produce no REPL analysis diagnostics for any contract, even one that
-    /// would normally trigger lint warnings.
+    /// When analysis is globally disabled via `disable_all()` (as done by
+    /// `setup_session_with_deployment` when `enable_analysis=false`),
+    /// deploying a contract should produce NO lint diagnostics even when
+    /// `skip_analysis` is false on the contract itself — because the session
+    /// has no lints/passes configured.
     #[test]
-    fn setup_session_with_analysis_disabled_produces_no_diagnostics() {
+    fn deploy_with_analysis_globally_disabled_produces_no_diagnostics() {
         let settings = SessionSettings::default();
         let mut session = Session::new(settings);
         let epoch = StacksEpochId::Epoch25;
         session.update_epoch(epoch);
 
-        // Enable default lints on session
+        // Enable default lints, then disable them globally
+        // (this is what setup_session_with_deployment does when enable_analysis=false)
         session.interpreter.repl_settings.analysis =
             clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
-
-        // Call disable_all() — simulating what setup_session_with_deployment does
         session.interpreter.repl_settings.analysis.disable_all();
 
         let spec = EmulatedContractPublishSpecification {
@@ -1273,6 +1274,97 @@ mod tests {
         assert!(
             lint_diags.is_empty(),
             "expected no lint diagnostics after disable_all(), got: {lint_diags:?}"
+        );
+    }
+
+    /// Create a session with default lints enabled and a deployment containing
+    /// a lint-triggering contract, then run `update_session_with_deployment_plan`.
+    fn deploy_lint_triggering_contract_via_deployment_plan(
+        disable_analysis: bool,
+    ) -> ExecutionResultMap {
+        let mut session = Session::new(SessionSettings::default());
+        let epoch = StacksEpochId::Epoch25;
+        session.update_epoch(epoch);
+
+        session.interpreter.repl_settings.analysis =
+            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        if disable_analysis {
+            session.interpreter.repl_settings.analysis.disable_all();
+        }
+
+        let deployment = DeploymentSpecification {
+            id: 0,
+            name: "test".to_string(),
+            network: StacksNetwork::Simnet,
+            stacks_node: None,
+            bitcoin_node: None,
+            genesis: None,
+            contracts: BTreeMap::new(),
+            plan: TransactionPlanSpecification {
+                batches: vec![TransactionsBatchSpecification {
+                    id: 0,
+                    transactions: vec![TransactionSpecification::EmulatedContractPublish(
+                        EmulatedContractPublishSpecification {
+                            contract_name: ContractName::from("lint-test"),
+                            emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER)
+                                .unwrap(),
+                            source: LINT_TRIGGERING_SOURCE.to_string(),
+                            clarity_version: ClarityVersion::Clarity2,
+                            location: PathBuf::from("/contracts/lint-test.clar"),
+                            skip_analysis: false,
+                        },
+                    )],
+                    epoch: Some(EpochSpec::Epoch2_4),
+                }],
+            },
+        };
+
+        update_session_with_deployment_plan(&mut session, &deployment, None)
+    }
+
+    /// End-to-end test: `update_session_with_deployment_plan` with analysis
+    /// disabled should produce no lint diagnostics in execution results.
+    /// This simulates the `clarinet console` and `npm test` codepaths.
+    #[test]
+    fn update_session_no_lint_diagnostics_when_analysis_disabled() {
+        let results = deploy_lint_triggering_contract_via_deployment_plan(true);
+
+        for (contract_id, result) in results {
+            match result {
+                Ok(execution_result) => {
+                    let lint_diags: Vec<_> = execution_result
+                        .diagnostics
+                        .iter()
+                        .filter(|d| d.message.contains("never used"))
+                        .collect();
+                    assert!(
+                        lint_diags.is_empty(),
+                        "contract {contract_id} should have no lint diagnostics, got: {lint_diags:?}"
+                    );
+                }
+                Err(diags) => panic!("contract {contract_id} deployment failed: {diags:?}"),
+            }
+        }
+    }
+
+    /// Counterpart: with default lints enabled and skip_analysis=false,
+    /// `update_session_with_deployment_plan` DOES produce lint diagnostics.
+    #[test]
+    fn update_session_produces_lint_diagnostics_when_analysis_enabled() {
+        let results = deploy_lint_triggering_contract_via_deployment_plan(false);
+
+        let has_lint_warning = results.into_iter().any(|(_, result)| {
+            result
+                .map(|r| {
+                    r.diagnostics
+                        .iter()
+                        .any(|d| d.message.contains("never used"))
+                })
+                .unwrap_or(false)
+        });
+        assert!(
+            has_lint_warning,
+            "expected lint diagnostics when analysis is enabled"
         );
     }
 
