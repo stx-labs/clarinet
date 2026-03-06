@@ -10,6 +10,7 @@ ls-types = "0.0.2"
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+clarinet-defaults = { workspace = true }
 clarinet-format = { path = "../clarinet-format" }
 clarinet-files = { path = "../clarinet-files" }
 clarity-repl = { path = "../clarity-repl", default-features = false }
