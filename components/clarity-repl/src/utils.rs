@@ -2,6 +2,7 @@ use ::clarity::types::StacksEpochId;
 use ::clarity::vm::ast::parser;
 use ::clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
+use ::clarity::vm::representations::PreSymbolicExpression;
 use ::clarity::vm::representations::PreSymbolicExpressionType::Comment;
 use serde_json::json;
 
@@ -84,32 +85,9 @@ pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
     }
 
     let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
-    let mut found_env_simnet = false;
-    let mut global_found_env_simnet = false;
+    let found = strip_env_simnet_exprs(&pre_expressions, &mut lines);
 
-    for expr in &pre_expressions {
-        // remove all comments and first non-comment
-        if found_env_simnet {
-            for i in expr.span.start_line..=expr.span.end_line {
-                lines[(i - 1) as usize] = None;
-            }
-            if !matches!(expr.pre_expr, Comment(_)) {
-                found_env_simnet = false;
-            }
-        }
-
-        if let Comment(comment) = &expr.pre_expr {
-            if comment.contains("#[env(simnet)]") {
-                found_env_simnet = true;
-                global_found_env_simnet = true;
-                for i in expr.span.start_line..=expr.span.end_line {
-                    lines[(i - 1) as usize] = None;
-                }
-            }
-        }
-    }
-
-    if !global_found_env_simnet {
+    if !found {
         Ok((source, false))
     } else {
         let mut source = String::new();
@@ -122,6 +100,45 @@ pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
 
         Ok((source, true))
     }
+}
+
+fn strip_env_simnet_exprs(exprs: &[PreSymbolicExpression], lines: &mut [Option<&str>]) -> bool {
+    let mut found_env_simnet = false;
+    let mut global_found = false;
+
+    for expr in exprs {
+        // remove the annotation comment and the next non-comment expression
+        if found_env_simnet {
+            for i in expr.span.start_line..=expr.span.end_line {
+                lines[(i - 1) as usize] = None;
+            }
+            if !matches!(expr.pre_expr, Comment(_)) {
+                found_env_simnet = false;
+            }
+            continue;
+        }
+
+        if let Comment(comment) = &expr.pre_expr {
+            if comment.contains("#[env(simnet)]") {
+                found_env_simnet = true;
+                global_found = true;
+                for i in expr.span.start_line..=expr.span.end_line {
+                    lines[(i - 1) as usize] = None;
+                }
+            }
+        }
+
+        // recurse into nested lists and tuples
+        match &expr.pre_expr {
+            ::clarity::vm::representations::PreSymbolicExpressionType::List(children)
+            | ::clarity::vm::representations::PreSymbolicExpressionType::Tuple(children) => {
+                global_found |= strip_env_simnet_exprs(children, lines);
+            }
+            _ => {}
+        }
+    }
+
+    global_found
 }
 
 #[cfg(test)]
@@ -179,5 +196,37 @@ mod tests {
             remove_env_simnet(without_env_simnet.to_string()).expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
         assert_eq!(found, false);
+    }
+
+    #[test]
+    fn can_remove_nested_env_simnet() {
+        #[rustfmt::skip]
+        let with_env_simnet = indoc!(r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                    ;; #[env(simnet)]
+                    (minty-fresh amount recipient)
+                    (ok true)
+                )
+            )
+        "#);
+
+        #[rustfmt::skip]
+        let without_env_simnet = indoc!(r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+
+
+                    (ok true)
+                )
+            )
+        "#);
+
+        let (clean, found) =
+            remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
+        assert_eq!(clean, without_env_simnet);
+        assert_eq!(found, true);
     }
 }
