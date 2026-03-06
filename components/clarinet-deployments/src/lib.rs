@@ -763,7 +763,8 @@ pub async fn generate_default_deployment(
             .clone();
 
         if force_remove_env_simnet {
-            let (clean, had_annotation) = remove_env_simnet(source)?;
+            let (clean, had_annotation) =
+                remove_env_simnet(source.clone()).unwrap_or((source, false));
             source = clean;
             found_env_simnet |= had_annotation;
         }

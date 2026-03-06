@@ -1127,7 +1127,7 @@ impl DeploymentSpecification {
                                     let spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    let (source, _) = remove_env_simnet(spec.source.clone())?;
+                                    let (source, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
                                     contracts.insert(contract_id, (source, spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
