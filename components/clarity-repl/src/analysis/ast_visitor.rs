@@ -18,6 +18,12 @@ pub struct TypedVar<'a> {
     pub decl_span: Span,
 }
 
+#[derive(Clone)]
+pub struct LetBinding<'a> {
+    pub value: &'a SymbolicExpression,
+    pub name_span: Span,
+}
+
 // Since the AST Visitor may be used before other checks have been performed,
 // we may need a default value for some expressions. This can be used for a
 // missing `ClarityName`.
@@ -2106,11 +2112,11 @@ pub trait ASTVisitor<'a> {
     fn traverse_let(
         &mut self,
         expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        bindings: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        for val in bindings.values() {
-            if !self.traverse_expr(val) {
+        for binding in bindings.values() {
+            if !self.traverse_expr(binding.value) {
                 return false;
             }
         }
@@ -2125,7 +2131,7 @@ pub trait ASTVisitor<'a> {
     fn visit_let(
         &mut self,
         expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        bindings: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
         true
@@ -2655,11 +2661,11 @@ pub trait ASTVisitor<'a> {
         &mut self,
         expr: &'a SymbolicExpression,
         owner: &'a SymbolicExpression,
-        allowance: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        allowance: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        for value in allowance.values() {
-            if !self.traverse_expr(value) {
+        for binding in allowance.values() {
+            if !self.traverse_expr(binding.value) {
                 return false;
             }
         }
@@ -2675,7 +2681,7 @@ pub trait ASTVisitor<'a> {
         &mut self,
         expr: &'a SymbolicExpression,
         owner: &'a SymbolicExpression,
-        allowance: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        allowance: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
         true
@@ -2728,7 +2734,7 @@ fn match_tuple<'a>(
     None
 }
 
-fn match_pairs(expr: &SymbolicExpression) -> Option<HashMap<&ClarityName, &SymbolicExpression>> {
+fn match_pairs(expr: &SymbolicExpression) -> Option<HashMap<&ClarityName, LetBinding<'_>>> {
     let list = expr.match_list()?;
     let mut tuple_map = HashMap::new();
     for pair_list in list {
@@ -2736,7 +2742,13 @@ fn match_pairs(expr: &SymbolicExpression) -> Option<HashMap<&ClarityName, &Symbo
         if pair.len() != 2 {
             return None;
         }
-        tuple_map.insert(pair[0].match_atom()?, &pair[1]);
+        tuple_map.insert(
+            pair[0].match_atom()?,
+            LetBinding {
+                value: &pair[1],
+                name_span: pair[0].span.clone(),
+            },
+        );
     }
     Some(tuple_map)
 }

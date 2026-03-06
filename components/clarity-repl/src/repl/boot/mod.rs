@@ -183,6 +183,7 @@ pub static BOOT_CONTRACTS_DATA: LazyLock<
                 name: name.to_string(),
                 epoch: Epoch::Specific(epoch),
                 clarity_version,
+                is_requirement: false,
             };
             let (ast, _, _) = interpreter.build_ast(&boot_contract);
             result.insert(
@@ -235,6 +236,7 @@ pub fn get_boot_contracts_data_with_overrides(
                 name: contract_name.clone(),
                 epoch: Epoch::Specific(epoch),
                 clarity_version,
+                is_requirement: false,
             };
 
             let (ast, _, _) = interpreter.build_ast(&boot_contract);

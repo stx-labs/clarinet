@@ -1,4 +1,5 @@
 use mockito::{Mock, ServerGuard};
+use serde_json::json;
 
 use crate::rpc_client::NodeInfo;
 

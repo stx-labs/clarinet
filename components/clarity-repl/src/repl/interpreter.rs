@@ -280,14 +280,18 @@ impl ClarityInterpreter {
         )
         .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
-        // Run REPL-only analyses
-        let diagnostics = analysis::run_analysis(
-            &mut contract_analysis,
-            &mut analysis_db,
-            annotations,
-            &self.repl_settings.analysis,
-        )
-        .map_err(|mut diagnostics| diagnostics.pop().unwrap())?;
+        // Run REPL-only analyses (linter, check_checker, etc.)
+        let diagnostics = if !contract.is_requirement {
+            analysis::run_analysis(
+                &mut contract_analysis,
+                &mut analysis_db,
+                annotations,
+                &self.repl_settings.analysis,
+            )
+            .map_err(|mut diagnostics| diagnostics.pop().unwrap())?
+        } else {
+            vec![]
+        };
 
         Ok((contract_analysis, diagnostics))
     }
@@ -1378,13 +1382,11 @@ mod tests {
         assert!(result.is_err());
 
         let diagnostics = result.unwrap_err();
-        // Expect error message from linter
-        // TODO: Disable linter for all unit tests in this file
-        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics.len(), 1);
 
         let message = format!("Runtime Error: Runtime error while interpreting {}.{}: Runtime(DivisionByZero, Some([FunctionIdentifier {{ identifier: \"_native_:native_div\" }}]))", StandardPrincipalData::transient(), contract.name);
         assert_eq!(
-            diagnostics[1],
+            diagnostics[0],
             Diagnostic {
                 level: vm::diagnostic::Level::Error,
                 message,

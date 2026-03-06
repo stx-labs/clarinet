@@ -1,10 +1,3 @@
-extern crate serde;
-
-extern crate serde_derive;
-
-#[macro_use]
-extern crate serde_json;
-
 pub mod analysis;
 
 use std::path::Path;
@@ -16,6 +9,7 @@ use clarity_repl::clarity::analysis::type_checker::v2_05::TypeChecker;
 use clarity_repl::clarity::costs::LimitedCostTracker;
 use clarity_repl::clarity::EvaluationResult;
 use clarity_repl::repl::{Session, SessionSettings};
+use serde_json::json;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

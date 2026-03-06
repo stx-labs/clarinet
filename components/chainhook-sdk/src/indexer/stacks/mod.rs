@@ -10,7 +10,7 @@ use chainhook_types::*;
 use clarity::codec::StacksMessageCodec;
 use clarity::vm::types::{SequenceData, Value as ClarityValue};
 use hiro_system_kit::slog;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use stacks_codec::codec::{StacksTransaction, TransactionAuth, TransactionPayload};
 

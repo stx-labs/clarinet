@@ -8,9 +8,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = {  workspace = true, features = ["rc"] }
+serde = {  workspace = true, features = ["derive", "rc"] }
 serde_json = {  workspace = true, features = ["arbitrary_precision"] }
-serde_derive = { workspace = true }
 clarity = { workspace = true, default-features = false, features = ["slog_json"] }
 axum = { version = "0.8.6", features = ["json"] }
 tower = "0.5.2"

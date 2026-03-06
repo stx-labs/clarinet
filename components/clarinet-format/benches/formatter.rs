@@ -33,7 +33,7 @@ mod format_benches {
         bencher.bench_local(|| {
             for file_path in &files {
                 let source = fs::read_to_string(file_path).expect("Failed to read test file");
-                black_box(formatter.format(black_box(&source)));
+                black_box(formatter.format(black_box(&source), None));
             }
         });
     }
@@ -45,7 +45,7 @@ mod format_benches {
         let source = fs::read_to_string("tests/golden/clarity-bitcoin.clar")
             .expect("Failed to read test file");
 
-        bencher.bench_local(|| black_box(formatter.format(black_box(&source))));
+        bencher.bench_local(|| black_box(formatter.format(black_box(&source), None)));
     }
 }
 

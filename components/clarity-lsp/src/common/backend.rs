@@ -175,11 +175,7 @@ pub async fn process_notification(
                             for (contract_name, contract_path) in
                                 &manifest.project.override_boot_contracts_source
                             {
-                                let project_root = manifest
-                                    .location
-                                    .parent()
-                                    .ok_or_else(|| "Failed to get project root".to_string())?;
-                                let resolved_path = project_root.join(contract_path);
+                                let resolved_path = manifest.root_dir.join(contract_path);
                                 if resolved_path == contract_location {
                                     found_boot_contract = Some(contract_name);
                                     break;

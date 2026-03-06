@@ -1,11 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt::Write;
 
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
 pub mod diagnostic_digest;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod onchain;
@@ -45,9 +40,24 @@ use self::types::{
 
 pub fn setup_session_with_deployment(
     manifest: &ProjectManifest,
-    deployment: &DeploymentSpecification,
+    deployment: &mut DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> DeploymentGenerationArtifacts {
+    // Mark contracts not in the project manifest as requirements.
+    // This is needed when the deployment plan is loaded from YAML,
+    // where `is_requirement` is not serialized. We match by location
+    // (absolute path) rather than contract name because requirements
+    // can share a name with a project contract.
+    for batch in deployment.plan.batches.iter_mut() {
+        for tx in batch.transactions.iter_mut() {
+            if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
+                if !manifest.contracts_settings.contains_key(&spec.location) {
+                    spec.is_requirement = true;
+                }
+            }
+        }
+    }
+
     let mut session = initiate_session_from_manifest(manifest);
     let contracts = update_session_with_deployment_plan(&mut session, deployment, contracts_asts);
 
@@ -243,6 +253,7 @@ fn handle_emulated_contract_publish(
         name: tx.contract_name.to_string(),
         clarity_version: tx.clarity_version,
         epoch: clarity_repl::repl::Epoch::Specific(epoch),
+        is_requirement: tx.is_requirement,
     };
 
     let result = session.deploy_contract(&contract, false, contract_ast);
@@ -286,16 +297,16 @@ pub async fn generate_default_deployment(
     file_accessor: Option<&dyn FileAccessor>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
     let network_manifest = match file_accessor {
-        None => NetworkManifest::from_project_manifest_location(
-            &manifest.location,
+        None => NetworkManifest::from_project_root(
+            &manifest.root_dir,
             &network.get_networks(),
             manifest.use_mainnet_wallets(),
             Some(&manifest.project.cache_location),
             None,
         )?,
         Some(file_accessor) => {
-            NetworkManifest::from_project_manifest_location_using_file_accessor(
-                &manifest.location,
+            NetworkManifest::from_project_root_using_file_accessor(
+                &manifest.root_dir,
                 &network.get_networks(),
                 manifest.use_mainnet_wallets(),
                 file_accessor,
@@ -425,12 +436,7 @@ pub async fn generate_default_deployment(
                 continue;
             }
 
-            // Resolve the relative path to the project root
-            let project_root = manifest
-                .location
-                .parent()
-                .ok_or_else(|| "Failed to get project root".to_string())?;
-            let resolved_path = project_root.join(file_path);
+            let resolved_path = manifest.root_dir.join(file_path);
             let resolved_path_string = resolved_path.to_string_lossy().to_string();
 
             // Load and validate the custom boot contract
@@ -466,6 +472,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.clone(),
                 clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             };
 
             let (_, diagnostics, ast_success) = interpreter.build_ast(&temp_contract);
@@ -544,6 +551,7 @@ pub async fn generate_default_deployment(
                                 source: source.clone(),
                                 location: contract_location,
                                 clarity_version,
+                                is_requirement: true,
                             };
 
                             emulated_contracts_publish.insert(contract_id.clone(), data);
@@ -597,6 +605,7 @@ pub async fn generate_default_deployment(
                         deployer: ContractDeployer::ContractIdentifier(contract_id.clone()),
                         clarity_version,
                         epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                        is_requirement: true,
                     };
                     let (ast, _, _) = interpreter.build_ast(&contract);
                     (clarity_version, ast)
@@ -690,17 +699,13 @@ pub async fn generate_default_deployment(
     let mut contracts = HashMap::new();
     let mut contracts_sources = HashMap::new();
 
-    let base_dir = manifest
-        .location
-        .parent()
-        .ok_or_else(|| "unable to get parent directory of manifest".to_string())?;
-
+    let project_root = &manifest.root_dir;
     let sources: HashMap<String, String> = match file_accessor {
         None => {
             let mut sources = HashMap::new();
             for (_, contract_config) in manifest.contracts.iter() {
                 let contract_location =
-                    base_dir.join(contract_config.expect_contract_path_as_str());
+                    project_root.join(contract_config.expect_contract_path_as_str());
                 let source = paths::read_content_as_utf8(&contract_location).map_err(|_| {
                     format!("unable to find contract at {}", contract_location.display())
                 })?;
@@ -714,7 +719,7 @@ pub async fn generate_default_deployment(
                 .values()
                 .map(|contract_config| {
                     let contract_location =
-                        base_dir.join(contract_config.expect_contract_path_as_str());
+                        project_root.join(contract_config.expect_contract_path_as_str());
                     contract_location.to_string_lossy().to_string()
                 })
                 .collect();
@@ -745,7 +750,7 @@ pub async fn generate_default_deployment(
             ));
         };
 
-        let contract_location = base_dir.join(contract_config.expect_contract_path_as_str());
+        let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
         let source = sources
             .get(&contract_location.to_string_lossy().to_string())
             .ok_or(format!(
@@ -766,6 +771,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.to_string(),
                 clarity_version: contract_config.clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             },
         );
 
@@ -777,6 +783,7 @@ pub async fn generate_default_deployment(
                     source,
                     location: contract_location,
                     clarity_version: contract_config.clarity_version,
+                    is_requirement: false,
                 },
             )
         } else {
@@ -1021,6 +1028,7 @@ mod tests {
             source: source.to_string(),
             clarity_version: ClarityVersion::Clarity2,
             location: PathBuf::from("/contracts/contract_1.clar"),
+            is_requirement: false,
         };
 
         handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch)

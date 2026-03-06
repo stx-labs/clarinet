@@ -8,6 +8,7 @@ use clarity_repl::clarity::{Address, ClarityVersion, StacksEpochId};
 use clarity_repl::repl::clarity_version_from_u8;
 use clarity_repl::repl::remote_data::epoch_for_height;
 use reqwest;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractMetadata {

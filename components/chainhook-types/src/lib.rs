@@ -1,8 +1,3 @@
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
 pub mod bitcoin;
 mod contract_interface;
 mod events;

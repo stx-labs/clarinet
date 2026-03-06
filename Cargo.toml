@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "components/chainhook-sdk",
+    "components/clarity-static-cost",
     "components/chainhook-types",
     "components/clarinet-cli",
     "components/clarinet-deployments",
@@ -21,7 +22,7 @@ members = [
 default-members = ["components/clarinet-cli"]
 
 [workspace.package]
-version = "3.14.0"
+version = "3.14.1"
 
 [workspace.dependencies]
 clarinet-defaults = { path = "components/clarinet-defaults" }
@@ -61,12 +62,12 @@ rpassword = "7.4"
 schemars = "1.2.1"
 serde = "1.0.225"
 serde_json = "1.0.149"
-serde_derive = "1.0.225"
 serde-wasm-bindgen = "0.6.4"
 yaml_serde = "0.10.3"
 signal-hook = "0.4.3"
 strum = "0.27.2"
 tempfile = "3.24.0"
+thiserror = "2"
 toml = { version = "0.5.6", features = ["preserve_order"] }
 toml_edit = "0.22"
 tokio = { version = "1.47.0", features = ["full"] }

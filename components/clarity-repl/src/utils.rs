@@ -3,6 +3,7 @@ use ::clarity::vm::ast::parser;
 use ::clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
 use ::clarity::vm::representations::PreSymbolicExpressionType::Comment;
+use serde_json::json;
 
 use crate::repl::clarity_values::value_to_string;
 

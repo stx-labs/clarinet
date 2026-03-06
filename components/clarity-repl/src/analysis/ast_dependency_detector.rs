@@ -954,6 +954,7 @@ mod tests {
             deployer: ContractDeployer::Transient,
             clarity_version: DEFAULT_CLARITY_VERSION,
             epoch: Epoch::Specific(DEFAULT_EPOCH),
+            is_requirement: false,
         };
         let (ast, diags, _) = session.interpreter.build_ast(&contract);
         Ok((

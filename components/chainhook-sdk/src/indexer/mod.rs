@@ -9,6 +9,7 @@ use chainhook_types::{
     StacksBlockData, StacksChainEvent, StacksNetwork, StacksNodeConfig,
 };
 use hiro_system_kit::slog;
+use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use stacks::StacksBlockPool;
 

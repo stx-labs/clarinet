@@ -1,8 +1,4 @@
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
+mod bitcoin_rpc_client;
 mod chainhooks;
 pub mod chains_coordinator;
 mod command;

@@ -69,7 +69,13 @@ impl<'a, 'b> UnusedBinding<'a, 'b> {
             BindingType::FunctionArg => format!("function parameter `{name}` is never used"),
             BindingType::LetBinding => format!("`let` binding `{name}` is never used"),
         };
-        (msg, Some("Remove this expression".to_string()))
+        (
+            msg,
+            Some(
+                "Remove this expression or suffix binding with '_' if this is intentional"
+                    .to_string(),
+            ),
+        )
     }
 
     fn make_diagnostic(
@@ -142,11 +148,11 @@ impl Lint for UnusedBinding<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::ExecutionResult;
-    use clarity_types::diagnostic::Diagnostic;
+    use clarity_types::diagnostic::{Diagnostic, Level};
     use indoc::indoc;
 
     use super::UnusedBinding;
-    use crate::analysis::linter::{Lint, LintLevel};
+    use crate::analysis::linter::Lint;
     use crate::analysis::lints::unused_binding::BindingType;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -155,11 +161,10 @@ mod tests {
         snippet: String,
     ) -> Result<(Vec<String>, ExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
         let mut settings = SessionSettings::default();
-        settings.repl_settings.analysis.disable_all_lints();
         settings
             .repl_settings
             .analysis
-            .set_lint_level(UnusedBinding::get_name(), LintLevel::Warning);
+            .enable_lint(UnusedBinding::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings).formatted_interpretation(
             snippet,

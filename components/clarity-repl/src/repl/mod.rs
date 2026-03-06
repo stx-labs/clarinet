@@ -21,7 +21,8 @@ use clarity::types::StacksEpochId;
 use clarity::vm::ClarityVersion;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 pub use interpreter::ClarityInterpreter;
-use serde::ser::{Serialize, SerializeMap, Serializer};
+use serde::ser::{SerializeMap, Serializer};
+use serde::{Deserialize, Serialize};
 pub use session::Session;
 pub use settings::{SessionSettings, Settings, SettingsFile};
 
@@ -191,6 +192,8 @@ pub struct ClarityContract {
     pub deployer: ContractDeployer,
     pub clarity_version: ClarityVersion,
     pub epoch: Epoch,
+    #[serde(skip)]
+    pub is_requirement: bool,
 }
 
 impl Serialize for ClarityContract {
