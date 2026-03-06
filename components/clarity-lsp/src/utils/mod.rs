@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 
 use clarinet_files::paths;
-use clarity_repl::clarity::vm::diagnostic::{
-    Diagnostic as ClarityDiagnostic, Level as ClarityLevel,
-};
+use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
 use ls_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity, Position, Range, Uri};
 
 #[allow(unused_macros)]

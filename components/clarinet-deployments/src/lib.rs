@@ -11,14 +11,12 @@ use std::path::Path;
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
+use clarity::types::StacksEpochId;
+use clarity::vm::ast::ContractAST;
+use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
+use clarity::vm::{ContractName, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
-use clarity_repl::clarity::vm::ast::ContractAST;
-use clarity_repl::clarity::vm::diagnostic::Diagnostic;
-use clarity_repl::clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
-use clarity_repl::clarity::vm::{
-    ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
-};
-use clarity_repl::clarity::StacksEpochId;
 use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_DEPOSIT_MAINNET_ADDRESS,
     SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_MAINNET_ADDRESS,

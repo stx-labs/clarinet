@@ -1,15 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 
-use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
-use clarity_repl::clarity::analysis::type_checker::v2_05::TypeChecker;
-use clarity_repl::clarity::util::hash;
-use clarity_repl::clarity::vm::analysis::types::ContractAnalysis;
-use clarity_repl::clarity::vm::types::{
+use clarity::util::hash;
+use clarity::vm::analysis::type_checker::v2_05::TypeChecker;
+use clarity::vm::analysis::ContractAnalysis;
+use clarity::vm::types::{
     AssetIdentifier, BuffData, CharType, PrincipalData, QualifiedContractIdentifier, SequenceData,
-    SequenceSubtype, StringSubtype, TypeSignature, Value,
+    SequenceSubtype, StringSubtype, TypeSignature,
 };
-use clarity_repl::clarity::vm::{ClarityName, SymbolicExpression};
-use clarity_repl::clarity::{ClarityVersion, SymbolicExpressionType};
+use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression, SymbolicExpressionType, Value};
+use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use clarity_repl::repl::clarity_values::value_to_string;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};

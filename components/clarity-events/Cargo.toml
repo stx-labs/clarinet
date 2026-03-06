@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2021"
 
 [dependencies]
+clarity = { workspace = true }
 clarinet-files = { path = "../clarinet-files", default-features = false }
 clarity-repl = { path = "../clarity-repl", default-features = false }
 serde = { workspace = true, features = ["derive"] }

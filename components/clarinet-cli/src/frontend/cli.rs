@@ -24,13 +24,14 @@ use clarinet_files::{
     StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
+use clarity::types::StacksEpochId;
+use clarity::vm::analysis::AnalysisDatabase;
+use clarity::vm::costs::LimitedCostTracker;
+use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::types::QualifiedContractIdentifier;
+use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
-use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
-use clarity_repl::clarity::vm::costs::LimitedCostTracker;
-use clarity_repl::clarity::vm::diagnostic::Diagnostic;
-use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -2788,7 +2789,7 @@ mod tests {
                 name: "special".to_string(),
                 deployer: ContractDeployer::LabeledDeployer("wallet_1".to_string()),
                 clarity_version: ClarityVersion::Clarity3,
-                epoch: Epoch::Specific(clarity_repl::clarity::StacksEpochId::Epoch25),
+                epoch: Epoch::Specific(StacksEpochId::Epoch25),
                 skip_analysis: false,
             };
 
@@ -2996,7 +2997,7 @@ mod tests {
 
     #[test]
     fn test_check_json_output() {
-        use clarity_repl::clarity::vm::diagnostic::Level as DiagnosticLevel;
+        use clarity::vm::diagnostic::Level as DiagnosticLevel;
 
         let snippet = indoc::indoc! {"
             (define-constant A u1)

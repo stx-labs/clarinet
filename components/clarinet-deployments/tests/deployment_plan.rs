@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use clarinet_deployments::types::*;
 use clarinet_files::StacksNetwork;
-use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName};
+use clarity::vm::types::QualifiedContractIdentifier;
+use clarity::vm::{ClarityName, ClarityVersion, ContractName};
 
 fn get_test_txs() -> (TransactionSpecification, TransactionSpecification) {
     let contract_id =

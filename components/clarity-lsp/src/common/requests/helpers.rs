@@ -1,7 +1,8 @@
 use std::cmp::Ordering;
 
-use clarity_repl::clarity::representations::Span;
-use clarity_repl::clarity::{ClarityName, SymbolicExpression, SymbolicExpressionType};
+use clarity::vm::{SymbolicExpression, SymbolicExpressionType};
+use clarity_types::representations::Span;
+use clarity_types::ClarityName;
 use ls_types::{Position, Range};
 
 pub fn span_to_range(span: &Span) -> Range {
