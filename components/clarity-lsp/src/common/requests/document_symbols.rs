@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use clarity::vm::ClarityVersion;
+use clarity::vm::{ClarityVersion, SymbolicExpression, SymbolicExpressionType};
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding};
-use clarity_repl::clarity::representations::Span;
-use clarity_repl::clarity::{ClarityName, SymbolicExpression, SymbolicExpressionType};
+use clarity_types::representations::Span;
+use clarity_types::ClarityName;
 use ls_types::{DocumentSymbol, SymbolKind};
 use serde::{Deserialize, Serialize};
 
@@ -89,7 +89,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_impl_trait(
         &mut self,
         expr: &'a SymbolicExpression,
-        trait_identifier: &clarity_repl::clarity::vm::types::TraitIdentifier,
+        trait_identifier: &clarity::vm::types::TraitIdentifier,
     ) -> bool {
         self.symbols.push(build_symbol(
             "impl-trait",
@@ -104,7 +104,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_define_data_var(
         &mut self,
         expr: &'a SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        name: &'a ClarityName,
         data_type: &'a SymbolicExpression,
         initial: &'a SymbolicExpression,
     ) -> bool {
@@ -144,7 +144,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_define_constant(
         &mut self,
         expr: &'a SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        name: &'a ClarityName,
         _value: &'a SymbolicExpression,
     ) -> bool {
         self.symbols.push(build_symbol(
@@ -160,7 +160,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_define_map(
         &mut self,
         expr: &'a SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        name: &'a ClarityName,
         key_type: &'a SymbolicExpression,
         value_type: &'a SymbolicExpression,
     ) -> bool {
@@ -194,7 +194,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_define_trait(
         &mut self,
         expr: &'a SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        name: &'a ClarityName,
         functions: &'a [SymbolicExpression],
     ) -> bool {
         let mut children = Vec::new();
@@ -224,7 +224,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_define_private(
         &mut self,
         expr: &'a SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        name: &'a ClarityName,
         _parameters: Option<Vec<clarity_repl::analysis::ast_visitor::TypedVar<'a>>>,
         body: &'a SymbolicExpression,
     ) -> bool {
@@ -240,10 +240,10 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
 
     fn visit_define_public(
         &mut self,
-        expr: &'a clarity_repl::clarity::SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
         _parameters: Option<Vec<clarity_repl::analysis::ast_visitor::TypedVar<'a>>>,
-        body: &'a clarity_repl::clarity::SymbolicExpression,
+        body: &'a SymbolicExpression,
     ) -> bool {
         self.symbols.push(build_symbol(
             &name.to_owned(),
@@ -257,10 +257,10 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
 
     fn visit_define_read_only(
         &mut self,
-        expr: &'a clarity_repl::clarity::SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
         _parameters: Option<Vec<clarity_repl::analysis::ast_visitor::TypedVar<'a>>>,
-        body: &'a clarity_repl::clarity::SymbolicExpression,
+        body: &'a SymbolicExpression,
     ) -> bool {
         self.symbols.push(build_symbol(
             &name.to_owned(),
@@ -275,7 +275,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_define_ft(
         &mut self,
         expr: &'a SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        name: &'a ClarityName,
         _supply: Option<&'a SymbolicExpression>,
     ) -> bool {
         self.symbols.push(build_symbol(
@@ -291,7 +291,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
     fn visit_define_nft(
         &mut self,
         expr: &'a SymbolicExpression,
-        name: &'a clarity_repl::clarity::ClarityName,
+        name: &'a ClarityName,
         nft_type: &'a SymbolicExpression,
     ) -> bool {
         let nft_type = match nft_type.expr.clone() {
@@ -488,16 +488,15 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
 
 #[cfg(test)]
 mod tests {
+    use clarity::types::StacksEpochId;
     use clarity::vm::ast::build_ast;
-    use clarity_repl::clarity::representations::Span;
-    use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-    use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
+    use clarity::vm::types::QualifiedContractIdentifier;
+    use clarity::vm::{ClarityVersion, SymbolicExpression};
+    use clarity_types::representations::Span;
     use ls_types::{DocumentSymbol, SymbolKind};
 
     use super::ASTSymbols;
     use crate::common::requests::document_symbols::{build_symbol, ClaritySymbolKind};
-
-    // use crate::common::ast_to_symbols::{build_symbol, ASTSymbols, ClaritySymbolKind};
 
     fn new_span(start_line: u32, start_column: u32, end_line: u32, end_column: u32) -> Span {
         Span {

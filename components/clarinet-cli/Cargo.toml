@@ -16,6 +16,7 @@ categories = [
 ]
 
 [dependencies]
+clarity = { workspace = true }
 colored = { workspace = true }
 crossbeam-channel = "0.5.6"
 crossterm = { workspace = true }

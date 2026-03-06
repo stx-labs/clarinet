@@ -1,16 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, OnceLock};
 
+use clarity::vm::analysis::ContractAnalysis;
+use clarity::vm::docs::{make_api_reference, make_define_reference, make_keyword_reference};
+use clarity::vm::functions::define::DefineFunctions;
+use clarity::vm::functions::NativeFunctions;
 use clarity::vm::types::{BlockInfoProperty, FunctionType, TypeSignatureExt};
+use clarity::vm::variables::NativeVariables;
+use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};
-use clarity_repl::clarity::analysis::ContractAnalysis;
-use clarity_repl::clarity::docs::{
-    make_api_reference, make_define_reference, make_keyword_reference,
-};
-use clarity_repl::clarity::functions::define::DefineFunctions;
-use clarity_repl::clarity::functions::NativeFunctions;
-use clarity_repl::clarity::variables::NativeVariables;
-use clarity_repl::clarity::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_repl::repl::DEFAULT_EPOCH;
 use clarity_types::types::TypeSignature;
 use ls_types::{
@@ -829,9 +827,10 @@ fn get_iterator_cb_completion_item(version: &ClarityVersion, func: &str) -> Vec<
 
 #[cfg(test)]
 mod get_contract_global_data_tests {
-    use clarity_repl::clarity::ast::build_ast;
-    use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-    use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
+    use clarity::types::StacksEpochId;
+    use clarity::vm::ast::build_ast;
+    use clarity::vm::types::QualifiedContractIdentifier;
+    use clarity::vm::ClarityVersion;
     use ls_types::Position;
 
     use super::ContractDefinedData;
@@ -882,9 +881,10 @@ mod get_contract_global_data_tests {
 
 #[cfg(test)]
 mod get_contract_local_data_tests {
-    use clarity_repl::clarity::ast::build_ast;
-    use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-    use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
+    use clarity::types::StacksEpochId;
+    use clarity::vm::ast::build_ast;
+    use clarity::vm::types::QualifiedContractIdentifier;
+    use clarity::vm::ClarityVersion;
     use ls_types::Position;
 
     use super::ContractDefinedData;
@@ -937,9 +937,10 @@ mod get_contract_local_data_tests {
 
 #[cfg(test)]
 mod populate_snippet_with_options_tests {
-    use clarity_repl::clarity::ast::build_ast;
-    use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-    use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
+    use clarity::types::StacksEpochId;
+    use clarity::vm::ast::build_ast;
+    use clarity::vm::types::QualifiedContractIdentifier;
+    use clarity::vm::ClarityVersion;
     use ls_types::Position;
 
     use super::ContractDefinedData;
