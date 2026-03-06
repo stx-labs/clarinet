@@ -11,15 +11,13 @@ use clarinet_deployments::{
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
+use clarity::types::chainstate::StacksAddress;
 use clarity::types::Address;
-use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
-use clarity_repl::clarity::analysis::contract_interface_builder::{
+use clarity::vm::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
 };
-use clarity_repl::clarity::chainstate::StacksAddress;
-use clarity_repl::clarity::vm::types::{
-    PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
-};
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::session::CostsReport;

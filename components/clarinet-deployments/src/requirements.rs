@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use clarinet_files::{paths, FileAccessor};
-use clarity_repl::clarity::chainstate::StacksAddress;
-use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::{Address, ClarityVersion, StacksEpochId};
+use clarity::types::chainstate::StacksAddress;
+use clarity::types::{Address, StacksEpochId};
+use clarity::vm::types::QualifiedContractIdentifier;
+use clarity::vm::ClarityVersion;
 use clarity_repl::repl::remote_data::epoch_for_height;
 use clarity_repl::repl::{clarity_version_from_u8, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use reqwest;

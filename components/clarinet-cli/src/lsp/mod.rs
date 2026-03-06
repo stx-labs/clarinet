@@ -2,10 +2,8 @@ mod native_bridge;
 
 use std::sync::mpsc;
 
+use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
 use clarity_lsp::utils;
-use clarity_repl::clarity::vm::diagnostic::{
-    Diagnostic as ClarityDiagnostic, Level as ClarityLevel,
-};
 use crossbeam_channel::unbounded;
 use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use tower_lsp_server::{LspService, Server};

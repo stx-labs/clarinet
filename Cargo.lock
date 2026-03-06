@@ -676,6 +676,7 @@ dependencies = [
  "clarinet-files",
  "clarinet-format",
  "clarinet-utils",
+ "clarity",
  "clarity-lsp",
  "clarity-repl",
  "colored",
@@ -821,6 +822,7 @@ version = "3.14.1"
 dependencies = [
  "clap",
  "clarinet-files",
+ "clarity",
  "clarity-repl",
  "serde",
  "serde_json",

@@ -7,14 +7,13 @@ use clarinet_deployments::{
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
-use clarity::vm::ast::build_ast;
+use clarity::types::StacksEpochId;
+use clarity::vm::analysis::ContractAnalysis;
+use clarity::vm::ast::{build_ast, ContractAST};
+use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
+use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
-use clarity_repl::clarity::analysis::ContractAnalysis;
-use clarity_repl::clarity::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
-use clarity_repl::clarity::vm::ast::ContractAST;
-use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
-use clarity_repl::clarity::vm::EvaluationResult;
-use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::{ContractDeployer, DEFAULT_CLARITY_VERSION};
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,

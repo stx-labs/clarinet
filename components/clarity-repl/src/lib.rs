@@ -6,12 +6,6 @@ mod uprint;
 
 pub mod analysis;
 
-pub mod clarity {
-    #![allow(ambiguous_glob_reexports)]
-    pub use ::clarity::types::*;
-    pub use ::clarity::vm::*;
-    pub use ::clarity::*;
-}
 pub mod repl;
 pub mod utils;
 

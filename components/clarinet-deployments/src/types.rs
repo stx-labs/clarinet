@@ -2,15 +2,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
+use clarity::types::StacksEpochId;
+use clarity::util::hash::{hex_bytes, to_hex};
+use clarity::vm::analysis::ContractAnalysis;
+use clarity::vm::ast::ContractAST;
+use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
-use clarity_repl::clarity::util::hash::{hex_bytes, to_hex};
-use clarity_repl::clarity::vm::analysis::ContractAnalysis;
-use clarity_repl::clarity::vm::ast::ContractAST;
-use clarity_repl::clarity::vm::diagnostic::Diagnostic;
-use clarity_repl::clarity::vm::types::{
-    PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
-};
-use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
 use clarity_repl::repl::{
     clarity_version_from_u8, clarity_version_to_u8, Session, DEFAULT_CLARITY_VERSION,
 };
@@ -394,7 +393,7 @@ pub struct StxTransferSpecification {
 pub mod memo_serde {
     use std::fmt::Write;
 
-    use clarity_repl::clarity::util::hash::hex_bytes;
+    use clarity::util::hash::hex_bytes;
     use serde::{Deserialize, Deserializer, Serializer};
 
     use super::Memo;
@@ -437,7 +436,7 @@ pub mod memo_serde {
     }
 }
 pub mod principal_data_serde {
-    use clarity_repl::clarity::vm::types::PrincipalData;
+    use clarity::vm::types::PrincipalData;
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(x: &PrincipalData, s: S) -> Result<S::Ok, S::Error>
@@ -673,7 +672,7 @@ pub mod source_serde {
 }
 
 pub mod standard_principal_data_serde {
-    use clarity_repl::clarity::vm::types::{PrincipalData, StandardPrincipalData};
+    use clarity::vm::types::{PrincipalData, StandardPrincipalData};
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(x: &StandardPrincipalData, s: S) -> Result<S::Ok, S::Error>
@@ -693,7 +692,7 @@ pub mod standard_principal_data_serde {
 }
 
 pub mod qualified_contract_identifier_serde {
-    use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
+    use clarity::vm::types::QualifiedContractIdentifier;
     use serde::{Deserializer, Serializer};
 
     pub fn serialize<S>(x: &QualifiedContractIdentifier, s: S) -> Result<S::Ok, S::Error>
@@ -716,7 +715,7 @@ pub mod qualified_contract_identifier_serde {
 pub mod remap_principals_serde {
     use std::collections::{BTreeMap, HashMap};
 
-    use clarity_repl::clarity::vm::types::{PrincipalData, StandardPrincipalData};
+    use clarity::vm::types::{PrincipalData, StandardPrincipalData};
     use serde::ser::SerializeMap;
     use serde::{Deserializer, Serializer};
 
@@ -754,7 +753,7 @@ pub mod remap_principals_serde {
 
 pub mod clarity_version_serde {
     use clarinet_files::INVALID_CLARITY_VERSION;
-    use clarity_repl::clarity::ClarityVersion;
+    use clarity::vm::ClarityVersion;
     use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8};
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -950,7 +949,7 @@ pub mod contracts_serde {
 
     use base64::engine::general_purpose::STANDARD as b64;
     use base64::Engine as _;
-    use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
+    use clarity::vm::types::QualifiedContractIdentifier;
     use serde::ser::SerializeSeq;
     use serde::{Deserializer, Serializer};
 

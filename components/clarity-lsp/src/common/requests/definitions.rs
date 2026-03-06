@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
-use clarity::vm::ClarityVersion;
+use clarity::vm::functions::define::DefineFunctions;
+use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier};
+use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};
-use clarity_repl::clarity::functions::define::DefineFunctions;
-use clarity_repl::clarity::vm::types::{
-    QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
-};
-use clarity_repl::clarity::{ClarityName, SymbolicExpression};
+use clarity_types::ClarityName;
 use ls_types::Range;
 
 use super::helpers::span_to_range;
@@ -102,7 +100,7 @@ impl<'a> ASTVisitor<'a> for Definitions {
     }
 
     fn traverse_expr(&mut self, expr: &'a SymbolicExpression) -> bool {
-        use clarity_repl::clarity::vm::representations::SymbolicExpressionType::*;
+        use clarity::vm::representations::SymbolicExpressionType::*;
         match &expr.expr {
             AtomValue(value) => self.visit_atom_value(expr, value),
             Atom(name) => self.visit_atom(expr, name),
@@ -655,9 +653,10 @@ pub fn get_public_function_and_trait_definitions(
 mod definitions_visitor_tests {
     use std::collections::HashMap;
 
-    use clarity_repl::clarity::ast::build_ast;
-    use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
-    use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
+    use clarity::types::StacksEpochId;
+    use clarity::vm::ast::build_ast;
+    use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
+    use clarity::vm::{ClarityVersion, SymbolicExpression};
     use ls_types::{Position, Range};
 
     use super::{DefinitionLocation, Definitions};
