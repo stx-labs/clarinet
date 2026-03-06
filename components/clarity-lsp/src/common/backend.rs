@@ -885,7 +885,7 @@ sbtc_balance = 1_000_000_000
         let message = diagnostic
             .get("message")
             .expect("Failed to find \"message\": in diagnostic");
-        assert_eq!(message, "use of unresolved function 'increment' (mainnet)");
+        assert_eq!(message, "use of unresolved function 'increment' (onchain)");
 
         let spans = diagnostic
             .get("spans")

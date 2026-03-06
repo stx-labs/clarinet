@@ -690,7 +690,7 @@ pub async fn build_state(
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         if global_found_env_simnet {
                             let suffix = if force_remove_env_simnet {
-                                " (mainnet)"
+                                " (onchain)"
                             } else {
                                 " (simnet)"
                             };
@@ -716,7 +716,7 @@ pub async fn build_state(
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         if global_found_env_simnet {
                             let suffix = if force_remove_env_simnet {
-                                " (mainnet)"
+                                " (onchain)"
                             } else {
                                 " (simnet)"
                             };
