@@ -1,9 +1,9 @@
-use chainhook_sdk::types::{StacksBlockData, StacksMicroblockData, StacksTransactionData};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use super::app::BlockData;
 use super::App;
+use crate::chainhook::types::{StacksBlockData, StacksMicroblockData, StacksTransactionData};
 use crate::event::Status;
 use crate::log::LogLevel;
 

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
+use bitcoincore_rpc::bitcoin::hex::DisplayHex;
 use bitcoincore_rpc::json::{GetBlockchainInfoResult, GetDescriptorInfoResult};
 use bitcoincore_rpc::jsonrpc::Response as JsonRpcResponse;
 use bollard::container::{
@@ -17,8 +18,6 @@ use bollard::models::{HostConfig, PortBinding};
 use bollard::network::{CreateNetworkOptions, PruneNetworksOptions};
 use bollard::service::Ipam;
 use bollard::Docker;
-use chainhook_sdk::bitcoin::hex::DisplayHex;
-use chainhook_sdk::utils::Context;
 use clarinet_deployments::types::BurnchainEpochConfig;
 use clarinet_files::{
     DevnetConfig, DevnetConfigFile, NetworkManifest, ProjectManifest, StacksNetwork,
@@ -31,6 +30,7 @@ use hiro_system_kit::{slog, slog_term, Drain};
 use indoc::formatdoc;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
+use crate::chainhook::utils::Context;
 use crate::command::run_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 

@@ -9,18 +9,6 @@ use std::{fs, str};
 
 use base58::FromBase58;
 use bitcoincore_rpc::bitcoin::Address;
-use chainhook_sdk::chainhooks::types::ChainhookStore;
-use chainhook_sdk::indexer::stacks::standardize_stacks_serialized_block;
-use chainhook_sdk::indexer::StacksChainContext;
-use chainhook_sdk::observer::{
-    start_event_observer, EventObserverConfig, ObserverCommand, ObserverEvent, PredicatesConfig,
-    StacksChainMempoolEvent, StacksObserverStartupContext,
-};
-use chainhook_sdk::types::{
-    BitcoinBlockSignaling, BitcoinChainEvent, StacksChainEvent, StacksNodeConfig,
-};
-use chainhook_sdk::utils::Context;
-use chainhook_types::{StacksBlockData, StacksTransactionKind};
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, DeploymentCommand, DeploymentEvent, TransactionStatus,
 };
@@ -47,6 +35,16 @@ use stackslib::util_lib::signed_structured_data::pox4::{
 };
 
 use super::ChainsCoordinatorCommand;
+use crate::chainhook::indexer::stacks::standardize_stacks_serialized_block;
+use crate::chainhook::indexer::StacksChainContext;
+use crate::chainhook::observer::{
+    start_event_observer, EventObserverConfig, ObserverCommand, ObserverEvent,
+    StacksChainMempoolEvent, StacksObserverStartupContext,
+};
+use crate::chainhook::types::{
+    BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksNodeConfig, StacksTransactionKind,
+};
+use crate::chainhook::utils::Context;
 use crate::command::run_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::orchestrator::{
@@ -120,7 +118,6 @@ impl DevnetEventObserverConfig {
         manifest: ProjectManifest,
         network_manifest: Option<NetworkManifest>,
         deployment: DeploymentSpecification,
-        chainhooks: ChainhookStore,
         ctx: &Context,
         services_map_hosts: ServicesMapHosts,
     ) -> Self {
@@ -138,20 +135,18 @@ impl DevnetEventObserverConfig {
         };
         let event_observer_config = EventObserverConfig {
             bitcoin_rpc_proxy_enabled: true,
-            registered_chainhooks: chainhooks,
             bitcoind_rpc_username: devnet_config.bitcoin_node_username.clone(),
             bitcoind_rpc_password: devnet_config.bitcoin_node_password.clone(),
             bitcoind_rpc_url: format!("http://{}", services_map_hosts.bitcoin_node_host),
-            bitcoin_block_signaling: BitcoinBlockSignaling::Stacks(StacksNodeConfig {
+            stacks_node_config: StacksNodeConfig {
                 rpc_url: format!("http://{}", services_map_hosts.stacks_node_host),
                 ingestion_port: devnet_config.orchestrator_ingestion_port,
-            }),
+            },
 
             display_stacks_ingestion_logs: true,
-            bitcoin_network: chainhook_types::BitcoinNetwork::Regtest,
-            stacks_network: chainhook_types::StacksNetwork::Devnet,
+            bitcoin_network: crate::chainhook::types::BitcoinNetwork::Regtest,
+            stacks_network: crate::chainhook::types::StacksNetwork::Devnet,
             prometheus_monitoring_port: None,
-            predicates_config: PredicatesConfig::default(),
         };
 
         DevnetEventObserverConfig {
@@ -231,24 +226,6 @@ pub async fn start_chains_coordinator(
         &boot_completed,
     );
 
-    let chainhooks_count = config
-        .event_observer_config
-        .registered_chainhooks
-        .stacks_chainhooks
-        .len()
-        + config
-            .event_observer_config
-            .registered_chainhooks
-            .bitcoin_chainhooks
-            .len();
-    if chainhooks_count > 0 {
-        devnet_event_tx
-            .send(DevnetEvent::info(format!(
-                "{chainhooks_count} chainhooks registered",
-            )))
-            .expect("Unable to terminate event observer");
-    }
-
     // Spawn event observer
     let (observer_event_tx, observer_event_rx) = crossbeam_channel::unbounded();
     let event_observer_config = config.event_observer_config.clone();
@@ -264,15 +241,16 @@ pub async fn start_chains_coordinator(
                 .join("events_export")
                 .join("events_cache.tsv");
 
-            let mut chain_ctx = StacksChainContext::new(&chainhook_types::StacksNetwork::Devnet);
+            let mut chain_ctx =
+                StacksChainContext::new(&crate::chainhook::types::StacksNetwork::Devnet);
             if let Ok(file_content) = fs::read_to_string(&events_cache_path) {
                 for line in file_content.lines() {
                     let parts: Vec<&str> = line.split('\t').collect();
                     if parts.get(2).unwrap_or(&"") == &"/new_block" {
                         let maybe_block = standardize_stacks_serialized_block(
-                            &chainhook_sdk::indexer::IndexerConfig {
-                                bitcoin_network: chainhook_types::BitcoinNetwork::Regtest,
-                                stacks_network: chainhook_types::StacksNetwork::Devnet,
+                            &crate::chainhook::indexer::IndexerConfig {
+                                bitcoin_network: crate::chainhook::types::BitcoinNetwork::Regtest,
+                                stacks_network: crate::chainhook::types::StacksNetwork::Devnet,
                                 bitcoind_rpc_url: config
                                     .devnet_config
                                     .bitcoin_node_image_url
@@ -285,12 +263,10 @@ pub async fn start_chains_coordinator(
                                     .devnet_config
                                     .bitcoin_node_password
                                     .clone(),
-                                bitcoin_block_signaling: BitcoinBlockSignaling::Stacks(
-                                    StacksNodeConfig {
-                                        rpc_url: config.devnet_config.stacks_node_image_url.clone(),
-                                        ingestion_port: 3999,
-                                    },
-                                ),
+                                stacks_node_config: StacksNodeConfig {
+                                    rpc_url: config.devnet_config.stacks_node_image_url.clone(),
+                                    ingestion_port: 3999,
+                                },
                             },
                             parts.get(3).unwrap_or(&""),
                             &mut chain_ctx,
@@ -323,7 +299,6 @@ pub async fn start_chains_coordinator(
             observer_command_tx_moved,
             observer_command_rx,
             Some(observer_event_tx_moved),
-            None,
             stacks_startup_context,
             ctx_moved,
         );
@@ -380,11 +355,6 @@ pub async fn start_chains_coordinator(
                     .expect("Unable to terminate event observer");
                 // Terminate
             }
-            ObserverEvent::PredicateInterrupted(_data) => {
-                devnet_event_tx
-                    .send(DevnetEvent::error("predicate interrupt".to_string())) // need to use data for the message
-                    .expect("Event observer received predicate interrupt");
-            }
             ObserverEvent::Error(msg) => {
                 devnet_event_tx
                     .send(DevnetEvent::error(msg))
@@ -395,7 +365,7 @@ pub async fn start_chains_coordinator(
                     .send(DevnetEvent::info(msg))
                     .expect("Unable to terminate event observer");
             }
-            ObserverEvent::BitcoinChainEvent((chain_update, _)) => {
+            ObserverEvent::BitcoinChainEvent(chain_update) => {
                 // Contextual shortcut: Devnet is an environment under control,
                 // with 1 miner. As such we will ignore Reorgs handling.
                 let (log, comment) = match &chain_update {
@@ -468,7 +438,7 @@ pub async fn start_chains_coordinator(
                 );
                 let _ = devnet_event_tx.send(DevnetEvent::BitcoinChainEvent(chain_update.clone()));
             }
-            ObserverEvent::StacksChainEvent((chain_event, _)) => {
+            ObserverEvent::StacksChainEvent(chain_event) => {
                 if should_deploy_protocol {
                     if let Some(block_identifier) = chain_event.get_latest_block_identifier() {
                         if block_identifier.index == starting_block_height {
@@ -605,17 +575,6 @@ pub async fn start_chains_coordinator(
                     }
                 }
             }
-            ObserverEvent::PredicateRegistered(hook) => {
-                let message = format!("New hook \"{}\" registered", hook.key());
-                let _ = devnet_event_tx.send(DevnetEvent::info(message));
-            }
-            ObserverEvent::PredicateDeregistered(_hook) => {}
-            ObserverEvent::PredicatesTriggered(count) => {
-                if count > 0 {
-                    let _ =
-                        devnet_event_tx.send(DevnetEvent::info(format!("{count} hooks triggered")));
-                }
-            }
             ObserverEvent::Terminate => {
                 break;
             }
@@ -627,9 +586,6 @@ pub async fn start_chains_coordinator(
                 }
                 StacksChainMempoolEvent::TransactionDropped(ref _transactions) => {}
             },
-            ObserverEvent::BitcoinPredicateTriggered(_) => {}
-            ObserverEvent::StacksPredicateTriggered(_) => {}
-            ObserverEvent::PredicateEnabled(_) => {}
         }
     }
     Ok(())
