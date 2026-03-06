@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::{fmt, slice};
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use clarity::vm::functions::define::DefineFunctions;
@@ -74,7 +75,7 @@ impl ClarityFormatter {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
         let pse = clarity::vm::ast::parser::v2::parse(
             trimmed_source,
-            StackDepthLimits::for_epoch(epoch.unwrap_or(StacksEpochId::latest())),
+            StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
         )
         .unwrap();
         let agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
@@ -100,7 +101,7 @@ impl ClarityFormatter {
     ) -> Result<String, String> {
         let pse = clarity::vm::ast::parser::v2::parse(
             source,
-            StackDepthLimits::for_epoch(epoch.unwrap_or(StacksEpochId::latest())),
+            StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
         )
         .map_err(|e| e.to_string())?;
 
@@ -1938,7 +1939,7 @@ mod tests_formatter {
     #[allow(unused_imports)]
     use std::assert_eq;
 
-    use clarity::types::StacksEpochId;
+    use clarinet_defaults::DEFAULT_EPOCH;
     use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
     use indoc::indoc;
 
@@ -2794,11 +2795,9 @@ mod tests_formatter {
     #[test]
     fn format_ast_without_source() {
         let src = "(define-private (noop) (begin (+ 1 2) (ok true)))";
-        let ast = clarity::vm::ast::parser::v2::parse(
-            src,
-            StackDepthLimits::for_epoch(StacksEpochId::latest()),
-        )
-        .unwrap();
+        let ast =
+            clarity::vm::ast::parser::v2::parse(src, StackDepthLimits::for_epoch(DEFAULT_EPOCH))
+                .unwrap();
         let formatter = ClarityFormatter::new(Settings::default());
         let expected = format_with_default(src);
         let result = formatter.format_ast(&ast);
@@ -2808,11 +2807,9 @@ mod tests_formatter {
     #[test]
     fn format_ast_without_source_handle_indentation() {
         let src = "  (begin (+ 1 2) (ok true))";
-        let ast = clarity::vm::ast::parser::v2::parse(
-            src,
-            StackDepthLimits::for_epoch(StacksEpochId::latest()),
-        )
-        .unwrap();
+        let ast =
+            clarity::vm::ast::parser::v2::parse(src, StackDepthLimits::for_epoch(DEFAULT_EPOCH))
+                .unwrap();
         let expected = format_with_default(src);
         let formatter = ClarityFormatter::new(Settings::default());
         let result = formatter.format_ast(&ast);
@@ -2940,7 +2937,7 @@ mod tests_formatter {
             let settings = Settings::default();
             let exprs = clarity::vm::ast::parser::v2::parse(
                 src,
-                StackDepthLimits::for_epoch(StacksEpochId::latest()),
+                StackDepthLimits::for_epoch(DEFAULT_EPOCH),
             )
             .unwrap();
             let aggregator = Aggregator::new(&settings, &exprs, Some(src));
