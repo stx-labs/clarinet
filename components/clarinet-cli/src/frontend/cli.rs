@@ -1283,7 +1283,7 @@ pub fn main() {
                             })
                             .collect();
                         let environment = if force_remove_env_simnet {
-                            "mainnet".to_string()
+                            "onchain".to_string()
                         } else {
                             "simnet".to_string()
                         };
