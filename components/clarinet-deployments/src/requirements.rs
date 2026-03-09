@@ -28,7 +28,7 @@ pub async fn retrieve_contract(
     contract_id: &QualifiedContractIdentifier,
     cache_location: &Path,
     file_accessor: &Option<&dyn FileAccessor>,
-    api_url: Option<&str>,
+    api_base_url: Option<&str>,
 ) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
     let contract_deployer = contract_id.issuer.to_address();
     let contract_name = contract_id.name.to_string();
@@ -70,8 +70,8 @@ pub async fn retrieve_contract(
         .unwrap()
         .is_mainnet();
 
-    let base_url = api_url.unwrap_or_else(|| default_api_url(is_mainnet));
-    let contract = fetch_contract(base_url, &contract_deployer, &contract_name).await?;
+    let api_base_url = api_base_url.unwrap_or_else(|| default_api_base_url(is_mainnet));
+    let contract = fetch_contract(api_base_url, &contract_deployer, &contract_name).await?;
 
     let epoch = epoch_for_height(is_mainnet, contract.block_height);
     let clarity_version = match contract.clarity_version {
@@ -131,7 +131,7 @@ struct Contract {
     clarity_version: Option<u8>,
 }
 
-fn default_api_url(is_mainnet: bool) -> &'static str {
+fn default_api_base_url(is_mainnet: bool) -> &'static str {
     if is_mainnet {
         "https://api.hiro.so"
     } else {
@@ -139,8 +139,12 @@ fn default_api_url(is_mainnet: bool) -> &'static str {
     }
 }
 
-async fn fetch_contract(base_url: &str, deployer: &str, name: &str) -> Result<Contract, String> {
-    let url = format!("{base_url}/extended/v1/contract/{deployer}.{name}");
+async fn fetch_contract(
+    api_base_url: &str,
+    deployer: &str,
+    name: &str,
+) -> Result<Contract, String> {
+    let url = format!("{api_base_url}/extended/v1/contract/{deployer}.{name}");
     let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Unable to retrieve contract {url}: {e}"))?;
