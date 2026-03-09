@@ -3,7 +3,9 @@ pub mod chainhook;
 pub mod chains_coordinator;
 mod command;
 mod event;
+pub mod event_logger;
 mod log;
+pub mod log_event_logger;
 mod orchestrator;
 mod snapshot_extractor;
 mod ui;
@@ -22,8 +24,10 @@ use clarinet_deployments::types::DeploymentSpecification;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::NetworkManifest;
 pub use event::DevnetEvent;
+use event_logger::DevnetEventLogger;
 use hiro_system_kit::slog;
 pub use log::{LogData, LogLevel};
+pub use log_event_logger::LogEventLogger;
 pub use orchestrator::DevnetOrchestrator;
 use orchestrator::ServicesMapHosts;
 
@@ -322,36 +326,40 @@ async fn do_run_devnet(
             }
         }
     } else if config.log_tx.is_none() {
+        let mut logger = LogEventLogger::new();
         loop {
             match devnet_events_rx.recv() {
                 Ok(DevnetEvent::Log(log)) => {
-                    if let Some(ref log_tx) = config.log_tx {
-                        let _ = log_tx.send(log.clone());
-                    } else {
-                        match log.level {
-                            LogLevel::Debug => config
-                                .ctx
-                                .try_log(|logger| slog::debug!(logger, "{}", log.message)),
-                            LogLevel::Info | LogLevel::Success => config
-                                .ctx
-                                .try_log(|logger| slog::info!(logger, "{}", log.message)),
-                            LogLevel::Warning => config
-                                .ctx
-                                .try_log(|logger| slog::warn!(logger, "{}", log.message)),
-                            LogLevel::Error => config
-                                .ctx
-                                .try_log(|logger| slog::error!(logger, "{}", log.message)),
-                        }
-                    }
+                    logger.handle_log(log);
+                }
+                Ok(DevnetEvent::ServiceStatus(status)) => {
+                    logger.handle_service_status(status);
+                }
+                Ok(DevnetEvent::StacksChainEvent(ref chain_event)) => {
+                    logger.handle_stacks_chain_event(chain_event);
+                }
+                Ok(DevnetEvent::BitcoinChainEvent(ref chain_event)) => {
+                    logger.handle_bitcoin_chain_event(chain_event);
+                }
+                Ok(DevnetEvent::MempoolAdmission(tx)) => {
+                    logger.handle_mempool_admission(tx);
+                }
+                Ok(DevnetEvent::ProtocolDeployingProgress(data)) => {
+                    logger.handle_protocol_deploying_progress(data);
                 }
                 Ok(DevnetEvent::BootCompleted(bitcoin_mining_tx)) => {
+                    logger.handle_boot_completed();
                     if !devnet_config.bitcoin_controller_automining_disabled {
                         let _ = bitcoin_mining_tx.send(BitcoinMiningCommand::Start);
                     }
                 }
-                Ok(DevnetEvent::FatalError(e)) => return Err(e),
+                Ok(DevnetEvent::FatalError(e)) => {
+                    logger.handle_fatal_error(&e);
+                    return Err(e);
+                }
                 Ok(DevnetEvent::Terminate) => return Ok((None, None, None)),
-                _ => {}
+                Ok(DevnetEvent::Tick) | Ok(DevnetEvent::KeyEvent(_)) => {}
+                Err(_) => return Ok((None, None, None)),
             }
         }
     } else {
