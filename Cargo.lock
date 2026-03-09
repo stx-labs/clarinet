@@ -724,6 +724,7 @@ dependencies = [
  "colored",
  "indoc",
  "libsecp256k1",
+ "mockito",
  "pretty_assertions",
  "rand 0.8.5",
  "reqwest",
@@ -733,6 +734,8 @@ dependencies = [
  "stacks-common",
  "stacks-rpc-client",
  "strum",
+ "tempfile",
+ "tokio",
  "toml",
  "yaml_serde",
 ]

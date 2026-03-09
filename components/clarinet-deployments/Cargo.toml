@@ -21,7 +21,10 @@ clarinet-files = { path = "../clarinet-files" }
 
 [dev-dependencies]
 indoc = { workspace = true }
+mockito = { workspace = true }
 pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
 toml = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
