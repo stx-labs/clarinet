@@ -2,7 +2,6 @@ use std::sync::mpsc::Sender;
 
 use chainhook_sdk::observer::MempoolAdmissionData;
 use chainhook_sdk::types::{BitcoinChainEvent, StacksChainEvent};
-use hiro_system_kit::slog;
 
 use crate::chains_coordinator::BitcoinMiningCommand;
 use crate::log::{LogData, LogLevel};
@@ -69,7 +68,6 @@ impl DevnetEvent {
 
 pub fn send_status_update(
     event_tx: &Sender<DevnetEvent>,
-    logger: &Option<slog::Logger>,
     name: &str,
     status: Status,
     comment: &str,
@@ -84,24 +82,12 @@ pub fn send_status_update(
         _ => return,
     };
 
-    match logger {
-        None => {
-            let _ = event_tx.send(DevnetEvent::ServiceStatus(ServiceStatusData {
-                order,
-                status,
-                name: name.into(),
-                comment: comment.into(),
-            }));
-        }
-        Some(logger) => {
-            let msg = format!("{name} - {comment}");
-            match status {
-                Status::Green => slog::info!(logger, "{}", &msg),
-                Status::Yellow => slog::warn!(logger, "{}", &msg),
-                Status::Red => slog::error!(logger, "{}", &msg),
-            }
-        }
-    }
+    let _ = event_tx.send(DevnetEvent::ServiceStatus(ServiceStatusData {
+        order,
+        status,
+        name: name.into(),
+        comment: comment.into(),
+    }));
 }
 
 #[derive(Clone, Debug)]

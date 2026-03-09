@@ -1539,7 +1539,7 @@ mod tests {
             ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
         let mut env = owned_env.get_exec_environment(None, None, &contract_context);
         let (_, cost_analysis_tree) = build_cost_analysis_tree(
-            &expr,
+            expr,
             &user_args,
             &cost_map,
             clarity_version,
@@ -1577,15 +1577,14 @@ mod tests {
     fn build_test_ast(src: &str) -> clarity::vm::ast::ContractAST {
         let contract_identifier = QualifiedContractIdentifier::transient();
         let mut cost_tracker = ();
-        let ast = build_ast(
+        build_ast(
             &contract_identifier,
             src,
             &mut cost_tracker,
             ClarityVersion::Clarity3,
             StacksEpochId::latest(),
         )
-        .unwrap();
-        ast
+        .unwrap()
     }
 
     #[test]

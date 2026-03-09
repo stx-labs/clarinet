@@ -1,13 +1,16 @@
+use chainhook_sdk::observer::MempoolAdmissionData;
 use chainhook_sdk::types::{
-    StacksBlockData, StacksMicroblockData, StacksTransactionData, StacksTransactionKind,
+    BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksMicroblockData,
+    StacksTransactionData, StacksTransactionKind,
 };
 use chainhook_sdk::utils::Context;
 use hiro_system_kit::slog;
 use ratatui::prelude::*;
 
 use super::util::{StatefulList, TabsState};
-use crate::event::ServiceStatusData;
-use crate::{LogData, MempoolAdmissionData};
+use crate::event::{ProtocolDeployingData, ServiceStatusData};
+use crate::event_logger::DevnetEventLogger;
+use crate::log::{LogData, LogLevel};
 
 pub enum BlockData {
     Block(Box<StacksBlockData>),
@@ -24,10 +27,11 @@ pub struct App<'a> {
     pub mempool: StatefulList<MempoolAdmissionData>,
     pub logs: StatefulList<LogData>,
     pub services: StatefulList<ServiceStatusData>,
+    pub ctx: Context,
 }
 
 impl<'a> App<'a> {
-    pub fn new(title: &'a str, devnet_path: &'a str) -> App<'a> {
+    pub fn new(title: &'a str, devnet_path: &'a str, ctx: Context) -> App<'a> {
         App {
             title,
             devnet_path,
@@ -38,6 +42,7 @@ impl<'a> App<'a> {
             mempool: StatefulList::with_items(vec![]),
             logs: StatefulList::with_items(vec![]),
             services: StatefulList::with_items(vec![]),
+            ctx,
         }
     }
 
@@ -93,15 +98,20 @@ impl<'a> App<'a> {
         }
     }
 
-    pub fn display_log(&mut self, log: LogData, ctx: &Context) {
-        use crate::LogLevel;
+    pub fn display_log(&mut self, log: LogData) {
         match &log.level {
-            LogLevel::Error => ctx.try_log(|logger| slog::error!(logger, "{}", log.message)),
-            LogLevel::Warning => ctx.try_log(|logger| slog::warn!(logger, "{}", log.message)),
-            LogLevel::Debug => ctx.try_log(|logger| slog::debug!(logger, "{}", log.message)),
-            LogLevel::Info | &LogLevel::Success => {
-                ctx.try_log(|logger| slog::info!(logger, "{}", log.message))
-            }
+            LogLevel::Error => self
+                .ctx
+                .try_log(|logger| slog::error!(logger, "{}", log.message)),
+            LogLevel::Warning => self
+                .ctx
+                .try_log(|logger| slog::warn!(logger, "{}", log.message)),
+            LogLevel::Debug => self
+                .ctx
+                .try_log(|logger| slog::debug!(logger, "{}", log.message)),
+            LogLevel::Info | LogLevel::Success => self
+                .ctx
+                .try_log(|logger| slog::info!(logger, "{}", log.message)),
         }
         self.logs.items.push(log);
     }
@@ -168,5 +178,90 @@ impl<'a> App<'a> {
         if self.tabs.index != 0 {
             self.tabs.index += 1;
         }
+    }
+
+    fn remove_mempool_txs_by_raw(&mut self, raw_txs: &[&str]) {
+        let mut indices_to_remove: Vec<usize> = self
+            .mempool
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| raw_txs.contains(&item.tx_data.as_str()))
+            .map(|(idx, _)| idx)
+            .collect();
+        indices_to_remove.reverse();
+        for i in indices_to_remove {
+            self.mempool.items.remove(i);
+        }
+    }
+}
+
+impl DevnetEventLogger for App<'_> {
+    fn handle_log(&mut self, log: LogData) {
+        self.display_log(log);
+    }
+
+    fn handle_service_status(&mut self, status: ServiceStatusData) {
+        self.display_service_status_update(status);
+    }
+
+    fn handle_stacks_chain_event(&mut self, event: &StacksChainEvent) {
+        match event {
+            StacksChainEvent::ChainUpdatedWithBlocks(update) => {
+                let raw_txs: Vec<&str> = if self.mempool.items.is_empty() {
+                    vec![]
+                } else {
+                    update
+                        .new_blocks
+                        .iter()
+                        .flat_map(|b| {
+                            b.block
+                                .transactions
+                                .iter()
+                                .map(|tx| tx.metadata.raw_tx.as_str())
+                        })
+                        .collect()
+                };
+                self.remove_mempool_txs_by_raw(&raw_txs);
+                for block_update in update.new_blocks.iter() {
+                    self.display_block(block_update.block.clone());
+                }
+            }
+            StacksChainEvent::ChainUpdatedWithMicroblocks(update) => {
+                let raw_txs: Vec<&str> = if self.mempool.items.is_empty() {
+                    vec![]
+                } else {
+                    update
+                        .new_microblocks
+                        .iter()
+                        .flat_map(|b| b.transactions.iter().map(|tx| tx.metadata.raw_tx.as_str()))
+                        .collect()
+                };
+                self.remove_mempool_txs_by_raw(&raw_txs);
+                for microblock in update.new_microblocks.iter() {
+                    self.display_microblock(microblock.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_bitcoin_chain_event(&mut self, _event: &BitcoinChainEvent) {}
+
+    fn handle_mempool_admission(&mut self, tx: MempoolAdmissionData) {
+        self.add_to_mempool(tx);
+    }
+
+    fn handle_protocol_deploying_progress(&mut self, _data: ProtocolDeployingData) {}
+
+    fn handle_boot_completed(&mut self) {
+        self.display_log(LogData::new(
+            LogLevel::Success,
+            "Local Devnet network ready".into(),
+        ));
+    }
+
+    fn handle_fatal_error(&mut self, message: &str) {
+        self.display_log(LogData::new(LogLevel::Error, format!("Fatal: {message}")));
     }
 }
