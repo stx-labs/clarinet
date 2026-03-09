@@ -365,10 +365,9 @@ fn test_pox_4_costs() {
             function_name
         );
 
-        let (_cost, _trait_count) = cost_map.get(function_name).expect(&format!(
-            "Failed to get cost for function '{}'",
-            function_name
-        ));
+        let (_cost, _trait_count) = cost_map
+            .get(function_name)
+            .unwrap_or_else(|| panic!("Failed to get cost for function '{}'", function_name));
     }
 }
 
@@ -471,10 +470,9 @@ fn run_cost_analysis_test(
         })
         .expect("Failed to get static cost analysis");
 
-    let (static_cost, _) = static_cost_map.get(function_name).expect(&format!(
-        "Function '{}' not found in static cost map",
-        function_name
-    ));
+    let (static_cost, _) = static_cost_map
+        .get(function_name)
+        .unwrap_or_else(|| panic!("Function '{}' not found in static cost map", function_name));
 
     println!("\n=== Cost Analysis for {} ===", function_name);
     println!("static cost: {:?}", static_cost);

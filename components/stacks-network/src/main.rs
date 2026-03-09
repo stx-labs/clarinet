@@ -47,8 +47,7 @@ fn main() {
             .unwrap_or_else(|e| panic!("Devnet.toml file malformatted {e:?}"));
 
     let orchestrator =
-        DevnetOrchestrator::new(manifest, Some(network_manifest.clone()), None, false, false)
-            .unwrap();
+        DevnetOrchestrator::new(manifest, Some(network_manifest.clone()), None, false).unwrap();
 
     let deployment_specification_file_content = paths::read_content(&deployment_location)
         .unwrap_or_else(|e| panic!("failed to read manifest data {e:?}"));

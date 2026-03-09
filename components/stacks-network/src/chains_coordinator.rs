@@ -428,13 +428,7 @@ pub async fn start_chains_coordinator(
 
                 let _ = devnet_event_tx.send(DevnetEvent::debug(log));
 
-                send_status_update(
-                    &devnet_event_tx,
-                    &None,
-                    "bitcoin-node",
-                    Status::Green,
-                    &comment,
-                );
+                send_status_update(&devnet_event_tx, "bitcoin-node", Status::Green, &comment);
                 let _ = devnet_event_tx.send(DevnetEvent::BitcoinChainEvent(chain_update.clone()));
             }
             ObserverEvent::StacksChainEvent(chain_event) => {
@@ -514,7 +508,6 @@ pub async fn start_chains_coordinator(
                 // would require either cloning the block, or passing ownership.
                 send_status_update(
                     &devnet_event_tx,
-                    &None,
                     "stacks-node",
                     Status::Green,
                     &format!(
