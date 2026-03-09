@@ -1,7 +1,7 @@
 use hiro_system_kit::{slog, slog_term, Drain};
 
-use crate::chainhook::observer::MempoolAdmissionData;
-use crate::chainhook::types::{
+use observer::event_handler::MempoolAdmissionData;
+use observer::types::{
     BitcoinChainEvent, StacksChainEvent, StacksTransactionData, StacksTransactionKind,
 };
 use crate::event::{ProtocolDeployingData, ServiceStatusData, Status};
