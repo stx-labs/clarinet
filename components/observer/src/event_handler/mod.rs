@@ -201,7 +201,7 @@ pub fn start_event_observer(
     Ok(())
 }
 
-pub async fn start_stacks_event_observer(
+async fn start_stacks_event_observer(
     config: EventObserverConfig,
     observer_commands_tx: Sender<ObserverCommand>,
     observer_commands_rx: Receiver<ObserverCommand>,
@@ -209,21 +209,21 @@ pub async fn start_stacks_event_observer(
     stacks_startup_context: StacksObserverStartupContext,
     ctx: Context,
 ) -> Result<(), Box<dyn Error>> {
+    let bitcoin_config = config.get_bitcoin_config();
+    let ingestion_port = config.stacks_node_config.ingestion_port;
+    let bitcoin_rpc_proxy_enabled = config.bitcoin_rpc_proxy_enabled;
+
     let indexer_config = IndexerConfig {
         bitcoind_rpc_url: config.bitcoind_rpc_url.clone(),
         bitcoind_rpc_username: config.bitcoind_rpc_username.clone(),
         bitcoind_rpc_password: config.bitcoind_rpc_password.clone(),
-        stacks_network: StacksNetwork::Devnet,
-        bitcoin_network: BitcoinNetwork::Regtest,
+        stacks_network: config.stacks_network.clone(),
+        bitcoin_network: config.bitcoin_network.clone(),
         stacks_node_config: config.stacks_node_config.clone(),
     };
 
     let mut indexer = Indexer::new(indexer_config.clone());
     indexer.seed_stacks_block_pool(stacks_startup_context.block_pool_seed, &ctx);
-
-    let ingestion_port = config.get_stacks_node_config().ingestion_port;
-    let bitcoin_rpc_proxy_enabled = config.bitcoin_rpc_proxy_enabled;
-    let bitcoin_config = config.get_bitcoin_config();
 
     let indexer_rw_lock = Arc::new(RwLock::new(indexer));
     let background_job_tx_mutex = Arc::new(Mutex::new(observer_commands_tx.clone()));

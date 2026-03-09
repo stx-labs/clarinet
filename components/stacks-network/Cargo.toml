@@ -6,15 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = { version = "0.8.6", features = ["json"] }
-tower = "0.5.2"
-base64 = { workspace = true }
 bitcoincore-rpc = { workspace= true }
-bitcoincore-rpc-json = { workspace = true }
 bollard = "0.17"
-hex = "0.4.3"
-miniscript = "11.0.0"
-strum = { workspace = true, features = ["derive"] }
 colored = { workspace = true }
 dirs = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
