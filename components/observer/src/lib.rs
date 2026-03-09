@@ -1,6 +1,6 @@
+pub mod event_handler;
 pub mod hooks;
 pub mod indexer;
-pub mod observer;
 pub mod types;
 pub mod utils;
 

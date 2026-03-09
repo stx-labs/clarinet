@@ -5,10 +5,8 @@ use std::time::Duration;
 use self::helpers::BlockEvent;
 use super::fork_scratch_pad::ForkScratchPad;
 use super::StacksBlockPool;
-use crate::chainhook::types::{
-    BitcoinBlockData, BlockchainEvent, StacksBlockData, StacksChainEvent,
-};
-use crate::chainhook::utils::{AbstractBlock, Context};
+use crate::types::{BitcoinBlockData, BlockchainEvent, StacksBlockData, StacksChainEvent};
+use crate::utils::{AbstractBlock, Context};
 
 pub type StacksChainEventExpectation = Box<dyn Fn(Option<StacksChainEvent>)>;
 

@@ -22,11 +22,11 @@ use super::{
     BitcoinConfig, BitcoinRPCRequest, MempoolAdmissionData, ObserverCommand,
     StacksChainMempoolEvent,
 };
-use crate::chainhook::indexer::bitcoin::{
+use crate::indexer::bitcoin::{
     build_http_client, download_and_parse_block_with_retry, NewBitcoinBlock,
 };
-use crate::chainhook::indexer::{self, Indexer};
-use crate::chainhook::utils::Context;
+use crate::indexer::{self, Indexer};
+use crate::utils::Context;
 use crate::{try_error, try_info};
 
 fn success_response() -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {

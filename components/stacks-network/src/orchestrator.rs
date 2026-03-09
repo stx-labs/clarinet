@@ -29,9 +29,9 @@ use clarity::types::PrivateKey;
 use futures::stream::TryStreamExt;
 use hiro_system_kit::slog;
 use indoc::formatdoc;
+use observer::utils::Context;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
-use crate::chainhook::utils::Context;
 use crate::command::run_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 
@@ -907,7 +907,7 @@ impl DevnetOrchestrator {
         stacks_conf.push_str(&formatdoc!(
             r#"
             # Add orchestrator (docker-host) as an event observer
-            # Also used by the devnet chainhook instance
+            # Also used by the devnet observer instance
             [[events_observer]]
             endpoint = "host.docker.internal:{orchestrator_ingestion_port}"
             events_keys = ["*"]

@@ -14,6 +14,7 @@ members = [
     "components/clarity-events",
     "components/hiro-system-kit",
     "components/stacks-codec",
+    "components/observer",
     "components/stacks-network",
     "components/stacks-rpc-client",
 ]

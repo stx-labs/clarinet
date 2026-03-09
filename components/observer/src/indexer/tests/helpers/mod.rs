@@ -1,4 +1,4 @@
-use crate::chainhook::types::{StacksBlockData, StacksMicroblockData};
+use crate::types::{StacksBlockData, StacksMicroblockData};
 
 pub mod accounts;
 #[allow(non_snake_case, unreachable_code)]

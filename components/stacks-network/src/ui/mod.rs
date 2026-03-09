@@ -17,11 +17,11 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use observer::utils::Context;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use super::DevnetEvent;
-use crate::chainhook::utils::Context;
 use crate::chains_coordinator::BitcoinMiningCommand;
 use crate::event_logger::DevnetEventLogger;
 use crate::ChainsCoordinatorCommand;

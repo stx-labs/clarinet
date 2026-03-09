@@ -2,7 +2,7 @@ use hiro_system_kit::slog::{self, Logger};
 use reqwest::RequestBuilder;
 use serde_json::{json, Value as JsonValue};
 
-use crate::chainhook::types::{
+use crate::types::{
     BitcoinBlockData, BlockHeader, BlockIdentifier, StacksBlockData, StacksMicroblockData,
     StacksTransactionData,
 };
