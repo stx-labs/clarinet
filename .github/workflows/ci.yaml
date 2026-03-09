@@ -81,7 +81,7 @@ jobs:
         run: cargo fmt-stacks --check
 
       - name: Run clippy
-        run: cargo clippy --workspace --exclude clarinet-sdk-wasm
+        run: cargo clippy --workspace --tests --exclude clarinet-sdk-wasm
 
   cargo_test:
     name: Run cargo tests
