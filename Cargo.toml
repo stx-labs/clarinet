@@ -1,9 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "components/chainhook-sdk",
     "components/clarity-static-cost",
-    "components/chainhook-types",
     "components/clarinet-cli",
     "components/clarinet-deployments",
     "components/clarinet-files",
@@ -16,6 +14,7 @@ members = [
     "components/clarity-events",
     "components/hiro-system-kit",
     "components/stacks-codec",
+    "components/observer",
     "components/stacks-network",
     "components/stacks-rpc-client",
 ]

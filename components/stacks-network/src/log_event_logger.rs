@@ -1,8 +1,8 @@
-use chainhook_sdk::observer::MempoolAdmissionData;
-use chainhook_sdk::types::{
+use hiro_system_kit::{slog, slog_term, Drain};
+use observer::event_handler::MempoolAdmissionData;
+use observer::types::{
     BitcoinChainEvent, StacksChainEvent, StacksTransactionData, StacksTransactionKind,
 };
-use hiro_system_kit::{slog, slog_term, Drain};
 
 use crate::event::{ProtocolDeployingData, ServiceStatusData, Status};
 use crate::event_logger::DevnetEventLogger;

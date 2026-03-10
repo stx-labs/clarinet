@@ -209,9 +209,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "axum"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b098575ebe77cb6d14fc7f32749631a6e44edbef6b796f89b020e99ba20d425"
+checksum = "8b52af3cb4058c895d37317bb27508dccc8e5f2d39454016b297bf4a400597b8"
 dependencies = [
  "axum-core",
  "bytes",
@@ -242,9 +242,9 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59446ce19cd142f8833f856eb31f3eb097812d1479ab224f54d72428ca21ea22"
+checksum = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1"
 dependencies = [
  "bytes",
  "futures-core",
@@ -555,42 +555,6 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
-
-[[package]]
-name = "chainhook-sdk"
-version = "0.12.12"
-dependencies = [
- "assert-json-diff",
- "axum",
- "base58",
- "base64 0.22.1",
- "bitcoincore-rpc",
- "bitcoincore-rpc-json",
- "chainhook-types",
- "clarity",
- "crossbeam-channel",
- "hex",
- "hiro-system-kit",
- "miniscript",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "stacks-codec",
- "test-case",
- "tokio",
- "tower",
-]
-
-[[package]]
-name = "chainhook-types"
-version = "1.3.7"
-dependencies = [
- "hex",
- "serde",
- "serde_json",
- "strum",
-]
 
 [[package]]
 name = "chrono"
@@ -2823,6 +2787,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "observer"
+version = "3.14.1"
+dependencies = [
+ "axum",
+ "base58",
+ "base64 0.22.1",
+ "bitcoincore-rpc",
+ "bitcoincore-rpc-json",
+ "clarity",
+ "crossbeam-channel",
+ "hex",
+ "hiro-system-kit",
+ "miniscript",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "stacks-codec",
+ "strum",
+ "test-case",
+ "tokio",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3071,9 +3058,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.13"
+version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
+checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
 dependencies = [
  "bytes",
  "getrandom 0.3.4",
@@ -4185,8 +4172,6 @@ dependencies = [
  "base58",
  "bitcoincore-rpc",
  "bollard",
- "chainhook-sdk",
- "chainhook-types",
  "chrono",
  "clap",
  "clarinet-deployments",
@@ -4202,7 +4187,7 @@ dependencies = [
  "hiro-system-kit",
  "indoc",
  "libc",
- "pretty_assertions",
+ "observer",
  "rand 0.8.5",
  "ratatui",
  "reqwest",
@@ -4214,6 +4199,7 @@ dependencies = [
  "stacks-rpc-client",
  "stackslib",
  "tar",
+ "test-case",
  "tokio",
  "toml",
  "tracing",

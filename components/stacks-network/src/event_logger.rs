@@ -1,5 +1,5 @@
-use chainhook_sdk::observer::MempoolAdmissionData;
-use chainhook_sdk::types::{BitcoinChainEvent, StacksChainEvent};
+use observer::event_handler::MempoolAdmissionData;
+use observer::types::{BitcoinChainEvent, StacksChainEvent};
 
 use crate::event::{ProtocolDeployingData, ServiceStatusData};
 use crate::log::LogData;

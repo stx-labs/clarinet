@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
+use bitcoincore_rpc::bitcoin::hex::DisplayHex;
 use bitcoincore_rpc::json::{GetBlockchainInfoResult, GetDescriptorInfoResult};
 use bitcoincore_rpc::jsonrpc::Response as JsonRpcResponse;
 use bollard::container::{
@@ -18,8 +19,6 @@ use bollard::models::{HostConfig, PortBinding};
 use bollard::network::{CreateNetworkOptions, PruneNetworksOptions};
 use bollard::service::Ipam;
 use bollard::Docker;
-use chainhook_sdk::bitcoin::hex::DisplayHex;
-use chainhook_sdk::utils::Context;
 use clarinet_deployments::types::BurnchainEpochConfig;
 use clarinet_files::{
     DevnetConfig, DevnetConfigFile, NetworkManifest, ProjectManifest, StacksNetwork,
@@ -30,6 +29,7 @@ use clarity::types::PrivateKey;
 use futures::stream::TryStreamExt;
 use hiro_system_kit::slog;
 use indoc::formatdoc;
+use observer::utils::Context;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
 use crate::command::run_command;
@@ -907,7 +907,7 @@ impl DevnetOrchestrator {
         stacks_conf.push_str(&formatdoc!(
             r#"
             # Add orchestrator (docker-host) as an event observer
-            # Also used by the devnet chainhook instance
+            # Also used by the devnet observer instance
             [[events_observer]]
             endpoint = "host.docker.internal:{orchestrator_ingestion_port}"
             events_keys = ["*"]

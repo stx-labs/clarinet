@@ -1,16 +1,16 @@
-use chainhook_sdk::observer::MempoolAdmissionData;
-use chainhook_sdk::types::{
+use hiro_system_kit::slog;
+use observer::types::{
     BitcoinChainEvent, StacksBlockData, StacksChainEvent, StacksMicroblockData,
     StacksTransactionData, StacksTransactionKind,
 };
-use chainhook_sdk::utils::Context;
-use hiro_system_kit::slog;
+use observer::utils::Context;
 use ratatui::prelude::*;
 
 use super::util::{StatefulList, TabsState};
 use crate::event::{ProtocolDeployingData, ServiceStatusData};
 use crate::event_logger::DevnetEventLogger;
 use crate::log::{LogData, LogLevel};
+use crate::MempoolAdmissionData;
 
 pub enum BlockData {
     Block(Box<StacksBlockData>),
