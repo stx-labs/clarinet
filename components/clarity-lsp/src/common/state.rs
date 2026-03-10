@@ -16,13 +16,14 @@ use clarity_repl::clarity::vm::ast::ContractAST;
 use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
+use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::ContractDeployer;
 use clarity_static_cost::static_cost::StaticCost;
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
 
-use super::requests::capabilities::InitializationOptions;
+use super::requests::capabilities::{CostDisplayFormat, InitializationOptions};
 use super::requests::completion::{
     build_completion_item_list, get_contract_calls, ContractDefinedData,
 };
@@ -493,7 +494,10 @@ impl EditorState {
 
             let function_name_str = function_name.to_string();
             if let Some((cost_node, _)) = cost_analysis.get(&function_name_str) {
-                let cost_text = Self::format_cost_for_codelens(cost_node);
+                let cost_text = Self::format_cost_for_codelens(
+                    cost_node,
+                    self.settings.static_cost_display_format,
+                );
 
                 let code_lens_line = saved_range.start.line;
                 let code_lens_range = ls_types::Range {
@@ -522,17 +526,32 @@ impl EditorState {
         code_lenses
     }
 
-    fn format_cost_for_codelens(cost_node: &StaticCost) -> String {
-        let total_cost = &cost_node.max;
+    fn format_cost_for_codelens(cost_node: &StaticCost, display: CostDisplayFormat) -> String {
+        let cost = &cost_node.max;
 
-        format!(
-            "runtime: {}, read count: {}, read length: {}, write count: {}, write length: {}",
-            format_abbreviated_number(total_cost.runtime),
-            format_abbreviated_number(total_cost.read_count),
-            format_abbreviated_number(total_cost.read_length),
-            format_abbreviated_number(total_cost.write_count),
-            format_abbreviated_number(total_cost.write_length)
-        )
+        match display {
+            CostDisplayFormat::Exact => {
+                format!(
+                    "runtime: {}, read count: {}, read length: {}, write count: {}, write length: {}",
+                    format_abbreviated_number(cost.runtime),
+                    format_abbreviated_number(cost.read_count),
+                    format_abbreviated_number(cost.read_length),
+                    format_abbreviated_number(cost.write_count),
+                    format_abbreviated_number(cost.write_length)
+                )
+            }
+            CostDisplayFormat::Percentage => {
+                let limit = &BLOCK_LIMIT_MAINNET;
+                format!(
+                    "runtime: {:.1}%, read count: {:.1}%, read length: {:.1}%, write count: {:.1}%, write length: {:.1}%",
+                    cost.runtime as f64 / limit.runtime as f64 * 100.0,
+                    cost.read_count as f64 / limit.read_count as f64 * 100.0,
+                    cost.read_length as f64 / limit.read_length as f64 * 100.0,
+                    cost.write_count as f64 / limit.write_count as f64 * 100.0,
+                    cost.write_length as f64 / limit.write_length as f64 * 100.0,
+                )
+            }
+        }
     }
 
     pub fn get_signature_help(

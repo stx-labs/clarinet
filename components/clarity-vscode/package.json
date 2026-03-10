@@ -131,6 +131,13 @@
             "order": 0,
             "description": "Show static cost analysis (runtime, read/write counts) above function definitions."
           },
+          "clarity-lsp.staticCostDisplayFormat": {
+            "type": "string",
+            "enum": ["exact", "percentage"],
+            "default": "exact",
+            "order": 0,
+            "description": "Display format for static cost analysis: exact numbers or percentage of block limits."
+          },
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",
             "default": false,
