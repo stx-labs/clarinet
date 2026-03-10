@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 
-use chainhook_sdk::observer::MempoolAdmissionData;
-use chainhook_sdk::types::{BitcoinChainEvent, StacksChainEvent};
+use observer::event_handler::MempoolAdmissionData;
+use observer::types::{BitcoinChainEvent, StacksChainEvent};
 
 use crate::chains_coordinator::BitcoinMiningCommand;
 use crate::log::{LogData, LogLevel};

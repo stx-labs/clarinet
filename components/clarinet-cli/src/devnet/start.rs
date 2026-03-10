@@ -6,11 +6,9 @@ use std::sync::mpsc::{self, channel, Sender};
 
 use clarinet_deployments::types::DeploymentSpecification;
 use hiro_system_kit::{slog, slog_async, slog_term, Drain};
-use stacks_network::chainhook_sdk::types::{BitcoinNetwork, StacksNetwork};
-use stacks_network::chainhook_sdk::utils::Context;
 use stacks_network::{
-    do_run_local_devnet, load_chainhooks, ChainsCoordinatorCommand, DevnetEvent,
-    DevnetOrchestrator, LogData,
+    do_run_local_devnet, ChainsCoordinatorCommand, Context, DevnetEvent, DevnetOrchestrator,
+    LogData,
 };
 
 pub struct StartConfig {
@@ -33,17 +31,6 @@ pub fn start(
     ),
     String,
 > {
-    let hooks = match load_chainhooks(
-        &config.devnet.manifest.root_dir,
-        &(BitcoinNetwork::Regtest, StacksNetwork::Devnet),
-    ) {
-        Ok(hooks) => hooks,
-        Err(e) => {
-            println!("{e}");
-            std::process::exit(1);
-        }
-    };
-
     let working_dir = config
         .devnet
         .network_config
@@ -78,7 +65,6 @@ pub fn start(
     let res = hiro_system_kit::nestable_block_on(do_run_local_devnet(
         config.devnet,
         config.deployment,
-        &mut Some(hooks),
         config.log_tx,
         config.display_dashboard,
         config.no_snapshot,

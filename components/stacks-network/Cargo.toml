@@ -10,8 +10,8 @@ bitcoincore-rpc = { workspace= true }
 bollard = "0.17"
 colored = { workspace = true }
 dirs = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = ["preserve_order"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true, features = ["preserve_order", "arbitrary_precision"] }
 yaml_serde = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3.20"
@@ -32,24 +32,27 @@ flate2 = "1.1.1"
 tar = "0.4.44"
 indoc = { workspace = true }
 
-clarity = { workspace = true, default-features = false }
+clarity = { workspace = true, default-features = false, features = ["slog_json"] }
 stacks-common = { workspace = true, default-features = false }
 stackslib = { workspace = true }
 
-chainhook-sdk = { path = "../chainhook-sdk" }
-chainhook-types = { path = "../chainhook-types" }
 stacks-rpc-client = { path = "../stacks-rpc-client" }
 clarinet-files = { path = "../clarinet-files" }
 clarinet-deployments = { path = "../clarinet-deployments" }
 hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
 stacks-codec = { path = "../stacks-codec" }
+observer = { path = "../observer" }
 libc = "0.2.173"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = { workspace = true, features = ["iterator"] }
 
+[features]
+default = []
+stacks-signers = ["observer/stacks-signers"]
+
 [dev-dependencies]
-pretty_assertions = { workspace = true }
+test-case = "3.1.0"
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 
 [lib]

@@ -1,10 +1,10 @@
 mod bitcoin_rpc_client;
-mod chainhooks;
 pub mod chains_coordinator;
 mod command;
 mod event;
 pub mod event_logger;
 mod log;
+pub use observer;
 pub mod log_event_logger;
 mod orchestrator;
 mod snapshot_extractor;
@@ -15,12 +15,6 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-use chainhook_sdk::chainhooks::types::ChainhookStore;
-pub use chainhook_sdk::observer::MempoolAdmissionData;
-use chainhook_sdk::observer::ObserverCommand;
-pub use chainhook_sdk::utils::Context;
-pub use chainhook_sdk::{self};
-pub use chainhooks::{load_chainhooks, parse_chainhook_full_specification};
 use chains_coordinator::{start_chains_coordinator, BitcoinMiningCommand};
 use clarinet_deployments::types::DeploymentSpecification;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
@@ -30,6 +24,10 @@ use event_logger::DevnetEventLogger;
 use hiro_system_kit::slog;
 pub use log::{LogData, LogLevel};
 pub use log_event_logger::LogEventLogger;
+pub use observer::event_handler::MempoolAdmissionData;
+use observer::event_handler::ObserverCommand;
+pub use observer::types::{BitcoinNetwork, StacksNetwork};
+pub use observer::utils::Context;
 pub use orchestrator::DevnetOrchestrator;
 use orchestrator::ServicesMapHosts;
 
@@ -113,7 +111,6 @@ fn setup_signal_handlers(
 
 pub struct DevnetRunConfig {
     pub deployment: DeploymentSpecification,
-    pub chainhooks: Option<ChainhookStore>,
     pub log_tx: Option<Sender<LogData>>,
     pub display_dashboard: bool,
     pub no_snapshot: bool,
@@ -211,14 +208,12 @@ async fn do_run_devnet(
 
     // The event observer should be able to send some events to the UI thread,
     // and should be able to be terminated
-    let hooks = config.chainhooks.unwrap_or_default();
     let devnet_path = devnet_config.working_dir.clone();
     let observer_config = DevnetEventObserverConfig::new(
         devnet_config.clone(),
         devnet.manifest.clone(),
         config.network_manifest,
         config.deployment,
-        hooks,
         &config.ctx,
         config.ip_address_setup,
     );
@@ -381,7 +376,6 @@ async fn do_run_devnet(
 pub async fn do_run_chain_coordinator(
     mut devnet: DevnetOrchestrator,
     deployment: DeploymentSpecification,
-    chainhooks: &mut Option<ChainhookStore>,
     log_tx: Option<Sender<LogData>>,
     no_snapshot: bool,
     ctx: Context,
@@ -399,7 +393,6 @@ pub async fn do_run_chain_coordinator(
     let ip_address_setup = devnet.prepare_network_k8s_coordinator(namespace)?;
     let config = DevnetRunConfig {
         deployment,
-        chainhooks: chainhooks.take(),
         log_tx,
         display_dashboard: false,
         no_snapshot,
@@ -418,7 +411,6 @@ pub async fn do_run_chain_coordinator(
 pub async fn do_run_local_devnet(
     mut devnet: DevnetOrchestrator,
     deployment: DeploymentSpecification,
-    chainhooks: &mut Option<ChainhookStore>,
     log_tx: Option<Sender<LogData>>,
     display_dashboard: bool,
     no_snapshot: bool,
@@ -438,7 +430,6 @@ pub async fn do_run_local_devnet(
     let ip_address_setup = devnet.prepare_local_network().await?;
     let config = DevnetRunConfig {
         deployment,
-        chainhooks: chainhooks.take(),
         log_tx,
         display_dashboard,
         no_snapshot,

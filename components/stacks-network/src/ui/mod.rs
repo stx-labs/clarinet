@@ -12,12 +12,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use app::App;
-use chainhook_sdk::utils::Context;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use observer::utils::Context;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
