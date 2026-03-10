@@ -7,13 +7,12 @@ mod trait_counter;
 use std::collections::HashMap;
 
 use clarity::vm::callables::CallableType;
-use clarity::vm::costs::cost_functions::{linear, ClarityCostFunction};
+use clarity::vm::costs::cost_functions::ClarityCostFunction;
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::functions::{lookup_reserved_functions, NativeFunctions};
 use clarity::vm::representations::ClarityName;
 use clarity::vm::{ClarityVersion, Value};
 use clarity_types::representations::SymbolicExpression;
-use clarity_types::types::{CharType, SequenceData};
 pub use cost_analysis::{
     build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_source,
     static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost, SummingExecutionCost,
@@ -34,9 +33,6 @@ pub(crate) fn saturating_add_cost(a: &mut ExecutionCost, b: &ExecutionCost) {
     a.read_length = a.read_length.saturating_add(b.read_length);
     a.read_count = a.read_count.saturating_add(b.read_count);
 }
-
-const STRING_COST_BASE: u64 = 36;
-const STRING_COST_MULTIPLIER: u64 = 3;
 
 pub(crate) fn calculate_function_cost(
     function_name: &str,
@@ -76,25 +72,12 @@ pub(crate) fn is_node_branching(node: &CostAnalysisNode) -> bool {
     }
 }
 
-/// string cost based on length
-fn string_cost(length: usize) -> StaticCost {
-    let cost = linear(length as u64, STRING_COST_BASE, STRING_COST_MULTIPLIER);
-    let execution_cost = ExecutionCost::runtime(cost);
-    StaticCost {
-        min: execution_cost.clone(),
-        max: execution_cost,
-    }
-}
-
-/// Strings are the only Value's with costs associated
-pub(crate) fn calculate_value_cost(value: &Value) -> StaticCost {
-    match value {
-        Value::Sequence(SequenceData::String(CharType::UTF8(data))) => string_cost(data.data.len()),
-        Value::Sequence(SequenceData::String(CharType::ASCII(data))) => {
-            string_cost(data.data.len())
-        }
-        _ => StaticCost::ZERO,
-    }
+/// Cost of evaluating a literal value.
+/// The dynamic VM does not charge any runtime cost for evaluating
+/// AtomValue / LiteralValue expressions (they just clone the value),
+/// so this always returns ZERO.
+pub(crate) fn calculate_value_cost(_value: &Value) -> StaticCost {
+    StaticCost::ZERO
 }
 
 /// Add lookup function cost to an execution cost

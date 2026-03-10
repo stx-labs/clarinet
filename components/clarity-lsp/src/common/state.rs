@@ -17,6 +17,7 @@ use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrin
 use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::ContractDeployer;
+use clarity_static_cost::static_cost::StaticCost;
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
@@ -26,7 +27,8 @@ use super::requests::completion::{
     build_completion_item_list, get_contract_calls, ContractDefinedData,
 };
 use super::requests::definitions::{
-    get_definitions, get_public_function_and_trait_definitions, DefinitionLocation,
+    get_all_function_definitions, get_definitions, get_public_function_and_trait_definitions,
+    get_trait_definitions, DefinitionLocation,
 };
 use super::requests::document_symbols::ASTSymbols;
 use super::requests::helpers::get_atom_or_field_start_at_position;
@@ -129,29 +131,27 @@ impl ActiveContractData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ContractState {
     contract_calls: Vec<CompletionItem>,
     errors: Vec<ClarityDiagnostic>,
     warnings: Vec<ClarityDiagnostic>,
     notes: Vec<ClarityDiagnostic>,
-    contract_id: QualifiedContractIdentifier,
     analysis: Option<ContractAnalysis>,
     definitions: HashMap<ClarityName, Range>,
-    location: PathBuf,
     clarity_version: ClarityVersion,
+    cost_analysis: Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>>,
 }
 
 impl ContractState {
     pub fn new(
-        contract_id: QualifiedContractIdentifier,
         _ast: ContractAST,
         _deps: DependencySet,
         diags: Vec<ClarityDiagnostic>,
         analysis: Option<ContractAnalysis>,
         definitions: HashMap<ClarityName, Range>,
-        location: PathBuf,
         clarity_version: ClarityVersion,
+        cost_analysis: Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>>,
     ) -> ContractState {
         let mut errors = vec![];
         let mut warnings = vec![];
@@ -177,16 +177,26 @@ impl ContractState {
             .unwrap_or_default();
 
         ContractState {
-            contract_id,
             contract_calls,
             errors,
             warnings,
             notes,
             analysis,
             definitions,
-            location,
             clarity_version,
+            cost_analysis,
         }
+    }
+}
+
+// Format a number with abbreviation (e.g., 2.6k instead of 2,634)
+fn format_abbreviated_number(value: u64) -> String {
+    if value >= 1_000_000 {
+        format!("{:.1}M", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}k", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
     }
 }
 
@@ -432,6 +442,99 @@ impl EditorState {
         })
     }
 
+    pub fn get_code_lenses(&self, contract_location: &Path) -> Vec<ls_types::CodeLens> {
+        let mut code_lenses = Vec::new();
+
+        if !self.settings.static_cost_analysis {
+            return code_lenses;
+        }
+
+        // Get the contract metadata to find the manifest
+        let Some(contract_metadata) = self.contracts_lookup.get(contract_location) else {
+            return code_lenses;
+        };
+
+        // Get the protocol state to find the contract state
+        let Some(protocol_state) = self.protocols.get(&contract_metadata.manifest_location) else {
+            return code_lenses;
+        };
+
+        let Some(contract_state) = protocol_state.contracts.get(contract_location) else {
+            return code_lenses;
+        };
+
+        // Get the stored cost analysis
+        let Some(cost_analysis) = contract_state.cost_analysis.as_ref() else {
+            return code_lenses;
+        };
+
+        // Compute current function ranges from the live editor content so we can
+        // detect which functions have moved (i.e. been edited) since the last save.
+        let current_ranges = self
+            .active_contracts
+            .get(contract_location)
+            .and_then(|ac| ac.expressions.as_ref())
+            .map(|exprs| {
+                let mut ranges = HashMap::new();
+                get_all_function_definitions(&mut ranges, exprs);
+                get_trait_definitions(&mut ranges, exprs);
+                ranges
+            });
+
+        // Create a CodeLens for each function definition
+        for (function_name, saved_range) in &contract_state.definitions {
+            // If the function's range in the live source differs from the saved range,
+            // the function (or something above it) was edited — skip the stale lens.
+            if let Some(ref current) = current_ranges {
+                if current.get(function_name) != Some(saved_range) {
+                    continue;
+                }
+            }
+
+            let function_name_str = function_name.to_string();
+            if let Some((cost_node, _)) = cost_analysis.get(&function_name_str) {
+                let cost_text = Self::format_cost_for_codelens(cost_node);
+
+                let code_lens_line = saved_range.start.line;
+                let code_lens_range = ls_types::Range {
+                    start: ls_types::Position {
+                        line: code_lens_line,
+                        character: 0,
+                    },
+                    end: ls_types::Position {
+                        line: code_lens_line,
+                        character: u32::MAX,
+                    },
+                };
+
+                code_lenses.push(ls_types::CodeLens {
+                    range: code_lens_range,
+                    command: Some(ls_types::Command {
+                        title: cost_text,
+                        command: "clarity.staticCostLens".to_string(),
+                        arguments: None,
+                    }),
+                    data: None,
+                });
+            }
+        }
+
+        code_lenses
+    }
+
+    fn format_cost_for_codelens(cost_node: &StaticCost) -> String {
+        let total_cost = &cost_node.max;
+
+        format!(
+            "runtime: {}, read count: {}, read length: {}, write count: {}, write length: {}",
+            format_abbreviated_number(total_cost.runtime),
+            format_abbreviated_number(total_cost.read_count),
+            format_abbreviated_number(total_cost.read_length),
+            format_abbreviated_number(total_cost.write_count),
+            format_abbreviated_number(total_cost.write_length)
+        )
+    }
+
     pub fn get_signature_help(
         &self,
         contract_location: &Path,
@@ -571,6 +674,10 @@ impl ProtocolState {
         definitions: &mut HashMap<QualifiedContractIdentifier, HashMap<ClarityName, Range>>,
         analyses: &mut HashMap<QualifiedContractIdentifier, Option<ContractAnalysis>>,
         clarity_versions: &mut HashMap<QualifiedContractIdentifier, ClarityVersion>,
+        cost_analyses: &mut HashMap<
+            QualifiedContractIdentifier,
+            HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
+        >,
     ) {
         // Remove old paths
         // TODO(lgalabru)
@@ -588,16 +695,16 @@ impl ProtocolState {
                 .unwrap_or(DEFAULT_CLARITY_VERSION);
 
             let definitions = definitions.remove(&contract_id).unwrap_or_default();
+            let cost_analysis = cost_analyses.remove(&contract_id);
 
             let contract_state = ContractState::new(
-                contract_id.clone(),
                 ast,
                 deps,
                 diags,
                 analysis,
                 definitions,
-                contract_location.clone(),
                 clarity_version,
+                cost_analysis,
             );
             self.contracts
                 .insert(contract_location.clone(), contract_state);
@@ -688,7 +795,8 @@ pub async fn build_state(
                 if let EvaluationResult::Contract(contract_result) = execution_result.result {
                     if let Some(ast) = artifacts.asts.get(&contract_id) {
                         let mut v = HashMap::new();
-                        get_public_function_and_trait_definitions(&mut v, &ast.expressions);
+                        get_all_function_definitions(&mut v, &ast.expressions);
+                        get_trait_definitions(&mut v, &ast.expressions);
                         definitions.insert(contract_id.clone(), v);
                     }
                     analyses.insert(contract_id.clone(), Some(contract_result.contract.analysis));
@@ -703,6 +811,40 @@ pub async fn build_state(
         };
     }
 
+    // Compute cost analysis for each contract
+    // Note: Cost analysis must run AFTER contracts are deployed to the session
+    // static_cost_tree needs the contract to be available in the global context
+    let mut cost_analyses = HashMap::new();
+    for contract_id in locations.keys() {
+        // Skip cost analysis for empty contracts (no expressions to analyze)
+        if artifacts
+            .asts
+            .get(contract_id)
+            .is_none_or(|ast| ast.expressions.is_empty())
+        {
+            continue;
+        }
+
+        let clarity_version = clarity_versions
+            .get(contract_id)
+            .copied()
+            .unwrap_or(DEFAULT_CLARITY_VERSION);
+
+        // Run static_cost_tree for this contract
+        if let Some(cost_analysis) =
+            get_cost_analysis(&mut session, contract_id, clarity_version).await
+        {
+            clarity_repl::uprint!(
+                "[LSP] Cost analysis completed for {}: {} functions analyzed",
+                contract_id,
+                cost_analysis.len()
+            );
+            cost_analyses.insert(contract_id.clone(), cost_analysis);
+        } else {
+            clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
+        }
+    }
+
     protocol_state.consolidate(
         &mut locations,
         &mut artifacts.asts,
@@ -711,7 +853,70 @@ pub async fn build_state(
         &mut definitions,
         &mut analyses,
         &mut clarity_versions,
+        &mut cost_analyses,
     );
 
     Ok(())
+}
+
+// Helper function to compute cost analysis for a contract
+async fn get_cost_analysis(
+    session: &mut clarity_repl::repl::Session,
+    contract_id: &QualifiedContractIdentifier,
+    clarity_version: ClarityVersion,
+) -> Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>> {
+    use clarity::vm::contexts::{CallStack, ContractContext, Environment};
+    use clarity::vm::errors::{VmExecutionError, VmInternalError};
+    use clarity_static_cost::static_cost::static_cost;
+
+    clarity_repl::uprint!(
+        "[LSP] get_cost_analysis called for contract: {} (clarity version: {:?})",
+        contract_id,
+        clarity_version
+    );
+
+    let tx_sender: clarity_types::types::PrincipalData = session.interpreter.get_tx_sender().into();
+    let epoch = session.interpreter.datastore.get_current_epoch();
+
+    let mut global_context = session
+        .interpreter
+        .get_global_context(epoch, false)
+        .map_err(|e| {
+            clarity_repl::uprint!("[LSP] Failed to get global context: {}", e);
+            e
+        })
+        .ok()?;
+
+    global_context.begin();
+
+    let cost_result: Result<
+        HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
+        clarity::vm::errors::VmExecutionError,
+    > = global_context.execute(|g| {
+        let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
+        let mut call_stack = CallStack::new();
+
+        let mut env = Environment::new(
+            g,
+            &contract_context,
+            &mut call_stack,
+            Some(tx_sender.clone()),
+            Some(tx_sender),
+            None,
+        );
+
+        // Use static_cost which returns (StaticCost, Option<TraitCount>)
+        // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
+        static_cost(&mut env, contract_id).map_err(|e| {
+            clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
+            let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
+            VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+        })
+    });
+
+    cost_result
+        .map_err(|e| {
+            clarity_repl::uprint!("[LSP] Cost analysis failed with error: {:?}", e);
+        })
+        .ok()
 }

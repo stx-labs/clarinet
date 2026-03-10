@@ -8,14 +8,17 @@ description = "Static cost analysis for Clarity smart contracts"
 clarity = { workspace = true, default-features = false, features = [
     "developer-mode",
     "devtools",
-    "rusqlite",
-    "testing",
 ] }
 clarity-types = { workspace = true }
 stacks-common = { workspace = true, default-features = false }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+clarity = { workspace = true, default-features = false, features = [
+    "developer-mode",
+    "devtools",
+    "testing",
+] }
 stackslib = { workspace = true, default-features = false }
 rstest = "0.26.1"
 indoc = { workspace = true }
