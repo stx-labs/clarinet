@@ -9,6 +9,7 @@ use clarinet_deployments::{
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::vm::ast::build_ast;
+use clarity::vm::costs::ExecutionCost;
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::clarity::analysis::ContractAnalysis;
 use clarity_repl::clarity::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
@@ -187,6 +188,32 @@ impl ContractState {
             clarity_version,
             cost_analysis,
         }
+    }
+}
+
+struct CostPercentages {
+    runtime: f64,
+    read_count: f64,
+    read_length: f64,
+    write_count: f64,
+    write_length: f64,
+}
+
+fn percentage_of_limit(value: u64, limit: u64) -> f64 {
+    if limit == 0 {
+        return 0.0;
+    }
+    (value as f64) / (limit as f64) * 100.0
+}
+
+fn cost_percentages(cost: &ExecutionCost) -> CostPercentages {
+    let limit = &BLOCK_LIMIT_MAINNET;
+    CostPercentages {
+        runtime: percentage_of_limit(cost.runtime, limit.runtime),
+        read_count: percentage_of_limit(cost.read_count, limit.read_count),
+        read_length: percentage_of_limit(cost.read_length, limit.read_length),
+        write_count: percentage_of_limit(cost.write_count, limit.write_count),
+        write_length: percentage_of_limit(cost.write_length, limit.write_length),
     }
 }
 
@@ -494,6 +521,13 @@ impl EditorState {
 
             let function_name_str = function_name.to_string();
             if let Some((cost_node, _)) = cost_analysis.get(&function_name_str) {
+                if !Self::exceeds_threshold(
+                    cost_node,
+                    self.settings.static_cost_threshold_percentage,
+                ) {
+                    continue;
+                }
+
                 let cost_text = Self::format_cost_for_codelens(
                     cost_node,
                     self.settings.static_cost_display_format,
@@ -541,17 +575,26 @@ impl EditorState {
                 )
             }
             CostDisplayFormat::Percentage => {
-                let limit = &BLOCK_LIMIT_MAINNET;
+                let pct = cost_percentages(cost);
                 format!(
                     "runtime: {:.1}%, read count: {:.1}%, read length: {:.1}%, write count: {:.1}%, write length: {:.1}%",
-                    cost.runtime as f64 / limit.runtime as f64 * 100.0,
-                    cost.read_count as f64 / limit.read_count as f64 * 100.0,
-                    cost.read_length as f64 / limit.read_length as f64 * 100.0,
-                    cost.write_count as f64 / limit.write_count as f64 * 100.0,
-                    cost.write_length as f64 / limit.write_length as f64 * 100.0,
+                    pct.runtime, pct.read_count, pct.read_length, pct.write_count, pct.write_length,
                 )
             }
         }
+    }
+
+    fn exceeds_threshold(cost_node: &StaticCost, threshold: f64) -> bool {
+        let pct = cost_percentages(&cost_node.max);
+        [
+            pct.runtime,
+            pct.read_count,
+            pct.read_length,
+            pct.write_count,
+            pct.write_length,
+        ]
+        .iter()
+        .any(|p| *p >= threshold)
     }
 
     pub fn get_signature_help(

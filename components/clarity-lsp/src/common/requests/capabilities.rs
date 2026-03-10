@@ -26,6 +26,7 @@ pub struct InitializationOptions {
     signature_help: bool,
     pub static_cost_analysis: bool,
     pub static_cost_display_format: CostDisplayFormat,
+    pub static_cost_threshold_percentage: f64,
 }
 
 impl Default for InitializationOptions {
@@ -41,6 +42,7 @@ impl Default for InitializationOptions {
             signature_help: true,
             static_cost_analysis: false,
             static_cost_display_format: CostDisplayFormat::default(),
+            static_cost_threshold_percentage: 0.0,
         }
     }
 }

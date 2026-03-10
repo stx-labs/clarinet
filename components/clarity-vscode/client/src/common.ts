@@ -99,6 +99,7 @@ export async function initClient(
       "goToDefinition",
       "staticCostAnalysis",
       "staticCostDisplayFormat",
+      "staticCostThresholdPercentage",
     ].forEach((k) => {
       if (newConfig[k] !== config[k]) requireReload = true;
     });

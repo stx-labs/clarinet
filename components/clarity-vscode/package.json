@@ -138,6 +138,14 @@
             "order": 0,
             "description": "Display format for static cost analysis: exact numbers or percentage of block limits."
           },
+          "clarity-lsp.staticCostThresholdPercentage": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 100,
+            "order": 0,
+            "description": "Only show cost code lens for functions that use at least this percentage of any block limit dimension."
+          },
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",
             "default": false,
