@@ -137,25 +137,19 @@ pub struct ContractState {
     errors: Vec<ClarityDiagnostic>,
     warnings: Vec<ClarityDiagnostic>,
     notes: Vec<ClarityDiagnostic>,
-    #[allow(dead_code)]
-    contract_id: QualifiedContractIdentifier,
     analysis: Option<ContractAnalysis>,
     definitions: HashMap<ClarityName, Range>,
-    #[allow(dead_code)]
-    location: PathBuf,
     clarity_version: ClarityVersion,
     cost_analysis: Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>>,
 }
 
 impl ContractState {
     pub fn new(
-        contract_id: QualifiedContractIdentifier,
         _ast: ContractAST,
         _deps: DependencySet,
         diags: Vec<ClarityDiagnostic>,
         analysis: Option<ContractAnalysis>,
         definitions: HashMap<ClarityName, Range>,
-        location: PathBuf,
         clarity_version: ClarityVersion,
         cost_analysis: Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>>,
     ) -> ContractState {
@@ -183,14 +177,12 @@ impl ContractState {
             .unwrap_or_default();
 
         ContractState {
-            contract_id,
             contract_calls,
             errors,
             warnings,
             notes,
             analysis,
             definitions,
-            location,
             clarity_version,
             cost_analysis,
         }
@@ -706,13 +698,11 @@ impl ProtocolState {
             let cost_analysis = cost_analyses.remove(&contract_id);
 
             let contract_state = ContractState::new(
-                contract_id.clone(),
                 ast,
                 deps,
                 diags,
                 analysis,
                 definitions,
-                contract_location.clone(),
                 clarity_version,
                 cost_analysis,
             );
