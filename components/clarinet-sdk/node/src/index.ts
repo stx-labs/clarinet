@@ -63,6 +63,7 @@ function memoizedInit() {
       trackCoverage: boolean;
       trackPerformance?: boolean;
       performanceCostField?: string;
+      apiUrl?: string;
     },
   ) => {
     if (noCache || !simnet) {
@@ -70,7 +71,7 @@ function memoizedInit() {
     }
 
     // start a new simnet session
-    await simnet.initSession(process.cwd(), manifestPath);
+    await simnet.initSession(process.cwd(), manifestPath, options?.apiUrl ?? null);
     return simnet;
   };
 }
