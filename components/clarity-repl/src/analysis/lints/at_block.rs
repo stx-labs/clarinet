@@ -110,6 +110,7 @@ impl Lint for AtBlock<'_> {
 
 #[cfg(test)]
 mod tests {
+    use clarity::types::StacksEpochId;
     use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
@@ -125,7 +126,10 @@ mod tests {
             .analysis
             .enable_lint(AtBlock::get_name(), Level::Warning);
 
-        let (output, _result) = Session::new_without_boot_contracts(settings)
+        let mut session = Session::new_without_boot_contracts(settings);
+        session.update_epoch(StacksEpochId::Epoch33);
+
+        let (output, _result) = session
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
             .expect("Invalid code snippet");
         output
