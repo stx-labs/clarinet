@@ -1272,8 +1272,7 @@ impl BurnStateDB for Datastore {
                     .get(&current_chain_tip)
                     .map(|block| block.burn_block_height)
             }
-            // preserve the 3.0 -> 3.3 special behavior of burn-block-height
-            // https://github.com/stacks-network/stacks-core/pull/5524
+            // Note: at-block removed at 3.4+
             Epoch30 | Epoch31 | Epoch32 | Epoch33 | Epoch34 => Some(self.burn_chain_height),
         }
     }

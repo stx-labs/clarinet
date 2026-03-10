@@ -1,3 +1,4 @@
+mod at_block;
 mod case_binding;
 mod case_const;
 mod error_const;
@@ -13,6 +14,7 @@ mod unused_private_fn;
 mod unused_token;
 mod unused_trait;
 
+pub use at_block::AtBlock;
 pub use case_binding::CaseBinding;
 pub use case_const::CaseConst;
 pub use error_const::ErrorConst;
