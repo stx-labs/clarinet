@@ -50,7 +50,7 @@ fn error_response(
     ))
 }
 
-pub async fn handle_new_bitcoin_block(
+async fn handle_new_bitcoin_block(
     Extension(app_state): Extension<AppState>,
     Json(bitcoin_block): Json<NewBitcoinBlock>,
 ) -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {
@@ -113,7 +113,7 @@ pub async fn handle_new_bitcoin_block(
     success_response()
 }
 
-pub async fn handle_new_stacks_block(
+async fn handle_new_stacks_block(
     Extension(app_state): Extension<AppState>,
     Json(marshalled_block): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {
@@ -167,7 +167,7 @@ pub async fn handle_new_stacks_block(
 }
 
 #[cfg(feature = "stacks-signers")]
-pub async fn handle_stackerdb_chunks(
+async fn handle_stackerdb_chunks(
     Extension(app_state): Extension<AppState>,
     Json(payload): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {
@@ -214,7 +214,7 @@ pub async fn handle_stackerdb_chunks(
     success_response()
 }
 
-pub async fn handle_new_microblocks(
+async fn handle_new_microblocks(
     Extension(app_state): Extension<AppState>,
     Json(marshalled_microblock): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {
@@ -256,7 +256,7 @@ pub async fn handle_new_microblocks(
     success_response()
 }
 
-pub async fn handle_new_mempool_tx(
+async fn handle_new_mempool_tx(
     Extension(app_state): Extension<AppState>,
     Json(raw_txs): Json<Vec<String>>,
 ) -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {
@@ -297,7 +297,7 @@ pub async fn handle_new_mempool_tx(
     success_response()
 }
 
-pub async fn handle_drop_mempool_tx(
+async fn handle_drop_mempool_tx(
     Extension(app_state): Extension<AppState>,
     Json(payload): Json<JsonValue>,
 ) -> Json<JsonValue> {
@@ -315,7 +315,7 @@ pub async fn handle_drop_mempool_tx(
     }))
 }
 
-pub async fn handle_new_attachement(
+async fn handle_new_attachment(
     Extension(app_state): Extension<AppState>,
     Json(payload): Json<JsonValue>,
 ) -> Json<JsonValue> {
@@ -332,7 +332,7 @@ pub async fn handle_new_attachement(
     }))
 }
 
-pub async fn handle_mined_block(
+async fn handle_mined_block(
     Extension(app_state): Extension<AppState>,
     Json(payload): Json<JsonValue>,
 ) -> Json<JsonValue> {
@@ -349,7 +349,7 @@ pub async fn handle_mined_block(
     }))
 }
 
-pub async fn handle_mined_microblock(
+async fn handle_mined_microblock(
     Extension(app_state): Extension<AppState>,
     Json(payload): Json<JsonValue>,
 ) -> Json<JsonValue> {
@@ -366,7 +366,7 @@ pub async fn handle_mined_microblock(
     }))
 }
 
-pub async fn handle_bitcoin_wallet_rpc_call(
+async fn handle_bitcoin_wallet_rpc_call(
     Extension(app_state): Extension<AppState>,
     Json(bitcoin_rpc_call): Json<BitcoinRPCRequest>,
 ) -> Json<JsonValue> {
@@ -407,7 +407,7 @@ pub async fn handle_bitcoin_wallet_rpc_call(
     }
 }
 
-pub async fn handle_bitcoin_rpc_call(
+async fn handle_bitcoin_rpc_call(
     Extension(app_state): Extension<AppState>,
     Json(bitcoin_rpc_call): Json<BitcoinRPCRequest>,
 ) -> Json<JsonValue> {
@@ -494,7 +494,7 @@ pub fn create_router(
         .route("/new_microblocks", post(handle_new_microblocks))
         .route("/new_mempool_tx", post(handle_new_mempool_tx))
         .route("/drop_mempool_tx", post(handle_drop_mempool_tx))
-        .route("/attachments/new", post(handle_new_attachement))
+        .route("/attachments/new", post(handle_new_attachment))
         .route("/mined_block", post(handle_mined_block))
         .route("/mined_microblock", post(handle_mined_microblock));
 
