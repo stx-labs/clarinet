@@ -656,6 +656,7 @@ dependencies = [
  "reqwest",
  "rpassword",
  "segment",
+ "semver",
  "serde",
  "serde_json",
  "similar",

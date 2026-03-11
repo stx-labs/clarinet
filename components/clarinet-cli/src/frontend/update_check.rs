@@ -40,20 +40,14 @@ fn fetch_latest_version() -> Option<String> {
     Some(version.to_string())
 }
 
-/// Returns true if `latest` is strictly newer than `current` using semver comparison.
 fn is_newer(latest: &str, current: &str) -> bool {
-    let parse = |s: &str| -> Option<(u64, u64, u64)> {
-        let mut parts = s.splitn(3, '.');
-        let major = parts.next()?.parse().ok()?;
-        let minor = parts.next()?.parse().ok()?;
-        let patch = parts.next()?.split('-').next()?.parse().ok()?;
-        Some((major, minor, patch))
+    let Ok(latest) = semver::Version::parse(latest) else {
+        return false;
     };
-
-    match (parse(latest), parse(current)) {
-        (Some(l), Some(c)) => l > c,
-        _ => false,
-    }
+    let Ok(current) = semver::Version::parse(current) else {
+        return false;
+    };
+    latest > current
 }
 
 #[cfg(test)]

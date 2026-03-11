@@ -6,12 +6,15 @@ use serde::{Deserialize, Serialize};
 pub struct ClarinetRC {
     pub enable_hints: Option<bool>,
     pub enable_telemetry: Option<bool>,
-    pub ignore_version_warning: Option<bool>,
 }
 
 impl ClarinetRC {
     pub fn get_settings_file_path() -> &'static str {
         "~/.clarinet/clarinetrc.toml"
+    }
+
+    pub fn get_config_dir() -> Option<std::path::PathBuf> {
+        dirs::home_dir().map(|h| h.join(".clarinet"))
     }
 
     pub fn from_rc_file() -> Self {

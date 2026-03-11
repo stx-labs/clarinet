@@ -26,6 +26,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 similar = "2.1.0"
 reqwest = { workspace = true, features = ["blocking"] }
+semver = { workspace = true }
 tokio = { workspace = true }
 toml_edit = { workspace = true }
 
