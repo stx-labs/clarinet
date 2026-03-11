@@ -3,9 +3,12 @@ use clarity::vm::ClarityName;
 use regex::Regex;
 use strum::EnumString;
 
+use crate::utils::Environment;
+
 #[derive(Debug)]
 pub enum AnnotationKind {
     Allow(Vec<WarningKind>),
+    Env(Environment),
     Filter(Vec<ClarityName>),
     FilterAll,
 }
@@ -33,6 +36,17 @@ impl std::str::FromStr for AnnotationKind {
                     } else {
                         Ok(AnnotationKind::Allow(params))
                     }
+                }
+                "env" => {
+                    let env: Environment = value
+                        .parse()
+                        .map_err(|_| format!("bad environment {value} for 'env' annotation"))?;
+                    if env == Environment::OnChain {
+                        return Err(
+                            "'onchain' is not a valid environment for 'env' annotation".to_string()
+                        );
+                    }
+                    Ok(AnnotationKind::Env(env))
                 }
                 "filter" => {
                     if value == "*" {
