@@ -45,6 +45,7 @@ use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
+use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
 use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
@@ -592,6 +593,10 @@ pub fn main() {
     };
 
     let clarinetrc = ClarinetRC::from_rc_file();
+
+    if !clarinetrc.ignore_version_warning.unwrap_or(false) {
+        update_check::check_for_update();
+    }
 
     match opts.command {
         Command::Completions(cmd) => {

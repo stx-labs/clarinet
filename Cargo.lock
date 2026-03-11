@@ -653,6 +653,7 @@ dependencies = [
  "indoc",
  "mac_address",
  "ratatui",
+ "reqwest",
  "rpassword",
  "segment",
  "serde",

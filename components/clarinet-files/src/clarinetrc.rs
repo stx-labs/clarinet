@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct ClarinetRC {
     pub enable_hints: Option<bool>,
     pub enable_telemetry: Option<bool>,
+    pub ignore_version_warning: Option<bool>,
 }
 
 impl ClarinetRC {
