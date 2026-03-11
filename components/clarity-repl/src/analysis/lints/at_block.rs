@@ -36,6 +36,7 @@ impl<'a> AtBlock<'a> {
     }
 
     fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
+        // In Clarity 5+, `at-block` is no longer part of the language, so allow it to be used as a user-defined function
         if contract_analysis.clarity_version >= ClarityVersion::Clarity5 {
             return Ok(self.diagnostics);
         }
@@ -137,17 +138,15 @@ mod tests {
 
     #[test]
     fn warn_at_block_usage() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-read-only (get-info)
                 (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
                     (var-get my-var)
                 )
             )
             (define-data-var my-var uint u0)
-            "
-        )
-        .to_string();
+        ").to_string();
 
         let output = run_snippet(snippet);
         assert!(output.iter().any(|line| line.contains("warning:")));
@@ -156,8 +155,8 @@ mod tests {
 
     #[test]
     fn allow_with_annotation() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-read-only (get-info)
                 ;; #[allow(at_block)]
                 (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
@@ -165,9 +164,7 @@ mod tests {
                 )
             )
             (define-data-var my-var uint u0)
-            "
-        )
-        .to_string();
+        ").to_string();
 
         let output = run_snippet(snippet);
         assert!(!output.iter().any(|line| line.contains("warning:")));
