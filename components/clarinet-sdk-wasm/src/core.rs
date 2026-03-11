@@ -29,6 +29,7 @@ use clarity_repl::repl::{
     clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
     Session, SessionSettings,
 };
+use clarity_repl::utils::Environment;
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
 use serde::{Deserialize, Serialize};
@@ -499,12 +500,13 @@ impl SDK {
         let deployment_plan_location =
             project_root.join(get_default_deployment_path(&StacksNetwork::Simnet));
 
-        let (mut deployment, artifacts) = generate_default_deployment(
+        let (mut deployment, artifacts, _) = generate_default_deployment(
             &manifest,
             &StacksNetwork::Simnet,
             false,
             Some(&*self.file_accessor),
             self.api_base_url.as_deref(),
+            Environment::Simnet,
         )
         .await?;
 

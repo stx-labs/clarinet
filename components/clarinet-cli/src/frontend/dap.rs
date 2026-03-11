@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clarinet_deployments::setup_session_with_deployment;
 use clarinet_files::{ProjectManifest, StacksNetwork};
 use clarity_repl::repl::debug::dap::DAPDebugger;
+use clarity_repl::utils::Environment;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
@@ -14,8 +15,12 @@ pub fn run_dap() -> Result<(), String> {
         Ok((manifest_location_str, expression)) => {
             let manifest_location = PathBuf::from(&manifest_location_str);
             let project_manifest = ProjectManifest::from_location(&manifest_location, false)?;
-            let (mut deployment, artifacts) =
-                generate_default_deployment(&project_manifest, &StacksNetwork::Simnet, false)?;
+            let (mut deployment, artifacts, _) = generate_default_deployment(
+                &project_manifest,
+                &StacksNetwork::Simnet,
+                false,
+                Environment::Simnet,
+            )?;
             let mut session = setup_session_with_deployment(
                 &project_manifest,
                 &mut deployment,

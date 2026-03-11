@@ -293,6 +293,7 @@ impl LanguageServer for LspNativeBridge {
             .await;
 
         self.after_receive_lsp_notification().await;
+        let _ = self.client.code_lens_refresh().await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -313,6 +314,7 @@ impl LanguageServer for LspNativeBridge {
         };
 
         self.after_receive_lsp_notification().await;
+        let _ = self.client.code_lens_refresh().await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {

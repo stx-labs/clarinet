@@ -125,6 +125,12 @@
             "order": 0,
             "description": "Show function signature help."
           },
+          "clarity-lsp.staticCostAnalysis": {
+            "type": "boolean",
+            "default": false,
+            "order": 0,
+            "description": "Show static cost analysis (runtime, read/write counts) above function definitions."
+          },
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",
             "default": false,
@@ -163,27 +169,7 @@
         "path": "./syntaxes/clarity.tmLanguage.json"
       }
     ],
-    "viewsContainers": {
-      "panel": [
-        {
-          "id": "clarityPanel",
-          "title": "Clarity",
-          "icon": "assets/images/file-icon/clar-dark-theme.svg",
-          "when": "config.clariy-lsp.panels.insights-panel"
-        }
-      ]
-    },
-    "views": {
-      "clarityPanel": [
-        {
-          "type": "webview",
-          "id": "clariy-lsp.clarityInsightsView",
-          "icon": "",
-          "name": "Insights",
-          "when": "config.clariy-lsp.panels.insights-panel"
-        }
-      ]
-    },
+    "commands": [],
     "breakpoints": [
       {
         "language": "clarity"

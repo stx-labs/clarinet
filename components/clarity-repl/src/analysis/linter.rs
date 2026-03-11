@@ -27,18 +27,19 @@ use crate::analysis::annotation::Annotation;
 #[strum(serialize_all = "snake_case")]
 pub enum LintName {
     // Keep sorted alphabetically
+    AtBlock,
     CaseBinding,
     CaseConst,
     ErrorConst,
     Noop,
     Panic,
+    UnnecessaryAsMaxLen,
     UnnecessaryPublic,
     UnusedBinding,
     UnusedConst,
     UnusedDataVar,
     UnusedMap,
     UnusedPrivateFn,
-    UnnecessaryAsMaxLen,
     UnusedToken,
     UnusedTrait,
 }
@@ -80,7 +81,12 @@ impl LintGroup {
         match self {
             All => LintName::VARIANTS,
             Perf => &[LintName::UnnecessaryAsMaxLen, LintName::UnnecessaryPublic],
-            Safety => &[LintName::ErrorConst, LintName::Noop, LintName::Panic],
+            Safety => &[
+                LintName::AtBlock,
+                LintName::ErrorConst,
+                LintName::Noop,
+                LintName::Panic,
+            ],
             Style => &[LintName::CaseBinding, LintName::CaseConst],
             Unused => &[
                 LintName::UnusedConst,
@@ -127,7 +133,7 @@ impl LintMapBuilder {
         LintGroup::Unused.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
         LintGroup::Perf.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
         LintGroup::Safety.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
-        //LintGroup::Style.insert_into(&mut map, LintLevel::Notice);
+        //LintGroup::Style.insert_into(&mut map, ClarityDiagnosticLevel::Notice);
 
         self
     }
