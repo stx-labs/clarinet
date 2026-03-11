@@ -19,7 +19,7 @@ use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrin
 use clarity_repl::clarity::vm::EvaluationResult;
 use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
 use clarity_repl::repl::ContractDeployer;
-use clarity_repl::utils::REMOVE_ENV_SIMNET_PASSES;
+use clarity_repl::utils::CHECK_ENVIRONMENTS;
 use clarity_static_cost::static_cost::StaticCost;
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
@@ -730,16 +730,14 @@ impl ProtocolState {
 
 pub use clarity_repl::utils::Environment;
 
-fn tag_chain(remove_env_simnet: bool, found_env_simnet: bool, diagnostics: &mut Vec<Diagnostic>) {
+fn tag_diagnostics(
+    environment: Environment,
+    found_env_simnet: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if found_env_simnet {
-        let env = if remove_env_simnet {
-            Environment::OnChain
-        } else {
-            Environment::Simnet
-        };
-
         for ref mut diag in diagnostics {
-            let _ = write!(diag.message, " ({env})");
+            let _ = write!(diag.message, " ({environment})");
         }
     }
 }
@@ -771,14 +769,14 @@ pub async fn build_state(
 
     let mut global_found_env_simnet = false;
     let mut session = initiate_session_from_manifest(&manifest);
-    for force_remove_env_simnet in REMOVE_ENV_SIMNET_PASSES {
+    for environment in CHECK_ENVIRONMENTS {
         let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment(
             &manifest,
             &StacksNetwork::Simnet,
             false,
             file_accessor,
             None,
-            force_remove_env_simnet,
+            environment,
         )
         .await?;
         global_found_env_simnet |= found_env_simnet;
@@ -816,8 +814,8 @@ pub async fn build_state(
             match result {
                 Ok(mut execution_result) => {
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
-                        tag_chain(
-                            force_remove_env_simnet,
+                        tag_diagnostics(
+                            environment,
                             global_found_env_simnet,
                             &mut execution_result.diagnostics,
                         );
@@ -837,11 +835,7 @@ pub async fn build_state(
                 }
                 Err(ref mut diags) => {
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
-                        tag_chain(
-                            force_remove_env_simnet,
-                            global_found_env_simnet,
-                            &mut *diags,
-                        );
+                        tag_diagnostics(environment, global_found_env_simnet, &mut *diags);
                         entry.append(diags);
                     }
                     continue;

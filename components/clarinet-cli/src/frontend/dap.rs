@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clarinet_deployments::setup_session_with_deployment;
 use clarinet_files::{ProjectManifest, StacksNetwork};
 use clarity_repl::repl::debug::dap::DAPDebugger;
+use clarity_repl::utils::Environment;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
@@ -18,7 +19,7 @@ pub fn run_dap() -> Result<(), String> {
                 &project_manifest,
                 &StacksNetwork::Simnet,
                 false,
-                false,
+                Environment::Simnet,
             )?;
             let mut session = setup_session_with_deployment(
                 &project_manifest,

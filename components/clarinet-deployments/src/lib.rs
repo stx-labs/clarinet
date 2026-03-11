@@ -28,7 +28,7 @@ use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
 };
-use clarity_repl::utils::remove_env_simnet;
+use clarity_repl::utils::{remove_env_simnet, Environment};
 use types::{
     ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,
     EpochSpec, RequirementPublishSpecification, StxTransferSpecification, TransactionSpecification,
@@ -297,7 +297,7 @@ pub async fn generate_default_deployment(
     no_batch: bool,
     file_accessor: Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
-    force_remove_env_simnet: bool,
+    environment: Environment,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let mut found_env_simnet = false;
     let network_manifest = match file_accessor {
@@ -764,7 +764,7 @@ pub async fn generate_default_deployment(
             ))?
             .clone();
 
-        if force_remove_env_simnet {
+        if environment == Environment::OnChain {
             let (clean, had_annotation) =
                 remove_env_simnet(source.clone()).unwrap_or((source, false));
             source = clean;

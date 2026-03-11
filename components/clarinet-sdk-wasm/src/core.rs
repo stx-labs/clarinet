@@ -29,6 +29,7 @@ use clarity_repl::repl::{
     clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
     Session, SessionSettings,
 };
+use clarity_repl::utils::Environment;
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
 use serde::{Deserialize, Serialize};
@@ -505,7 +506,7 @@ impl SDK {
             false,
             Some(&*self.file_accessor),
             self.api_base_url.as_deref(),
-            false,
+            Environment::Simnet,
         )
         .await?;
 

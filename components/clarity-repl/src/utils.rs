@@ -12,9 +12,9 @@ use strum::{Display, EnumString};
 use crate::analysis::annotation::AnnotationKind;
 use crate::repl::clarity_values::value_to_string;
 
-pub const REMOVE_ENV_SIMNET_PASSES: [bool; 2] = [true, false];
+pub const CHECK_ENVIRONMENTS: [Environment; 2] = [Environment::OnChain, Environment::Simnet];
 
-#[derive(Debug, EnumString, Display, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, EnumString, Display, PartialEq, Eq, Hash)]
 #[strum(serialize_all = "lowercase")]
 pub enum Environment {
     OnChain,

@@ -37,7 +37,7 @@ use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{
     clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
 };
-use clarity_repl::utils::REMOVE_ENV_SIMNET_PASSES;
+use clarity_repl::utils::CHECK_ENVIRONMENTS;
 use clarity_repl::{analysis, repl};
 use serde::Serialize;
 use stacks_network::{self, DevnetOrchestrator};
@@ -750,14 +750,18 @@ pub fn main() {
                     StacksNetwork::Simnet
                 };
 
-                let (mut deployment, _, _) =
-                    match generate_default_deployment(&manifest, &network, cmd.no_batch, false) {
-                        Ok(result) => result,
-                        Err(message) => {
-                            eprintln!("{}", format_err!(message));
-                            std::process::exit(1);
-                        }
-                    };
+                let (mut deployment, _, _) = match generate_default_deployment(
+                    &manifest,
+                    &network,
+                    cmd.no_batch,
+                    Environment::Simnet,
+                ) {
+                    Ok(result) => result,
+                    Err(message) => {
+                        eprintln!("{}", format_err!(message));
+                        std::process::exit(1);
+                    }
+                };
 
                 if !cmd.manual_cost
                     && matches!(network, StacksNetwork::Testnet | StacksNetwork::Mainnet)
@@ -861,7 +865,7 @@ pub fn main() {
                             None => {
                                 let default_deployment_path = project_root.join(get_default_deployment_path(network));
                                 let (deployment, _, _) =
-                                    generate_default_deployment(&manifest, network, false, false)
+                                    generate_default_deployment(&manifest, network, false, Environment::Simnet)
                                         .unwrap_or_else(|message| {
                                             eprintln!("{}", red!(message));
                                             std::process::exit(1);
@@ -1093,7 +1097,7 @@ pub fn main() {
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
                             cmd.use_computed_deployment_plan,
-                            false,
+                            Environment::Simnet,
                         );
 
                         if !artifacts.success {
@@ -1259,14 +1263,14 @@ pub fn main() {
             let manifest = load_manifest_or_exit(cmd.manifest_path, false);
             let mut exit_codes = Vec::new();
             let mut global_found_env_simnet = false;
-            for force_remove_env_simnet in REMOVE_ENV_SIMNET_PASSES {
+            for environment in CHECK_ENVIRONMENTS {
                 let ((deployment, _, artifacts), found_env_simnet) =
                     load_deployment_and_artifacts_or_exit(
                         &manifest,
                         &cmd.deployment_plan_path,
                         cmd.use_on_disk_deployment_plan,
                         cmd.use_computed_deployment_plan,
-                        force_remove_env_simnet,
+                        environment,
                     );
                 global_found_env_simnet |= found_env_simnet;
 
@@ -1284,12 +1288,7 @@ pub fn main() {
                                 Some((path.to_string_lossy().to_string(), diags))
                             })
                             .collect();
-                        let environment = if force_remove_env_simnet {
-                            Environment::OnChain
-                        } else {
-                            Environment::Simnet
-                        }
-                        .to_string();
+                        let environment = environment.to_string();
                         let output = JsonCheckOutput {
                             success: artifacts.success,
                             diagnostics,
@@ -1304,10 +1303,13 @@ pub fn main() {
                     }
                     OutputFormat::Standard => {
                         if global_found_env_simnet {
-                            if !force_remove_env_simnet {
-                                println!("Checking contracts with #[env(simnet)] code");
-                            } else {
-                                println!("Checking contracts without #[env(simnet)] code");
+                            match environment {
+                                Environment::Simnet => {
+                                    println!("Checking contracts with #[env(simnet)] code");
+                                }
+                                Environment::OnChain => {
+                                    println!("Checking contracts without #[env(simnet)] code");
+                                }
                             }
                         }
                         let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
@@ -1521,7 +1523,7 @@ pub fn load_deployment_and_artifacts_or_exit(
     deployment_plan_path: &Option<String>,
     force_on_disk: bool,
     force_computed: bool,
-    force_remove_env_simnet: bool,
+    environment: Environment,
 ) -> (
     (
         DeploymentSpecification,
@@ -1544,7 +1546,7 @@ pub fn load_deployment_and_artifacts_or_exit(
             .and_then(|opt| match opt {
                 Some(mut deployment) => {
                     eprintln!("{} using {default_deployment_file}", yellow!("note:"));
-                    if force_remove_env_simnet {
+                    if environment == Environment::OnChain {
                         found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
                     }
                     let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
@@ -1556,7 +1558,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                             manifest,
                             &StacksNetwork::Simnet,
                             false,
-                            force_remove_env_simnet,
+                            environment,
                         )?;
                     found_env_simnet |= gen_found_env_simnet;
                     if ast_artifacts.success {
@@ -1584,7 +1586,7 @@ pub fn load_deployment_and_artifacts_or_exit(
             let deployment_location = project_root.join(path);
             load_deployment(project_root, &deployment_location)
                 .map(|mut deployment| {
-                    if force_remove_env_simnet {
+                    if environment == Environment::OnChain {
                         found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
                     }
                     let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
@@ -1665,7 +1667,7 @@ fn load_deployment_if_exists(
     }
 
     if !force_on_disk {
-        match generate_default_deployment(manifest, network, true, false) {
+        match generate_default_deployment(manifest, network, true, Environment::Simnet) {
             Ok((deployment, _, _)) => {
                 use similar::{ChangeTag, TextDiff};
 
@@ -2130,7 +2132,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                         &manifest,
                         &StacksNetwork::Devnet,
                         false,
-                        false,
+                        Environment::Simnet,
                     )
                     .unwrap_or_else(|message| {
                         eprintln!("{}", red!(message));
