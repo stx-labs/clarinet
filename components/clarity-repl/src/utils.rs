@@ -8,10 +8,19 @@ use ::clarity::vm::representations::PreSymbolicExpression;
 use ::clarity::vm::representations::PreSymbolicExpressionType::{self as PSEType, Comment};
 use serde_json::json;
 
+use strum::{Display, EnumString};
+
 use crate::analysis::annotation::AnnotationKind;
 use crate::repl::clarity_values::value_to_string;
 
 pub const REMOVE_ENV_SIMNET_PASSES: [bool; 2] = [true, false];
+
+#[derive(Debug, EnumString, Display, PartialEq, Eq, Hash)]
+#[strum(serialize_all = "lowercase")]
+pub enum Environment {
+    OnChain,
+    Simnet,
+}
 
 pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     match event {

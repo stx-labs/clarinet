@@ -728,19 +728,7 @@ impl ProtocolState {
     }
 }
 
-pub enum Environment {
-    OnChain,
-    Simnet,
-}
-
-impl std::fmt::Display for Environment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Environment::OnChain => write!(f, "onchain"),
-            Environment::Simnet => write!(f, "simnet"),
-        }
-    }
-}
+pub use clarity_repl::utils::Environment;
 
 fn tag_chain(remove_env_simnet: bool, found_env_simnet: bool, diagnostics: &mut Vec<Diagnostic>) {
     if found_env_simnet {
