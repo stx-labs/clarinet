@@ -13,20 +13,61 @@ pub mod settings;
 #[cfg(any(not(target_arch = "wasm32"), feature = "dap"))]
 pub mod debug;
 
-use std::convert::TryInto;
 use std::fmt::Display;
 use std::path::PathBuf;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::types::StacksEpochId;
 use clarity::vm::ClarityVersion;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 pub use interpreter::ClarityInterpreter;
-use serde::ser::{Serialize, SerializeMap, Serializer};
+use serde::ser::{SerializeMap, Serializer};
+use serde::{Deserialize, Serialize};
 pub use session::Session;
 pub use settings::{SessionSettings, Settings, SettingsFile};
 
-pub const DEFAULT_CLARITY_VERSION: ClarityVersion = ClarityVersion::Clarity3;
-pub const DEFAULT_EPOCH: StacksEpochId = StacksEpochId::Epoch32;
+/// Convert ClarityVersion to its integer representation.
+pub fn clarity_version_to_u8(version: ClarityVersion) -> u8 {
+    match version {
+        ClarityVersion::Clarity1 => 1,
+        ClarityVersion::Clarity2 => 2,
+        ClarityVersion::Clarity3 => 3,
+        ClarityVersion::Clarity4 => 4,
+        ClarityVersion::Clarity5 => 5,
+    }
+}
+
+/// Parse an integer into a ClarityVersion, returning None for invalid values.
+pub fn clarity_version_from_u8(value: u8) -> Option<ClarityVersion> {
+    match value {
+        1 => Some(ClarityVersion::Clarity1),
+        2 => Some(ClarityVersion::Clarity2),
+        3 => Some(ClarityVersion::Clarity3),
+        4 => Some(ClarityVersion::Clarity4),
+        5 => Some(ClarityVersion::Clarity5),
+        _ => None,
+    }
+}
+
+/// Parse a human-readable epoch string (e.g. "3.4") into a StacksEpochId.
+/// Accepts aliases "2" for "2.0" and "3" for "3.0".
+pub fn epoch_from_str(s: &str) -> Option<StacksEpochId> {
+    match s {
+        "2" | "2.0" => Some(StacksEpochId::Epoch20),
+        "2.05" => Some(StacksEpochId::Epoch2_05),
+        "2.1" => Some(StacksEpochId::Epoch21),
+        "2.2" => Some(StacksEpochId::Epoch22),
+        "2.3" => Some(StacksEpochId::Epoch23),
+        "2.4" => Some(StacksEpochId::Epoch24),
+        "2.5" => Some(StacksEpochId::Epoch25),
+        "3" | "3.0" => Some(StacksEpochId::Epoch30),
+        "3.1" => Some(StacksEpochId::Epoch31),
+        "3.2" => Some(StacksEpochId::Epoch32),
+        "3.3" => Some(StacksEpochId::Epoch33),
+        "3.4" => Some(StacksEpochId::Epoch34),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Epoch {
@@ -40,6 +81,17 @@ impl PartialEq<StacksEpochId> for Epoch {
             Epoch::Specific(epoch) => epoch == other,
             Epoch::Latest => &DEFAULT_EPOCH == other,
         }
+    }
+}
+
+impl PartialOrd<StacksEpochId> for Epoch {
+    fn partial_cmp(&self, other: &StacksEpochId) -> Option<std::cmp::Ordering> {
+        let myself = match self {
+            Epoch::Specific(epoch) => epoch,
+            Epoch::Latest => &DEFAULT_EPOCH,
+        };
+
+        StacksEpochId::partial_cmp(myself, other)
     }
 }
 
@@ -98,6 +150,9 @@ impl<'de> serde::Deserialize<'de> for Epoch {
                     2.5 => StacksEpochId::Epoch25,
                     3.0 => StacksEpochId::Epoch30,
                     3.1 => StacksEpochId::Epoch31,
+                    3.2 => StacksEpochId::Epoch32,
+                    3.3 => StacksEpochId::Epoch33,
+                    3.4 => StacksEpochId::Epoch34,
                     _ => {
                         return Err(serde::de::Error::custom(format!(
                             "unknown epoch value: {value}"
@@ -137,6 +192,8 @@ pub struct ClarityContract {
     pub deployer: ContractDeployer,
     pub clarity_version: ClarityVersion,
     pub epoch: Epoch,
+    #[serde(skip)]
+    pub is_requirement: bool,
 }
 
 impl Serialize for ClarityContract {
@@ -158,20 +215,10 @@ impl Serialize for ClarityContract {
             ContractDeployer::DefaultDeployer => {}
             _ => unreachable!(),
         }
-        match self.clarity_version {
-            ClarityVersion::Clarity1 => {
-                map.serialize_entry("clarity_version", &1)?;
-            }
-            ClarityVersion::Clarity2 => {
-                map.serialize_entry("clarity_version", &2)?;
-            }
-            ClarityVersion::Clarity3 => {
-                map.serialize_entry("clarity_version", &3)?;
-            }
-            ClarityVersion::Clarity4 => {
-                map.serialize_entry("clarity_version", &4)?;
-            }
-        }
+        map.serialize_entry(
+            "clarity_version",
+            &clarity_version_to_u8(self.clarity_version),
+        )?;
         map.serialize_entry("epoch", &self.epoch)?;
         map.end()
     }

@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 
 use bitcoincore_rpc::{Auth, Client};
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{AccountConfig, NetworkManifest, StacksNetwork};
 use clarinet_utils::get_bip32_keys_from_mnemonic;
 use clarity_repl::clarity::chainstate::StacksAddress;
@@ -116,7 +117,7 @@ fn sign_transaction_payload(
     Ok(signed_tx)
 }
 
-pub fn encode_contract_call(
+fn encode_contract_call(
     contract_id: &QualifiedContractIdentifier,
     function_name: ClarityName,
     function_args: Vec<Value>,
@@ -142,7 +143,7 @@ pub fn encode_contract_call(
     )
 }
 
-pub fn encode_stx_transfer(
+fn encode_stx_transfer(
     recipient: PrincipalData,
     amount: u64,
     memo: [u8; 34],
@@ -156,7 +157,7 @@ pub fn encode_stx_transfer(
     sign_transaction_payload(account, payload, nonce, tx_fee, anchor_mode, network)
 }
 
-pub fn encode_contract_publish(
+fn encode_contract_publish(
     contract_name: &ContractName,
     source: &str,
     clarity_version: Option<ClarityVersion>,
@@ -330,14 +331,10 @@ pub fn apply_on_chain_deployment(
     let mut accounts_cached_nonces: BTreeMap<String, u64> = BTreeMap::new();
     let mut stx_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
     let mut btc_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
-    let mut default_epoch = EpochSpec::Epoch2_05;
     if !fetch_initial_nonces {
         for (_, account) in network_manifest.accounts.iter() {
             accounts_cached_nonces.insert(account.stx_address.clone(), 0);
         }
-        if network_manifest.devnet.is_some() {
-            default_epoch = EpochSpec::Epoch2_1;
-        };
     }
 
     for (_, account) in network_manifest.accounts.iter() {
@@ -385,7 +382,7 @@ pub fn apply_on_chain_deployment(
     }
 
     for batch_spec in deployment.plan.batches.iter() {
-        let epoch = batch_spec.epoch.unwrap_or(default_epoch);
+        let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
         let mut batch = Vec::new();
         for transaction in batch_spec.transactions.iter() {
             let tracker = match transaction {
@@ -732,23 +729,21 @@ pub fn apply_on_chain_deployment(
     for (epoch, batch) in batches.into_iter() {
         if network == StacksNetwork::Devnet {
             // Devnet only: ensure we've reached the appropriate epoch for this batch
+            let devnet = network_manifest.devnet.as_ref().unwrap();
             let after_bitcoin_block = match epoch {
-                EpochSpec::Epoch2_0 => network_manifest.devnet.as_ref().unwrap().epoch_2_0,
-                EpochSpec::Epoch2_05 => network_manifest.devnet.as_ref().unwrap().epoch_2_05,
-                EpochSpec::Epoch2_1 => network_manifest.devnet.as_ref().unwrap().epoch_2_1,
-                EpochSpec::Epoch2_2 => network_manifest.devnet.as_ref().unwrap().epoch_2_2,
-                EpochSpec::Epoch2_3 => network_manifest.devnet.as_ref().unwrap().epoch_2_3,
-                EpochSpec::Epoch2_4 => network_manifest.devnet.as_ref().unwrap().epoch_2_4,
-                EpochSpec::Epoch2_5 => network_manifest.devnet.as_ref().unwrap().epoch_2_5,
-                EpochSpec::Epoch3_0 => network_manifest.devnet.as_ref().unwrap().epoch_3_0,
-                EpochSpec::Epoch3_1 => network_manifest.devnet.as_ref().unwrap().epoch_3_1,
-                EpochSpec::Epoch3_2 => network_manifest.devnet.as_ref().unwrap().epoch_3_2,
-                EpochSpec::Epoch3_3 => network_manifest
-                    .devnet
-                    .as_ref()
-                    .unwrap()
-                    .epoch_3_3
-                    .unwrap_or(u64::MAX),
+                EpochSpec::Epoch2_0 => devnet.epoch_2_0,
+                EpochSpec::Epoch2_05 => devnet.epoch_2_05,
+                EpochSpec::Epoch2_1 => devnet.epoch_2_1,
+                EpochSpec::Epoch2_2 => devnet.epoch_2_2,
+                EpochSpec::Epoch2_3 => devnet.epoch_2_3,
+                EpochSpec::Epoch2_4 => devnet.epoch_2_4,
+                EpochSpec::Epoch2_5 => devnet.epoch_2_5,
+                EpochSpec::Epoch3_0 => devnet.epoch_3_0,
+                EpochSpec::Epoch3_1 => devnet.epoch_3_1,
+                EpochSpec::Epoch3_2 => devnet.epoch_3_2,
+                EpochSpec::Epoch3_3 => devnet.epoch_3_3,
+                // this version of clarinet has to handle optional support for epoch 3_4
+                EpochSpec::Epoch3_4 => devnet.epoch_3_4.unwrap_or(u64::MAX),
             };
             let mut epoch_transition_successful =
                 current_bitcoin_block_height > after_bitcoin_block;

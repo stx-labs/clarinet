@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clarity::types::StacksEpochId;
@@ -10,17 +10,16 @@ use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::ser::SerializeMap;
-use serde::{Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
-use super::FileLocation;
 #[cfg(feature = "json_schema")]
 use crate::schema;
-use crate::FileAccessor;
+use crate::{paths, FileAccessor};
 
 pub const INVALID_CLARITY_VERSION: &str =
-    "clarity_version field invalid (value supported: 1, 2, 3)";
+    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5)";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ClarityContractMetadata {
@@ -64,8 +63,12 @@ pub struct ProjectConfigFile {
     #[cfg_attr(feature = "json_schema", schemars(skip))]
     analysis: Option<Vec<clarity_repl::analysis::Pass>>,
     /// Directory for caching build artifacts
-    #[serde(default)]
-    cache_dir: Option<String>,
+    #[serde(default = "default_cache_dir")]
+    cache_dir: String,
+}
+
+fn default_cache_dir() -> String {
+    ".cache".to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -95,15 +98,16 @@ pub struct ProjectManifest {
     #[serde(rename = "repl")]
     pub repl_settings: repl::Settings,
     #[serde(skip_serializing)]
-    #[serde(default = "default_location")]
-    pub location: FileLocation,
+    #[serde(default = "default_root_dir")]
+    pub root_dir: PathBuf,
+    #[serde(skip_serializing)]
+    pub location: PathBuf,
     #[serde(skip_serializing, skip_deserializing)]
-    pub contracts_settings: HashMap<FileLocation, ClarityContractMetadata>,
+    pub contracts_settings: HashMap<PathBuf, ClarityContractMetadata>,
 }
 
-fn default_location() -> FileLocation {
-    let path = std::env::temp_dir();
-    FileLocation::from_path(path)
+fn default_root_dir() -> PathBuf {
+    std::env::temp_dir()
 }
 
 fn contracts_deserializer<'de, D>(des: D) -> Result<BTreeMap<String, ClarityContract>, D::Error>
@@ -163,6 +167,7 @@ where
             deployer,
             clarity_version,
             epoch,
+            is_requirement: false,
         };
 
         map.insert(contract_name, cc);
@@ -178,19 +183,10 @@ pub struct ProjectConfig {
     pub telemetry: bool,
     pub requirements: Option<Vec<RequirementConfig>>,
     #[serde(rename = "cache_dir")]
-    #[serde(deserialize_with = "cache_location_deserializer")]
-    pub cache_location: FileLocation,
+    pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
     pub boot_contracts: Vec<String>,
     pub override_boot_contracts_source: BTreeMap<String, String>,
-}
-
-fn cache_location_deserializer<'de, D>(des: D) -> Result<FileLocation, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let container: String = serde::Deserialize::deserialize(des)?;
-    FileLocation::from_path_string(&container).map_err(serde::de::Error::custom)
 }
 
 impl Serialize for ProjectConfig {
@@ -205,10 +201,7 @@ impl Serialize for ProjectConfig {
         map.serialize_entry("telemetry", &self.telemetry)?;
         map.serialize_entry(
             "cache_dir",
-            &self
-                .cache_location
-                .get_relative_location()
-                .unwrap_or(self.cache_location.to_string()),
+            &self.cache_location.to_string_lossy().to_string(),
         )?;
         if self.requirements.is_some() {
             map.serialize_entry("requirements", &self.requirements)?;
@@ -226,19 +219,17 @@ pub struct RequirementConfig {
 
 impl ProjectManifest {
     pub async fn from_file_accessor(
-        location: &FileLocation,
+        location: &Path,
         allow_remote_data_fetching: bool,
         file_accessor: &dyn FileAccessor,
     ) -> Result<ProjectManifest, String> {
-        let content = file_accessor.read_file(location.to_string()).await?;
+        let content = file_accessor
+            .read_file(location.to_string_lossy().to_string())
+            .await?;
 
-        let project_manifest_file: ProjectManifestFile = match toml::from_slice(content.as_bytes())
-        {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(format!("Clarinet.toml file malformatted {e:?}"));
-            }
-        };
+        let project_manifest_file: ProjectManifestFile = toml::from_slice(content.as_bytes())
+            .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
+
         ProjectManifest::from_project_manifest_file(
             project_manifest_file,
             location,
@@ -247,17 +238,13 @@ impl ProjectManifest {
     }
 
     pub fn from_location(
-        location: &FileLocation,
+        location: &Path,
         allow_remote_data_fetching: bool,
     ) -> Result<ProjectManifest, String> {
-        let project_manifest_file_content = location.read_content()?;
+        let project_manifest_file_content = paths::read_content(location)?;
         let project_manifest_file: ProjectManifestFile =
-            match toml::from_slice(&project_manifest_file_content[..]) {
-                Ok(s) => s,
-                Err(e) => {
-                    return Err(format!("Clarinet.toml file malformatted {e:?}"));
-                }
-            };
+            toml::from_slice(&project_manifest_file_content[..])
+                .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
 
         ProjectManifest::from_project_manifest_file(
             project_manifest_file,
@@ -273,9 +260,9 @@ impl ProjectManifest {
         deployer: ContractDeployer,
         epoch: Option<&str>,
         clarity_version: Option<&str>,
-        project_root_location: &FileLocation,
+        project_root_location: &Path,
         config_contracts: &mut BTreeMap<String, ClarityContract>,
-        contracts_settings: &mut HashMap<FileLocation, ClarityContractMetadata>,
+        contracts_settings: &mut HashMap<PathBuf, ClarityContractMetadata>,
     ) -> Result<(), String> {
         let code_source = match PathBuf::from_str(contract_path) {
             Ok(path) => ClarityCodeSource::ContractOnDisk(path),
@@ -293,11 +280,11 @@ impl ProjectManifest {
                 code_source,
                 clarity_version: parsed_clarity_version,
                 epoch: epoch.clone(),
+                is_requirement: false,
             },
         );
 
-        let mut contract_location = project_root_location.clone();
-        contract_location.append_path(contract_path)?;
+        let contract_location = project_root_location.join(contract_path);
         contracts_settings.insert(
             contract_location,
             ClarityContractMetadata {
@@ -313,13 +300,16 @@ impl ProjectManifest {
 
     pub fn from_project_manifest_file(
         project_manifest_file: ProjectManifestFile,
-        manifest_location: &FileLocation,
+        manifest_location: &Path,
         allow_remote_data_fetching: bool,
     ) -> Result<ProjectManifest, String> {
         let mut repl_settings = if let Some(repl_settings) = project_manifest_file.repl {
             repl::Settings::from(repl_settings)
         } else {
-            repl::Settings::default()
+            repl::Settings {
+                analysis: clarity_repl::analysis::Settings::with_default_lints(),
+                ..Default::default()
+            }
         };
 
         // when performing static analysis, we never want to enable remote data fetching
@@ -329,20 +319,17 @@ impl ProjectManifest {
 
         // Check for deprecated settings
         if let Some(passes) = project_manifest_file.project.analysis {
-            repl_settings.analysis.set_passes(passes);
+            repl_settings.analysis.enable_passes(&passes);
         }
 
         let project_name = project_manifest_file.project.name;
-        let project_root_location = manifest_location.get_parent_location()?;
-        let cache_location = match project_manifest_file.project.cache_dir {
-            Some(ref path) => FileLocation::try_parse(path, Some(&project_root_location))
-                .ok_or_else(|| format!("unable to parse path {path}"))?,
-            None => {
-                let mut cache_location = project_root_location.clone();
-                cache_location.append_path(".cache")?;
-                cache_location
-            }
-        };
+        let root_path = manifest_location
+            .parent()
+            .ok_or_else(|| "unable to get parent of manifest location".to_string())?;
+
+        let cache_dir = project_manifest_file.project.cache_dir;
+        let cache_location = paths::try_parse_path(&cache_dir, Some(root_path))
+            .ok_or_else(|| format!("unable to parse path {cache_dir}"))?;
 
         let mut override_boot_contracts_source = BTreeMap::new();
         if let Some(overrides) = project_manifest_file.project.override_boot_contracts_source {
@@ -386,7 +373,8 @@ impl ProjectManifest {
             project,
             contracts: BTreeMap::new(),
             repl_settings,
-            location: manifest_location.clone(),
+            root_dir: root_path.to_path_buf(),
+            location: manifest_location.to_path_buf(),
             contracts_settings: HashMap::new(),
         };
         let mut config_contracts = BTreeMap::new();
@@ -445,7 +433,7 @@ impl ProjectManifest {
                         deployer,
                         parsed_epoch.as_deref(),
                         parsed_clarity_version.as_deref(),
-                        &project_root_location,
+                        root_path,
                         &mut config_contracts,
                         &mut contracts_settings,
                     )?;
@@ -477,23 +465,9 @@ fn get_epoch_and_clarity_version(
         // Which can differ from `StacksEpochId::latest()` if it hasn't been activated yet
         Some("latest") => clarity_repl::repl::Epoch::Latest,
         Some(epoch) => {
-            let stacks_epoch = match epoch {
-                "2" | "2.0" => StacksEpochId::Epoch20,
-                "2.05" => StacksEpochId::Epoch2_05,
-                "2.1" => StacksEpochId::Epoch21,
-                "2.2" => StacksEpochId::Epoch22,
-                "2.3" => StacksEpochId::Epoch23,
-                "2.4" => StacksEpochId::Epoch24,
-                "2.5" => StacksEpochId::Epoch25,
-                "3" | "3.0" => StacksEpochId::Epoch30,
-                "3.1" => StacksEpochId::Epoch31,
-                "3.2" => StacksEpochId::Epoch32,
-                "3.3" => StacksEpochId::Epoch33,
-                _ => return Err(
-                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 3.0, 3.1, 3.2, 3.3 latest)"
-                        .into(),
-                ),
-            };
+            let stacks_epoch = clarity_repl::repl::epoch_from_str(epoch).ok_or(
+                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2, 3.3, 3.4, latest)",
+                )?;
             clarity_repl::repl::Epoch::Specific(stacks_epoch)
         }
     };
@@ -530,7 +504,7 @@ mod tests {
             enabled = true
         };
         let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
-        let location = FileLocation::from_path("/tmp/clarinet.toml".into());
+        let location = PathBuf::from("/tmp/clarinet.toml");
 
         let manifest =
             ProjectManifest::from_project_manifest_file(manifest_file, &location, true).unwrap();
@@ -633,7 +607,7 @@ mod tests {
         };
 
         let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
-        let location = FileLocation::from_path("/tmp/clarinet.toml".into());
+        let location = PathBuf::from("/tmp/clarinet.toml");
         let manifest =
             ProjectManifest::from_project_manifest_file(manifest_file, &location, true).unwrap();
         let contract = manifest.contracts.get("test-contract").unwrap();
@@ -654,7 +628,7 @@ mod tests {
             "costs" = "./custom-boot-contracts/costs.clar"
         };
         let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
-        let location = FileLocation::from_path("/tmp/clarinet.toml".into());
+        let location = PathBuf::from("/tmp/clarinet.toml");
 
         let manifest =
             ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
@@ -682,7 +656,7 @@ mod tests {
             "costs" = "./custom-boot-contracts/costs.clar"
         };
         let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
-        let location = FileLocation::from_path("/tmp/clarinet.toml".into());
+        let location = PathBuf::from("/tmp/clarinet.toml");
 
         let manifest =
             ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
@@ -714,7 +688,7 @@ mod tests {
             "pox-x" = "./custom-boot-contracts/pox-x.clar"
         };
         let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
-        let location = FileLocation::from_path("/tmp/clarinet.toml".into());
+        let location = PathBuf::from("/tmp/clarinet.toml");
 
         let manifest =
             ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();

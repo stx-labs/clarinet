@@ -2,7 +2,7 @@ use clarity::types::chainstate::{
     BlockHeaderHash, BurnchainHeaderHash, ConsensusHash, SortitionId, StacksBlockId, VRFSeed,
 };
 use clarity::types::StacksEpochId;
-use clarity::vm::errors::InterpreterResult;
+use clarity::vm::errors::VmExecutionError;
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::de::{DeserializeOwned, Error as SerdeError};
 use serde::{Deserialize, Deserializer};
@@ -22,7 +22,7 @@ pub const MAINNET_25_START_HEIGHT: u32 = 147_290;
 pub const MAINNET_30_START_HEIGHT: u32 = 171_833;
 pub const MAINNET_31_START_HEIGHT: u32 = 340_555;
 pub const MAINNET_32_START_HEIGHT: u32 = 2_401_415;
-pub const MAINNET_33_START_HEIGHT: u32 = u32::MAX;
+pub const MAINNET_33_START_HEIGHT: u32 = 4_717_214;
 
 // the current primary testnet starts directly in epoch 2.5 (pox-4 deployment)
 pub const TESTNET_20_START_HEIGHT: u32 = 1;
@@ -35,7 +35,7 @@ pub const TESTNET_25_START_HEIGHT: u32 = 1;
 pub const TESTNET_30_START_HEIGHT: u32 = 320;
 pub const TESTNET_31_START_HEIGHT: u32 = 814;
 pub const TESTNET_32_START_HEIGHT: u32 = 3_140_887;
-pub const TESTNET_33_START_HEIGHT: u32 = u32::MAX;
+pub const TESTNET_33_START_HEIGHT: u32 = 3_640_102;
 
 pub fn epoch_for_height(is_mainnet: bool, height: u32) -> StacksEpochId {
     if is_mainnet {
@@ -230,7 +230,7 @@ impl HttpClient {
         self.get::<Block>(url).unwrap()
     }
 
-    pub fn fetch_clarity_data(&self, path: &str) -> InterpreterResult<Option<String>> {
+    pub fn fetch_clarity_data(&self, path: &str) -> Result<Option<String>, VmExecutionError> {
         match self.get::<ClarityDataResponse>(path) {
             Ok(data) => Ok(Some(data.data.trim_start_matches("0x").to_string())),
             Err(_) => Ok(None),
@@ -249,16 +249,16 @@ impl HttpClient {
 }
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use super::*;
 
     #[test]
     fn test_http_client_fetch_info() {
         let mut server = mockito::Server::new();
-        let _ = server
-            .mock("GET", "/v2/info")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{
+        #[rustfmt::skip]
+        let body = indoc!(r#"
+            {
                 "peer_version": 402653196,
                 "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
                 "burn_block_height": 882262,
@@ -277,7 +277,13 @@ mod tests {
                 "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
                 "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
                 "stackerdbs": []
-            }"#)
+            }
+        "#);
+        let _ = server
+            .mock("GET", "/v2/info")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body)
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));
@@ -290,25 +296,27 @@ mod tests {
     fn test_http_client_fetch_sortition() {
         let mut server = mockito::Server::new();
 
+        #[rustfmt::skip]
+        let body = indoc!(r#"
+            [{
+                "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
+                "burn_block_height": 882262,
+                "burn_header_timestamp": 1738666756,
+                "sortition_id": "0x6e79b604db6d97b9289f04f446e78ec871a6b16972b02674bc3ea2bdec200fb9",
+                "parent_sortition_id": "0x8b2dedebf5b8c72c1e8ede00abd1f417d755ac7f513dbf3c3d007494404115d3",
+                "consensus_hash": "0x0ce291b675bb0148b435a884e250aafc3fd6bc86",
+                "was_sortition": true,
+                "miner_pk_hash160": "0x37e79a837b4071a1fc6c1b49208e7d2141a25905",
+                "stacks_parent_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
+                "last_sortition_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
+                "committed_block_hash": "0xbf7e26ee22b18461dfed70cc114372a0f8a61249de2f20b120e6fe63da5a45e4"
+            }]
+        "#);
         let _ = server
             .mock("GET", "/v3/sortitions/burn_height/882262")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"[{
-                    "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
-                    "burn_block_height": 882262,
-                    "burn_header_timestamp": 1738666756,
-                    "sortition_id": "0x6e79b604db6d97b9289f04f446e78ec871a6b16972b02674bc3ea2bdec200fb9",
-                    "parent_sortition_id": "0x8b2dedebf5b8c72c1e8ede00abd1f417d755ac7f513dbf3c3d007494404115d3",
-                    "consensus_hash": "0x0ce291b675bb0148b435a884e250aafc3fd6bc86",
-                    "was_sortition": true,
-                    "miner_pk_hash160": "0x37e79a837b4071a1fc6c1b49208e7d2141a25905",
-                    "stacks_parent_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
-                    "last_sortition_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
-                    "committed_block_hash": "0xbf7e26ee22b18461dfed70cc114372a0f8a61249de2f20b120e6fe63da5a45e4"
-                }]"#,
-            )
+            .with_body(body)
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));
@@ -338,34 +346,36 @@ mod tests {
     #[test]
     fn test_http_client_fetch_block() {
         let mut server = mockito::Server::new();
+        #[rustfmt::skip]
+        let body = indoc!(r#"
+            {
+                "canonical": true,
+                "height": 556946,
+                "hash": "0x70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
+                "block_time": 1738667305,
+                "block_time_iso": "2025-02-04T11:08:25.000Z",
+                "tenure_height": 184037,
+                "index_block_hash": "0xa246be7256de49aa6923074a53507a839b2ba356f8809f8e7448c87b5c1891e9",
+                "parent_block_hash": "0x06dd38d5315c133b08cefdedb5c51f2e91fd8a0474e07b3d1a740c19bc21842e",
+                "parent_index_block_hash": "0x1d39f5eb45aa0e78cc256ea6ed180dcb9e8c87bea11ecf8102ef9bced5f3f73b",
+                "burn_block_time": 1738666756,
+                "burn_block_time_iso": "2025-02-04T10:59:16.000Z",
+                "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
+                "burn_block_height": 882262,
+                "miner_txid": "0x2ca4c7f6d36f32f3c2f1c5ebae3816690a9ba2258c38ef6a4494d315873a0448",
+                "tx_count": 1,
+                "execution_cost_read_count": 0,
+                "execution_cost_read_length": 0,
+                "execution_cost_runtime": 0,
+                "execution_cost_write_count": 0,
+                "execution_cost_write_length": 0
+            }
+        "#);
         let _ = server
             .mock("GET", "/extended/v2/blocks/556946")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"{
-                    "canonical": true,
-                    "height": 556946,
-                    "hash": "0x70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
-                    "block_time": 1738667305,
-                    "block_time_iso": "2025-02-04T11:08:25.000Z",
-                    "tenure_height": 184037,
-                    "index_block_hash": "0xa246be7256de49aa6923074a53507a839b2ba356f8809f8e7448c87b5c1891e9",
-                    "parent_block_hash": "0x06dd38d5315c133b08cefdedb5c51f2e91fd8a0474e07b3d1a740c19bc21842e",
-                    "parent_index_block_hash": "0x1d39f5eb45aa0e78cc256ea6ed180dcb9e8c87bea11ecf8102ef9bced5f3f73b",
-                    "burn_block_time": 1738666756,
-                    "burn_block_time_iso": "2025-02-04T10:59:16.000Z",
-                    "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
-                    "burn_block_height": 882262,
-                    "miner_txid": "0x2ca4c7f6d36f32f3c2f1c5ebae3816690a9ba2258c38ef6a4494d315873a0448",
-                    "tx_count": 1,
-                    "execution_cost_read_count": 0,
-                    "execution_cost_read_length": 0,
-                    "execution_cost_runtime": 0,
-                    "execution_cost_write_count": 0,
-                    "execution_cost_write_length": 0
-                }"#,
-            )
+            .with_body(body)
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));
@@ -434,11 +444,9 @@ mod tests {
             .create();
 
         // The third call returns a 200
-        let _ = server
-            .mock("GET", "/v2/info")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{
+        #[rustfmt::skip]
+        let body = indoc!(r#"
+            {
                 "peer_version": 402653196,
                 "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
                 "burn_block_height": 882262,
@@ -457,7 +465,13 @@ mod tests {
                 "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
                 "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
                 "stackerdbs": []
-            }"#)
+            }
+        "#);
+        let _ = server
+            .mock("GET", "/v2/info")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body)
             .create();
 
         let client = HttpClient::new(ApiUrl(server.url()));

@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::prelude::*;
 use std::io::{self};
+use std::path::{Path, PathBuf};
 use std::{env, process};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Generator, Shell};
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, get_initial_transactions_trackers, update_deployment_costs,
@@ -18,35 +20,56 @@ use clarinet_deployments::{
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::{
-    get_manifest_location, FileLocation, NetworkManifest, ProjectManifest, ProjectManifestFile,
-    RequirementConfig, StacksNetwork,
+    get_manifest_location, paths, NetworkManifest, ProjectManifest, RequirementConfig,
+    StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
+use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
 use clarity_repl::clarity::vm::costs::LimitedCostTracker;
+use clarity_repl::clarity::vm::diagnostic::Diagnostic;
 use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::ClarityVersion;
+use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
-use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_EPOCH};
+use clarity_repl::repl::{
+    clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
+};
+use clarity_repl::utils::CHECK_ENVIRONMENTS;
 use clarity_repl::{analysis, repl};
+use serde::Serialize;
 use stacks_network::{self, DevnetOrchestrator};
-use toml;
+use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
 use crate::deployments::types::DeploymentSynthesis;
-use crate::deployments::{
-    self, check_deployments, generate_default_deployment, get_absolute_deployment_path,
-    write_deployment,
-};
+use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
 use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
 use crate::lsp::run_lsp;
+
+#[derive(Clone, PartialEq, Debug, clap::ValueEnum)]
+enum OutputFormat {
+    /// Human-readable output (default)
+    Standard,
+    /// Minimal JSON output
+    Json,
+    /// Formatted, human-readable JSON output
+    JsonPretty,
+}
+
+#[derive(Serialize)]
+struct JsonCheckOutput {
+    success: bool,
+    diagnostics: HashMap<String, Vec<Diagnostic>>,
+    environment: String,
+}
+
 /// Clarinet is a command line tool for Clarity smart contract development.
 #[derive(Parser, PartialEq, Clone, Debug)]
 #[clap(version = env!("CARGO_PKG_VERSION"), name = "clarinet", bin_name = "clarinet")]
@@ -76,10 +99,10 @@ enum Command {
     /// Load contracts in a REPL for an interactive session
     #[clap(name = "console", aliases = &["poke"], bin_name = "console")]
     Console(Console),
-    /// Check contracts syntax
+    /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
-    /// Start a local Devnet network for interacting with your contracts from your browser
+    /// Start a local Devnet network (deprecated, use 'clarinet devnet start')
     #[clap(name = "integrate", bin_name = "integrate")]
     Integrate(DevnetStart),
     /// Subcommands for Devnet usage
@@ -98,11 +121,13 @@ enum Command {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Formatter {
+    /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
     /// If specified, format only this file
     #[clap(long = "file", short = 'f')]
     pub file: Option<String>,
+    /// Maximum line length
     #[clap(long = "max-line-length", short = 'l')]
     pub max_line_length: Option<usize>,
     #[clap(long = "indent", short = 'i', conflicts_with = "use_tabs")]
@@ -126,33 +151,41 @@ struct Formatter {
 }
 
 impl Formatter {
-    fn get_input_sources(&self) -> Vec<FormatterInputSource> {
+    fn get_input_sources(&self, manifest: &ProjectManifest) -> Vec<FormatterInputSource> {
         if self.stdin {
             vec![FormatterInputSource::Stdin]
         } else if let Some(file) = &self.file {
-            vec![FormatterInputSource::File(file.clone())]
+            let epoch = manifest
+                .contracts
+                .values()
+                .find(|c| from_code_source(c.code_source.clone()) == *file)
+                .map(|c| c.epoch.resolve());
+            vec![FormatterInputSource::File(file.clone(), epoch)]
         } else {
-            // look for files at the default code path (./contracts/) if
-            // cmd.manifest_path is not specified OR if cmd.file is not specified
-            let manifest = load_manifest_or_exit(self.manifest_path.clone(), true);
-            let contracts = manifest.contracts.values().cloned();
-            contracts
-                .map(|c| from_code_source(c.code_source))
-                .map(FormatterInputSource::File)
+            manifest
+                .contracts
+                .values()
+                .cloned()
+                .map(|c| {
+                    FormatterInputSource::File(
+                        from_code_source(c.code_source),
+                        Some(c.epoch.resolve()),
+                    )
+                })
                 .collect()
         }
     }
 }
 
 enum FormatterInputSource {
-    File(String),
+    File(String, Option<StacksEpochId>),
     Stdin,
 }
 
 impl FormatterInputSource {
     fn get_input(&self) -> String {
         match self {
-            FormatterInputSource::File(path) => {
+            FormatterInputSource::File(path, _) => {
                 fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read file: {e}"))
             }
             FormatterInputSource::Stdin => io::stdin()
@@ -165,7 +198,14 @@ impl FormatterInputSource {
 
     fn file_path(&self) -> Option<&str> {
         match self {
-            FormatterInputSource::File(path) => Some(path),
+            FormatterInputSource::File(path, _) => Some(path),
+            FormatterInputSource::Stdin => None,
+        }
+    }
+
+    fn epoch(&self) -> Option<StacksEpochId> {
+        match self {
+            FormatterInputSource::File(_, epoch) => *epoch,
             FormatterInputSource::Stdin => None,
         }
     }
@@ -198,7 +238,7 @@ enum Contracts {
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
 enum Requirements {
-    /// Interact with contracts published on Mainnet
+    /// Interact with contracts deployed on Mainnet
     #[clap(name = "add", bin_name = "add")]
     AddRequirement(AddRequirement),
 }
@@ -215,6 +255,9 @@ enum Deployments {
     /// Apply deployment
     #[clap(name = "apply", bin_name = "apply")]
     ApplyDeployment(ApplyDeployment),
+    /// Encrypt deployment mnemonic
+    #[clap(name = "encrypt", bin_name = "encrypt")]
+    EncryptDeployment,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -222,6 +265,7 @@ struct DevnetPackage {
     /// Output json file name
     #[clap(long = "name", short = 'n')]
     pub package_file_name: Option<String>,
+    /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
 }
@@ -287,7 +331,7 @@ struct GenerateDeployment {
         conflicts_with = "mainnet"
     )]
     pub devnet: bool,
-    /// Generate a deployment file for devnet, using settings/Testnet.toml
+    /// Generate a deployment file for testnet, using settings/Testnet.toml
     #[clap(
         long = "testnet",
         conflicts_with = "simnet",
@@ -295,7 +339,7 @@ struct GenerateDeployment {
         conflicts_with = "mainnet"
     )]
     pub testnet: bool,
-    /// Generate a deployment file for devnet, using settings/Mainnet.toml
+    /// Generate a deployment file for mainnet, using settings/Mainnet.toml
     #[clap(
         long = "mainnet",
         conflicts_with = "simnet",
@@ -507,11 +551,14 @@ struct Check {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
+    /// Set the output format
+    #[clap(long = "output", default_value = "standard")]
+    pub output_format: OutputFormat,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Completions {
-    /// Specify which shell to generation completions script for
+    /// Specify which shell to generate completions script for
     #[clap(ignore_case = true)]
     pub shell: Shell,
 }
@@ -684,7 +731,7 @@ pub fn main() {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
                 // Ensure that all the deployments can correctly be deserialized.
                 println!("Checking deployments");
-                let res = check_deployments(&manifest);
+                let res = check_deployments(&manifest.root_dir);
                 if let Err(message) = res {
                     eprintln!("{}", format_err!(message));
                     process::exit(1);
@@ -703,16 +750,18 @@ pub fn main() {
                     StacksNetwork::Simnet
                 };
 
-                let default_deployment_path =
-                    get_default_deployment_path(&manifest, &network).unwrap();
-                let (mut deployment, _) =
-                    match generate_default_deployment(&manifest, &network, cmd.no_batch) {
-                        Ok(deployment) => deployment,
-                        Err(message) => {
-                            eprintln!("{}", format_err!(message));
-                            std::process::exit(1);
-                        }
-                    };
+                let (mut deployment, _, _) = match generate_default_deployment(
+                    &manifest,
+                    &network,
+                    cmd.no_batch,
+                    Environment::Simnet,
+                ) {
+                    Ok(result) => result,
+                    Err(message) => {
+                        eprintln!("{}", format_err!(message));
+                        std::process::exit(1);
+                    }
+                };
 
                 if !cmd.manual_cost
                     && matches!(network, StacksNetwork::Testnet | StacksNetwork::Mainnet)
@@ -738,24 +787,40 @@ pub fn main() {
                     };
                 }
 
+                let project_root = &manifest.root_dir;
+                let default_deployment_path =
+                    project_root.join(get_default_deployment_path(&network));
+
                 let write_plan = if default_deployment_path.exists() {
-                    let existing_deployment = load_deployment(&manifest, &default_deployment_path)
-                        .unwrap_or_else(|message| {
-                            eprintln!(
-                                "{}",
-                                format_err!(format!(
-                                    "unable to load {default_deployment_path}\n{message}",
-                                ))
-                            );
-                            process::exit(1);
-                        });
-                    should_existing_plan_be_replaced(&existing_deployment, &deployment)
+                    let existing_deployment =
+                        load_deployment(project_root, &default_deployment_path).unwrap_or_else(
+                            |message| {
+                                eprintln!(
+                                    "{}",
+                                    format_err!(format!(
+                                        "unable to load {}\n{message}",
+                                        default_deployment_path.display(),
+                                    ))
+                                );
+                                process::exit(1);
+                            },
+                        );
+                    should_existing_plan_be_replaced(
+                        &existing_deployment,
+                        &deployment,
+                        project_root,
+                    )
                 } else {
                     true
                 };
 
                 if write_plan {
-                    let res = write_deployment(&deployment, &default_deployment_path, false);
+                    let res = write_deployment(
+                        &deployment,
+                        &default_deployment_path,
+                        project_root,
+                        false,
+                    );
                     if let Err(message) = res {
                         eprintln!("{}", format_err!(message));
                         process::exit(1);
@@ -764,7 +829,7 @@ pub fn main() {
                     println!(
                         "{} {}",
                         green!("Generated file"),
-                        default_deployment_path.get_relative_location().unwrap()
+                        paths::get_relative_path(&default_deployment_path, project_root).unwrap()
                     );
                 }
             }
@@ -781,14 +846,15 @@ pub fn main() {
                     None
                 };
 
+                let project_root = &manifest.root_dir;
+
                 let result = match (&network, cmd.deployment_plan_path) {
                     (None, None) => {
                         Err(format!("{}: a flag `--devnet`, `--testnet`, `--mainnet` or `--deployment-plan-path=path/to/yaml` should be provided.", yellow!("Command usage")))
                     }
                     (Some(network), None) => {
-                        let res = load_deployment_if_exists(&manifest, network, cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan);
-                        match res {
-                            Some(Ok(deployment)) => {
+                        load_deployment_if_exists(&manifest, network, cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan).and_then(|opt| match opt {
+                            Some(deployment) => {
                                 println!(
                                     "{} using existing deployments/default.{}-plan.yaml",
                                     yellow!("note:"),
@@ -796,29 +862,23 @@ pub fn main() {
                                 );
                                 Ok(deployment)
                             }
-                            Some(Err(e)) => Err(e),
                             None => {
-                                let default_deployment_path = get_default_deployment_path(&manifest, network).unwrap();
-                                let (deployment, _) = match generate_default_deployment(&manifest, network, false) {
-                                    Ok(deployment) => deployment,
-                                    Err(message) => {
-                                        eprintln!("{}", red!(message));
-                                        std::process::exit(1);
-                                    }
-                                };
-                                let res = write_deployment(&deployment, &default_deployment_path, true);
-                                if let Err(message) = res {
-                                    Err(message)
-                                } else {
-                                    println!("{} {}", green!("Generated file"), default_deployment_path.get_relative_location().unwrap());
-                                    Ok(deployment)
-                                }
+                                let default_deployment_path = project_root.join(get_default_deployment_path(network));
+                                let (deployment, _, _) =
+                                    generate_default_deployment(&manifest, network, false, Environment::Simnet)
+                                        .unwrap_or_else(|message| {
+                                            eprintln!("{}", red!(message));
+                                            std::process::exit(1);
+                                        });
+                                write_deployment(&deployment, &default_deployment_path, project_root, true)?;
+                                println!("{} {}", green!("Generated file"), paths::get_relative_path(&default_deployment_path, project_root).unwrap());
+                                Ok(deployment)
                             }
-                        }
+                        })
                     }
                     (None, Some(deployment_plan_path)) => {
-                        let deployment_path = get_absolute_deployment_path(&manifest, &deployment_plan_path).expect("unable to retrieve deployment");
-                        load_deployment(&manifest, &deployment_path)
+                        let deployment_path = project_root.join(&deployment_plan_path);
+                        load_deployment(project_root, &deployment_path)
                     }
                     (_, _) => unreachable!()
                 };
@@ -836,7 +896,7 @@ pub fn main() {
 
                 println!(
                     "The following deployment plan will be applied:\n{}\n\n",
-                    DeploymentSynthesis::from_deployment(&deployment)
+                    DeploymentSynthesis::from_deployment(&deployment, project_root)
                 );
 
                 if !cmd.use_on_disk_deployment_plan {
@@ -873,22 +933,23 @@ pub fn main() {
                     get_initial_transactions_trackers(&deployment)
                 };
                 let network_moved = network.clone();
+                let manifest = manifest_moved;
+                let res = NetworkManifest::from_project_root(
+                    &manifest.root_dir,
+                    &network_moved.get_networks(),
+                    manifest.use_mainnet_wallets(),
+                    Some(&manifest.project.cache_location),
+                    None,
+                );
+                let network_manifest = match res {
+                    Ok(network_manifest) => network_manifest,
+                    Err(e) => {
+                        let _ = event_tx.send(DeploymentEvent::Interrupted(e));
+                        return;
+                    }
+                };
+
                 std::thread::spawn(move || {
-                    let manifest = manifest_moved;
-                    let res = NetworkManifest::from_project_manifest_location(
-                        &manifest.location,
-                        &network_moved.get_networks(),
-                        manifest.use_mainnet_wallets(),
-                        Some(&manifest.project.cache_location),
-                        None,
-                    );
-                    let network_manifest = match res {
-                        Ok(network_manifest) => network_manifest,
-                        Err(e) => {
-                            let _ = event_tx.send(DeploymentEvent::Interrupted(e));
-                            return;
-                        }
-                    };
                     apply_on_chain_deployment(
                         network_manifest,
                         deployment,
@@ -903,11 +964,7 @@ pub fn main() {
                 let _ = command_tx.send(DeploymentCommand::Start);
 
                 if cmd.no_dashboard {
-                    loop {
-                        let cmd = match event_rx.recv() {
-                            Ok(cmd) => cmd,
-                            Err(_e) => break,
-                        };
+                    while let Ok(cmd) = event_rx.recv() {
                         match cmd {
                             DeploymentEvent::Interrupted(message) => {
                                 eprintln!(
@@ -944,23 +1001,28 @@ pub fn main() {
                     }
                 }
             }
+            Deployments::EncryptDeployment => {
+                println!("{}", yellow!("Enter mnemonic to encrypt:"));
+                let mut buffer = String::new();
+                std::io::stdin().read_line(&mut buffer).unwrap();
+                let phrase = buffer.trim();
+                let password = rpassword::prompt_password("Enter password: ").unwrap();
+                let encrypted_mnemonic =
+                    clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
+                println!("encrypted_mnemonic = \"{encrypted_mnemonic}\"");
+                std::process::exit(0);
+            }
         },
         Command::Contracts(subcommand) => match subcommand {
             Contracts::NewContract(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
 
-                let changes = match generate::get_changes_for_new_contract(
-                    &manifest.location,
-                    cmd.name,
-                    None,
-                    true,
-                ) {
-                    Ok(changes) => changes,
-                    Err(message) => {
-                        eprintln!("{}", format_err!(message));
-                        std::process::exit(1);
-                    }
-                };
+                let changes =
+                    generate::get_changes_for_new_contract(manifest.location, cmd.name, true)
+                        .unwrap_or_else(|message| {
+                            eprintln!("{}", format_err!(message));
+                            std::process::exit(1);
+                        });
 
                 if !execute_changes(changes) {
                     std::process::exit(1);
@@ -972,14 +1034,11 @@ pub fn main() {
             Contracts::RemoveContract(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
                 let contract_name = cmd.name.clone();
-                let changes =
-                    match generate::get_changes_for_rm_contract(&manifest.location, cmd.name) {
-                        Ok(changes) => changes,
-                        Err(message) => {
-                            eprintln!("{}", format_err!(message));
-                            std::process::exit(1);
-                        }
-                    };
+                let changes = generate::get_changes_for_rm_contract(manifest.location, cmd.name)
+                    .unwrap_or_else(|message| {
+                        eprintln!("{}", format_err!(message));
+                        std::process::exit(1);
+                    });
 
                 let mut answer = String::new();
                 println!(
@@ -1033,11 +1092,12 @@ pub fn main() {
 
                 let mut terminal = match manifest {
                     Some(ref manifest) => {
-                        let (deployment, _, artifacts) = load_deployment_and_artifacts_or_exit(
+                        let ((deployment, _, artifacts), _) = load_deployment_and_artifacts_or_exit(
                             manifest,
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
                             cmd.use_computed_deployment_plan,
+                            Environment::Simnet,
                         );
 
                         if !artifacts.success {
@@ -1113,7 +1173,13 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
-            let mut settings = repl::SessionSettings::default();
+            let mut settings = repl::SessionSettings {
+                repl_settings: repl::Settings {
+                    analysis: analysis::Settings::with_default_lints(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
             settings.repl_settings.analysis.enable_all_passes();
 
             let mut session = repl::Session::new(settings.clone());
@@ -1129,6 +1195,7 @@ pub fn main() {
                 name: "transient".to_string(),
                 clarity_version: ClarityVersion::default_for_epoch(epoch),
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             };
             let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
             let (annotations, mut annotation_diagnostics) = session
@@ -1158,68 +1225,137 @@ pub fn main() {
             };
             diagnostics.append(&mut analysis_diagnostics);
 
-            let lines = contract.expect_in_memory_code_source().lines();
-            let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-            for d in diagnostics {
-                for line in output_diagnostic(&d, &file, &formatted_lines) {
-                    println!("{line}");
+            match cmd.output_format {
+                OutputFormat::Json | OutputFormat::JsonPretty => {
+                    let output = JsonCheckOutput {
+                        success,
+                        diagnostics: HashMap::from([(file, diagnostics)]),
+                        environment: Environment::Simnet.to_string(),
+                    };
+                    let json = if cmd.output_format == OutputFormat::JsonPretty {
+                        serde_json::to_string_pretty(&output).unwrap()
+                    } else {
+                        serde_json::to_string(&output).unwrap()
+                    };
+                    println!("{json}");
+                    if !success {
+                        std::process::exit(1);
+                    }
                 }
-            }
+                OutputFormat::Standard => {
+                    let lines = contract.expect_in_memory_code_source().lines();
+                    let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
+                    for d in diagnostics {
+                        for line in output_diagnostic(&d, &file, &formatted_lines) {
+                            println!("{line}");
+                        }
+                    }
 
-            if success {
-                println!("{} Syntax of contract successfully checked", green!("✔"))
-            } else {
-                std::process::exit(1);
+                    if success {
+                        println!("{} Contract successfully checked", green!("✔"))
+                    } else {
+                        std::process::exit(1);
+                    }
+                }
             }
         }
         Command::Check(cmd) => {
             let manifest = load_manifest_or_exit(cmd.manifest_path, false);
-            let (deployment, _, artifacts) = load_deployment_and_artifacts_or_exit(
-                &manifest,
-                &cmd.deployment_plan_path,
-                cmd.use_on_disk_deployment_plan,
-                cmd.use_computed_deployment_plan,
-            );
+            let mut exit_codes = Vec::new();
+            let mut global_found_env_simnet = false;
+            for environment in CHECK_ENVIRONMENTS {
+                let ((deployment, _, artifacts), found_env_simnet) =
+                    load_deployment_and_artifacts_or_exit(
+                        &manifest,
+                        &cmd.deployment_plan_path,
+                        cmd.use_on_disk_deployment_plan,
+                        cmd.use_computed_deployment_plan,
+                        environment,
+                    );
+                global_found_env_simnet |= found_env_simnet;
 
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-            if diags_digest.has_feedbacks() {
-                println!("{}", diags_digest.message);
+                let exit_code = i32::from(!artifacts.success);
+                exit_codes.push(exit_code);
+
+                match cmd.output_format {
+                    OutputFormat::Json | OutputFormat::JsonPretty => {
+                        let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
+                            .diags
+                            .into_iter()
+                            .filter(|(_, diags)| !diags.is_empty())
+                            .filter_map(|(contract_id, diags)| {
+                                let (_, path) = deployment.contracts.get(&contract_id)?;
+                                Some((path.to_string_lossy().to_string(), diags))
+                            })
+                            .collect();
+                        let environment = environment.to_string();
+                        let output = JsonCheckOutput {
+                            success: artifacts.success,
+                            diagnostics,
+                            environment,
+                        };
+                        let json = if cmd.output_format == OutputFormat::JsonPretty {
+                            serde_json::to_string_pretty(&output).unwrap()
+                        } else {
+                            serde_json::to_string(&output).unwrap()
+                        };
+                        println!("{json}");
+                    }
+                    OutputFormat::Standard => {
+                        if global_found_env_simnet {
+                            match environment {
+                                Environment::Simnet => {
+                                    println!("Checking contracts with #[env(simnet)] code");
+                                }
+                                Environment::OnChain => {
+                                    println!("Checking contracts without #[env(simnet)] code");
+                                }
+                            }
+                        }
+                        let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                        if diags_digest.has_feedbacks() {
+                            println!("{}", diags_digest.message);
+                        }
+
+                        if diags_digest.warnings > 0 {
+                            println!(
+                                "{} {} detected",
+                                yellow!("!"),
+                                pluralize!(diags_digest.warnings, "warning")
+                            );
+                        }
+                        if diags_digest.errors > 0 {
+                            println!(
+                                "{} {} detected",
+                                red!("x"),
+                                pluralize!(diags_digest.errors, "error")
+                            );
+                        } else {
+                            println!(
+                                "{} {} checked",
+                                green!("✔"),
+                                pluralize!(diags_digest.contracts_checked, "contract"),
+                            );
+                        }
+
+                        if clarinetrc.enable_hints.unwrap_or(true) {
+                            display_post_check_hint();
+                        }
+                    }
+                }
+                if !global_found_env_simnet {
+                    break;
+                }
             }
 
-            if diags_digest.warnings > 0 {
-                println!(
-                    "{} {} detected",
-                    yellow!("!"),
-                    pluralize!(diags_digest.warnings, "warning")
-                );
-            }
-            if diags_digest.errors > 0 {
-                println!(
-                    "{} {} detected",
-                    red!("x"),
-                    pluralize!(diags_digest.errors, "error")
-                );
-            } else {
-                println!(
-                    "{} {} checked",
-                    green!("✔"),
-                    pluralize!(diags_digest.contracts_checked, "contract"),
-                );
-            }
-            let exit_code = match artifacts.success {
-                true => 0,
-                false => 1,
-            };
-
-            if clarinetrc.enable_hints.unwrap_or(true) {
-                display_post_check_hint();
-            }
             if manifest.project.telemetry {
                 #[cfg(feature = "telemetry")]
                 telemetry_report_event(DeveloperUsageEvent::CheckExecuted(
                     DeveloperUsageDigest::new(&manifest.project.name, &manifest.project.authors),
                 ));
             }
+            // Returns first non-zero exit code, if any
+            let exit_code = exit_codes.iter().cloned().find(|c| *c != 0).unwrap_or(0);
             std::process::exit(exit_code);
         }
         Command::Integrate(cmd) => {
@@ -1242,7 +1378,8 @@ pub fn main() {
                 "{}",
                 format_warn!("This command is in beta. Feedback is welcome!"),
             );
-            let sources = cmd.get_input_sources();
+            let manifest = load_manifest_or_exit(cmd.manifest_path.clone(), false);
+            let sources = cmd.get_input_sources(&manifest);
             let mut settings = formatter::Settings::default();
 
             if let Some(max_line_length) = cmd.max_line_length {
@@ -1262,7 +1399,7 @@ pub fn main() {
 
             for source in sources {
                 let input = source.get_input();
-                let output = formatter.format(&input);
+                let output = formatter.format(&input, source.epoch());
 
                 if cmd.check {
                     if let Some(file_path) = source.file_path() {
@@ -1335,14 +1472,14 @@ fn from_code_source(src: ClarityCodeSource) -> String {
     }
 }
 
-fn get_manifest_location_or_exit(path: Option<String>) -> FileLocation {
+fn get_manifest_location_or_exit(path: Option<String>) -> PathBuf {
     get_manifest_location(path).unwrap_or_else(|| {
         eprintln!("Could not find Clarinet.toml");
         process::exit(1);
     })
 }
 
-fn get_manifest_location_or_warn(path: Option<String>) -> Option<FileLocation> {
+fn get_manifest_location_or_warn(path: Option<String>) -> Option<PathBuf> {
     match get_manifest_location(path) {
         Some(manifest_location) => Some(manifest_location),
         None => {
@@ -1386,87 +1523,104 @@ pub fn load_deployment_and_artifacts_or_exit(
     deployment_plan_path: &Option<String>,
     force_on_disk: bool,
     force_computed: bool,
+    environment: Environment,
 ) -> (
-    DeploymentSpecification,
-    Option<String>,
-    DeploymentGenerationArtifacts,
+    (
+        DeploymentSpecification,
+        Option<String>,
+        DeploymentGenerationArtifacts,
+    ),
+    bool,
 ) {
+    let default_deployment_file = get_default_deployment_path(&StacksNetwork::Simnet);
+    let mut found_env_simnet = false;
     let result = match deployment_plan_path {
         None => {
-            let res = load_deployment_if_exists(
+            load_deployment_if_exists(
                 manifest,
                 &StacksNetwork::Simnet,
                 force_on_disk,
                 force_computed,
-            );
-            match res {
-                Some(Ok(deployment)) => {
-                    println!(
-                        "{} using deployments/default.simnet-plan.yaml",
-                        yellow!("note:")
-                    );
-                    let artifacts = setup_session_with_deployment(manifest, &deployment, None);
+            )
+            .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
+            .and_then(|opt| match opt {
+                Some(mut deployment) => {
+                    eprintln!("{} using {default_deployment_file}", yellow!("note:"));
+                    if environment == Environment::OnChain {
+                        found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
+                    }
+                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
                     Ok((deployment, None, artifacts))
                 }
-                Some(Err(e)) => Err(format!(
-                    "loading deployments/default.simnet-plan.yaml failed with error: {e}"
-                )),
                 None => {
-                    match generate_default_deployment(manifest, &StacksNetwork::Simnet, false) {
-                        Ok((deployment, ast_artifacts)) if ast_artifacts.success => {
-                            let mut artifacts = setup_session_with_deployment(
-                                manifest,
-                                &deployment,
-                                Some(&ast_artifacts.asts),
-                            );
-                            for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
-                                // Merge parser's diags with analysis' diags.
-                                if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
-                                    parser_diags.append(diags);
-                                }
-                                artifacts.diags.insert(contract_id, parser_diags);
+                    let (mut deployment, ast_artifacts, gen_found_env_simnet) =
+                        generate_default_deployment(
+                            manifest,
+                            &StacksNetwork::Simnet,
+                            false,
+                            environment,
+                        )?;
+                    found_env_simnet |= gen_found_env_simnet;
+                    if ast_artifacts.success {
+                        let mut artifacts = setup_session_with_deployment(
+                            manifest,
+                            &mut deployment,
+                            Some(&ast_artifacts.asts),
+                        );
+                        for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
+                            // Merge parser's diags with analysis' diags.
+                            if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
+                                parser_diags.append(diags);
                             }
-                            Ok((deployment, None, artifacts))
+                            artifacts.diags.insert(contract_id, parser_diags);
                         }
-                        Ok((deployment, ast_artifacts)) => Ok((deployment, None, ast_artifacts)),
-                        Err(e) => Err(e),
+                        Ok((deployment, None, artifacts))
+                    } else {
+                        Ok((deployment, None, ast_artifacts))
                     }
                 }
-            }
+            })
         }
         Some(path) => {
-            let deployment_location = get_absolute_deployment_path(manifest, path)
-                .expect("unable to retrieve deployment");
-            match load_deployment(manifest, &deployment_location) {
-                Ok(deployment) => {
-                    let artifacts = setup_session_with_deployment(manifest, &deployment, None);
-                    Ok((deployment, Some(deployment_location.to_string()), artifacts))
-                }
-                Err(e) => Err(format!("loading {path} failed with error: {e}")),
-            }
+            let project_root = &manifest.root_dir;
+            let deployment_location = project_root.join(path);
+            load_deployment(project_root, &deployment_location)
+                .map(|mut deployment| {
+                    if environment == Environment::OnChain {
+                        found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
+                    }
+                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+                    (
+                        deployment,
+                        Some(deployment_location.to_string_lossy().to_string()),
+                        artifacts,
+                    )
+                })
+                .map_err(|e| format!("loading {path} failed with error: {e}"))
         }
     };
 
-    match result {
-        Ok(deployment) => deployment,
-        Err(e) => {
+    (
+        result.unwrap_or_else(|e| {
             eprintln!("{}", format_err!(e));
             process::exit(1);
-        }
-    }
+        }),
+        found_env_simnet,
+    )
 }
 
 fn should_existing_plan_be_replaced(
     existing_plan: &DeploymentSpecification,
     new_plan: &DeploymentSpecification,
+    project_root: &Path,
 ) -> bool {
     use similar::{ChangeTag, TextDiff};
 
     let existing_file = existing_plan
-        .to_file_content()
+        .to_file_content(project_root)
         .expect("unable to serialize deployment");
     let new_file = new_plan
-        .to_file_content()
+        .to_file_content(project_root)
         .expect("unable to serialize deployment");
 
     if existing_file == new_file {
@@ -1505,32 +1659,25 @@ fn load_deployment_if_exists(
     network: &StacksNetwork,
     force_on_disk: bool,
     force_computed: bool,
-) -> Option<Result<DeploymentSpecification, String>> {
-    let default_deployment_location = match get_default_deployment_path(manifest, network) {
-        Ok(location) => location,
-        Err(e) => return Some(Err(e)),
-    };
+) -> Result<Option<DeploymentSpecification>, String> {
+    let project_root = &manifest.root_dir;
+    let default_deployment_location = project_root.join(get_default_deployment_path(network));
     if !default_deployment_location.exists() {
-        return None;
+        return Ok(None);
     }
 
     if !force_on_disk {
-        match generate_default_deployment(manifest, network, true) {
-            Ok((deployment, _)) => {
+        match generate_default_deployment(manifest, network, true, Environment::Simnet) {
+            Ok((deployment, _, _)) => {
                 use similar::{ChangeTag, TextDiff};
 
-                let current_version = match default_deployment_location.read_content() {
-                    Ok(content) => content,
-                    Err(message) => return Some(Err(message)),
-                };
-
-                let updated_version = match deployment.to_file_content() {
-                    Ok(res) => res,
-                    Err(err) => return Some(Err(format!("failed serializing deployment\n{err}"))),
-                };
+                let current_version = paths::read_content(&default_deployment_location)?;
+                let updated_version = deployment
+                    .to_file_content(project_root)
+                    .map_err(|err| format!("failed serializing deployment\n{err}"))?;
 
                 if updated_version == current_version {
-                    return Some(load_deployment(manifest, &default_deployment_location));
+                    return load_deployment(project_root, &default_deployment_location).map(Some);
                 }
 
                 if !force_computed {
@@ -1558,18 +1705,14 @@ fn load_deployment_if_exists(
                     let mut buffer = String::new();
                     std::io::stdin().read_line(&mut buffer).unwrap();
                     if buffer.starts_with('n') {
-                        Some(load_deployment(manifest, &default_deployment_location))
+                        load_deployment(project_root, &default_deployment_location).map(Some)
                     } else {
-                        default_deployment_location
-                            .write_content(&updated_version)
-                            .ok()?;
-                        Some(Ok(deployment))
+                        paths::write_content(&default_deployment_location, &updated_version)?;
+                        Ok(Some(deployment))
                     }
                 } else {
-                    default_deployment_location
-                        .write_content(&updated_version)
-                        .ok()?;
-                    Some(Ok(deployment))
+                    paths::write_content(&default_deployment_location, &updated_version)?;
+                    Ok(Some(deployment))
                 }
             }
             Err(message) => {
@@ -1578,11 +1721,11 @@ fn load_deployment_if_exists(
                     red!("error:"),
                     message
                 );
-                Some(load_deployment(manifest, &default_deployment_location))
+                load_deployment(project_root, &default_deployment_location).map(Some)
             }
         }
     } else {
-        Some(load_deployment(manifest, &default_deployment_location))
+        load_deployment(project_root, &default_deployment_location).map(Some)
     }
 }
 
@@ -1605,169 +1748,212 @@ fn sanitize_project_name(name: &str) -> String {
 }
 
 fn execute_changes(changes: Vec<Changes>) -> bool {
-    let mut shared_config = None;
+    let mut shared_doc: Option<(PathBuf, DocumentMut)> = None;
 
-    for mut change in changes.into_iter() {
+    for mut change in changes {
         match change {
             Changes::AddFile(options) => {
-                if let Ok(entry) = fs::metadata(&options.path) {
-                    if entry.is_file() {
-                        println!(
-                            "{} file already exists at path {}",
-                            yellow!("warning:"),
-                            options.path
-                        );
-                        continue;
-                    }
+                if fs::metadata(&options.path).is_ok_and(|e| e.is_file()) {
+                    println!(
+                        "{} file already exists at path {}",
+                        yellow!("warning:"),
+                        options.path
+                    );
+                    continue;
                 }
-                let mut file = match File::create(options.path.clone()) {
-                    Ok(file) => file,
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to create file {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
-                match file.write_all(options.content.as_bytes()) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to write file {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
+
+                let write_result = File::create(&options.path)
+                    .and_then(|mut file| file.write_all(options.content.as_bytes()));
+
+                if let Err(e) = write_result {
+                    eprintln!(
+                        "{} Unable to write file {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
+                }
+
                 println!("{}", options.comment);
             }
+
             Changes::AddDirectory(options) => {
-                match fs::create_dir_all(options.path.clone()) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!(
-                            "{} Unable to create directory {}: {}",
-                            red!("error:"),
-                            options.path,
-                            e
-                        );
-                        return false;
-                    }
-                };
+                if let Err(e) = fs::create_dir_all(&options.path) {
+                    eprintln!(
+                        "{} Unable to create directory {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
+                }
                 println!("{}", options.comment);
             }
+
             Changes::EditTOML(ref mut options) => {
-                let mut config = match shared_config.take() {
-                    Some(config) => config,
+                let (location, doc) = match shared_doc.take() {
+                    Some(cached) => cached,
                     None => {
-                        let manifest_location = options.manifest_location.clone();
-                        let project_manifest_content = match manifest_location.read_content() {
-                            Ok(content) => content,
-                            Err(message) => {
-                                eprintln!("{}", format_err!(message));
-                                return false;
-                            }
+                        let Some(doc) = load_manifest(&options.manifest_location) else {
+                            return false;
                         };
-
-                        let project_manifest_file: ProjectManifestFile =
-                            match toml::from_slice(&project_manifest_content[..]) {
-                                Ok(manifest) => manifest,
-                                Err(message) => {
-                                    eprintln!(
-                                        "{} Failed to process manifest file: {}",
-                                        red!("error:"),
-                                        message
-                                    );
-                                    return false;
-                                }
-                            };
-                        match ProjectManifest::from_project_manifest_file(
-                            project_manifest_file,
-                            &manifest_location,
-                            true,
-                        ) {
-                            Ok(content) => content,
-                            Err(message) => {
-                                eprintln!("{}", format_err!(message));
-                                return false;
-                            }
-                        }
+                        (options.manifest_location.clone(), doc)
                     }
                 };
 
-                let mut requirements = config.project.requirements.take().unwrap_or_default();
-                for requirement in options.requirements_to_add.drain(..) {
-                    if !requirements.contains(&requirement) {
-                        requirements.push(requirement);
-                    }
-                }
-                config.project.requirements = Some(requirements);
-
-                for (contract_name, contract_config) in options.contracts_to_add.drain() {
-                    config.contracts.insert(contract_name, contract_config);
-                }
-                for contract_name in options.contracts_to_rm.iter() {
-                    config.contracts.remove(contract_name);
-                }
-
-                shared_config = Some(config);
+                let doc = edit_toml_document(doc, options);
+                shared_doc = Some((location, doc));
                 println!("{}", options.comment);
             }
+
             Changes::RemoveFile(options) => {
-                if let Ok(entry) = fs::metadata(&options.path) {
-                    if !entry.is_file() {
-                        eprintln!(
-                            "{} file doesn't exist at path {}",
-                            yellow!("warning:"),
-                            options.path
-                        );
-                        continue;
-                    }
+                if !fs::metadata(&options.path).is_ok_and(|e| e.is_file()) {
+                    eprintln!(
+                        "{} file doesn't exist at path {}",
+                        yellow!("warning:"),
+                        options.path
+                    );
+                    continue;
                 }
-                match fs::remove_file(&options.path) {
-                    Ok(_) => println!("{}", options.comment),
-                    Err(e) => eprintln!("error {e}"),
+
+                if let Err(e) = fs::remove_file(&options.path) {
+                    eprintln!(
+                        "{} Unable to remove file {}: {e}",
+                        red!("error:"),
+                        options.path
+                    );
+                    return false;
                 }
+
+                println!("{}", options.comment);
             }
         }
     }
 
-    if let Some(project_manifest) = shared_config {
-        let toml_value = match toml::Value::try_from(&project_manifest) {
-            Ok(value) => value,
-            Err(e) => {
-                eprintln!("{} failed encoding config file ({})", red!("error:"), e);
-                return false;
-            }
-        };
-
-        let pretty_toml = match toml::ser::to_string_pretty(&toml_value) {
-            Ok(value) => value,
-            Err(e) => {
-                eprintln!("{} failed formatting config file ({})", red!("error:"), e);
-                return false;
-            }
-        };
-
-        if let Err(message) = project_manifest
-            .location
-            .write_content(pretty_toml.as_bytes())
-        {
-            eprintln!(
-                "{} Unable to update manifest file - {}",
-                red!("error:"),
-                message
-            );
+    if let Some((location, doc)) = shared_doc {
+        if let Err(e) = paths::write_content(&location, doc.to_string().as_bytes()) {
+            eprintln!("{}", format_err!(e));
             return false;
         }
     }
 
     true
+}
+
+/// Load and parse a manifest file, printing errors on failure.
+fn load_manifest(location: &Path) -> Option<DocumentMut> {
+    let content = paths::read_content(location)
+        .map_err(|e| {
+            eprintln!("{}", format_err!(e));
+        })
+        .ok()?;
+
+    let content_str = std::str::from_utf8(&content)
+        .map_err(|e| {
+            eprintln!("{} Invalid UTF-8 in manifest file: {e}", red!("error:"));
+        })
+        .ok()?;
+
+    content_str
+        .parse()
+        .map_err(|e| {
+            eprintln!("{} Failed to parse manifest file: {e}", red!("error:"));
+        })
+        .ok()
+}
+
+/// Edit a TOML document directly, preserving comments and structure.
+fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> DocumentMut {
+    for req in options.requirements_to_add.drain(..) {
+        add_requirement_to_doc(&mut doc, &req.contract_id);
+    }
+
+    for (name, contract) in options.contracts_to_add.drain() {
+        add_contract_to_doc(&mut doc, &name, &contract);
+    }
+
+    for name in &options.contracts_to_rm {
+        remove_contract_from_doc(&mut doc, name);
+    }
+
+    doc
+}
+
+/// Add a requirement to the [[project.requirements]] array in the document.
+fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
+    use toml_edit::{ArrayOfTables, Item, Table};
+
+    // Ensure [project] table exists
+    let project = doc
+        .entry("project")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .expect("[project] should be a table");
+
+    // Ensure [[project.requirements]] array exists.
+    // If requirements = [] (an empty inline array), replace it with an array of tables.
+    if project
+        .get("requirements")
+        .is_some_and(|v| v.as_array().is_some_and(|a| a.is_empty()))
+    {
+        project["requirements"] = Item::ArrayOfTables(ArrayOfTables::new());
+    }
+
+    let requirements = project
+        .entry("requirements")
+        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
+        .as_array_of_tables_mut()
+        .expect("[[project.requirements]] should be an array of tables");
+
+    // Check for duplicates
+    let already_exists = requirements
+        .iter()
+        .filter_map(|req| req.get("contract_id")?.as_str())
+        .any(|id| id == contract_id);
+
+    if !already_exists {
+        let mut new_req = Table::new();
+        new_req["contract_id"] = toml_edit::value(contract_id);
+        requirements.push(new_req);
+    }
+}
+
+/// Add a contract to the [contracts.<name>] section in the document.
+fn add_contract_to_doc(doc: &mut DocumentMut, name: &str, contract: &ClarityContract) {
+    use toml_edit::{Item, Table};
+
+    let contracts = doc
+        .entry("contracts")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .expect("[contracts] should be a table");
+
+    let mut entry = Table::new();
+
+    if let ClarityCodeSource::ContractOnDisk(path) = &contract.code_source {
+        entry["path"] = toml_edit::value(path.display().to_string());
+    }
+
+    if let ContractDeployer::LabeledDeployer(label) = &contract.deployer {
+        entry["deployer"] = toml_edit::value(label.as_str());
+    }
+
+    let clarity_version = clarity_version_to_u8(contract.clarity_version) as i64;
+    entry["clarity_version"] = toml_edit::value(clarity_version);
+
+    let epoch = match &contract.epoch {
+        Epoch::Latest => "latest".to_string(),
+        Epoch::Specific(e) => e.to_string(),
+    };
+    entry["epoch"] = toml_edit::value(epoch);
+
+    contracts[name] = Item::Table(entry);
+}
+
+/// Remove a contract from the [contracts] section in the document.
+fn remove_contract_from_doc(doc: &mut DocumentMut, name: &str) {
+    if let Some(contracts) = doc.get_mut("contracts").and_then(|c| c.as_table_mut()) {
+        contracts.remove(name);
+    }
 }
 
 fn prompt_user_to_continue() {
@@ -1843,7 +2029,7 @@ fn display_post_check_hint() {
         "{}",
         yellow!("    Run all run tests in the ./tests folder.\n")
     );
-    println!("{}", yellow!("Find more information on testing with Clarinet here: https://docs.hiro.so/stacks/clarinet-js-sdk"));
+    println!("{}", yellow!("Find more information on testing with Clarinet here: https://docs.stacks.co/clarinet/testing-with-clarinet-sdk"));
     display_hint_footer();
 }
 
@@ -1873,7 +2059,7 @@ fn display_contract_new_hint(project_name: Option<&str>) {
         yellow!("    Check contract syntax for all files in ./contracts.\n")
     );
 
-    println!("{}", yellow!("Find more information on writing contracts with Clarinet here: https://docs.hiro.so/clarinet/how-to-guides/how-to-set-up-local-development-environment#developing-a-clarity-smart-contract"));
+    println!("{}", yellow!("Find more information on writing contracts with Clarinet here: https://docs.stacks.co/clarinet"));
     display_hint_footer();
 }
 
@@ -1903,13 +2089,14 @@ fn display_deploy_hint() {
     );
     println!(
         "{}",
-        yellow!("Find more information on the devnet here: https://docs.hiro.so/clarinet/guides/how-to-run-integration-environment")
+        yellow!("Find more information on the devnet here: https://docs.stacks.co/clarinet/local-blockchain-development")
     );
     display_hint_footer();
 }
 
 fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let manifest = load_manifest_or_exit(cmd.manifest_path, false);
+    let project_root = &manifest.root_dir;
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {
         None => {
@@ -1920,7 +2107,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                 };
                 let deployment: ConfigurationPackage = serde_json::from_reader(package_file)
                     .expect("error while reading deployment specification");
-                Some(Ok(deployment.deployment_plan))
+                Ok(Some(deployment.deployment_plan))
             } else {
                 load_deployment_if_exists(
                     &manifest,
@@ -1929,47 +2116,41 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                     cmd.use_computed_deployment_plan,
                 )
             };
-            match res {
-                Some(Ok(deployment)) => {
+
+            res.and_then(|opt| match opt {
+                Some(deployment) => {
                     println!(
                         "{} using existing deployments/default.devnet-plan.yaml",
                         yellow!("note:")
                     );
-                    // TODO(lgalabru): Think more about the desired DX.
-                    // Compute the latest version, display differences and propose overwrite?
                     Ok(deployment)
                 }
-                Some(Err(e)) => Err(e),
                 None => {
                     let default_deployment_path =
-                        get_default_deployment_path(&manifest, &StacksNetwork::Devnet).unwrap();
-                    let (deployment, _) =
-                        match generate_default_deployment(&manifest, &StacksNetwork::Devnet, false)
-                        {
-                            Ok(deployment) => deployment,
-                            Err(message) => {
-                                eprintln!("{}", red!(message));
-                                std::process::exit(1);
-                            }
-                        };
-                    let res = write_deployment(&deployment, &default_deployment_path, true);
-                    if let Err(message) = res {
-                        Err(message)
-                    } else {
-                        println!(
-                            "{} {}",
-                            green!("Generated file"),
-                            default_deployment_path.get_relative_location().unwrap()
-                        );
-                        Ok(deployment)
-                    }
+                        project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
+                    let (deployment, _, _) = generate_default_deployment(
+                        &manifest,
+                        &StacksNetwork::Devnet,
+                        false,
+                        Environment::Simnet,
+                    )
+                    .unwrap_or_else(|message| {
+                        eprintln!("{}", red!(message));
+                        std::process::exit(1);
+                    });
+                    write_deployment(&deployment, &default_deployment_path, project_root, true)?;
+                    println!(
+                        "{} {}",
+                        green!("Generated file"),
+                        paths::get_relative_path(&default_deployment_path, project_root).unwrap()
+                    );
+                    Ok(deployment)
                 }
-            }
+            })
         }
         Some(deployment_plan_path) => {
-            let deployment_path = get_absolute_deployment_path(&manifest, &deployment_plan_path)
-                .expect("unable to retrieve deployment");
-            load_deployment(&manifest, &deployment_path)
+            let deployment_path = project_root.join(&deployment_plan_path);
+            load_deployment(project_root, &deployment_path)
         }
     };
 
@@ -1981,7 +2162,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         }
     };
 
-    let orchestrator = match DevnetOrchestrator::new(manifest, None, None, true, cmd.no_dashboard) {
+    let orchestrator = match DevnetOrchestrator::new(manifest, None, None, true) {
         Ok(orchestrator) => orchestrator,
         Err(e) => {
             eprintln!("{}", format_err!(e));
@@ -2083,5 +2264,803 @@ mod tests {
 
         let sanitized = sanitize_project_name("H€llo/world");
         assert_eq!(sanitized, "H_llo/world");
+    }
+
+    mod toml_editing_tests {
+        use std::path::PathBuf;
+
+        use indoc::indoc;
+
+        use super::*;
+
+        /// Helper to create a ClarityContract for testing
+        fn make_test_contract(name: &str) -> ClarityContract {
+            ClarityContract {
+                code_source: ClarityCodeSource::ContractOnDisk(PathBuf::from(format!(
+                    "contracts/{}.clar",
+                    name
+                ))),
+                name: name.to_string(),
+                deployer: ContractDeployer::DefaultDeployer,
+                clarity_version: ClarityVersion::Clarity2,
+                epoch: Epoch::Latest,
+                is_requirement: false,
+            }
+        }
+
+        /// Helper to check if a string contains a comment (line starting with #)
+        fn contains_comment(content: &str, comment_text: &str) -> bool {
+            content.lines().any(|line| {
+                let trimmed = line.trim();
+                trimmed.starts_with('#') && trimmed.contains(comment_text)
+            })
+        }
+
+        /// Helper to check if a TOML has a specific key-value in a section
+        fn has_toml_value(content: &str, key_path: &str, expected_value: &str) -> bool {
+            let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
+            let parts: Vec<&str> = key_path.split('.').collect();
+
+            let mut current = doc.as_item();
+            for (i, part) in parts.iter().enumerate() {
+                if i == parts.len() - 1 {
+                    // Last part - check the value
+                    if let Some(table) = current.as_table() {
+                        if let Some(item) = table.get(part) {
+                            let value_str = item.to_string();
+                            // Handle quoted strings
+                            let cleaned = value_str.trim().trim_matches('"').trim_matches('\'');
+                            return cleaned == expected_value;
+                        }
+                    }
+                    return false;
+                } else {
+                    // Navigate to the next level
+                    if let Some(table) = current.as_table() {
+                        if let Some(item) = table.get(part) {
+                            current = item;
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            }
+            false
+        }
+
+        /// Helper to check if a contract exists in the TOML
+        fn has_contract(content: &str, contract_name: &str) -> bool {
+            let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
+            if let Some(contracts) = doc.get("contracts").and_then(|c| c.as_table()) {
+                return contracts.contains_key(contract_name);
+            }
+            false
+        }
+
+        /// Helper to check if a requirement exists in the TOML
+        fn has_requirement(content: &str, contract_id: &str) -> bool {
+            let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
+            if let Some(project) = doc.get("project").and_then(|p| p.as_table()) {
+                if let Some(requirements) = project.get("requirements") {
+                    if let Some(arr) = requirements.as_array_of_tables() {
+                        return arr.iter().any(|req| {
+                            req.get("contract_id")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s == contract_id)
+                                .unwrap_or(false)
+                        });
+                    }
+                }
+            }
+            false
+        }
+
+        #[test]
+        fn test_add_contract_preserves_comments() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+                description = ""
+
+                # This is an important comment that should be preserved!
+                # Another comment line
+
+                [repl.analysis]
+                passes = ["check_checker"]
+
+                # Check-checker settings comment
+                [repl.analysis.check_checker]
+                strict = false
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
+
+            let output = doc.to_string();
+
+            // Verify comments are preserved
+            assert!(
+                contains_comment(&output, "important comment"),
+                "Important comment should be preserved"
+            );
+            assert!(
+                contains_comment(&output, "Another comment"),
+                "Second comment should be preserved"
+            );
+            assert!(
+                contains_comment(&output, "Check-checker settings"),
+                "Check-checker comment should be preserved"
+            );
+
+            // Verify the contract was added
+            assert!(
+                has_contract(&output, "my-contract"),
+                "Contract should be added"
+            );
+
+            // Verify existing settings are preserved
+            assert!(
+                has_toml_value(&output, "project.name", "test-project"),
+                "Project name should be preserved"
+            );
+            assert!(
+                has_toml_value(&output, "repl.analysis.check_checker.strict", "false"),
+                "Repl settings should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_remove_contract_preserves_comments_and_other_contracts() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                # Comment about contracts
+                [contracts.keep-me]
+                path = "contracts/keep-me.clar"
+                clarity_version = 2
+                epoch = "2.4"
+
+                # Comment about remove-me
+                [contracts.remove-me]
+                path = "contracts/remove-me.clar"
+                clarity_version = 1
+                epoch = "2.0"
+
+                # Final comment
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            remove_contract_from_doc(&mut doc, "remove-me");
+
+            let output = doc.to_string();
+
+            // Verify the contract was removed
+            assert!(
+                !has_contract(&output, "remove-me"),
+                "Contract should be removed"
+            );
+
+            // Verify the other contract is still there
+            assert!(
+                has_contract(&output, "keep-me"),
+                "Other contract should be preserved"
+            );
+
+            // Verify comments are preserved (at least the ones not directly attached to removed section)
+            assert!(
+                contains_comment(&output, "Comment about contracts"),
+                "Contract section comment should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_add_requirement_preserves_comments() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+                description = "A test project"
+                authors = ["Test Author"]
+                telemetry = false
+
+                # This comment should survive
+
+                [contracts.my-contract]
+                path = "contracts/my-contract.clar"
+                clarity_version = 2
+                epoch = "latest"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
+
+            let output = doc.to_string();
+
+            // Verify the requirement was added
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Requirement should be added"
+            );
+
+            // Verify comment is preserved
+            assert!(
+                contains_comment(&output, "This comment should survive"),
+                "Comment should be preserved"
+            );
+
+            // Verify existing settings are preserved
+            assert!(
+                has_toml_value(&output, "project.name", "test-project"),
+                "Project name should be preserved"
+            );
+            assert!(
+                has_toml_value(&output, "project.telemetry", "false"),
+                "Telemetry setting should be preserved"
+            );
+
+            // Verify contract is still there
+            assert!(
+                has_contract(&output, "my-contract"),
+                "Contract should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_add_requirement_with_empty_requirements_array() {
+            let input = indoc! {r#"
+                [project]
+                name = 'project-template'
+                requirements = []
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
+
+            let output = doc.to_string();
+
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Requirement should be added when requirements was an empty array"
+            );
+
+            assert!(
+                has_toml_value(&output, "project.name", "project-template"),
+                "Project name should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_add_requirement_does_not_duplicate() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                [[project.requirements]]
+                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Try to add the same requirement again
+            add_requirement_to_doc(
+                &mut doc,
+                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+            );
+
+            let output = doc.to_string();
+
+            // Count how many times the contract_id appears
+            let count = output.matches("nft-trait").count();
+            assert_eq!(count, 1, "Requirement should not be duplicated");
+        }
+
+        #[test]
+        fn test_add_multiple_requirements() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                [[project.requirements]]
+                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_requirement_to_doc(
+                &mut doc,
+                "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait",
+            );
+
+            let output = doc.to_string();
+
+            // Both requirements should exist
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Original requirement should be preserved"
+            );
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"
+                ),
+                "New requirement should be added"
+            );
+        }
+
+        #[test]
+        fn test_edit_simple_nft_example() {
+            // Test with the actual simple-nft example content
+            let input = indoc! {r#"
+                [project]
+                name = 'simple-nft'
+                description = ''
+                authors = []
+                telemetry = false
+                cache_dir = './.cache'
+
+                [[project.requirements]]
+                contract_id = 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait'
+
+                [contracts.simple-nft]
+                path = 'contracts/simple-nft.clar'
+                clarity_version = 2
+                epoch = 2.4
+
+                # the analysis errors are used as a test case
+                [repl.analysis]
+                passes = ["check_checker"]
+                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+
+                # We don't want linter diagnostics in this test
+                [repl.analysis.lint_groups]
+                all = false
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Add a new contract
+            add_contract_to_doc(
+                &mut doc,
+                "new-contract",
+                &make_test_contract("new-contract"),
+            );
+
+            let output = doc.to_string();
+
+            // Verify comments are preserved
+            assert!(
+                contains_comment(&output, "analysis errors are used as a test case"),
+                "Analysis comment should be preserved"
+            );
+            assert!(
+                contains_comment(&output, "don't want linter diagnostics"),
+                "Linter comment should be preserved"
+            );
+
+            // Verify existing content is preserved
+            assert!(
+                has_contract(&output, "simple-nft"),
+                "Original contract should be preserved"
+            );
+            assert!(
+                has_contract(&output, "new-contract"),
+                "New contract should be added"
+            );
+            assert!(
+                has_requirement(
+                    &output,
+                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                ),
+                "Requirement should be preserved"
+            );
+            assert!(
+                has_toml_value(&output, "project.cache_dir", "./.cache"),
+                "Cache dir should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_edit_counter_example() {
+            // Test with the actual counter example content
+            let input = indoc! {r#"
+                [project]
+                name = "counter"
+                authors = []
+                description = ""
+                telemetry = false
+
+                [contracts.counter]
+                path = "contracts/counter.clar"
+                clarity_version = 1
+                epoch = "2.0"
+
+                [contracts.counter-2]
+                path = "contracts/counter-v2.clar"
+                clarity_version = 2
+                epoch = "2.4"
+
+                [repl.analysis]
+                passes = ["check_checker"]
+
+                [repl.analysis.check_checker]
+                strict = false
+                trusted_sender = true
+                trusted_caller = false
+                callee_filter = false
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Remove one contract, add another
+            remove_contract_from_doc(&mut doc, "counter");
+            add_contract_to_doc(&mut doc, "counter-3", &make_test_contract("counter-3"));
+
+            let output = doc.to_string();
+
+            // Verify the operations
+            assert!(
+                !has_contract(&output, "counter"),
+                "counter should be removed"
+            );
+            assert!(
+                has_contract(&output, "counter-2"),
+                "counter-2 should be preserved"
+            );
+            assert!(
+                has_contract(&output, "counter-3"),
+                "counter-3 should be added"
+            );
+
+            // Verify settings are preserved
+            assert!(
+                has_toml_value(&output, "project.name", "counter"),
+                "Project name should be preserved"
+            );
+            assert!(
+                has_toml_value(
+                    &output,
+                    "repl.analysis.check_checker.trusted_sender",
+                    "true"
+                ),
+                "Check checker settings should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_contract_with_labeled_deployer() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Create a contract with a labeled deployer
+            let contract = ClarityContract {
+                code_source: ClarityCodeSource::ContractOnDisk(PathBuf::from(
+                    "contracts/special.clar",
+                )),
+                name: "special".to_string(),
+                deployer: ContractDeployer::LabeledDeployer("wallet_1".to_string()),
+                clarity_version: ClarityVersion::Clarity3,
+                epoch: Epoch::Specific(clarity_repl::clarity::StacksEpochId::Epoch25),
+                is_requirement: false,
+            };
+
+            add_contract_to_doc(&mut doc, "special", &contract);
+
+            let output = doc.to_string();
+
+            // Verify the contract was added with all properties
+            assert!(has_contract(&output, "special"), "Contract should be added");
+
+            // Parse and check the values
+            let parsed: DocumentMut = output.parse().unwrap();
+            let contracts = parsed.get("contracts").unwrap().as_table().unwrap();
+            let special = contracts.get("special").unwrap().as_table().unwrap();
+
+            assert_eq!(
+                special.get("deployer").unwrap().as_str().unwrap(),
+                "wallet_1"
+            );
+            assert_eq!(
+                special
+                    .get("clarity_version")
+                    .unwrap()
+                    .as_integer()
+                    .unwrap(),
+                3
+            );
+        }
+
+        #[test]
+        fn test_preserves_inline_tables() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                [repl.analysis]
+                passes = ["check_checker"]
+                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
+
+            let output = doc.to_string();
+
+            // The inline table format should be preserved
+            assert!(
+                output.contains("check_checker = {") || output.contains("check_checker = { "),
+                "Inline table format should be preserved: {}",
+                output
+            );
+        }
+
+        #[test]
+        fn test_preserves_array_format() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+                authors = ["Alice", "Bob"]
+                requirements = []
+
+                [repl.analysis]
+                passes = ["check_checker", "lint"]
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            add_contract_to_doc(&mut doc, "my-contract", &make_test_contract("my-contract"));
+
+            let output = doc.to_string();
+
+            // Verify arrays are preserved
+            assert!(
+                output.contains("authors = [") || output.contains("authors= ["),
+                "Authors array should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_preserves_lint_groups_and_lints_ordering() {
+            // Test with all lint groups and lints in a deliberately random order
+            // with random values to ensure ordering is preserved after edits
+            //
+            // LintGroups: All, Perf, Safety, Style, Unused
+            // LintNames: Noop, UnusedConst, UnusedDataVar, UnusedBinding, UnusedMap,
+            //            UnusedPrivateFn, UnusedToken, UnusedTrait, CaseConst
+            // LintLevels: ignore/allow/off/none, notice/note, warning/warn/on, error/err
+            let input = indoc! {r#"
+                [project]
+                name = "lint-ordering-test"
+                authors = []
+                telemetry = false
+
+                [contracts.existing-contract]
+                path = "contracts/existing.clar"
+
+                # Custom comment about linting configuration
+                [repl.analysis]
+                passes = ["check_checker", "lint"]
+
+                # Lint groups in random order with random values
+                [repl.analysis.lint_groups]
+                style = "warn"
+                unused = "error"
+                all = false
+                safety = "notice"
+                perf = "off"
+
+                # Individual lints in random order with random values
+                [repl.analysis.lints]
+                unused_map = "error"
+                case_const = "warn"
+                unused_binding = "off"
+                noop = "notice"
+                unused_trait = "warning"
+                unused_const = "allow"
+                unused_private_fn = "err"
+                unused_data_var = "note"
+                unused_token = "none"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+
+            // Perform an edit (add a contract) to simulate real usage
+            add_contract_to_doc(
+                &mut doc,
+                "new-contract",
+                &make_test_contract("new-contract"),
+            );
+
+            let output = doc.to_string();
+
+            // Verify the comment is preserved
+            assert!(
+                contains_comment(&output, "Custom comment about linting configuration"),
+                "Linting comment should be preserved"
+            );
+
+            // Helper to extract keys in order from a TOML section
+            fn get_keys_in_order(toml_str: &str, section: &str) -> Vec<String> {
+                let doc: DocumentMut = toml_str.parse().unwrap();
+
+                // Navigate to the section (e.g., "repl.analysis.lint_groups")
+                let parts: Vec<&str> = section.split('.').collect();
+                let mut current = doc.as_item();
+
+                for part in &parts {
+                    current = current.as_table().unwrap().get(part).unwrap();
+                }
+
+                current
+                    .as_table()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, _)| k.to_string())
+                    .collect()
+            }
+
+            // Verify lint_groups ordering is preserved
+            let lint_groups_order = get_keys_in_order(&output, "repl.analysis.lint_groups");
+            assert_eq!(
+                lint_groups_order,
+                vec!["style", "unused", "all", "safety", "perf"],
+                "Lint groups ordering should be preserved"
+            );
+
+            // Verify lints ordering is preserved
+            let lints_order = get_keys_in_order(&output, "repl.analysis.lints");
+            assert_eq!(
+                lints_order,
+                vec![
+                    "unused_map",
+                    "case_const",
+                    "unused_binding",
+                    "noop",
+                    "unused_trait",
+                    "unused_const",
+                    "unused_private_fn",
+                    "unused_data_var",
+                    "unused_token"
+                ],
+                "Lints ordering should be preserved"
+            );
+
+            // Also verify the values are preserved
+            let parsed: DocumentMut = output.parse().unwrap();
+            let lint_groups = parsed["repl"]["analysis"]["lint_groups"]
+                .as_table()
+                .unwrap();
+            let lints = parsed["repl"]["analysis"]["lints"].as_table().unwrap();
+
+            // Check a few lint group values
+            assert_eq!(lint_groups["style"].as_str().unwrap(), "warn");
+            assert_eq!(lint_groups["unused"].as_str().unwrap(), "error");
+            assert!(!lint_groups["all"].as_bool().unwrap());
+            assert_eq!(lint_groups["safety"].as_str().unwrap(), "notice");
+            assert_eq!(lint_groups["perf"].as_str().unwrap(), "off");
+
+            // Check a few lint values
+            assert_eq!(lints["unused_map"].as_str().unwrap(), "error");
+            assert_eq!(lints["case_const"].as_str().unwrap(), "warn");
+            assert_eq!(lints["noop"].as_str().unwrap(), "notice");
+            assert_eq!(lints["unused_token"].as_str().unwrap(), "none");
+        }
+    }
+
+    #[test]
+    fn test_check_json_output() {
+        use clarity_repl::clarity::vm::diagnostic::Level as DiagnosticLevel;
+
+        let snippet = indoc::indoc! {"
+            (define-constant A u1)
+            (define-constant B u2)
+
+            (define-read-only (get-val)
+                u0)
+        "};
+
+        let mut settings = repl::SessionSettings::default();
+        settings.repl_settings.analysis.enable_all_passes();
+        settings
+            .repl_settings
+            .analysis
+            .enable_all_lints(DiagnosticLevel::Warning);
+
+        let mut session = repl::Session::new(settings.clone());
+        let contract_id = QualifiedContractIdentifier::transient();
+        let epoch = DEFAULT_EPOCH;
+        let contract = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(snippet.to_string()),
+            deployer: ContractDeployer::Transient,
+            name: "transient".to_string(),
+            clarity_version: ClarityVersion::default_for_epoch(epoch),
+            epoch: clarity_repl::repl::Epoch::Specific(epoch),
+            is_requirement: false,
+        };
+        let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
+        let (annotations, mut annotation_diagnostics) = session
+            .interpreter
+            .collect_annotations(contract.expect_in_memory_code_source());
+        diagnostics.append(&mut annotation_diagnostics);
+
+        let mut contract_analysis = ContractAnalysis::new(
+            contract_id,
+            ast.expressions,
+            LimitedCostTracker::new_free(),
+            contract.epoch.resolve(),
+            contract.clarity_version,
+        );
+        let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
+        let mut analysis_diagnostics = match analysis::run_analysis(
+            &mut contract_analysis,
+            &mut analysis_db,
+            &annotations,
+            &settings.repl_settings.analysis,
+        ) {
+            Ok(diagnostics) => diagnostics,
+            Err(diagnostics) => {
+                success = false;
+                diagnostics
+            }
+        };
+        diagnostics.append(&mut analysis_diagnostics);
+
+        let filename = "test-contract.clar".to_string();
+        let output = JsonCheckOutput {
+            success,
+            diagnostics: HashMap::from([(filename.clone(), diagnostics)]),
+            environment: Environment::Simnet.to_string(),
+        };
+
+        // Verify both JSON formats parse correctly
+        for json_str in [
+            serde_json::to_string(&output).unwrap(),
+            serde_json::to_string_pretty(&output).unwrap(),
+        ] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&json_str).expect("JSON output should be valid JSON");
+
+            assert!(parsed["success"].is_boolean());
+            assert!(parsed["diagnostics"].is_object());
+            assert!(parsed["diagnostics"][&filename].is_array());
+
+            let diags = parsed["diagnostics"][&filename].as_array().unwrap();
+            assert!(
+                diags.len() >= 2,
+                "expected at least 2 diagnostics for unused constants A and B, got {}",
+                diags.len()
+            );
+
+            // Verify diagnostic structure
+            let diag = &diags[0];
+            assert!(diag["level"].is_string());
+            assert!(diag["message"].is_string());
+            assert!(diag["spans"].is_array());
+
+            // Verify at least one diagnostic mentions an unused constant
+            let messages: Vec<&str> = diags.iter().filter_map(|d| d["message"].as_str()).collect();
+            assert!(
+                messages.iter().any(|m| m.contains("never used")),
+                "expected a 'never used' diagnostic, got: {messages:?}"
+            );
+        }
     }
 }

@@ -1,10 +1,14 @@
 use clarity::vm::representations::Span;
 use clarity::vm::ClarityName;
 use regex::Regex;
+use strum::EnumString;
+
+use crate::utils::Environment;
 
 #[derive(Debug)]
 pub enum AnnotationKind {
-    Allow(WarningKind),
+    Allow(Vec<WarningKind>),
+    Env(Environment),
     Filter(Vec<ClarityName>),
     FilterAll,
 }
@@ -21,10 +25,29 @@ impl std::str::FromStr for AnnotationKind {
                 (&captures[1], "")
             };
             match base {
-                "allow" => match value.parse() {
-                    Ok(value) => Ok(AnnotationKind::Allow(value)),
-                    Err(_) => Err("missing value for 'allow' annotation".to_string()),
-                },
+                "allow" => {
+                    let params: Vec<WarningKind> = value
+                        .split(',')
+                        .filter(|s| !s.is_empty())
+                        .filter_map(|s| s.trim().parse().ok())
+                        .collect();
+                    if params.is_empty() {
+                        Err("missing value for 'allow' annotation".to_string())
+                    } else {
+                        Ok(AnnotationKind::Allow(params))
+                    }
+                }
+                "env" => {
+                    let env: Environment = value
+                        .parse()
+                        .map_err(|_| format!("bad environment {value} for 'env' annotation"))?;
+                    if env == Environment::OnChain {
+                        return Err(
+                            "'onchain' is not a valid environment for 'env' annotation".to_string()
+                        );
+                    }
+                    Ok(AnnotationKind::Env(env))
+                }
                 "filter" => {
                     if value == "*" {
                         Ok(AnnotationKind::FilterAll)
@@ -49,30 +72,48 @@ impl std::str::FromStr for AnnotationKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumString, PartialEq, Eq, Hash)]
+#[strum(serialize_all = "snake_case")]
 pub enum WarningKind {
+    // Check checker
     UncheckedData,
     UncheckedParams,
+    // Linter. Keep sorted alphabetically
+    CaseBinding,
+    CaseConst,
+    ErrorConst,
     Noop,
-}
-
-impl std::str::FromStr for WarningKind {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "unchecked_data" => Ok(WarningKind::UncheckedData),
-            "unchecked_params" => Ok(WarningKind::UncheckedParams),
-            "noop" => Ok(WarningKind::Noop),
-            _ => Err(format!("'{s}' is not a valid warning identifier")),
-        }
-    }
+    Panic,
+    UnnecessaryAsMaxLen,
+    UnnecessaryPublic,
+    UnusedBinding,
+    UnusedConst,
+    UnusedDataVar,
+    UnusedMap,
+    UnusedPrivateFn,
+    UnusedToken,
+    UnusedTrait,
 }
 
 #[derive(Debug)]
 pub struct Annotation {
     pub kind: AnnotationKind,
     pub span: Span,
+}
+
+/// Returns the index in `annotations` for `span`
+/// Assumes `annotations` is sorted by `span.start_line`
+pub fn get_index_of_span(annotations: &[Annotation], span: &Span) -> Option<usize> {
+    for (i, annotation) in annotations.iter().enumerate() {
+        if annotation.span.start_line == (span.start_line - 1) {
+            return Some(i);
+        } else if annotation.span.start_line >= span.start_line {
+            // The annotations are ordered by span, so if we have passed
+            // the target line, return.
+            break;
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -98,8 +139,23 @@ mod tests {
     #[test]
     fn parse_allow_unchecked_data() {
         match "allow(unchecked_data)".parse::<AnnotationKind>() {
-            Ok(AnnotationKind::Allow(WarningKind::UncheckedData)) => (),
+            Ok(AnnotationKind::Allow(params)) => {
+                assert_eq!(params.len(), 1);
+                assert!(matches!(params[0], WarningKind::UncheckedData));
+            }
             _ => panic!("failed to parse annotation kind correctly"),
+        };
+    }
+
+    #[test]
+    fn parse_allow_multiple() {
+        match "allow(unused_const, case_const)".parse::<AnnotationKind>() {
+            Ok(AnnotationKind::Allow(params)) => {
+                assert_eq!(params.len(), 2);
+                assert!(params.contains(&WarningKind::UnusedConst));
+                assert!(params.contains(&WarningKind::CaseConst));
+            }
+            _ => panic!("failed to parse multiple allow annotation correctly"),
         };
     }
 

@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "components/chainhook-sdk",
-    "components/chainhook-types",
+    "components/clarity-static-cost",
     "components/clarinet-cli",
     "components/clarinet-deployments",
     "components/clarinet-files",
+    "components/clarinet-defaults",
     "components/clarinet-format",
     "components/clarinet-utils",
     "components/clarinet-sdk-wasm",
@@ -14,58 +14,70 @@ members = [
     "components/clarity-events",
     "components/hiro-system-kit",
     "components/stacks-codec",
+    "components/observer",
     "components/stacks-network",
     "components/stacks-rpc-client",
 ]
 default-members = ["components/clarinet-cli"]
 
 [workspace.package]
-version = "3.9.0"
+version = "3.14.1"
 
 [workspace.dependencies]
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "clarity-types"}
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", branch="develop", package = "stackslib", default-features = false}
+clarinet-defaults = { path = "components/clarinet-defaults" }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "clarity-types" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "41bd9d0a15a08d8ab2603edf11774b0d21a616ec", package = "stackslib", default-features = false }
 
+aes-gcm = "0.10"
+argon2 = "0.5.3"
+bs58 = "0.5"
 base58 = "0.2.0"
 base64 = "0.22.1"
 bitcoincore-rpc = "0.18.0"
 bitcoincore-rpc-json = "0.18.0"
-clap = "4.5.47"
+clap = "4.5.57"
 colored = "3"
 chrono = "0.4.42"
-crossterm = "0.28.0"
+crossterm = "0.29.0"
 dirs = "6.0.0"
+indexmap = "2.13.0"
+tikv-jemallocator = "0.6.1"
 js-sys = "0.3.80"
 libsecp256k1 = "0.7.2"
 pretty_assertions = "1.4"
 rand = "0.8.5"
-ratatui = { version = "0.29.0", default-features = false, features = ["crossterm"] }
-regex = "1.11.2"
-reqwest = { version = "0.12.22", default-features = false, features = [
+ratatui = { version = "0.30.0", default-features = false, features = [
+    "crossterm",
+] }
+regex = "1.12.3"
+reqwest = { version = "0.12.28", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
-schemars = "1.0.4"
+rpassword = "7.4"
+schemars = "1.2.1"
 serde = "1.0.225"
-serde_json = "1.0.145"
-serde_derive = "1.0.225"
-serde_yaml = "0.8.23"
+serde_json = "1.0.149"
 serde-wasm-bindgen = "0.6.4"
+yaml_serde = "0.10.3"
+signal-hook = "0.4.3"
 strum = "0.27.2"
-tempfile = "3.22.0"
+tempfile = "3.24.0"
+thiserror = "2"
 toml = { version = "0.5.6", features = ["preserve_order"] }
+toml_edit = "0.22"
 tokio = { version = "1.47.0", features = ["full"] }
 tokio-util = { version = "0.7.16", features = ["codec"] }
-wasm-bindgen = { version = "0.2.103" }
-wasm-bindgen-futures = { version = "0.4.53" }
-web-sys = { version = "0.3.80" }
+wasm-bindgen = { version = "0.2.108" }
+wasm-bindgen-futures = { version = "0.4.58" }
+web-sys = { version = "0.3.85" }
 indoc = "2.0.3"
 
 # dev dependencies
-mockito = { version = "1.6", default-features = false }
+mockito = { version = "1.7", default-features = false }
 
 # [patch.'https://github.com/stacks-network/stacks-core.git']
 # clarity = { path = "../stacks-core/clarity" }

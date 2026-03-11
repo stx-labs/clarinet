@@ -16,7 +16,8 @@ interface ClarityValuesMatchers<R = unknown> {
   toBeAscii(expected: string): R;
   toBeUtf8(expected: string): R;
   toBePrincipal(expected: string): R;
-  toBeBuff(expected: Uint8Array): R;
+  /** Validate that a BufferCV is equal to the expected Uint8Array or hex string */
+  toBeBuff(expected: Uint8Array | string): R;
 
   toBeList(expected: ExpectStatic[] | ClarityValue[]): R;
   toBeTuple(expected: Record<string, ExpectStatic | ClarityValue>): R;

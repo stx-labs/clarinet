@@ -15,6 +15,7 @@ use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIden
 use clarity_types::Value;
 use colored::Colorize;
 use comfy_table::Table;
+use serde::Serialize;
 
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
@@ -118,6 +119,15 @@ pub struct Session {
 
 impl Session {
     pub fn new(settings: SessionSettings) -> Self {
+        Self::inner_new(settings, true)
+    }
+
+    /// Many unit tests don't need the boot contracts, and skipping them makes the tests run significantly faster
+    pub fn new_without_boot_contracts(settings: SessionSettings) -> Self {
+        Self::inner_new(settings, false)
+    }
+
+    fn inner_new(settings: SessionSettings, with_boot_contracts: bool) -> Self {
         let mut interpreter = ClarityInterpreter::new(
             settings.get_default_sender(),
             settings.repl_settings.clone(),
@@ -125,7 +135,11 @@ impl Session {
         );
 
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
-        let boot_contracts = deploy_boot_contracts(&settings, &mut interpreter);
+        let boot_contracts = if with_boot_contracts {
+            deploy_boot_contracts(&settings, &mut interpreter)
+        } else {
+            BTreeMap::new()
+        };
 
         Self {
             interpreter,
@@ -685,6 +699,7 @@ impl Session {
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
+            is_requirement: false,
         };
         let contract_identifier =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
@@ -735,6 +750,7 @@ impl Session {
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
+            is_requirement: false,
         };
         let contract_identifier =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
@@ -1030,20 +1046,10 @@ impl Session {
     }
 
     pub fn set_epoch(&mut self, cmd: &str) -> String {
-        let epoch = match cmd.split_once(' ').map(|(_, epoch)| epoch) {
-            Some("2.0") => StacksEpochId::Epoch20,
-            Some("2.05") => StacksEpochId::Epoch2_05,
-            Some("2.1") => StacksEpochId::Epoch21,
-            Some("2.2") => StacksEpochId::Epoch22,
-            Some("2.3") => StacksEpochId::Epoch23,
-            Some("2.4") => StacksEpochId::Epoch24,
-            Some("2.5") => StacksEpochId::Epoch25,
-            Some("3.0") => StacksEpochId::Epoch30,
-            Some("3.1") => StacksEpochId::Epoch31,
-            Some("3.2") => StacksEpochId::Epoch32,
-            Some("3.3") => StacksEpochId::Epoch33,
-            _ => {
-                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3"
+        let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
+            Some(epoch) => epoch,
+            None => {
+                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4"
                     .red()
                     .to_string()
             }
@@ -1624,14 +1630,14 @@ fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
+    use clarinet_defaults::DEFAULT_EPOCH;
     use clarity::util::hash::hex_bytes;
     use clarity_types::types::TupleData;
-    use indoc::formatdoc;
+    use indoc::{formatdoc, indoc};
 
     use super::*;
     use crate::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
     use crate::repl::settings::Account;
-    use crate::repl::DEFAULT_EPOCH;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     #[track_caller]
@@ -1805,7 +1811,10 @@ mod tests {
         let result = session.encode("::encode { foo false }");
         assert_eq!(
             result,
-            format_err!("Tuple literal construction expects a colon at index 1\nencoding failed")
+            format!(
+                "encode:1:7: {} expected ':' after key in tuple\n{{ foo false }}\n      ^~~~~\nencoding failed",
+                "error:".red().bold()
+            )
         );
 
         let result = session.encode("::encode (foo 1)");
@@ -1839,7 +1848,7 @@ mod tests {
         let result = session.decode("::decode 42");
         assert_eq!(
             result,
-            "Failed to decode clarity value: DeserializationError(\"Bad type prefix\")"
+            "Failed to decode clarity value: DeserializationFailure(\"Bad type prefix\")"
                 .red()
                 .to_string()
         );
@@ -1866,6 +1875,7 @@ mod tests {
             deployer: ContractDeployer::Address("ST000000000000000000002AMW42H".into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: Epoch::Specific(StacksEpochId::Epoch2_05),
+            is_requirement: false,
         };
 
         let result = session.deploy_contract(&contract, false, None);
@@ -1926,20 +1936,21 @@ mod tests {
     #[test]
     fn evaluate_at_block() {
         let settings = SessionSettings::default();
-
         let mut session = Session::new(settings);
 
         session.handle_command("::set_epoch 2.5");
 
         // setup contract state
-        let snippet = "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var x uint u0)
             (define-read-only (get-x)
                 (var-get x))
             (define-public (incr)
                 (begin
                     (var-set x (+ (var-get x) u1))
-                    (ok (var-get x))))";
+                    (ok (var-get x))))
+        ");
 
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet.to_string()),
@@ -1947,6 +1958,7 @@ mod tests {
             deployer: ContractDeployer::Address("ST000000000000000000002AMW42H".into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: Epoch::Specific(StacksEpochId::Epoch25),
+            is_requirement: false,
         };
 
         let _ = session.deploy_contract(&contract, false, None);

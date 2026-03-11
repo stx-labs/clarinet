@@ -43,7 +43,7 @@ afterAll(() => {
   deleteMetadataFsCache();
 });
 
-describe("simnet remote interactions", async () => {
+describe("simnet remote interactions", { retry: 2 }, async () => {
   const simnet = await getSDK();
 
   it("can call a remote contract", async () => {
@@ -131,7 +131,7 @@ describe("simnet remote interactions", async () => {
   });
 });
 
-describe("repl settings", async () => {
+describe("repl settings", { retry: 2 }, async () => {
   it("can use testnet wallet addresses by default", async () => {
     const simnet = await initSimnet("tests/fixtures/ManifestWithMXSDefault.toml", false);
     const accounts = simnet.getAccounts();

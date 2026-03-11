@@ -1,3 +1,4 @@
+use clarity::types::StacksEpochId;
 use clarity::vm::Value as ClarityValue;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use gloo_utils::format::JsValueSerdeExt;
@@ -12,7 +13,7 @@ async fn init_sdk() -> SDK {
     let js_noop = JsFunction::new_no_args("return");
     let mut sdk = SDK::new(js_noop, None);
     let _ = sdk.init_empty_session(JsValue::undefined()).await;
-    sdk.set_epoch(EpochString::new("3.0"));
+    sdk.set_epoch(EpochString::new(&StacksEpochId::latest().to_string()));
     sdk
 }
 
@@ -39,7 +40,7 @@ async fn it_can_execute_clarity_code() {
 async fn it_can_set_epoch() {
     let mut sdk = init_sdk().await;
     assert_eq!(sdk.block_height(), 1);
-    assert_eq!(sdk.current_epoch(), "3.0");
+    assert_eq!(sdk.current_epoch(), StacksEpochId::latest().to_string());
 }
 
 #[wasm_bindgen_test]

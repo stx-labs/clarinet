@@ -7,7 +7,7 @@ use clarity_repl::clarity::vm::diagnostic::{
     Diagnostic as ClarityDiagnostic, Level as ClarityLevel,
 };
 use crossbeam_channel::unbounded;
-use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use tower_lsp_server::{LspService, Server};
 
 use self::native_bridge::LspNativeBridge;
@@ -50,7 +50,7 @@ async fn do_run_lsp() -> Result<(), String> {
 
 pub fn clarity_diagnostics_to_tower_lsp_type(
     diagnostics: &[ClarityDiagnostic],
-) -> Vec<tower_lsp_server::lsp_types::Diagnostic> {
+) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     diagnostics
         .iter()
         .map(clarity_diagnostic_to_tower_lsp_type)
@@ -59,7 +59,7 @@ pub fn clarity_diagnostics_to_tower_lsp_type(
 
 pub fn clarity_diagnostic_to_tower_lsp_type(
     diagnostic: &ClarityDiagnostic,
-) -> tower_lsp_server::lsp_types::Diagnostic {
+) -> tower_lsp_server::ls_types::Diagnostic {
     let range = match diagnostic.spans.len() {
         0 => Range::default(),
         _ => Range {
@@ -95,7 +95,6 @@ pub fn clarity_diagnostic_to_tower_lsp_type(
 fn test_opening_counter_contract_should_return_fresh_analysis() {
     use std::sync::mpsc::channel;
 
-    use clarinet_files::FileLocation;
     use clarity_lsp::backend::{LspNotification, LspNotificationResponse};
     use crossbeam_channel::unbounded;
 
@@ -118,7 +117,7 @@ fn test_opening_counter_contract_should_return_fresh_analysis() {
         counter_path.push("counter");
         counter_path.push("contracts");
         counter_path.push("counter.clar");
-        FileLocation::from_path(counter_path)
+        counter_path
     };
 
     let _ = notification_tx.send(LspNotification::ContractOpened(contract_location.clone()));
@@ -146,7 +145,6 @@ fn test_opening_counter_contract_should_return_fresh_analysis() {
 fn test_opening_counter_manifest_should_return_fresh_analysis() {
     use std::sync::mpsc::channel;
 
-    use clarinet_files::FileLocation;
     use clarity_lsp::backend::{LspNotification, LspNotificationResponse};
     use crossbeam_channel::unbounded;
 
@@ -168,7 +166,7 @@ fn test_opening_counter_manifest_should_return_fresh_analysis() {
         manifest_path.push("examples");
         manifest_path.push("counter");
         manifest_path.push("Clarinet.toml");
-        FileLocation::from_path(manifest_path)
+        manifest_path
     };
 
     let _ = notification_tx.send(LspNotification::ManifestOpened(manifest_location.clone()));
@@ -195,7 +193,6 @@ fn test_opening_counter_manifest_should_return_fresh_analysis() {
 fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
     use std::sync::mpsc::channel;
 
-    use clarinet_files::FileLocation;
     use clarity_lsp::backend::LspNotification;
     use crossbeam_channel::unbounded;
 
@@ -217,9 +214,7 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
     manifest_location.push("simple-nft");
     manifest_location.push("Clarinet.toml");
 
-    let _ = notification_tx.send(LspNotification::ManifestOpened(FileLocation::from_path(
-        manifest_location,
-    )));
+    let _ = notification_tx.send(LspNotification::ManifestOpened(manifest_location));
     let response = response_rx.recv().expect("Unable to get response");
     let LspResponse::Notification(response) = response else {
         panic!("Unable to get response")

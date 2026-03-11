@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use clarity::vm::ast::ContractAST;
+use clarity::vm::errors::VmExecutionError;
 use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::functions::NativeFunctions::{self, Filter, Fold, Map};
 use clarity::vm::{EvalHook, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
+use serde::{Deserialize, Serialize};
 
 type ExprCoverage = HashMap<u64, u64>;
 type ExecutableLines = HashMap<u32, Vec<u64>>;
@@ -217,7 +219,7 @@ impl EvalHook for CoverageHook {
         _env: &mut clarity::vm::Environment,
         _context: &clarity::vm::LocalContext,
         _expr: &SymbolicExpression,
-        _res: &Result<clarity::vm::Value, clarity::vm::errors::Error>,
+        _res: &Result<clarity::vm::Value, VmExecutionError>,
     ) {
     }
 

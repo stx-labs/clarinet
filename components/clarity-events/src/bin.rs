@@ -1,19 +1,15 @@
-extern crate serde;
-
-extern crate serde_derive;
-
-#[macro_use]
-extern crate serde_json;
-
 pub mod analysis;
+
+use std::path::Path;
 
 use analysis::{EventCollector, Settings};
 use clap::{Parser, Subcommand};
-use clarinet_files::FileLocation;
+use clarinet_files::paths;
 use clarity_repl::clarity::analysis::type_checker::v2_05::TypeChecker;
 use clarity_repl::clarity::costs::LimitedCostTracker;
 use clarity_repl::clarity::EvaluationResult;
 use clarity_repl::repl::{Session, SessionSettings};
+use serde_json::json;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -46,8 +42,7 @@ pub fn main() {
 
     match opts.command {
         Command::Scan(cmd) => {
-            let file = FileLocation::from_path_string(&cmd.file_path).unwrap();
-            let snippet = file.read_content_as_utf8().unwrap();
+            let snippet = paths::read_content_as_utf8(Path::new(&cmd.file_path)).unwrap();
             let mut session = Session::new(SessionSettings::default());
             let mut contract_analysis = match session.eval(snippet, false) {
                 Ok(execution) => match execution.result {

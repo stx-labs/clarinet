@@ -1,4 +1,4 @@
-use lsp_types::{
+use ls_types::{
     CompletionOptions, HoverProviderCapability, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions,
@@ -16,6 +16,7 @@ pub struct InitializationOptions {
     go_to_definition: bool,
     hover: bool,
     signature_help: bool,
+    pub static_cost_analysis: bool,
 }
 
 impl Default for InitializationOptions {
@@ -29,6 +30,7 @@ impl Default for InitializationOptions {
             go_to_definition: true,
             hover: true,
             signature_help: true,
+            static_cost_analysis: false,
         }
     }
 }
@@ -53,19 +55,19 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             false => None,
         },
         document_symbol_provider: match initialization_options.document_symbols {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         document_formatting_provider: match initialization_options.formatting {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         document_range_formatting_provider: match initialization_options.formatting {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         definition_provider: match initialization_options.go_to_definition {
-            true => Some(lsp_types::OneOf::Left(true)),
+            true => Some(ls_types::OneOf::Left(true)),
             false => None,
         },
         signature_help_provider: match initialization_options.signature_help {
@@ -76,6 +78,11 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             }),
             false => None,
         },
+        code_lens_provider: initialization_options.static_cost_analysis.then_some({
+            ls_types::CodeLensOptions {
+                resolve_provider: Some(false),
+            }
+        }),
         ..ServerCapabilities::default()
     }
 }

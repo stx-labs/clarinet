@@ -34,7 +34,7 @@ The SDK mainly relies on two components:
 - the TS component: `components/clarinet-sdk`
 
 To work with these two packages locally, the first one needs to be built with
-wasm-pack (install [wasm-pack](https://rustwasm.github.io/wasm-pack/installer)).
+wasm-pack (install [wasm-pack](https://drager.github.io/wasm-pack/installer)).
 
 ```sh
 # build the wasm package

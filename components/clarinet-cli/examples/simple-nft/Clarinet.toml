@@ -17,3 +17,7 @@ epoch = 2.4
 [repl.analysis]
 passes = ["check_checker"]
 check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+
+# We don't want linter diagnostics in this test
+[repl.analysis.lint_groups]
+all = false

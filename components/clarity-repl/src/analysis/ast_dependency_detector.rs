@@ -1,17 +1,17 @@
 #![allow(unused_variables)]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::types::StacksEpochId;
 pub use clarity::vm::analysis::types::ContractAnalysis;
-use clarity::vm::analysis::CheckErrors;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::representations::{SymbolicExpression, TraitDefinition};
 use clarity::vm::types::{FunctionSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpressionType};
+use clarity_types::errors::analysis::RuntimeCheckErrorKind;
 use clarity_types::types::signatures::CallableSubtype;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceSubtype, TraitIdentifier, TypeSignature,
@@ -20,7 +20,6 @@ use clarity_types::types::{
 
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::repl::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 
 pub static DEFAULT_NAME: LazyLock<ClarityName> = LazyLock::new(|| ClarityName::from("placeholder"));
 
@@ -262,7 +261,7 @@ impl<'a> ASTDependencyDetector<'a> {
     pub fn order_contracts<'deps>(
         dependencies: &'deps BTreeMap<QualifiedContractIdentifier, DependencySet>,
         contract_epochs: &HashMap<QualifiedContractIdentifier, StacksEpochId>,
-    ) -> Result<Vec<&'deps QualifiedContractIdentifier>, CheckErrors> {
+    ) -> Result<Vec<&'deps QualifiedContractIdentifier>, RuntimeCheckErrorKind> {
         let mut lookup = BTreeMap::new();
         let mut reverse_lookup = Vec::new();
 
@@ -288,7 +287,9 @@ impl<'a> ASTDependencyDetector<'a> {
                     .get(&dep.contract_id)
                     .unwrap_or(&StacksEpochId::Epoch20);
                 if contract_epoch < dep_epoch {
-                    return Err(CheckErrors::NoSuchContract(dep.contract_id.to_string()));
+                    return Err(RuntimeCheckErrorKind::NoSuchContract(
+                        dep.contract_id.to_string(),
+                    ));
                 }
                 let Some(dep_id) = lookup.get(&dep.contract_id) else {
                     // No need to report an error here, it will be caught
@@ -310,7 +311,7 @@ impl<'a> ASTDependencyDetector<'a> {
                 let contract = reverse_lookup[*index];
                 contracts.push(contract.name.to_string());
             }
-            return Err(CheckErrors::CircularReference(contracts));
+            return Err(RuntimeCheckErrorKind::CircularReference(contracts));
         }
 
         Ok(sorted_indexes
@@ -933,12 +934,13 @@ impl GraphWalker {
 #[cfg(test)]
 mod tests {
     use ::clarity::vm::diagnostic::Diagnostic;
+    use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
+    use indoc::indoc;
 
     use super::*;
     use crate::repl::session::Session;
     use crate::repl::{
         ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, SessionSettings,
-        DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
     };
 
     fn build_ast(
@@ -952,6 +954,7 @@ mod tests {
             deployer: ContractDeployer::Transient,
             clarity_version: DEFAULT_CLARITY_VERSION,
             epoch: Epoch::Specific(DEFAULT_EPOCH),
+            is_requirement: false,
         };
         let (ast, diags, _) = session.interpreter.build_ast(&contract);
         Ok((
@@ -978,13 +981,13 @@ mod tests {
 
     #[test]
     fn no_deps() {
-        let session = Session::new(SessionSettings::default());
-        let snippet = "
-(define-public (hello)
-    (ok (print \"hello\"))
-)
-"
-        .to_string();
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (hello)
+                (ok (print \"hello\"))
+            )
+        ").to_string();
         match build_ast(&session, &snippet, None) {
             Ok((contract_identifier, ast, _)) => {
                 let mut contracts = BTreeMap::new();
@@ -1000,13 +1003,14 @@ mod tests {
 
     #[test]
     fn contract_call() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-public (hello (a int))
-    (ok u0)
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-public (hello (a int))
+                (ok u0)
+            )
+        ").to_string();
         let foo = match build_ast(&session, &snippet1, Some("foo")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1015,12 +1019,12 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet = "
-(define-public (call-foo)
-    (contract-call? .foo hello 4)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (call-foo)
+                (contract-call? .foo hello 4)
+            )
+        ").to_string();
         let test_identifier = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1037,13 +1041,14 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_local_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-public (hello (a int))
-    (ok u0)
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-public (hello (a int))
+                (ok u0)
+            )
+        ").to_string();
         let bar = match build_ast(&session, &snippet1, Some("bar")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1052,18 +1057,18 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet = "
-(define-trait my-trait
-    ((hello (int) (response uint uint)))
-)
-(define-trait dyn-trait
-    ((call-hello (<my-trait>) (response uint uint)))
-)
-(define-public (call-dyn (dt <dyn-trait>))
-    (contract-call? dt call-hello .bar)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-trait my-trait
+                ((hello (int) (response uint uint)))
+            )
+            (define-trait dyn-trait
+                ((call-hello (<my-trait>) (response uint uint)))
+            )
+            (define-public (call-dyn (dt <dyn-trait>))
+                (contract-call? dt call-hello .bar)
+            )
+        ").to_string();
         let test_identifier = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1080,16 +1085,17 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_remote_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-trait my-trait
-    ((hello (int) (response uint uint)))
-)
-(define-public (hello (a int))
-    (ok u0)
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-trait my-trait
+                ((hello (int) (response uint uint)))
+            )
+            (define-public (hello (a int))
+                (ok u0)
+            )
+        ").to_string();
         let bar = match build_ast(&session, &snippet1, Some("bar")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1098,16 +1104,16 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet = "
-(use-trait my-trait .bar.my-trait)
-(define-trait dyn-trait
-    ((call-hello (<my-trait>) (response uint uint)))
-)
-(define-public (call-dyn (dt <dyn-trait>))
-    (contract-call? dt call-hello .bar)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait my-trait .bar.my-trait)
+            (define-trait dyn-trait
+                ((call-hello (<my-trait>) (response uint uint)))
+            )
+            (define-public (call-dyn (dt <dyn-trait>))
+                (contract-call? dt call-hello .bar)
+            )
+        ").to_string();
         let test_identifier = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1124,13 +1130,14 @@ mod tests {
 
     #[test]
     fn pass_contract_local() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-public (hello (a int))
-    (ok u0)
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-public (hello (a int))
+                (ok u0)
+            )
+        ").to_string();
         let bar = match build_ast(&session, &snippet1, Some("bar")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1139,11 +1146,12 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet2 = "
-(define-trait my-trait
-    ((hello (int) (response uint uint)))
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet2 = indoc!("
+            (define-trait my-trait
+                ((hello (int) (response uint uint)))
+            )
+        ").to_string();
         let my_trait = match build_ast(&session, &snippet2, Some("my-trait")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1152,16 +1160,16 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet = "
-(use-trait my-trait .my-trait.my-trait)
-(define-private (pass-trait (a <my-trait>))
-    (print a)
-)
-(define-public (call-it)
-    (ok (pass-trait .bar))
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait my-trait .my-trait.my-trait)
+            (define-private (pass-trait (a <my-trait>))
+                (print a)
+            )
+            (define-public (call-it)
+                (ok (pass-trait .bar))
+            )
+        ").to_string();
         let test_identifier = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1186,17 +1194,20 @@ mod tests {
 
     #[test]
     fn nested_trait_in_optional_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
-(define-public (hello) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let trait_snippet = indoc!("
+            (define-trait my-trait ((hello () (response bool uint))))
+            (define-public (hello) (ok true))
+        ").to_string();
         let my_trait = deploy_snippet(&session, &trait_snippet, Some("my_trait"), &mut contracts);
 
-        let callee_snippet = "
-(use-trait my-trait .my_trait.my-trait)
-(define-public (call-mt (mt (optional <my-trait>))) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let callee_snippet = indoc!("
+            (use-trait my-trait .my_trait.my-trait)
+            (define-public (call-mt (mt (optional <my-trait>))) (ok true))
+        ").to_string();
         let _ = deploy_snippet(&session, &callee_snippet, Some("callee"), &mut contracts);
 
         let caller_snippet =
@@ -1212,17 +1223,20 @@ mod tests {
 
     #[test]
     fn nested_trait_in_response_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
-(define-public (hello) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let trait_snippet = indoc!("
+            (define-trait my-trait ((hello () (response bool uint))))
+            (define-public (hello) (ok true))
+        ").to_string();
         let my_trait = deploy_snippet(&session, &trait_snippet, Some("my_trait"), &mut contracts);
 
-        let callee_snippet = "
-(use-trait my-trait .my_trait.my-trait)
-(define-public (call-mt (mt (response <my-trait> uint))) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let callee_snippet = indoc!("
+            (use-trait my-trait .my_trait.my-trait)
+            (define-public (call-mt (mt (response <my-trait> uint))) (ok true))
+        ").to_string();
         let _ = deploy_snippet(&session, &callee_snippet, Some("callee"), &mut contracts);
 
         let caller_snippet =
@@ -1238,17 +1252,20 @@ mod tests {
 
     #[test]
     fn nested_trait_in_tuple_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
-(define-public (hello) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let trait_snippet = indoc!("
+            (define-trait my-trait ((hello () (response bool uint))))
+            (define-public (hello) (ok true))
+        ").to_string();
         let my_trait = deploy_snippet(&session, &trait_snippet, Some("my_trait"), &mut contracts);
 
-        let callee_snippet = "
-(use-trait my-trait .my_trait.my-trait)
-(define-public (call-mt (mt { t: <my-trait> })) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let callee_snippet = indoc!("
+            (use-trait my-trait .my_trait.my-trait)
+            (define-public (call-mt (mt { t: <my-trait> })) (ok true))
+        ").to_string();
         let _ = deploy_snippet(&session, &callee_snippet, Some("callee"), &mut contracts);
 
         let caller_snippet =
@@ -1264,17 +1281,20 @@ mod tests {
 
     #[test]
     fn nested_trait_in_list_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
-(define-public (hello) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let trait_snippet = indoc!("
+            (define-trait my-trait ((hello () (response bool uint))))
+            (define-public (hello) (ok true))
+        ").to_string();
         let my_trait = deploy_snippet(&session, &trait_snippet, Some("my_trait"), &mut contracts);
 
-        let callee_snippet = "
-(use-trait my-trait .my_trait.my-trait)
-(define-public (call-mt (mt (list 4 <my-trait>))) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let callee_snippet = indoc!("
+            (use-trait my-trait .my_trait.my-trait)
+            (define-public (call-mt (mt (list 4 <my-trait>))) (ok true))
+        ").to_string();
         let _ = deploy_snippet(&session, &callee_snippet, Some("callee"), &mut contracts);
 
         let caller_snippet =
@@ -1291,17 +1311,20 @@ mod tests {
 
     #[test]
     fn nested_trait_in_composite_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let trait_snippet = "(define-trait my-trait ((hello () (response bool uint))))
-(define-public (hello) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let trait_snippet = indoc!("
+            (define-trait my-trait ((hello () (response bool uint))))
+            (define-public (hello) (ok true))
+        ").to_string();
         let my_trait = deploy_snippet(&session, &trait_snippet, Some("my_trait"), &mut contracts);
 
-        let callee_snippet = "
-(use-trait my-trait .my_trait.my-trait)
-(define-public (call-mt (mt (response { t: (optional <my-trait>) } uint))) (ok true))"
-            .to_string();
+        #[rustfmt::skip]
+        let callee_snippet = indoc!("
+            (use-trait my-trait .my_trait.my-trait)
+            (define-public (call-mt (mt (response { t: (optional <my-trait>) } uint))) (ok true))
+        ").to_string();
         let _ = deploy_snippet(&session, &callee_snippet, Some("callee"), &mut contracts);
 
         let caller_snippet =
@@ -1318,13 +1341,14 @@ mod tests {
 
     #[test]
     fn impl_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-trait something
-    ((hello (int) (response uint uint)))
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-trait something
+                ((hello (int) (response uint uint)))
+            )
+        ").to_string();
         let other = match build_ast(&session, &snippet1, Some("other")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1333,13 +1357,13 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet = "
-(impl-trait .other.something)
-(define-public (hello (a int))
-    (ok u0)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (impl-trait .other.something)
+            (define-public (hello (a int))
+                (ok u0)
+            )
+        ").to_string();
         let test_identifier = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1358,13 +1382,14 @@ mod tests {
 
     #[test]
     fn use_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-trait something
-    ((hello (int) (response uint uint)))
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-trait something
+                ((hello (int) (response uint uint)))
+            )
+        ").to_string();
         let other = match build_ast(&session, &snippet1, Some("other")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1373,10 +1398,10 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet = "
-(use-trait my-trait .other.something)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait my-trait .other.something)
+        ").to_string();
         let test_identifier = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1395,14 +1420,14 @@ mod tests {
 
     #[test]
     fn unresolved_contract_call() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet = "
-(define-public (call-foo)
-    (contract-call? .foo hello 4)
-)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (call-foo)
+                (contract-call? .foo hello 4)
+            )
+        ").to_string();
         let _ = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1419,16 +1444,16 @@ mod tests {
 
     #[test]
     fn dynamic_contract_call_unresolved_trait() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet = "
-(use-trait my-trait .bar.my-trait)
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (use-trait my-trait .bar.my-trait)
 
-(define-public (call-dyn (dt <my-trait>))
-    (contract-call? dt call-hello .bar)
-)
-"
-        .to_string();
+            (define-public (call-dyn (dt <my-trait>))
+                (contract-call? dt call-hello .bar)
+            )
+        ").to_string();
         let _ = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1445,13 +1470,14 @@ mod tests {
 
     #[test]
     fn contract_call_top_level() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-public (hello (a int))
-    (ok u0)
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-public (hello (a int))
+                (ok u0)
+            )
+        ").to_string();
         let foo = match build_ast(&session, &snippet1, Some("foo")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1477,13 +1503,14 @@ mod tests {
 
     #[test]
     fn avoid_bad_type() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-public (hello (a (list principal)))
-    (ok u0)
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-public (hello (a (list principal)))
+                (ok u0)
+            )
+        ").to_string();
         let foo = match build_ast(&session, &snippet1, Some("foo")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1509,13 +1536,14 @@ mod tests {
 
     #[test]
     fn contract_stored_in_constant() {
-        let session = Session::new(SessionSettings::default());
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet1 = "
-(define-public (hello (a int))
-    (ok u0)
-)"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet1 = indoc!("
+            (define-public (hello (a int))
+                (ok u0)
+            )
+        ").to_string();
         let foo = match build_ast(&session, &snippet1, Some("foo")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));
@@ -1524,11 +1552,11 @@ mod tests {
             Err(_) => panic!("expected success"),
         };
 
-        let snippet = "
-(define-constant foo-contract .foo)
-(contract-call? foo-contract .test)
-"
-        .to_string();
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant foo-contract .foo)
+            (contract-call? foo-contract .test)
+        ").to_string();
         let test_identifier = match build_ast(&session, &snippet, Some("test")) {
             Ok((contract_identifier, ast, _)) => {
                 contracts.insert(contract_identifier.clone(), (DEFAULT_CLARITY_VERSION, ast));

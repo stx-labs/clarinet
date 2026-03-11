@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use clarity::vm::ClarityVersion;
-use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use clarity_repl::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};
 use clarity_repl::clarity::functions::define::DefineFunctions;
 use clarity_repl::clarity::vm::types::{
     QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
 };
 use clarity_repl::clarity::{ClarityName, SymbolicExpression};
-use lsp_types::Range;
+use ls_types::Range;
 
 use super::helpers::span_to_range;
 #[cfg(target_arch = "wasm32")]
@@ -519,30 +519,19 @@ impl<'a> ASTVisitor<'a> for Definitions {
     fn traverse_let(
         &mut self,
         expr: &'a SymbolicExpression,
-        bindings: &HashMap<&'a ClarityName, &'a SymbolicExpression>,
+        bindings: &HashMap<&'a ClarityName, LetBinding<'a>>,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        let local_scope = || -> Option<HashMap<ClarityName, Range>> {
-            let mut result = HashMap::new();
-
-            let binding_exprs = expr.match_list()?.get(1)?.match_list()?;
-            for binding in binding_exprs {
-                if let Some(name) = binding
-                    .match_list()
-                    .and_then(|l| l.split_first())
-                    .and_then(|(name, _)| name.match_atom())
-                {
-                    result.insert(name.to_owned(), span_to_range(&binding.span));
-                }
-            }
-            Some(result)
-        };
-        if let Some(local_scope) = local_scope() {
+        let local_scope: HashMap<ClarityName, Range> = bindings
+            .iter()
+            .map(|(name, binding)| ((*name).clone(), span_to_range(&binding.name_span)))
+            .collect();
+        if !local_scope.is_empty() {
             self.local.insert(expr.id, local_scope);
         }
 
         for binding in bindings.values() {
-            if !self.traverse_expr(binding) {
+            if !self.traverse_expr(binding.value) {
                 return false;
             }
         }
@@ -610,15 +599,33 @@ pub fn get_public_function_definitions(
     definitions: &mut HashMap<ClarityName, Range>,
     expressions: &[SymbolicExpression],
 ) {
+    get_function_definitions(definitions, expressions, false);
+}
+
+pub fn get_all_function_definitions(
+    definitions: &mut HashMap<ClarityName, Range>,
+    expressions: &[SymbolicExpression],
+) {
+    get_function_definitions(definitions, expressions, true);
+}
+
+fn get_function_definitions(
+    definitions: &mut HashMap<ClarityName, Range>,
+    expressions: &[SymbolicExpression],
+    include_private: bool,
+) {
     for expression in expressions {
         if let Some((function_name, args)) = expression
             .match_list()
             .and_then(|l| l.split_first())
             .and_then(|(function_name, args)| Some((function_name.match_atom()?, args)))
         {
-            if let Some(DefineFunctions::PublicFunction | DefineFunctions::ReadOnlyFunction) =
-                DefineFunctions::lookup_by_name(function_name)
-            {
+            let matches = match DefineFunctions::lookup_by_name(function_name) {
+                Some(DefineFunctions::PublicFunction | DefineFunctions::ReadOnlyFunction) => true,
+                Some(DefineFunctions::PrivateFunction) => include_private,
+                _ => false,
+            };
+            if matches {
                 if let Some(function_name) = args
                     .split_first()
                     .and_then(|(args_list, _)| args_list.match_list()?.split_first())
@@ -669,7 +676,7 @@ mod definitions_visitor_tests {
     use clarity_repl::clarity::ast::build_ast;
     use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
     use clarity_repl::clarity::{ClarityVersion, StacksEpochId, SymbolicExpression};
-    use lsp_types::{Position, Range};
+    use ls_types::{Position, Range};
 
     use super::{DefinitionLocation, Definitions};
 
@@ -742,7 +749,7 @@ mod definitions_visitor_tests {
         assert_eq!(tokens.keys().next(), Some(&(1, 22)));
         assert_eq!(
             tokens.values().next(),
-            Some(&DefinitionLocation::Internal(new_range(0, 6, 0, 15)))
+            Some(&DefinitionLocation::Internal(new_range(0, 7, 0, 11)))
         );
     }
 

@@ -1,18 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt::Write;
 
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
 pub mod diagnostic_digest;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod onchain;
 pub mod requirements;
 pub mod types;
 
-use clarinet_files::{FileAccessor, FileLocation, NetworkManifest, ProjectManifest, StacksNetwork};
+use std::path::Path;
+
+use clarinet_defaults::DEFAULT_EPOCH;
+use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::clarity::vm::ast::ContractAST;
 use clarity_repl::clarity::vm::diagnostic::Diagnostic;
@@ -28,8 +26,9 @@ use clarity_repl::repl::boot::{
 use clarity_repl::repl::session::ExecutionResultMap;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
-    SessionSettings, DEFAULT_EPOCH,
+    SessionSettings,
 };
+use clarity_repl::utils::{remove_env_simnet, Environment};
 use types::{
     ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,
     EpochSpec, RequirementPublishSpecification, StxTransferSpecification, TransactionSpecification,
@@ -42,12 +41,26 @@ use self::types::{
 
 pub fn setup_session_with_deployment(
     manifest: &ProjectManifest,
-    deployment: &DeploymentSpecification,
+    deployment: &mut DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> DeploymentGenerationArtifacts {
+    // Mark contracts not in the project manifest as requirements.
+    // This is needed when the deployment plan is loaded from YAML,
+    // where `is_requirement` is not serialized. We match by location
+    // (absolute path) rather than contract name because requirements
+    // can share a name with a project contract.
+    for batch in deployment.plan.batches.iter_mut() {
+        for tx in batch.transactions.iter_mut() {
+            if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
+                if !manifest.contracts_settings.contains_key(&spec.location) {
+                    spec.is_requirement = true;
+                }
+            }
+        }
+    }
+
     let mut session = initiate_session_from_manifest(manifest);
-    let contracts =
-        update_session_with_deployment_plan(&mut session, deployment, contracts_asts, None);
+    let contracts = update_session_with_deployment_plan(&mut session, deployment, contracts_asts);
 
     let deps = BTreeMap::new();
     let mut diags = HashMap::new();
@@ -87,7 +100,7 @@ pub fn initiate_session_from_manifest(manifest: &ProjectManifest) -> Session {
     let settings = SessionSettings {
         repl_settings: manifest.repl_settings.clone(),
         disk_cache_enabled: true,
-        cache_location: Some(manifest.project.cache_location.to_path_buf()),
+        cache_location: Some(manifest.project.cache_location.clone()),
         override_boot_contracts_source: manifest.project.override_boot_contracts_source.clone(),
         ..Default::default()
     };
@@ -166,7 +179,6 @@ pub fn update_session_with_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
-    forced_min_epoch: Option<StacksEpochId>,
 ) -> ExecutionResultMap {
     update_session_with_genesis_accounts(session, deployment);
 
@@ -174,8 +186,8 @@ pub fn update_session_with_deployment_plan(
 
     let mut contracts = BTreeMap::new();
     for batch in deployment.plan.batches.iter() {
-        let epoch: StacksEpochId = match (batch.epoch, forced_min_epoch) {
-            (Some(epoch), _) => epoch.into(),
+        let epoch: StacksEpochId = match batch.epoch {
+            Some(epoch) => epoch.into(),
             _ => DEFAULT_EPOCH,
         };
         session.advance_chain_tip(1);
@@ -242,6 +254,7 @@ fn handle_emulated_contract_publish(
         name: tx.contract_name.to_string(),
         clarity_version: tx.clarity_version,
         epoch: clarity_repl::repl::Epoch::Specific(epoch),
+        is_requirement: tx.is_requirement,
     };
 
     let result = session.deploy_contract(&contract, false, contract_ast);
@@ -283,19 +296,21 @@ pub async fn generate_default_deployment(
     network: &StacksNetwork,
     no_batch: bool,
     file_accessor: Option<&dyn FileAccessor>,
-    forced_min_epoch: Option<StacksEpochId>,
-) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
+    api_base_url: Option<&str>,
+    environment: Environment,
+) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
+    let mut found_env_simnet = false;
     let network_manifest = match file_accessor {
-        None => NetworkManifest::from_project_manifest_location(
-            &manifest.location,
+        None => NetworkManifest::from_project_root(
+            &manifest.root_dir,
             &network.get_networks(),
             manifest.use_mainnet_wallets(),
             Some(&manifest.project.cache_location),
             None,
         )?,
         Some(file_accessor) => {
-            NetworkManifest::from_project_manifest_location_using_file_accessor(
-                &manifest.location,
+            NetworkManifest::from_project_root_using_file_accessor(
+                &manifest.root_dir,
                 &network.get_networks(),
                 manifest.use_mainnet_wallets(),
                 file_accessor,
@@ -425,16 +440,8 @@ pub async fn generate_default_deployment(
                 continue;
             }
 
-            // Resolve the relative path to the project root
-            let project_root = manifest
-                .location
-                .get_parent_location()
-                .map_err(|e| format!("Failed to get project root: {e}"))?;
-            let mut resolved_path = project_root.clone();
-            resolved_path
-                .append_path(file_path)
-                .map_err(|e| format!("Failed to resolve boot contract path {file_path}: {e}"))?;
-            let resolved_path_string = resolved_path.to_string();
+            let resolved_path = manifest.root_dir.join(file_path);
+            let resolved_path_string = resolved_path.to_string_lossy().to_string();
 
             // Load and validate the custom boot contract
             let custom_source = match file_accessor {
@@ -469,6 +476,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.clone(),
                 clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             };
 
             let (_, diagnostics, ast_success) = interpreter.build_ast(&temp_contract);
@@ -493,7 +501,6 @@ pub async fn generate_default_deployment(
 
     // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
     if let Some(ref requirements) = manifest.project.requirements {
-        let cache_location = &manifest.project.cache_location;
         let mut emulated_contracts_publish = HashMap::new();
         let mut requirements_publish = HashMap::new();
 
@@ -505,50 +512,38 @@ pub async fn generate_default_deployment(
                 .iter()
                 .any(|r| r.contract_id == SBTC_DEPOSIT_MAINNET_ADDRESS.to_string())
         {
-            queue.push_front((
+            queue.push_front(
                 QualifiedContractIdentifier::parse(&SBTC_DEPOSIT_MAINNET_ADDRESS.to_string())
                     .unwrap(),
-                None,
-            ));
+            );
         }
 
         // Load all the requirements
         // Some requirements are explicitly listed, some are discovered as we compute the ASTs.
         for requirement in requirements.iter() {
-            let contract_id = match QualifiedContractIdentifier::parse(&requirement.contract_id) {
-                Ok(contract_id) => contract_id,
-                Err(_e) => {
-                    return Err(format!(
-                        "malformatted contract_id: {}",
-                        requirement.contract_id
-                    ))
-                }
-            };
-            queue.push_front((contract_id, None));
+            let contract_id = QualifiedContractIdentifier::parse(&requirement.contract_id)
+                .map_err(|_e| format!("malformatted contract_id: {}", requirement.contract_id))?;
+            queue.push_front(contract_id);
         }
 
-        while let Some((contract_id, forced_clarity_version)) = queue.pop_front() {
+        while let Some(contract_id) = queue.pop_front() {
             if requirements_deps.contains_key(&contract_id) {
                 continue;
             }
 
             // Did we already get the source in a prior cycle?
-            let requirement_data = match requirements_data.remove(&contract_id) {
+            let (clarity_version, ast) = match requirements_data.remove(&contract_id) {
                 Some(requirement_data) => requirement_data,
                 None => {
                     // Download the code
                     let (source, epoch, clarity_version, contract_location) =
                         requirements::retrieve_contract(
                             &contract_id,
-                            cache_location,
+                            &manifest.project.cache_location,
                             &file_accessor,
+                            api_base_url,
                         )
                         .await?;
-
-                    let epoch = match forced_min_epoch {
-                        Some(min_epoch) => std::cmp::max(min_epoch, epoch),
-                        None => epoch,
-                    };
 
                     contract_epochs.insert(contract_id.clone(), epoch);
 
@@ -561,6 +556,7 @@ pub async fn generate_default_deployment(
                                 source: source.clone(),
                                 location: contract_location,
                                 clarity_version,
+                                is_requirement: true,
                             };
 
                             emulated_contracts_publish.insert(contract_id.clone(), data);
@@ -614,6 +610,7 @@ pub async fn generate_default_deployment(
                         deployer: ContractDeployer::ContractIdentifier(contract_id.clone()),
                         clarity_version,
                         epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                        is_requirement: true,
                     };
                     let (ast, _, _) = interpreter.build_ast(&contract);
                     (clarity_version, ast)
@@ -622,19 +619,7 @@ pub async fn generate_default_deployment(
 
             // Detect the eventual dependencies for this AST
             let mut contract_data = BTreeMap::new();
-            let (_, ast) = requirement_data;
-            let clarity_version = match forced_clarity_version {
-                Some(clarity_version) => clarity_version,
-                None => {
-                    let (_, _, clarity_version, _) = requirements::retrieve_contract(
-                        &contract_id,
-                        cache_location,
-                        &file_accessor,
-                    )
-                    .await?;
-                    clarity_version
-                }
-            };
+
             contract_data.insert(contract_id.clone(), (clarity_version, ast));
             let dependencies =
                 ASTDependencyDetector::detect_dependencies(&contract_data, &requirements_data);
@@ -654,7 +639,7 @@ pub async fn generate_default_deployment(
                         inferable_dependencies.into_iter().next()
                     {
                         for dependency in dependencies.iter() {
-                            queue.push_back((dependency.contract_id.clone(), None));
+                            queue.push_back(dependency.contract_id.clone());
                         }
                         requirements_deps.insert(contract_id.clone(), dependencies);
                         requirements_data.insert(contract_id.clone(), (clarity_version, ast));
@@ -666,14 +651,14 @@ pub async fn generate_default_deployment(
                     // and we will keep the source in memory to avoid useless disk access.
                     for (_, dependencies) in inferable_dependencies.iter() {
                         for dependency in dependencies.iter() {
-                            queue.push_back((dependency.contract_id.clone(), None));
+                            queue.push_back(dependency.contract_id.clone());
                         }
                     }
                     requirements_data.insert(contract_id.clone(), (clarity_version, ast));
-                    queue.push_front((contract_id, None));
+                    queue.push_front(contract_id);
 
                     for non_inferable_contract_id in non_inferable_dependencies.into_iter() {
-                        queue.push_front((non_inferable_contract_id, None));
+                        queue.push_front(non_inferable_contract_id);
                     }
                 }
             };
@@ -681,13 +666,9 @@ pub async fn generate_default_deployment(
 
         // Avoid listing requirements as deployment transactions to the deployment specification on Mainnet
         if !matches!(network, StacksNetwork::Mainnet) && !simnet_remote_data {
-            let mut ordered_contracts_ids = match ASTDependencyDetector::order_contracts(
-                &requirements_deps,
-                &contract_epochs,
-            ) {
-                Ok(ordered_contracts) => ordered_contracts,
-                Err(e) => return Err(format!("unable to order requirements {e}")),
-            };
+            let mut ordered_contracts_ids =
+                ASTDependencyDetector::order_contracts(&requirements_deps, &contract_epochs)
+                    .map_err(|e| format!("unable to order requirements {e}"))?;
 
             // Filter out boot contracts from requirement dependencies
             ordered_contracts_ids.retain(|contract_id| !boot_contracts_ids.contains(contract_id));
@@ -723,26 +704,17 @@ pub async fn generate_default_deployment(
     let mut contracts = HashMap::new();
     let mut contracts_sources = HashMap::new();
 
-    let base_location = manifest.location.clone().get_parent_location()?;
-
+    let project_root = &manifest.root_dir;
     let sources: HashMap<String, String> = match file_accessor {
         None => {
             let mut sources = HashMap::new();
             for (_, contract_config) in manifest.contracts.iter() {
-                let mut contract_location = base_location.clone();
-                contract_location
-                    .append_path(contract_config.expect_contract_path_as_str())
-                    .map_err(|_| {
-                        format!(
-                            "unable to build path for contract {}",
-                            contract_config.expect_contract_path_as_str()
-                        )
-                    })?;
-
-                let source = contract_location
-                    .read_content_as_utf8()
-                    .map_err(|_| format!("unable to find contract at {contract_location}"))?;
-                sources.insert(contract_location.to_string(), source);
+                let contract_location =
+                    project_root.join(contract_config.expect_contract_path_as_str());
+                let source = paths::read_content_as_utf8(&contract_location).map_err(|_| {
+                    format!("unable to find contract at {}", contract_location.display())
+                })?;
+                sources.insert(contract_location.to_string_lossy().to_string(), source);
             }
             sources
         }
@@ -751,11 +723,9 @@ pub async fn generate_default_deployment(
                 .contracts
                 .values()
                 .map(|contract_config| {
-                    let mut contract_location = base_location.clone();
-                    contract_location
-                        .append_path(contract_config.expect_contract_path_as_str())
-                        .unwrap();
-                    contract_location.to_string()
+                    let contract_location =
+                        project_root.join(contract_config.expect_contract_path_as_str());
+                    contract_location.to_string_lossy().to_string()
                 })
                 .collect();
             file_accessor.read_files(contracts_location).await?
@@ -785,22 +755,25 @@ pub async fn generate_default_deployment(
             ));
         };
 
-        let mut contract_location = base_location.clone();
-        contract_location.append_path(contract_config.expect_contract_path_as_str())?;
-        let source = sources
-            .get(&contract_location.to_string())
+        let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
+        let mut source = sources
+            .get(&contract_location.to_string_lossy().to_string())
             .ok_or(format!(
                 "Invalid Clarinet.toml, source file not found for: {}",
                 &name
             ))?
             .clone();
 
+        if environment == Environment::OnChain {
+            let (clean, had_annotation) =
+                remove_env_simnet(source.clone()).unwrap_or((source, false));
+            source = clean;
+            found_env_simnet |= had_annotation;
+        }
+
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
 
-        let epoch = match forced_min_epoch {
-            Some(min_epoch) => std::cmp::max(min_epoch, contract_config.epoch.resolve()),
-            None => contract_config.epoch.resolve(),
-        };
+        let epoch = contract_config.epoch.resolve();
 
         contracts_sources.insert(
             contract_id.clone(),
@@ -810,6 +783,7 @@ pub async fn generate_default_deployment(
                 name: contract_name.to_string(),
                 clarity_version: contract_config.clarity_version,
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                is_requirement: false,
             },
         );
 
@@ -821,6 +795,7 @@ pub async fn generate_default_deployment(
                     source,
                     location: contract_location,
                     clarity_version: contract_config.clarity_version,
+                    is_requirement: false,
                 },
             )
         } else {
@@ -1001,7 +976,7 @@ pub async fn generate_default_deployment(
         session,
     };
 
-    Ok((deployment, artifacts))
+    Ok((deployment, artifacts, found_env_simnet))
 }
 
 fn add_transaction_to_epoch(
@@ -1019,42 +994,31 @@ fn add_transaction_to_epoch(
     epoch_transactions.push(transaction);
 }
 
-pub fn get_default_deployment_path(
-    manifest: &ProjectManifest,
-    network: &StacksNetwork,
-) -> Result<FileLocation, String> {
-    let mut deployment_path = manifest.location.get_project_root_location()?;
-    deployment_path.append_path("deployments")?;
-    deployment_path.append_path(match network {
-        StacksNetwork::Simnet => "default.simnet-plan.yaml",
-        StacksNetwork::Devnet => "default.devnet-plan.yaml",
-        StacksNetwork::Testnet => "default.testnet-plan.yaml",
-        StacksNetwork::Mainnet => "default.mainnet-plan.yaml",
-    })?;
-    Ok(deployment_path)
+pub fn get_default_deployment_path(network: &StacksNetwork) -> &'static str {
+    match network {
+        StacksNetwork::Simnet => "deployments/default.simnet-plan.yaml",
+        StacksNetwork::Devnet => "deployments/default.devnet-plan.yaml",
+        StacksNetwork::Testnet => "deployments/default.testnet-plan.yaml",
+        StacksNetwork::Mainnet => "deployments/default.mainnet-plan.yaml",
+    }
 }
 
 pub fn load_deployment(
-    manifest: &ProjectManifest,
-    deployment_plan_location: &FileLocation,
+    project_root: &Path,
+    deployment_plan_path: &Path,
 ) -> Result<DeploymentSpecification, String> {
-    let project_root_location = manifest.location.get_project_root_location()?;
-    let spec = match DeploymentSpecification::from_config_file(
-        deployment_plan_location,
-        &project_root_location,
-    ) {
-        Ok(spec) => spec,
-        Err(msg) => {
-            return Err(format!(
-                "error: {deployment_plan_location} syntax incorrect\n{msg}"
-            ));
-        }
-    };
-    Ok(spec)
+    DeploymentSpecification::from_config_file(deployment_plan_path, project_root).map_err(|err| {
+        format!(
+            "error: {} syntax incorrect\n{err}",
+            deployment_plan_path.display()
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clarity::vm::types::TupleData;
     use clarity::vm::{ClarityName, ClarityVersion, Value};
     use clarity_repl::repl::clarity_values::to_raw_value;
@@ -1075,7 +1039,8 @@ mod tests {
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
             source: source.to_string(),
             clarity_version: ClarityVersion::Clarity2,
-            location: FileLocation::from_path_string("/contracts/contract_1.clar").unwrap(),
+            location: PathBuf::from("/contracts/contract_1.clar"),
+            is_requirement: false,
         };
 
         handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch)

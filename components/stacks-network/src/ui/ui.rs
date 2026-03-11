@@ -1,4 +1,4 @@
-use chainhook_sdk::types::{StacksBlockData, StacksMicroblockData, StacksTransactionData};
+use observer::types::{StacksBlockData, StacksMicroblockData, StacksTransactionData};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 

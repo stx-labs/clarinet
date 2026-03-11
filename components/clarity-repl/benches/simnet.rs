@@ -1,9 +1,9 @@
 use std::hint::black_box;
 
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::vm::{EvaluationResult, ExecutionResult, SymbolicExpression, Value as ClarityValue};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
-    DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
 };
 use clarity_types::types::QualifiedContractIdentifier;
 use divan::Bencher;
@@ -57,6 +57,7 @@ fn init_session() -> Session {
         deployer: ContractDeployer::DefaultDeployer,
         clarity_version: DEFAULT_CLARITY_VERSION,
         epoch: Epoch::Specific(DEFAULT_EPOCH),
+        is_requirement: false,
     };
 
     let _ = session.deploy_contract(&contract, false, None);

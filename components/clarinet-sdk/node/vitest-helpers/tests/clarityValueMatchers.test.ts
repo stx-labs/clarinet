@@ -227,6 +227,9 @@ describe("test simple clarity values assertions", () => {
     expect(() =>
       expect(Cl.buffer(Uint8Array.from(val))).not.toBeBuff(Uint8Array.from(val)),
     ).toThrow("the received Buffer does match the expected one");
+
+    // Allow hex strings
+    expect(Cl.buffer(Uint8Array.from(val))).toBeBuff("627463");
   });
 });
 

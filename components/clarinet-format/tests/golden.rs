@@ -3,6 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use clarinet_format::formatter::{ClarityFormatter, Indentation, Settings};
+use clarity::types::StacksEpochId;
+use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 
 /// This is strictly for reading top metadata from golden tests
 fn from_metadata(metadata: &str) -> Settings {
@@ -45,7 +47,7 @@ fn format_file_with_metadata(source: &str) -> String {
 
     let real_source = lines.collect::<Vec<&str>>().join("\n");
     let formatter = ClarityFormatter::new(settings);
-    formatter.format_file(&real_source)
+    formatter.format_file(&real_source, None)
 }
 #[test]
 fn test_irl_contracts() {
@@ -72,7 +74,10 @@ fn test_irl_contracts() {
             pretty_assertions::assert_eq!(result, intended, "Mismatch in file: {:?}", file_name);
             // parse resulting contract
             let (_statements, diagnostics, success) =
-                clarity::vm::ast::parser::v2::parse_collect_diagnostics(&result);
+                clarity::vm::ast::parser::v2::parse_collect_diagnostics(
+                    &result,
+                    StackDepthLimits::for_epoch(StacksEpochId::latest()),
+                );
 
             if !diagnostics.is_empty() {
                 println!("Result of re-parsing file: {}", file_name.to_str().unwrap());

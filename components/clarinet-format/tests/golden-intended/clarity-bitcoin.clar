@@ -266,13 +266,14 @@
       remaining: uint,
       txins: (list 8
         {
-        outpoint: {
-          hash: (buff 32),
-          index: uint,
-        },
-        scriptSig: (buff 256), ;; just big enough to hold a 2-of-3 multisig script
-        sequence: uint,
-      }),
+          outpoint: {
+            hash: (buff 32),
+            index: uint,
+          },
+          scriptSig: (buff 256), ;; just big enough to hold a 2-of-3 multisig script
+          sequence: uint,
+        }
+      ),
     }
       uint
     ))

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clarinet-defaults = { workspace = true }
 clarity = { workspace = true, default-features = false, features = ["developer-mode", "devtools"] }
 
 [dev-dependencies]

@@ -906,9 +906,12 @@
             (hashed-salted-namespace (hash160 (concat (concat namespace 0x2e) namespace-salt)))
             ;; Define the price function based on the provided parameters.
             (price-function {
-                buckets: (list p-func-b1 p-func-b2 p-func-b3 p-func-b4 p-func-b5 p-func-b6
-                    p-func-b7 p-func-b8 p-func-b9 p-func-b10 p-func-b11
-                    p-func-b12 p-func-b13 p-func-b14 p-func-b15 p-func-b16),
+                buckets: (list
+                    p-func-b1 p-func-b2 p-func-b3 p-func-b4 p-func-b5
+                    p-func-b6 p-func-b7 p-func-b8 p-func-b9
+                    p-func-b10 p-func-b11 p-func-b12 p-func-b13
+                    p-func-b14 p-func-b15 p-func-b16
+                ),
                 base: p-func-base,
                 coeff: p-func-coeff,
                 nonalpha-discount: p-func-non-alpha-discount,
@@ -1192,9 +1195,12 @@
             (namespace-props (unwrap! (map-get? namespaces namespace) ERR-NAMESPACE-NOT-FOUND))
             ;; Construct the new price function.
             (price-function {
-                buckets: (list p-func-b1 p-func-b2 p-func-b3 p-func-b4 p-func-b5 p-func-b6
-                    p-func-b7 p-func-b8 p-func-b9 p-func-b10 p-func-b11
-                    p-func-b12 p-func-b13 p-func-b14 p-func-b15 p-func-b16),
+                buckets: (list
+                    p-func-b1 p-func-b2 p-func-b3 p-func-b4 p-func-b5
+                    p-func-b6 p-func-b7 p-func-b8 p-func-b9
+                    p-func-b10 p-func-b11 p-func-b12 p-func-b13
+                    p-func-b14 p-func-b15 p-func-b16
+                ),
                 base: p-func-base,
                 coeff: p-func-coeff,
                 nonalpha-discount: p-func-non-alpha-discount,

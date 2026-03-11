@@ -1,0 +1,35 @@
+name: Nix
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**/CHANGELOG.md"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/CHANGELOG.md"
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  nix-ci:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04-arm
+          - macos-26
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: DeterminateSystems/determinate-nix-action@dbda91f6efef3ee627f56175120aa9543687d830  # v3.11.2
+      - uses: DeterminateSystems/flake-checker-action@3164002371bc90729c68af0e24d5aacf20d7c9f6  # v12
+      - run: nix run .#check-git-dependencies-hash
+      - run: nix flake check

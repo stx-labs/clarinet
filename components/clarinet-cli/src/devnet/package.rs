@@ -41,20 +41,16 @@ fn pack_to_stdout(package: ConfigurationPackage) -> Result<(), String> {
 }
 
 pub fn pack(file_name: Option<String>, project_manifest: ProjectManifest) -> Result<(), String> {
-    let deployment_path = get_default_deployment_path(&project_manifest, &StacksNetwork::Devnet)
-        .map_err(|e| format!("failed to get default deployment path: {e}"))?;
+    let project_root = &project_manifest.root_dir;
+    let default_deployment_path =
+        project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
 
-    let deployment_manifest = DeploymentSpecification::from_config_file(
-        &deployment_path,
-        &project_manifest
-            .location
-            .get_project_root_location()
-            .map_err(|e| format!("failed to get project root location: {e}"))?,
-    )
-    .map_err(|e| format!("failed to create deployment plan: {e}"))?;
+    let deployment_manifest =
+        DeploymentSpecification::from_config_file(&default_deployment_path, project_root)
+            .map_err(|e| format!("failed to create deployment plan: {e}"))?;
 
-    let network_manifest = NetworkManifest::from_project_manifest_location(
-        &project_manifest.location,
+    let network_manifest = NetworkManifest::from_project_root(
+        project_root,
         &StacksNetwork::Devnet.get_networks(),
         false,
         None,

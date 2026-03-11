@@ -38,6 +38,19 @@ export async function getSDK(options?: Options): Promise<Simnet> {
   return simnet;
 }
 
+// wrapper around `simnet.generateDeploymentPlan()` that loads wasm and pass process.cwd()
+export async function generateDeployement(manifestPath = "./Clarinet.toml") {
+  const simnet = await getSDK();
+
+  try {
+    await simnet.generateDeploymentPlan(process.cwd(), manifestPath);
+    return true;
+  } catch (e) {
+    console.warn(e)
+    return false;
+  }
+}
+
 // load wasm only once and memoize it
 function memoizedInit() {
   let simnet: Simnet | null = null;
@@ -50,6 +63,7 @@ function memoizedInit() {
       trackCoverage: boolean;
       trackPerformance?: boolean;
       performanceCostField?: string;
+      apiUrl?: string;
     },
   ) => {
     if (noCache || !simnet) {
@@ -57,9 +71,11 @@ function memoizedInit() {
     }
 
     // start a new simnet session
-    await simnet.initSession(process.cwd(), manifestPath);
+    await simnet.initSession(process.cwd(), manifestPath, options?.apiUrl ?? null);
     return simnet;
   };
 }
+
+
 
 export const initSimnet = memoizedInit();

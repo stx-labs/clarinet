@@ -1,22 +1,27 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use clarinet_files::FileLocation;
-use clarity_repl::repl::{
-    ClarityCodeSource, ClarityContract, ContractDeployer, DEFAULT_CLARITY_VERSION,
-};
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
+use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
+use indoc::{formatdoc, indoc};
 
 use super::changes::{Changes, FileCreation, FileDeletion, TOMLEdition};
 
+pub fn project_root_from_manifest_location(manifest_location: &Path) -> &Path {
+    manifest_location
+        .parent()
+        .expect("couldn't find project root directory")
+}
+
 pub struct GetChangesForRmContract {
-    manifest_location: FileLocation,
+    manifest_location: PathBuf,
     contract_name: String,
     changes: Vec<Changes>,
 }
 
 impl GetChangesForRmContract {
-    pub fn new(manifest_location: FileLocation, contract_name: String) -> Self {
+    pub fn new(manifest_location: PathBuf, contract_name: String) -> Self {
         Self {
             manifest_location,
             contract_name: contract_name.replace('.', "_"),
@@ -31,30 +36,28 @@ impl GetChangesForRmContract {
     }
     fn rm_test(&mut self) -> Result<(), String> {
         let name = format!("{}.test.ts", self.contract_name);
-        let mut f = self.manifest_location.get_project_root_location().unwrap();
-        f.append_path("tests")?;
-        f.append_path(&name)?;
+        let root = project_root_from_manifest_location(&self.manifest_location);
+        let f = root.join("tests").join(&name);
         if !f.exists() {
             return Ok(());
         }
         let change = FileDeletion {
             comment: format!("{} tests/{}", red!("Deleted file"), name),
-            path: f.to_string(),
+            path: f.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::RemoveFile(change));
         Ok(())
     }
     fn rm_template_contract(&mut self) -> Result<(), String> {
         let name = format!("{}.clar", self.contract_name);
-        let mut f = self.manifest_location.get_project_root_location().unwrap();
-        f.append_path("contracts")?;
-        f.append_path(&name)?;
+        let root = project_root_from_manifest_location(&self.manifest_location);
+        let f = root.join("contracts").join(&name);
         if !f.exists() {
-            return Err(format!("{f} doesn't exist"));
+            return Err(format!("{} doesn't exist", f.display()));
         }
         let change = FileDeletion {
             comment: format!("{} contracts/{}", red!("Deleted file"), name),
-            path: f.to_string(),
+            path: f.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::RemoveFile(change));
         Ok(())
@@ -79,22 +82,16 @@ impl GetChangesForRmContract {
 }
 
 pub struct GetChangesForNewContract {
-    manifest_location: FileLocation,
+    manifest_location: PathBuf,
     contract_name: String,
-    source: Option<String>,
     changes: Vec<Changes>,
 }
 
 impl GetChangesForNewContract {
-    pub fn new(
-        manifest_location: FileLocation,
-        contract_name: String,
-        source: Option<String>,
-    ) -> Self {
+    pub fn new(manifest_location: PathBuf, contract_name: String) -> Self {
         Self {
             manifest_location,
             contract_name: contract_name.replace('.', "_"),
-            source,
             changes: vec![],
         }
     }
@@ -109,95 +106,87 @@ impl GetChangesForNewContract {
     }
 
     fn create_template_contract(&mut self) -> Result<(), String> {
-        let content = if let Some(ref source) = self.source {
-            source.to_string()
-        } else {
-            format!(
-                r#";; title: {}
-;; version:
-;; summary:
-;; description:
+        let content = formatdoc! {"
+            ;; title: {}
+            ;; version:
+            ;; summary:
+            ;; description:
 
-;; traits
-;;
+            ;; traits
+            ;;
 
-;; token definitions
-;;
+            ;; token definitions
+            ;;
 
-;; constants
-;;
+            ;; constants
+            ;;
 
-;; data vars
-;;
+            ;; data vars
+            ;;
 
-;; data maps
-;;
+            ;; data maps
+            ;;
 
-;; public functions
-;;
+            ;; public functions
+            ;;
 
-;; read only functions
-;;
+            ;; read only functions
+            ;;
 
-;; private functions
-;;
+            ;; private functions
+            ;;
 
-"#,
-                self.contract_name
-            )
-        };
+        ", self.contract_name};
         let name = format!("{}.clar", self.contract_name);
-        let mut new_file = self.manifest_location.get_project_root_location().unwrap();
-        new_file.append_path("contracts")?;
-        new_file.append_path(&name)?;
+        let root = project_root_from_manifest_location(&self.manifest_location);
+        let new_file = root.join("contracts").join(&name);
         if new_file.exists() {
-            return Err(format!("{new_file} already exists"));
+            return Err(format!("{} already exists", new_file.display()));
         }
         let change = FileCreation {
             comment: format!("{} contracts/{}", green!("Created file"), name),
             content,
-            path: new_file.to_string(),
+            path: new_file.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::AddFile(change));
         Ok(())
     }
 
     fn create_template_test(&mut self) -> Result<(), String> {
-        let content = r#"
-import { describe, expect, it } from "vitest";
+        let content = indoc! {r#"
+            import { describe, expect, it } from "vitest";
 
-const accounts = simnet.getAccounts();
-const address1 = accounts.get("wallet_1")!;
+            const accounts = simnet.getAccounts();
+            const address1 = accounts.get("wallet_1")!;
 
-/*
-  The test below is an example. To learn more, read the testing documentation here:
-  https://docs.hiro.so/stacks/clarinet-js-sdk
-*/
+            /*
+            The test below is an example. To learn more, read the testing documentation here:
+            https://docs.stacks.co/clarinet/testing-with-clarinet-sdk
+            */
 
-describe("example tests", () => {
-  it("ensures simnet is well initialised", () => {
-    expect(simnet.blockHeight).toBeDefined();
-  });
+            describe("example tests", () => {
+            it("ensures simnet is well initialised", () => {
+                expect(simnet.blockHeight).toBeDefined();
+            });
 
-  // it("shows an example", () => {
-  //   const { result } = simnet.callReadOnlyFn("counter", "get-counter", [], address1);
-  //   expect(result).toBeUint(0);
-  // });
-});
-"#
+            // it("shows an example", () => {
+            //   const { result } = simnet.callReadOnlyFn("counter", "get-counter", [], address1);
+            //   expect(result).toBeUint(0);
+            // });
+            });
+        "#}
         .into();
 
         let name = format!("{}.test.ts", self.contract_name);
-        let mut new_file = self.manifest_location.get_project_root_location().unwrap();
-        new_file.append_path("tests")?;
-        new_file.append_path(&name)?;
+        let root = project_root_from_manifest_location(&self.manifest_location);
+        let new_file = root.join("tests").join(&name);
         if new_file.exists() {
-            return Err(format!("{new_file} already exists"));
+            return Err(format!("{} already exists", new_file.display()));
         }
         let change = FileCreation {
             comment: format!("{} tests/{}", green!("Created file"), name),
             content,
-            path: new_file.to_string(),
+            path: new_file.to_string_lossy().to_string(),
         };
         self.changes.push(Changes::AddFile(change));
         Ok(())
@@ -216,6 +205,7 @@ describe("example tests", () => {
             name: self.contract_name.clone(),
             clarity_version: DEFAULT_CLARITY_VERSION,
             epoch: clarity_repl::repl::Epoch::Latest,
+            is_requirement: false,
         };
         let mut contracts_to_add = HashMap::new();
         contracts_to_add.insert(self.contract_name.clone(), contract_config);

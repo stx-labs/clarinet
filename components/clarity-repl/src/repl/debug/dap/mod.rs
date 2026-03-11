@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::vm::callables::FunctionIdentifier;
 use clarity::vm::contexts::{ContractContext, Environment, GlobalContext, LocalContext};
-use clarity::vm::errors::Error;
+use clarity::vm::errors::VmExecutionError;
 use clarity::vm::representations::Span;
 use clarity::vm::{EvalHook, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_types::types::{
@@ -23,7 +24,6 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 use self::codec::{DebugAdapterCodec, ParseError};
 use super::{extract_watch_variable, AccessType, DebugState, State};
-use crate::repl::DEFAULT_EPOCH;
 
 pub mod codec;
 
@@ -1085,7 +1085,7 @@ impl EvalHook for DAPDebugger {
         env: &mut Environment,
         context: &LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, Error>,
+        res: &Result<Value, VmExecutionError>,
     ) {
         self.get_state().did_finish_eval(env, context, expr, res);
     }

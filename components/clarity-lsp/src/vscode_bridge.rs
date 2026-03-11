@@ -2,19 +2,19 @@ extern crate console_error_panic_hook;
 use std::panic;
 use std::sync::{Arc, RwLock};
 
-use clarinet_files::{FileAccessor, WASMFileSystemAccessor};
+use clarinet_files::{paths, FileAccessor, WASMFileSystemAccessor};
 use js_sys::{Function as JsFunction, Promise};
-use lsp_types::notification::{
+use ls_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     Initialized, Notification,
 };
-use lsp_types::request::{
-    Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest, Initialize,
-    RangeFormatting, Request, SignatureHelpRequest,
+use ls_types::request::{
+    CodeLensRequest, Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest,
+    Initialize, RangeFormatting, Request, SignatureHelpRequest,
 };
-use lsp_types::{
+use ls_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, MessageType, PublishDiagnosticsParams,
+    DidSaveTextDocumentParams, PublishDiagnosticsParams,
 };
 use serde::Serialize;
 use serde_wasm_bindgen::{from_value as decode_from_js, to_value as encode_to_js, Serializer};
@@ -71,6 +71,7 @@ impl LspVscodeBridge {
                     }
                 };
                 let uri = &params.text_document.uri;
+
                 if let Some(contract_location) = get_contract_location(uri) {
                     LspNotification::ContractOpened(contract_location.clone())
                 } else if let Some(manifest_location) = get_manifest_location(uri) {
@@ -146,9 +147,15 @@ impl LspVscodeBridge {
             }
         };
 
+        let should_refresh_code_lens = matches!(
+            method.as_str(),
+            DidOpenTextDocument::METHOD | DidSaveTextDocument::METHOD
+        );
+
         let mut editor_state_lock = EditorStateInput::RwLock(self.editor_state_lock.clone());
         let send_diagnostic = self.client_diagnostic_tx.clone();
         let send_notification = self.client_notification_tx.clone();
+        let send_request = self.backend_to_client_tx.clone();
         let file_accessor: Box<dyn FileAccessor> = Box::new(WASMFileSystemAccessor::new(
             self.backend_to_client_tx.clone(),
         ));
@@ -162,12 +169,8 @@ impl LspVscodeBridge {
                 if err.starts_with("No Clarinet.toml is associated to the contract") {
                     let _ = send_notification.call2(
                         &JsValue::NULL,
-                        &encode_to_js(&lsp_types::notification::ShowMessage::METHOD).unwrap(),
-                        &encode_to_js(&lsp_types::ShowMessageParams {
-                            typ: MessageType::WARNING,
-                            message: String::from(&err),
-                        })
-                        .unwrap(),
+                        &encode_to_js("clarity/noManifestWarning").unwrap(),
+                        &encode_to_js(&err).unwrap(),
                     );
                 }
                 return Err(JsValue::from(err));
@@ -177,7 +180,7 @@ impl LspVscodeBridge {
             }
 
             for (location, diags) in aggregated_diagnostics.into_iter() {
-                if let Ok(uri) = location.to_url_string()?.parse() {
+                if let Ok(uri) = paths::path_to_url_string(&location)?.parse() {
                     send_diagnostic.call1(
                         &JsValue::NULL,
                         &encode_to_js(&PublishDiagnosticsParams {
@@ -187,6 +190,13 @@ impl LspVscodeBridge {
                         })?,
                     )?;
                 }
+            }
+
+            if should_refresh_code_lens {
+                let _ = send_request.call1(
+                    &JsValue::NULL,
+                    &encode_to_js("workspace/codeLens/refresh").unwrap(),
+                );
             }
 
             Ok(JsValue::TRUE)
@@ -276,6 +286,16 @@ impl LspVscodeBridge {
                     &EditorStateInput::RwLock(self.editor_state_lock.clone()),
                 );
                 if let Ok(LspRequestResponse::Hover(response)) = lsp_response {
+                    return response.serialize(&serializer).map_err(|_| JsValue::NULL);
+                }
+            }
+
+            CodeLensRequest::METHOD => {
+                let lsp_response = process_request(
+                    LspRequest::CodeLens(decode_from_js(js_params)?),
+                    &EditorStateInput::RwLock(self.editor_state_lock.clone()),
+                );
+                if let Ok(LspRequestResponse::CodeLens(response)) = lsp_response {
                     return response.serialize(&serializer).map_err(|_| JsValue::NULL);
                 }
             }

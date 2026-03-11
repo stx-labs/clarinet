@@ -5,7 +5,7 @@
       "type": "clarinet",
       "request": "launch",
       "name": "Call .counter.increment",
-      "manifest": "${workspaceFolder}/clean/Clarinet.toml",
+      "manifest": "${workspaceFolder}/simple/Clarinet.toml",
       "expression": "(contract-call? .counter increment)"
     }
   ]

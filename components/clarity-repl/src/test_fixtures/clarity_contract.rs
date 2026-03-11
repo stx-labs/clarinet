@@ -1,30 +1,30 @@
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::types::StacksEpochId;
 use clarity::vm::ClarityVersion;
+use indoc::indoc;
 
-use crate::repl::{
-    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, DEFAULT_CLARITY_VERSION,
-    DEFAULT_EPOCH,
-};
+use crate::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, Epoch};
 
 impl ClarityContract {
     pub fn fixture() -> Self {
-        let snippet = [
-            "(define-data-var x uint u0)",
-            "(define-read-only (get-x)",
-            "  (var-get x))",
-            "(define-public (incr)",
-            "  (let ((new-x (+ (var-get x) u1)))",
-            "    (var-set x new-x)",
-            "    (ok new-x)))",
-        ]
-        .join("\n");
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var x uint u0)
+            (define-read-only (get-x)
+              (var-get x))
+            (define-public (incr)
+              (let ((new-x (+ (var-get x) u1)))
+                (var-set x new-x)
+                (ok new-x)))
+        ");
 
         Self {
-            code_source: ClarityCodeSource::ContractInMemory(snippet),
+            code_source: ClarityCodeSource::ContractInMemory(snippet.to_owned()),
             name: "contract".into(),
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: DEFAULT_CLARITY_VERSION,
             epoch: Epoch::Specific(DEFAULT_EPOCH),
+            is_requirement: false,
         }
     }
 }

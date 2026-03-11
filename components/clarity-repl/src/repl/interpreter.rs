@@ -2,6 +2,7 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
@@ -26,7 +27,7 @@ use clarity_types::Value;
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
 use super::settings::{ApiUrl, RemoteNetworkInfo};
-use super::{ClarityContract, DEFAULT_EPOCH};
+use super::ClarityContract;
 use crate::analysis::annotation::{Annotation, AnnotationKind};
 use crate::analysis::ast_dependency_detector::{ASTDependencyDetector, Dependency};
 use crate::analysis::{self};
@@ -279,14 +280,18 @@ impl ClarityInterpreter {
         )
         .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
-        // Run REPL-only analyses
-        let diagnostics = analysis::run_analysis(
-            &mut contract_analysis,
-            &mut analysis_db,
-            annotations,
-            &self.repl_settings.analysis,
-        )
-        .map_err(|mut diagnostics| diagnostics.pop().unwrap())?;
+        // Run REPL-only analyses (linter, check_checker, etc.)
+        let diagnostics = if !contract.is_requirement {
+            analysis::run_analysis(
+                &mut contract_analysis,
+                &mut analysis_db,
+                annotations,
+                &self.repl_settings.analysis,
+            )
+            .map_err(|mut diagnostics| diagnostics.pop().unwrap())?
+        } else {
+            vec![]
+        };
 
         Ok((contract_analysis, diagnostics))
     }
@@ -330,7 +335,7 @@ impl ClarityInterpreter {
         Some(format!("0x{value_hex}"))
     }
 
-    fn get_global_context(
+    pub fn get_global_context(
         &'_ mut self,
         epoch: StacksEpochId,
         cost_track: bool,
@@ -492,7 +497,7 @@ impl ClarityInterpreter {
         let mut emitted_events = global_context
             .event_batches
             .iter()
-            .flat_map(|b| b.events.clone())
+            .flat_map(|b| b.0.events.clone())
             .collect::<Vec<_>>();
 
         let contract_saved =
@@ -645,7 +650,7 @@ impl ClarityInterpreter {
         let mut emitted_events = global_context
             .event_batches
             .iter()
-            .flat_map(|b| b.events.clone())
+            .flat_map(|b| b.0.events.clone())
             .collect::<Vec<_>>();
 
         let eval_result = match value {
@@ -1248,11 +1253,11 @@ mod tests {
             (define-private (test-burn)
                 (ft-burn? ctb u10 tx-sender))
             (define-private (test-transfer)
-                (ft-transfer? ctb u10 tx-sender (as-contract tx-sender)))
+                (ft-transfer? ctb u10 tx-sender current-contract))
             (define-private (test-burn-1000)
                 (ft-burn? ctb u1000 tx-sender))
             (define-private (test-transfer-1000)
-                (ft-transfer? ctb u1000 tx-sender (as-contract tx-sender)))
+                (ft-transfer? ctb u1000 tx-sender current-contract))
             (test-mint)
             (test-burn)
             (test-transfer)
@@ -1511,7 +1516,7 @@ mod tests {
             .code_source(
                 [
                     "(define-public (test-transfer)",
-                    "  (ok (stx-transfer? u10 tx-sender (as-contract tx-sender))))",
+                    "  (ok (stx-transfer? u10 tx-sender current-contract)))",
                     "(define-public (test-burn)",
                     "  (ok (stx-burn? u10 tx-sender)))",
                     "(test-transfer)",
@@ -1564,7 +1569,7 @@ mod tests {
                     "(define-private (test-burn)",
                     "  (ft-burn? ctb u10 tx-sender))",
                     "(define-private (test-transfer)",
-                    "  (ft-transfer? ctb u10 tx-sender (as-contract tx-sender)))",
+                    "  (ft-transfer? ctb u10 tx-sender current-contract))",
                     "(test-mint)",
                     "(test-burn)",
                     "(test-transfer)",
@@ -1609,7 +1614,7 @@ mod tests {
                     "(define-private (test-burn)",
                     "  (nft-burn? nftest u1 tx-sender))",
                     "(define-private (test-transfer)",
-                    "  (nft-transfer? nftest u2 tx-sender (as-contract  tx-sender)))",
+                    "  (nft-transfer? nftest u2 tx-sender current-contract))",
                     "(test-burn)",
                     "(test-transfer)",
                 ]

@@ -1,5 +1,5 @@
 use clarity::vm::contexts::{Environment, LocalContext};
-use clarity::vm::errors::Error;
+use clarity::vm::errors::VmExecutionError;
 use clarity::vm::events::StacksTransactionEvent;
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
@@ -202,7 +202,7 @@ impl EvalHook for TracerHook {
         env: &mut Environment,
         _context: &LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, Error>,
+        res: &Result<Value, VmExecutionError>,
     ) {
         if let Err(e) = res {
             if self.error.is_none() {
@@ -219,7 +219,7 @@ impl EvalHook for TracerHook {
             .global_context
             .event_batches
             .iter()
-            .flat_map(|b| &b.events)
+            .flat_map(|b| &b.0.events)
             .collect::<Vec<_>>();
         if emitted_events.len() > self.nb_of_emitted_events {
             for event in emitted_events.iter().skip(self.nb_of_emitted_events) {

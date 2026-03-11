@@ -63,17 +63,17 @@ plan:
   batches:
     - id: 0
       transactions:
-        - emulated-contract-publish:
-            contract-name: nft-trait
-            emulated-sender: SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9
-            path: "./.cache/requirements/SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait.clar"
-            clarity-version: 1
+        - transaction-type: emulated-contract-publish
+          contract-name: nft-trait
+          emulated-sender: SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9
+          path: "./.cache/requirements/SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait.clar"
+          clarity-version: 1
       epoch: "2.1"
     - id: 1
       transactions:
-        - emulated-contract-publish:
-            contract-name: simple-nft
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/simple-nft.clar
-            clarity-version: 2
+        - transaction-type: emulated-contract-publish
+          contract-name: simple-nft
+          emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          path: contracts/simple-nft.clar
+          clarity-version: 2
       epoch: "2.4"

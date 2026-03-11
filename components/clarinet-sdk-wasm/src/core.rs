@@ -1,19 +1,19 @@
 use std::collections::{BTreeMap, HashMap};
 use std::panic;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
-    DeploymentSpecification, DeploymentSpecificationFile, EmulatedContractPublishSpecification,
-    TransactionSpecification,
+    DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
 };
 use clarinet_deployments::{
-    generate_default_deployment, initiate_session_from_manifest,
+    generate_default_deployment, get_default_deployment_path, initiate_session_from_manifest,
     update_session_with_deployment_plan,
 };
-use clarinet_files::{
-    FileAccessor, FileLocation, ProjectManifest, StacksNetwork, WASMFileSystemAccessor,
-};
+use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
+use clarity::types::Address;
+use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::clarity::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
 };
@@ -21,17 +21,15 @@ use clarity_repl::clarity::chainstate::StacksAddress;
 use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
-use clarity_repl::clarity::{
-    Address, ClarityVersion, EvaluationResult, ExecutionResult, StacksEpochId, SymbolicExpression,
-};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::session::CostsReport;
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
-    clarity_values, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session,
-    SessionSettings, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
+    clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
+    Session, SessionSettings,
 };
+use clarity_repl::utils::Environment;
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
 use serde::{Deserialize, Serialize};
@@ -70,6 +68,12 @@ macro_rules! log {
     ( $( $t:tt )* ) => {
         web_sys::console::log_1(&format!( $( $t )* ).into());
     }
+}
+
+struct DeploymentArtifacts {
+    artifacts: DeploymentGenerationArtifacts,
+    deployment: DeploymentSpecification,
+    manifest: ProjectManifest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,14 +139,10 @@ impl CallFnArgs {
 
 fn clarity_version_from_u32(v: Option<u32>) -> ClarityVersion {
     match v {
-        Some(1) => ClarityVersion::Clarity1,
-        Some(2) => ClarityVersion::Clarity2,
-        Some(3) => ClarityVersion::Clarity3,
-        Some(4) => ClarityVersion::Clarity4,
-        Some(v) => {
+        Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8).unwrap_or_else(|| {
             log!("Invalid clarity version {v}. Using default version.");
             DEFAULT_CLARITY_VERSION
-        }
+        }),
         None => DEFAULT_CLARITY_VERSION,
     }
 }
@@ -260,7 +260,7 @@ pub fn execution_result_to_transaction_res(execution: &ExecutionResult) -> Trans
 #[derive(Clone)]
 struct ProjectCache {
     accounts: HashMap<String, String>,
-    contracts_locations: HashMap<QualifiedContractIdentifier, FileLocation>,
+    contracts_locations: HashMap<QualifiedContractIdentifier, PathBuf>,
     contracts_interfaces: HashMap<QualifiedContractIdentifier, ContractInterface>,
     session: Session,
 }
@@ -291,15 +291,16 @@ impl SDKOptions {
 pub struct SDK {
     #[wasm_bindgen(getter_with_clone)]
     pub deployer: String,
-    cache: HashMap<FileLocation, ProjectCache>,
+    cache: HashMap<PathBuf, ProjectCache>,
     accounts: HashMap<String, String>,
-    contracts_locations: HashMap<QualifiedContractIdentifier, FileLocation>,
+    contracts_locations: HashMap<QualifiedContractIdentifier, PathBuf>,
     contracts_interfaces: HashMap<QualifiedContractIdentifier, ContractInterface>,
     session: Option<Session>,
     file_accessor: Box<dyn FileAccessor>,
     options: SDKOptions,
     current_test_name: String,
     costs_reports: Vec<CostsReport>,
+    api_base_url: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -329,6 +330,7 @@ impl SDK {
             },
             current_test_name: String::new(),
             costs_reports: vec![],
+            api_base_url: None,
         }
     }
 
@@ -368,10 +370,15 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=initSession)]
-    pub async fn init_session(&mut self, cwd: String, manifest_path: String) -> Result<(), String> {
+    pub async fn init_session(
+        &mut self,
+        cwd: &str,
+        manifest_path: &str,
+        api_base_url: JsValue,
+    ) -> Result<(), String> {
+        self.api_base_url = api_base_url.as_string();
         let cwd_path = PathBuf::from(cwd);
-        let cwd_root = FileLocation::FileSystem { path: cwd_path };
-        let manifest_location = FileLocation::try_parse(&manifest_path, Some(&cwd_root))
+        let manifest_location = paths::try_parse_path(manifest_path, Some(&cwd_path))
             .ok_or("Failed to parse manifest location")?;
 
         let ProjectCache {
@@ -381,7 +388,7 @@ impl SDK {
             accounts,
         } = match self.cache.get(&manifest_location) {
             Some(cache) => cache.clone(),
-            None => self.setup_session(&manifest_location).await?,
+            None => self.setup_session(cwd, manifest_path).await?,
         };
 
         self.deployer = session.interpreter.get_tx_sender().to_string();
@@ -394,86 +401,31 @@ impl SDK {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name=clearCache)]
+    pub fn clear_cach(&mut self) {
+        self.cache.clear();
+    }
+
     async fn setup_session(
         &mut self,
-        manifest_location: &FileLocation,
+        cwd: &str,
+        manifest_path: &str,
     ) -> Result<ProjectCache, String> {
-        let manifest =
-            ProjectManifest::from_file_accessor(manifest_location, true, &*self.file_accessor)
-                .await?;
-        let project_root = manifest_location.get_parent_location()?;
-        let deployment_plan_location =
-            FileLocation::try_parse("deployments/default.simnet-plan.yaml", Some(&project_root))
-                .ok_or("Failed to parse default deployment location")?;
-
-        let (mut deployment, artifacts) = generate_default_deployment(
-            &manifest,
-            &StacksNetwork::Simnet,
-            false,
-            Some(&*self.file_accessor),
-            Some(StacksEpochId::Epoch21),
-        )
-        .await?;
-
-        if !artifacts.success {
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
-            if diags_digest.errors > 0 {
-                return Err(diags_digest.message);
-            }
-        }
-
-        if self
-            .file_accessor
-            .file_exists(deployment_plan_location.to_string())
-            .await?
-        {
-            let spec_file_content = self
-                .file_accessor
-                .read_file(deployment_plan_location.to_string())
-                .await?;
-
-            let mut spec_file = DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
-
-            // the contract publish txs are managed by the manifest
-            // keep the user added txs and merge them with the default deployment plan
-            if let Some(ref mut plan) = spec_file.plan {
-                for batch in plan.batches.iter_mut() {
-                    batch.remove_publish_transactions()
-                }
-            }
-
-            let existing_deployment = DeploymentSpecification::from_specifications(
-                &spec_file,
-                &StacksNetwork::Simnet,
-                &project_root,
-                None,
-            )?;
-
-            deployment.merge_batches(existing_deployment.plan.batches);
-
-            self.write_deployment_plan(
-                &deployment,
-                &project_root,
-                &deployment_plan_location,
-                Some(&spec_file_content),
-            )
+        let DeploymentArtifacts {
+            deployment,
+            manifest,
+            artifacts,
+        } = self
+            .generate_deployment_plan_internal(cwd, manifest_path)
             .await?;
-        } else {
-            self.write_deployment_plan(&deployment, &project_root, &deployment_plan_location, None)
-                .await?;
-        }
 
         let mut session = initiate_session_from_manifest(&manifest);
         if self.options.track_coverage {
             session.enable_coverage_hook();
         }
         session.enable_logger_hook();
-        let executed_contracts = update_session_with_deployment_plan(
-            &mut session,
-            &deployment,
-            Some(&artifacts.asts),
-            Some(DEFAULT_EPOCH),
-        );
+        let executed_contracts =
+            update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
 
         let mut accounts = HashMap::new();
         if let Some(ref spec) = deployment.genesis {
@@ -526,47 +478,112 @@ impl SDK {
             contracts_locations,
             session,
         };
-        self.cache.insert(manifest_location.clone(), cache.clone());
+        self.cache.insert(manifest.location.clone(), cache.clone());
         Ok(cache)
     }
 
-    #[wasm_bindgen(js_name=clearCache)]
-    pub fn clear_cach(&mut self) {
-        self.cache.clear();
+    async fn generate_deployment_plan_internal(
+        &self,
+        cwd: &str,
+        manifest_path: &str,
+    ) -> Result<DeploymentArtifacts, String> {
+        let cwd_path = PathBuf::from(cwd);
+        let manifest_location = paths::try_parse_path(manifest_path, Some(&cwd_path))
+            .ok_or("Failed to parse manifest location")?;
+        let manifest =
+            ProjectManifest::from_file_accessor(&manifest_location, true, &*self.file_accessor)
+                .await?;
+        let project_root = manifest_location
+            .parent()
+            .ok_or("Failed to get parent of manifest location")?
+            .to_path_buf();
+        let deployment_plan_location =
+            project_root.join(get_default_deployment_path(&StacksNetwork::Simnet));
+
+        let (mut deployment, artifacts, _) = generate_default_deployment(
+            &manifest,
+            &StacksNetwork::Simnet,
+            false,
+            Some(&*self.file_accessor),
+            self.api_base_url.as_deref(),
+            Environment::Simnet,
+        )
+        .await?;
+
+        if !artifacts.success {
+            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+            if diags_digest.errors > 0 {
+                return Err(diags_digest.message);
+            }
+        }
+
+        if self
+            .file_accessor
+            .file_exists(deployment_plan_location.to_string_lossy().to_string())
+            .await?
+        {
+            let spec_file_content = self
+                .file_accessor
+                .read_file(deployment_plan_location.to_string_lossy().to_string())
+                .await?;
+
+            let mut spec_file = DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
+
+            // the contract publish txs are managed by the manifest
+            // keep the user added txs and merge them with the default deployment plan
+            if let Some(ref mut plan) = spec_file.plan {
+                for batch in plan.batches.iter_mut() {
+                    batch.remove_publish_transactions()
+                }
+            }
+
+            let existing_deployment = DeploymentSpecification::from_specifications(
+                &spec_file,
+                &StacksNetwork::Simnet,
+                &project_root,
+                None,
+            )?;
+
+            deployment.merge_batches(existing_deployment.plan.batches);
+
+            self.write_deployment_plan(
+                &deployment,
+                &project_root,
+                &deployment_plan_location,
+                Some(&spec_file_content),
+            )
+            .await?;
+        } else {
+            self.write_deployment_plan(&deployment, &project_root, &deployment_plan_location, None)
+                .await?;
+        }
+
+        Ok(DeploymentArtifacts {
+            artifacts,
+            deployment,
+            manifest,
+        })
+    }
+
+    #[wasm_bindgen(js_name=generateDeploymentPlan)]
+    pub async fn generate_deployment_plan(
+        &self,
+        cwd: &str,
+        manifest_path: &str,
+    ) -> Result<(), String> {
+        self.generate_deployment_plan_internal(cwd, manifest_path)
+            .await?;
+        Ok(())
     }
 
     async fn write_deployment_plan(
         &self,
         deployment_plan: &DeploymentSpecification,
-        project_root: &FileLocation,
-        deployment_plan_location: &FileLocation,
+        project_root: &Path,
+        deployment_plan_location: &Path,
         existing_file: Option<&str>,
     ) -> Result<(), String> {
-        // we must manually update the location of the contracts in the deployment plan to be relative to the project root
-        // because the serialize function is not able to get project_root location in wasm, so it falls back to the full path
-        // https://github.com/stx-labs/clarinet/blob/7a41c0c312148b3a5f0eee28a95bebf2766d2e8d/components/clarinet-files/src/lib.rs#L379
-        let mut deployment_plan_with_relative_paths = deployment_plan.clone();
-        deployment_plan_with_relative_paths
-            .plan
-            .batches
-            .iter_mut()
-            .for_each(|batch| {
-                batch.transactions.iter_mut().for_each(|tx| {
-                    if let TransactionSpecification::EmulatedContractPublish(
-                        EmulatedContractPublishSpecification { location, .. },
-                    ) = tx
-                    {
-                        *location = FileLocation::from_path_string(
-                            &location
-                                .get_relative_path_from_base(project_root)
-                                .expect("failed to retrieve relative path"),
-                        )
-                        .expect("failed to get file location");
-                    }
-                });
-            });
-
-        let deployment_file = deployment_plan_with_relative_paths.to_file_content()?;
+        let deployment_file = deployment_plan.to_file_content(project_root)?;
 
         if let Some(existing_file) = existing_file {
             if existing_file.as_bytes() == deployment_file {
@@ -577,7 +594,10 @@ impl SDK {
         log!("Updated deployment plan file");
 
         self.file_accessor
-            .write_file(deployment_plan_location.to_string(), &deployment_file)
+            .write_file(
+                deployment_plan_location.to_string_lossy().to_string(),
+                &deployment_file,
+            )
             .await?;
         Ok(())
     }
@@ -624,24 +644,11 @@ impl SDK {
 
     #[wasm_bindgen(js_name=setEpoch)]
     pub fn set_epoch(&mut self, epoch: EpochString) {
-        let epoch = epoch.as_string().unwrap_or(DEFAULT_EPOCH.to_string());
-        let epoch = match epoch.as_str() {
-            "2.0" => StacksEpochId::Epoch20,
-            "2.05" => StacksEpochId::Epoch2_05,
-            "2.1" => StacksEpochId::Epoch21,
-            "2.2" => StacksEpochId::Epoch22,
-            "2.3" => StacksEpochId::Epoch23,
-            "2.4" => StacksEpochId::Epoch24,
-            "2.5" => StacksEpochId::Epoch25,
-            "3.0" => StacksEpochId::Epoch30,
-            "3.1" => StacksEpochId::Epoch31,
-            "3.2" => StacksEpochId::Epoch32,
-            "3.3" => StacksEpochId::Epoch33,
-            _ => {
-                log!("Invalid epoch {epoch}. Using default epoch");
-                DEFAULT_EPOCH
-            }
-        };
+        let epoch_str = epoch.as_string().unwrap_or(DEFAULT_EPOCH.to_string());
+        let epoch = epoch_from_str(&epoch_str).unwrap_or_else(|| {
+            log!("Invalid epoch {epoch_str}. Using default epoch");
+            DEFAULT_EPOCH
+        });
 
         let session = self.get_session_mut();
         session.update_epoch(epoch);
@@ -904,6 +911,7 @@ impl SDK {
             return Err(format!("Invalid sender address '{}'.", args.sender));
         }
 
+        let track_costs = self.options.track_costs;
         let execution = {
             let session = self.get_session_mut();
             if advance_chain_tip {
@@ -921,9 +929,10 @@ impl SDK {
                 deployer: ContractDeployer::Address(args.sender.to_string()),
                 clarity_version,
                 epoch: Epoch::Specific(current_epoch),
+                is_requirement: false,
             };
 
-            match session.deploy_contract(&contract, false, None) {
+            match session.deploy_contract(&contract, track_costs, None) {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(
@@ -1181,7 +1190,10 @@ impl SDK {
             asts.insert(contract_id.clone(), contract.ast.clone());
         }
         for (contract_id, contract_location) in contracts_locations.iter() {
-            contract_paths.insert(contract_id.name.to_string(), contract_location.to_string());
+            contract_paths.insert(
+                contract_id.name.to_string(),
+                contract_location.to_string_lossy().to_string(),
+            );
         }
 
         if include_boot_contracts {

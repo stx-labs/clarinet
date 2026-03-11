@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use clarinet_utils::{get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_mnemonic};
@@ -6,15 +7,17 @@ use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use libsecp256k1::PublicKey;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use toml::value::Value;
 
-use super::{FileAccessor, FileLocation};
+use super::FileAccessor;
+use crate::paths;
 
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
-pub const DEFAULT_STACKS_NODE_IMAGE: &str = "blockstack/stacks-blockchain:3.2.0.0.2-alpine";
-pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "blockstack/stacks-signer:3.2.0.0.2.0-alpine";
+pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:3.3.0.0.6-alpine";
+pub const DEFAULT_STACKS_SIGNER_IMAGE: &str =
+    "ghcr.io/stacks-network/stacks-signer:3.3.0.0.6.0-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
@@ -45,7 +48,7 @@ pub const DEFAULT_EPOCH_2_5: u64 = 108;
 pub const DEFAULT_EPOCH_3_0: u64 = 142;
 pub const DEFAULT_EPOCH_3_1: u64 = 144;
 pub const DEFAULT_EPOCH_3_2: u64 = 146;
-// pub const DEFAULT_EPOCH_3_3: u64 = 100_000_000;
+pub const DEFAULT_EPOCH_3_3: u64 = 148;
 
 // Currently, the pox-4 contract has these values hardcoded:
 // https://github.com/stacks-network/stacks-core/blob/e09ab931e2f15ff70f3bb5c2f4d7afb[…]42bd7bec6/stackslib/src/chainstate/stacks/boot/pox-testnet.clar
@@ -175,6 +178,7 @@ pub struct DevnetConfigFile {
     pub epoch_3_1: Option<u64>,
     pub epoch_3_2: Option<u64>,
     pub epoch_3_3: Option<u64>,
+    pub epoch_3_4: Option<u64>,
     pub use_docker_gateway_routing: Option<bool>,
     pub docker_platform: Option<String>,
 }
@@ -312,9 +316,8 @@ pub struct DevnetConfig {
     pub epoch_3_0: u64,
     pub epoch_3_1: u64,
     pub epoch_3_2: u64,
-    // keep epoch 3.3 optional for now while it's not enabled on the default image
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub epoch_3_3: Option<u64>,
+    pub epoch_3_3: u64,
+    pub epoch_3_4: Option<u64>,
     pub use_docker_gateway_routing: bool,
     pub docker_platform: Option<String>,
 }
@@ -332,6 +335,7 @@ pub struct PoxStackingOrder {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AccountConfig {
     pub label: String,
+    pub encrypted_mnemonic: String,
     pub mnemonic: String,
     pub derivation: String,
     pub balance: u64,
@@ -342,15 +346,14 @@ pub struct AccountConfig {
 }
 
 impl NetworkManifest {
-    pub fn from_project_manifest_location(
-        project_manifest_location: &FileLocation,
+    pub fn from_project_root(
+        project_root: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
-        cache_location: Option<&FileLocation>,
+        cache_location: Option<&Path>,
         devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_location =
-            project_manifest_location.get_network_manifest_location(&networks.1)?;
+        let network_manifest_location = paths::get_network_manifest_path(project_root, &networks.1);
         NetworkManifest::from_location(
             &network_manifest_location,
             networks,
@@ -360,16 +363,15 @@ impl NetworkManifest {
         )
     }
 
-    pub async fn from_project_manifest_location_using_file_accessor(
-        location: &FileLocation,
+    pub async fn from_project_root_using_file_accessor(
+        project_root: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
         file_accessor: &dyn FileAccessor,
     ) -> Result<NetworkManifest, String> {
-        let mut network_manifest_location = location.get_parent_location()?;
-        network_manifest_location.append_path("settings/Devnet.toml")?;
+        let network_manifest_location = project_root.join("settings/Devnet.toml");
         let content = file_accessor
-            .read_file(network_manifest_location.to_string())
+            .read_file(network_manifest_location.to_string_lossy().to_string())
             .await?;
 
         let mut network_manifest_file: NetworkManifestFile =
@@ -384,13 +386,13 @@ impl NetworkManifest {
     }
 
     pub fn from_location(
-        location: &FileLocation,
+        location: &Path,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
-        cache_location: Option<&FileLocation>,
+        cache_location: Option<&Path>,
         devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_file_content = location.read_content()?;
+        let network_manifest_file_content = paths::read_content(location)?;
         let mut network_manifest_file: NetworkManifestFile =
             toml::from_slice(&network_manifest_file_content[..]).unwrap();
         NetworkManifest::from_network_manifest_file(
@@ -406,7 +408,7 @@ impl NetworkManifest {
         network_manifest_file: &mut NetworkManifestFile,
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
-        cache_location: Option<&FileLocation>,
+        cache_location: Option<&Path>,
         devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
         let stacks_node_rpc_address = match (
@@ -445,7 +447,7 @@ impl NetworkManifest {
                         _ => 1_000_000_000, // mint 10 sBTC by default
                     };
 
-                    let mnemonic = match account_settings.get("mnemonic") {
+                    let mut mnemonic = match account_settings.get("mnemonic") {
                         Some(Value::String(phrase)) => match mnemonic_from_phrase(phrase) {
                             Ok(result) => result.to_string(),
                             Err(e) => {
@@ -457,6 +459,22 @@ impl NetworkManifest {
                         },
                         _ => random_mnemonic().to_string(),
                     };
+
+                    let encrypted_mnemonic = match account_settings.get("encrypted_mnemonic") {
+                        Some(Value::String(cipher)) => cipher.clone(),
+                        _ => "".to_string(),
+                    };
+
+                    if !encrypted_mnemonic.is_empty() {
+                        let password = rpassword::prompt_password(format!(
+                            "Enter password to decrypt mnemonic for account {account_name}: "
+                        ))
+                        .unwrap();
+                        mnemonic =
+                            clarinet_utils::decrypt_mnemonic_phrase(&encrypted_mnemonic, &password)
+                                .unwrap()
+                                .to_string();
+                    }
 
                     let derivation = match account_settings.get("derivation") {
                         Some(Value::String(derivation)) => derivation.to_string(),
@@ -476,6 +494,7 @@ impl NetworkManifest {
                         AccountConfig {
                             label: account_name.to_string(),
                             mnemonic: mnemonic.to_string(),
+                            encrypted_mnemonic,
                             derivation,
                             balance,
                             sbtc_balance,
@@ -692,11 +711,10 @@ impl NetworkManifest {
                 format!("stacks-devnet-{now}/")
             };
             let default_working_dir = match cache_location {
-                Some(cache_location) => {
-                    let mut devnet_location = cache_location.clone();
-                    let _ = devnet_location.append_path(&devnet_dir);
-                    devnet_location.to_string()
-                }
+                Some(cache_location) => cache_location
+                    .join(&devnet_dir)
+                    .to_string_lossy()
+                    .to_string(),
                 None => {
                     let mut dir = std::env::temp_dir();
                     dir.push(devnet_dir);
@@ -737,7 +755,7 @@ impl NetworkManifest {
                 DEFAULT_FIRST_BURN_HEADER_HEIGHT,
                 DEFAULT_POX_REWARD_LENGTH,
                 DEFAULT_POX_PREPARE_LENGTH,
-                &epoch_3_0,
+                epoch_3_0,
             ) {
                 return Err(format!(
                     "Epoch 3.0 must start *during* a reward phase, not a prepare phase. Epoch 3.0 start set to: {epoch_3_0}. Reward Cycle Length: {DEFAULT_POX_REWARD_LENGTH}. Prepare Phase Length: {DEFAULT_POX_PREPARE_LENGTH}"
@@ -760,6 +778,7 @@ impl NetworkManifest {
                 AccountConfig {
                     label: "stacker".to_string(),
                     mnemonic: stacker_mnemonic.clone(),
+                    encrypted_mnemonic: "".to_string(),
                     derivation: stacker_derivation_path.clone(),
                     balance: 100_000_000_000_000,
                     sbtc_balance: 1_000_000_000,
@@ -932,7 +951,8 @@ impl NetworkManifest {
                 epoch_3_0: devnet_config.epoch_3_0.unwrap_or(DEFAULT_EPOCH_3_0),
                 epoch_3_1: devnet_config.epoch_3_1.unwrap_or(DEFAULT_EPOCH_3_1),
                 epoch_3_2: devnet_config.epoch_3_2.unwrap_or(DEFAULT_EPOCH_3_2),
-                epoch_3_3: devnet_config.epoch_3_3,
+                epoch_3_3: devnet_config.epoch_3_3.unwrap_or(DEFAULT_EPOCH_3_3),
+                epoch_3_4: devnet_config.epoch_3_4,
                 stacks_node_env_vars: devnet_config
                     .stacks_node_env_vars
                     .take()
@@ -1060,7 +1080,8 @@ impl Default for DevnetConfig {
             epoch_3_0: DEFAULT_EPOCH_3_0,
             epoch_3_1: DEFAULT_EPOCH_3_1,
             epoch_3_2: DEFAULT_EPOCH_3_2,
-            epoch_3_3: None,
+            epoch_3_3: DEFAULT_EPOCH_3_3,
+            epoch_3_4: None,
             use_docker_gateway_routing: false,
             docker_platform: None,
         }
@@ -1143,9 +1164,9 @@ pub fn is_in_reward_phase(
     first_block_height: u64,
     reward_cycle_length: u64,
     prepare_length: u64,
-    block_height: &u64,
+    block_height: u64,
 ) -> bool {
-    if block_height <= &first_block_height {
+    if block_height <= first_block_height {
         // not a reward cycle start if we're the first block after genesis.
         false
     } else {
@@ -1165,7 +1186,7 @@ fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> St
 
 #[cfg(test)]
 mod tests {
-    use clarity_repl::repl::DEFAULT_EPOCH;
+    use clarinet_defaults::DEFAULT_EPOCH;
 
     use crate::{DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE};
 

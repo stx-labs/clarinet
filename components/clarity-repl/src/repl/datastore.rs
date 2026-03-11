@@ -18,7 +18,7 @@ use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
-use clarity::vm::errors::{InterpreterError, InterpreterResult as Result};
+use clarity::vm::errors::{VmExecutionError, VmInternalError};
 use clarity::vm::{ContractContext, StacksEpoch};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
@@ -53,6 +53,7 @@ fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
         StacksEpochId::Epoch31 => PEER_VERSION_EPOCH_3_1,
         StacksEpochId::Epoch32 => PEER_VERSION_EPOCH_3_2,
         StacksEpochId::Epoch33 => PEER_VERSION_EPOCH_3_3,
+        StacksEpochId::Epoch34 => PEER_VERSION_EPOCH_3_4,
     }
 }
 
@@ -380,7 +381,7 @@ impl ClarityDatastore {
         block_info.index_block_hash.to_string()
     }
 
-    fn fetch_clarity_marf_value(&mut self, key: &str) -> Result<Option<String>> {
+    fn fetch_clarity_marf_value(&mut self, key: &str) -> Result<Option<String>, VmExecutionError> {
         let key_hash = TrieHash::from_key(key);
         let tip = self.get_remote_chaintip();
         let url = format!("/v2/clarity/marf/{key_hash}?tip={tip}&proof=false");
@@ -391,24 +392,24 @@ impl ClarityDatastore {
         &mut self,
         contract_id: &QualifiedContractIdentifier,
         context_str: Option<String>,
-    ) -> Result<ContractContext> {
+    ) -> Result<ContractContext, VmExecutionError> {
         let contract_src_key = ClarityDatabase::make_metadata_key(
             StoreType::Contract,
             ContractDataVarName::ContractSrc.as_str(),
         );
         let contract_src =
             self.get_metadata(contract_id, &contract_src_key)?
-                .ok_or(InterpreterError::Expect(format!(
+                .ok_or(VmInternalError::Expect(format!(
                     "No contract source found for contract: {contract_id}",
                 )))?;
 
         let mut contract_context = context_str
-            .ok_or(InterpreterError::Expect(format!(
+            .ok_or(VmInternalError::Expect(format!(
                 "No contract context found for contract: {contract_id}",
             )))
             .and_then(|s| {
                 serde_json::from_str::<ContractContextResponse>(&s).map_err(|e| {
-                    InterpreterError::Expect(format!("Failed to parse contract context: {e}"))
+                    VmInternalError::Expect(format!("Failed to parse contract context: {e}"))
                 })
             })?
             .contract_context;
@@ -416,12 +417,12 @@ impl ClarityDatastore {
 
         let analysis = self
             .get_metadata(contract_id, AnalysisDatabase::storage_key())?
-            .ok_or(InterpreterError::Expect(format!(
+            .ok_or(VmInternalError::Expect(format!(
                 "No analysis metadata found for contract: {contract_id}",
             )))
             .and_then(|s| {
                 serde_json::from_str::<ContractAnalysis>(&s).map_err(|e| {
-                    InterpreterError::Expect(format!("Failed to parse analysis metadata: {e}"))
+                    VmInternalError::Expect(format!("Failed to parse analysis metadata: {e}"))
                 })
             })?;
 
@@ -431,13 +432,15 @@ impl ClarityDatastore {
             &mut (),
             analysis.clarity_version,
             analysis.epoch,
-        )?;
+        )
+        .map_err(|e| VmInternalError::Expect(e.to_string()))?;
 
         context::set_functions_in_contract_context(
             &contract_ast.expressions,
             &mut contract_context,
             &analysis.epoch,
-        )?;
+        )
+        .map_err(|e| VmInternalError::Expect(e.to_string()))?;
 
         Ok(contract_context)
     }
@@ -446,7 +449,7 @@ impl ClarityDatastore {
         &mut self,
         contract_id: &QualifiedContractIdentifier,
         key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         let addr = contract_id.issuer.to_string();
         let contract = contract_id.name.to_string();
         let tip = self.get_remote_chaintip();
@@ -480,7 +483,7 @@ impl ClarityDatastore {
             let contract_context_response = ContractContextResponse { contract_context };
             Some(
                 serde_json::to_string(&contract_context_response).map_err(|e| {
-                    InterpreterError::Expect(format!("Failed to serialize contract context: {e}"))
+                    VmInternalError::Expect(format!("Failed to serialize contract context: {e}"))
                 })?,
             )
         } else {
@@ -500,7 +503,7 @@ impl ClarityDatastore {
 }
 
 impl ClarityBackingStore for ClarityDatastore {
-    fn put_all_data(&mut self, items: Vec<(String, String)>) -> Result<()> {
+    fn put_all_data(&mut self, items: Vec<(String, String)>) -> Result<(), VmExecutionError> {
         for (key, value) in items {
             self.put(&key, &value);
         }
@@ -508,7 +511,7 @@ impl ClarityBackingStore for ClarityDatastore {
     }
 
     /// fetch K-V out of the committed datastore
-    fn get_data(&mut self, key: &str) -> Result<Option<String>> {
+    fn get_data(&mut self, key: &str) -> Result<Option<String>, VmExecutionError> {
         let current_height = self.get_current_block_height();
         let fetch_remote_data =
             self.remote_network_info.is_some() && !self.is_key_from_local_account(key);
@@ -547,29 +550,32 @@ impl ClarityBackingStore for ClarityDatastore {
         }))
     }
 
-    fn get_data_from_path(&mut self, _hash: &TrieHash) -> Result<Option<String>> {
+    fn get_data_from_path(&mut self, _hash: &TrieHash) -> Result<Option<String>, VmExecutionError> {
         unreachable!()
     }
 
-    fn get_data_with_proof(&mut self, _key: &str) -> Result<Option<(String, Vec<u8>)>> {
+    fn get_data_with_proof(
+        &mut self,
+        _key: &str,
+    ) -> Result<Option<(String, Vec<u8>)>, VmExecutionError> {
         Ok(None)
     }
 
     fn get_data_with_proof_from_path(
         &mut self,
         _hash: &TrieHash,
-    ) -> Result<Option<(String, Vec<u8>)>> {
+    ) -> Result<Option<(String, Vec<u8>)>, VmExecutionError> {
         unreachable!()
     }
 
-    fn has_entry(&mut self, key: &str) -> Result<bool> {
+    fn has_entry(&mut self, key: &str) -> Result<bool, VmExecutionError> {
         Ok(self.get_data(key)?.is_some())
     }
 
     /// change the current MARF context to service reads from a different chain_tip
     ///   used to implement time-shifted evaluation.
     /// returns the previous block header hash on success
-    fn set_block_hash(&mut self, bhh: StacksBlockId) -> Result<StacksBlockId> {
+    fn set_block_hash(&mut self, bhh: StacksBlockId) -> Result<StacksBlockId, VmExecutionError> {
         let prior_tip = self.open_chain_tip.clone();
         if self.remote_network_info.is_some() {
             #[allow(clippy::map_entry)]
@@ -630,7 +636,7 @@ impl ClarityBackingStore for ClarityDatastore {
         contract: &QualifiedContractIdentifier,
         key: &str,
         value: &str,
-    ) -> Result<()> {
+    ) -> Result<(), VmExecutionError> {
         self.metadata
             .insert((contract.to_string(), key.to_string()), value.to_string());
         Ok(())
@@ -640,7 +646,7 @@ impl ClarityBackingStore for ClarityDatastore {
         &mut self,
         contract: &QualifiedContractIdentifier,
         key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         let metadata = self.metadata.get(&(contract.to_string(), key.to_string()));
         if metadata.is_some() {
             return Ok(metadata.cloned());
@@ -658,7 +664,7 @@ impl ClarityBackingStore for ClarityDatastore {
     fn get_contract_hash(
         &mut self,
         _contract: &QualifiedContractIdentifier,
-    ) -> Result<(StacksBlockId, Sha512Trunc256Sum)> {
+    ) -> Result<(StacksBlockId, Sha512Trunc256Sum), VmExecutionError> {
         panic!("Datastore cannot get_contract_hash")
     }
 
@@ -667,7 +673,7 @@ impl ClarityBackingStore for ClarityDatastore {
         _at_height: u32,
         _contract: &QualifiedContractIdentifier,
         _key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         panic!("Datastore cannot get_metadata_manual")
     }
 
@@ -1268,7 +1274,7 @@ impl BurnStateDB for Datastore {
             }
             // preserve the 3.0 -> 3.3 special behavior of burn-block-height
             // https://github.com/stacks-network/stacks-core/pull/5524
-            Epoch30 | Epoch31 | Epoch32 | Epoch33 => Some(self.burn_chain_height),
+            Epoch30 | Epoch31 | Epoch32 | Epoch33 | Epoch34 => Some(self.burn_chain_height),
         }
     }
 
@@ -1369,6 +1375,7 @@ impl BurnStateDB for Datastore {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpoch;
+    use indoc::indoc;
 
     use super::*;
     use crate::repl::settings::ApiUrl;
@@ -1383,44 +1390,48 @@ mod tests {
 
     fn get_datastores_with_remote_data() -> (ClarityDatastore, Datastore) {
         let mut server = mockito::Server::new();
+        #[rustfmt::skip]
+        let blocks_body = indoc!(r#"
+            {
+                "canonical": true,
+                "height": 10,
+                "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
+                "block_time": 1735934294,
+                "block_time_iso": "2025-01-03T19:58:14.000Z",
+                "tenure_height": 10,
+                "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
+                "parent_block_hash": "0x94c3d8f56ed2e1093f26089572af9cc5d5b097d461dcc184196f1ee2070de063",
+                "parent_index_block_hash": "0x1969bdddb9902162f5fdd2ff49cabb30300a9819c89bedd4c27fed82f8c9cf4b",
+                "burn_block_time": 1735451504,
+                "burn_block_time_iso": "2024-12-29T05:51:44.000Z",
+                "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
+                "burn_block_height": 798,
+                "miner_txid": "0x5fb426cf9eb4577b545bd731634886d5bd5c9d40d573e2cdb95100f483913491",
+                "tx_count": 2
+            }
+        "#);
         let _ = server
             .mock("GET", "/extended/v2/blocks/10")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"{
-                    "canonical": true,
-                    "height": 10,
-                    "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
-                    "block_time": 1735934294,
-                    "block_time_iso": "2025-01-03T19:58:14.000Z",
-                    "tenure_height": 10,
-                    "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
-                    "parent_block_hash": "0x94c3d8f56ed2e1093f26089572af9cc5d5b097d461dcc184196f1ee2070de063",
-                    "parent_index_block_hash": "0x1969bdddb9902162f5fdd2ff49cabb30300a9819c89bedd4c27fed82f8c9cf4b",
-                    "burn_block_time": 1735451504,
-                    "burn_block_time_iso": "2024-12-29T05:51:44.000Z",
-                    "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
-                    "burn_block_height": 798,
-                    "miner_txid": "0x5fb426cf9eb4577b545bd731634886d5bd5c9d40d573e2cdb95100f483913491",
-                    "tx_count": 2
-                }"#,
-            )
+            .with_body(blocks_body)
             .create();
+        #[rustfmt::skip]
+        let sortitions_body = indoc!(r#"
+            [{
+                "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
+                "burn_block_height":798,
+                "burn_header_timestamp": 1735451504,
+                "sortition_id": "0x71e332329133c0f331c6b5e9b21a415ea0c32aa300a0e94a88e7c30d4aaf78c6",
+                "parent_sortition_id": "0xd6bffd8c4cd86428d5404ef36867319976008e84047d2acbae9079fd918c4de9",
+                "consensus_hash": "0x44f6511f569d3ed78d437af619d529b6c66a4fa2"
+            }]
+        "#);
         let _ = server
             .mock("GET", "/v3/sortitions/burn_height/798")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"[{
-                    "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
-                    "burn_block_height":798,
-                    "burn_header_timestamp": 1735451504,
-                    "sortition_id": "0x71e332329133c0f331c6b5e9b21a415ea0c32aa300a0e94a88e7c30d4aaf78c6",
-                    "parent_sortition_id": "0xd6bffd8c4cd86428d5404ef36867319976008e84047d2acbae9079fd918c4de9",
-                    "consensus_hash": "0x44f6511f569d3ed78d437af619d529b6c66a4fa2"
-                }]"#,
-            )
+            .with_body(sortitions_body)
             .create();
         let client = HttpClient::new(ApiUrl(server.url()));
         let constants = StacksConstants::default();

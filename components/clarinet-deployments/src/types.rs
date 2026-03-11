@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
-use clarinet_files::{DevnetConfig, FileAccessor, FileLocation, StacksNetwork};
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
+use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::clarity::util::hash::{hex_bytes, to_hex};
 use clarity_repl::clarity::vm::analysis::ContractAnalysis;
@@ -10,10 +12,11 @@ use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
-use clarity_repl::repl::{Session, DEFAULT_CLARITY_VERSION};
+use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
+use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 use strum::{EnumIter, IntoEnumIterator};
+use yaml_serde;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy, Eq, PartialOrd, Ord, EnumIter)]
 pub enum EpochSpec {
@@ -39,6 +42,8 @@ pub enum EpochSpec {
     Epoch3_2,
     #[serde(rename = "3.3")]
     Epoch3_3,
+    #[serde(rename = "3.4")]
+    Epoch3_4,
 }
 
 impl From<StacksEpochId> for EpochSpec {
@@ -55,6 +60,7 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch31 => EpochSpec::Epoch3_1,
             StacksEpochId::Epoch32 => EpochSpec::Epoch3_2,
             StacksEpochId::Epoch33 => EpochSpec::Epoch3_3,
+            StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
         }
     }
@@ -74,6 +80,7 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_1 => StacksEpochId::Epoch31,
             EpochSpec::Epoch3_2 => StacksEpochId::Epoch32,
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
+            EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
         }
     }
 }
@@ -109,8 +116,8 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_0 => Some(config.epoch_3_0),
                     EpochSpec::Epoch3_1 => Some(config.epoch_3_1),
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
-                    // epoch 3.3 is optional while it's not enabled on the default image
-                    EpochSpec::Epoch3_3 => config.epoch_3_3,
+                    EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
+                    EpochSpec::Epoch3_4 => config.epoch_3_4,
                 };
                 start_height.map(|start_height| EpochConfig {
                     epoch_name: epoch,
@@ -127,13 +134,9 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
 
 fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, String> {
     match value {
-        Some(1) => Ok(ClarityVersion::Clarity1),
-        Some(2) => Ok(ClarityVersion::Clarity2),
-        Some(3) => Ok(ClarityVersion::Clarity3),
-        Some(4) => Ok(ClarityVersion::Clarity4),
-        Some(_) => {
-            Err("unable to parse clarity_version (can either be '1', '2', '3', or '4'".to_string())
-        }
+        Some(v) => clarity_version_from_u8(v).ok_or_else(|| {
+            "unable to parse clarity_version (can either be '1', '2', '3', '4', or '5')".to_string()
+        }),
         None => Ok(DEFAULT_CLARITY_VERSION),
     }
 }
@@ -182,8 +185,8 @@ impl TransactionsBatchSpecificationFile {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "transaction-type", rename_all = "kebab-case")]
 pub enum TransactionSpecificationFile {
     ContractCall(ContractCallSpecificationFile),
     ContractPublish(ContractPublishSpecificationFile),
@@ -192,6 +195,87 @@ pub enum TransactionSpecificationFile {
     RequirementPublish(RequirementPublishSpecificationFile),
     BtcTransfer(BtcTransferSpecificationFile),
     StxTransfer(StxTransferSpecificationFile),
+}
+
+fn deserialize_variant(
+    variant: &str,
+    value: yaml_serde::Value,
+) -> Result<TransactionSpecificationFile, String> {
+    match variant {
+        "contract-call" => ContractCallSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::ContractCall)
+            .map_err(|e| e.to_string()),
+        "contract-publish" => ContractPublishSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::ContractPublish)
+            .map_err(|e| e.to_string()),
+        "emulated-contract-call" => EmulatedContractCallSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::EmulatedContractCall)
+            .map_err(|e| e.to_string()),
+        "emulated-contract-publish" => EmulatedContractPublishSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::EmulatedContractPublish)
+            .map_err(|e| e.to_string()),
+        "requirement-publish" => RequirementPublishSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::RequirementPublish)
+            .map_err(|e| e.to_string()),
+        "btc-transfer" => BtcTransferSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::BtcTransfer)
+            .map_err(|e| e.to_string()),
+        "stx-transfer" => StxTransferSpecificationFile::deserialize(value)
+            .map(TransactionSpecificationFile::StxTransfer)
+            .map_err(|e| e.to_string()),
+        other => Err(format!("unknown transaction type: {other}")),
+    }
+}
+
+// Custom Deserialize for backward compatibility: supports:
+// - the new internally-tagged format (`transaction-type: variant-name`)
+// - the old serde_yaml externally-tagged format (`variant-name: { fields }`) (Clarinet <= 3.13.1)
+// - and yaml_serde's native `!tag` format.
+impl<'de> Deserialize<'de> for TransactionSpecificationFile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = yaml_serde::Value::deserialize(deserializer)?;
+
+        match value {
+            yaml_serde::Value::Mapping(ref map) => {
+                let type_key = yaml_serde::Value::String("transaction-type".into());
+                if let Some(yaml_serde::Value::String(ref variant)) = map.get(&type_key) {
+                    // New internally-tagged format: { transaction-type: variant, ...fields }
+                    let variant = variant.clone();
+                    let mut remaining = map.clone();
+                    remaining.remove(&type_key);
+                    deserialize_variant(&variant, yaml_serde::Value::Mapping(remaining))
+                        .map_err(serde::de::Error::custom)
+                } else if map.len() == 1 {
+                    // Old externally-tagged format: { variant-name: { ...fields } }
+                    let (key, inner) = map.iter().next().unwrap();
+                    if let yaml_serde::Value::String(ref variant) = key {
+                        deserialize_variant(variant, inner.clone())
+                            .map_err(serde::de::Error::custom)
+                    } else {
+                        Err(serde::de::Error::custom(
+                            "expected string key for transaction variant",
+                        ))
+                    }
+                } else {
+                    Err(serde::de::Error::custom(
+                        "expected mapping with 'transaction-type' key or single-key variant map",
+                    ))
+                }
+            }
+            yaml_serde::Value::Tagged(ref tagged) => {
+                // yaml_serde tag format: !variant-name { ... }
+                let tag_str = tagged.tag.to_string();
+                let variant = tag_str.strip_prefix('!').unwrap_or(&tag_str);
+                deserialize_variant(variant, tagged.value.clone()).map_err(serde::de::Error::custom)
+            }
+            _ => Err(serde::de::Error::custom(
+                "expected mapping or tagged value for transaction specification",
+            )),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -235,12 +319,7 @@ pub struct RequirementPublishSpecificationFile {
     pub remap_sender: String,
     pub remap_principals: Option<BTreeMap<String, String>>,
     pub cost: u64,
-    #[serde(flatten)]
-    pub location: Option<FileLocation>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
+    pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clarity_version: Option<u8>,
 }
@@ -251,12 +330,7 @@ pub struct ContractPublishSpecificationFile {
     pub contract_name: String,
     pub expected_sender: String,
     pub cost: u64,
-    #[serde(flatten)]
-    pub location: Option<FileLocation>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
+    pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor_block_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -277,12 +351,7 @@ pub struct EmulatedContractCallSpecificationFile {
 pub struct EmulatedContractPublishSpecificationFile {
     pub contract_name: String,
     pub emulated_sender: String,
-    #[serde(flatten)]
-    pub location: Option<FileLocation>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
+    pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clarity_version: Option<u8>,
 }
@@ -506,7 +575,7 @@ pub struct ContractPublishSpecification {
     pub contract_name: ContractName,
     #[serde(with = "standard_principal_data_serde")]
     pub expected_sender: StandardPrincipalData,
-    pub location: FileLocation,
+    pub location: PathBuf,
     #[serde(with = "source_serde")]
     pub source: String,
     #[serde(with = "clarity_version_serde")]
@@ -518,7 +587,7 @@ pub struct ContractPublishSpecification {
 impl ContractPublishSpecification {
     pub fn from_specifications(
         specs: &ContractPublishSpecificationFile,
-        project_root_location: &FileLocation,
+        project_root_location: &Path,
     ) -> Result<ContractPublishSpecification, String> {
         let Ok(contract_name) = ContractName::try_from(specs.contract_name.to_string()) else {
             return Err(format!(
@@ -535,15 +604,10 @@ impl ContractPublishSpecification {
             ));
         };
 
-        let location = match (&specs.path, &specs.url) {
-            (Some(location_string), None) | (None, Some(location_string)) => {
-                FileLocation::try_parse(location_string, Some(project_root_location))
-            }
-            _ => None,
-        }
-        .ok_or("unable to parse file location (can either be 'path' or 'url'".to_string())?;
+        let location = paths::try_parse_path(&specs.path, Some(project_root_location))
+            .ok_or(format!("unable to parse path '{}'", specs.path))?;
 
-        let source = location.read_content_as_utf8()?;
+        let source = paths::read_content_as_utf8(&location)?;
         let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
 
         Ok(ContractPublishSpecification {
@@ -571,7 +635,7 @@ pub struct RequirementPublishSpecification {
     #[serde(with = "clarity_version_serde")]
     pub clarity_version: ClarityVersion,
     pub cost: u64,
-    pub location: FileLocation,
+    pub location: PathBuf,
 }
 
 pub mod source_serde {
@@ -690,18 +754,14 @@ pub mod remap_principals_serde {
 pub mod clarity_version_serde {
     use clarinet_files::INVALID_CLARITY_VERSION;
     use clarity_repl::clarity::ClarityVersion;
+    use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8};
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(clarity_version: &ClarityVersion, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        match clarity_version {
-            ClarityVersion::Clarity1 => s.serialize_i64(1),
-            ClarityVersion::Clarity2 => s.serialize_i64(2),
-            ClarityVersion::Clarity3 => s.serialize_i64(3),
-            ClarityVersion::Clarity4 => s.serialize_i64(4),
-        }
+        s.serialize_i64(clarity_version_to_u8(*clarity_version) as i64)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<ClarityVersion, D::Error>
@@ -709,20 +769,15 @@ pub mod clarity_version_serde {
         D: Deserializer<'de>,
     {
         let cv = i64::deserialize(deserializer)?;
-        match cv {
-            1 => Ok(ClarityVersion::Clarity1),
-            2 => Ok(ClarityVersion::Clarity2),
-            3 => Ok(ClarityVersion::Clarity3),
-            4 => Ok(ClarityVersion::Clarity4),
-            _ => Err(serde::de::Error::custom(INVALID_CLARITY_VERSION)),
-        }
+        clarity_version_from_u8(cv as u8)
+            .ok_or_else(|| serde::de::Error::custom(INVALID_CLARITY_VERSION))
     }
 }
 
 impl RequirementPublishSpecification {
     pub fn from_specifications(
         specs: &RequirementPublishSpecificationFile,
-        project_root_location: &FileLocation,
+        project_root_location: &Path,
     ) -> Result<RequirementPublishSpecification, String> {
         let Ok(contract_id) = QualifiedContractIdentifier::parse(&specs.contract_id) else {
             return Err(format!(
@@ -757,15 +812,10 @@ impl RequirementPublishSpecification {
             }
         }
 
-        let location = match (&specs.path, &specs.url) {
-            (Some(location_string), None) | (None, Some(location_string)) => {
-                FileLocation::try_parse(location_string, Some(project_root_location))
-            }
-            _ => None,
-        }
-        .ok_or("unable to parse file location (can either be 'path' or 'url'".to_string())?;
+        let location = paths::try_parse_path(&specs.path, Some(project_root_location))
+            .ok_or(format!("unable to parse path '{}'", specs.path))?;
 
-        let source = location.read_content_as_utf8()?;
+        let source = paths::read_content_as_utf8(&location)?;
         let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
 
         Ok(RequirementPublishSpecification {
@@ -832,13 +882,15 @@ pub struct EmulatedContractPublishSpecification {
     pub source: String,
     #[serde(with = "clarity_version_serde")]
     pub clarity_version: ClarityVersion,
-    pub location: FileLocation,
+    pub location: PathBuf,
+    #[serde(skip)]
+    pub is_requirement: bool,
 }
 
 impl EmulatedContractPublishSpecification {
     pub fn from_specifications(
         specs: &EmulatedContractPublishSpecificationFile,
-        project_root_location: &FileLocation,
+        project_root: &Path,
         source: Option<String>,
     ) -> Result<EmulatedContractPublishSpecification, String> {
         let Ok(contract_name) = ContractName::try_from(specs.contract_name.to_string()) else {
@@ -856,17 +908,12 @@ impl EmulatedContractPublishSpecification {
             ));
         };
 
-        let location = match (&specs.path, &specs.url) {
-            (Some(location_string), None) | (None, Some(location_string)) => {
-                FileLocation::try_parse(location_string, Some(project_root_location))
-            }
-            _ => None,
-        }
-        .ok_or("unable to parse file location (can either be 'path' or 'url'".to_string())?;
+        let location = paths::try_parse_path(&specs.path, Some(project_root))
+            .ok_or(format!("unable to parse path '{}'", specs.path))?;
 
         let source = match source {
             Some(source) => source,
-            None => location.read_content_as_utf8()?,
+            None => paths::read_content_as_utf8(&location)?,
         };
         let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
 
@@ -876,6 +923,7 @@ impl EmulatedContractPublishSpecification {
             source,
             location,
             clarity_version,
+            is_requirement: false,
         })
     }
 }
@@ -892,15 +940,15 @@ pub struct DeploymentSpecification {
     pub plan: TransactionPlanSpecification,
     // Keep a cache of contract's (source, relative_path)
     #[serde(with = "contracts_serde")]
-    pub contracts: BTreeMap<QualifiedContractIdentifier, (String, FileLocation)>,
+    pub contracts: BTreeMap<QualifiedContractIdentifier, (String, PathBuf)>,
 }
 
 pub mod contracts_serde {
     use std::collections::{BTreeMap, HashMap};
+    use std::path::PathBuf;
 
     use base64::engine::general_purpose::STANDARD as b64;
     use base64::Engine as _;
-    use clarinet_files::FileLocation;
     use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
     use serde::ser::SerializeSeq;
     use serde::{Deserializer, Serializer};
@@ -908,24 +956,19 @@ pub mod contracts_serde {
     use super::source_serde;
 
     pub fn serialize<S>(
-        target: &BTreeMap<QualifiedContractIdentifier, (String, FileLocation)>,
+        target: &BTreeMap<QualifiedContractIdentifier, (String, PathBuf)>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let mut out = serializer.serialize_seq(Some(target.len()))?;
-        for (contract_id, (source, file_location)) in target {
+        for (contract_id, (source, path)) in target {
             let encoded = b64.encode(source);
             let mut map = BTreeMap::new();
             map.insert("contract_id", contract_id.to_string());
             map.insert("source", encoded);
-            match file_location {
-                FileLocation::FileSystem { path } => {
-                    map.insert("path", path.to_str().unwrap().to_string())
-                }
-                FileLocation::Url { url } => map.insert("url", url.to_string()),
-            };
+            map.insert("path", path.to_string_lossy().to_string());
             out.serialize_element(&map)?;
         }
         out.end()
@@ -933,12 +976,11 @@ pub mod contracts_serde {
 
     pub fn deserialize<'de, D>(
         des: D,
-    ) -> Result<BTreeMap<QualifiedContractIdentifier, (String, FileLocation)>, D::Error>
+    ) -> Result<BTreeMap<QualifiedContractIdentifier, (String, PathBuf)>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let mut res: BTreeMap<QualifiedContractIdentifier, (String, FileLocation)> =
-            BTreeMap::new();
+        let mut res: BTreeMap<QualifiedContractIdentifier, (String, PathBuf)> = BTreeMap::new();
         let container: Vec<HashMap<String, String>> = serde::Deserialize::deserialize(des)?;
 
         for entry in container {
@@ -951,14 +993,10 @@ pub mod contracts_serde {
                 )),
             }?;
 
-            let file_location = if let Some(url) = entry.get("url") {
-                FileLocation::from_url_string(url)
-            } else if let Some(path) = entry.get("path") {
-                FileLocation::from_path_string(path)
-            } else {
-                Err("Invalid file location field. Must have key \"url\" or \"path\"".into())
-            }
-            .map_err(serde::de::Error::custom)?;
+            let path = entry
+                .get("path")
+                .map(PathBuf::from)
+                .ok_or_else(|| serde::de::Error::custom("Contract entry must have `path` field"))?;
 
             let source = match entry.get("source") {
                 Some(source) => {
@@ -969,7 +1007,7 @@ pub mod contracts_serde {
                 )),
             }?;
 
-            res.insert(contract_id, (source, file_location));
+            res.insert(contract_id, (source, path));
         }
 
         Ok(res)
@@ -978,16 +1016,14 @@ pub mod contracts_serde {
 
 impl DeploymentSpecification {
     pub fn from_config_file(
-        deployment_location: &FileLocation,
-        project_root_location: &FileLocation,
+        deployment_path: &Path,
+        project_root: &Path,
     ) -> Result<DeploymentSpecification, String> {
-        let spec_file_content = deployment_location.read_content()?;
+        let spec_file_content = paths::read_content(deployment_path)?;
 
         let specification_file: DeploymentSpecificationFile =
-            match serde_yaml::from_slice(&spec_file_content[..]) {
-                Ok(res) => res,
-                Err(msg) => return Err(format!("unable to read file {msg}")),
-            };
+            yaml_serde::from_slice(&spec_file_content[..])
+                .map_err(|msg| format!("unable to read file {msg}"))?;
 
         let network = match specification_file.network.to_lowercase().as_str() {
             "simnet" => StacksNetwork::Simnet,
@@ -1002,20 +1038,18 @@ impl DeploymentSpecification {
             }
         };
 
-        let deployment_spec = DeploymentSpecification::from_specifications(
+        DeploymentSpecification::from_specifications(
             &specification_file,
             &network,
-            project_root_location,
+            project_root,
             None,
-        )?;
-
-        Ok(deployment_spec)
+        )
     }
 
     pub fn from_specifications(
         specs: &DeploymentSpecificationFile,
         network: &StacksNetwork,
-        project_root_location: &FileLocation,
+        project_root: &Path,
         contracts_sources: Option<&HashMap<String, String>>,
     ) -> Result<DeploymentSpecification, String> {
         let mut contracts = BTreeMap::new();
@@ -1033,15 +1067,16 @@ impl DeploymentSpecification {
                                 }
                                 TransactionSpecificationFile::EmulatedContractPublish(spec) => {
                                     let source = contracts_sources.as_ref().map(|contracts_sources| {
-                                        let contract_path = FileLocation::try_parse(spec.path.as_ref().expect("missing path"), Some(project_root_location))
-                                            .expect("failed to get contract path").to_string();
+                                        let contract_path = paths::try_parse_path(&spec.path, Some(project_root))
+                                            .expect("failed to get contract path");
+                                        let contract_path_str = contract_path.to_string_lossy().to_string();
                                         contracts_sources
-                                            .get(&contract_path)
+                                            .get(&contract_path_str)
                                             .cloned()
-                                            .unwrap_or_else(|| panic!("missing contract source for {}", spec.path.clone().unwrap_or_default()))
+                                            .unwrap_or_else(|| panic!("missing contract source for {}", spec.path))
                                     });
 
-                                    let spec = EmulatedContractPublishSpecification::from_specifications(spec, project_root_location, source)?;
+                                    let spec = EmulatedContractPublishSpecification::from_specifications(spec, project_root, source)?;
                                     let contract_id = QualifiedContractIdentifier::new(spec.emulated_sender.clone(), spec.contract_name.clone());
                                     contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
                                     TransactionSpecification::EmulatedContractPublish(spec)
@@ -1085,14 +1120,15 @@ impl DeploymentSpecification {
                                     if matches!(network, StacksNetwork::Mainnet) {
                                         return Err(format!("{} only supports transactions of type 'contract-call' and 'contract-publish", specs.network.to_lowercase()))
                                     }
-                                    let spec = RequirementPublishSpecification::from_specifications(spec, project_root_location)?;
+                                    let spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
                                     TransactionSpecification::RequirementPublish(spec)
                                 }
                                 TransactionSpecificationFile::ContractPublish(spec) => {
-                                    let spec = ContractPublishSpecification::from_specifications(spec, project_root_location)?;
+                                    let spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
+                                    let (source, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
+                                    contracts.insert(contract_id, (source, spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
                                 TransactionSpecificationFile::BtcTransfer(spec) => {
@@ -1142,7 +1178,7 @@ impl DeploymentSpecification {
         })
     }
 
-    pub fn to_specification_file(&self) -> DeploymentSpecificationFile {
+    pub fn to_specification_file(&self, project_root: &Path) -> DeploymentSpecificationFile {
         DeploymentSpecificationFile {
             id: Some(self.id),
             name: self.name.clone(),
@@ -1156,12 +1192,13 @@ impl DeploymentSpecification {
             bitcoin_node: self.bitcoin_node.clone(),
             node: None,
             genesis: self.genesis.as_ref().map(|g| g.to_specification_file()),
-            plan: Some(self.plan.to_specification_file()),
+            plan: Some(self.plan.to_specification_file(project_root)),
         }
     }
 
-    pub fn to_file_content(&self) -> Result<Vec<u8>, String> {
-        serde_yaml::to_vec(&self.to_specification_file())
+    pub fn to_file_content(&self, project_root: &Path) -> Result<Vec<u8>, String> {
+        yaml_serde::to_string(&self.to_specification_file(project_root))
+            .map(|s| s.into_bytes())
             .map_err(|err| format!("failed to serialize deployment\n{err}"))
     }
 
@@ -1218,6 +1255,28 @@ impl DeploymentSpecification {
         }
         self.sort_batches_by_epoch();
     }
+
+    pub fn remove_env_simnet(&mut self) -> Result<bool, String> {
+        let mut global_found_env_simnet = false;
+        for batch in self.plan.batches.iter_mut() {
+            for transaction in batch.transactions.iter_mut() {
+                if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = transaction
+                {
+                    let (clean, found_env_simnet) = remove_env_simnet(spec.source.to_string())?;
+                    spec.source = clean;
+                    global_found_env_simnet |= found_env_simnet;
+                }
+            }
+        }
+
+        for (ref mut source, _) in self.contracts.values_mut() {
+            let (clean, found_env_simnet) = remove_env_simnet(source.to_string())?;
+            *source = clean;
+            global_found_env_simnet |= found_env_simnet;
+        }
+
+        Ok(global_found_env_simnet)
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -1239,17 +1298,19 @@ pub struct DeploymentSpecificationFile {
 
 impl DeploymentSpecificationFile {
     pub async fn from_file_accessor(
-        path: &FileLocation,
+        path: &Path,
         file_accesor: &dyn FileAccessor,
     ) -> Result<DeploymentSpecificationFile, String> {
-        let spec_file_content = file_accesor.read_file(path.to_string()).await?;
+        let spec_file_content = file_accesor
+            .read_file(path.to_string_lossy().to_string())
+            .await?;
 
-        serde_yaml::from_str(&spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
+        yaml_serde::from_str(&spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
     }
     pub fn from_file_content(
         spec_file_content: &str,
     ) -> Result<DeploymentSpecificationFile, String> {
-        serde_yaml::from_str(spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
+        yaml_serde::from_str(spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
     }
 }
 
@@ -1350,7 +1411,7 @@ impl WalletSpecification {
 }
 
 impl TransactionPlanSpecification {
-    pub fn to_specification_file(&self) -> TransactionPlanSpecificationFile {
+    pub fn to_specification_file(&self, project_root: &Path) -> TransactionPlanSpecificationFile {
         let mut batches = vec![];
         for batch in self.batches.iter() {
             let mut transactions = vec![];
@@ -1367,21 +1428,16 @@ impl TransactionPlanSpecification {
                         })
                     }
                     TransactionSpecification::ContractPublish(tx) => {
+                        let rel_path = paths::get_relative_path(&tx.location, project_root)
+                            .unwrap_or_else(|_| tx.location.to_string_lossy().into_owned());
                         TransactionSpecificationFile::ContractPublish(
                             ContractPublishSpecificationFile {
                                 contract_name: tx.contract_name.to_string(),
                                 expected_sender: tx.expected_sender.to_address(),
-                                location: Some(tx.location.clone()),
-                                path: None,
-                                url: None,
+                                path: rel_path,
                                 cost: tx.cost,
                                 anchor_block_only: Some(tx.anchor_block_only),
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1396,19 +1452,14 @@ impl TransactionPlanSpecification {
                         )
                     }
                     TransactionSpecification::EmulatedContractPublish(tx) => {
+                        let rel_path = paths::get_relative_path(&tx.location, project_root)
+                            .unwrap_or_else(|_| tx.location.to_string_lossy().into_owned());
                         TransactionSpecificationFile::EmulatedContractPublish(
                             EmulatedContractPublishSpecificationFile {
                                 contract_name: tx.contract_name.to_string(),
                                 emulated_sender: tx.emulated_sender.to_address(),
-                                location: Some(tx.location.clone()),
-                                path: None,
-                                url: None,
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                },
+                                path: rel_path,
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1417,21 +1468,16 @@ impl TransactionPlanSpecification {
                         for (src, dst) in tx.remap_principals.iter() {
                             remap_principals.insert(src.to_address(), dst.to_address());
                         }
+                        let rel_path = paths::get_relative_path(&tx.location, project_root)
+                            .unwrap_or_else(|_| tx.location.to_string_lossy().into_owned());
                         TransactionSpecificationFile::RequirementPublish(
                             RequirementPublishSpecificationFile {
                                 contract_id: tx.contract_id.to_string(),
                                 remap_sender: tx.remap_sender.to_address(),
                                 remap_principals: Some(remap_principals),
-                                location: Some(tx.location.clone()),
-                                path: None,
-                                url: None,
+                                path: rel_path,
                                 cost: tx.cost,
-                                clarity_version: match tx.clarity_version {
-                                    ClarityVersion::Clarity1 => Some(1),
-                                    ClarityVersion::Clarity2 => Some(2),
-                                    ClarityVersion::Clarity3 => Some(3),
-                                    ClarityVersion::Clarity4 => Some(4),
-                                },
+                                clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
                             },
                         )
                     }
@@ -1492,74 +1538,7 @@ mod tests {
             epoch_3_0: 8,
             epoch_3_1: 9,
             epoch_3_2: 10,
-            epoch_3_3: None,
-            ..Default::default()
-        };
-
-        let epoch_config = BurnchainEpochConfig::from(&devnet_config);
-        let epoch_config_toml = toml::to_string(&epoch_config).unwrap();
-
-        assert_eq!(
-            epoch_config_toml,
-            indoc! { r#"
-                [[burnchain.epochs]]
-                epoch_name = "2.0"
-                start_height = 1
-
-                [[burnchain.epochs]]
-                epoch_name = "2.05"
-                start_height = 2
-
-                [[burnchain.epochs]]
-                epoch_name = "2.1"
-                start_height = 3
-
-                [[burnchain.epochs]]
-                epoch_name = "2.2"
-                start_height = 4
-
-                [[burnchain.epochs]]
-                epoch_name = "2.3"
-                start_height = 5
-
-                [[burnchain.epochs]]
-                epoch_name = "2.4"
-                start_height = 6
-
-                [[burnchain.epochs]]
-                epoch_name = "2.5"
-                start_height = 7
-
-                [[burnchain.epochs]]
-                epoch_name = "3.0"
-                start_height = 8
-
-                [[burnchain.epochs]]
-                epoch_name = "3.1"
-                start_height = 9
-
-                [[burnchain.epochs]]
-                epoch_name = "3.2"
-                start_height = 10
-                "#
-            }
-        );
-    }
-
-    #[test]
-    fn test_epoch_config_with_optional_3_3() {
-        let devnet_config = DevnetConfig {
-            epoch_2_0: 1,
-            epoch_2_05: 2,
-            epoch_2_1: 3,
-            epoch_2_2: 4,
-            epoch_2_3: 5,
-            epoch_2_4: 6,
-            epoch_2_5: 7,
-            epoch_3_0: 8,
-            epoch_3_1: 9,
-            epoch_3_2: 10,
-            epoch_3_3: Some(11),
+            epoch_3_3: 11,
             ..Default::default()
         };
 
@@ -1612,6 +1591,82 @@ mod tests {
                 [[burnchain.epochs]]
                 epoch_name = "3.3"
                 start_height = 11
+                "#
+            }
+        );
+    }
+
+    #[test]
+    fn test_epoch_config_with_optional_next_epoch() {
+        let devnet_config = DevnetConfig {
+            epoch_2_0: 1,
+            epoch_2_05: 2,
+            epoch_2_1: 3,
+            epoch_2_2: 4,
+            epoch_2_3: 5,
+            epoch_2_4: 6,
+            epoch_2_5: 7,
+            epoch_3_0: 8,
+            epoch_3_1: 9,
+            epoch_3_2: 10,
+            epoch_3_3: 11,
+            epoch_3_4: Some(12),
+            ..Default::default()
+        };
+
+        let epoch_config = BurnchainEpochConfig::from(&devnet_config);
+        let epoch_config_toml = toml::to_string(&epoch_config).unwrap();
+
+        assert_eq!(
+            epoch_config_toml,
+            indoc! { r#"
+                [[burnchain.epochs]]
+                epoch_name = "2.0"
+                start_height = 1
+
+                [[burnchain.epochs]]
+                epoch_name = "2.05"
+                start_height = 2
+
+                [[burnchain.epochs]]
+                epoch_name = "2.1"
+                start_height = 3
+
+                [[burnchain.epochs]]
+                epoch_name = "2.2"
+                start_height = 4
+
+                [[burnchain.epochs]]
+                epoch_name = "2.3"
+                start_height = 5
+
+                [[burnchain.epochs]]
+                epoch_name = "2.4"
+                start_height = 6
+
+                [[burnchain.epochs]]
+                epoch_name = "2.5"
+                start_height = 7
+
+                [[burnchain.epochs]]
+                epoch_name = "3.0"
+                start_height = 8
+
+                [[burnchain.epochs]]
+                epoch_name = "3.1"
+                start_height = 9
+
+                [[burnchain.epochs]]
+                epoch_name = "3.2"
+                start_height = 10
+
+                [[burnchain.epochs]]
+                epoch_name = "3.3"
+                start_height = 11
+
+                [[burnchain.epochs]]
+                epoch_name = "3.4"
+                start_height = 12
                 "#
             }
         );

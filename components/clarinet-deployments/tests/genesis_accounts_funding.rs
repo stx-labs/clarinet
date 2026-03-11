@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use clarinet_deployments::types::*;
 use clarinet_deployments::update_session_with_deployment_plan;
-use clarinet_files::{FileLocation, StacksNetwork};
+use clarinet_files::StacksNetwork;
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::Address;
 use clarity::vm::types::StandardPrincipalData;
@@ -50,7 +51,7 @@ fn fund_geneis_account_with_stx() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -72,7 +73,7 @@ fn does_not_fund_sbtc_without_sbtc_contract() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -100,9 +101,9 @@ fn can_fund_initial_sbtc_balance() {
                     contract_name: ContractName::try_from(contract_name.to_string()).unwrap(),
                     source: source.to_string(),
                     clarity_version: ClarityVersion::Clarity3,
-                    location: FileLocation::from_path_string("./fixtures/sbtc-registry.clar")
-                        .unwrap(),
+                    location: PathBuf::from("./fixtures/sbtc-registry.clar"),
                     emulated_sender: SBTC_DEPLOYER.clone(),
+                    is_requirement: false,
                 },
             )
         })
@@ -124,7 +125,7 @@ fn can_fund_initial_sbtc_balance() {
         }],
     };
     let deployment = build_test_deployement_plan(vec![batch], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None, None);
+    update_session_with_deployment_plan(&mut session, &deployment, None);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 2);

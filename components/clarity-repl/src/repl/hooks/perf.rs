@@ -3,7 +3,7 @@ use std::io::Write;
 
 use clarity::vm::contexts::{Environment, LocalContext};
 use clarity::vm::costs::ExecutionCost;
-use clarity::vm::errors::Error;
+use clarity::vm::errors::VmExecutionError;
 use clarity::vm::{EvalHook, SymbolicExpression, SymbolicExpressionType};
 use clarity_types::types::{QualifiedContractIdentifier, Value};
 
@@ -275,7 +275,7 @@ impl EvalHook for PerfHook {
         env: &mut Environment,
         _context: &LocalContext,
         expr: &SymbolicExpression,
-        _res: &Result<Value, Error>,
+        _res: &Result<Value, VmExecutionError>,
     ) {
         // Get the full call stack as a string
         let call_stack = self
@@ -366,17 +366,11 @@ impl EvalHook for PerfHook {
                 }
 
                 for (call_stack, cost) in &self.collected_data {
-                    let final_call_stack =
-                        if overhead_runtime > 0 && self.contract_identifier.is_some() {
-                            format!(
-                                "{};{}",
-                                self.contract_identifier.as_ref().unwrap(),
-                                call_stack
-                            )
-                        } else {
-                            call_stack.clone()
-                        };
-                    writeln!(writer, "{} {}", final_call_stack, cost)
+                    let final_call_stack = match &self.contract_identifier {
+                        Some(id) if overhead_runtime > 0 => format!("{id};{call_stack}"),
+                        _ => call_stack.clone(),
+                    };
+                    writeln!(writer, "{final_call_stack} {cost}")
                         .expect("Failed to write to perf output");
                 }
             }

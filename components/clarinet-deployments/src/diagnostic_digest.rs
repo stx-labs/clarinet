@@ -68,10 +68,7 @@ impl DiagnosticsDigest {
                         continue;
                     }
                 }
-                let contract_path = match contract_location.get_relative_location() {
-                    Ok(contract_path) => contract_path,
-                    _ => contract_location.to_string(),
-                };
+                let contract_path = contract_location.to_string_lossy().to_string();
 
                 if let Some(span) = diagnostic.spans.first() {
                     outputs.push(format!(

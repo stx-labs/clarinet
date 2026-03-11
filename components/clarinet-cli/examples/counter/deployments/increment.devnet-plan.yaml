@@ -8,10 +8,10 @@ plan:
   batches:
     - id: 0
       transactions:
-        - contract-call:
-            contract-id: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
-            expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            method: increment
-            parameters:
-              - u1
-            cost: 5960
+        - transaction-type: contract-call
+          contract-id: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
+          expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+          method: increment
+          parameters:
+            - u1
+          cost: 5960
