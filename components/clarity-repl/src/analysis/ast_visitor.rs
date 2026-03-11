@@ -419,9 +419,14 @@ pub trait ASTVisitor<'a> {
                                 )
                             }
                         }
-                        AsContract | AsContractSafe => {
+                        AsContract => {
                             self.traverse_as_contract(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
+                        AsContractSafe => self.traverse_as_contract_safe(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                            if args.len() > 1 { &args[1..] } else { &[] },
+                        ),
                         ContractOf => {
                             self.traverse_contract_of(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
@@ -1461,6 +1466,32 @@ pub trait ASTVisitor<'a> {
         &mut self,
         expr: &'a SymbolicExpression,
         inner: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) -> bool {
+        if !self.traverse_expr(allowances) {
+            return false;
+        }
+        for stmt in body {
+            if !self.traverse_expr(stmt) {
+                return false;
+            }
+        }
+        self.visit_as_contract_safe(expr, allowances, body)
+    }
+
+    fn visit_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
     ) -> bool {
         true
     }

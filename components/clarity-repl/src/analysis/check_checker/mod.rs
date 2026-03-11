@@ -539,6 +539,25 @@ impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
         res
     }
 
+    fn traverse_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) -> bool {
+        self.in_as_contract = true;
+        let mut res = self.traverse_expr(allowances);
+        for stmt in body {
+            if !res {
+                break;
+            }
+            res = self.traverse_expr(stmt);
+        }
+        res = res && self.visit_as_contract_safe(expr, allowances, body);
+        self.in_as_contract = false;
+        res
+    }
+
     fn visit_asserts(
         &mut self,
         expr: &'a SymbolicExpression,
