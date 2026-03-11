@@ -425,7 +425,7 @@ pub trait ASTVisitor<'a> {
                         AsContractSafe => self.traverse_as_contract_safe(
                             expr,
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
-                            if args.len() > 1 { &args[1..] } else { &[] },
+                            &args[1..],
                         ),
                         ContractOf => {
                             self.traverse_contract_of(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
@@ -1476,7 +1476,13 @@ pub trait ASTVisitor<'a> {
         allowances: &'a SymbolicExpression,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        if !self.traverse_expr(allowances) {
+        if let Some(allowance_list) = allowances.match_list() {
+            for allowance in allowance_list {
+                if !self.traverse_expr(allowance) {
+                    return false;
+                }
+            }
+        } else if !self.traverse_expr(allowances) {
             return false;
         }
         for stmt in body {
@@ -2737,6 +2743,35 @@ pub trait ASTVisitor<'a> {
 
 pub fn traverse<'a>(visitor: &mut impl ASTVisitor<'a>, exprs: &'a [SymbolicExpression]) -> bool {
     exprs.iter().all(|expr| visitor.traverse_expr(expr))
+}
+
+#[cfg(test)]
+mod tests {
+    use clarity::types::StacksEpochId;
+    use indoc::indoc;
+
+    use crate::repl::session::Session;
+    use crate::repl::SessionSettings;
+
+    #[test]
+    fn as_contract_safe_no_body_is_error() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings::default());
+        session.update_epoch(StacksEpochId::Epoch33);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (my-func)
+                (as-contract? ()))
+        ").to_string();
+
+        let result =
+            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
+
+        assert!(
+            result.is_err(),
+            "as-contract? with no body should be an error"
+        );
+    }
 }
 
 fn match_tuple<'a>(

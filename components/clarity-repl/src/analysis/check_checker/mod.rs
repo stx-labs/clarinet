@@ -546,7 +546,13 @@ impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
         body: &'a [SymbolicExpression],
     ) -> bool {
         self.in_as_contract = true;
-        let mut res = self.traverse_expr(allowances);
+        let mut res = if let Some(allowance_list) = allowances.match_list() {
+            allowance_list
+                .iter()
+                .all(|allowance| self.traverse_expr(allowance))
+        } else {
+            self.traverse_expr(allowances)
+        };
         for stmt in body {
             if !res {
                 break;
