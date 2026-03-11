@@ -6,10 +6,10 @@ use clarity_repl::clarity::diagnostic::Diagnostic;
 use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
 use ls_types::{
-    CompletionItem, CompletionParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-    DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams, Hover, HoverParams,
-    InitializeParams, InitializeResult, Location, MessageType, ServerInfo, SignatureHelp,
-    SignatureHelpParams, TextEdit,
+    CodeLens, CodeLensParams, CompletionItem, CompletionParams, DocumentFormattingParams,
+    DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams,
+    Hover, HoverParams, InitializeParams, InitializeResult, Location, MessageType, ServerInfo,
+    SignatureHelp, SignatureHelpParams, TextEdit,
 };
 use serde::{Deserialize, Serialize};
 
@@ -293,6 +293,7 @@ pub enum LspRequest {
     DocumentSymbol(DocumentSymbolParams),
     DocumentFormatting(DocumentFormattingParams),
     DocumentRangeFormatting(DocumentRangeFormattingParams),
+    CodeLens(CodeLensParams),
     Initialize(Box<InitializeParams>),
 }
 
@@ -305,6 +306,7 @@ pub enum LspRequestResponse {
     DocumentFormatting(Option<Vec<TextEdit>>),
     DocumentRangeFormatting(Option<Vec<TextEdit>>),
     Hover(Option<Hover>),
+    CodeLens(Vec<CodeLens>),
     Initialize(Box<InitializeResult>),
 }
 
@@ -576,6 +578,18 @@ pub fn process_request(
                 .unwrap_or_default();
             Ok(LspRequestResponse::Hover(hover_data))
         }
+
+        LspRequest::CodeLens(params) => {
+            let file_url = params.text_document.uri;
+            let Some(contract_location) = get_contract_location(&file_url) else {
+                return Ok(LspRequestResponse::CodeLens(vec![]));
+            };
+            let code_lenses = editor_state
+                .try_read(|es| es.get_code_lenses(&contract_location))
+                .unwrap_or_default();
+            Ok(LspRequestResponse::CodeLens(code_lenses))
+        }
+
         _ => Err(format!("Unexpected command: {command:?}")),
     }
 }
@@ -620,11 +634,12 @@ mod lsp_tests {
     use std::path::PathBuf;
 
     use clarity_repl::clarity::ClarityVersion;
+    use indoc::indoc;
     use ls_types::{
         DocumentRangeFormattingParams, FormattingOptions, Position, Range, TextDocumentIdentifier,
         WorkDoneProgressParams,
     };
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use super::*;
     use crate::common::state::EditorState;
@@ -732,37 +747,348 @@ mod lsp_tests {
             .ends_with("test.clar\""));
     }
 
+    struct TestFileAccessor {
+        project_manifest: String,
+        network_manifest: String,
+        contract: String,
+    }
+
+    impl TestFileAccessor {
+        fn new(contract: String) -> Self {
+            let project_manifest = indoc! {r#"
+                [project]
+                name = 'test-project'
+
+                [contracts.counter]
+                path = 'contracts/test.clar'
+                epoch = 'latest'
+                clarity_version = 3
+            "#}
+            .to_string();
+
+            let network_manifest = indoc! {r#"
+                [network]
+                name = "devnet"
+                deployment_fee_rate = 10
+
+                [accounts.deployer]
+                mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
+                balance = 100_000_000_000_000
+                sbtc_balance = 1_000_000_000
+            "#}
+            .to_string();
+
+            Self {
+                project_manifest,
+                network_manifest,
+                contract,
+            }
+        }
+    }
+
+    impl FileAccessor for TestFileAccessor {
+        fn file_exists(&self, _path: String) -> clarinet_files::FileAccessorResult<bool> {
+            Box::pin(async { Ok(true) })
+        }
+
+        fn read_file(&self, path: String) -> clarinet_files::FileAccessorResult<String> {
+            let content = if path.ends_with("Clarinet.toml") {
+                self.project_manifest.clone()
+            } else if path.ends_with("Devnet.toml") {
+                self.network_manifest.clone()
+            } else {
+                self.contract.clone()
+            };
+            Box::pin(async { Ok(content) })
+        }
+
+        fn read_files(
+            &self,
+            contracts_paths: Vec<String>,
+        ) -> clarinet_files::FileAccessorResult<HashMap<String, String>> {
+            let contract = self.contract.clone();
+            Box::pin(async move {
+                Ok(contracts_paths
+                    .into_iter()
+                    .map(|path| (path, contract.clone()))
+                    .collect())
+            })
+        }
+
+        fn write_file(
+            &self,
+            _path: String,
+            _content: &[u8],
+        ) -> clarinet_files::FileAccessorResult<()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_env_simnet() {
+        let with_env_simnet = indoc! {r#"
+            (define-data-var count uint u0)
+
+            ;; #[env(simnet)]
+            (define-public (increment)
+              (ok (var-set count (+ (var-get count) u1)))
+            )
+
+            (define-public (increment2)
+              (increment)
+            )
+        "#};
+
+        let file_accessor = TestFileAccessor::new(with_env_simnet.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        let contract_location = PathBuf::from("test.clar".to_string());
+        let notification = LspNotification::ContractSaved(contract_location);
+        let response =
+            process_notification(notification, &mut editor_state_input, Some(&file_accessor))
+                .await
+                .expect("Failed to process notification");
+
+        let response_json = json!(response);
+        println!("full response: {response_json}");
+
+        let aggregated_diagnostics = response_json
+            .get("aggregated_diagnostics")
+            .expect("Expected 'aggregate_diagnostics' key");
+        let Some(aggregate_array) = aggregated_diagnostics.as_array() else {
+            panic!("aggregated_diagnostics should be an array");
+        };
+        assert_eq!(aggregate_array.len(), 1);
+
+        let element = aggregate_array
+            .first()
+            .expect("Expected an element in outer array");
+        let Some(element_array) = element.as_array() else {
+            panic!("element should be an array");
+        };
+        assert_eq!(
+            element_array.len(),
+            2,
+            "Element array should have two items"
+        );
+
+        let path = element_array
+            .first()
+            .expect("Failed to get path in element array")
+            .to_string();
+        assert_eq!(path, "\"contracts/test.clar\"");
+
+        let diagnostics = element_array
+            .get(1)
+            .expect("Failed to get diagnostics in element array");
+        let Some(diagnostics_array) = diagnostics.as_array() else {
+            panic!("diagnostics should be an array");
+        };
+        assert_eq!(
+            diagnostics_array.len(),
+            1,
+            "Diagnostics array should have one item"
+        );
+        let diagnostic = diagnostics_array
+            .first()
+            .expect("Failed to get expected diagnostic");
+        let level = diagnostic
+            .get("level")
+            .expect("Failed to find \"level\": in diagnostic")
+            .to_string();
+        assert_eq!(level, "\"Error\"");
+
+        let message = diagnostic
+            .get("message")
+            .expect("Failed to find \"message\": in diagnostic");
+        assert_eq!(message, "use of unresolved function 'increment' (onchain)");
+
+        let spans = diagnostic
+            .get("spans")
+            .expect("Failed to find \"spans\": in diagnostic");
+        let Some(spans_array) = spans.as_array() else {
+            panic!("spans should be an array");
+        };
+        assert_eq!(spans_array.len(), 1, "Spans array should have one item");
+        let span = spans_array.first().expect("Failed to get expected span");
+        let start_line = span
+            .get("start_line")
+            .expect("span didn't have a \"start_line\" field");
+
+        let end_line = span
+            .get("end_line")
+            .expect("span didn't have a \"end_line\" field");
+
+        assert_eq!(start_line, &Value::from(8));
+        assert_eq!(end_line, &Value::from(10));
+    }
+
     #[test]
     fn test_custom_boot_contract_recognition() {
-        let manifest_content = r#"
-[project]
-name = "test-project"
-telemetry = false
+        let manifest_content = indoc! {r#"
+            [project]
+            name = "test-project"
+            telemetry = false
 
-[project.override_boot_contracts_source]
-"pox-4" = "./custom-boot-contracts/pox-4.clar"
-"costs" = "./custom-boot-contracts/costs.clar"
+            [project.override_boot_contracts_source]
+            "pox-4" = "./custom-boot-contracts/pox-4.clar"
+            "costs" = "./custom-boot-contracts/costs.clar"
 
-[contracts.test-contract]
-path = "contracts/test.clar"
-clarity_version = 1
-"#;
+            [contracts.test-contract]
+            path = "contracts/test.clar"
+            clarity_version = 1
+        "#};
 
         // Create a test contract in custom-boot-contracts
-        let contract_content = r#"
-(define-data-var counter uint u0)
-(define-public (increment)
-    (begin
-        (set-data-var! counter (+ (var-get counter) u1))
-        (ok (var-get counter))
-    )
-)
-"#;
+        let contract_content = indoc! {r#"
+            (define-data-var counter uint u0)
+            (define-public (increment)
+                (begin
+                    (set-data-var! counter (+ (var-get counter) u1))
+                    (ok (var-get counter))
+                )
+            )
+        "#};
 
         // This test verifies that the LSP infrastructure can handle custom-boot-contracts
         // The actual file system operations would be handled by the file accessor
         // but we can verify the contract recognition logic works
         assert!(manifest_content.contains("custom-boot-contracts"));
         assert!(contract_content.contains("define-public"));
+    }
+
+    #[tokio::test]
+    async fn test_env_simnet_opened() {
+        let with_env_simnet = indoc! {r#"
+            ;; token definitions
+            ;;
+            (define-fungible-token drachma)
+
+            ;; constants
+
+            (define-constant CONTRACT-OWNER tx-sender)
+            (define-constant ERR-OWNER-ONLY (err u100))
+            (define-constant ERR-NOT-TOKEN-OWNER (err u101))
+
+            ;; data vars
+            ;;
+            (define-data-var token-uri (optional (string-utf8 256)) (some u"https://en.wikipedia.org/wiki/Ancient_drachma"))
+
+            ;; data maps
+            ;;
+
+            ;; public functions
+            ;;
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                    (minty-fresh amount recipient)
+                )
+            )
+
+            ;; #[env(simnet)]
+            (define-public (minty-fresh (amount uint) (recipient principal)) ;; eol
+                (begin
+                    (ft-mint? drachma amount recipient)
+                )
+            )
+            ;; post comment
+        "#};
+
+        let file_accessor = TestFileAccessor::new(with_env_simnet.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        let contract_location = PathBuf::from("test.clar".to_string());
+        let notification = LspNotification::ContractSaved(contract_location);
+        let response =
+            process_notification(notification, &mut editor_state_input, Some(&file_accessor))
+                .await
+                .expect("Failed to process notification");
+
+        let response_json = json!(response);
+        println!("full respeonse: {response_json}");
+
+        let aggregated_diagnostics = response_json
+            .get("aggregated_diagnostics")
+            .expect("Expected 'aggregate_diagnostics' key");
+        let Some(aggregate_array) = aggregated_diagnostics.as_array() else {
+            panic!("aggregated_diagnostics should be an array");
+        };
+        assert_eq!(aggregate_array.len(), 1);
+
+        let element = aggregate_array
+            .first()
+            .expect("Expected an element in outer array");
+        let Some(element_array) = element.as_array() else {
+            panic!("element should be an array");
+        };
+        assert_eq!(
+            element_array.len(),
+            2,
+            "Element array should have two items"
+        );
+
+        let path = element_array
+            .first()
+            .expect("Failed to get path in element array")
+            .to_string();
+        assert_eq!(path, "\"contracts/test.clar\"");
+
+        let diagnostics = element_array
+            .get(1)
+            .expect("Failed to get diagnostics in element array");
+        let Some(diagnostics_array) = diagnostics.as_array() else {
+            panic!("diagnostics should be an array");
+        };
+        assert_eq!(
+            diagnostics_array.len(),
+            3,
+            "Diagnostics array should have three items"
+        );
+        let diagnostic = diagnostics_array
+            .first()
+            .expect("Failed to get expected diagnostic");
+        let level = diagnostic
+            .get("level")
+            .expect("Failed to find \"level\": in diagnostic")
+            .to_string();
+        assert_eq!(level, "\"Error\"");
+
+        let message = diagnostic
+            .get("message")
+            .expect("Failed to find \"message\": in diagnostic");
+        assert_eq!(
+            message,
+            "use of unresolved function 'minty-fresh' (onchain)"
+        );
+
+        let spans = diagnostic
+            .get("spans")
+            .expect("Failed to find \"spans\": in diagnostic");
+        let Some(spans_array) = spans.as_array() else {
+            panic!("spans should be an array");
+        };
+        assert_eq!(spans_array.len(), 3, "Spans array should have one item");
+        let span1 = spans_array.first().expect("Failed to get expected span");
+        let start_line1 = span1
+            .get("start_line")
+            .expect("span didn't have a \"start_line\" field");
+
+        let start_column1 = span1
+            .get("start_column")
+            .expect("span didn't have a \"start_line\" field");
+
+        let end_line1 = span1
+            .get("end_line")
+            .expect("span didn't have a \"end_line\" field");
+
+        let end_column1 = span1
+            .get("end_column")
+            .expect("span didn't have a \"end_column\" field");
+
+        assert_eq!(start_line1, &Value::from(21));
+        assert_eq!(start_column1, &Value::from(6));
+        assert_eq!(end_line1, &Value::from(21));
+        assert_eq!(end_column1, &Value::from(10));
     }
 }
