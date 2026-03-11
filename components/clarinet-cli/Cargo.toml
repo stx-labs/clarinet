@@ -17,7 +17,7 @@ categories = [
 
 [dependencies]
 colored = { workspace = true }
-crossbeam-channel = "0.5.6"
+crossbeam-channel = { workspace = true }
 crossterm = { workspace = true }
 indoc = { workspace = true }
 ratatui = { workspace = true }
