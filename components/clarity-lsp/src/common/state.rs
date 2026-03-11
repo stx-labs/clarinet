@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::vec;
 
@@ -750,7 +751,7 @@ fn tag_chain(remove_env_simnet: bool, found_env_simnet: bool, diagnostics: &mut 
         };
 
         for ref mut diag in diagnostics {
-            diag.message.push_str(&format!(" ({env})"));
+            let _ = write!(diag.message, " ({env})");
         }
     }
 }
