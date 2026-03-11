@@ -7,7 +7,6 @@ use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTrans
 use ::clarity::vm::representations::PreSymbolicExpression;
 use ::clarity::vm::representations::PreSymbolicExpressionType::{self as PSEType, Comment};
 use serde_json::json;
-
 use strum::{Display, EnumString};
 
 use crate::analysis::annotation::AnnotationKind;

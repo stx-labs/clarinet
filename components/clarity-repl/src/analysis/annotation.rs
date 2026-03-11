@@ -42,7 +42,9 @@ impl std::str::FromStr for AnnotationKind {
                         .parse()
                         .map_err(|_| format!("bad environment {value} for 'env' annotation"))?;
                     if env == Environment::OnChain {
-                        return Err("'onchain' is not a valid environment for 'env' annotation".to_string());
+                        return Err(
+                            "'onchain' is not a valid environment for 'env' annotation".to_string()
+                        );
                     }
                     Ok(AnnotationKind::Env(env))
                 }
