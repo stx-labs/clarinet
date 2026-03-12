@@ -1454,12 +1454,22 @@ pub trait ASTVisitor<'a> {
         true
     }
 
+    fn pre_traverse_as_contract(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        inner: &'a SymbolicExpression,
+    ) {
+    }
+
     fn traverse_as_contract(
         &mut self,
         expr: &'a SymbolicExpression,
         inner: &'a SymbolicExpression,
     ) -> bool {
-        self.traverse_expr(inner) && self.visit_as_contract(expr, inner)
+        self.pre_traverse_as_contract(expr, inner);
+        let res = self.traverse_expr(inner) && self.visit_as_contract(expr, inner);
+        self.post_traverse_as_contract(expr, inner);
+        res
     }
 
     fn visit_as_contract(
@@ -1470,27 +1480,41 @@ pub trait ASTVisitor<'a> {
         true
     }
 
+    fn post_traverse_as_contract(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        inner: &'a SymbolicExpression,
+    ) {
+    }
+
+    fn pre_traverse_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) {
+    }
+
     fn traverse_as_contract_safe(
         &mut self,
         expr: &'a SymbolicExpression,
         allowances: &'a SymbolicExpression,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        if let Some(allowance_list) = allowances.match_list() {
-            for allowance in allowance_list {
-                if !self.traverse_expr(allowance) {
-                    return false;
-                }
-            }
-        } else if !self.traverse_expr(allowances) {
-            return false;
+        self.pre_traverse_as_contract_safe(expr, allowances, body);
+        let mut res = if let Some(allowance_list) = allowances.match_list() {
+            allowance_list
+                .iter()
+                .all(|allowance| self.traverse_expr(allowance))
+        } else {
+            self.traverse_expr(allowances)
+        };
+        if res {
+            res = body.iter().all(|stmt| self.traverse_expr(stmt));
         }
-        for stmt in body {
-            if !self.traverse_expr(stmt) {
-                return false;
-            }
-        }
-        self.visit_as_contract_safe(expr, allowances, body)
+        res = res && self.visit_as_contract_safe(expr, allowances, body);
+        self.post_traverse_as_contract_safe(expr, allowances, body);
+        res
     }
 
     fn visit_as_contract_safe(
@@ -1500,6 +1524,14 @@ pub trait ASTVisitor<'a> {
         body: &'a [SymbolicExpression],
     ) -> bool {
         true
+    }
+
+    fn post_traverse_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) {
     }
 
     fn traverse_contract_of(

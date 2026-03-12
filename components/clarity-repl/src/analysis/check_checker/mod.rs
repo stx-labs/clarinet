@@ -528,40 +528,38 @@ impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
         true
     }
 
-    fn traverse_as_contract(
+    fn pre_traverse_as_contract(
         &mut self,
-        expr: &'a SymbolicExpression,
-        inner: &'a SymbolicExpression,
-    ) -> bool {
+        _expr: &'a SymbolicExpression,
+        _inner: &'a SymbolicExpression,
+    ) {
         self.in_as_contract = true;
-        let res = self.traverse_expr(inner) && self.visit_as_contract(expr, inner);
-        self.in_as_contract = false;
-        res
     }
 
-    fn traverse_as_contract_safe(
+    fn post_traverse_as_contract(
         &mut self,
-        expr: &'a SymbolicExpression,
-        allowances: &'a SymbolicExpression,
-        body: &'a [SymbolicExpression],
-    ) -> bool {
-        self.in_as_contract = true;
-        let mut res = if let Some(allowance_list) = allowances.match_list() {
-            allowance_list
-                .iter()
-                .all(|allowance| self.traverse_expr(allowance))
-        } else {
-            self.traverse_expr(allowances)
-        };
-        for stmt in body {
-            if !res {
-                break;
-            }
-            res = self.traverse_expr(stmt);
-        }
-        res = res && self.visit_as_contract_safe(expr, allowances, body);
+        _expr: &'a SymbolicExpression,
+        _inner: &'a SymbolicExpression,
+    ) {
         self.in_as_contract = false;
-        res
+    }
+
+    fn pre_traverse_as_contract_safe(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _allowances: &'a SymbolicExpression,
+        _body: &'a [SymbolicExpression],
+    ) {
+        self.in_as_contract = true;
+    }
+
+    fn post_traverse_as_contract_safe(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        _allowances: &'a SymbolicExpression,
+        _body: &'a [SymbolicExpression],
+    ) {
+        self.in_as_contract = false;
     }
 
     fn visit_asserts(
