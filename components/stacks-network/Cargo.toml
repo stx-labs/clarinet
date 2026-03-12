@@ -18,11 +18,11 @@ tracing-subscriber = "0.3.20"
 tracing-appender = "0.2.0"
 ctrlc = "3.1.9"
 reqwest = { workspace = true, features = ["blocking"] }
-crossbeam-channel = "0.5.6"
+crossbeam-channel = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
 chrono = { workspace = true }
-futures = "0.3.12"
+futures = { workspace = true }
 base58 = { workspace = true }
 tokio = { workspace = true}
 clap = { workspace = true, features = ["derive"] }
@@ -52,7 +52,7 @@ default = []
 stacks-signers = ["observer/stacks-signers"]
 
 [dev-dependencies]
-test-case = "3.1.0"
+test-case = { workspace = true }
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 
 [lib]
