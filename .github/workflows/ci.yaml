@@ -14,6 +14,8 @@ on:
   workflow_dispatch:
 
 # Cancel previous runs for the same workflow
+permissions: {}
+
 concurrency:
   group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
   cancel-in-progress: true
@@ -22,16 +24,20 @@ jobs:
   get_release_info:
     name: Get Release Info
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.new_release_tag.outputs.TAG }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Get latest release
         if: startsWith(github.ref, 'refs/heads/main')
         id: release
-        uses: pozetroninc/github-action-get-latest-release@master
+        uses: pozetroninc/github-action-get-latest-release@53d33d213ee71c72360e3c829caf7cee94ec21e2 # master
         with:
           repository: ${{ github.repository }}
           excludes: prerelease, draft
@@ -53,11 +59,15 @@ jobs:
   sanity_check:
     name: Sanity checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       RUSTFLAGS: "-Dwarnings"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
@@ -86,6 +96,9 @@ jobs:
   cargo_test:
     name: Run cargo tests
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    environment: ci
     strategy:
       fail-fast: false
       matrix:
@@ -105,10 +118,14 @@ jobs:
             architecture: arm64
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: rustup toolchain install stable --profile minimal --target "$BUILD_TARGET"
 
       - name: Setup Rust cache
         id: setup-rust-cache
@@ -121,7 +138,7 @@ jobs:
             target/debug/deps/
 
       - name: Install dependencies
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2
         with:
           tool: cargo-llvm-cov,nextest
 
@@ -149,7 +166,7 @@ jobs:
 
       - name: Upload coverage data to codecov
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -162,6 +179,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -197,10 +215,14 @@ jobs:
           git config --global core.eol lf
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: rustup toolchain install stable --profile minimal --target "$BUILD_TARGET"
 
       - name: Setup Rust cache
         id: setup-rust-cache
@@ -218,16 +240,23 @@ jobs:
       - name: Configure artifact names (libc)
         if: ${{ matrix.libc }}
         shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          LIBC: ${{ matrix.libc }}
         run: |
-          echo "SHORT_TARGET_NAME=${{ matrix.platform }}-${{ matrix.architecture }}-${{ matrix.libc }}" >> $GITHUB_ENV
-          echo "PRE_GYP_TARGET_NAME=${{ matrix.platform }}-${{ matrix.architecture }}-${{ matrix.libc }}" >> $GITHUB_ENV
+          echo "SHORT_TARGET_NAME=${PLATFORM}-${ARCHITECTURE}-${LIBC}" >> $GITHUB_ENV
+          echo "PRE_GYP_TARGET_NAME=${PLATFORM}-${ARCHITECTURE}-${LIBC}" >> $GITHUB_ENV
 
       - name: Configure artifact names (not libc)
         if: ${{ ! matrix.libc }}
         shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          echo "SHORT_TARGET_NAME=${{ matrix.platform }}-${{ matrix.architecture }}" >> $GITHUB_ENV
-          echo "PRE_GYP_TARGET_NAME=${{ matrix.platform }}-${{ matrix.architecture }}-unknown" >> $GITHUB_ENV
+          echo "SHORT_TARGET_NAME=${PLATFORM}-${ARCHITECTURE}" >> $GITHUB_ENV
+          echo "PRE_GYP_TARGET_NAME=${PLATFORM}-${ARCHITECTURE}-unknown" >> $GITHUB_ENV
 
       - name: Install musl-gcc
         if: matrix.target == 'x86_64-unknown-linux-musl'
@@ -236,19 +265,21 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Build - Cargo
-        run: cargo build --release --features=telemetry --locked --target ${{ matrix.target }}
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: cargo build --release --features=telemetry --locked --target "$BUILD_TARGET"
 
       - name: Upload unsigned Windows binary for SignPath
         id: upload-unsigned-windows
         if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != '' && matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-clarinet-${{ env.SHORT_TARGET_NAME }}
           path: target/${{ matrix.target }}/release/clarinet.exe
 
       - name: Code sign Windows binary with SignPath
         if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != '' && matrix.os == 'windows-latest'
-        uses: signpath/github-action-submit-signing-request@v2
+        uses: signpath/github-action-submit-signing-request@3f9250c56651ff692d6729a2fbb0603a42d7d322 # v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -260,24 +291,26 @@ jobs:
 
       - name: Compress cargo artifact (Linux and macOS)
         if: matrix.os != 'windows-latest'
-        run: tar -C target/${{ matrix.target }}/release -zcvf clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz clarinet
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: tar -C "target/${BUILD_TARGET}/release" -zcvf "clarinet-${SHORT_TARGET_NAME}.tar.gz" clarinet
 
       - name: Compress signed cargo artifact (Windows - main branch)
         if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != '' && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path "./signed/clarinet.exe" -DestinationPath "clarinet-${{ env.SHORT_TARGET_NAME }}.zip"
+          Compress-Archive -Path "./signed/clarinet.exe" -DestinationPath "clarinet-$env:SHORT_TARGET_NAME.zip"
 
       - name: Upload cargo artifacts (Linux and macOS)
         if: matrix.os != 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.tar.gz
 
       - name: Upload cargo artifact (Windows)
         if: matrix.os == 'windows-latest' && needs.get_release_info.outputs.tag != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: clarinet-${{ env.SHORT_TARGET_NAME }}
           path: clarinet-${{ env.SHORT_TARGET_NAME }}.zip
@@ -296,10 +329,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Download pre-built dists
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
 
       - name: Tag and Release
         uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2.4.1
@@ -317,7 +352,7 @@ jobs:
             **/*.zip
 
       - name: Trigger pkg-version-bump workflow
-        uses: peter-evans/repository-dispatch@v1
+        uses: peter-evans/repository-dispatch@ce5485de42c9b2622d2ed064be479e8ed65e76f4 # v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: released

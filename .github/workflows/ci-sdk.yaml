@@ -12,6 +12,8 @@ on:
       - "**/CHANGELOG.md"
 
 # Cancel previous runs for the same workflow
+permissions: {}
+
 concurrency:
   group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
   cancel-in-progress: true
@@ -20,27 +22,32 @@ jobs:
   build_wasm:
     name: Build and test Wasm packages
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       RUSTFLAGS: "-Dwarnings"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Setup Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
 
       - name: Setup cache keys
+        id: rust-version
         run: |
           RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
-          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_ENV
+          echo "hash=$RUST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.x'
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/bin/
@@ -48,9 +55,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/
             target/
-          key: ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-${{ hashFiles('./Cargo.lock') }}
+          key: ${{ runner.os }}-${{ github.job }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('./Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ github.job }}-${{ env.RUST_VERSION }}-
+            ${{ runner.os }}-${{ github.job }}-${{ steps.rust-version.outputs.hash }}-
             ${{ runner.os }}-${{ github.job }}-
 
       - name: Run clippy
@@ -69,7 +76,7 @@ jobs:
         run: wasm-pack test --node components/clarinet-sdk-wasm
 
       - name: Upload Wasm artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: wasm-artifacts
           path: components/clarinet-sdk-wasm/pkg-*
@@ -77,6 +84,9 @@ jobs:
   test:
     name: Run clarinet-sdk tests
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    environment: ci
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -84,15 +94,17 @@ jobs:
     needs: build_wasm
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Download Wasm artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: wasm-artifacts
           path: components/clarinet-sdk-wasm
