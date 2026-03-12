@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -79,6 +80,7 @@ pub struct LspNativeBridge {
     notification_tx: Arc<Mutex<MultiplexableSender<LspNotification>>>,
     request_tx: Arc<Mutex<MultiplexableSender<LspRequest>>>,
     response_rx: Arc<Mutex<Receiver<LspResponse>>>,
+    client_supports_code_lens_refresh: AtomicBool,
 }
 
 impl LspNativeBridge {
@@ -93,6 +95,7 @@ impl LspNativeBridge {
             notification_tx: Arc::new(Mutex::new(notification_tx)),
             request_tx: Arc::new(Mutex::new(request_tx)),
             response_rx: Arc::new(Mutex::new(response_rx)),
+            client_supports_code_lens_refresh: AtomicBool::new(false),
         }
     }
 
@@ -128,6 +131,16 @@ impl LspNativeBridge {
 
 impl LanguageServer for LspNativeBridge {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let supports_code_lens_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.code_lens.as_ref())
+            .and_then(|cl| cl.refresh_support)
+            .unwrap_or(false);
+        self.client_supports_code_lens_refresh
+            .store(supports_code_lens_refresh, Ordering::Relaxed);
+
         let _ = match self.request_tx.lock() {
             Ok(tx) => tx.send(LspRequest::Initialize(Box::new(params))),
             Err(_) => return Err(Error::new(ErrorCode::InternalError)),
@@ -293,7 +306,12 @@ impl LanguageServer for LspNativeBridge {
             .await;
 
         self.after_receive_lsp_notification().await;
-        let _ = self.client.code_lens_refresh().await;
+        if self
+            .client_supports_code_lens_refresh
+            .load(Ordering::Relaxed)
+        {
+            let _ = self.client.code_lens_refresh().await;
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -314,7 +332,12 @@ impl LanguageServer for LspNativeBridge {
         };
 
         self.after_receive_lsp_notification().await;
-        let _ = self.client.code_lens_refresh().await;
+        if self
+            .client_supports_code_lens_refresh
+            .load(Ordering::Relaxed)
+        {
+            let _ = self.client.code_lens_refresh().await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
