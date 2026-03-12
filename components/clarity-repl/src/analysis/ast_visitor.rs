@@ -419,9 +419,14 @@ pub trait ASTVisitor<'a> {
                                 )
                             }
                         }
-                        AsContract | AsContractSafe => {
+                        AsContract => {
                             self.traverse_as_contract(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
+                        AsContractSafe => self.traverse_as_contract_safe(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                            &args[1..],
+                        ),
                         ContractOf => {
                             self.traverse_contract_of(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
@@ -1449,12 +1454,22 @@ pub trait ASTVisitor<'a> {
         true
     }
 
+    fn pre_traverse_as_contract(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        inner: &'a SymbolicExpression,
+    ) {
+    }
+
     fn traverse_as_contract(
         &mut self,
         expr: &'a SymbolicExpression,
         inner: &'a SymbolicExpression,
     ) -> bool {
-        self.traverse_expr(inner) && self.visit_as_contract(expr, inner)
+        self.pre_traverse_as_contract(expr, inner);
+        let res = self.traverse_expr(inner) && self.visit_as_contract(expr, inner);
+        self.post_traverse_as_contract(expr, inner);
+        res
     }
 
     fn visit_as_contract(
@@ -1463,6 +1478,60 @@ pub trait ASTVisitor<'a> {
         inner: &'a SymbolicExpression,
     ) -> bool {
         true
+    }
+
+    fn post_traverse_as_contract(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        inner: &'a SymbolicExpression,
+    ) {
+    }
+
+    fn pre_traverse_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) {
+    }
+
+    fn traverse_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) -> bool {
+        self.pre_traverse_as_contract_safe(expr, allowances, body);
+        let mut res = if let Some(allowance_list) = allowances.match_list() {
+            allowance_list
+                .iter()
+                .all(|allowance| self.traverse_expr(allowance))
+        } else {
+            self.traverse_expr(allowances)
+        };
+        if res {
+            res = body.iter().all(|stmt| self.traverse_expr(stmt));
+        }
+        res = res && self.visit_as_contract_safe(expr, allowances, body);
+        self.post_traverse_as_contract_safe(expr, allowances, body);
+        res
+    }
+
+    fn visit_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) -> bool {
+        true
+    }
+
+    fn post_traverse_as_contract_safe(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        allowances: &'a SymbolicExpression,
+        body: &'a [SymbolicExpression],
+    ) {
     }
 
     fn traverse_contract_of(
@@ -2767,4 +2836,139 @@ fn match_pairs_list(list: &[SymbolicExpression]) -> Option<Vec<TypedVar<'_>>> {
         });
     }
     Some(vars)
+}
+
+#[cfg(test)]
+mod tests {
+    use clarity::types::StacksEpochId;
+    use clarity::vm::ast::build_ast;
+    use clarity::vm::{ClarityVersion, SymbolicExpression};
+    use clarity_types::types::QualifiedContractIdentifier;
+    use indoc::indoc;
+
+    use super::{traverse, ASTVisitor};
+    use crate::repl::session::Session;
+    use crate::repl::SessionSettings;
+
+    /// A minimal ASTVisitor that counts how many times a target atom name
+    /// is visited during traversal.
+    struct AtomCounter {
+        target: &'static str,
+        count: usize,
+    }
+
+    impl AtomCounter {
+        fn new(target: &'static str) -> Self {
+            Self { target, count: 0 }
+        }
+    }
+
+    impl<'a> ASTVisitor<'a> for AtomCounter {
+        fn get_clarity_version(&self) -> &ClarityVersion {
+            &ClarityVersion::Clarity4
+        }
+
+        fn visit_atom(
+            &mut self,
+            _expr: &'a SymbolicExpression,
+            atom: &'a clarity::vm::ClarityName,
+        ) -> bool {
+            if atom.as_str() == self.target {
+                self.count += 1;
+            }
+            true
+        }
+    }
+
+    fn parse_clarity4(source: &str) -> Vec<SymbolicExpression> {
+        let contract_id = QualifiedContractIdentifier::transient();
+        let ast = build_ast(
+            &contract_id,
+            source,
+            &mut (),
+            ClarityVersion::Clarity4,
+            StacksEpochId::Epoch33,
+        )
+        .expect("Failed to parse Clarity source");
+        ast.expressions
+    }
+
+    fn count_atom(source: &str, target: &'static str) -> usize {
+        let exprs = parse_clarity4(source);
+        let mut counter = AtomCounter::new(target);
+        traverse(&mut counter, &exprs);
+        counter.count
+    }
+
+    /// as-contract? with no body is rejected by the type checker (not the parser),
+    /// so we need a full Session to verify this.
+    #[test]
+    fn as_contract_safe_no_body_is_error() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings::default());
+        session.update_epoch(StacksEpochId::Epoch33);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (my-func)
+                (as-contract? ()))
+        ").to_string();
+
+        let result =
+            session.formatted_interpretation(snippet, Some("checker".to_string()), false, None);
+
+        assert!(
+            result.is_err(),
+            "as-contract? with no body should be an error"
+        );
+    }
+
+    #[test]
+    fn as_contract_safe_traverses_multiple_allowances() {
+        #[rustfmt::skip]
+        let source = indoc!("
+            (define-constant STX_LIMIT u1000)
+            (define-constant STACKING_LIMIT u2000)
+
+            (define-public (my-func)
+                (as-contract? ((with-stx STX_LIMIT) (with-stacking STACKING_LIMIT)) true))
+        ");
+
+        // define-constant extracts the name via match_atom(), not visit_atom,
+        // so each constant is counted once (at the usage site in the allowance).
+        assert_eq!(count_atom(source, "STX_LIMIT"), 1);
+        assert_eq!(count_atom(source, "STACKING_LIMIT"), 1);
+    }
+
+    #[test]
+    fn as_contract_safe_traverses_multiple_body_exprs() {
+        #[rustfmt::skip]
+        let source = indoc!("
+            (define-public (my-func)
+                (as-contract? ()
+                    (+ stacks-block-height stacks-block-height)
+                    stacks-block-height
+                    stacks-block-height))
+        ");
+
+        assert_eq!(count_atom(source, "stacks-block-height"), 4);
+    }
+
+    #[test]
+    fn as_contract_safe_traverses_allowances_and_body() {
+        #[rustfmt::skip]
+        let source = indoc!("
+            (define-constant STX_LIMIT u1000)
+            (define-constant STACKING_LIMIT u2000)
+
+            (define-public (my-func)
+                (as-contract?
+                    ((with-stx STX_LIMIT) (with-stacking STACKING_LIMIT))
+                    stacks-block-height
+                    (+ stacks-block-height stacks-block-height)))
+        ");
+
+        assert_eq!(count_atom(source, "STX_LIMIT"), 1);
+        assert_eq!(count_atom(source, "STACKING_LIMIT"), 1);
+        assert_eq!(count_atom(source, "stacks-block-height"), 3);
+    }
 }

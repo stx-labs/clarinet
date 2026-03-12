@@ -434,4 +434,31 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 0);
     }
+
+    #[test]
+    fn used_inside_as_contract_safe() {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(UnusedPrivateFn::get_name(), Level::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+        session.update_epoch(clarity::types::StacksEpochId::Epoch33);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (helper (x uint))
+                (* x x))
+
+            (define-public (my-func (x uint))
+                (as-contract? () (helper x)))
+        ").to_string();
+
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
 }
