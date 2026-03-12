@@ -1,3 +1,35 @@
+#### 2026-03-12
+
+##### New Features
+
+- Add at-block lint (#2270) (0c6a5253)
+- Add static code analysis CodeLens (#2087) (59653687)
+- Log more in `devnet start --no-dashboard` (#2259) (a4b198ff)
+- Group docker containers in devnet (#2255) (99494d0f)
+- Static cost analysis (#2210) (93f13ef2)
+- **linter:** Add lint `case_binding` (#2251) (61a897eb)
+- Run diagnostics with and without env(simnet) code during CLI clarinet check and LSP (#2252) (bae909a)
+
+##### Chores
+
+- Move some dependencies to workspace-level (#2277) (eb1119f4)
+- Update stacks docker images (#2269) (87c53287)
+- Remove chainhooks v1 (#2236) (a395f0f1)
+- Upgrade npm dependencies (#2249) (afa70845)
+
+##### Continuous Integration
+
+- Fix flaky CI tests by using mock HTTP server instead of API (#2244) (8167d2a0)
+- Run clippy on tests (#2262) (9a820fbc)
+
+##### Bug Fixes
+
+- Don't run linter on external requirements (#2231) (a15e9770)
+
+##### Refactors
+
+- Devnet orchestrator improvements (#2225) (6a45e07d)
+
 #### 2026-02-27
 
 ##### New Features
