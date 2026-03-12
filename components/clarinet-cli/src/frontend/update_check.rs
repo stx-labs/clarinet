@@ -5,39 +5,46 @@ use clarinet_files::clarinetrc::ClarinetRC;
 const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/stx-labs/clarinet/releases/latest";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const CHECK_INTERVAL: Duration = Duration::from_secs(72 * 60 * 60);
-const TIMESTAMP_FILE: &str = ".last_update_check";
+const VERSION_CACHE_FILE: &str = ".latest_version";
 
 /// Check if a newer version of clarinet is available and print a warning if so.
-/// any failure is silently ignored.
+/// Any failure is silently ignored.
+///
+/// If a cached latest version exists and is fresh (<72h), it is used directly.
+/// Otherwise, the latest version is fetched from GitHub (with a short timeout),
+/// cached to disk, and compared.
 pub fn check_for_update() {
     let current_version = env!("CARGO_PKG_VERSION");
 
-    std::thread::spawn(move || {
-        let Some(config_dir) = ClarinetRC::get_config_dir() else {
-            return;
-        };
+    let Some(config_dir) = ClarinetRC::get_config_dir() else {
+        return;
+    };
 
-        let timestamp_path = config_dir.join(TIMESTAMP_FILE);
-        if !should_check(&timestamp_path) {
-            return;
+    let cache_path = config_dir.join(VERSION_CACHE_FILE);
+
+    let latest = if should_check(&cache_path) {
+        // Cache is missing or stale — fetch from GitHub (only happens every 72h)
+        let fetched = fetch_latest_version();
+        if let Some(ref version) = fetched {
+            let _ = std::fs::write(&cache_path, version);
         }
+        fetched
+    } else {
+        read_cached_version(&cache_path)
+    };
 
-        if let Some(latest) = fetch_latest_version() {
-            // Touch the file to update its mtime after a successful fetch
-            let _ = touch(&timestamp_path);
-
-            if is_newer(&latest, current_version) {
-                eprintln!(
-                    "\nA new release of clarinet is available: {} -> {}",
-                    current_version, latest,
-                );
-            }
+    if let Some(latest) = latest {
+        if is_newer(&latest, current_version) {
+            eprintln!(
+                "\nA new release of clarinet is available: {} -> {}",
+                current_version, latest,
+            );
         }
-    });
+    }
 }
 
-fn should_check(timestamp_path: &std::path::Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(timestamp_path) else {
+fn should_check(cache_path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(cache_path) else {
         return true;
     };
     let Ok(modified) = metadata.modified() else {
@@ -49,8 +56,14 @@ fn should_check(timestamp_path: &std::path::Path) -> bool {
     elapsed >= CHECK_INTERVAL
 }
 
-fn touch(path: &std::path::Path) -> std::io::Result<()> {
-    std::fs::write(path, [])
+fn read_cached_version(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let version = content.trim().to_string();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version)
+    }
 }
 
 fn fetch_latest_version() -> Option<String> {
@@ -106,10 +119,27 @@ mod tests {
     }
 
     #[test]
-    fn test_should_check_recent_timestamp() {
+    fn test_should_check_recent_cache() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(TIMESTAMP_FILE);
-        touch(&path).unwrap();
+        let path = dir.path().join(VERSION_CACHE_FILE);
+        std::fs::write(&path, "3.15.0").unwrap();
         assert!(!should_check(&path));
+    }
+
+    #[test]
+    fn test_read_cached_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(VERSION_CACHE_FILE);
+
+        assert!(read_cached_version(&path).is_none());
+
+        std::fs::write(&path, "3.15.0").unwrap();
+        assert_eq!(read_cached_version(&path).as_deref(), Some("3.15.0"));
+
+        std::fs::write(&path, "  3.15.0\n").unwrap();
+        assert_eq!(read_cached_version(&path).as_deref(), Some("3.15.0"));
+
+        std::fs::write(&path, "").unwrap();
+        assert!(read_cached_version(&path).is_none());
     }
 }
