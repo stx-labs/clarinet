@@ -25,6 +25,7 @@
 ##### Bug Fixes
 
 - Don't run linter on external requirements (#2231) (a15e9770)
+- Traverse Clarity 4's `as-contract?` (#2279) (fe2f1ee)
 
 ##### Refactors
 
