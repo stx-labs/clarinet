@@ -150,7 +150,7 @@ pub fn derive_key(
     let argon2 = match strength {
         MnemonicEncryptionStrength::Default => Argon2::default(),
         MnemonicEncryptionStrength::Medium => {
-            let params = argon2::Params::new(262144, 4, 2, Some(32))?;
+            let params = argon2::Params::new(262144, 6, 2, Some(32))?;
             Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
         }
         MnemonicEncryptionStrength::High => {
