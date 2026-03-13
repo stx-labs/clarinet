@@ -808,6 +808,7 @@ pub async fn build_state(
     manifest_location: &Path,
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
+    static_cost_analysis: bool,
 ) -> Result<(), String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -926,32 +927,34 @@ pub async fn build_state(
     // Note: Cost analysis must run AFTER contracts are deployed to the session
     // static_cost_tree needs the contract to be available in the global context
     let mut cost_analyses = HashMap::new();
-    for contract_id in locations.keys() {
-        // Skip cost analysis for empty contracts (no expressions to analyze)
-        if asts
-            .get(contract_id)
-            .is_none_or(|ast| ast.expressions.is_empty())
-        {
-            continue;
-        }
+    if static_cost_analysis {
+        for contract_id in locations.keys() {
+            // Skip cost analysis for empty contracts (no expressions to analyze)
+            if asts
+                .get(contract_id)
+                .is_none_or(|ast| ast.expressions.is_empty())
+            {
+                continue;
+            }
 
-        let clarity_version = clarity_versions
-            .get(contract_id)
-            .copied()
-            .unwrap_or(DEFAULT_CLARITY_VERSION);
+            let clarity_version = clarity_versions
+                .get(contract_id)
+                .copied()
+                .unwrap_or(DEFAULT_CLARITY_VERSION);
 
-        // Run static_cost_tree for this contract
-        if let Some(cost_analysis) =
-            get_cost_analysis(&mut session, contract_id, clarity_version).await
-        {
-            clarity_repl::uprint!(
-                "[LSP] Cost analysis completed for {}: {} functions analyzed",
-                contract_id,
-                cost_analysis.len()
-            );
-            cost_analyses.insert(contract_id.clone(), cost_analysis);
-        } else {
-            clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
+            // Run static_cost_tree for this contract
+            if let Some(cost_analysis) =
+                get_cost_analysis(&mut session, contract_id, clarity_version).await
+            {
+                clarity_repl::uprint!(
+                    "[LSP] Cost analysis completed for {}: {} functions analyzed",
+                    contract_id,
+                    cost_analysis.len()
+                );
+                cost_analyses.insert(contract_id.clone(), cost_analysis);
+            } else {
+                clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
+            }
         }
     }
 

@@ -635,7 +635,7 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "clarinet-cli"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -649,6 +649,7 @@ dependencies = [
  "colored",
  "crossbeam-channel",
  "crossterm",
+ "futures",
  "hiro-system-kit",
  "indoc",
  "mac_address",
@@ -664,19 +665,20 @@ dependencies = [
  "tokio",
  "toml",
  "toml_edit 0.22.27",
+ "tower",
  "tower-lsp-server",
 ]
 
 [[package]]
 name = "clarinet-defaults"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clarity",
 ]
 
 [[package]]
 name = "clarinet-deployments"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "base58",
  "base64 0.22.1",
@@ -709,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-files"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "bitcoin",
  "clarinet-defaults",
@@ -745,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -780,7 +782,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=41bd9d0a15a08d8ab2603edf11774b0d21a616ec#41bd9d0a15a08d8ab2603edf11774b0d21a616ec"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -799,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-events"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clap",
  "clarinet-files",
@@ -810,7 +812,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -836,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -880,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-static-cost"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clarity",
  "clarity-types",
@@ -894,7 +896,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=41bd9d0a15a08d8ab2603edf11774b0d21a616ec#41bd9d0a15a08d8ab2603edf11774b0d21a616ec"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
 dependencies = [
  "lazy_static",
  "regex",
@@ -927,7 +929,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1284,7 +1286,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1440,7 +1442,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2291,7 +2293,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2477,7 +2479,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=41bd9d0a15a08d8ab2603edf11774b0d21a616ec#41bd9d0a15a08d8ab2603edf11774b0d21a616ec"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
 dependencies = [
  "clarity",
  "serde",
@@ -2775,7 +2777,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2829,7 +2831,7 @@ dependencies = [
 
 [[package]]
 name = "observer"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "axum",
  "base58",
@@ -3019,7 +3021,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=41bd9d0a15a08d8ab2603edf11774b0d21a616ec#41bd9d0a15a08d8ab2603edf11774b0d21a616ec"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
 dependencies = [
  "clarity",
  "slog",
@@ -3145,7 +3147,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3586,7 +3588,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4194,7 +4196,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-codec"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clarity",
  "serde",
@@ -4204,7 +4206,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=41bd9d0a15a08d8ab2603edf11774b0d21a616ec#41bd9d0a15a08d8ab2603edf11774b0d21a616ec"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4234,7 +4236,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-network"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "base58",
  "bitcoincore-rpc",
@@ -4277,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "3.14.1"
+version = "3.15.0"
 dependencies = [
  "clarinet-utils",
  "clarity",
@@ -4293,7 +4295,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=41bd9d0a15a08d8ab2603edf11774b0d21a616ec#41bd9d0a15a08d8ab2603edf11774b0d21a616ec"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
 dependencies = [
  "clarity",
  "ed25519-dalek",
@@ -4430,7 +4432,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4439,7 +4441,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5222,7 +5224,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

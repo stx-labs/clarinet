@@ -460,20 +460,47 @@ impl NetworkManifest {
                         _ => random_mnemonic().to_string(),
                     };
 
-                    let encrypted_mnemonic = match account_settings.get("encrypted_mnemonic") {
-                        Some(Value::String(cipher)) => cipher.clone(),
-                        _ => "".to_string(),
-                    };
+                    let (encrypted_mnemonic, encryption_strength) =
+                        if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic_high")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::High,
+                            )
+                        } else if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic_medium")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::Medium,
+                            )
+                        } else if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                            )
+                        } else {
+                            (
+                                String::new(),
+                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                            )
+                        };
 
                     if !encrypted_mnemonic.is_empty() {
                         let password = rpassword::prompt_password(format!(
                             "Enter password to decrypt mnemonic for account {account_name}: "
                         ))
                         .unwrap();
-                        mnemonic =
-                            clarinet_utils::decrypt_mnemonic_phrase(&encrypted_mnemonic, &password)
-                                .unwrap()
-                                .to_string();
+                        mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
+                            &encrypted_mnemonic,
+                            &password,
+                            encryption_strength,
+                        )
+                        .unwrap()
+                        .to_string();
                     }
 
                     let derivation = match account_settings.get("derivation") {
