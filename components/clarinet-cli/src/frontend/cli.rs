@@ -1017,7 +1017,13 @@ pub fn main() {
                 let encrypted_mnemonic =
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password, cmd.strength)
                         .unwrap();
-                println!("encrypted_mnemonic = \"{encrypted_mnemonic}\"");
+                let key = match cmd.strength {
+                    clarinet_utils::MnemonicEncryptionStrength::Default => "encrypted_mnemonic",
+                    clarinet_utils::MnemonicEncryptionStrength::Strong => {
+                        "encrypted_mnemonic_strong"
+                    }
+                };
+                println!("{key} = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
             }
         },
