@@ -305,7 +305,8 @@ async fn run_did_open_and_collect_server_requests(code_lens_refresh: bool) -> Ve
     let contract_path = std::env::current_dir()
         .unwrap()
         .join("examples/counter/contracts/counter.clar");
-    let uri = format!("file://{}", contract_path.to_str().unwrap());
+    let uri =
+        clarinet_files::paths::path_to_url_string(&contract_path).expect("failed to build URI");
 
     // 3. Send didOpen and concurrently handle server-to-client requests
     let did_open = build_did_open_notification(&uri);
