@@ -202,6 +202,20 @@ struct CostPercentages {
     write_length: f64,
 }
 
+impl CostPercentages {
+    fn exceeds_threshold(&self, threshold: f64) -> bool {
+        [
+            self.runtime,
+            self.read_count,
+            self.read_length,
+            self.write_count,
+            self.write_length,
+        ]
+        .iter()
+        .any(|p| *p >= threshold)
+    }
+}
+
 fn percentage_of_limit(value: u64, limit: u64) -> f64 {
     if limit == 0 {
         return 0.0;
@@ -524,10 +538,9 @@ impl EditorState {
 
             let function_name_str = function_name.to_string();
             if let Some((cost_node, _)) = cost_analysis.get(&function_name_str) {
-                if !Self::exceeds_threshold(
-                    cost_node,
-                    self.settings.static_cost_threshold_percentage,
-                ) {
+                if !cost_percentages(&cost_node.max)
+                    .exceeds_threshold(self.settings.static_cost_threshold_percentage)
+                {
                     continue;
                 }
 
@@ -585,19 +598,6 @@ impl EditorState {
                 )
             }
         }
-    }
-
-    fn exceeds_threshold(cost_node: &StaticCost, threshold: f64) -> bool {
-        let pct = cost_percentages(&cost_node.max);
-        [
-            pct.runtime,
-            pct.read_count,
-            pct.read_length,
-            pct.write_count,
-            pct.write_length,
-        ]
-        .iter()
-        .any(|p| *p >= threshold)
     }
 
     pub fn get_signature_help(
