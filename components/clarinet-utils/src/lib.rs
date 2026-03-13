@@ -379,26 +379,48 @@ mod tests {
     fn test_encrypt_mnemonic() {
         let phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
         let password = "foo";
-        let strength = MnemonicEncryptionStrength::Default;
 
+        // Test Default and Medium with cross-strength mismatch checks
+        for strength in [
+            MnemonicEncryptionStrength::Default,
+            MnemonicEncryptionStrength::Medium,
+        ] {
+            let encrypted = encrypt_mnemonic_phrase(phrase, password, strength)
+                .expect("encrypt_mnemonic_phrase should succeed");
+            let decrypted = decrypt_mnemonic_phrase(&encrypted, password, strength)
+                .expect("decrypt_mnemonic_phrase should succeed");
+
+            assert_eq!(phrase, decrypted.to_string());
+
+            for other in [
+                MnemonicEncryptionStrength::Default,
+                MnemonicEncryptionStrength::Medium,
+            ] {
+                if other != strength {
+                    assert!(decrypt_mnemonic_phrase(&encrypted, password, other).is_err());
+                }
+            }
+
+            let mut bad_bs58 = encrypted.clone();
+            bad_bs58.push('?');
+            assert!(matches!(
+                decrypt_mnemonic_phrase(&bad_bs58, password, strength),
+                Err(MnemonicEncryptionError::Bs58Decode(_))
+            ));
+        }
+
+        // Test High with a single round-trip (expensive key derivation)
+        let strength = MnemonicEncryptionStrength::High;
         let encrypted = encrypt_mnemonic_phrase(phrase, password, strength)
             .expect("encrypt_mnemonic_phrase should succeed");
         let decrypted = decrypt_mnemonic_phrase(&encrypted, password, strength)
             .expect("decrypt_mnemonic_phrase should succeed");
-
         assert_eq!(phrase, decrypted.to_string());
 
         let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
         assert!(matches!(
-            encrypt_mnemonic_phrase(bad_phrase, password, strength),
+            encrypt_mnemonic_phrase(bad_phrase, password, MnemonicEncryptionStrength::Default),
             Err(MnemonicEncryptionError::Mnemonic(_))
-        ));
-
-        let mut bad_bs58 = encrypted.clone();
-        bad_bs58.push('?');
-        assert!(matches!(
-            decrypt_mnemonic_phrase(&bad_bs58, password, strength),
-            Err(MnemonicEncryptionError::Bs58Decode(_))
         ));
     }
 }
