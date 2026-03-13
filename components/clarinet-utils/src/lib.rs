@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 
 use aes_gcm::aead::Aead;
@@ -11,6 +12,39 @@ use rand::RngCore;
 
 /// Size of the AES-GCM nonce
 pub const AES_GCM_NONCE_SIZE: usize = 12;
+
+/// Size of the random salt used for Strong encryption
+pub const SALT_SIZE: usize = 32;
+
+const DEFAULT_SALT: &[u8] = b"clarinet_utils-derive_key_salt";
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum MnemonicEncryptionStrength {
+    #[default]
+    Default,
+    Strong,
+}
+
+impl FromStr for MnemonicEncryptionStrength {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "default" => Ok(Self::Default),
+            "strong" => Ok(Self::Strong),
+            _ => Err(format!("unknown encryption strength: {s}")),
+        }
+    }
+}
+
+impl fmt::Display for MnemonicEncryptionStrength {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Default => write!(f, "default"),
+            Self::Strong => write!(f, "strong"),
+        }
+    }
+}
 
 pub fn mnemonic_from_phrase(phrase: &str) -> Result<Mnemonic, String> {
     Mnemonic::parse_in(Language::English, phrase).map_err(|e| e.to_string())
@@ -104,26 +138,53 @@ impl From<std::str::Utf8Error> for MnemonicEncryptionError {
     }
 }
 
-pub fn derive_key(password: &str, buf: &mut [u8]) -> Result<(), EncryptionError> {
-    let salt = b"clarinet_utils-derive_key_salt";
+pub fn derive_key(
+    password: &str,
+    buf: &mut [u8],
+    strength: MnemonicEncryptionStrength,
+    salt: &[u8],
+) -> Result<(), EncryptionError> {
+    let argon2 = match strength {
+        MnemonicEncryptionStrength::Default => Argon2::default(),
+        MnemonicEncryptionStrength::Strong => {
+            let params = argon2::Params::new(262144, 4, 2, Some(32))?;
+            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+        }
+    };
 
-    Argon2::default().hash_password_into(password.as_bytes(), salt, buf)?;
+    argon2.hash_password_into(password.as_bytes(), salt, buf)?;
 
     Ok(())
 }
 
-pub fn encrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> {
+pub fn encrypt(
+    data: &[u8],
+    password: &str,
+    strength: MnemonicEncryptionStrength,
+) -> Result<Vec<u8>, EncryptionError> {
     let mut key = [0u8; 32];
     let mut rng = OsRng;
     let mut nonce_bytes = [0u8; AES_GCM_NONCE_SIZE];
 
-    derive_key(password, &mut key)?;
+    let mut bytes = Vec::new();
+
+    match strength {
+        MnemonicEncryptionStrength::Default => {
+            derive_key(password, &mut key, strength, DEFAULT_SALT)?;
+        }
+        MnemonicEncryptionStrength::Strong => {
+            let mut salt = [0u8; SALT_SIZE];
+            rng.fill_bytes(&mut salt);
+            derive_key(password, &mut key, strength, &salt)?;
+            bytes.extend_from_slice(&salt);
+        }
+    }
+
     rng.fill_bytes(&mut nonce_bytes);
 
     let nonce = Nonce::from(nonce_bytes);
     let cipher = Aes256Gcm::new((&key).into());
     let cipher_vec = cipher.encrypt(&nonce, data.to_vec().as_ref())?;
-    let mut bytes = Vec::new();
 
     bytes.extend_from_slice(&nonce_bytes);
     bytes.extend_from_slice(&cipher_vec);
@@ -131,13 +192,31 @@ pub fn encrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> 
     Ok(bytes)
 }
 
-pub fn decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> {
+pub fn decrypt(
+    data: &[u8],
+    password: &str,
+    strength: MnemonicEncryptionStrength,
+) -> Result<Vec<u8>, EncryptionError> {
     let mut key = [0u8; 32];
-    derive_key(password, &mut key)?;
-    let Some(nonce_data) = data.get(..AES_GCM_NONCE_SIZE) else {
+
+    let rest = match strength {
+        MnemonicEncryptionStrength::Default => {
+            derive_key(password, &mut key, strength, DEFAULT_SALT)?;
+            data
+        }
+        MnemonicEncryptionStrength::Strong => {
+            let Some(salt) = data.get(..SALT_SIZE) else {
+                return Err(EncryptionError::MissingData);
+            };
+            derive_key(password, &mut key, strength, salt)?;
+            &data[SALT_SIZE..]
+        }
+    };
+
+    let Some(nonce_data) = rest.get(..AES_GCM_NONCE_SIZE) else {
         return Err(EncryptionError::MissingNonce);
     };
-    let Some(cipher_data) = data.get(AES_GCM_NONCE_SIZE..) else {
+    let Some(cipher_data) = rest.get(AES_GCM_NONCE_SIZE..) else {
         return Err(EncryptionError::MissingData);
     };
     if cipher_data.is_empty() {
@@ -155,9 +234,10 @@ pub fn decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, EncryptionError> 
 pub fn encrypt_mnemonic_phrase(
     phrase: &str,
     password: &str,
+    strength: MnemonicEncryptionStrength,
 ) -> Result<String, MnemonicEncryptionError> {
     let _ = Mnemonic::parse_in(Language::English, phrase)?;
-    let ciphertext = encrypt(phrase.as_bytes(), password)?;
+    let ciphertext = encrypt(phrase.as_bytes(), password, strength)?;
     let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
     let decoded_ciphertext = bs58::decode(&encrypted_mnemonic).into_vec()?;
 
@@ -171,9 +251,10 @@ pub fn encrypt_mnemonic_phrase(
 pub fn decrypt_mnemonic_phrase(
     encrypted_mnemonic: &str,
     password: &str,
+    strength: MnemonicEncryptionStrength,
 ) -> Result<Mnemonic, MnemonicEncryptionError> {
     let cipher = bs58::decode(encrypted_mnemonic).into_vec()?;
-    let plain = decrypt(&cipher, password)?;
+    let plain = decrypt(&cipher, password, strength)?;
     let phrase = str::from_utf8(&plain)?;
     let mnemonic = Mnemonic::parse_in(Language::English, phrase)?;
 
@@ -236,18 +317,31 @@ mod tests {
         let mut right = [0u8; 32];
         let password = "foo";
 
-        let _ = derive_key(password, &mut short)
-            .expect_err("Should have failed with 1-byte output buffer");
+        let _ = derive_key(
+            password,
+            &mut short,
+            MnemonicEncryptionStrength::Default,
+            DEFAULT_SALT,
+        )
+        .expect_err("Should have failed with 1-byte output buffer");
 
-        derive_key(password, &mut right).expect("Should have succeeded with 32-byte output buffer");
+        derive_key(
+            password,
+            &mut right,
+            MnemonicEncryptionStrength::Default,
+            DEFAULT_SALT,
+        )
+        .expect("Should have succeeded with 32-byte output buffer");
     }
 
     #[test]
     fn test_encrypt() {
         let password = "foo";
         let data = vec![42u8; 128];
-        let encrypted = encrypt(&data, password).expect("encrypt should have succeeded");
-        let decrypted = decrypt(&encrypted, password).expect("decrypt should have succeeded");
+        let strength = MnemonicEncryptionStrength::Default;
+        let encrypted = encrypt(&data, password, strength).expect("encrypt should have succeeded");
+        let decrypted =
+            decrypt(&encrypted, password, strength).expect("decrypt should have succeeded");
 
         assert_eq!(data, decrypted);
 
@@ -255,21 +349,21 @@ mod tests {
         let mut buf = encrypted.clone();
         buf.truncate(AES_GCM_NONCE_SIZE - 1);
         assert!(matches!(
-            decrypt(&buf, password),
+            decrypt(&buf, password, strength),
             Err(EncryptionError::MissingNonce)
         ));
 
         let mut buf = encrypted.clone();
         buf.truncate(AES_GCM_NONCE_SIZE);
         assert!(matches!(
-            decrypt(&buf, password),
+            decrypt(&buf, password, strength),
             Err(EncryptionError::MissingData)
         ));
 
         let mut buf = encrypted.clone();
         buf.truncate(AES_GCM_NONCE_SIZE + 1);
         assert!(matches!(
-            decrypt(&buf, password),
+            decrypt(&buf, password, strength),
             Err(EncryptionError::AesGcm(_))
         ));
     }
@@ -278,24 +372,25 @@ mod tests {
     fn test_encrypt_mnemonic() {
         let phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
         let password = "foo";
+        let strength = MnemonicEncryptionStrength::Default;
 
-        let encrypted = encrypt_mnemonic_phrase(phrase, password)
+        let encrypted = encrypt_mnemonic_phrase(phrase, password, strength)
             .expect("encrypt_mnemonic_phrase should succeed");
-        let decrypted = decrypt_mnemonic_phrase(&encrypted, password)
+        let decrypted = decrypt_mnemonic_phrase(&encrypted, password, strength)
             .expect("decrypt_mnemonic_phrase should succeed");
 
         assert_eq!(phrase, decrypted.to_string());
 
         let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
         assert!(matches!(
-            encrypt_mnemonic_phrase(bad_phrase, password),
+            encrypt_mnemonic_phrase(bad_phrase, password, strength),
             Err(MnemonicEncryptionError::Mnemonic(_))
         ));
 
         let mut bad_bs58 = encrypted.clone();
         bad_bs58.push('?');
         assert!(matches!(
-            decrypt_mnemonic_phrase(&bad_bs58, password),
+            decrypt_mnemonic_phrase(&bad_bs58, password, strength),
             Err(MnemonicEncryptionError::Bs58Decode(_))
         ));
     }

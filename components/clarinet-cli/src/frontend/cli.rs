@@ -257,7 +257,14 @@ enum Deployments {
     ApplyDeployment(ApplyDeployment),
     /// Encrypt deployment mnemonic
     #[clap(name = "encrypt", bin_name = "encrypt")]
-    EncryptDeployment,
+    EncryptDeployment(EncryptDeployment),
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+struct EncryptDeployment {
+    /// Encryption strength
+    #[clap(long = "strength", default_value = "default")]
+    pub strength: clarinet_utils::MnemonicEncryptionStrength,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1001,14 +1008,15 @@ pub fn main() {
                     }
                 }
             }
-            Deployments::EncryptDeployment => {
+            Deployments::EncryptDeployment(cmd) => {
                 println!("{}", yellow!("Enter mnemonic to encrypt:"));
                 let mut buffer = String::new();
                 std::io::stdin().read_line(&mut buffer).unwrap();
                 let phrase = buffer.trim();
                 let password = rpassword::prompt_password("Enter password: ").unwrap();
                 let encrypted_mnemonic =
-                    clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
+                    clarinet_utils::encrypt_mnemonic_phrase(phrase, &password, cmd.strength)
+                        .unwrap();
                 println!("encrypted_mnemonic = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
             }
