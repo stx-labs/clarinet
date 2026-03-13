@@ -73,7 +73,7 @@ jobs:
       - name: Install wasm-pack
         env:
           WASM_PACK_VERSION: "0.14.0"
-          WASM_PACK_SHA256: "5941c7b05060440ff37ee50fe9009a408e63fa5ba607a3b0736f5a887ec5f2ca"
+          WASM_PACK_SHA256: "278a8d668085821f4d1a637bd864f1713f872b0ae3a118c77562a308c0abfe8d"
         run: |
           curl -fsSL "https://github.com/drager/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" -o wasm-pack.tar.gz
           echo "${WASM_PACK_SHA256}  wasm-pack.tar.gz" | sha256sum -c -
