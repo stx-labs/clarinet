@@ -461,21 +461,32 @@ impl NetworkManifest {
                     };
 
                     let (encrypted_mnemonic, encryption_strength) =
-                        match account_settings.get("encrypted_mnemonic_strong") {
-                            Some(Value::String(cipher)) => (
+                        if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic_high")
+                        {
+                            (
                                 cipher.clone(),
-                                clarinet_utils::MnemonicEncryptionStrength::Strong,
-                            ),
-                            _ => match account_settings.get("encrypted_mnemonic") {
-                                Some(Value::String(cipher)) => (
-                                    cipher.clone(),
-                                    clarinet_utils::MnemonicEncryptionStrength::Default,
-                                ),
-                                _ => (
-                                    String::new(),
-                                    clarinet_utils::MnemonicEncryptionStrength::Default,
-                                ),
-                            },
+                                clarinet_utils::MnemonicEncryptionStrength::High,
+                            )
+                        } else if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic_medium")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::Medium,
+                            )
+                        } else if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                            )
+                        } else {
+                            (
+                                String::new(),
+                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                            )
                         };
 
                     if !encrypted_mnemonic.is_empty() {

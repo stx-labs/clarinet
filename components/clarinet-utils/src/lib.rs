@@ -22,7 +22,8 @@ const DEFAULT_SALT: &[u8] = b"clarinet_utils-derive_key_salt";
 pub enum MnemonicEncryptionStrength {
     #[default]
     Default,
-    Strong,
+    Medium,
+    High,
 }
 
 impl FromStr for MnemonicEncryptionStrength {
@@ -31,7 +32,8 @@ impl FromStr for MnemonicEncryptionStrength {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "default" => Ok(Self::Default),
-            "strong" => Ok(Self::Strong),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
             _ => Err(format!("unknown encryption strength: {s}")),
         }
     }
@@ -41,7 +43,8 @@ impl fmt::Display for MnemonicEncryptionStrength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Default => write!(f, "default"),
-            Self::Strong => write!(f, "strong"),
+            Self::Medium => write!(f, "medium"),
+            Self::High => write!(f, "high"),
         }
     }
 }
@@ -146,8 +149,12 @@ pub fn derive_key(
 ) -> Result<(), EncryptionError> {
     let argon2 = match strength {
         MnemonicEncryptionStrength::Default => Argon2::default(),
-        MnemonicEncryptionStrength::Strong => {
+        MnemonicEncryptionStrength::Medium => {
             let params = argon2::Params::new(262144, 4, 2, Some(32))?;
+            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+        }
+        MnemonicEncryptionStrength::High => {
+            let params = argon2::Params::new(1048576, 10, 2, Some(32))?;
             Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
         }
     };
@@ -172,7 +179,7 @@ pub fn encrypt(
         MnemonicEncryptionStrength::Default => {
             derive_key(password, &mut key, strength, DEFAULT_SALT)?;
         }
-        MnemonicEncryptionStrength::Strong => {
+        MnemonicEncryptionStrength::Medium | MnemonicEncryptionStrength::High => {
             let mut salt = [0u8; SALT_SIZE];
             rng.fill_bytes(&mut salt);
             derive_key(password, &mut key, strength, &salt)?;
@@ -204,7 +211,7 @@ pub fn decrypt(
             derive_key(password, &mut key, strength, DEFAULT_SALT)?;
             data
         }
-        MnemonicEncryptionStrength::Strong => {
+        MnemonicEncryptionStrength::Medium | MnemonicEncryptionStrength::High => {
             let Some(salt) = data.get(..SALT_SIZE) else {
                 return Err(EncryptionError::MissingData);
             };

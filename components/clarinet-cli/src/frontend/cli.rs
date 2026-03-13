@@ -1019,9 +1019,10 @@ pub fn main() {
                         .unwrap();
                 let key = match cmd.strength {
                     clarinet_utils::MnemonicEncryptionStrength::Default => "encrypted_mnemonic",
-                    clarinet_utils::MnemonicEncryptionStrength::Strong => {
-                        "encrypted_mnemonic_strong"
+                    clarinet_utils::MnemonicEncryptionStrength::Medium => {
+                        "encrypted_mnemonic_medium"
                     }
+                    clarinet_utils::MnemonicEncryptionStrength::High => "encrypted_mnemonic_high",
                 };
                 println!("{key} = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
