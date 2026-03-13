@@ -71,7 +71,15 @@ jobs:
         run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack
+        env:
+          WASM_PACK_VERSION: "0.14.0"
+          WASM_PACK_SHA256: "5941c7b05060440ff37ee50fe9009a408e63fa5ba607a3b0736f5a887ec5f2ca"
+        run: |
+          curl -fsSL "https://github.com/drager/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" -o wasm-pack.tar.gz
+          echo "${WASM_PACK_SHA256}  wasm-pack.tar.gz" | sha256sum -c -
+          tar xzf wasm-pack.tar.gz
+          mv "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack" /usr/local/bin/
+          rm -rf wasm-pack.tar.gz "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl"
 
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
