@@ -44,16 +44,11 @@ pub async fn start_language_server(
         match oper.index() {
             i if i == notifications_oper => match oper.recv(&notification_rx) {
                 Ok(notification) => {
-                    let response = match process_notification(
-                        notification,
-                        &mut editor_state,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(response) => response,
-                        Err(e) => LspNotificationResponse::error(&e),
-                    };
+                    let response =
+                        match process_notification(notification, &mut editor_state, None).await {
+                            Ok(response) => response,
+                            Err(e) => LspNotificationResponse::error(&e),
+                        };
                     let _ = response_tx.send(LspResponse::Notification(response));
                 }
                 Err(_e) => {

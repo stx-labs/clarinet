@@ -229,7 +229,10 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
 /// Helper: build an `initialize` JSON-RPC request.  When `code_lens_refresh`
 /// is true the client capabilities advertise `workspace.codeLens.refreshSupport`.
 #[cfg(test)]
-fn build_initialize_request(id: i64, code_lens_refresh: bool) -> tower_lsp_server::jsonrpc::Request {
+fn build_initialize_request(
+    id: i64,
+    code_lens_refresh: bool,
+) -> tower_lsp_server::jsonrpc::Request {
     let capabilities = if code_lens_refresh {
         serde_json::json!({
             "capabilities": {
@@ -265,15 +268,13 @@ fn build_did_open_notification(uri: &str) -> tower_lsp_server::jsonrpc::Request 
 /// socket, responding to each so the server doesn't block.
 /// Returns the list of server-to-client request method names observed.
 #[cfg(test)]
-async fn run_did_open_and_collect_server_requests(
-    code_lens_refresh: bool,
-) -> Vec<String> {
+async fn run_did_open_and_collect_server_requests(code_lens_refresh: bool) -> Vec<String> {
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
     use crossbeam_channel::unbounded;
-    use futures::stream::StreamExt;
     use futures::sink::SinkExt;
+    use futures::stream::StreamExt;
     use tower::{Service, ServiceExt};
 
     let (notification_tx, notification_rx) = unbounded();
@@ -304,20 +305,12 @@ async fn run_did_open_and_collect_server_requests(
     let contract_path = std::env::current_dir()
         .unwrap()
         .join("examples/counter/contracts/counter.clar");
-    let uri = format!(
-        "file://{}",
-        contract_path.to_str().unwrap()
-    );
+    let uri = format!("file://{}", contract_path.to_str().unwrap());
 
     // 3. Send didOpen and concurrently handle server-to-client requests
     let did_open = build_did_open_notification(&uri);
     let did_open_fut = async {
-        let _ = service
-            .ready()
-            .await
-            .unwrap()
-            .call(did_open)
-            .await;
+        let _ = service.ready().await.unwrap().call(did_open).await;
     };
 
     let collect_requests_fut = async {

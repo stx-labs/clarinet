@@ -81,8 +81,7 @@ pub async fn process_notification(
     editor_state: &mut EditorStateInput,
     file_accessor: Option<&dyn FileAccessor>,
 ) -> Result<LspNotificationResponse, String> {
-    let static_cost_analysis =
-        editor_state.try_read(|es| es.settings.static_cost_analysis)?;
+    let static_cost_analysis = editor_state.try_read(|es| es.settings.static_cost_analysis)?;
 
     match command {
         LspNotification::ManifestOpened(manifest_location) => {
@@ -93,7 +92,14 @@ pub async fn process_notification(
 
             // With this manifest_location, let's initialize our state.
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor, static_cost_analysis).await {
+            match build_state(
+                &manifest_location,
+                &mut protocol_state,
+                file_accessor,
+                static_cost_analysis,
+            )
+            .await
+            {
                 Ok(_) => {
                     editor_state
                         .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
@@ -111,7 +117,14 @@ pub async fn process_notification(
         LspNotification::ManifestSaved(manifest_location) => {
             // We will rebuild the entire state, without to try any optimizations for now
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor, static_cost_analysis).await {
+            match build_state(
+                &manifest_location,
+                &mut protocol_state,
+                file_accessor,
+                static_cost_analysis,
+            )
+            .await
+            {
                 Ok(_) => {
                     editor_state
                         .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
@@ -220,7 +233,14 @@ pub async fn process_notification(
             }
 
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor, static_cost_analysis).await {
+            match build_state(
+                &manifest_location,
+                &mut protocol_state,
+                file_accessor,
+                static_cost_analysis,
+            )
+            .await
+            {
                 Ok(_) => {
                     editor_state
                         .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
@@ -251,7 +271,14 @@ pub async fn process_notification(
 
             // TODO(): introduce partial analysis #604
             let mut protocol_state = ProtocolState::new();
-            match build_state(&manifest_location, &mut protocol_state, file_accessor, static_cost_analysis).await {
+            match build_state(
+                &manifest_location,
+                &mut protocol_state,
+                file_accessor,
+                static_cost_analysis,
+            )
+            .await
+            {
                 Ok(_) => {
                     editor_state.try_write(|es| {
                         es.index_protocol(manifest_location, protocol_state);
