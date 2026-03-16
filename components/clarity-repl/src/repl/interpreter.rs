@@ -2262,4 +2262,112 @@ mod tests {
             })),
         );
     }
+
+    #[test]
+    fn eol_annotation_produces_ignored_warning() {
+        let interpreter = get_interpreter(None);
+        let source = indoc!(
+            r#"
+            (define-read-only (get-owner) ;; #[allow(unchecked_data)]
+                (ok tx-sender)
+            )
+            "#
+        );
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert!(annotations.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "annotation at end of line will be ignored"
+        );
+    }
+
+    #[test]
+    fn annotation_missing_closing_bracket() {
+        let interpreter = get_interpreter(None);
+        let source = ";; #[allow(unchecked_data)";
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert!(annotations.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "malformed annotation");
+    }
+
+    #[test]
+    fn annotation_unrecognized_kind() {
+        let interpreter = get_interpreter(None);
+        let source = ";; #[foo(bar)]";
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert!(annotations.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "unrecognized annotation");
+    }
+
+    #[test]
+    fn annotation_allow_missing_value() {
+        let interpreter = get_interpreter(None);
+        let source = ";; #[allow()]";
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert!(annotations.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "missing value for 'allow' annotation"
+        );
+    }
+
+    #[test]
+    fn annotation_env_bad_environment() {
+        let interpreter = get_interpreter(None);
+        let source = ";; #[env(foo)]";
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert!(annotations.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "bad environment foo for 'env' annotation"
+        );
+    }
+
+    #[test]
+    fn annotation_env_onchain_rejected() {
+        let interpreter = get_interpreter(None);
+        let source = ";; #[env(onchain)]";
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert!(annotations.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "'onchain' is not a valid environment for 'env' annotation"
+        );
+    }
+
+    #[test]
+    fn annotation_filter_missing_value() {
+        let interpreter = get_interpreter(None);
+        let source = ";; #[filter]";
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert!(annotations.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "missing value for 'filter' annotation"
+        );
+    }
+
+    #[test]
+    fn valid_annotation_produces_no_diagnostics() {
+        let interpreter = get_interpreter(None);
+        let source = ";; #[allow(unchecked_data)]";
+
+        let (annotations, diagnostics) = interpreter.collect_annotations(source);
+        assert_eq!(annotations.len(), 1);
+        assert!(diagnostics.is_empty());
+    }
 }
