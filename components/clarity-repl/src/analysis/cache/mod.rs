@@ -4,9 +4,13 @@ use clarity::vm::analysis::ContractAnalysis;
 
 pub mod bindings;
 pub mod constants;
+pub mod data_vars;
+pub mod maps;
 
 use bindings::{BindingMap, BindingMapBuilder};
 use constants::{ConstantMap, ConstantMapBuilder};
+use data_vars::{DataVarMap, DataVarMapBuilder};
+use maps::{MapDefinitionMap, MapDefinitionMapBuilder};
 
 use crate::analysis::annotation::Annotation;
 
@@ -18,6 +22,8 @@ pub struct AnalysisCache<'a> {
 
     constants: Option<ConstantMap<'a>>,
     bindings: Option<BindingMap<'a>>,
+    data_vars: Option<DataVarMap<'a>>,
+    maps: Option<MapDefinitionMap<'a>>,
 }
 
 impl<'a> AnalysisCache<'a> {
@@ -27,6 +33,8 @@ impl<'a> AnalysisCache<'a> {
             annotations,
             constants: None,
             bindings: None,
+            data_vars: None,
+            maps: None,
         }
     }
 
@@ -40,6 +48,22 @@ impl<'a> AnalysisCache<'a> {
 
     pub fn get_bindings(&mut self) -> &BindingMap<'a> {
         self.bindings.get_or_insert(BindingMapBuilder::build(
+            self.contract_analysis.clarity_version,
+            self.contract_analysis,
+            self.annotations,
+        ))
+    }
+
+    pub fn get_data_vars(&mut self) -> &DataVarMap<'a> {
+        self.data_vars.get_or_insert(DataVarMapBuilder::build(
+            self.contract_analysis.clarity_version,
+            self.contract_analysis,
+            self.annotations,
+        ))
+    }
+
+    pub fn get_maps(&mut self) -> &MapDefinitionMap<'a> {
+        self.maps.get_or_insert(MapDefinitionMapBuilder::build(
             self.contract_analysis.clarity_version,
             self.contract_analysis,
             self.annotations,

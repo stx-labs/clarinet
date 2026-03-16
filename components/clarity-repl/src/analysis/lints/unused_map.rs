@@ -4,17 +4,13 @@
 //!  - The map is never referenced
 //!  - The map is used, but in a way that cannot affect contract execution
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
-use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
-use clarity::vm::representations::Span;
-use clarity::vm::{ClarityVersion, SymbolicExpression};
+use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::cache::maps::MapData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
@@ -38,7 +34,10 @@ impl From<&MapData<'_>> for Usage {
         } else if !map_data.map_get && !map_data.map_set {
             Self::Unused
         } else {
-            unreachable!("Unhandled usage pattern: {map_data:?}")
+            unreachable!(
+                "Unhandled usage pattern: insert={}, delete={}, set={}, get={}",
+                map_data.map_insert, map_data.map_delete, map_data.map_set, map_data.map_get
+            )
         }
     }
 }
@@ -53,91 +52,39 @@ impl UnusedMapSettings {
     }
 }
 
-/// Data associated with a `define-map` variable
-#[derive(Debug)]
-struct MapData<'a> {
-    expr: &'a SymbolicExpression,
-    /// Has `map-insert` been called on map?
-    pub map_insert: bool,
-    /// Has `map-delete` been called on map?
-    pub map_delete: bool,
-    /// Has `map-set` been called on map?
-    pub map_set: bool,
-    /// Has `map-get?` been called on map?
-    pub map_get: bool,
-}
-
-impl<'a> MapData<'a> {
-    fn new(expr: &'a SymbolicExpression) -> Self {
-        Self {
-            expr,
-            map_insert: false,
-            map_delete: false,
-            map_set: false,
-            map_get: false,
-        }
-    }
-
-    /// Decide if a map is "unused"
-    /// This means whether or not it can affect contract execution, which is still possible even if `map-get?` is never called.
-    /// For example, it might track unique hashes using `map-insert` and fail if the same hash is used twice
-    /// So the conditions we will use to determine if a map is used:
-    ///  - `map-insert` is called
-    ///  - `map-set` and either `map-delete` or `map-get?` are called
-    ///
-    /// TODO: If the `bool` return value from `map-insert` or `map-delete` is not bound to a variable or returned from a function,
-    ///       the map may still be unused
-    fn is_used(&self) -> bool {
-        self.map_insert || (self.map_set && (self.map_get || self.map_delete))
-    }
-}
-
-pub struct UnusedMap<'a> {
-    clarity_version: ClarityVersion,
+pub struct UnusedMap<'a, 'b>
+where
+    'b: 'a,
+{
+    analysis_cache: &'a mut AnalysisCache<'b>,
     _settings: UnusedMapSettings,
-    annotations: &'a Vec<Annotation>,
-    active_annotation: Option<usize>,
+    /// Clarity diagnostic level
     level: Level,
-    /// Clarity maps declared with `define-map`
-    maps: HashMap<&'a ClarityName, MapData<'a>>,
 }
 
-impl<'a> UnusedMap<'a> {
+impl<'a, 'b> UnusedMap<'a, 'b> {
     fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
+        analysis_cache: &'a mut AnalysisCache<'b>,
         level: Level,
         settings: UnusedMapSettings,
-    ) -> UnusedMap<'a> {
+    ) -> UnusedMap<'a, 'b> {
         Self {
-            clarity_version,
+            analysis_cache,
             _settings: settings,
             level,
-            annotations,
-            active_annotation: None,
-            maps: HashMap::new(),
         }
     }
 
-    fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
-        // Traverse the entire AST
-        traverse(&mut self, &contract_analysis.expressions);
-
-        // Process hashmap of unused constants and generate diagnostics
+    fn run(&mut self) -> AnalysisResult {
         let diagnostics = self.generate_diagnostics();
-
         Ok(diagnostics)
     }
 
-    // Check for annotations that should be attached to the given span
-    fn set_active_annotation(&mut self, span: &Span) {
-        self.active_annotation = get_index_of_span(self.annotations, span);
-    }
-
     // Check if the expression is annotated with `allow(<lint_name>)`
-    fn allow(&self) -> bool {
-        self.active_annotation
-            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+    fn allow(map_data: &MapData, annotations: &[Annotation]) -> bool {
+        map_data
+            .annotation
+            .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
 
@@ -166,13 +113,13 @@ impl<'a> UnusedMap<'a> {
     }
 
     fn make_diagnostic(
-        &self,
+        level: Level,
         expr: &'a SymbolicExpression,
         message: String,
         suggestion: Option<String>,
     ) -> Diagnostic {
         Diagnostic {
-            level: self.level.clone(),
+            level,
             message,
             spans: vec![expr.span.clone()],
             suggestion,
@@ -182,8 +129,11 @@ impl<'a> UnusedMap<'a> {
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (name, data) in &self.maps {
-            if is_explicitly_unused(name) {
+        let annotations = self.analysis_cache.annotations;
+        let maps = self.analysis_cache.get_maps();
+
+        for (name, data) in maps {
+            if is_explicitly_unused(name) || Self::allow(data, annotations) {
                 continue;
             }
             let (message, suggestion) = match Usage::from(data) {
@@ -192,81 +142,16 @@ impl<'a> UnusedMap<'a> {
                 Usage::Unread => Self::make_diagnostic_strings_unread(name),
                 Usage::Unused => Self::make_diagnostic_strings_unused(name),
             };
-            let diagnostic = self.make_diagnostic(data.expr, message, suggestion);
+            let diagnostic =
+                Self::make_diagnostic(self.level.clone(), data.expr, message, suggestion);
             diagnostics.push(diagnostic);
         }
 
-        // Order the sets by the span of the error (the first diagnostic)
-        diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
 }
 
-impl<'a> ASTVisitor<'a> for UnusedMap<'a> {
-    fn get_clarity_version(&self) -> &ClarityVersion {
-        &self.clarity_version
-    }
-
-    fn visit_define_map(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _key_type: &'a SymbolicExpression,
-        _value_type: &'a SymbolicExpression,
-    ) -> bool {
-        self.set_active_annotation(&expr.span);
-
-        if !self.allow() {
-            self.maps.insert(name, MapData::new(expr));
-        }
-
-        true
-    }
-
-    fn visit_map_insert(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _key: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
-        _value: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
-    ) -> bool {
-        _ = self.maps.get_mut(name).map(|data| data.map_insert = true);
-        true
-    }
-
-    fn visit_map_delete(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _key: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
-    ) -> bool {
-        _ = self.maps.get_mut(name).map(|data| data.map_delete = true);
-        true
-    }
-
-    fn visit_map_set(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _key: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
-        _value: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
-    ) -> bool {
-        _ = self.maps.get_mut(name).map(|data| data.map_set = true);
-        true
-    }
-
-    fn visit_map_get(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _key: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
-    ) -> bool {
-        _ = self.maps.get_mut(name).map(|data| data.map_get = true);
-        true
-    }
-}
-
-impl AnalysisPass for UnusedMap<'_> {
+impl<'a, 'b> AnalysisPass for UnusedMap<'a, 'b> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
@@ -274,17 +159,12 @@ impl AnalysisPass for UnusedMap<'_> {
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedMapSettings::new();
-        let lint = UnusedMap::new(
-            analysis_cache.contract_analysis.clarity_version,
-            analysis_cache.annotations,
-            level,
-            settings,
-        );
-        lint.run(analysis_cache.contract_analysis)
+        let mut lint = UnusedMap::new(analysis_cache, level, settings);
+        lint.run()
     }
 }
 
-impl Lint for UnusedMap<'_> {
+impl Lint for UnusedMap<'_, '_> {
     fn get_name() -> LintName {
         LintName::UnusedMap
     }
