@@ -266,7 +266,7 @@ enum Deployments {
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct EncryptDeployment {
     /// Encryption strength
-    #[clap(long = "strength", default_value = "default")]
+    #[clap(long = "strength", default_value = "medium")]
     pub strength: clarinet_utils::MnemonicEncryptionStrength,
 }
 
@@ -1024,11 +1024,14 @@ pub fn main() {
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password, cmd.strength)
                         .unwrap();
                 let key = match cmd.strength {
-                    clarinet_utils::MnemonicEncryptionStrength::Default => "encrypted_mnemonic",
+                    clarinet_utils::MnemonicEncryptionStrength::Basic => "encrypted_mnemonic",
                     clarinet_utils::MnemonicEncryptionStrength::Medium => {
                         "encrypted_mnemonic_medium"
                     }
                     clarinet_utils::MnemonicEncryptionStrength::High => "encrypted_mnemonic_high",
+                    clarinet_utils::MnemonicEncryptionStrength::Extreme => {
+                        "encrypted_mnemonic_extreme"
+                    }
                 };
                 println!("{key} = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);

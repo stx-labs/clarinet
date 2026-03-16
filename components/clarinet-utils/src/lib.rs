@@ -20,10 +20,11 @@ const DEFAULT_SALT: &[u8] = b"clarinet_utils-derive_key_salt";
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum MnemonicEncryptionStrength {
+    Basic,
     #[default]
-    Default,
     Medium,
     High,
+    Extreme,
 }
 
 impl FromStr for MnemonicEncryptionStrength {
@@ -31,9 +32,10 @@ impl FromStr for MnemonicEncryptionStrength {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "default" => Ok(Self::Default),
+            "basic" => Ok(Self::Basic),
             "medium" => Ok(Self::Medium),
             "high" => Ok(Self::High),
+            "extreme" => Ok(Self::Extreme),
             _ => Err(format!("unknown encryption strength: {s}")),
         }
     }
@@ -42,9 +44,10 @@ impl FromStr for MnemonicEncryptionStrength {
 impl fmt::Display for MnemonicEncryptionStrength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Default => write!(f, "default"),
+            Self::Basic => write!(f, "basic"),
             Self::Medium => write!(f, "medium"),
             Self::High => write!(f, "high"),
+            Self::Extreme => write!(f, "extreme"),
         }
     }
 }
@@ -148,13 +151,20 @@ pub fn derive_key(
     salt: &[u8],
 ) -> Result<(), EncryptionError> {
     let argon2 = match strength {
-        MnemonicEncryptionStrength::Default => Argon2::default(),
+        MnemonicEncryptionStrength::Basic => {
+            let params = argon2::Params::new(19456, 2, 1, Some(32))?;
+            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+        }
         MnemonicEncryptionStrength::Medium => {
             let params = argon2::Params::new(262144, 6, 2, Some(32))?;
             Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
         }
         MnemonicEncryptionStrength::High => {
             let params = argon2::Params::new(1048576, 10, 2, Some(32))?;
+            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+        }
+        MnemonicEncryptionStrength::Extreme => {
+            let params = argon2::Params::new(2097152, 14, 4, Some(32))?;
             Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
         }
     };
@@ -176,10 +186,12 @@ pub fn encrypt(
     let mut bytes = Vec::new();
 
     match strength {
-        MnemonicEncryptionStrength::Default => {
+        MnemonicEncryptionStrength::Basic => {
             derive_key(password, &mut key, strength, DEFAULT_SALT)?;
         }
-        MnemonicEncryptionStrength::Medium | MnemonicEncryptionStrength::High => {
+        MnemonicEncryptionStrength::Medium
+        | MnemonicEncryptionStrength::High
+        | MnemonicEncryptionStrength::Extreme => {
             let mut salt = [0u8; SALT_SIZE];
             rng.fill_bytes(&mut salt);
             derive_key(password, &mut key, strength, &salt)?;
@@ -207,11 +219,13 @@ pub fn decrypt(
     let mut key = [0u8; 32];
 
     let rest = match strength {
-        MnemonicEncryptionStrength::Default => {
+        MnemonicEncryptionStrength::Basic => {
             derive_key(password, &mut key, strength, DEFAULT_SALT)?;
             data
         }
-        MnemonicEncryptionStrength::Medium | MnemonicEncryptionStrength::High => {
+        MnemonicEncryptionStrength::Medium
+        | MnemonicEncryptionStrength::High
+        | MnemonicEncryptionStrength::Extreme => {
             let Some(salt) = data.get(..SALT_SIZE) else {
                 return Err(EncryptionError::MissingData);
             };
@@ -327,7 +341,7 @@ mod tests {
         let _ = derive_key(
             password,
             &mut short,
-            MnemonicEncryptionStrength::Default,
+            MnemonicEncryptionStrength::Basic,
             DEFAULT_SALT,
         )
         .expect_err("Should have failed with 1-byte output buffer");
@@ -335,7 +349,7 @@ mod tests {
         derive_key(
             password,
             &mut right,
-            MnemonicEncryptionStrength::Default,
+            MnemonicEncryptionStrength::Basic,
             DEFAULT_SALT,
         )
         .expect("Should have succeeded with 32-byte output buffer");
@@ -345,7 +359,7 @@ mod tests {
     fn test_encrypt() {
         let password = "foo";
         let data = vec![42u8; 128];
-        let strength = MnemonicEncryptionStrength::Default;
+        let strength = MnemonicEncryptionStrength::Basic;
         let encrypted = encrypt(&data, password, strength).expect("encrypt should have succeeded");
         let decrypted =
             decrypt(&encrypted, password, strength).expect("decrypt should have succeeded");
@@ -382,7 +396,7 @@ mod tests {
 
         // Test Default and Medium with cross-strength mismatch checks
         for strength in [
-            MnemonicEncryptionStrength::Default,
+            MnemonicEncryptionStrength::Basic,
             MnemonicEncryptionStrength::Medium,
         ] {
             let encrypted = encrypt_mnemonic_phrase(phrase, password, strength)
@@ -393,7 +407,7 @@ mod tests {
             assert_eq!(phrase, decrypted.to_string());
 
             for other in [
-                MnemonicEncryptionStrength::Default,
+                MnemonicEncryptionStrength::Basic,
                 MnemonicEncryptionStrength::Medium,
             ] {
                 if other != strength {
@@ -419,7 +433,7 @@ mod tests {
 
         let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
         assert!(matches!(
-            encrypt_mnemonic_phrase(bad_phrase, password, MnemonicEncryptionStrength::Default),
+            encrypt_mnemonic_phrase(bad_phrase, password, MnemonicEncryptionStrength::Basic),
             Err(MnemonicEncryptionError::Mnemonic(_))
         ));
     }
