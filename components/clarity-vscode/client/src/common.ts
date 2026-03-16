@@ -98,6 +98,8 @@ export async function initClient(
       "documentSymbols",
       "goToDefinition",
       "staticCostAnalysis",
+      "staticCostDisplayFormat",
+      "staticCostThresholdPercentage",
     ].forEach((k) => {
       if (newConfig[k] !== config[k]) requireReload = true;
     });
