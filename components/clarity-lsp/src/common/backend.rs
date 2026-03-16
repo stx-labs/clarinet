@@ -1138,9 +1138,10 @@ mod lsp_tests {
 
     fn make_semantic_tokens_request(source: &str) -> Option<SemanticTokensResult> {
         let editor_state = create_test_editor_state(source.to_owned());
+        let path = get_root_path().join("test.clar");
         let params = SemanticTokensParams {
             text_document: TextDocumentIdentifier {
-                uri: "file:///test.clar".parse().unwrap(),
+                uri: paths::path_to_url_string(&path).unwrap().parse().unwrap(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
