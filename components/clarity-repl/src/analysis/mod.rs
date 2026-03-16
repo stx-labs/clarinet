@@ -163,6 +163,15 @@ impl Settings {
     pub fn disable_all_lints(&mut self) {
         self.lints.clear();
     }
+
+    pub fn disable_all_passes(&mut self) {
+        self.passes.clear();
+    }
+
+    pub fn disable_all(&mut self) {
+        self.disable_all_lints();
+        self.disable_all_passes();
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -337,5 +346,27 @@ mod tests {
         let settings = Settings::from(file);
         assert!(!settings.lints.is_empty());
         assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    #[test]
+    fn disable_all_clears_lints_and_passes() {
+        let mut settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert!(!settings.passes.is_empty());
+
+        settings.disable_all();
+        assert!(settings.lints.is_empty());
+        assert!(settings.passes.is_empty());
+    }
+
+    #[test]
+    fn disable_all_passes_preserves_lints() {
+        let mut settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert!(!settings.passes.is_empty());
+
+        settings.disable_all_passes();
+        assert!(!settings.lints.is_empty(), "lints should be preserved");
+        assert!(settings.passes.is_empty());
     }
 }

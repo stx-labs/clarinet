@@ -25,6 +25,7 @@ pub fn run_dap() -> Result<(), String> {
                 &project_manifest,
                 &mut deployment,
                 Some(&artifacts.asts),
+                false,
             )
             .session;
 

@@ -298,7 +298,7 @@ impl ClarityInterpreter {
         .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
         // Run REPL-only analyses (linter, check_checker, etc.)
-        let diagnostics = if !contract.is_requirement {
+        let diagnostics = if !contract.skip_analysis {
             analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,

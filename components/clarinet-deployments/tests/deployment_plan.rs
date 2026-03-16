@@ -19,7 +19,7 @@ fn get_test_txs() -> (TransactionSpecification, TransactionSpecification) {
             location: PathBuf::from("/contracts/test.clar"),
             source: "(ok true)".to_string(),
             clarity_version: ClarityVersion::Clarity2,
-            is_requirement: false,
+            skip_analysis: false,
         });
 
     let contract_call_txs =
