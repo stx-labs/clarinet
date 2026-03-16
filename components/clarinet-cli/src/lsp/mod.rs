@@ -225,3 +225,132 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
     // the counter project should emit 4 warnings and 4 notes coming from counter.clar
     assert_eq!(diags_0.len(), 8);
 }
+
+/// Helper: build an `initialize` JSON-RPC request.  When `code_lens_refresh`
+/// is true the client capabilities advertise `workspace.codeLens.refreshSupport`.
+#[cfg(test)]
+fn build_initialize_request(
+    id: i64,
+    code_lens_refresh: bool,
+) -> tower_lsp_server::jsonrpc::Request {
+    let capabilities = if code_lens_refresh {
+        serde_json::json!({
+            "capabilities": {
+                "workspace": { "codeLens": { "refreshSupport": true } }
+            }
+        })
+    } else {
+        serde_json::json!({ "capabilities": {} })
+    };
+    tower_lsp_server::jsonrpc::Request::build("initialize")
+        .params(capabilities)
+        .id(id)
+        .finish()
+}
+
+/// Helper: build a `textDocument/didOpen` JSON-RPC notification for a .clar file.
+#[cfg(test)]
+fn build_did_open_notification(uri: &str) -> tower_lsp_server::jsonrpc::Request {
+    tower_lsp_server::jsonrpc::Request::build("textDocument/didOpen")
+        .params(serde_json::json!({
+            "textDocument": {
+                "uri": uri,
+                "languageId": "clarity",
+                "version": 1,
+                "text": "(define-read-only (hello) (ok u1))"
+            }
+        }))
+        .finish()
+}
+
+/// Drives the LspService: sends initialize → didOpen, then collects any
+/// server-to-client requests (like `workspace/codeLens/refresh`) from the
+/// socket, responding to each so the server doesn't block.
+/// Returns the list of server-to-client request method names observed.
+#[cfg(test)]
+async fn run_did_open_and_collect_server_requests(code_lens_refresh: bool) -> Vec<String> {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    use crossbeam_channel::unbounded;
+    use futures::sink::SinkExt;
+    use futures::stream::StreamExt;
+    use tower::{Service, ServiceExt};
+
+    let (notification_tx, notification_rx) = unbounded();
+    let (request_tx, request_rx) = unbounded();
+    let (response_tx, response_rx) = channel();
+    std::thread::spawn(move || {
+        hiro_system_kit::nestable_block_on(native_bridge::start_language_server(
+            notification_rx,
+            request_rx,
+            response_tx,
+        ));
+    });
+
+    let (mut service, socket) = LspService::new(|client| {
+        native_bridge::LspNativeBridge::new(client, notification_tx, request_tx, response_rx)
+    });
+    let (mut request_stream, mut response_sink) = socket.split();
+
+    // 1. Initialize
+    let _init_resp = service
+        .ready()
+        .await
+        .unwrap()
+        .call(build_initialize_request(1, code_lens_refresh))
+        .await;
+
+    // 2. Build a file URI for the counter contract
+    let contract_path = std::env::current_dir()
+        .unwrap()
+        .join("examples/counter/contracts/counter.clar");
+    let uri =
+        clarinet_files::paths::path_to_url_string(&contract_path).expect("failed to build URI");
+
+    // 3. Send didOpen and concurrently handle server-to-client requests
+    let did_open = build_did_open_notification(&uri);
+    let did_open_fut = async {
+        let _ = service.ready().await.unwrap().call(did_open).await;
+    };
+
+    let collect_requests_fut = async {
+        let mut methods = vec![];
+        while let Ok(Some(req)) =
+            tokio::time::timeout(Duration::from_secs(10), request_stream.next()).await
+        {
+            let method = req.method().to_string();
+            if let Some(id) = req.id().cloned() {
+                let _ = response_sink
+                    .send(tower_lsp_server::jsonrpc::Response::from_ok(
+                        id,
+                        serde_json::json!(null),
+                    ))
+                    .await;
+            }
+            methods.push(method);
+        }
+        methods
+    };
+
+    let (_, methods) = tokio::join!(did_open_fut, collect_requests_fut);
+    methods
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_code_lens_refresh_sent_when_client_supports_it() {
+    let methods = run_did_open_and_collect_server_requests(true).await;
+    assert!(
+        methods.iter().any(|m| m == "workspace/codeLens/refresh"),
+        "expected workspace/codeLens/refresh in server requests, got: {methods:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_code_lens_refresh_not_sent_when_client_does_not_support_it() {
+    let methods = run_did_open_and_collect_server_requests(false).await;
+    assert!(
+        !methods.iter().any(|m| m == "workspace/codeLens/refresh"),
+        "unexpected workspace/codeLens/refresh in server requests: {methods:?}"
+    );
+}
