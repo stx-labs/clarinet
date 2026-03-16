@@ -594,7 +594,7 @@ pub fn main() {
 
     let clarinetrc = ClarinetRC::from_rc_file();
 
-    update_check::check_for_update();
+    update_check::check_for_update_async();
 
     match opts.command {
         Command::Completions(cmd) => {
