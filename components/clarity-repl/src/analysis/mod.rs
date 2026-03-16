@@ -51,12 +51,13 @@ impl From<&LintName> for AnalysisPassFn {
     fn from(lint: &LintName) -> AnalysisPassFn {
         match lint {
             // Keep alphabetically sorted
-            LintName::UnnecessaryAsMaxLen => lints::UnnecessaryAsMaxLen::run_pass,
+            LintName::AtBlock => lints::AtBlock::run_pass,
             LintName::CaseBinding => lints::CaseBinding::run_pass,
             LintName::CaseConst => lints::CaseConst::run_pass,
             LintName::ErrorConst => lints::ErrorConst::run_pass,
             LintName::Noop => lints::NoopChecker::run_pass,
             LintName::Panic => lints::PanicChecker::run_pass,
+            LintName::UnnecessaryAsMaxLen => lints::UnnecessaryAsMaxLen::run_pass,
             LintName::UnnecessaryPublic => lints::UnnecessaryPublic::run_pass,
             LintName::UnusedConst => lints::UnusedConst::run_pass,
             LintName::UnusedDataVar => lints::UnusedDataVar::run_pass,

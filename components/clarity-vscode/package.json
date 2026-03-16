@@ -12,7 +12,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "license": "GPL-3.0-only",
-  "version": "3.14.1",
+  "version": "3.15.0",
   "private": true,
   "workspaces": [
     "client",
@@ -125,6 +125,27 @@
             "order": 0,
             "description": "Show function signature help."
           },
+          "clarity-lsp.staticCostAnalysis": {
+            "type": "boolean",
+            "default": false,
+            "order": 0,
+            "description": "Show static cost analysis (runtime, read/write counts) above function definitions."
+          },
+          "clarity-lsp.staticCostDisplayFormat": {
+            "type": "string",
+            "enum": ["exact", "percentage"],
+            "default": "exact",
+            "order": 0,
+            "description": "Display format for static cost analysis: exact numbers or percentage of block limits."
+          },
+          "clarity-lsp.staticCostThresholdPercentage": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 100,
+            "order": 0,
+            "description": "Only show cost code lens for functions that use at least this percentage of any block limit dimension."
+          },
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",
             "default": false,
@@ -163,27 +184,7 @@
         "path": "./syntaxes/clarity.tmLanguage.json"
       }
     ],
-    "viewsContainers": {
-      "panel": [
-        {
-          "id": "clarityPanel",
-          "title": "Clarity",
-          "icon": "assets/images/file-icon/clar-dark-theme.svg",
-          "when": "config.clariy-lsp.panels.insights-panel"
-        }
-      ]
-    },
-    "views": {
-      "clarityPanel": [
-        {
-          "type": "webview",
-          "id": "clariy-lsp.clarityInsightsView",
-          "icon": "",
-          "name": "Insights",
-          "when": "config.clariy-lsp.panels.insights-panel"
-        }
-      ]
-    },
+    "commands": [],
     "breakpoints": [
       {
         "language": "clarity"
@@ -243,17 +244,17 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
-    "@eslint/js": "^9.13.0",
+    "@eslint/js": "^10.0.1",
     "@swc/cli": "^0.8.0",
     "@swc/core": "^1.15.11",
     "@typescript-eslint/eslint-plugin": "^8.11.0",
     "@typescript-eslint/parser": "^8.11.0",
-    "@vscode/test-web": "0.0.79",
+    "@vscode/test-web": "0.0.80",
     "@vscode/vsce": "^3.2.2",
     "@wasm-tool/wasm-pack-plugin": "^1.6.0",
     "concurrently": "^9.1.2",
     "copy-webpack-plugin": "^13.0.0",
-    "eslint": "^9.13.0",
+    "eslint": "^10.0.2",
     "ovsx": "^0.10.8",
     "path-browserify": "^1.0.1",
     "regenerator-runtime": "^0.14.0",

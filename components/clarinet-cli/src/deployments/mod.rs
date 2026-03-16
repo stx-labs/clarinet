@@ -6,14 +6,23 @@ use std::path::{Path, PathBuf};
 
 use clarinet_deployments::types::{DeploymentGenerationArtifacts, DeploymentSpecification};
 use clarinet_files::{paths, ProjectManifest, StacksNetwork};
+use clarity_repl::utils::Environment;
 pub use ui::start_ui;
 
 pub fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
     _no_batch: bool,
-) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts), String> {
-    let future = clarinet_deployments::generate_default_deployment(manifest, network, false, None);
+    environment: Environment,
+) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
+    let future = clarinet_deployments::generate_default_deployment(
+        manifest,
+        network,
+        false,
+        None,
+        None,
+        environment,
+    );
     hiro_system_kit::nestable_block_on(future)
 }
 

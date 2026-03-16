@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 
 use bitcoincore_rpc::{Auth, Client};
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{AccountConfig, NetworkManifest, StacksNetwork};
 use clarinet_utils::get_bip32_keys_from_mnemonic;
 use clarity_repl::clarity::chainstate::StacksAddress;
@@ -19,7 +20,7 @@ use clarity_repl::repl::boot::{
     BOOT_CONTRACTS_NAMES, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_CONTRACTS_NAMES,
     SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
 };
-use clarity_repl::repl::{Session, SessionSettings, DEFAULT_EPOCH};
+use clarity_repl::repl::{Session, SessionSettings};
 use libsecp256k1::PublicKey;
 use reqwest::Url;
 use stacks_codec::codec::{

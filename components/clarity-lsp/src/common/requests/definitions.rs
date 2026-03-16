@@ -599,15 +599,33 @@ pub fn get_public_function_definitions(
     definitions: &mut HashMap<ClarityName, Range>,
     expressions: &[SymbolicExpression],
 ) {
+    get_function_definitions(definitions, expressions, false);
+}
+
+pub fn get_all_function_definitions(
+    definitions: &mut HashMap<ClarityName, Range>,
+    expressions: &[SymbolicExpression],
+) {
+    get_function_definitions(definitions, expressions, true);
+}
+
+fn get_function_definitions(
+    definitions: &mut HashMap<ClarityName, Range>,
+    expressions: &[SymbolicExpression],
+    include_private: bool,
+) {
     for expression in expressions {
         if let Some((function_name, args)) = expression
             .match_list()
             .and_then(|l| l.split_first())
             .and_then(|(function_name, args)| Some((function_name.match_atom()?, args)))
         {
-            if let Some(DefineFunctions::PublicFunction | DefineFunctions::ReadOnlyFunction) =
-                DefineFunctions::lookup_by_name(function_name)
-            {
+            let matches = match DefineFunctions::lookup_by_name(function_name) {
+                Some(DefineFunctions::PublicFunction | DefineFunctions::ReadOnlyFunction) => true,
+                Some(DefineFunctions::PrivateFunction) => include_private,
+                _ => false,
+            };
+            if matches {
                 if let Some(function_name) = args
                     .split_first()
                     .and_then(|(args_list, _)| args_list.match_list()?.split_first())

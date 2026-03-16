@@ -1,11 +1,9 @@
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::types::StacksEpochId;
 use clarity::vm::ClarityVersion;
 use indoc::indoc;
 
-use crate::repl::{
-    ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, DEFAULT_CLARITY_VERSION,
-    DEFAULT_EPOCH,
-};
+use crate::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, Epoch};
 
 impl ClarityContract {
     pub fn fixture() -> Self {

@@ -31,7 +31,7 @@ export function initConnection(
   const notifications: [string, unknown][] = [];
   async function consumeNotification() {
     const notification = notifications[notifications.length - 1];
-    if (!notifications) return;
+    if (!notification) return;
     try {
       await bridge.onNotification(...notification);
     } catch (err) {

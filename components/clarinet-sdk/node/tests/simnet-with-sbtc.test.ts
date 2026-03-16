@@ -1,6 +1,7 @@
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
 
 // test the built package and not the source code
 // makes it simpler to handle wasm build
@@ -10,6 +11,8 @@ const address1 = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
 const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
 let simnet: Simnet;
+let server: http.Server;
+let serverUrl: string;
 
 const deploymentPlanPath = path.join(
   process.cwd(),
@@ -22,11 +25,40 @@ function deleteExistingDeploymentPlan() {
   }
 }
 
+beforeAll(async () => {
+  server = http.createServer((req, res) => {
+    const match = req.url?.match(/\/extended\/v1\/contract\/(.+)/);
+    if (match) {
+      const fixturePath = path.join("tests/fixtures/api-responses", `${match[1]}.json`);
+      try {
+        const fixture = fs.readFileSync(fixturePath, "utf-8");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(fixture);
+      } catch {
+        res.writeHead(404);
+        res.end();
+      }
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const addr = server.address() as { port: number };
+  serverUrl = `http://localhost:${addr.port}`;
+});
+
+afterAll(() => {
+  server?.close();
+});
+
 beforeEach(async () => {
   deleteExistingDeploymentPlan();
   simnet = await initSimnet("tests/fixtures/ManifestWithSBTC.toml", false, {
     trackCosts: true,
     trackCoverage: false,
+    apiUrl: serverUrl,
   });
 });
 

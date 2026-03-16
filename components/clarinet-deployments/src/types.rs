@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::clarity::util::hash::{hex_bytes, to_hex};
@@ -11,9 +12,7 @@ use clarity_repl::clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_repl::clarity::{ClarityName, ClarityVersion, ContractName, StacksEpochId, Value};
-use clarity_repl::repl::{
-    clarity_version_from_u8, clarity_version_to_u8, Session, DEFAULT_CLARITY_VERSION,
-};
+use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
 use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
@@ -1128,7 +1127,7 @@ impl DeploymentSpecification {
                                     let spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    let source = remove_env_simnet(spec.source.clone())?;
+                                    let (source, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
                                     contracts.insert(contract_id, (source, spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
@@ -1255,6 +1254,28 @@ impl DeploymentSpecification {
             }
         }
         self.sort_batches_by_epoch();
+    }
+
+    pub fn remove_env_simnet(&mut self) -> Result<bool, String> {
+        let mut global_found_env_simnet = false;
+        for batch in self.plan.batches.iter_mut() {
+            for transaction in batch.transactions.iter_mut() {
+                if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = transaction
+                {
+                    let (clean, found_env_simnet) = remove_env_simnet(spec.source.to_string())?;
+                    spec.source = clean;
+                    global_found_env_simnet |= found_env_simnet;
+                }
+            }
+        }
+
+        for (ref mut source, _) in self.contracts.values_mut() {
+            let (clean, found_env_simnet) = remove_env_simnet(source.to_string())?;
+            *source = clean;
+            global_found_env_simnet |= found_env_simnet;
+        }
+
+        Ok(global_found_env_simnet)
     }
 }
 

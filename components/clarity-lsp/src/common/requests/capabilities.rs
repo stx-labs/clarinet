@@ -5,6 +5,14 @@ use ls_types::{
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CostDisplayFormat {
+    #[default]
+    Exact,
+    Percentage,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct InitializationOptions {
@@ -16,6 +24,9 @@ pub struct InitializationOptions {
     go_to_definition: bool,
     hover: bool,
     signature_help: bool,
+    pub static_cost_analysis: bool,
+    pub static_cost_display_format: CostDisplayFormat,
+    pub static_cost_threshold_percentage: f64,
 }
 
 impl Default for InitializationOptions {
@@ -29,6 +40,9 @@ impl Default for InitializationOptions {
             go_to_definition: true,
             hover: true,
             signature_help: true,
+            static_cost_analysis: false,
+            static_cost_display_format: CostDisplayFormat::default(),
+            static_cost_threshold_percentage: 0.0,
         }
     }
 }
@@ -76,6 +90,11 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
             }),
             false => None,
         },
+        code_lens_provider: initialization_options.static_cost_analysis.then_some({
+            ls_types::CodeLensOptions {
+                resolve_provider: Some(false),
+            }
+        }),
         ..ServerCapabilities::default()
     }
 }

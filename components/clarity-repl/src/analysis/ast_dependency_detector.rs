@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::types::StacksEpochId;
 pub use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::ast::ContractAST;
@@ -19,7 +20,6 @@ use clarity_types::types::{
 
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
-use crate::repl::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 
 pub static DEFAULT_NAME: LazyLock<ClarityName> = LazyLock::new(|| ClarityName::from("placeholder"));
 
@@ -934,13 +934,13 @@ impl GraphWalker {
 #[cfg(test)]
 mod tests {
     use ::clarity::vm::diagnostic::Diagnostic;
+    use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
     use indoc::indoc;
 
     use super::*;
     use crate::repl::session::Session;
     use crate::repl::{
         ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, SessionSettings,
-        DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
     };
 
     fn build_ast(

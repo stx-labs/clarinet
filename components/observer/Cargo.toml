@@ -1,0 +1,35 @@
+[package]
+name = "observer"
+version.workspace = true
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8.6", features = ["json"] }
+base58 = { workspace = true }
+base64 = { workspace = true }
+bitcoincore-rpc = { workspace = true }
+bitcoincore-rpc-json = { workspace = true }
+crossbeam-channel = { workspace = true }
+hex = "0.4.3"
+miniscript = "11.0.0"
+strum = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true, features = ["preserve_order", "arbitrary_precision"] }
+reqwest = { workspace = true, features = ["blocking"] }
+tokio = { workspace = true }
+
+clarity = { workspace = true, default-features = false, features = ["slog_json"] }
+
+hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
+stacks-codec = { path = "../stacks-codec" }
+
+[features]
+default = []
+stacks-signers = []
+
+[dev-dependencies]
+test-case = { workspace = true }
+
+[lib]
+name = "observer"
+path = "src/lib.rs"

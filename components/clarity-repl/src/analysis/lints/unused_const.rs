@@ -259,4 +259,55 @@ mod tests {
 
         assert_eq!(result.diagnostics.len(), 0);
     }
+
+    #[test]
+    fn used_in_as_contract_safe_body() {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(UnusedConst::get_name(), Level::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+        session.update_epoch(clarity::types::StacksEpochId::Epoch33);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant MY_VAL u42)
+
+            (define-public (my-func)
+                (as-contract? () MY_VAL))
+        ").to_string();
+
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_in_as_contract_safe_allowances() {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(UnusedConst::get_name(), Level::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+        session.update_epoch(clarity::types::StacksEpochId::Epoch33);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant TRANSFER_AMOUNT u1000)
+
+            (define-public (my-func)
+                (as-contract? ((with-stx TRANSFER_AMOUNT)) true))
+        ").to_string();
+
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+        assert_eq!(result.diagnostics.len(), 0);
+    }
 }

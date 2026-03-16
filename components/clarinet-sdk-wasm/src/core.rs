@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::panic;
 use std::path::{Path, PathBuf};
 
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
     DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
@@ -26,8 +27,9 @@ use clarity_repl::repl::session::CostsReport;
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
     clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
-    Session, SessionSettings, DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH,
+    Session, SessionSettings,
 };
+use clarity_repl::utils::Environment;
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
 use serde::{Deserialize, Serialize};
@@ -298,6 +300,7 @@ pub struct SDK {
     options: SDKOptions,
     current_test_name: String,
     costs_reports: Vec<CostsReport>,
+    api_base_url: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -327,6 +330,7 @@ impl SDK {
             },
             current_test_name: String::new(),
             costs_reports: vec![],
+            api_base_url: None,
         }
     }
 
@@ -366,7 +370,13 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=initSession)]
-    pub async fn init_session(&mut self, cwd: &str, manifest_path: &str) -> Result<(), String> {
+    pub async fn init_session(
+        &mut self,
+        cwd: &str,
+        manifest_path: &str,
+        api_base_url: JsValue,
+    ) -> Result<(), String> {
+        self.api_base_url = api_base_url.as_string();
         let cwd_path = PathBuf::from(cwd);
         let manifest_location = paths::try_parse_path(manifest_path, Some(&cwd_path))
             .ok_or("Failed to parse manifest location")?;
@@ -491,11 +501,13 @@ impl SDK {
         let deployment_plan_location =
             project_root.join(get_default_deployment_path(&StacksNetwork::Simnet));
 
-        let (mut deployment, artifacts) = generate_default_deployment(
+        let (mut deployment, artifacts, _) = generate_default_deployment(
             &manifest,
             &StacksNetwork::Simnet,
             false,
             Some(&*self.file_accessor),
+            self.api_base_url.as_deref(),
+            Environment::Simnet,
         )
         .await?;
 

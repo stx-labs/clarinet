@@ -9,8 +9,8 @@ use clarity::vm::costs::ExecutionCost;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use clarity::vm::types::{
-    parse_name_type_pairs, QualifiedContractIdentifier, TupleTypeSignature, TypeSignature,
-    TypeSignatureExt,
+    parse_name_type_pairs, PrincipalData, QualifiedContractIdentifier, SequenceSubtype,
+    TupleTypeSignature, TypeSignature, TypeSignatureExt,
 };
 use clarity::vm::variables::lookup_reserved_variable;
 use clarity::vm::{ClarityVersion, LocalContext, Value};
@@ -26,7 +26,6 @@ use super::{
     TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
 // TODO:
-// contract-call? - get source from database
 // unwrap evaluates both branches (https://github.com/clarity-lang/reference/issues/59)
 
 const FUNCTION_DEFINITION_KEYWORDS: &[&str] =
@@ -309,9 +308,13 @@ fn compute_function_overhead_costs(
         .unwrap_or((0, &[]));
 
     // cost_load_contract
-    if let Some(size) = contract_size {
+    // The VM's get_contract_size() returns source_size + data_size, where
+    // data_size accounts for memory used by define-map, define-data-var, etc.
+    if let Some(source_size) = contract_size {
+        let data_size = compute_contract_data_size(ast_expressions);
+        let total_size = source_size.saturating_add(data_size);
         let load_cost = ClarityCostFunction::LoadContract
-            .eval_for_epoch(size, epoch)
+            .eval_for_epoch(total_size, epoch)
             .unwrap_or(ExecutionCost::ZERO);
         saturating_add_cost(&mut overhead.min, &load_cost);
         saturating_add_cost(&mut overhead.max, &load_cost);
@@ -498,6 +501,42 @@ pub fn static_cost_tree_from_ast(
         .collect())
 }
 
+/// Compute the `data_size` that the VM accumulates during `eval_all`.
+///
+/// In the VM, `total_memory_use` (stored as `contract_context.data_size`) only
+/// includes memory from `DefineResult::Variable` (i.e. `define-constant`).
+/// Maps, data-vars, tokens, and NFTs call `global_context.add_memory()` but do
+/// **not** add to `total_memory_use`.  The `data_size` is later returned by
+/// `get_contract_size()` alongside the source-code length.
+fn compute_contract_data_size(ast_expressions: &[SymbolicExpression]) -> u64 {
+    let mut data_size: u64 = 0;
+
+    for expr in ast_expressions {
+        let Some(list) = expr.match_list() else {
+            continue;
+        };
+        let is_constant = list
+            .first()
+            .and_then(|f| f.match_atom())
+            .map(|a| a.as_str() == "define-constant")
+            .unwrap_or(false);
+        if !is_constant {
+            continue;
+        }
+        // VM charges value.get_memory_use() = value.size() for the constant's value
+        if let Some(value) = list
+            .get(2)
+            .and_then(|e| e.match_atom_value().or_else(|| e.match_literal_value()))
+        {
+            if let Ok(s) = value.size() {
+                data_size = data_size.saturating_add(u64::from(s));
+            }
+        }
+    }
+
+    data_size
+}
+
 /// Extract function name from a symbolic expression
 fn extract_function_name(expr: &SymbolicExpression) -> Option<String> {
     expr.match_list().and_then(|list| {
@@ -510,6 +549,37 @@ fn extract_function_name(expr: &SymbolicExpression) -> Option<String> {
             .and_then(|name| name.match_atom())
             .map(|name| name.to_string())
     })
+}
+
+/// Look up the cost of the function targeted by a `contract-call?`.
+///
+/// `args` corresponds to `exprs[1..]` of the contract-call expression:
+///   args[0] = target contract — either an AtomValue(Principal(Contract(..)))
+///             for static dispatch, or a Field(TraitIdentifier) / trait ref
+///             for dynamic dispatch
+///   args[1] = function name   (Atom)
+///   args[2..] = call arguments
+///
+/// Returns `None` for dynamic (trait-based) dispatch or if the target
+/// contract / function cannot be resolved.
+fn get_contract_call_target_cost(
+    args: &[SymbolicExpression],
+    env: &mut Environment,
+) -> Option<StaticCost> {
+    let first = args.first()?;
+    let function_name = args.get(1)?.match_atom()?;
+
+    let contract_id = match first
+        .match_atom_value()
+        .or_else(|| first.match_literal_value())
+    {
+        Some(Value::Principal(PrincipalData::Contract(id))) => id.clone(),
+        _ => first.match_field()?.contract_identifier.clone(),
+    };
+
+    let costs = static_cost(env, &contract_id).ok()?;
+    let (cost, _trait_count) = costs.get(function_name.as_str())?;
+    Some(cost.clone())
 }
 
 pub fn build_cost_analysis_tree(
@@ -809,6 +879,33 @@ fn parse_atom_expression(name: &ClarityName, user_args: &UserArgumentsContext) -
         .unwrap_or_else(|| CostExprNode::Atom(name.clone()))
 }
 
+/// Multiply every field of an ExecutionCost by a scalar.
+fn multiply_cost(cost: &mut ExecutionCost, factor: u64) {
+    cost.runtime = cost.runtime.saturating_mul(factor);
+    cost.write_length = cost.write_length.saturating_mul(factor);
+    cost.write_count = cost.write_count.saturating_mul(factor);
+    cost.read_length = cost.read_length.saturating_mul(factor);
+    cost.read_count = cost.read_count.saturating_mul(factor);
+}
+
+/// Determine the maximum list length for map/filter/fold list arguments.
+/// Returns the max length of the first list-typed argument found, or 1 as a
+/// fallback when the type cannot be determined.
+fn get_map_filter_fold_list_max_len(
+    list_exprs: &[SymbolicExpression],
+    user_args: &UserArgumentsContext,
+) -> u64 {
+    for expr in list_exprs {
+        if let Some(TypeSignature::SequenceType(SequenceSubtype::ListType(list_data))) = expr
+            .match_atom()
+            .and_then(|name| user_args.get_argument_type(name))
+        {
+            return list_data.get_max_len() as u64;
+        }
+    }
+    1
+}
+
 /// Build an expression tree for function definitions like (define-public (foo (a u64)) (ok a))
 fn build_function_definition_cost_analysis_tree(
     list: &[SymbolicExpression],
@@ -1094,7 +1191,7 @@ fn build_listlike_cost_analysis_tree(
                     }
                 }
 
-                let cost = calculate_function_cost_from_native_function(
+                let mut cost = calculate_function_cost_from_native_function(
                     native_function,
                     children.len() as u64,
                     &exprs[1..],
@@ -1102,6 +1199,48 @@ fn build_listlike_cost_analysis_tree(
                     Some(user_args),
                     Some(env),
                 )?;
+
+                // For map/filter/fold, the called function's cost must be
+                // multiplied by the list length and added to the node cost.
+                // Syntax: (map fn-name list ...), (filter fn-name list),
+                //         (fold fn-name list initial-value)
+                if matches!(
+                    native_function,
+                    NativeFunctions::Map | NativeFunctions::Filter | NativeFunctions::Fold
+                ) {
+                    // The dynamic VM calls lookup_function inside
+                    // special_map/special_filter/special_fold which charges
+                    // LookupFunction once to resolve the function name.
+                    let fn_lookup_cost = ClarityCostFunction::LookupFunction
+                        .eval_for_epoch(0, epoch)
+                        .unwrap_or(ExecutionCost::ZERO);
+                    super::saturating_add_cost(&mut cost.min, &fn_lookup_cost);
+                    super::saturating_add_cost(&mut cost.max, &fn_lookup_cost);
+
+                    if let Some(called_fn_cost) = exprs
+                        .get(1)
+                        .and_then(|e| e.match_atom())
+                        .and_then(|name| cost_map.get(name.as_str()))
+                        .and_then(|c| c.as_ref())
+                    {
+                        let list_max_len = get_map_filter_fold_list_max_len(&exprs[2..], user_args);
+                        let mut multiplied_min = called_fn_cost.min.clone();
+                        multiply_cost(&mut multiplied_min, list_max_len);
+                        let mut multiplied_max = called_fn_cost.max.clone();
+                        multiply_cost(&mut multiplied_max, list_max_len);
+                        super::saturating_add_cost(&mut cost.min, &multiplied_min);
+                        super::saturating_add_cost(&mut cost.max, &multiplied_max);
+                    }
+                }
+
+                // For contract-call?, add the cost of the called function from
+                // the target contract.
+                if native_function == NativeFunctions::ContractCall {
+                    if let Some(called_fn_cost) = get_contract_call_target_cost(&exprs[1..], env) {
+                        super::saturating_add_cost(&mut cost.min, &called_fn_cost.min);
+                        super::saturating_add_cost(&mut cost.max, &called_fn_cost.max);
+                    }
+                }
 
                 (CostExprNode::NativeFunction(native_function), cost)
             } else {
@@ -1400,7 +1539,7 @@ mod tests {
             ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
         let mut env = owned_env.get_exec_environment(None, None, &contract_context);
         let (_, cost_analysis_tree) = build_cost_analysis_tree(
-            &expr,
+            expr,
             &user_args,
             &cost_map,
             clarity_version,
@@ -1438,15 +1577,14 @@ mod tests {
     fn build_test_ast(src: &str) -> clarity::vm::ast::ContractAST {
         let contract_identifier = QualifiedContractIdentifier::transient();
         let mut cost_tracker = ();
-        let ast = build_ast(
+        build_ast(
             &contract_identifier,
             src,
             &mut cost_tracker,
             ClarityVersion::Clarity3,
             StacksEpochId::latest(),
         )
-        .unwrap();
-        ast
+        .unwrap()
     }
 
     #[test]
