@@ -123,9 +123,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        env:
-          BUILD_TARGET: ${{ matrix.target }}
-        run: rustup toolchain install stable --profile minimal --target "$BUILD_TARGET"
+        run: rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
 
       - name: Setup Rust cache
         id: setup-rust-cache
@@ -220,9 +218,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        env:
-          BUILD_TARGET: ${{ matrix.target }}
-        run: rustup toolchain install stable --profile minimal --target "$BUILD_TARGET"
+        run: rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
 
       - name: Setup Rust cache
         id: setup-rust-cache
@@ -265,9 +261,7 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Build - Cargo
-        env:
-          BUILD_TARGET: ${{ matrix.target }}
-        run: cargo build --release --features=telemetry --locked --target "$BUILD_TARGET"
+        run: cargo build --release --features=telemetry --locked --target "${{ matrix.target }}"
 
       - name: Upload unsigned Windows binary for SignPath
         id: upload-unsigned-windows
@@ -291,9 +285,7 @@ jobs:
 
       - name: Compress cargo artifact (Linux and macOS)
         if: matrix.os != 'windows-latest'
-        env:
-          BUILD_TARGET: ${{ matrix.target }}
-        run: tar -C "target/${BUILD_TARGET}/release" -zcvf "clarinet-${SHORT_TARGET_NAME}.tar.gz" clarinet
+        run: tar -C "target/${{ matrix.target }}/release" -zcvf "clarinet-${SHORT_TARGET_NAME}.tar.gz" clarinet
 
       - name: Compress signed cargo artifact (Windows - main branch)
         if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != '' && matrix.os == 'windows-latest'
