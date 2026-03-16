@@ -228,25 +228,16 @@ mod tests {
             (define-data-var total--supply uint u1000000)
         ").to_string();
 
-        let res = run_snippet_no_panic(snippet);
+        let (output, result) = run_snippet(snippet);
 
-        match res {
-            Ok((output, result)) => {
-                let var_name = "total--supply";
-                let expected_message = CaseDataVar::make_diagnostic_message(
-                    &var_name.into(),
-                    &CaseError::ConsecutiveHyphens,
-                );
+        let var_name = "total--supply";
+        let expected_message =
+            CaseDataVar::make_diagnostic_message(&var_name.into(), &CaseError::ConsecutiveHyphens);
 
-                assert_eq!(result.diagnostics.len(), 1);
-                assert!(output[0].contains("warning:"));
-                assert!(output[0].contains(var_name));
-                assert!(output[0].contains(&expected_message));
-            }
-            Err(..) => {
-                // Variable name may be illegal in Clarity, so allow interpretation to fail
-            }
-        }
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(var_name));
+        assert!(output[0].contains(&expected_message));
     }
 
     #[test]

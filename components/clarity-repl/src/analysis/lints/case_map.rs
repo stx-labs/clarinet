@@ -220,25 +220,16 @@ mod tests {
             (define-map user--roles principal (string-ascii 20))
         ").to_string();
 
-        let res = run_snippet_no_panic(snippet);
+        let (output, result) = run_snippet(snippet);
 
-        match res {
-            Ok((output, result)) => {
-                let map_name = "user--roles";
-                let expected_message = CaseMap::make_diagnostic_message(
-                    &map_name.into(),
-                    &CaseError::ConsecutiveHyphens,
-                );
+        let map_name = "user--roles";
+        let expected_message =
+            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::ConsecutiveHyphens);
 
-                assert_eq!(result.diagnostics.len(), 1);
-                assert!(output[0].contains("warning:"));
-                assert!(output[0].contains(map_name));
-                assert!(output[0].contains(&expected_message));
-            }
-            Err(..) => {
-                // Map name may be illegal in Clarity, so allow interpretation to fail
-            }
-        }
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(map_name));
+        assert!(output[0].contains(&expected_message));
     }
 
     #[test]
