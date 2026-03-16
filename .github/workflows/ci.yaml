@@ -138,7 +138,7 @@ jobs:
             target/debug/deps/
 
       - name: Install dependencies
-        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2
+        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2.68.27
         with:
           tool: cargo-llvm-cov,nextest
 
