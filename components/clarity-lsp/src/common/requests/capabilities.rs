@@ -1,5 +1,7 @@
 use ls_types::{
-    CompletionOptions, HoverProviderCapability, ServerCapabilities, SignatureHelpOptions,
+    CompletionOptions, HoverProviderCapability, SemanticTokenModifier, SemanticTokenType,
+    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+    SemanticTokensServerCapabilities, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions,
 };
@@ -95,6 +97,16 @@ pub fn get_capabilities(initialization_options: &InitializationOptions) -> Serve
                 resolve_provider: Some(false),
             }
         }),
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            SemanticTokensOptions {
+                legend: SemanticTokensLegend {
+                    token_types: vec![SemanticTokenType::COMMENT],
+                    token_modifiers: vec![SemanticTokenModifier::DEPRECATED],
+                },
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                ..Default::default()
+            },
+        )),
         ..ServerCapabilities::default()
     }
 }
