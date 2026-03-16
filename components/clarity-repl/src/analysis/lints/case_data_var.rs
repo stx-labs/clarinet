@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 0);
     }
 
-    // We plan to allow leading hyphens in Clarity some day
+    // We may allow leading hyphens in Clarity some day
     // This test is written so that it does not need to be modified when that occurs
     #[test]
     fn allow_single_leading_hyphen() {
