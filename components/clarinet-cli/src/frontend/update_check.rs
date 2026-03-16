@@ -1,3 +1,4 @@
+use std::sync::mpsc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -8,17 +9,25 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const CHECK_INTERVAL: Duration = Duration::from_hours(72);
 const RELEASE_COOLDOWN: Duration = Duration::from_hours(1);
 const VERSION_CACHE_FILE: &str = ".latest_version";
+const UPDATE_CHECK_WAIT: Duration = Duration::from_millis(100);
+
+pub struct UpdateHandle(mpsc::Receiver<Option<String>>);
 
 /// Spawn the update check on a background thread so it doesn't block CLI startup.
-/// The message (if any) is printed to stderr from the background thread.
-/// The HTTP request has a 1-second timeout; if it doesn't complete in time,
-/// or if the process exits first, the check is silently skipped.
-pub fn check_for_update_async() {
-    std::thread::spawn(|| {
-        if let Some(message) = check_for_update() {
-            eprintln!("{message}");
-        }
+pub fn check_for_update_async() -> UpdateHandle {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(check_for_update());
     });
+    UpdateHandle(rx)
+}
+
+/// Wait up to 1 second for the background update check to finish,
+/// then print the result to stderr.
+pub fn print_update_message(handle: UpdateHandle) {
+    if let Ok(Some(message)) = handle.0.recv_timeout(UPDATE_CHECK_WAIT) {
+        eprintln!("{message}");
+    }
 }
 
 fn check_for_update() -> Option<String> {
@@ -44,8 +53,7 @@ fn check_for_update() -> Option<String> {
     let latest = latest?;
     if is_newer(&latest, current_version) && !is_within_cooldown(published_at.as_deref()) {
         Some(format!(
-            "\nA new release of clarinet is available: {} -> {}",
-            current_version, latest,
+            "\nA new release of clarinet is available: {current_version} -> {latest}",
         ))
     } else {
         None

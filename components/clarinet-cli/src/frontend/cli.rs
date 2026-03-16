@@ -594,7 +594,7 @@ pub fn main() {
 
     let clarinetrc = ClarinetRC::from_rc_file();
 
-    update_check::check_for_update_async();
+    let update_handle = update_check::check_for_update_async();
 
     match opts.command {
         Command::Completions(cmd) => {
@@ -1457,6 +1457,8 @@ pub fn main() {
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
     };
+
+    update_check::print_update_message(update_handle);
 }
 
 fn overwrite_formatted(file_path: &str, output: &str) -> io::Result<()> {
