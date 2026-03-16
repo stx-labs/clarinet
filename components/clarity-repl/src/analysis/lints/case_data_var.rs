@@ -146,14 +146,12 @@ mod tests {
 
     #[test]
     fn valid_names() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var counter uint u0)
             (define-data-var total-supply uint u1000000)
             (define-data-var is-active bool true)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -162,12 +160,10 @@ mod tests {
 
     #[test]
     fn fail_on_underscore() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var total_supply uint u1000000)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -185,12 +181,10 @@ mod tests {
 
     #[test]
     fn fail_on_upper_case() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var COUNTER uint u0)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -208,12 +202,10 @@ mod tests {
 
     #[test]
     fn fail_on_camel_case() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var totalSupply uint u1000000)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -231,12 +223,10 @@ mod tests {
 
     #[test]
     fn fail_on_consecutive_hyphens() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var total--supply uint u1000000)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let res = run_snippet_no_panic(snippet);
 
@@ -261,13 +251,11 @@ mod tests {
 
     #[test]
     fn allow_with_annotation() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             ;; #[allow(case_data_var)]
             (define-data-var total_supply uint u1000000)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -276,12 +264,10 @@ mod tests {
 
     #[test]
     fn allow_single_trailing_hyphen() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var counter- uint u0)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -292,12 +278,10 @@ mod tests {
     // This test is written so that it does not need to be modified when that occurs
     #[test]
     fn allow_single_leading_hyphen() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-data-var -counter uint u0)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let res = run_snippet_no_panic(snippet);
 

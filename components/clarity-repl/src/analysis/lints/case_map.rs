@@ -144,14 +144,12 @@ mod tests {
 
     #[test]
     fn valid_names() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-map balances principal uint)
             (define-map user-roles principal (string-ascii 20))
             (define-map consumed-messages (buff 32) bool)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -160,12 +158,10 @@ mod tests {
 
     #[test]
     fn fail_on_underscore() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-map user_roles principal (string-ascii 20))
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -181,12 +177,10 @@ mod tests {
 
     #[test]
     fn fail_on_upper_case() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-map Balances principal uint)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -202,12 +196,10 @@ mod tests {
 
     #[test]
     fn fail_on_screaming_snake_case() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-map USER_ROLES principal (string-ascii 20))
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -223,12 +215,10 @@ mod tests {
 
     #[test]
     fn fail_on_consecutive_hyphens() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-map user--roles principal (string-ascii 20))
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let res = run_snippet_no_panic(snippet);
 
@@ -253,13 +243,11 @@ mod tests {
 
     #[test]
     fn allow_with_annotation() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             ;; #[allow(case_map)]
             (define-map user_roles principal (string-ascii 20))
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -268,12 +256,10 @@ mod tests {
 
     #[test]
     fn allow_single_trailing_hyphen() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-map balances- principal uint)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -284,12 +270,10 @@ mod tests {
     // This test is written so that it does not need to be modified when that occurs
     #[test]
     fn allow_single_leading_hyphen() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-map -balances principal uint)
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let res = run_snippet_no_panic(snippet);
 
