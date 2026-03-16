@@ -254,6 +254,23 @@ impl ClarityInterpreter {
                         });
                     }
                 }
+            } else if let Some(comment_pos) = line.find(";;") {
+                let comment = &line[comment_pos + 2..];
+                if let Some(rest) = comment.trim().strip_prefix("#[") {
+                    if rest.contains(']') {
+                        diagnostics.push(Diagnostic {
+                            level: Level::Warning,
+                            message: "annotation at end of line will be ignored".to_string(),
+                            spans: vec![Span {
+                                start_line: (n + 1) as u32,
+                                start_column: (comment_pos + 1) as u32,
+                                end_line: (n + 1) as u32,
+                                end_column: line.len() as u32,
+                            }],
+                            suggestion: None,
+                        });
+                    }
+                }
             }
         }
         (annotations, diagnostics)
