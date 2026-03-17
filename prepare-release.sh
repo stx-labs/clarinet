@@ -20,7 +20,6 @@ ROOT_DIR=$(pwd)
 update_package_json() {
     local file=$1
     local version=$2
-    local dir=$(dirname "$file")
 
     # Update package version
     sed -i'' -e "s/\"version\": \".*\"/\"version\": \"$version\"/" "$file"
@@ -50,7 +49,7 @@ echo "Checking out release branch..."
 git checkout -b release/next
 
 echo "Generating changelog..."
-npx generate-changelog v$NEW_VERSION...HEAD
+npx generate-changelog "v$NEW_VERSION...HEAD"
 
 echo "Starting version updates to $NEW_VERSION..."
 
