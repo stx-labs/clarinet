@@ -253,8 +253,7 @@ mod tests {
         for lint in LintName::VARIANTS {
             assert!(
                 lints.contains_key(lint),
-                "{} is not part of any `LintGroup` variant",
-                lint
+                "{lint} is not part of any `LintGroup` variant"
             )
         }
     }
