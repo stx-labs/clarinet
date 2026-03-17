@@ -11,7 +11,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::bindings::BindingData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
-use crate::analysis::util::{match_kebab_case, CaseError};
+use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 struct CaseBindingSettings {
@@ -88,7 +88,7 @@ impl<'a, 'b> CaseBinding<'a, 'b> {
             if Self::allow(binding_data, annotations) {
                 continue;
             }
-            let Err(error) = match_kebab_case(binding.name) else {
+            let Err(error) = match_kebab_case(strip_unused_suffix(binding.name)) else {
                 continue;
             };
             let message = Self::make_diagnostic_message(binding.name, &error);
@@ -267,6 +267,20 @@ mod tests {
                 (let ((my_var u1))
                     my_var))
         ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_trailing_underscore() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-read-only (test)
+                (let ((my-var_ u1))
+                    u1))
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
 

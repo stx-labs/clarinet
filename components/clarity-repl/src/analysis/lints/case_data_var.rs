@@ -11,7 +11,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::data_vars::DataVarData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
-use crate::analysis::util::{match_kebab_case, CaseError};
+use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
 pub struct CaseDataVar<'a, 'b>
@@ -72,7 +72,7 @@ impl<'a, 'b> CaseDataVar<'a, 'b> {
             if Self::allow(data_var_data, annotations) {
                 continue;
             }
-            let Err(error) = match_kebab_case(name.as_str()) else {
+            let Err(error) = match_kebab_case(strip_unused_suffix(name.as_str())) else {
                 continue;
             };
             let message = Self::make_diagnostic_message(name, &error);
@@ -246,6 +246,18 @@ mod tests {
         let snippet = indoc!("
             ;; #[allow(case_data_var)]
             (define-data-var total_supply uint u1000000)
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_trailing_underscore() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var used-nonces_ uint u0)
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
