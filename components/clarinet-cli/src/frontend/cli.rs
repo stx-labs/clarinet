@@ -43,7 +43,7 @@ use clarity_repl::utils::CHECK_ENVIRONMENTS;
 use clarity_repl::{analysis, repl};
 use serde::Serialize;
 use stacks_network::{self, DevnetOrchestrator};
-use strum::VariantArray;
+use strum::{EnumMessage, VariantArray};
 use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
@@ -1486,7 +1486,10 @@ fn print_available_lints() {
     println!("Lint groups:");
     println!();
     for group in LintGroup::VARIANTS {
-        println!("  {group:<12} {}", group.description());
+        println!(
+            "  {group:<12} {}",
+            group.get_documentation().unwrap_or_default()
+        );
     }
 
     println!();
@@ -1496,7 +1499,10 @@ fn print_available_lints() {
         let group = LintGroup::of(lint)
             .map(|g| g.to_string())
             .unwrap_or_default();
-        println!("  {lint:<28} {group:<12} {}", lint.description());
+        println!(
+            "  {lint:<28} {group:<12} {}",
+            lint.get_documentation().unwrap_or_default()
+        );
     }
 
     indoc::printdoc! {r#"

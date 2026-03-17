@@ -4,7 +4,7 @@ use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use strum::{EnumString, VariantArray};
+use strum::{EnumMessage, EnumString, VariantArray};
 
 use crate::analysis::annotation::Annotation;
 
@@ -19,6 +19,7 @@ use crate::analysis::annotation::Annotation;
     Deserialize,
     Hash,
     VariantArray,
+    EnumMessage,
     EnumString,
     strum::Display,
 )]
@@ -27,48 +28,40 @@ use crate::analysis::annotation::Annotation;
 #[strum(serialize_all = "snake_case")]
 pub enum LintName {
     // Keep sorted alphabetically
+    /// Warn about usage of deprecated `at-block`
     AtBlock,
+    /// Enforce kebab-case for bindings
     CaseBinding,
+    /// Enforce SCREAMING_SNAKE_CASE for constants
     CaseConst,
+    /// Enforce kebab-case for data variables
     CaseDataVar,
+    /// Enforce kebab-case for maps
     CaseMap,
+    /// Check that ERR_ constants are unique and use `(err ...)` values
     ErrorConst,
+    /// Find expressions that have no effect
     Noop,
+    /// Warn about `unwrap-panic` and `unwrap-err-panic`
     Panic,
+    /// Find unnecessary `as-max-len?` calls
     UnnecessaryAsMaxLen,
+    /// Find public functions that could be read-only
     UnnecessaryPublic,
+    /// Find unused variable bindings
     UnusedBinding,
+    /// Find unused constants
     UnusedConst,
+    /// Find unused data variables
     UnusedDataVar,
+    /// Find unused maps
     UnusedMap,
+    /// Find unused private functions
     UnusedPrivateFn,
+    /// Find unused tokens
     UnusedToken,
+    /// Find unused traits
     UnusedTrait,
-}
-
-impl LintName {
-    /// Short human-readable description of what the lint checks for
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::AtBlock => "Warn about usage of deprecated `at-block`",
-            Self::CaseBinding => "Enforce kebab-case for bindings",
-            Self::CaseConst => "Enforce SCREAMING_SNAKE_CASE for constants",
-            Self::CaseDataVar => "Enforce kebab-case for data variables",
-            Self::CaseMap => "Enforce kebab-case for maps",
-            Self::ErrorConst => "Check that ERR_ constants are unique and use `(err ...)` values",
-            Self::Noop => "Find expressions that have no effect",
-            Self::Panic => "Warn about `unwrap-panic` and `unwrap-err-panic`",
-            Self::UnnecessaryAsMaxLen => "Find unnecessary `as-max-len?` calls",
-            Self::UnnecessaryPublic => "Find public functions that could be read-only",
-            Self::UnusedBinding => "Find unused variable bindings",
-            Self::UnusedConst => "Find unused constants",
-            Self::UnusedDataVar => "Find unused data variables",
-            Self::UnusedMap => "Find unused maps",
-            Self::UnusedPrivateFn => "Find unused private functions",
-            Self::UnusedToken => "Find unused tokens",
-            Self::UnusedTrait => "Find unused traits",
-        }
-    }
 }
 
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
@@ -91,6 +84,7 @@ impl TryFrom<String> for LintName {
     Deserialize,
     Hash,
     VariantArray,
+    EnumMessage,
     EnumString,
     strum::Display,
 )]
@@ -111,17 +105,6 @@ pub enum LintGroup {
 }
 
 impl LintGroup {
-    /// Short human-readable description of the group
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::All => "All existing lints",
-            Self::Perf => "Find inefficient code",
-            Self::Safety => "Find code which might not work as user intended",
-            Self::Style => "Cosmetic lints like naming conventions",
-            Self::Unused => "Find dead code",
-        }
-    }
-
     /// Find the most specific group a lint belongs to (excluding `All`)
     pub fn of(lint: &LintName) -> Option<&'static Self> {
         LintGroup::VARIANTS
