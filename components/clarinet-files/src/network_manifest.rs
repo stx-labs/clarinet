@@ -53,8 +53,8 @@ pub const DEFAULT_EPOCH_3_3: u64 = 148;
 // Currently, the pox-4 contract has these values hardcoded:
 // https://github.com/stacks-network/stacks-core/blob/e09ab931e2f15ff70f3bb5c2f4d7afb[…]42bd7bec6/stackslib/src/chainstate/stacks/boot/pox-testnet.clar
 // but they may be configurable in the future.
-pub const DEFAULT_POX_PREPARE_LENGTH: u64 = 4;
-pub const DEFAULT_POX_REWARD_LENGTH: u64 = 10;
+pub const DEFAULT_POX_PREPARE_LENGTH: u64 = 5;
+pub const DEFAULT_POX_REWARD_LENGTH: u64 = 20;
 pub const DEFAULT_FIRST_BURN_HEADER_HEIGHT: u64 = 100;
 
 pub static DEFAULT_PRIVATE_KEYS: LazyLock<[StacksPrivateKey; 1]> = LazyLock::new(|| {
