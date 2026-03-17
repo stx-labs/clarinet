@@ -1498,7 +1498,7 @@ fn print_available_lints() {
     for lint in LintName::VARIANTS {
         let groups: Vec<_> = LintGroup::of(lint)
             .into_iter()
-            .map(|g| g.to_string())
+            .map(ToString::to_string)
             .collect();
         let groups = format!("[{}]", groups.join(", "));
         println!(
