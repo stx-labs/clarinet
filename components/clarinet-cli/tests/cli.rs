@@ -731,12 +731,12 @@ fn test_deployment_environment_mapping() {
 
 #[test]
 fn test_schema_validates_all_manifests() {
-    // Generate schema from `clarinet schema`
+    // Generate schema from `clarinet manifest schema`
     let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["schema"])
+        .args(["manifest", "schema"])
         .output()
-        .expect("Failed to execute clarinet schema");
-    assert!(output.status.success(), "clarinet schema failed");
+        .expect("Failed to execute clarinet manifest schema");
+    assert!(output.status.success(), "clarinet manifest schema failed");
 
     let schema_json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("Schema output is not valid JSON");
