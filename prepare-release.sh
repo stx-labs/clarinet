@@ -14,13 +14,11 @@ if [ $# -ne 1 ]; then
 fi
 
 NEW_VERSION=$1
-ROOT_DIR=$(pwd)
 
 # update version in package.json
 update_package_json() {
     local file=$1
     local version=$2
-    local dir=$(dirname "$file")
 
     # Update package version
     sed -i'' -e "s/\"version\": \".*\"/\"version\": \"$version\"/" "$file"
@@ -50,7 +48,7 @@ echo "Checking out release branch..."
 git checkout -b release/next
 
 echo "Generating changelog..."
-npx generate-changelog v$NEW_VERSION...HEAD
+npx generate-changelog "v$NEW_VERSION...HEAD"
 
 echo "Starting version updates to $NEW_VERSION..."
 
@@ -81,9 +79,7 @@ update_package_json "components/clarinet-sdk/browser/package.json" "$NEW_VERSION
 # Update clarity-vscode
 echo "Updating clarity-vscode..."
 update_package_json "components/clarity-vscode/package.json" "$NEW_VERSION"
-cd components/clarity-vscode
-npm i
-cd "$ROOT_DIR"
+(cd components/clarity-vscode && npm i)
 
 # Install all deps from root to properly handle workspaces
 echo "Installing deps from root..."

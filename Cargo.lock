@@ -664,6 +664,7 @@ dependencies = [
  "serde_json",
  "similar",
  "stacks-network",
+ "strum",
  "tempfile",
  "tikv-jemallocator",
  "tokio",
