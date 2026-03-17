@@ -5,9 +5,13 @@ use chrono::{DateTime, Utc};
 use clarinet_files::clarinetrc::ClarinetRC;
 
 const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/stx-labs/clarinet/releases/latest";
+// if GH take longer than this, return a result without fetching version
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+// will only fetch versionfrom GH every 72 hours
 const CHECK_INTERVAL: Duration = Duration::from_hours(72);
+// after a release, wait before checking for updates again
 const RELEASE_COOLDOWN: Duration = Duration::from_hours(1);
+// file to cache the latest version
 const VERSION_CACHE_FILE: &str = ".latest_version";
 // time to wait for the gh fetch to complete before returning a result
 const UPDATE_CHECK_WAIT: Duration = Duration::from_millis(100);
