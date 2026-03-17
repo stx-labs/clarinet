@@ -105,9 +105,6 @@ enum Command {
     /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
-    /// List available lints and lint groups
-    #[clap(name = "lints", bin_name = "lints")]
-    Lints,
     /// Start a local Devnet network (deprecated, use 'clarinet devnet start')
     #[clap(name = "integrate", bin_name = "integrate")]
     Integrate(DevnetStart),
@@ -564,6 +561,9 @@ struct Check {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
+    /// List available lints and lint groups
+    #[clap(long = "show-lints")]
+    pub show_lints: bool,
     /// Set the output format
     #[clap(long = "output", default_value = "standard")]
     pub output_format: OutputFormat,
@@ -1193,7 +1193,7 @@ pub fn main() {
                 display_contract_new_hint(None);
             }
         }
-        Command::Lints => {
+        Command::Check(cmd) if cmd.show_lints => {
             print_available_lints();
         }
         Command::Check(cmd) if cmd.file.is_some() => {
