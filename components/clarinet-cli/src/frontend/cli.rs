@@ -1496,11 +1496,13 @@ fn print_available_lints() {
     println!("Lints:");
     println!();
     for lint in LintName::VARIANTS {
-        let group = LintGroup::of(lint)
+        let groups: Vec<_> = LintGroup::of(lint)
+            .into_iter()
             .map(|g| g.to_string())
-            .unwrap_or_default();
+            .collect();
+        let groups = format!("[{}]", groups.join(", "));
         println!(
-            "  {lint:<28} {group:<12} {}",
+            "  {lint:<28} {groups:<12} {}",
             lint.get_documentation().unwrap_or_default()
         );
     }

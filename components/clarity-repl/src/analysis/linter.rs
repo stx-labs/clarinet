@@ -105,11 +105,12 @@ pub enum LintGroup {
 }
 
 impl LintGroup {
-    /// Find the most specific group a lint belongs to (excluding `All`)
-    pub fn of(lint: &LintName) -> Option<&'static Self> {
+    /// Find all groups a lint belongs to (excluding `All`)
+    pub fn of(lint: &LintName) -> Vec<&'static Self> {
         LintGroup::VARIANTS
             .iter()
-            .find(|g| !matches!(g, LintGroup::All) && g.lints().contains(lint))
+            .filter(|g| !matches!(g, LintGroup::All) && g.lints().contains(lint))
+            .collect()
     }
 
     /// Returns lints which belong to group
