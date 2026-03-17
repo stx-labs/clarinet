@@ -1,6 +1,8 @@
 mod at_block;
 mod case_binding;
 mod case_const;
+mod case_data_var;
+mod case_map;
 mod error_const;
 mod noop;
 mod panic;
@@ -17,6 +19,8 @@ mod unused_trait;
 pub use at_block::AtBlock;
 pub use case_binding::CaseBinding;
 pub use case_const::CaseConst;
+pub use case_data_var::CaseDataVar;
+pub use case_map::CaseMap;
 pub use error_const::ErrorConst;
 pub use noop::NoopChecker;
 pub use panic::PanicChecker;

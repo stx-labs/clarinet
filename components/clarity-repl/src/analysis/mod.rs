@@ -54,6 +54,8 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::AtBlock => lints::AtBlock::run_pass,
             LintName::CaseBinding => lints::CaseBinding::run_pass,
             LintName::CaseConst => lints::CaseConst::run_pass,
+            LintName::CaseDataVar => lints::CaseDataVar::run_pass,
+            LintName::CaseMap => lints::CaseMap::run_pass,
             LintName::ErrorConst => lints::ErrorConst::run_pass,
             LintName::Noop => lints::NoopChecker::run_pass,
             LintName::Panic => lints::PanicChecker::run_pass,

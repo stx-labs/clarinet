@@ -30,6 +30,8 @@ pub enum LintName {
     AtBlock,
     CaseBinding,
     CaseConst,
+    CaseDataVar,
+    CaseMap,
     ErrorConst,
     Noop,
     Panic,
@@ -87,7 +89,12 @@ impl LintGroup {
                 LintName::Noop,
                 LintName::Panic,
             ],
-            Style => &[LintName::CaseBinding, LintName::CaseConst],
+            Style => &[
+                LintName::CaseBinding,
+                LintName::CaseConst,
+                LintName::CaseDataVar,
+                LintName::CaseMap,
+            ],
             Unused => &[
                 LintName::UnusedConst,
                 LintName::UnusedDataVar,

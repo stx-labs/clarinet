@@ -1,4 +1,4 @@
-//! Lint to check case of bindings (`let` bindings and function args)
+//! Lint to check case of map names (declared using `define-map`)
 //!
 //! By default, this enforces kebab-case
 
@@ -8,60 +8,44 @@ use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
-use crate::analysis::cache::bindings::BindingData;
+use crate::analysis::cache::maps::MapData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-struct CaseBindingSettings {
-    // TODO
-}
-
-impl CaseBindingSettings {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-pub struct CaseBinding<'a, 'b>
+pub struct CaseMap<'a, 'b>
 where
     'b: 'a,
 {
     analysis_cache: &'a mut AnalysisCache<'b>,
-    _settings: CaseBindingSettings,
     /// Clarity diagnostic level
     level: Level,
 }
 
-impl<'a, 'b> CaseBinding<'a, 'b> {
-    fn new(
-        analysis_cache: &'a mut AnalysisCache<'b>,
-        level: Level,
-        settings: CaseBindingSettings,
-    ) -> CaseBinding<'a, 'b> {
+impl<'a, 'b> CaseMap<'a, 'b> {
+    fn new(analysis_cache: &'a mut AnalysisCache<'b>, level: Level) -> CaseMap<'a, 'b> {
         Self {
             analysis_cache,
-            _settings: settings,
             level,
         }
     }
 
     fn run(&mut self) -> AnalysisResult {
         let diagnostics = self.generate_diagnostics();
-
         Ok(diagnostics)
     }
 
-    fn allow(binding_data: &BindingData, annotations: &[Annotation]) -> bool {
-        binding_data
+    // Check if the expression is annotated with `allow(<lint_name>)`
+    fn allow(map_data: &MapData, annotations: &[Annotation]) -> bool {
+        map_data
             .annotation
             .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
 
     fn make_diagnostic_message(name: &ClarityName, error: &CaseError) -> String {
-        format!("binding `{name}` is not kebab-case: {error}")
+        format!("map `{name}` is not kebab-case: {error}")
     }
 
     fn make_diagnostic(
@@ -82,18 +66,18 @@ impl<'a, 'b> CaseBinding<'a, 'b> {
         let mut diagnostics = vec![];
 
         let annotations = self.analysis_cache.annotations;
-        let bindings = self.analysis_cache.get_bindings();
+        let maps = self.analysis_cache.get_maps();
 
-        for (binding, binding_data) in bindings {
-            if Self::allow(binding_data, annotations) {
+        for (name, map_data) in maps {
+            if Self::allow(map_data, annotations) {
                 continue;
             }
-            let Err(error) = match_kebab_case(strip_unused_suffix(binding.name)) else {
+            let Err(error) = match_kebab_case(strip_unused_suffix(name.as_str())) else {
                 continue;
             };
-            let message = Self::make_diagnostic_message(binding.name, &error);
+            let message = Self::make_diagnostic_message(name, &error);
             let diagnostic =
-                Self::make_diagnostic(self.level.clone(), binding_data.expr, message, &error);
+                Self::make_diagnostic(self.level.clone(), map_data.expr, message, &error);
             diagnostics.push(diagnostic);
         }
 
@@ -101,28 +85,25 @@ impl<'a, 'b> CaseBinding<'a, 'b> {
     }
 }
 
-impl<'a, 'b> AnalysisPass for CaseBinding<'a, 'b> {
+impl<'a, 'b> AnalysisPass for CaseMap<'a, 'b> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let settings = CaseBindingSettings::new();
-        let mut lint = CaseBinding::new(analysis_cache, level, settings);
+        let mut lint = CaseMap::new(analysis_cache, level);
         lint.run()
     }
 }
 
-impl Lint for CaseBinding<'_, '_> {
+impl Lint for CaseMap<'_, '_> {
     fn get_name() -> LintName {
-        LintName::CaseBinding
+        LintName::CaseMap
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
         match &annotation.kind {
-            AnnotationKind::Allow(warning_kinds) => {
-                warning_kinds.contains(&WarningKind::CaseBinding)
-            }
+            AnnotationKind::Allow(warning_kinds) => warning_kinds.contains(&WarningKind::CaseMap),
             _ => false,
         }
     }
@@ -134,7 +115,7 @@ mod tests {
     use clarity_types::diagnostic::{Diagnostic, Level};
     use indoc::indoc;
 
-    use super::CaseBinding;
+    use super::CaseMap;
     use crate::analysis::linter::Lint;
     use crate::analysis::util::CaseError;
     use crate::repl::session::Session;
@@ -147,7 +128,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(CaseBinding::get_name(), Level::Warning);
+            .enable_lint(CaseMap::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings).formatted_interpretation(
             snippet,
@@ -162,15 +143,13 @@ mod tests {
     }
 
     #[test]
-    fn valid_let_binding_names() {
+    fn valid_names() {
         #[rustfmt::skip]
-        let snippet = indoc!(r#"
-            (define-read-only (test)
-                (let ((my-var u1)
-                      (another-binding u2)
-                      (x u3))
-                    (+ my-var another-binding x)))
-        "#).to_string();
+        let snippet = indoc!("
+            (define-map balances principal uint)
+            (define-map user-roles principal (string-ascii 20))
+            (define-map consumed-messages (buff 32) bool)
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -178,83 +157,78 @@ mod tests {
     }
 
     #[test]
-    fn valid_function_arg_names() {
+    fn fail_on_underscore() {
         #[rustfmt::skip]
-        let snippet = indoc!(r#"
-            (define-read-only (my-func (amount uint) (sender-address principal))
-                (ok u1))
-        "#).to_string();
-
-        let (_, result) = run_snippet(snippet);
-
-        assert_eq!(result.diagnostics.len(), 0);
-    }
-
-    #[test]
-    fn fail_let_binding_with_underscore() {
-        #[rustfmt::skip]
-        let snippet = indoc!(r#"
-            (define-read-only (test)
-                (let ((my_var u1))
-                    my_var))
-        "#).to_string();
+        let snippet = indoc!("
+            (define-map user_roles principal (string-ascii 20))
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
-        let binding_name = "my_var";
-        let expected_message = CaseBinding::make_diagnostic_message(
-            &binding_name.into(),
-            &CaseError::IllegalCharacter(b'_'),
-        );
+        let map_name = "user_roles";
+        let expected_message =
+            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'_'));
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains(binding_name));
+        assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
     }
 
     #[test]
-    fn fail_function_arg_with_uppercase() {
+    fn fail_on_upper_case() {
         #[rustfmt::skip]
-        let snippet = indoc!(r#"
-            (define-read-only (my-func (Amount uint))
-                (ok Amount))
-        "#).to_string();
+        let snippet = indoc!("
+            (define-map Balances principal uint)
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
-        let arg_name = "Amount";
-        let expected_message = CaseBinding::make_diagnostic_message(
-            &arg_name.into(),
-            &CaseError::IllegalCharacter(b'A'),
-        );
+        let map_name = "Balances";
+        let expected_message =
+            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'B'));
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains(arg_name));
+        assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
     }
 
     #[test]
-    fn fail_let_binding_with_consecutive_hyphens() {
+    fn fail_on_screaming_snake_case() {
         #[rustfmt::skip]
-        let snippet = indoc!(r#"
-            (define-read-only (test)
-                (let ((my--var u1))
-                    my--var))
-        "#).to_string();
+        let snippet = indoc!("
+            (define-map USER_ROLES principal (string-ascii 20))
+        ").to_string();
 
         let (output, result) = run_snippet(snippet);
 
-        let binding_name = "my--var";
-        let expected_message = CaseBinding::make_diagnostic_message(
-            &binding_name.into(),
-            &CaseError::ConsecutiveHyphens,
-        );
+        let map_name = "USER_ROLES";
+        let expected_message =
+            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'U'));
 
         assert_eq!(result.diagnostics.len(), 1);
         assert!(output[0].contains("warning:"));
-        assert!(output[0].contains(binding_name));
+        assert!(output[0].contains(map_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
+    fn fail_on_consecutive_hyphens() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map user--roles principal (string-ascii 20))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        let map_name = "user--roles";
+        let expected_message =
+            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::ConsecutiveHyphens);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
     }
 
@@ -262,10 +236,8 @@ mod tests {
     fn allow_with_annotation() {
         #[rustfmt::skip]
         let snippet = indoc!("
-            (define-read-only (test)
-                ;; #[allow(case_binding)]
-                (let ((my_var u1))
-                    my_var))
+            ;; #[allow(case_map)]
+            (define-map user_roles principal (string-ascii 20))
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
@@ -276,11 +248,9 @@ mod tests {
     #[test]
     fn allow_trailing_underscore() {
         #[rustfmt::skip]
-        let snippet = indoc!(r#"
-            (define-read-only (test)
-                (let ((my-var_ u1))
-                    u1))
-        "#).to_string();
+        let snippet = indoc!("
+            (define-map used-nonces_ principal uint)
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
@@ -288,17 +258,35 @@ mod tests {
     }
 
     #[test]
-    fn multiple_violations() {
+    fn allow_single_trailing_hyphen() {
         #[rustfmt::skip]
-        let snippet = indoc!(r#"
-            (define-read-only (test)
-                (let ((my_var u1)
-                      (another_bad u2))
-                    (+ my_var another_bad)))
-        "#).to_string();
+        let snippet = indoc!("
+            (define-map balances- principal uint)
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    // We may allow leading hyphens in Clarity some day
+    // This test is written so that it does not need to be modified when that occurs
+    #[test]
+    fn allow_single_leading_hyphen() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map -balances principal uint)
+        ").to_string();
+
+        let res = run_snippet_no_panic(snippet);
+
+        match res {
+            Ok((_, result)) => {
+                assert_eq!(result.diagnostics.len(), 0);
+            }
+            Err(..) => {
+                // Map name may be illegal in Clarity, so allow interpretation to fail
+            }
+        }
     }
 }

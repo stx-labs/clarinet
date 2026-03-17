@@ -82,6 +82,8 @@ pub enum WarningKind {
     AtBlock,
     CaseBinding,
     CaseConst,
+    CaseDataVar,
+    CaseMap,
     ErrorConst,
     Noop,
     Panic,
