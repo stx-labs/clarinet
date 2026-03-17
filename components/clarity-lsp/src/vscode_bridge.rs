@@ -10,7 +10,7 @@ use ls_types::notification::{
 };
 use ls_types::request::{
     CodeLensRequest, Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest,
-    Initialize, RangeFormatting, Request, SignatureHelpRequest,
+    Initialize, RangeFormatting, Request, SemanticTokensFullRequest, SignatureHelpRequest,
 };
 use ls_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
@@ -197,6 +197,10 @@ impl LspVscodeBridge {
                     &JsValue::NULL,
                     &encode_to_js("workspace/codeLens/refresh").unwrap(),
                 );
+                let _ = send_request.call1(
+                    &JsValue::NULL,
+                    &encode_to_js("workspace/semanticTokens/refresh").unwrap(),
+                );
             }
 
             Ok(JsValue::TRUE)
@@ -296,6 +300,16 @@ impl LspVscodeBridge {
                     &EditorStateInput::RwLock(self.editor_state_lock.clone()),
                 );
                 if let Ok(LspRequestResponse::CodeLens(response)) = lsp_response {
+                    return response.serialize(&serializer).map_err(|_| JsValue::NULL);
+                }
+            }
+
+            SemanticTokensFullRequest::METHOD => {
+                let lsp_response = process_request(
+                    LspRequest::SemanticTokensFull(decode_from_js(js_params)?),
+                    &EditorStateInput::RwLock(self.editor_state_lock.clone()),
+                );
+                if let Ok(LspRequestResponse::SemanticTokensFull(response)) = lsp_response {
                     return response.serialize(&serializer).map_err(|_| JsValue::NULL);
                 }
             }
