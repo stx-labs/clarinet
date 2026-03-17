@@ -46,6 +46,31 @@ pub enum LintName {
     UnusedTrait,
 }
 
+impl LintName {
+    /// Short human-readable description of what the lint checks for
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::AtBlock => "Warn about usage of deprecated `at-block`",
+            Self::CaseBinding => "Enforce naming convention for bindings",
+            Self::CaseConst => "Enforce SCREAMING_SNAKE_CASE for constants",
+            Self::CaseDataVar => "Enforce naming convention for data variables",
+            Self::CaseMap => "Enforce naming convention for maps",
+            Self::ErrorConst => "Check that ERR_ constants use `(err ...)` values",
+            Self::Noop => "Find expressions that have no effect",
+            Self::Panic => "Warn about `unwrap-panic` and `unwrap-err-panic`",
+            Self::UnnecessaryAsMaxLen => "Find unnecessary `as-max-len?` calls",
+            Self::UnnecessaryPublic => "Find public functions that could be read-only",
+            Self::UnusedBinding => "Find unused variable bindings",
+            Self::UnusedConst => "Find unused constants",
+            Self::UnusedDataVar => "Find unused data variables",
+            Self::UnusedMap => "Find unused maps",
+            Self::UnusedPrivateFn => "Find unused private functions",
+            Self::UnusedToken => "Find unused tokens",
+            Self::UnusedTrait => "Find unused traits",
+        }
+    }
+}
+
 /// `strum` can automatically derive `TryFrom<&str>`, but we need a wrapper to work with `String`s
 impl TryFrom<String> for LintName {
     type Error = strum::ParseError;
@@ -57,7 +82,17 @@ impl TryFrom<String> for LintName {
 
 /// Represents a set of linter passes
 #[derive(
-    Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString,
+    Debug,
+    PartialEq,
+    Eq,
+    Copy,
+    Clone,
+    Serialize,
+    Deserialize,
+    Hash,
+    VariantArray,
+    EnumString,
+    strum::Display,
 )]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case", try_from = "String")]
@@ -76,6 +111,24 @@ pub enum LintGroup {
 }
 
 impl LintGroup {
+    /// Short human-readable description of the group
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::All => "All existing lints",
+            Self::Perf => "Find inefficient code",
+            Self::Safety => "Find code which might not work as user intended",
+            Self::Style => "Cosmetic lints like naming conventions",
+            Self::Unused => "Find dead code",
+        }
+    }
+
+    /// Find the most specific group a lint belongs to (excluding `All`)
+    pub fn of(lint: &LintName) -> Option<&'static Self> {
+        LintGroup::VARIANTS
+            .iter()
+            .find(|g| !matches!(g, LintGroup::All) && g.lints().contains(lint))
+    }
+
     /// Returns lints which belong to group
     pub fn lints(&self) -> &[LintName] {
         use LintGroup::*;

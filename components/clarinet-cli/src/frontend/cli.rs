@@ -32,6 +32,7 @@ use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
+use clarity_repl::analysis::linter::{LintGroup, LintName};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -42,6 +43,7 @@ use clarity_repl::utils::CHECK_ENVIRONMENTS;
 use clarity_repl::{analysis, repl};
 use serde::Serialize;
 use stacks_network::{self, DevnetOrchestrator};
+use strum::VariantArray;
 use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
@@ -103,6 +105,9 @@ enum Command {
     /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
+    /// List available lints and lint groups
+    #[clap(name = "lints", bin_name = "lints")]
+    Lints,
     /// Start a local Devnet network (deprecated, use 'clarinet devnet start')
     #[clap(name = "integrate", bin_name = "integrate")]
     Integrate(DevnetStart),
@@ -1188,6 +1193,9 @@ pub fn main() {
                 display_contract_new_hint(None);
             }
         }
+        Command::Lints => {
+            print_available_lints();
+        }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
             let mut settings = repl::SessionSettings {
@@ -1472,6 +1480,35 @@ pub fn main() {
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
     };
+}
+
+fn print_available_lints() {
+    println!("Lint groups:");
+    println!();
+    for group in LintGroup::VARIANTS {
+        println!("  {group:<12} {desc}", desc = group.description());
+    }
+
+    println!();
+    println!("Lints:");
+    println!();
+    for lint in LintName::VARIANTS {
+        let group = LintGroup::of(lint)
+            .map(|g| g.to_string())
+            .unwrap_or_default();
+        println!("  {:<28} {:<12} {}", lint, group, lint.description());
+    }
+
+    println!();
+    println!("Configure lints in Clarinet.toml:");
+    println!();
+    println!("  [repl.analysis.lint_groups]");
+    println!("  style = \"warning\"");
+    println!();
+    println!("  [repl.analysis.lints]");
+    println!("  unused_const = \"error\"");
+    println!();
+    println!("Suppress a lint in source code with: ;; #[allow(lint_name)]");
 }
 
 fn overwrite_formatted(file_path: &str, output: &str) -> io::Result<()> {
