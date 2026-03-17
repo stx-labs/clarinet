@@ -33,8 +33,8 @@ async function main() {
       folderPath,
       browserType,
       waitForDebugger,
-      devTools: true,
-      headless: false,
+      devTools: !process.env.CI,
+      headless: !!process.env.CI,
     });
   } catch (err) {
     console.error(err);
