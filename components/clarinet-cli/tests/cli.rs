@@ -531,3 +531,56 @@ fn test_check_skips_requirement_lint_warnings() {
         }
     }
 }
+
+#[test]
+fn test_schema_validates_all_manifests() {
+    // Generate schema from `clarinet schema`
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["schema"])
+        .output()
+        .expect("Failed to execute clarinet schema");
+    assert!(output.status.success(), "clarinet schema failed");
+
+    let schema_json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("Schema output is not valid JSON");
+    let validator =
+        jsonschema::validator_for(&schema_json).expect("Schema itself is not a valid JSON Schema");
+
+    // Find all Clarinet.toml files in the repo
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+
+    let manifest_paths = [
+        "components/clarinet-cli/examples/billboard/Clarinet.toml",
+        "components/clarinet-cli/examples/counter/Clarinet.toml",
+        "components/clarinet-cli/examples/custom-boot-contracts/Clarinet.toml",
+        "components/clarinet-cli/examples/simple-nft/Clarinet.toml",
+        "components/clarinet-cli/examples/swappool/Clarinet.toml",
+        "components/clarinet-cli/tests/fixtures/mxs/Clarinet.toml",
+        "components/clarinet-sdk/node/tests/fixtures/Clarinet.toml",
+        "components/clarity-vscode/test-data/simple/Clarinet.toml",
+        "components/clarity-vscode/test-data/test-cases/Clarinet.toml",
+    ];
+
+    let mut failures = Vec::new();
+    for relative_path in &manifest_paths {
+        let path = workspace_root.join(relative_path);
+        let toml_str = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Failed to read {relative_path}: {e}"));
+        let toml_value: serde_json::Value = toml::from_str(&toml_str)
+            .unwrap_or_else(|e| panic!("Failed to parse {relative_path}: {e}"));
+
+        if let Err(error) = validator.validate(&toml_value) {
+            failures.push(format!("{relative_path}:\n  - {error}"));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "Schema validation failed for:\n{}",
+        failures.join("\n\n")
+    );
+}
