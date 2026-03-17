@@ -14,7 +14,6 @@ if [ $# -ne 1 ]; then
 fi
 
 NEW_VERSION=$1
-ROOT_DIR=$(pwd)
 
 # update version in package.json
 update_package_json() {
@@ -80,9 +79,7 @@ update_package_json "components/clarinet-sdk/browser/package.json" "$NEW_VERSION
 # Update clarity-vscode
 echo "Updating clarity-vscode..."
 update_package_json "components/clarity-vscode/package.json" "$NEW_VERSION"
-cd components/clarity-vscode
-npm i
-cd "$ROOT_DIR"
+(cd components/clarity-vscode && npm i)
 
 # Install all deps from root to properly handle workspaces
 echo "Installing deps from root..."
