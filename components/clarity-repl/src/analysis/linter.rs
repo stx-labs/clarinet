@@ -258,4 +258,24 @@ mod tests {
             )
         }
     }
+
+    #[test]
+    fn all_lints_have_documentation() {
+        for lint in LintName::VARIANTS {
+            assert!(
+                lint.get_documentation().is_some(),
+                "LintName::{lint} is missing a doc comment"
+            );
+        }
+    }
+
+    #[test]
+    fn all_lint_groups_have_documentation() {
+        for group in LintGroup::VARIANTS {
+            assert!(
+                group.get_documentation().is_some(),
+                "LintGroup::{group} is missing a doc comment"
+            );
+        }
+    }
 }
