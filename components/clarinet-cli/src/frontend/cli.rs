@@ -1486,7 +1486,7 @@ fn print_available_lints() {
     println!("Lint groups:");
     println!();
     for group in LintGroup::VARIANTS {
-        println!("  {group:<12} {desc}", desc = group.description());
+        println!("  {group:<12} {}", group.description());
     }
 
     println!();
@@ -1496,19 +1496,21 @@ fn print_available_lints() {
         let group = LintGroup::of(lint)
             .map(|g| g.to_string())
             .unwrap_or_default();
-        println!("  {:<28} {:<12} {}", lint, group, lint.description());
+        println!("  {lint:<28} {group:<12} {}", lint.description());
     }
 
-    println!();
-    println!("Configure lints in Clarinet.toml:");
-    println!();
-    println!("  [repl.analysis.lint_groups]");
-    println!("  style = \"warning\"");
-    println!();
-    println!("  [repl.analysis.lints]");
-    println!("  unused_const = \"error\"");
-    println!();
-    println!("Suppress a lint in source code with: ;; #[allow(lint_name)]");
+    indoc::printdoc! {r#"
+
+        Configure lints in Clarinet.toml:
+
+          [repl.analysis.lint_groups]
+          style = "warning"
+
+          [repl.analysis.lints]
+          unused_const = "error"
+
+        Suppress a lint in source code with: ;; #[allow(lint_name)]
+    "#};
 }
 
 fn overwrite_formatted(file_path: &str, output: &str) -> io::Result<()> {
