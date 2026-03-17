@@ -9,7 +9,7 @@ clarity = { workspace = true, default-features = false, features = ["developer-m
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-divan = "0.1"
+divan = { workspace = true }
 indoc = { workspace = true }
 
 [[bench]]

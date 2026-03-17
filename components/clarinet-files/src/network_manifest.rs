@@ -25,7 +25,7 @@ pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
 pub const DEFAULT_BITCOIN_NODE_IMAGE: &str = "lncm/bitcoind:v27.2";
 pub const DEFAULT_BITCOIN_EXPLORER_IMAGE: &str = "quay.io/hirosystems/bitcoin-explorer:devnet";
 
-pub const DEFAULT_STACKS_EXPLORER_IMAGE: &str = "hirosystems/explorer:latest";
+pub const DEFAULT_STACKS_EXPLORER_IMAGE: &str = "ghcr.io/stx-labs/explorer:latest";
 
 pub const DEFAULT_STACKS_MINER_MNEMONIC: &str = "fragile loan twenty basic net assault jazz absorb diet talk art shock innocent float punch travel gadget embrace caught blossom hockey surround initial reduce";
 pub const DEFAULT_FAUCET_MNEMONIC: &str = "shadow private easily thought say logic fault paddle word top book during ignore notable orange flight clock image wealth health outside kitten belt reform";
@@ -53,8 +53,8 @@ pub const DEFAULT_EPOCH_3_3: u64 = 148;
 // Currently, the pox-4 contract has these values hardcoded:
 // https://github.com/stacks-network/stacks-core/blob/e09ab931e2f15ff70f3bb5c2f4d7afb[…]42bd7bec6/stackslib/src/chainstate/stacks/boot/pox-testnet.clar
 // but they may be configurable in the future.
-pub const DEFAULT_POX_PREPARE_LENGTH: u64 = 4;
-pub const DEFAULT_POX_REWARD_LENGTH: u64 = 10;
+pub const DEFAULT_POX_PREPARE_LENGTH: u64 = 5;
+pub const DEFAULT_POX_REWARD_LENGTH: u64 = 20;
 pub const DEFAULT_FIRST_BURN_HEADER_HEIGHT: u64 = 100;
 
 pub static DEFAULT_PRIVATE_KEYS: LazyLock<[StacksPrivateKey; 1]> = LazyLock::new(|| {
@@ -460,20 +460,47 @@ impl NetworkManifest {
                         _ => random_mnemonic().to_string(),
                     };
 
-                    let encrypted_mnemonic = match account_settings.get("encrypted_mnemonic") {
-                        Some(Value::String(cipher)) => cipher.clone(),
-                        _ => "".to_string(),
-                    };
+                    let (encrypted_mnemonic, encryption_strength) =
+                        if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic_high")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::High,
+                            )
+                        } else if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic_medium")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::Medium,
+                            )
+                        } else if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                            )
+                        } else {
+                            (
+                                String::new(),
+                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                            )
+                        };
 
                     if !encrypted_mnemonic.is_empty() {
                         let password = rpassword::prompt_password(format!(
                             "Enter password to decrypt mnemonic for account {account_name}: "
                         ))
                         .unwrap();
-                        mnemonic =
-                            clarinet_utils::decrypt_mnemonic_phrase(&encrypted_mnemonic, &password)
-                                .unwrap()
-                                .to_string();
+                        mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
+                            &encrypted_mnemonic,
+                            &password,
+                            encryption_strength,
+                        )
+                        .unwrap()
+                        .to_string();
                     }
 
                     let derivation = match account_settings.get("derivation") {

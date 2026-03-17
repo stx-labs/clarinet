@@ -6,16 +6,11 @@ use bitcoincore_rpc::{Auth, Client};
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{AccountConfig, NetworkManifest, StacksNetwork};
 use clarinet_utils::get_bip32_keys_from_mnemonic;
-use clarity_repl::clarity::chainstate::StacksAddress;
-use clarity_repl::clarity::codec::StacksMessageCodec;
-use clarity_repl::clarity::util::secp256k1::{
-    MessageSignature, Secp256k1PrivateKey, Secp256k1PublicKey,
-};
-use clarity_repl::clarity::vm::types::{
-    PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
-};
-use clarity_repl::clarity::vm::{ClarityName, Value};
-use clarity_repl::clarity::{ClarityVersion, ContractName, EvaluationResult};
+use clarity::codec::StacksMessageCodec;
+use clarity::types::chainstate::StacksAddress;
+use clarity::util::secp256k1::{MessageSignature, Secp256k1PrivateKey, Secp256k1PublicKey};
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::{ClarityName, ClarityVersion, ContractName, EvaluationResult, Value};
 use clarity_repl::repl::boot::{
     BOOT_CONTRACTS_NAMES, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_CONTRACTS_NAMES,
     SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,

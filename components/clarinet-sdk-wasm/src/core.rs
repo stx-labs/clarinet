@@ -12,15 +12,13 @@ use clarinet_deployments::{
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
+use clarity::types::chainstate::StacksAddress;
 use clarity::types::Address;
-use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
-use clarity_repl::clarity::analysis::contract_interface_builder::{
+use clarity::vm::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
 };
-use clarity_repl::clarity::chainstate::StacksAddress;
-use clarity_repl::clarity::vm::types::{
-    PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
-};
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::session::CostsReport;
@@ -420,6 +418,7 @@ impl SDK {
             .await?;
 
         let mut session = initiate_session_from_manifest(&manifest);
+        session.interpreter.repl_settings.analysis.disable_all();
         if self.options.track_coverage {
             session.enable_coverage_hook();
         }
@@ -929,7 +928,7 @@ impl SDK {
                 deployer: ContractDeployer::Address(args.sender.to_string()),
                 clarity_version,
                 epoch: Epoch::Specific(current_epoch),
-                is_requirement: false,
+                skip_analysis: false,
             };
 
             match session.deploy_contract(&contract, track_costs, None) {

@@ -22,7 +22,7 @@ clarinet-utils = { version = "1", path = "../clarinet-utils" }
 clarity-repl = { path = "../clarity-repl", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bitcoin = { version = "0.31.2" }
+bitcoin = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { workspace = true }

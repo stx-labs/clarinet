@@ -5,9 +5,9 @@ use std::path::Path;
 use analysis::{EventCollector, Settings};
 use clap::{Parser, Subcommand};
 use clarinet_files::paths;
-use clarity_repl::clarity::analysis::type_checker::v2_05::TypeChecker;
-use clarity_repl::clarity::costs::LimitedCostTracker;
-use clarity_repl::clarity::EvaluationResult;
+use clarity::vm::analysis::type_checker::v2_05::TypeChecker;
+use clarity::vm::costs::LimitedCostTracker;
+use clarity::vm::EvaluationResult;
 use clarity_repl::repl::{Session, SessionSettings};
 use serde_json::json;
 

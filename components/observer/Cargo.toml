@@ -9,7 +9,7 @@ base58 = { workspace = true }
 base64 = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 bitcoincore-rpc-json = { workspace = true }
-crossbeam-channel = "0.5.6"
+crossbeam-channel = { workspace = true }
 hex = "0.4.3"
 miniscript = "11.0.0"
 strum = { workspace = true, features = ["derive"] }
@@ -28,7 +28,7 @@ default = []
 stacks-signers = []
 
 [dev-dependencies]
-test-case = "3.1.0"
+test-case = { workspace = true }
 
 [lib]
 name = "observer"

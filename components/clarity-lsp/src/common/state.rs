@@ -9,23 +9,23 @@ use clarinet_deployments::{
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
-use clarity::vm::ast::build_ast;
-use clarity::vm::diagnostic::Diagnostic;
+use clarity::types::StacksEpochId;
+use clarity::vm::analysis::ContractAnalysis;
+use clarity::vm::ast::{build_ast, ContractAST};
+use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
+use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
-use clarity_repl::clarity::analysis::ContractAnalysis;
-use clarity_repl::clarity::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
-use clarity_repl::clarity::vm::ast::ContractAST;
-use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
-use clarity_repl::clarity::vm::EvaluationResult;
-use clarity_repl::clarity::{ClarityName, ClarityVersion, StacksEpochId, SymbolicExpression};
+use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::ContractDeployer;
 use clarity_repl::utils::CHECK_ENVIRONMENTS;
 use clarity_static_cost::static_cost::StaticCost;
+use clarity_types::execution_cost::ExecutionCost;
 use ls_types::{
     CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
 
-use super::requests::capabilities::InitializationOptions;
+use super::requests::capabilities::{CostDisplayFormat, InitializationOptions};
 use super::requests::completion::{
     build_completion_item_list, get_contract_calls, ContractDefinedData,
 };
@@ -189,6 +189,46 @@ impl ContractState {
             clarity_version,
             cost_analysis,
         }
+    }
+}
+
+struct CostPercentages {
+    runtime: f64,
+    read_count: f64,
+    read_length: f64,
+    write_count: f64,
+    write_length: f64,
+}
+
+impl CostPercentages {
+    fn exceeds_threshold(&self, threshold: f64) -> bool {
+        [
+            self.runtime,
+            self.read_count,
+            self.read_length,
+            self.write_count,
+            self.write_length,
+        ]
+        .iter()
+        .any(|p| *p >= threshold)
+    }
+}
+
+fn percentage_of_limit(value: u64, limit: u64) -> f64 {
+    if limit == 0 {
+        return 0.0;
+    }
+    (value as f64) / (limit as f64) * 100.0
+}
+
+fn cost_percentages(cost: &ExecutionCost) -> CostPercentages {
+    let limit = &BLOCK_LIMIT_MAINNET;
+    CostPercentages {
+        runtime: percentage_of_limit(cost.runtime, limit.runtime),
+        read_count: percentage_of_limit(cost.read_count, limit.read_count),
+        read_length: percentage_of_limit(cost.read_length, limit.read_length),
+        write_count: percentage_of_limit(cost.write_count, limit.write_count),
+        write_length: percentage_of_limit(cost.write_length, limit.write_length),
     }
 }
 
@@ -496,7 +536,16 @@ impl EditorState {
 
             let function_name_str = function_name.to_string();
             if let Some((cost_node, _)) = cost_analysis.get(&function_name_str) {
-                let cost_text = Self::format_cost_for_codelens(cost_node);
+                if !cost_percentages(&cost_node.max)
+                    .exceeds_threshold(self.settings.static_cost_threshold_percentage)
+                {
+                    continue;
+                }
+
+                let cost_text = Self::format_cost_for_codelens(
+                    cost_node,
+                    self.settings.static_cost_display_format,
+                );
 
                 let code_lens_line = saved_range.start.line;
                 let code_lens_range = ls_types::Range {
@@ -525,17 +574,28 @@ impl EditorState {
         code_lenses
     }
 
-    fn format_cost_for_codelens(cost_node: &StaticCost) -> String {
-        let total_cost = &cost_node.max;
+    fn format_cost_for_codelens(cost_node: &StaticCost, display: CostDisplayFormat) -> String {
+        let cost = &cost_node.max;
 
-        format!(
-            "runtime: {}, read count: {}, read length: {}, write count: {}, write length: {}",
-            format_abbreviated_number(total_cost.runtime),
-            format_abbreviated_number(total_cost.read_count),
-            format_abbreviated_number(total_cost.read_length),
-            format_abbreviated_number(total_cost.write_count),
-            format_abbreviated_number(total_cost.write_length)
-        )
+        match display {
+            CostDisplayFormat::Exact => {
+                format!(
+                    "runtime: {}, read count: {}, read length: {}, write count: {}, write length: {}",
+                    format_abbreviated_number(cost.runtime),
+                    format_abbreviated_number(cost.read_count),
+                    format_abbreviated_number(cost.read_length),
+                    format_abbreviated_number(cost.write_count),
+                    format_abbreviated_number(cost.write_length)
+                )
+            }
+            CostDisplayFormat::Percentage => {
+                let pct = cost_percentages(cost);
+                format!(
+                    "runtime: {:.1}%, read count: {:.1}%, read length: {:.1}%, write count: {:.1}%, write length: {:.1}%",
+                    pct.runtime, pct.read_count, pct.read_length, pct.write_count, pct.write_length,
+                )
+            }
+        }
     }
 
     pub fn get_signature_help(
@@ -746,6 +806,7 @@ pub async fn build_state(
     manifest_location: &Path,
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
+    static_cost_analysis: bool,
 ) -> Result<(), String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -864,32 +925,34 @@ pub async fn build_state(
     // Note: Cost analysis must run AFTER contracts are deployed to the session
     // static_cost_tree needs the contract to be available in the global context
     let mut cost_analyses = HashMap::new();
-    for contract_id in locations.keys() {
-        // Skip cost analysis for empty contracts (no expressions to analyze)
-        if asts
-            .get(contract_id)
-            .is_none_or(|ast| ast.expressions.is_empty())
-        {
-            continue;
-        }
+    if static_cost_analysis {
+        for contract_id in locations.keys() {
+            // Skip cost analysis for empty contracts (no expressions to analyze)
+            if asts
+                .get(contract_id)
+                .is_none_or(|ast| ast.expressions.is_empty())
+            {
+                continue;
+            }
 
-        let clarity_version = clarity_versions
-            .get(contract_id)
-            .copied()
-            .unwrap_or(DEFAULT_CLARITY_VERSION);
+            let clarity_version = clarity_versions
+                .get(contract_id)
+                .copied()
+                .unwrap_or(DEFAULT_CLARITY_VERSION);
 
-        // Run static_cost_tree for this contract
-        if let Some(cost_analysis) =
-            get_cost_analysis(&mut session, contract_id, clarity_version).await
-        {
-            clarity_repl::uprint!(
-                "[LSP] Cost analysis completed for {}: {} functions analyzed",
-                contract_id,
-                cost_analysis.len()
-            );
-            cost_analyses.insert(contract_id.clone(), cost_analysis);
-        } else {
-            clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
+            // Run static_cost_tree for this contract
+            if let Some(cost_analysis) =
+                get_cost_analysis(&mut session, contract_id, clarity_version).await
+            {
+                clarity_repl::uprint!(
+                    "[LSP] Cost analysis completed for {}: {} functions analyzed",
+                    contract_id,
+                    cost_analysis.len()
+                );
+                cost_analyses.insert(contract_id.clone(), cost_analysis);
+            } else {
+                clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
+            }
         }
     }
 

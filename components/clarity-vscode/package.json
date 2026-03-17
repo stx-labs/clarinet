@@ -12,7 +12,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "license": "GPL-3.0-only",
-  "version": "3.14.1",
+  "version": "3.15.0",
   "private": true,
   "workspaces": [
     "client",
@@ -130,6 +130,21 @@
             "default": false,
             "order": 0,
             "description": "Show static cost analysis (runtime, read/write counts) above function definitions."
+          },
+          "clarity-lsp.staticCostDisplayFormat": {
+            "type": "string",
+            "enum": ["exact", "percentage"],
+            "default": "exact",
+            "order": 0,
+            "description": "Display format for static cost analysis: exact numbers or percentage of block limits."
+          },
+          "clarity-lsp.staticCostThresholdPercentage": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 100,
+            "order": 0,
+            "description": "Only show cost code lens for functions that use at least this percentage of any block limit dimension."
           },
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",

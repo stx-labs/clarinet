@@ -517,7 +517,7 @@ fn test_check_skips_requirement_lint_warnings() {
     );
 
     // Requirement contracts should NOT have any diagnostics.
-    // Since requirements have is_requirement=true, REPL analysis (lints) is skipped.
+    // Since requirements have skip_analysis=true, REPL analysis (lints) is skipped.
     // They only get standard Clarity analysis (which produces no warnings for unused
     // constants), so they should not appear in the JSON output at all (entries with
     // empty diagnostics are filtered out).

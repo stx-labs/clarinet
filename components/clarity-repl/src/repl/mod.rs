@@ -193,7 +193,7 @@ pub struct ClarityContract {
     pub clarity_version: ClarityVersion,
     pub epoch: Epoch,
     #[serde(skip)]
-    pub is_requirement: bool,
+    pub skip_analysis: bool,
 }
 
 impl Serialize for ClarityContract {

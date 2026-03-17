@@ -24,13 +24,14 @@ use clarinet_files::{
     StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
+use clarity::types::StacksEpochId;
+use clarity::vm::analysis::AnalysisDatabase;
+use clarity::vm::costs::LimitedCostTracker;
+use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::types::QualifiedContractIdentifier;
+use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
-use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
-use clarity_repl::clarity::vm::costs::LimitedCostTracker;
-use clarity_repl::clarity::vm::diagnostic::Diagnostic;
-use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -258,7 +259,14 @@ enum Deployments {
     ApplyDeployment(ApplyDeployment),
     /// Encrypt deployment mnemonic
     #[clap(name = "encrypt", bin_name = "encrypt")]
-    EncryptDeployment,
+    EncryptDeployment(EncryptDeployment),
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+struct EncryptDeployment {
+    /// Encryption strength
+    #[clap(long = "strength", default_value = "default")]
+    pub strength: clarinet_utils::MnemonicEncryptionStrength,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1006,15 +1014,23 @@ pub fn main() {
                     }
                 }
             }
-            Deployments::EncryptDeployment => {
+            Deployments::EncryptDeployment(cmd) => {
                 println!("{}", yellow!("Enter mnemonic to encrypt:"));
                 let mut buffer = String::new();
                 std::io::stdin().read_line(&mut buffer).unwrap();
                 let phrase = buffer.trim();
                 let password = rpassword::prompt_password("Enter password: ").unwrap();
                 let encrypted_mnemonic =
-                    clarinet_utils::encrypt_mnemonic_phrase(phrase, &password).unwrap();
-                println!("encrypted_mnemonic = \"{encrypted_mnemonic}\"");
+                    clarinet_utils::encrypt_mnemonic_phrase(phrase, &password, cmd.strength)
+                        .unwrap();
+                let key = match cmd.strength {
+                    clarinet_utils::MnemonicEncryptionStrength::Default => "encrypted_mnemonic",
+                    clarinet_utils::MnemonicEncryptionStrength::Medium => {
+                        "encrypted_mnemonic_medium"
+                    }
+                    clarinet_utils::MnemonicEncryptionStrength::High => "encrypted_mnemonic_high",
+                };
+                println!("{key} = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
             }
         },
@@ -1102,6 +1118,7 @@ pub fn main() {
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
                             cmd.use_computed_deployment_plan,
+                            false,
                             Environment::Simnet,
                         );
 
@@ -1200,7 +1217,7 @@ pub fn main() {
                 name: "transient".to_string(),
                 clarity_version: ClarityVersion::default_for_epoch(epoch),
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                is_requirement: false,
+                skip_analysis: false,
             };
             let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
             let (annotations, mut annotation_diagnostics) = session
@@ -1275,6 +1292,7 @@ pub fn main() {
                         &cmd.deployment_plan_path,
                         cmd.use_on_disk_deployment_plan,
                         cmd.use_computed_deployment_plan,
+                        true,
                         environment,
                     );
                 global_found_env_simnet |= found_env_simnet;
@@ -1530,6 +1548,7 @@ pub fn load_deployment_and_artifacts_or_exit(
     deployment_plan_path: &Option<String>,
     force_on_disk: bool,
     force_computed: bool,
+    enable_analysis: bool,
     environment: Environment,
 ) -> (
     (
@@ -1556,7 +1575,12 @@ pub fn load_deployment_and_artifacts_or_exit(
                     if environment == Environment::OnChain {
                         found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
                     }
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     Ok((deployment, None, artifacts))
                 }
                 None => {
@@ -1573,6 +1597,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                             manifest,
                             &mut deployment,
                             Some(&ast_artifacts.asts),
+                            enable_analysis,
                         );
                         for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
                             // Merge parser's diags with analysis' diags.
@@ -1596,7 +1621,12 @@ pub fn load_deployment_and_artifacts_or_exit(
                     if environment == Environment::OnChain {
                         found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
                     }
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     (
                         deployment,
                         Some(deployment_location.to_string_lossy().to_string()),
@@ -2293,7 +2323,7 @@ mod tests {
                 deployer: ContractDeployer::DefaultDeployer,
                 clarity_version: ClarityVersion::Clarity2,
                 epoch: Epoch::Latest,
-                is_requirement: false,
+                skip_analysis: false,
             }
         }
 
@@ -2768,8 +2798,8 @@ mod tests {
                 name: "special".to_string(),
                 deployer: ContractDeployer::LabeledDeployer("wallet_1".to_string()),
                 clarity_version: ClarityVersion::Clarity3,
-                epoch: Epoch::Specific(clarity_repl::clarity::StacksEpochId::Epoch25),
-                is_requirement: false,
+                epoch: Epoch::Specific(StacksEpochId::Epoch25),
+                skip_analysis: false,
             };
 
             add_contract_to_doc(&mut doc, "special", &contract);
@@ -2976,7 +3006,7 @@ mod tests {
 
     #[test]
     fn test_check_json_output() {
-        use clarity_repl::clarity::vm::diagnostic::Level as DiagnosticLevel;
+        use clarity::vm::diagnostic::Level as DiagnosticLevel;
 
         let snippet = indoc::indoc! {"
             (define-constant A u1)
@@ -3002,7 +3032,7 @@ mod tests {
             name: "transient".to_string(),
             clarity_version: ClarityVersion::default_for_epoch(epoch),
             epoch: clarity_repl::repl::Epoch::Specific(epoch),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
         let (annotations, mut annotation_diagnostics) = session
