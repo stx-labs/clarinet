@@ -1,4 +1,5 @@
 use std::env;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -9,32 +10,30 @@ pub struct ClarinetRC {
 }
 
 impl ClarinetRC {
-    pub fn get_settings_file_path() -> &'static str {
-        "~/.clarinet/clarinetrc.toml"
-    }
-
-    pub fn get_config_dir() -> Option<std::path::PathBuf> {
+    pub fn get_config_dir() -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".clarinet"))
     }
 
-    pub fn from_rc_file() -> Self {
-        let home_dir = dirs::home_dir();
+    pub fn get_settings_file_path() -> Option<PathBuf> {
+        Self::get_config_dir().map(|d| d.join("clarinetrc.toml"))
+    }
 
-        if let Some(path) = home_dir.map(|home_dir| home_dir.join(".clarinet/clarinetrc.toml")) {
+    pub fn from_rc_file() -> Self {
+        if let Some(path) = Self::get_settings_file_path() {
             if path.exists() {
-                match std::fs::read_to_string(path) {
+                match std::fs::read_to_string(&path) {
                     Ok(content) => match toml::from_str::<ClarinetRC>(&content) {
                         Ok(res) => return res,
                         Err(_) => {
-                            println!("unable to parse {}", Self::get_settings_file_path());
+                            println!("unable to parse {}", path.display());
                         }
                     },
                     Err(_) => {
-                        println!("unable to read file {}", Self::get_settings_file_path());
+                        println!("unable to read file {}", path.display());
                     }
                 }
             }
-        };
+        }
 
         // Keep backwards compatibility with ENV var
         let enable_hints = match env::var("CLARINET_DISABLE_HINTS") {

@@ -9,6 +9,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const CHECK_INTERVAL: Duration = Duration::from_hours(72);
 const RELEASE_COOLDOWN: Duration = Duration::from_hours(1);
 const VERSION_CACHE_FILE: &str = ".latest_version";
+// time to wait for the gh fetch to complete before returning a result
 const UPDATE_CHECK_WAIT: Duration = Duration::from_millis(100);
 
 pub struct UpdateHandle(mpsc::Receiver<Option<String>>);

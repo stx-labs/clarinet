@@ -669,13 +669,15 @@ pub fn main() {
                             println!("{}",
                                 yellow!("Enable or disable clarinet telemetry globally with this command:")
                             );
-                            println!(
-                                "{}",
-                                blue!(
-                                    "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
-                                    ClarinetRC::get_settings_file_path()
-                                )
-                            );
+                            if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+                                println!(
+                                    "{}",
+                                    blue!(
+                                        "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
+                                        settings_path.display()
+                                    )
+                                );
+                            }
                             // TODO(lgalabru): once we have a privacy policy available, add a link
                             // println!("{}", yellow!("Visit http://hiro.so/clarinet-privacy for details."));
                             println!("{}", yellow!("Enable [Y/n]?"));
@@ -1980,20 +1982,22 @@ fn display_hint_header() {
 }
 
 fn display_hint_footer() {
-    println!(
-        "{}",
-        yellow!(
-            "These hints can be disabled in the {} file.",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
-    println!(
-        "{}",
-        blue!(
-            "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
+    if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+        println!(
+            "{}",
+            yellow!(
+                "These hints can be disabled in the {} file.",
+                settings_path.display()
+            )
+        );
+        println!(
+            "{}",
+            blue!(
+                "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
+                settings_path.display()
+            )
+        );
+    }
     display_separator();
 }
 
