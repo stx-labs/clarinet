@@ -51,11 +51,11 @@ impl LintName {
     pub fn description(&self) -> &'static str {
         match self {
             Self::AtBlock => "Warn about usage of deprecated `at-block`",
-            Self::CaseBinding => "Enforce naming convention for bindings",
+            Self::CaseBinding => "Enforce kebab-case for bindings",
             Self::CaseConst => "Enforce SCREAMING_SNAKE_CASE for constants",
-            Self::CaseDataVar => "Enforce naming convention for data variables",
-            Self::CaseMap => "Enforce naming convention for maps",
-            Self::ErrorConst => "Check that ERR_ constants use `(err ...)` values",
+            Self::CaseDataVar => "Enforce kebab-case for data variables",
+            Self::CaseMap => "Enforce kebab-case for maps",
+            Self::ErrorConst => "Check that ERR_ constants are unique and use `(err ...)` values",
             Self::Noop => "Find expressions that have no effect",
             Self::Panic => "Warn about `unwrap-panic` and `unwrap-err-panic`",
             Self::UnnecessaryAsMaxLen => "Find unnecessary `as-max-len?` calls",
