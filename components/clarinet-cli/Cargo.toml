@@ -34,7 +34,7 @@ toml_edit = { workspace = true }
 
 clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
 clarinet-defaults = { workspace = true }
-clarinet-files = { path = "../clarinet-files" }
+clarinet-files = { path = "../clarinet-files", features = ["json_schema"] }
 clarity-lsp = { path = "../clarity-lsp" }
 clarinet-format = { path = "../clarinet-format" }
 clarinet-deployments = { path = "../clarinet-deployments" }
