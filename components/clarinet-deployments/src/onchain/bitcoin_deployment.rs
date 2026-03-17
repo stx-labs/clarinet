@@ -16,7 +16,7 @@ use bitcoincore_rpc::bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretK
 use bitcoincore_rpc::bitcoin::Address;
 use bitcoincore_rpc::{Client, RpcApi};
 use bitcoincore_rpc_json::ListUnspentResultEntry;
-use clarity_repl::clarity::util::hash::bytes_to_hex;
+use clarity::util::hash::bytes_to_hex;
 
 use crate::types::BtcTransferSpecification;
 

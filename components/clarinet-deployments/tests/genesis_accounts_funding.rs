@@ -8,7 +8,7 @@ use clarinet_files::StacksNetwork;
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::Address;
 use clarity::vm::types::StandardPrincipalData;
-use clarity_repl::clarity::{ClarityVersion, ContractName};
+use clarity::vm::{ClarityVersion, ContractName};
 use clarity_repl::repl::{Session, SessionSettings};
 
 static SBTC_DEPLOYER: LazyLock<StandardPrincipalData> = LazyLock::new(|| {

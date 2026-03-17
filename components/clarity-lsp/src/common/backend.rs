@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use clarinet_files::{paths, FileAccessor, ProjectManifest};
-use clarity_repl::clarity::diagnostic::Diagnostic;
 use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
+use clarity_types::diagnostic::Diagnostic;
 use ls_types::{
     CodeLens, CodeLensParams, CompletionItem, CompletionParams, DocumentFormattingParams,
     DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams,
@@ -663,7 +663,7 @@ mod lsp_tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use clarity_repl::clarity::ClarityVersion;
+    use clarity::vm::ClarityVersion;
     use indoc::indoc;
     use ls_types::{
         DocumentRangeFormattingParams, FormattingOptions, Position, Range, TextDocumentIdentifier,

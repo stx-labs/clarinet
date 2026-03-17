@@ -1,4 +1,4 @@
-use clarity_repl::clarity::docs::FunctionAPI;
+use clarity::vm::docs::FunctionAPI;
 use ls_types::{ParameterInformation, ParameterLabel, Position, SignatureInformation};
 
 use super::api_ref::API_REF;
@@ -81,9 +81,9 @@ pub fn get_signatures(
 
 #[cfg(test)]
 mod definitions_visitor_tests {
-    use clarity_repl::clarity::functions::NativeFunctions;
-    use clarity_repl::clarity::ClarityVersion::Clarity2;
-    use clarity_repl::clarity::StacksEpochId::Epoch21;
+    use clarity::types::StacksEpochId;
+    use clarity::vm::functions::NativeFunctions;
+    use clarity::vm::ClarityVersion;
     use ls_types::ParameterLabel::Simple;
     use ls_types::{ParameterInformation, Position, SignatureInformation};
 
@@ -94,7 +94,12 @@ mod definitions_visitor_tests {
         source: String,
         position: &Position,
     ) -> Option<Vec<ls_types::SignatureInformation>> {
-        let contract = &ActiveContractData::new(Clarity2, Epoch21, None, source);
+        let contract = &ActiveContractData::new(
+            ClarityVersion::Clarity2,
+            StacksEpochId::Epoch21,
+            None,
+            source,
+        );
         get_signatures(contract, position)
     }
 
