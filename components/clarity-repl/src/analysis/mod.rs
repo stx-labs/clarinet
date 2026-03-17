@@ -112,7 +112,6 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 static DEFAULT_PASSES: [Pass; 1] = [Pass::CallChecker];
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
     lints: HashMap<LintName, ClarityDiagnosticLevel>,

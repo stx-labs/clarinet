@@ -121,6 +121,9 @@ enum Command {
     /// Step by step debugging and breakpoints from your code editor (VSCode, vim, emacs, etc)
     #[clap(name = "dap", bin_name = "dap")]
     DAP,
+    /// Output the JSON schema for Clarinet.toml
+    #[clap(name = "schema", bin_name = "schema")]
+    Schema,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1473,6 +1476,10 @@ pub fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        Command::Schema => {
+            let schema = clarinet_files::schema::generate_clarinet_manifest_schema();
+            println!("{}", serde_json::to_string_pretty(&schema).unwrap());
         }
         Command::Devnet(subcommand) => match subcommand {
             Devnet::Package(cmd) => {
