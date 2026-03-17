@@ -1516,6 +1516,7 @@ fn print_available_lints() {
 
           [repl.analysis.lints]
           unused_const = "error"
+          at_block = false
 
         Suppress a lint in source code with: ;; #[allow(lint_name)]
     "#};
