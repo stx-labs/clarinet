@@ -70,7 +70,7 @@ impl<'a, 'b> CaseToken<'a, 'b> {
             if Self::allow(token_data, annotations) {
                 continue;
             }
-            let Err(error) = match_kebab_case(strip_unused_suffix(name.as_str())) else {
+            let Err(error) = match_kebab_case(strip_unused_suffix(name)) else {
                 continue;
             };
             let message = Self::make_diagnostic_message(name, &error);
@@ -84,7 +84,7 @@ impl<'a, 'b> CaseToken<'a, 'b> {
             if Self::allow(token_data, annotations) {
                 continue;
             }
-            let Err(error) = match_kebab_case(strip_unused_suffix(name.as_str())) else {
+            let Err(error) = match_kebab_case(strip_unused_suffix(name)) else {
                 continue;
             };
             let message = Self::make_diagnostic_message(name, &error);
