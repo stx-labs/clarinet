@@ -13,7 +13,7 @@ use bindings::{BindingMap, BindingMapBuilder};
 use constants::{ConstantMap, ConstantMapBuilder};
 use data_vars::{DataVarMap, DataVarMapBuilder};
 use maps::{MapDefinitionMap, MapDefinitionMapBuilder};
-use tokens::{TokenMap, TokenMapBuilder};
+use tokens::{TokenMap, TokenMapBuilder, TokenMaps};
 use traits::{TraitMap, TraitMapBuilder};
 
 use crate::analysis::annotation::Annotation;
@@ -28,7 +28,7 @@ pub struct AnalysisCache<'a> {
     bindings: Option<BindingMap<'a>>,
     data_vars: Option<DataVarMap<'a>>,
     maps: Option<MapDefinitionMap<'a>>,
-    tokens: Option<(TokenMap<'a>, TokenMap<'a>)>,
+    tokens: Option<TokenMaps<'a>>,
     traits: Option<TraitMap<'a>>,
 }
 
@@ -78,24 +78,20 @@ impl<'a> AnalysisCache<'a> {
         ))
     }
 
-    fn ensure_tokens(&mut self) {
-        if self.tokens.is_none() {
-            self.tokens = Some(TokenMapBuilder::build(
-                self.contract_analysis.clarity_version,
-                self.contract_analysis,
-                self.annotations,
-            ));
-        }
+    fn get_tokens(&mut self) -> &TokenMaps<'a> {
+        self.tokens.get_or_insert(TokenMapBuilder::build(
+            self.contract_analysis.clarity_version,
+            self.contract_analysis,
+            self.annotations,
+        ))
     }
 
     pub fn get_fts(&mut self) -> &TokenMap<'a> {
-        self.ensure_tokens();
-        &self.tokens.as_ref().unwrap().0
+        &self.get_tokens().fts
     }
 
     pub fn get_nfts(&mut self) -> &TokenMap<'a> {
-        self.ensure_tokens();
-        &self.tokens.as_ref().unwrap().1
+        &self.get_tokens().nfts
     }
 
     pub fn get_traits(&mut self) -> &TraitMap<'a> {

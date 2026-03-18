@@ -28,6 +28,11 @@ impl<'a> TokenData<'a> {
 
 pub type TokenMap<'a> = IndexMap<&'a ClarityName, TokenData<'a>>;
 
+pub struct TokenMaps<'a> {
+    pub fts: TokenMap<'a>,
+    pub nfts: TokenMap<'a>,
+}
+
 pub struct TokenMapBuilder<'a> {
     clarity_version: ClarityVersion,
     annotations: &'a Vec<Annotation>,
@@ -40,7 +45,7 @@ impl<'a> TokenMapBuilder<'a> {
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
         annotations: &'a Vec<Annotation>,
-    ) -> (TokenMap<'a>, TokenMap<'a>) {
+    ) -> TokenMaps<'a> {
         let mut builder = Self {
             clarity_version,
             annotations,
@@ -48,7 +53,10 @@ impl<'a> TokenMapBuilder<'a> {
             nfts: IndexMap::new(),
         };
         traverse(&mut builder, &contract_analysis.expressions);
-        (builder.fts, builder.nfts)
+        TokenMaps {
+            fts: builder.fts,
+            nfts: builder.nfts,
+        }
     }
 }
 
