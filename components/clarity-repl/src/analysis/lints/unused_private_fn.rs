@@ -1,105 +1,54 @@
-//! Lint to find unused FTs and NFTs
+//! Lint to find unused private functions
 //!
 //! A private function is considered unused if it is never referenced
 //!
 //! **NOTE:** A private function is considered used if it is referenced by another unused private function.
 //! In this case, repeated applications of the lint will find all unused code
 //!
-//! **NOTE:** It is common to intentinoally have unused private functions for unit testing.
+//! **NOTE:** It is common to intentionally have unused private functions for unit testing.
 //! In this case, you should annotate the function with `;; #[allow(unused_private_fn)]`
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
-use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
-use clarity::vm::representations::Span;
-use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::cache::functions::FnData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-struct UnusedPrivateFnSettings {
-    // TODO
-}
-
-impl UnusedPrivateFnSettings {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-/// Data associated with a `define-data-var` variable
-struct PrivateFnData<'a> {
-    expr: &'a SymbolicExpression,
-    /// Has this function been called?
-    pub called: bool,
-}
-
-impl<'a> PrivateFnData<'a> {
-    fn new(expr: &'a SymbolicExpression) -> Self {
-        Self {
-            expr,
-            called: false,
-        }
-    }
-}
-
-pub struct UnusedPrivateFn<'a> {
-    clarity_version: ClarityVersion,
-    _settings: UnusedPrivateFnSettings,
-    annotations: &'a Vec<Annotation>,
-    active_annotation: Option<usize>,
+pub struct UnusedPrivateFn<'a, 'b>
+where
+    'b: 'a,
+{
+    analysis_cache: &'a mut AnalysisCache<'b>,
     level: Level,
-    private_fns: HashMap<&'a ClarityName, PrivateFnData<'a>>,
 }
 
-impl<'a> UnusedPrivateFn<'a> {
-    fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
-        level: Level,
-        settings: UnusedPrivateFnSettings,
-    ) -> UnusedPrivateFn<'a> {
+impl<'a, 'b> UnusedPrivateFn<'a, 'b> {
+    fn new(analysis_cache: &'a mut AnalysisCache<'b>, level: Level) -> UnusedPrivateFn<'a, 'b> {
         Self {
-            clarity_version,
-            _settings: settings,
+            analysis_cache,
             level,
-            annotations,
-            active_annotation: None,
-            private_fns: HashMap::new(),
         }
     }
 
-    fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
-        // Traverse the entire AST
-        traverse(&mut self, &contract_analysis.expressions);
-
-        // Process hashmap of unused constants and generate diagnostics
+    fn run(&mut self) -> AnalysisResult {
         let diagnostics = self.generate_diagnostics();
-
         Ok(diagnostics)
     }
 
-    // Check for annotations that should be attached to the given span
-    fn set_active_annotation(&mut self, span: &Span) {
-        self.active_annotation = get_index_of_span(self.annotations, span);
-    }
-
-    // Check if the expression is annotated with `allow(<lint_name>)`
-    fn allow(&self) -> bool {
-        self.active_annotation
-            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+    fn allow(fn_data: &FnData, annotations: &[Annotation]) -> bool {
+        fn_data
+            .annotation
+            .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
 
     /// Make diagnostic message and suggestion for unused private fn
-    fn make_diagnostic_strings(name: &ClarityName) -> (String, Option<String>) {
+    pub(crate) fn make_diagnostic_strings(name: &ClarityName) -> (String, Option<String>) {
         (
             format!("private function `{name}` is never used"),
             Some(
@@ -109,130 +58,44 @@ impl<'a> UnusedPrivateFn<'a> {
         )
     }
 
-    fn make_diagnostic(
-        &self,
-        expr: &'a SymbolicExpression,
-        message: String,
-        suggestion: Option<String>,
-    ) -> Diagnostic {
-        Diagnostic {
-            level: self.level.clone(),
-            message,
-            spans: vec![expr.span.clone()],
-            suggestion,
-        }
-    }
-
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (name, data) in &self.private_fns {
-            if is_explicitly_unused(name) {
+        let annotations = self.analysis_cache.annotations;
+        let private_fns = self.analysis_cache.get_private_fns();
+
+        for (name, fn_data) in private_fns {
+            if fn_data.called || Self::allow(fn_data, annotations) || is_explicitly_unused(name) {
                 continue;
             }
-            let (message, suggestion) = match data.called {
-                true => continue,
-                false => Self::make_diagnostic_strings(name),
-            };
-            let diagnostic = self.make_diagnostic(data.expr, message, suggestion);
-            diagnostics.push(diagnostic);
+            let (message, suggestion) = Self::make_diagnostic_strings(name);
+            diagnostics.push(Diagnostic {
+                level: self.level.clone(),
+                message,
+                spans: vec![fn_data.expr.span.clone()],
+                suggestion,
+            });
         }
 
-        // Order the sets by the span of the error (the first diagnostic)
+        // Functions are topologically sorted, not in source order
         diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
-
-    fn set_called(&mut self, func: &ClarityName) {
-        _ = self
-            .private_fns
-            .get_mut(func)
-            .map(|data| data.called = true);
-    }
 }
 
-impl<'a> ASTVisitor<'a> for UnusedPrivateFn<'a> {
-    fn get_clarity_version(&self) -> &ClarityVersion {
-        &self.clarity_version
-    }
-
-    fn visit_define_private(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _parameters: Option<Vec<analysis::ast_visitor::TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
-    ) -> bool {
-        self.set_active_annotation(&expr.span);
-
-        if !self.allow() {
-            self.private_fns.insert(name, PrivateFnData::new(expr));
-        }
-
-        true
-    }
-
-    fn visit_call_user_defined(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _args: &'a [SymbolicExpression],
-    ) -> bool {
-        self.set_called(name);
-        true
-    }
-
-    fn visit_filter(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        func: &'a ClarityName,
-        _sequence: &'a SymbolicExpression,
-    ) -> bool {
-        self.set_called(func);
-        true
-    }
-
-    fn visit_fold(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        func: &'a ClarityName,
-        _sequence: &'a SymbolicExpression,
-        _initial: &'a SymbolicExpression,
-    ) -> bool {
-        self.set_called(func);
-        true
-    }
-
-    fn visit_map(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        func: &'a ClarityName,
-        _sequences: &'a [SymbolicExpression],
-    ) -> bool {
-        self.set_called(func);
-        true
-    }
-}
-
-impl AnalysisPass for UnusedPrivateFn<'_> {
+impl<'a, 'b> AnalysisPass for UnusedPrivateFn<'a, 'b> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let settings = UnusedPrivateFnSettings::new();
-        let lint = UnusedPrivateFn::new(
-            analysis_cache.contract_analysis.clarity_version,
-            analysis_cache.annotations,
-            level,
-            settings,
-        );
-        lint.run(analysis_cache.contract_analysis)
+        let mut lint = UnusedPrivateFn::new(analysis_cache, level);
+        lint.run()
     }
 }
 
-impl Lint for UnusedPrivateFn<'_> {
+impl Lint for UnusedPrivateFn<'_, '_> {
     fn get_name() -> LintName {
         LintName::UnusedPrivateFn
     }

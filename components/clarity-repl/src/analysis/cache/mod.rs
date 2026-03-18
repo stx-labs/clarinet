@@ -5,11 +5,13 @@ use clarity::vm::analysis::ContractAnalysis;
 pub mod bindings;
 pub mod constants;
 pub mod data_vars;
+pub mod functions;
 pub mod maps;
 
 use bindings::{BindingMap, BindingMapBuilder};
 use constants::{ConstantMap, ConstantMapBuilder};
 use data_vars::{DataVarMap, DataVarMapBuilder};
+use functions::{FnMap, FnMapBuilder, FnMaps};
 use maps::{MapDefinitionMap, MapDefinitionMapBuilder};
 
 use crate::analysis::annotation::Annotation;
@@ -23,6 +25,7 @@ pub struct AnalysisCache<'a> {
     constants: Option<ConstantMap<'a>>,
     bindings: Option<BindingMap<'a>>,
     data_vars: Option<DataVarMap<'a>>,
+    functions: Option<FnMaps<'a>>,
     maps: Option<MapDefinitionMap<'a>>,
 }
 
@@ -34,6 +37,7 @@ impl<'a> AnalysisCache<'a> {
             constants: None,
             bindings: None,
             data_vars: None,
+            functions: None,
             maps: None,
         }
     }
@@ -60,6 +64,26 @@ impl<'a> AnalysisCache<'a> {
             self.contract_analysis,
             self.annotations,
         ))
+    }
+
+    fn get_functions(&mut self) -> &FnMaps<'a> {
+        self.functions.get_or_insert(FnMapBuilder::build(
+            self.contract_analysis.clarity_version,
+            self.contract_analysis,
+            self.annotations,
+        ))
+    }
+
+    pub fn get_public_fns(&mut self) -> &FnMap<'a> {
+        &self.get_functions().public
+    }
+
+    pub fn get_read_only_fns(&mut self) -> &FnMap<'a> {
+        &self.get_functions().read_only
+    }
+
+    pub fn get_private_fns(&mut self) -> &FnMap<'a> {
+        &self.get_functions().private
     }
 
     pub fn get_maps(&mut self) -> &MapDefinitionMap<'a> {

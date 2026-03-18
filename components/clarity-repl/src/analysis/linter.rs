@@ -36,6 +36,8 @@ pub enum LintName {
     CaseConst,
     /// Enforce kebab-case for data variables
     CaseDataVar,
+    /// Enforce kebab-case for function names
+    CaseFn,
     /// Enforce kebab-case for maps
     CaseMap,
     /// Check that ERR_ constants are unique and use `(err ...)` values
@@ -130,6 +132,7 @@ impl LintGroup {
                 LintName::CaseBinding,
                 LintName::CaseConst,
                 LintName::CaseDataVar,
+                LintName::CaseFn,
                 LintName::CaseMap,
             ],
             Unused => &[
