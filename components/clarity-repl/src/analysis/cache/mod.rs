@@ -11,7 +11,7 @@ pub mod maps;
 use bindings::{BindingMap, BindingMapBuilder};
 use constants::{ConstantMap, ConstantMapBuilder};
 use data_vars::{DataVarMap, DataVarMapBuilder};
-use functions::{FnMap, FnMapBuilder, FnMaps};
+use functions::{FnMap, FnMapBuilder, FnMaps, PrivateFnMap};
 use maps::{MapDefinitionMap, MapDefinitionMapBuilder};
 
 use crate::analysis::annotation::Annotation;
@@ -82,7 +82,7 @@ impl<'a> AnalysisCache<'a> {
         &self.get_functions().read_only
     }
 
-    pub fn get_private_fns(&mut self) -> &FnMap<'a> {
+    pub fn get_private_fns(&mut self) -> &PrivateFnMap<'a> {
         &self.get_functions().private
     }
 

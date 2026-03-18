@@ -4,10 +4,10 @@
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
-use crate::analysis::cache::functions::FnData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
@@ -34,9 +34,8 @@ impl<'a, 'b> CaseFn<'a, 'b> {
         Ok(diagnostics)
     }
 
-    fn allow(fn_data: &FnData, annotations: &[Annotation]) -> bool {
-        fn_data
-            .annotation
+    fn allow(annotation: Option<usize>, annotations: &[Annotation]) -> bool {
+        annotation
             .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
@@ -48,11 +47,12 @@ impl<'a, 'b> CaseFn<'a, 'b> {
     fn check_name(
         level: &Level,
         name: &ClarityName,
-        fn_data: &FnData,
+        expr: &SymbolicExpression,
+        annotation: Option<usize>,
         annotations: &[Annotation],
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        if Self::allow(fn_data, annotations) {
+        if Self::allow(annotation, annotations) {
             return;
         }
         let Err(error) = match_kebab_case(strip_unused_suffix(name.as_str())) else {
@@ -62,7 +62,7 @@ impl<'a, 'b> CaseFn<'a, 'b> {
         diagnostics.push(Diagnostic {
             level: level.clone(),
             message,
-            spans: vec![fn_data.expr.span.clone()],
+            spans: vec![expr.span.clone()],
             suggestion: Some(error.suggestion()),
         });
     }
@@ -72,18 +72,39 @@ impl<'a, 'b> CaseFn<'a, 'b> {
         let annotations = self.analysis_cache.annotations;
 
         let public_fns = self.analysis_cache.get_public_fns();
-        for (name, fn_data) in public_fns {
-            Self::check_name(&self.level, name, fn_data, annotations, &mut diagnostics);
+        for (name, data) in public_fns {
+            Self::check_name(
+                &self.level,
+                name,
+                data.expr,
+                data.annotation,
+                annotations,
+                &mut diagnostics,
+            );
         }
 
         let read_only_fns = self.analysis_cache.get_read_only_fns();
-        for (name, fn_data) in read_only_fns {
-            Self::check_name(&self.level, name, fn_data, annotations, &mut diagnostics);
+        for (name, data) in read_only_fns {
+            Self::check_name(
+                &self.level,
+                name,
+                data.expr,
+                data.annotation,
+                annotations,
+                &mut diagnostics,
+            );
         }
 
         let private_fns = self.analysis_cache.get_private_fns();
-        for (name, fn_data) in private_fns {
-            Self::check_name(&self.level, name, fn_data, annotations, &mut diagnostics);
+        for (name, data) in private_fns {
+            Self::check_name(
+                &self.level,
+                name,
+                data.expr,
+                data.annotation,
+                annotations,
+                &mut diagnostics,
+            );
         }
 
         // Functions are topologically sorted, not in source order

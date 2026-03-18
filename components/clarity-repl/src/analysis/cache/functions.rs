@@ -13,7 +13,15 @@ use clarity_types::ClarityName;
 use crate::analysis::annotation::{get_index_of_span, Annotation};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 
+/// Data for a public or read-only function
 pub struct FnData<'a> {
+    pub expr: &'a SymbolicExpression,
+    /// Annotation comment, if present
+    pub annotation: Option<usize>,
+}
+
+/// Data for a private function, including call-site tracking
+pub struct PrivateFnData<'a> {
     pub expr: &'a SymbolicExpression,
     /// Has this function been called?
     pub called: bool,
@@ -21,8 +29,8 @@ pub struct FnData<'a> {
     pub annotation: Option<usize>,
 }
 
-impl<'a> FnData<'a> {
-    pub fn new(expr: &'a SymbolicExpression, annotation: Option<usize>) -> Self {
+impl<'a> PrivateFnData<'a> {
+    fn new(expr: &'a SymbolicExpression, annotation: Option<usize>) -> Self {
         Self {
             expr,
             called: false,
@@ -32,11 +40,12 @@ impl<'a> FnData<'a> {
 }
 
 pub type FnMap<'a> = HashMap<&'a ClarityName, FnData<'a>>;
+pub type PrivateFnMap<'a> = HashMap<&'a ClarityName, PrivateFnData<'a>>;
 
 pub struct FnMaps<'a> {
     pub public: FnMap<'a>,
     pub read_only: FnMap<'a>,
-    pub private: FnMap<'a>,
+    pub private: PrivateFnMap<'a>,
 }
 
 pub struct FnMapBuilder<'a> {
@@ -44,7 +53,7 @@ pub struct FnMapBuilder<'a> {
     annotations: &'a Vec<Annotation>,
     public: FnMap<'a>,
     read_only: FnMap<'a>,
-    private: FnMap<'a>,
+    private: PrivateFnMap<'a>,
 }
 
 impl<'a> FnMapBuilder<'a> {
@@ -88,7 +97,7 @@ impl<'a> ASTVisitor<'a> for FnMapBuilder<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         let annotation = get_index_of_span(self.annotations, &expr.span);
-        self.public.insert(name, FnData::new(expr, annotation));
+        self.public.insert(name, FnData { expr, annotation });
         true
     }
 
@@ -100,7 +109,7 @@ impl<'a> ASTVisitor<'a> for FnMapBuilder<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         let annotation = get_index_of_span(self.annotations, &expr.span);
-        self.read_only.insert(name, FnData::new(expr, annotation));
+        self.read_only.insert(name, FnData { expr, annotation });
         true
     }
 
@@ -112,7 +121,8 @@ impl<'a> ASTVisitor<'a> for FnMapBuilder<'a> {
         _body: &'a SymbolicExpression,
     ) -> bool {
         let annotation = get_index_of_span(self.annotations, &expr.span);
-        self.private.insert(name, FnData::new(expr, annotation));
+        self.private
+            .insert(name, PrivateFnData::new(expr, annotation));
         true
     }
 

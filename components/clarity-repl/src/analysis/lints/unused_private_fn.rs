@@ -13,7 +13,7 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
-use crate::analysis::cache::functions::FnData;
+use crate::analysis::cache::functions::PrivateFnData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
@@ -40,7 +40,7 @@ impl<'a, 'b> UnusedPrivateFn<'a, 'b> {
         Ok(diagnostics)
     }
 
-    fn allow(fn_data: &FnData, annotations: &[Annotation]) -> bool {
+    fn allow(fn_data: &PrivateFnData, annotations: &[Annotation]) -> bool {
         fn_data
             .annotation
             .map(|idx| Self::match_allow_annotation(&annotations[idx]))
