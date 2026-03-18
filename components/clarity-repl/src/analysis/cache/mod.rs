@@ -6,15 +6,19 @@ pub mod bindings;
 pub mod constants;
 pub mod data_vars;
 pub mod maps;
+pub mod tokens;
+pub mod traits;
 
 use bindings::{BindingMap, BindingMapBuilder};
 use constants::{ConstantMap, ConstantMapBuilder};
 use data_vars::{DataVarMap, DataVarMapBuilder};
 use maps::{MapDefinitionMap, MapDefinitionMapBuilder};
+use tokens::{TokenMap, TokenMapBuilder};
+use traits::{TraitMap, TraitMapBuilder};
 
 use crate::analysis::annotation::Annotation;
 
-/// Container struct for all cached itemss
+/// Container struct for all cached items
 /// All fields are lazy-initialized, and only created if used in at least one pass
 pub struct AnalysisCache<'a> {
     pub contract_analysis: &'a ContractAnalysis,
@@ -24,6 +28,8 @@ pub struct AnalysisCache<'a> {
     bindings: Option<BindingMap<'a>>,
     data_vars: Option<DataVarMap<'a>>,
     maps: Option<MapDefinitionMap<'a>>,
+    tokens: Option<(TokenMap<'a>, TokenMap<'a>)>,
+    traits: Option<TraitMap<'a>>,
 }
 
 impl<'a> AnalysisCache<'a> {
@@ -35,6 +41,8 @@ impl<'a> AnalysisCache<'a> {
             bindings: None,
             data_vars: None,
             maps: None,
+            tokens: None,
+            traits: None,
         }
     }
 
@@ -64,6 +72,34 @@ impl<'a> AnalysisCache<'a> {
 
     pub fn get_maps(&mut self) -> &MapDefinitionMap<'a> {
         self.maps.get_or_insert(MapDefinitionMapBuilder::build(
+            self.contract_analysis.clarity_version,
+            self.contract_analysis,
+            self.annotations,
+        ))
+    }
+
+    fn ensure_tokens(&mut self) {
+        if self.tokens.is_none() {
+            self.tokens = Some(TokenMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            ));
+        }
+    }
+
+    pub fn get_fts(&mut self) -> &TokenMap<'a> {
+        self.ensure_tokens();
+        &self.tokens.as_ref().unwrap().0
+    }
+
+    pub fn get_nfts(&mut self) -> &TokenMap<'a> {
+        self.ensure_tokens();
+        &self.tokens.as_ref().unwrap().1
+    }
+
+    pub fn get_traits(&mut self) -> &TraitMap<'a> {
+        self.traits.get_or_insert(TraitMapBuilder::build(
             self.contract_analysis.clarity_version,
             self.contract_analysis,
             self.annotations,
