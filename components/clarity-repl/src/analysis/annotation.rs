@@ -83,6 +83,7 @@ pub enum WarningKind {
     CaseBinding,
     CaseConst,
     CaseDataVar,
+    CaseFn,
     CaseMap,
     CaseToken,
     CaseTrait,

@@ -5,6 +5,7 @@ use clarity::vm::analysis::ContractAnalysis;
 pub mod bindings;
 pub mod constants;
 pub mod data_vars;
+pub mod functions;
 pub mod maps;
 pub mod tokens;
 pub mod traits;
@@ -12,6 +13,7 @@ pub mod traits;
 use bindings::{BindingMap, BindingMapBuilder};
 use constants::{ConstantMap, ConstantMapBuilder};
 use data_vars::{DataVarMap, DataVarMapBuilder};
+use functions::{FnMap, FnMapBuilder, FnMaps, PrivateFnMap};
 use maps::{MapDefinitionMap, MapDefinitionMapBuilder};
 use tokens::{TokenMap, TokenMapBuilder, TokenMaps};
 use traits::{DeclaredTraitMap, ImportedTraitMap, TraitMapBuilder, TraitMaps};
@@ -27,6 +29,7 @@ pub struct AnalysisCache<'a> {
     constants: Option<ConstantMap<'a>>,
     bindings: Option<BindingMap<'a>>,
     data_vars: Option<DataVarMap<'a>>,
+    functions: Option<FnMaps<'a>>,
     maps: Option<MapDefinitionMap<'a>>,
     tokens: Option<TokenMaps<'a>>,
     traits: Option<TraitMaps<'a>>,
@@ -40,6 +43,7 @@ impl<'a> AnalysisCache<'a> {
             constants: None,
             bindings: None,
             data_vars: None,
+            functions: None,
             maps: None,
             tokens: None,
             traits: None,
@@ -68,6 +72,26 @@ impl<'a> AnalysisCache<'a> {
             self.contract_analysis,
             self.annotations,
         ))
+    }
+
+    fn get_functions(&mut self) -> &FnMaps<'a> {
+        self.functions.get_or_insert(FnMapBuilder::build(
+            self.contract_analysis.clarity_version,
+            self.contract_analysis,
+            self.annotations,
+        ))
+    }
+
+    pub fn get_public_fns(&mut self) -> &FnMap<'a> {
+        &self.get_functions().public
+    }
+
+    pub fn get_read_only_fns(&mut self) -> &FnMap<'a> {
+        &self.get_functions().read_only
+    }
+
+    pub fn get_private_fns(&mut self) -> &PrivateFnMap<'a> {
+        &self.get_functions().private
     }
 
     pub fn get_maps(&mut self) -> &MapDefinitionMap<'a> {
