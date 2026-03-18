@@ -236,6 +236,29 @@ mod tests {
     }
 
     #[test]
+    fn fail_define_trait_on_underscore() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-trait my_trait (
+                (get-amount () (response uint uint))
+            ))
+        ").to_string();
+
+        let (output, result) = run_snippet_no_panic(snippet).expect("Invalid code snippet");
+
+        let trait_name = "my_trait";
+        let expected_message = CaseTrait::make_diagnostic_message(
+            &trait_name.into(),
+            &CaseError::IllegalCharacter(b'_'),
+        );
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains(trait_name));
+        assert!(output[0].contains(&expected_message));
+    }
+
+    #[test]
     fn allow_trailing_underscore() {
         #[rustfmt::skip]
         let snippet = indoc!("

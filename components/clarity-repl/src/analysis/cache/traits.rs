@@ -180,12 +180,22 @@ impl<'a> ASTVisitor<'a> for TraitMapBuilder<'a> {
 
     fn visit_define_trait(
         &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
+        expr: &'a SymbolicExpression,
+        name: &'a ClarityName,
         functions: &'a [SymbolicExpression],
     ) -> bool {
-        for expr in functions {
-            self.process_symbolic_expr(expr, |usage| usage.declare_trait = true);
+        // Insert the defined trait itself (for case_trait lint)
+        if !self.map.contains_key(name) {
+            let annotation = get_index_of_span(self.annotations, &expr.span);
+            let mut data = TraitData::new(expr, annotation);
+            // A defined trait is inherently "used" — it's being declared, not imported
+            data.declare_trait = true;
+            self.map.insert(name, data);
+        }
+
+        // Also check for trait references within the function signatures (for unused_trait lint)
+        for func_expr in functions {
+            self.process_symbolic_expr(func_expr, |usage| usage.declare_trait = true);
         }
         true
     }
