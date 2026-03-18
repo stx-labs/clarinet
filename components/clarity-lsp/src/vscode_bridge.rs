@@ -165,6 +165,7 @@ impl LspVscodeBridge {
                 process_notification(command, &mut editor_state_lock, Some(&*file_accessor)).await;
 
             let mut aggregated_diagnostics = vec![];
+            let mut env_simnet_diagnostics = vec![];
             if let Err(err) = result {
                 if err.starts_with("No Clarinet.toml is associated to the contract") {
                     let _ = send_notification.call2(
@@ -177,15 +178,41 @@ impl LspVscodeBridge {
             }
             if let Ok(ref mut response) = result {
                 aggregated_diagnostics.append(&mut response.aggregated_diagnostics);
+                env_simnet_diagnostics.append(&mut response.env_simnet_diagnostics);
+            }
+
+            // Build a map of extra LSP diagnostics keyed by location
+            let mut extra_diags: std::collections::HashMap<_, Vec<_>> =
+                std::collections::HashMap::new();
+            for (location, diags) in env_simnet_diagnostics {
+                extra_diags.entry(location).or_default().extend(diags);
             }
 
             for (location, diags) in aggregated_diagnostics.into_iter() {
+                if let Ok(uri) = paths::path_to_url_string(&location)?.parse() {
+                    let mut lsp_diags = clarity_diagnostics_to_lsp_type(&diags);
+                    if let Some(extra) = extra_diags.remove(&location) {
+                        lsp_diags.extend(extra);
+                    }
+                    send_diagnostic.call1(
+                        &JsValue::NULL,
+                        &encode_to_js(&PublishDiagnosticsParams {
+                            uri,
+                            diagnostics: lsp_diags,
+                            version: None,
+                        })?,
+                    )?;
+                }
+            }
+
+            // Publish any remaining env_simnet diagnostics for contracts not in aggregated
+            for (location, diags) in extra_diags {
                 if let Ok(uri) = paths::path_to_url_string(&location)?.parse() {
                     send_diagnostic.call1(
                         &JsValue::NULL,
                         &encode_to_js(&PublishDiagnosticsParams {
                             uri,
-                            diagnostics: clarity_diagnostics_to_lsp_type(&diags),
+                            diagnostics: diags,
                             version: None,
                         })?,
                     )?;

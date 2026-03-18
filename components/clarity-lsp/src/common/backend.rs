@@ -6,10 +6,10 @@ use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
 use clarity_types::diagnostic::Diagnostic;
 use ls_types::{
-    CodeLens, CodeLensParams, CompletionItem, CompletionParams, DocumentFormattingParams,
-    DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams,
-    Hover, HoverParams, InitializeParams, InitializeResult, Location, MessageType, ServerInfo,
-    SignatureHelp, SignatureHelpParams, TextEdit,
+    CodeLens, CodeLensParams, CompletionItem, CompletionParams, Diagnostic as LspDiagnostic,
+    DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
+    GotoDefinitionParams, Hover, HoverParams, InitializeParams, InitializeResult, Location,
+    MessageType, ServerInfo, SignatureHelp, SignatureHelpParams, TextEdit,
 };
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +64,7 @@ pub enum LspNotification {
 #[derive(Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct LspNotificationResponse {
     pub aggregated_diagnostics: Vec<(PathBuf, Vec<Diagnostic>)>,
+    pub env_simnet_diagnostics: Vec<(PathBuf, Vec<LspDiagnostic>)>,
     pub notification: Option<(MessageType, String)>,
 }
 
@@ -71,6 +72,7 @@ impl LspNotificationResponse {
     pub fn error(message: &str) -> LspNotificationResponse {
         LspNotificationResponse {
             aggregated_diagnostics: vec![],
+            env_simnet_diagnostics: vec![],
             notification: Some((MessageType::ERROR, format!("Internal error: {message}"))),
         }
     }
@@ -105,8 +107,11 @@ pub async fn process_notification(
                         .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
+                    let env_simnet_diagnostics =
+                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
+                        env_simnet_diagnostics,
                         notification,
                     })
                 }
@@ -130,8 +135,11 @@ pub async fn process_notification(
                         .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
+                    let env_simnet_diagnostics =
+                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
+                        env_simnet_diagnostics,
                         notification,
                     })
                 }
@@ -246,8 +254,11 @@ pub async fn process_notification(
                         .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
+                    let env_simnet_diagnostics =
+                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
+                        env_simnet_diagnostics,
                         notification,
                     })
                 }
@@ -289,8 +300,11 @@ pub async fn process_notification(
 
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
+                    let env_simnet_diagnostics =
+                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
                     Ok(LspNotificationResponse {
                         aggregated_diagnostics,
+                        env_simnet_diagnostics,
                         notification,
                     })
                 }
