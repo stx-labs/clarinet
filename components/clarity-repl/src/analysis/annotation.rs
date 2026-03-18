@@ -84,6 +84,8 @@ pub enum WarningKind {
     CaseConst,
     CaseDataVar,
     CaseMap,
+    CaseToken,
+    CaseTrait,
     ErrorConst,
     Noop,
     Panic,

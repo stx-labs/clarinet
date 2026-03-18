@@ -2,210 +2,108 @@
 //!
 //! Tokens are considered unused if declared but never minted
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
-use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
-use clarity::vm::representations::Span;
-use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor};
+use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::cache::tokens::TokenData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-struct UnusedTokenSettings {
-    // TODO
-}
-
-impl UnusedTokenSettings {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-pub struct UnusedToken<'a> {
-    clarity_version: ClarityVersion,
-    _settings: UnusedTokenSettings,
-    annotations: &'a Vec<Annotation>,
-    active_annotation: Option<usize>,
-    /// Maps of tokens not yet used
-    unused_fts: HashMap<&'a ClarityName, &'a SymbolicExpression>,
-    unused_nfts: HashMap<&'a ClarityName, &'a SymbolicExpression>,
-    /// Clarity diagnostic level
+pub struct UnusedToken<'a, 'b>
+where
+    'b: 'a,
+{
+    analysis_cache: &'a mut AnalysisCache<'b>,
     level: Level,
 }
 
-impl<'a> UnusedToken<'a> {
-    fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
-        level: Level,
-        settings: UnusedTokenSettings,
-    ) -> UnusedToken<'a> {
+impl<'a, 'b> UnusedToken<'a, 'b> {
+    fn new(analysis_cache: &'a mut AnalysisCache<'b>, level: Level) -> UnusedToken<'a, 'b> {
         Self {
-            clarity_version,
-            _settings: settings,
+            analysis_cache,
             level,
-            annotations,
-            active_annotation: None,
-            unused_fts: HashMap::new(),
-            unused_nfts: HashMap::new(),
         }
     }
 
-    fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
-        // Traverse the entire AST
-        traverse(&mut self, &contract_analysis.expressions);
-
-        // Process hashmap of unused constants and generate diagnostics
+    fn run(&mut self) -> AnalysisResult {
         let diagnostics = self.generate_diagnostics();
-
         Ok(diagnostics)
     }
 
-    // Check for annotations that should be attached to the given span
-    fn set_active_annotation(&mut self, span: &Span) {
-        self.active_annotation = get_index_of_span(self.annotations, span);
-    }
-
-    // Check if the expression is annotated with `allow(<lint_name>)`
-    fn allow(&self) -> bool {
-        self.active_annotation
-            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+    fn allow(token_data: &TokenData, annotations: &[Annotation]) -> bool {
+        token_data
+            .annotation
+            .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
 
-    fn make_diagnostic_message_ft(name: &ClarityName) -> String {
+    pub(crate) fn make_diagnostic_message_ft(name: &ClarityName) -> String {
         format!("fungible token `{name}` never used")
     }
 
-    fn make_diagnostic_message_nft(name: &ClarityName) -> String {
+    pub(crate) fn make_diagnostic_message_nft(name: &ClarityName) -> String {
         format!("non-fungible token `{name}` never used")
     }
 
-    fn make_diagnostic(&self, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
+    fn make_diagnostic(level: &Level, token_data: &TokenData, message: String) -> Diagnostic {
         Diagnostic {
-            level: self.level.clone(),
+            level: level.clone(),
             message,
-            spans: vec![expr.span.clone()],
+            spans: vec![token_data.expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
         }
     }
 
-    /// Returns total number of unused tokens
-    fn unused_tokens(&self) -> usize {
-        self.unused_fts.len() + self.unused_nfts.len()
-    }
-
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::with_capacity(self.unused_tokens());
+        let mut diagnostics = vec![];
 
-        for (name, expr) in &self.unused_fts {
-            if is_explicitly_unused(name) {
+        let annotations = self.analysis_cache.annotations;
+
+        let fts = self.analysis_cache.get_fts();
+        for (name, token_data) in fts {
+            if token_data.minted
+                || Self::allow(token_data, annotations)
+                || is_explicitly_unused(name)
+            {
                 continue;
             }
             let message = Self::make_diagnostic_message_ft(name);
-            let diagnostic = self.make_diagnostic(expr, message);
-            diagnostics.push(diagnostic);
+            diagnostics.push(Self::make_diagnostic(&self.level, token_data, message));
         }
 
-        for (name, expr) in &self.unused_nfts {
-            if is_explicitly_unused(name) {
+        let nfts = self.analysis_cache.get_nfts();
+        for (name, token_data) in nfts {
+            if token_data.minted
+                || Self::allow(token_data, annotations)
+                || is_explicitly_unused(name)
+            {
                 continue;
             }
             let message = Self::make_diagnostic_message_nft(name);
-            let diagnostic = self.make_diagnostic(expr, message);
-            diagnostics.push(diagnostic);
+            diagnostics.push(Self::make_diagnostic(&self.level, token_data, message));
         }
 
-        // Order the sets by the span of the error (the first diagnostic)
-        diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
 }
 
-impl<'a> ASTVisitor<'a> for UnusedToken<'a> {
-    fn get_clarity_version(&self) -> &ClarityVersion {
-        &self.clarity_version
-    }
-
-    fn visit_define_ft(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _supply: Option<&'a SymbolicExpression>,
-    ) -> bool {
-        self.set_active_annotation(&expr.span);
-
-        if !self.allow() {
-            self.unused_fts.insert(name, expr);
-        }
-
-        true
-    }
-
-    fn visit_define_nft(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _nft_type: &'a SymbolicExpression,
-    ) -> bool {
-        self.set_active_annotation(&expr.span);
-
-        if !self.allow() {
-            self.unused_nfts.insert(name, expr);
-        }
-
-        true
-    }
-
-    fn visit_ft_mint(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        token: &'a ClarityName,
-        _amount: &'a SymbolicExpression,
-        _recipient: &'a SymbolicExpression,
-    ) -> bool {
-        self.unused_fts.remove(token);
-        true
-    }
-
-    fn visit_nft_mint(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        token: &'a ClarityName,
-        _identifier: &'a SymbolicExpression,
-        _recipient: &'a SymbolicExpression,
-    ) -> bool {
-        self.unused_nfts.remove(token);
-        true
-    }
-}
-
-impl AnalysisPass for UnusedToken<'_> {
+impl<'a, 'b> AnalysisPass for UnusedToken<'a, 'b> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let settings = UnusedTokenSettings::new();
-        let lint = UnusedToken::new(
-            analysis_cache.contract_analysis.clarity_version,
-            analysis_cache.annotations,
-            level,
-            settings,
-        );
-        lint.run(analysis_cache.contract_analysis)
+        let mut lint = UnusedToken::new(analysis_cache, level);
+        lint.run()
     }
 }
 
-impl Lint for UnusedToken<'_> {
+impl Lint for UnusedToken<'_, '_> {
     fn get_name() -> LintName {
         LintName::UnusedToken
     }
