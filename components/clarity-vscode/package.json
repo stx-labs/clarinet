@@ -63,10 +63,10 @@
   "contributes": {
     "configuration": [
       {
-        "id": "clariy-lsp",
+        "id": "clarity-lsp",
         "title": "Clarity",
         "properties": {
-          "clariy-lsp.trace.server": {
+          "clarity-lsp.trace.server": {
             "type": "string",
             "scope": "window",
             "enum": [

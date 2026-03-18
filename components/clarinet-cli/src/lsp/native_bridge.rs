@@ -15,8 +15,8 @@ use tower_lsp_server::ls_types::{
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
     ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    InitializeParams, InitializeResult, InitializedParams, MessageType, SignatureHelp,
-    SignatureHelpParams, TextEdit,
+    InitializeParams, InitializeResult, InitializedParams, MessageType, SemanticTokensParams,
+    SemanticTokensResult, SignatureHelp, SignatureHelpParams, TextEdit,
 };
 use tower_lsp_server::{Client, LanguageServer};
 
@@ -83,6 +83,7 @@ pub struct LspNativeBridge {
     request_tx: Arc<Mutex<MultiplexableSender<LspRequest>>>,
     response_rx: Arc<Mutex<Receiver<LspResponse>>>,
     client_supports_code_lens_refresh: AtomicBool,
+    client_supports_semantic_tokens_refresh: AtomicBool,
 }
 
 impl LspNativeBridge {
@@ -98,6 +99,7 @@ impl LspNativeBridge {
             request_tx: Arc::new(Mutex::new(request_tx)),
             response_rx: Arc::new(Mutex::new(response_rx)),
             client_supports_code_lens_refresh: AtomicBool::new(false),
+            client_supports_semantic_tokens_refresh: AtomicBool::new(false),
         }
     }
 
@@ -133,15 +135,20 @@ impl LspNativeBridge {
 
 impl LanguageServer for LspNativeBridge {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        let supports_code_lens_refresh = params
-            .capabilities
-            .workspace
-            .as_ref()
+        let workspace = params.capabilities.workspace.as_ref();
+        let supports_code_lens_refresh = workspace
             .and_then(|ws| ws.code_lens.as_ref())
             .and_then(|cl| cl.refresh_support)
             .unwrap_or(false);
         self.client_supports_code_lens_refresh
             .store(supports_code_lens_refresh, Ordering::Relaxed);
+
+        let supports_semantic_tokens_refresh = workspace
+            .and_then(|ws| ws.semantic_tokens.as_ref())
+            .and_then(|st| st.refresh_support)
+            .unwrap_or(false);
+        self.client_supports_semantic_tokens_refresh
+            .store(supports_semantic_tokens_refresh, Ordering::Relaxed);
 
         let _ = match self.request_tx.lock() {
             Ok(tx) => tx.send(LspRequest::Initialize(Box::new(params))),
@@ -262,6 +269,24 @@ impl LanguageServer for LspNativeBridge {
         Ok(None)
     }
 
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let _ = match self.request_tx.lock() {
+            Ok(tx) => tx.send(LspRequest::SemanticTokensFull(params)),
+            Err(_) => return Ok(None),
+        };
+
+        let response_rx = self.response_rx.lock().expect("failed to lock response_rx");
+        let response = &response_rx.recv().expect("failed to get value from recv");
+        if let LspResponse::Request(LspRequestResponse::SemanticTokensFull(data)) = response {
+            return Ok(data.to_owned());
+        }
+
+        Ok(None)
+    }
+
     async fn range_formatting(
         &self,
         params: DocumentRangeFormattingParams,
@@ -314,6 +339,12 @@ impl LanguageServer for LspNativeBridge {
         {
             let _ = self.client.code_lens_refresh().await;
         }
+        if self
+            .client_supports_semantic_tokens_refresh
+            .load(Ordering::Relaxed)
+        {
+            let _ = self.client.semantic_tokens_refresh().await;
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -340,6 +371,12 @@ impl LanguageServer for LspNativeBridge {
         {
             let _ = self.client.code_lens_refresh().await;
         }
+        if self
+            .client_supports_semantic_tokens_refresh
+            .load(Ordering::Relaxed)
+        {
+            let _ = self.client.semantic_tokens_refresh().await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -353,6 +390,12 @@ impl LanguageServer for LspNativeBridge {
         }
 
         self.after_receive_lsp_notification().await;
+        if self
+            .client_supports_semantic_tokens_refresh
+            .load(Ordering::Relaxed)
+        {
+            let _ = self.client.semantic_tokens_refresh().await;
+        }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {

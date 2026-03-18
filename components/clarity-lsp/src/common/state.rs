@@ -18,11 +18,12 @@ use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpress
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::ContractDeployer;
-use clarity_repl::utils::CHECK_ENVIRONMENTS;
+use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
 use clarity_types::execution_cost::ExecutionCost;
 use ls_types::{
-    CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
+    CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SemanticToken,
+    SemanticTokens, SemanticTokensResult, SignatureHelp,
 };
 
 use super::requests::capabilities::{CostDisplayFormat, InitializationOptions};
@@ -572,6 +573,46 @@ impl EditorState {
         }
 
         code_lenses
+    }
+
+    pub fn get_semantic_tokens_for_contract(
+        &self,
+        contract_location: &Path,
+    ) -> Option<SemanticTokensResult> {
+        let contract_data = self.active_contracts.get(contract_location)?;
+        let spans = get_env_simnet_spans(&contract_data.source).ok()?;
+
+        if spans.is_empty() {
+            return None;
+        }
+
+        let lines: Vec<&str> = contract_data.source.lines().collect();
+        let mut tokens = Vec::new();
+        let mut prev_line: u32 = 0;
+
+        for span in &spans {
+            for line_num in span.start_line..=span.end_line {
+                let line_idx = (line_num - 1) as usize;
+                let length = lines.get(line_idx).map_or(0, |l| l.len() as u32);
+                if length == 0 {
+                    continue;
+                }
+
+                tokens.push(SemanticToken {
+                    delta_line: line_num - 1 - prev_line,
+                    delta_start: 0,
+                    length,
+                    token_type: 0,             // comment (index 0 in legend)
+                    token_modifiers_bitset: 1, // deprecated (bit 0 in legend)
+                });
+                prev_line = line_num - 1;
+            }
+        }
+
+        Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens,
+        }))
     }
 
     fn format_cost_for_codelens(cost_node: &StaticCost, display: CostDisplayFormat) -> String {

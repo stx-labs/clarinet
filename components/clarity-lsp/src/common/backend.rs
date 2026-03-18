@@ -8,8 +8,9 @@ use clarity_types::diagnostic::Diagnostic;
 use ls_types::{
     CodeLens, CodeLensParams, CompletionItem, CompletionParams, DocumentFormattingParams,
     DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, GotoDefinitionParams,
-    Hover, HoverParams, InitializeParams, InitializeResult, Location, MessageType, ServerInfo,
-    SignatureHelp, SignatureHelpParams, TextEdit,
+    Hover, HoverParams, InitializeParams, InitializeResult, Location, MessageType,
+    SemanticTokensParams, SemanticTokensResult, ServerInfo, SignatureHelp, SignatureHelpParams,
+    TextEdit,
 };
 use serde::{Deserialize, Serialize};
 
@@ -324,6 +325,7 @@ pub enum LspRequest {
     DocumentFormatting(DocumentFormattingParams),
     DocumentRangeFormatting(DocumentRangeFormattingParams),
     CodeLens(CodeLensParams),
+    SemanticTokensFull(SemanticTokensParams),
     Initialize(Box<InitializeParams>),
 }
 
@@ -337,6 +339,7 @@ pub enum LspRequestResponse {
     DocumentRangeFormatting(Option<Vec<TextEdit>>),
     Hover(Option<Hover>),
     CodeLens(Vec<CodeLens>),
+    SemanticTokensFull(Option<SemanticTokensResult>),
     Initialize(Box<InitializeResult>),
 }
 
@@ -618,6 +621,17 @@ pub fn process_request(
                 .try_read(|es| es.get_code_lenses(&contract_location))
                 .unwrap_or_default();
             Ok(LspRequestResponse::CodeLens(code_lenses))
+        }
+
+        LspRequest::SemanticTokensFull(params) => {
+            let file_url = params.text_document.uri;
+            let Some(contract_location) = get_contract_location(&file_url) else {
+                return Ok(LspRequestResponse::SemanticTokensFull(None));
+            };
+            let tokens = editor_state
+                .try_read(|es| es.get_semantic_tokens_for_contract(&contract_location))
+                .unwrap_or_default();
+            Ok(LspRequestResponse::SemanticTokensFull(tokens))
         }
 
         _ => Err(format!("Unexpected command: {command:?}")),
@@ -1120,5 +1134,214 @@ mod lsp_tests {
         assert_eq!(start_column1, &Value::from(6));
         assert_eq!(end_line1, &Value::from(21));
         assert_eq!(end_column1, &Value::from(10));
+    }
+
+    fn make_semantic_tokens_request(source: &str) -> Option<SemanticTokensResult> {
+        let editor_state = create_test_editor_state(source.to_owned());
+        let path = get_root_path().join("test.clar");
+        let params = SemanticTokensParams {
+            text_document: TextDocumentIdentifier {
+                uri: paths::path_to_url_string(&path).unwrap().parse().unwrap(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: ls_types::PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+        let response = process_request(LspRequest::SemanticTokensFull(params), &editor_state)
+            .expect("Failed to process request");
+        let LspRequestResponse::SemanticTokensFull(result) = response else {
+            panic!("Expected SemanticTokensFull response, got: {response:?}");
+        };
+        result
+    }
+
+    #[test]
+    fn test_semantic_tokens_env_simnet() {
+        let source = indoc! {r#"
+            (define-constant KEEP u1)
+
+            ;; #[env(simnet)]
+            (define-public (minty-fresh (amount uint) (recipient principal))
+                (begin
+                    (ok true)
+                )
+            )
+        "#};
+
+        let result = make_semantic_tokens_request(source);
+        let SemanticTokensResult::Tokens(tokens) = result.expect("Expected Some") else {
+            panic!("Expected Tokens variant");
+        };
+
+        // annotation on line 3, expression spans lines 4-8 → 6 tokens (lines 3..=8)
+        assert_eq!(tokens.data.len(), 6);
+
+        // first token: line 3 (0-indexed delta_line = 2)
+        assert_eq!(tokens.data[0].delta_line, 2);
+        assert_eq!(tokens.data[0].delta_start, 0);
+        assert_eq!(tokens.data[0].token_type, 0);
+        assert_eq!(tokens.data[0].token_modifiers_bitset, 1);
+
+        // second token: line 4 (delta from line 3 = 1)
+        assert_eq!(tokens.data[1].delta_line, 1);
+
+        // verify all tokens have the deprecated modifier
+        for token in &tokens.data {
+            assert_eq!(token.token_modifiers_bitset, 1);
+        }
+    }
+
+    #[test]
+    fn test_semantic_tokens_no_annotations() {
+        let source = "(define-read-only (get-owner) (ok tx-sender))";
+        let result = make_semantic_tokens_request(source);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_semantic_tokens_eol_annotation_ignored() {
+        let source = indoc! {r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY) ;; #[env(simnet)]
+                    (ok true)
+                )
+            )
+        "#};
+
+        let result = make_semantic_tokens_request(source);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_semantic_tokens_nested_annotation() {
+        let source = indoc! {r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                    ;; #[env(simnet)]
+                    (minty-fresh amount recipient)
+                    (ok true)
+                )
+            )
+        "#};
+
+        let result = make_semantic_tokens_request(source);
+        let SemanticTokensResult::Tokens(tokens) = result.expect("Expected Some") else {
+            panic!("Expected Tokens variant");
+        };
+
+        // annotation on line 4, expression on line 5 → 2 tokens
+        assert_eq!(tokens.data.len(), 2);
+        assert_eq!(tokens.data[0].delta_line, 3); // line 4, 0-indexed = 3
+        assert_eq!(tokens.data[1].delta_line, 1); // line 5, delta from 4 = 1
+    }
+
+    #[test]
+    fn test_semantic_tokens_multiple_annotations() {
+        let source = indoc! {r#"
+            ;; #[env(simnet)]
+            (define-constant FIRST u1)
+
+            (define-constant KEEP u2)
+
+            ;; #[env(simnet)]
+            (define-constant SECOND u3)
+        "#};
+
+        let result = make_semantic_tokens_request(source);
+        let SemanticTokensResult::Tokens(tokens) = result.expect("Expected Some") else {
+            panic!("Expected Tokens variant");
+        };
+
+        // first block: lines 1-2, second block: lines 6-7 → 4 tokens
+        assert_eq!(tokens.data.len(), 4);
+
+        // first annotation: line 1, 0-indexed = 0
+        assert_eq!(tokens.data[0].delta_line, 0);
+        // first expression: line 2, delta = 1
+        assert_eq!(tokens.data[1].delta_line, 1);
+        // second annotation: line 6, delta from line 2 (0-indexed 1) = 4
+        assert_eq!(tokens.data[2].delta_line, 4);
+        // second expression: line 7, delta = 1
+        assert_eq!(tokens.data[3].delta_line, 1);
+    }
+
+    #[tokio::test]
+    async fn test_semantic_tokens_full_cycle() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+
+            ;; #[env(simnet)]
+            (define-public (increment)
+              (ok (var-set count (+ (var-get count) u1)))
+            )
+
+            (define-public (decrement)
+              (ok (var-set count (- (var-get count) u1)))
+            )
+        "#};
+
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        // save the contract — this builds the protocol state
+        let contract_location = PathBuf::from("test.clar");
+        let notification = LspNotification::ContractSaved(contract_location);
+        process_notification(notification, &mut editor_state_input, Some(&file_accessor))
+            .await
+            .expect("Failed to process notification");
+
+        // insert the contract directly into active_contracts with the source,
+        // using an absolute path so the file:// URI round-trips correctly
+        let contract_path = get_root_path().join("contracts/test.clar");
+        editor_state_input
+            .try_write(|es| {
+                es.insert_active_contract(
+                    contract_path.clone(),
+                    ClarityVersion::Clarity3,
+                    None,
+                    source.to_string(),
+                )
+            })
+            .unwrap();
+
+        // request semantic tokens using a URI that resolves to the same path
+        let uri: ls_types::Uri = paths::path_to_url_string(&contract_path)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let params = SemanticTokensParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: ls_types::PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+        let response = process_request(LspRequest::SemanticTokensFull(params), &editor_state_input)
+            .expect("Failed to process request");
+        let LspRequestResponse::SemanticTokensFull(result) = response else {
+            panic!("Expected SemanticTokensFull response, got: {response:?}");
+        };
+
+        let Some(SemanticTokensResult::Tokens(tokens)) = result else {
+            panic!("Expected Some(Tokens), got: {result:?}");
+        };
+
+        // annotation on line 3, expression spans lines 4-6 → 4 tokens
+        assert_eq!(tokens.data.len(), 4);
+        // first token at line 3 (0-indexed delta_line = 2)
+        assert_eq!(tokens.data[0].delta_line, 2);
+        assert_eq!(tokens.data[0].token_type, 0);
+        assert_eq!(tokens.data[0].token_modifiers_bitset, 1);
+        // subsequent lines: delta = 1 each
+        assert_eq!(tokens.data[1].delta_line, 1);
+        assert_eq!(tokens.data[2].delta_line, 1);
+        assert_eq!(tokens.data[3].delta_line, 1);
     }
 }
