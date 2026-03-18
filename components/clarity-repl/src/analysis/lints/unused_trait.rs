@@ -7,7 +7,7 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
-use crate::analysis::cache::traits::TraitData;
+use crate::analysis::cache::traits::ImportedTraitData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
@@ -34,7 +34,7 @@ impl<'a, 'b> UnusedTrait<'a, 'b> {
         Ok(diagnostics)
     }
 
-    fn allow(trait_data: &TraitData, annotations: &[Annotation]) -> bool {
+    fn allow(trait_data: &ImportedTraitData, annotations: &[Annotation]) -> bool {
         trait_data
             .annotation
             .map(|idx| Self::match_allow_annotation(&annotations[idx]))
@@ -61,7 +61,7 @@ impl<'a, 'b> UnusedTrait<'a, 'b> {
 
     fn make_diagnostic(
         level: &Level,
-        trait_data: &TraitData,
+        trait_data: &ImportedTraitData,
         message: String,
         suggestion: Option<String>,
     ) -> Diagnostic {
@@ -77,7 +77,8 @@ impl<'a, 'b> UnusedTrait<'a, 'b> {
         let mut diagnostics = vec![];
 
         let annotations = self.analysis_cache.annotations;
-        let traits = self.analysis_cache.get_traits();
+        // We only check imported traits here, declared traits are never used in the same file
+        let traits = self.analysis_cache.get_imported_traits();
 
         for (name, trait_data) in traits {
             if Self::allow(trait_data, annotations) || is_explicitly_unused(name) {

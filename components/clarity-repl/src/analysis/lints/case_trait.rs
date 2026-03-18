@@ -1,4 +1,4 @@
-//! Lint to check case of trait names (imported with `use-trait`)
+//! Lint to check case of trait names (declared with `define-trait` or imported with `use-trait`)
 //!
 //! By default, this enforces kebab-case
 
@@ -8,7 +8,6 @@ use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
-use crate::analysis::cache::traits::TraitData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
@@ -35,9 +34,8 @@ impl<'a, 'b> CaseTrait<'a, 'b> {
         Ok(diagnostics)
     }
 
-    fn allow(trait_data: &TraitData, annotations: &[Annotation]) -> bool {
-        trait_data
-            .annotation
+    fn allow(annotation: Option<usize>, annotations: &[Annotation]) -> bool {
+        annotation
             .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
@@ -46,37 +44,55 @@ impl<'a, 'b> CaseTrait<'a, 'b> {
         format!("trait `{name}` is not kebab-case: {error}")
     }
 
-    fn make_diagnostic(
-        level: Level,
-        expr: &'a SymbolicExpression,
-        message: String,
-        error: &CaseError,
-    ) -> Diagnostic {
-        Diagnostic {
-            level,
+    fn check_name(
+        level: &Level,
+        name: &ClarityName,
+        expr: &SymbolicExpression,
+        annotation: Option<usize>,
+        annotations: &[Annotation],
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if Self::allow(annotation, annotations) {
+            return;
+        }
+        let Err(error) = match_kebab_case(strip_unused_suffix(name.as_str())) else {
+            return;
+        };
+        let message = Self::make_diagnostic_message(name, &error);
+        diagnostics.push(Diagnostic {
+            level: level.clone(),
             message,
             spans: vec![expr.span.clone()],
             suggestion: Some(error.suggestion()),
-        }
+        });
     }
 
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
-
         let annotations = self.analysis_cache.annotations;
-        let traits = self.analysis_cache.get_traits();
 
-        for (name, trait_data) in traits {
-            if Self::allow(trait_data, annotations) {
-                continue;
-            }
-            let Err(error) = match_kebab_case(strip_unused_suffix(name)) else {
-                continue;
-            };
-            let message = Self::make_diagnostic_message(name, &error);
-            let diagnostic =
-                Self::make_diagnostic(self.level.clone(), trait_data.expr, message, &error);
-            diagnostics.push(diagnostic);
+        let declared = self.analysis_cache.get_declared_traits();
+        for (name, data) in declared {
+            Self::check_name(
+                &self.level,
+                name,
+                data.expr,
+                data.annotation,
+                annotations,
+                &mut diagnostics,
+            );
+        }
+
+        let imported = self.analysis_cache.get_imported_traits();
+        for (name, data) in imported {
+            Self::check_name(
+                &self.level,
+                name,
+                data.expr,
+                data.annotation,
+                annotations,
+                &mut diagnostics,
+            );
         }
 
         diagnostics

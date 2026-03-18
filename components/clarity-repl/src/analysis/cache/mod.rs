@@ -14,7 +14,7 @@ use constants::{ConstantMap, ConstantMapBuilder};
 use data_vars::{DataVarMap, DataVarMapBuilder};
 use maps::{MapDefinitionMap, MapDefinitionMapBuilder};
 use tokens::{TokenMap, TokenMapBuilder, TokenMaps};
-use traits::{TraitMap, TraitMapBuilder};
+use traits::{DeclaredTraitMap, ImportedTraitMap, TraitMapBuilder, TraitMaps};
 
 use crate::analysis::annotation::Annotation;
 
@@ -29,7 +29,7 @@ pub struct AnalysisCache<'a> {
     data_vars: Option<DataVarMap<'a>>,
     maps: Option<MapDefinitionMap<'a>>,
     tokens: Option<TokenMaps<'a>>,
-    traits: Option<TraitMap<'a>>,
+    traits: Option<TraitMaps<'a>>,
 }
 
 impl<'a> AnalysisCache<'a> {
@@ -94,11 +94,19 @@ impl<'a> AnalysisCache<'a> {
         &self.get_tokens().nfts
     }
 
-    pub fn get_traits(&mut self) -> &TraitMap<'a> {
+    fn get_traits(&mut self) -> &TraitMaps<'a> {
         self.traits.get_or_insert(TraitMapBuilder::build(
             self.contract_analysis.clarity_version,
             self.contract_analysis,
             self.annotations,
         ))
+    }
+
+    pub fn get_declared_traits(&mut self) -> &DeclaredTraitMap<'a> {
+        &self.get_traits().declared
+    }
+
+    pub fn get_imported_traits(&mut self) -> &ImportedTraitMap<'a> {
+        &self.get_traits().imported
     }
 }
