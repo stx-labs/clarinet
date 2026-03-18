@@ -48,6 +48,7 @@ use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
+use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
 use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
@@ -606,6 +607,8 @@ pub fn main() {
 
     let clarinetrc = ClarinetRC::from_rc_file();
 
+    let update_handle = update_check::check_for_update_async();
+
     match opts.command {
         Command::Completions(cmd) => {
             let mut app = Opts::command();
@@ -679,13 +682,15 @@ pub fn main() {
                             println!("{}",
                                 yellow!("Enable or disable clarinet telemetry globally with this command:")
                             );
-                            println!(
-                                "{}",
-                                blue!(
-                                    "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
-                                    ClarinetRC::get_settings_file_path()
-                                )
-                            );
+                            if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+                                println!(
+                                    "{}",
+                                    blue!(
+                                        "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
+                                        settings_path.display()
+                                    )
+                                );
+                            }
                             // TODO(lgalabru): once we have a privacy policy available, add a link
                             // println!("{}", yellow!("Visit http://hiro.so/clarinet-privacy for details."));
                             println!("{}", yellow!("Enable [Y/n]?"));
@@ -1480,6 +1485,8 @@ pub fn main() {
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
     };
+
+    update_check::print_update_message(update_handle);
 }
 
 fn print_available_lints() {
@@ -2053,20 +2060,22 @@ fn display_hint_header() {
 }
 
 fn display_hint_footer() {
-    println!(
-        "{}",
-        yellow!(
-            "These hints can be disabled in the {} file.",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
-    println!(
-        "{}",
-        blue!(
-            "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
+    if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+        println!(
+            "{}",
+            yellow!(
+                "These hints can be disabled in the {} file.",
+                settings_path.display()
+            )
+        );
+        println!(
+            "{}",
+            blue!(
+                "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
+                settings_path.display()
+            )
+        );
+    }
     display_separator();
 }
 

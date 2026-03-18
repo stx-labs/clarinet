@@ -637,6 +637,7 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 name = "clarinet-cli"
 version = "3.15.0"
 dependencies = [
+ "chrono",
  "clap",
  "clap_complete",
  "clarinet-defaults",
@@ -655,8 +656,10 @@ dependencies = [
  "indoc",
  "mac_address",
  "ratatui",
+ "reqwest",
  "rpassword",
  "segment",
+ "semver",
  "serde",
  "serde_json",
  "similar",
