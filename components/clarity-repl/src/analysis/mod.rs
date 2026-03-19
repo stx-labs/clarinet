@@ -39,34 +39,10 @@ pub struct LintDiagnostic {
     pub diagnostic: Diagnostic,
 }
 
-/// Diagnostic message prefix used to tag lint names.
-const LINT_TAG_START: &str = "[";
-const LINT_TAG_END: &str = "] ";
-
 impl From<LintDiagnostic> for Diagnostic {
-    /// Convert into a plain `Diagnostic`, embedding the lint name as a
-    /// `[lint_name]` prefix in the message so it survives through boundaries
-    /// that only carry `Diagnostic` (e.g. `ExecutionResult`).
     fn from(ld: LintDiagnostic) -> Self {
-        let mut diag = ld.diagnostic;
-        if let Some(name) = ld.lint_name {
-            diag.message = format!("{LINT_TAG_START}{name}{LINT_TAG_END}{}", diag.message);
-        }
-        diag
+        ld.diagnostic
     }
-}
-
-/// Extract a `[lint_name]` tag from the start of a diagnostic message.
-///
-/// Returns `(Some(lint_name_str), rest_of_message)` if a tag is found,
-/// or `(None, original_message)` otherwise.
-pub fn extract_lint_tag(message: &str) -> (Option<&str>, &str) {
-    if let Some(rest) = message.strip_prefix(LINT_TAG_START) {
-        if let Some((tag, rest)) = rest.split_once(LINT_TAG_END) {
-            return (Some(tag), rest);
-        }
-    }
-    (None, message)
 }
 
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;

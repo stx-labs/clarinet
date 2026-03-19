@@ -4,7 +4,7 @@ use std::sync::mpsc;
 
 use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
 use clarity_lsp::utils;
-use clarity_repl::analysis::extract_lint_tag;
+use clarity_repl::analysis::linter::LintName;
 use crossbeam_channel::unbounded;
 use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 use tower_lsp_server::{LspService, Server};
@@ -59,6 +59,13 @@ pub fn clarity_diagnostics_to_tower_lsp_type(
 pub fn clarity_diagnostic_to_tower_lsp_type(
     diagnostic: &ClarityDiagnostic,
 ) -> tower_lsp_server::ls_types::Diagnostic {
+    clarity_diagnostic_to_tower_lsp_type_with_lint(diagnostic, None)
+}
+
+pub fn clarity_diagnostic_to_tower_lsp_type_with_lint(
+    diagnostic: &ClarityDiagnostic,
+    lint_name: Option<&LintName>,
+) -> tower_lsp_server::ls_types::Diagnostic {
     let range = match diagnostic.spans.len() {
         0 => Range::default(),
         _ => Range {
@@ -72,8 +79,6 @@ pub fn clarity_diagnostic_to_tower_lsp_type(
             },
         },
     };
-    // Extract lint name from the message tag and populate the LSP `code` field
-    let (lint_name, message) = extract_lint_tag(&diagnostic.message);
     let code = lint_name.map(|name| NumberOrString::String(name.to_string()));
 
     // TODO(lgalabru): add hint for contracts not found errors
@@ -87,7 +92,7 @@ pub fn clarity_diagnostic_to_tower_lsp_type(
         code,
         code_description: None,
         source: Some("clarity".to_string()),
-        message: message.to_string(),
+        message: diagnostic.message.clone(),
         related_information: None,
         tags: None,
         data: None,

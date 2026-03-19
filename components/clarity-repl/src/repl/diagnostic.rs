@@ -1,12 +1,12 @@
 use clarity::vm::diagnostic::{Diagnostic, Level};
 
-use crate::analysis::extract_lint_tag;
+use crate::analysis::linter::LintName;
 
 /// Format the level string, including the lint name if provided.
 ///
 /// With a lint name: `warning[unused_const]:`
 /// Without: `warning:`
-fn level_to_string(level: &Level, lint_name: Option<&str>) -> String {
+fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
     let level_str = match level {
         Level::Note => blue!("note"),
         Level::Warning => yellow!("warning"),
@@ -15,7 +15,7 @@ fn level_to_string(level: &Level, lint_name: Option<&str>) -> String {
     match lint_name {
         Some(name) => {
             use colored::Colorize;
-            let styled_name = name.purple().bold();
+            let styled_name = name.to_string().purple().bold();
             format!("{level_str}[{styled_name}]:")
         }
         None => format!("{level_str}:"),
@@ -24,11 +24,13 @@ fn level_to_string(level: &Level, lint_name: Option<&str>) -> String {
 
 // Generate the formatted output for this diagnostic, given the source code.
 // TODO: Preferably a filename would be saved in the Span, but for now, pass a name here.
-pub fn output_diagnostic(diagnostic: &Diagnostic, name: &str, lines: &[String]) -> Vec<String> {
+pub fn output_diagnostic(
+    diagnostic: &Diagnostic,
+    name: &str,
+    lines: &[String],
+    lint_name: Option<&LintName>,
+) -> Vec<String> {
     let mut output = Vec::new();
-
-    // Extract lint name tag from the message if present
-    let (lint_name, message) = extract_lint_tag(&diagnostic.message);
 
     if !diagnostic.spans.is_empty() {
         output.push(format!(
@@ -37,13 +39,13 @@ pub fn output_diagnostic(diagnostic: &Diagnostic, name: &str, lines: &[String]) 
             diagnostic.spans[0].start_line,
             diagnostic.spans[0].start_column,
             level_to_string(&diagnostic.level, lint_name),
-            message,
+            diagnostic.message,
         ));
     } else {
         output.push(format!(
             "{} {}",
             level_to_string(&diagnostic.level, lint_name),
-            message,
+            diagnostic.message,
         ));
     }
     output.append(&mut output_code(diagnostic, lines));
