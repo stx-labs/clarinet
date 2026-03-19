@@ -1135,4 +1135,153 @@ mod lsp_tests {
         assert_eq!(end_line1, &Value::from(21));
         assert_eq!(end_column1, &Value::from(10));
     }
+
+    fn get_env_simnet_diags(source: &str) -> Vec<ls_types::Diagnostic> {
+        let EditorStateInput::Owned(es) = create_test_editor_state(source.to_owned()) else {
+            panic!("expected Owned");
+        };
+        let result = es.get_env_simnet_diagnostics();
+        result.into_iter().flat_map(|(_, diags)| diags).collect()
+    }
+
+    #[test]
+    fn test_env_simnet_diagnostics_top_level() {
+        let source = indoc! {r#"
+            (define-public (mint (amount uint)) (ok true))
+
+            ;; #[env(simnet)]
+            (define-public (minty-fresh (amount uint) (recipient principal))
+                (begin
+                    (ft-mint? drachma amount recipient)
+                )
+            )
+        "#};
+
+        let diags = get_env_simnet_diags(source);
+        assert_eq!(diags.len(), 1);
+        let d = &diags[0];
+        assert_eq!(d.severity, Some(ls_types::DiagnosticSeverity::HINT));
+        assert_eq!(
+            d.tags.as_ref().unwrap(),
+            &[ls_types::DiagnosticTag::UNNECESSARY]
+        );
+        // annotation starts on line 3 (0-indexed: 2), block ends on line 8 (0-indexed: 7)
+        assert_eq!(d.range.start.line, 2);
+        assert_eq!(d.range.end.line, 7);
+    }
+
+    #[test]
+    fn test_env_simnet_diagnostics_no_annotations() {
+        let source = "(define-read-only (get-owner) (ok tx-sender))";
+        let diags = get_env_simnet_diags(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_env_simnet_diagnostics_eol_ignored() {
+        let source = indoc! {r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY) ;; #[env(simnet)]
+                    (ok true)
+                )
+            )
+        "#};
+
+        let diags = get_env_simnet_diags(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_env_simnet_diagnostics_nested() {
+        let source = indoc! {r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                    ;; #[env(simnet)]
+                    (minty-fresh amount recipient)
+                    (ok true)
+                )
+            )
+        "#};
+
+        let diags = get_env_simnet_diags(source);
+        assert_eq!(diags.len(), 1);
+        // annotation on line 4 (0-indexed: 3), expression on line 5 (0-indexed: 4)
+        assert_eq!(diags[0].range.start.line, 3);
+        assert_eq!(diags[0].range.end.line, 4);
+    }
+
+    #[test]
+    fn test_env_simnet_diagnostics_multiple() {
+        let source = indoc! {r#"
+            ;; #[env(simnet)]
+            (define-constant FIRST u1)
+
+            (define-constant KEEP u2)
+
+            ;; #[env(simnet)]
+            (define-constant SECOND u3)
+        "#};
+
+        let diags = get_env_simnet_diags(source);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].range.start.line, 0);
+        assert_eq!(diags[0].range.end.line, 1);
+        assert_eq!(diags[1].range.start.line, 5);
+        assert_eq!(diags[1].range.end.line, 6);
+    }
+
+    #[tokio::test]
+    async fn test_env_simnet_diagnostics_full_cycle() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+
+            ;; #[env(simnet)]
+            (define-public (increment)
+              (ok (var-set count (+ (var-get count) u1)))
+            )
+
+            (define-public (decrement)
+              (ok (var-set count (- (var-get count) u1)))
+            )
+        "#};
+
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state = EditorState::new();
+
+        // Simulate the contract being opened first (populates active_contracts)
+        // Use an absolute path so the file:// URI round-trips correctly
+        let contract_path = get_root_path().join("contracts/test.clar");
+        editor_state.insert_active_contract(
+            contract_path,
+            ClarityVersion::Clarity3,
+            None,
+            source.to_string(),
+        );
+        let mut editor_state_input = EditorStateInput::Owned(editor_state);
+
+        // ContractSaved builds the protocol state and collects env_simnet diagnostics
+        let notification = LspNotification::ContractSaved(PathBuf::from("test.clar"));
+        let response =
+            process_notification(notification, &mut editor_state_input, Some(&file_accessor))
+                .await
+                .expect("Failed to process notification");
+
+        // Should have env_simnet diagnostics for the annotated block
+        assert!(
+            !response.env_simnet_diagnostics.is_empty(),
+            "Expected env_simnet_diagnostics to be populated"
+        );
+        let (_, diags) = &response.env_simnet_diagnostics[0];
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Some(ls_types::DiagnosticSeverity::HINT));
+        assert_eq!(
+            diags[0].tags.as_ref().unwrap(),
+            &[ls_types::DiagnosticTag::UNNECESSARY]
+        );
+        // annotation on line 3 (0-indexed: 2), block ends on line 6 (0-indexed: 5)
+        assert_eq!(diags[0].range.start.line, 2);
+        assert_eq!(diags[0].range.end.line, 5);
+    }
 }
