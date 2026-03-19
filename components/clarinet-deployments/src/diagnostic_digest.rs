@@ -2,10 +2,27 @@ use std::collections::HashMap;
 
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::types::QualifiedContractIdentifier;
+use clarity_repl::analysis::extract_lint_tag;
 use clarity_repl::repl::diagnostic::output_code;
 use colored::Colorize;
 
 use crate::types::DeploymentSpecification;
+
+/// Format the diagnostic level with an optional lint name.
+///
+/// With a lint name: `warning[unused_const]:`
+/// Without: `warning:`
+fn level_string(level: &Level, lint_name: Option<&str>) -> String {
+    let level_str = match level {
+        Level::Error => "error".red().bold(),
+        Level::Warning => "warning".yellow().bold(),
+        Level::Note => "note".blue().bold(),
+    };
+    match lint_name {
+        Some(name) => format!("{}[{}]:", level_str, name.purple().bold()),
+        None => format!("{level_str}:"),
+    }
+}
 
 #[allow(dead_code)]
 pub struct DiagnosticsDigest {
@@ -49,21 +66,31 @@ impl DiagnosticsDigest {
             let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
 
             for diagnostic in diags {
+                let (lint_name, message) = extract_lint_tag(&diagnostic.message);
+
                 match diagnostic.level {
                     Level::Error => {
                         errors += 1;
-                        outputs.push(format!("{} {}", "error:".red().bold(), diagnostic.message));
+                        outputs.push(format!(
+                            "{} {}",
+                            level_string(&diagnostic.level, lint_name),
+                            message
+                        ));
                     }
                     Level::Warning => {
                         warnings += 1;
                         outputs.push(format!(
                             "{} {}",
-                            "warning:".yellow().bold(),
-                            diagnostic.message
+                            level_string(&diagnostic.level, lint_name),
+                            message
                         ));
                     }
                     Level::Note => {
-                        outputs.push(format!("{}: {}", "note:".blue().bold(), diagnostic.message));
+                        outputs.push(format!(
+                            "{} {}",
+                            level_string(&diagnostic.level, lint_name),
+                            message
+                        ));
                         outputs.append(&mut output_code(diagnostic, &formatted_lines));
                         continue;
                     }
