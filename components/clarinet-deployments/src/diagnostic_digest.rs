@@ -19,7 +19,7 @@ fn level_string(level: &Level, lint_name: Option<&str>) -> String {
         Level::Note => "note".blue().bold(),
     };
     match lint_name {
-        Some(name) => format!("{}[{}]:", level_str, name.purple().bold()),
+        Some(name) => format!("{level_str}[{}]:", name.purple().bold()),
         None => format!("{level_str}:"),
     }
 }
@@ -72,24 +72,21 @@ impl DiagnosticsDigest {
                     Level::Error => {
                         errors += 1;
                         outputs.push(format!(
-                            "{} {}",
+                            "{} {message}",
                             level_string(&diagnostic.level, lint_name),
-                            message
                         ));
                     }
                     Level::Warning => {
                         warnings += 1;
                         outputs.push(format!(
-                            "{} {}",
+                            "{} {message}",
                             level_string(&diagnostic.level, lint_name),
-                            message
                         ));
                     }
                     Level::Note => {
                         outputs.push(format!(
-                            "{} {}",
+                            "{} {message}",
                             level_string(&diagnostic.level, lint_name),
-                            message
                         ));
                         outputs.append(&mut output_code(diagnostic, &formatted_lines));
                         continue;
