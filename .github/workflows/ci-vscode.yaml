@@ -1,0 +1,100 @@
+name: CI - VSCode Extension
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**/CHANGELOG.md"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/CHANGELOG.md"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel previous runs for the same workflow
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  sanity_check:
+    name: Sanity checks
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-Dwarnings"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy --target wasm32-unknown-unknown
+
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          target-cache-key: ${{ runner.os }}-${{ github.job }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        working-directory: ./components/clarity-vscode
+        run: npm ci
+
+      - name: Run clippy (wasm target)
+        run: cargo clippy --target=wasm32-unknown-unknown --no-default-features --package=clarity-lsp
+
+      - name: Run eslint
+        working-directory: ./components/clarity-vscode
+        run: npm run lint
+
+  build_and_test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    needs: sanity_check
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        env:
+          WASM_PACK_VERSION: "0.14.0"
+          WASM_PACK_SHA256: "278a8d668085821f4d1a637bd864f1713f872b0ae3a118c77562a308c0abfe8d"
+        run: |
+          curl -fsSL "https://github.com/drager/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" -o wasm-pack.tar.gz
+          echo "${WASM_PACK_SHA256}  wasm-pack.tar.gz" | sha256sum -c -
+          tar xzf wasm-pack.tar.gz
+          mv "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack" /usr/local/bin/
+          rm -rf wasm-pack.tar.gz "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl"
+
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          target-cache-key: ${{ runner.os }}-${{ github.job }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        working-directory: ./components/clarity-vscode
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ./components/clarity-vscode
+        run: npm test

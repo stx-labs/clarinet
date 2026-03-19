@@ -1,4 +1,4 @@
-use clarity_repl::clarity::SymbolicExpression;
+use clarity::vm::SymbolicExpression;
 use ls_types::Position;
 
 use super::api_ref::API_REF;

@@ -54,6 +54,11 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::AtBlock => lints::AtBlock::run_pass,
             LintName::CaseBinding => lints::CaseBinding::run_pass,
             LintName::CaseConst => lints::CaseConst::run_pass,
+            LintName::CaseDataVar => lints::CaseDataVar::run_pass,
+            LintName::CaseFn => lints::CaseFn::run_pass,
+            LintName::CaseMap => lints::CaseMap::run_pass,
+            LintName::CaseToken => lints::CaseToken::run_pass,
+            LintName::CaseTrait => lints::CaseTrait::run_pass,
             LintName::ErrorConst => lints::ErrorConst::run_pass,
             LintName::Noop => lints::NoopChecker::run_pass,
             LintName::Panic => lints::PanicChecker::run_pass,
@@ -162,6 +167,15 @@ impl Settings {
 
     pub fn disable_all_lints(&mut self) {
         self.lints.clear();
+    }
+
+    pub fn disable_all_passes(&mut self) {
+        self.passes.clear();
+    }
+
+    pub fn disable_all(&mut self) {
+        self.disable_all_lints();
+        self.disable_all_passes();
     }
 }
 
@@ -337,5 +351,27 @@ mod tests {
         let settings = Settings::from(file);
         assert!(!settings.lints.is_empty());
         assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
+    }
+
+    #[test]
+    fn disable_all_clears_lints_and_passes() {
+        let mut settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert!(!settings.passes.is_empty());
+
+        settings.disable_all();
+        assert!(settings.lints.is_empty());
+        assert!(settings.passes.is_empty());
+    }
+
+    #[test]
+    fn disable_all_passes_preserves_lints() {
+        let mut settings = Settings::from(SettingsFile::default());
+        assert!(!settings.lints.is_empty());
+        assert!(!settings.passes.is_empty());
+
+        settings.disable_all_passes();
+        assert!(!settings.lints.is_empty(), "lints should be preserved");
+        assert!(settings.passes.is_empty());
     }
 }

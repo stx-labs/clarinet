@@ -97,6 +97,15 @@ pub fn match_kebab_case(s: &str) -> Result<(), CaseError> {
     Ok(())
 }
 
+/// Strips the trailing `_` suffix used to mark explicitly unused identifiers.
+/// Returns the name unchanged if it does not end with `_`.
+///
+/// This should be called before case-checking so that `my-var_` is validated
+/// as `my-var` rather than failing on the underscore.
+pub fn strip_unused_suffix(s: &str) -> &str {
+    s.strip_suffix('_').unwrap_or(s)
+}
+
 /// Returns true if identifier matches our convention for explicity unused code
 ///
 /// An identifier is considered explicilty unused and ignored by `LintGroup::Unused` lints if...

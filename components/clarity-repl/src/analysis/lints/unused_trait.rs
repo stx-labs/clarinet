@@ -2,109 +2,47 @@
 //!
 //! A trait is considered unused if there is no public or read-only function parameter with the trait type
 
-use std::collections::HashMap;
-
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
-use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
-use clarity::vm::representations::Span;
-use clarity::vm::{ClarityVersion, SymbolicExpression, SymbolicExpressionType};
-use clarity_types::types::TraitIdentifier;
 use clarity_types::ClarityName;
 
-use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
-use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
+use crate::analysis::cache::traits::ImportedTraitData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-struct UnusedTraitSettings {
-    // TODO
-}
-
-impl UnusedTraitSettings {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-/// Data on trait usage
-struct TraitUsage<'a> {
-    /// Keep track of where trait was imported with `use-trait`
-    expr: &'a SymbolicExpression,
-    /// Has this trait appeared a function signature inside `declare-trait`?
-    pub declare_trait: bool,
-    /// Has this trait appeared in the arg list of a public function?
-    pub public_fn: bool,
-    /// Has this trait appeared in the arg list of a read-only function?
-    pub read_only_fn: bool,
-    /// Has this trait appeared in the arg list of a private function?
-    pub private_fn: bool,
-}
-
-pub struct UnusedTrait<'a> {
-    clarity_version: ClarityVersion,
-    _settings: UnusedTraitSettings,
-    annotations: &'a Vec<Annotation>,
-    active_annotation: Option<usize>,
+pub struct UnusedTrait<'a, 'b>
+where
+    'b: 'a,
+{
+    analysis_cache: &'a mut AnalysisCache<'b>,
     level: Level,
-    traits: HashMap<&'a ClarityName, TraitUsage<'a>>,
 }
 
-impl<'a> TraitUsage<'a> {
-    fn new(expr: &'a SymbolicExpression) -> Self {
+impl<'a, 'b> UnusedTrait<'a, 'b> {
+    fn new(analysis_cache: &'a mut AnalysisCache<'b>, level: Level) -> UnusedTrait<'a, 'b> {
         Self {
-            expr,
-            declare_trait: false,
-            public_fn: false,
-            read_only_fn: false,
-            private_fn: false,
-        }
-    }
-}
-
-impl<'a> UnusedTrait<'a> {
-    fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
-        level: Level,
-        settings: UnusedTraitSettings,
-    ) -> UnusedTrait<'a> {
-        Self {
-            clarity_version,
-            _settings: settings,
+            analysis_cache,
             level,
-            annotations,
-            active_annotation: None,
-            traits: HashMap::new(),
         }
     }
 
-    fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
-        // Traverse the entire AST
-        traverse(&mut self, &contract_analysis.expressions);
-
-        // Process hashmap of unused constants and generate diagnostics
+    fn run(&mut self) -> AnalysisResult {
         let diagnostics = self.generate_diagnostics();
-
         Ok(diagnostics)
     }
 
-    // Check for annotations that should be attached to the given span
-    fn set_active_annotation(&mut self, span: &Span) {
-        self.active_annotation = get_index_of_span(self.annotations, span);
-    }
-
-    // Check if the expression is annotated with `allow(<lint_name>)`
-    fn allow(&self) -> bool {
-        self.active_annotation
-            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+    fn allow(trait_data: &ImportedTraitData, annotations: &[Annotation]) -> bool {
+        trait_data
+            .annotation
+            .map(|idx| Self::match_allow_annotation(&annotations[idx]))
             .unwrap_or(false)
     }
 
     /// Make diagnostic message and suggestion for unused trait
-    fn make_diagnostic_strings_unused(name: &ClarityName) -> (String, Option<String>) {
+    pub(crate) fn make_diagnostic_strings_unused(name: &ClarityName) -> (String, Option<String>) {
         (
             format!("imported trait `{name}` is never used"),
             Some("Remove this expression".to_string()),
@@ -112,7 +50,9 @@ impl<'a> UnusedTrait<'a> {
     }
 
     /// Make diagnostic message and suggestion if trait is only used in private function
-    fn make_diagnostic_strings_private_fn_only(name: &ClarityName) -> (String, Option<String>) {
+    pub(crate) fn make_diagnostic_strings_private_fn_only(
+        name: &ClarityName,
+    ) -> (String, Option<String>) {
         (
             format!("imported trait `{name}` only appears in private functions, so cannot be used"),
             Some("Remove this expression".to_string()),
@@ -120,15 +60,15 @@ impl<'a> UnusedTrait<'a> {
     }
 
     fn make_diagnostic(
-        &self,
-        expr: &'a SymbolicExpression,
+        level: &Level,
+        trait_data: &ImportedTraitData,
         message: String,
         suggestion: Option<String>,
     ) -> Diagnostic {
         Diagnostic {
-            level: self.level.clone(),
+            level: level.clone(),
             message,
-            spans: vec![expr.span.clone()],
+            spans: vec![trait_data.expr.span.clone()],
             suggestion,
         }
     }
@@ -136,243 +76,48 @@ impl<'a> UnusedTrait<'a> {
     fn generate_diagnostics(&mut self) -> Vec<Diagnostic> {
         let mut diagnostics = vec![];
 
-        for (name, usage) in &self.traits {
-            if is_explicitly_unused(name) {
+        let annotations = self.analysis_cache.annotations;
+        // We only check imported traits here, declared traits are never used in the same file
+        let traits = self.analysis_cache.get_imported_traits();
+
+        for (name, trait_data) in traits {
+            if Self::allow(trait_data, annotations) || is_explicitly_unused(name) {
                 continue;
             }
-            let used_in = (
-                usage.declare_trait,
-                usage.public_fn,
-                usage.read_only_fn,
-                usage.private_fn,
-            );
-            let (message, suggestion) = match used_in {
-                (true, _, _, _) | (_, true, _, _) | (_, _, true, _) => continue,
-                (false, false, false, true) => Self::make_diagnostic_strings_private_fn_only(name),
-                (false, false, false, false) => Self::make_diagnostic_strings_unused(name),
+
+            let (message, suggestion) = if trait_data.is_used() {
+                continue;
+            } else if trait_data.is_private_fn_only() {
+                Self::make_diagnostic_strings_private_fn_only(name)
+            } else {
+                Self::make_diagnostic_strings_unused(name)
             };
-            let diagnostic = self.make_diagnostic(usage.expr, message, suggestion);
-            diagnostics.push(diagnostic);
+
+            diagnostics.push(Self::make_diagnostic(
+                &self.level,
+                trait_data,
+                message,
+                suggestion,
+            ));
         }
 
-        // Order the sets by the span of the error (the first diagnostic)
-        diagnostics.sort_by(|a, b| a.spans[0].cmp(&b.spans[0]));
         diagnostics
     }
-
-    /// Search a symbolic expression for a trait object, and fun `func` on associated `TraitUsage` struct`
-    fn process_symbolic_expr(
-        &mut self,
-        expr: &SymbolicExpression,
-        func: fn(&mut TraitUsage) -> (),
-    ) {
-        use SymbolicExpressionType::*;
-
-        match &expr.expr {
-            TraitReference(name, _) => {
-                self.traits.get_mut(name).map(func);
-            }
-            List(exprs) => {
-                for expr in exprs {
-                    self.process_symbolic_expr(expr, func);
-                }
-            }
-            Field(_) | AtomValue(_) | Atom(_) | LiteralValue(_) => {}
-        }
-    }
-
-    /// Search parameter list for a trait object, and fun `func` on associated `TraitUsage` struct`
-    fn process_param_list(&mut self, params: &[TypedVar], func: fn(&mut TraitUsage) -> ()) {
-        for param in params {
-            self.process_symbolic_expr(param.type_expr, func);
-        }
-    }
 }
 
-impl<'a> ASTVisitor<'a> for UnusedTrait<'a> {
-    fn get_clarity_version(&self) -> &ClarityVersion {
-        &self.clarity_version
-    }
-
-    fn visit_use_trait(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        _trait_identifier: &clarity_types::types::TraitIdentifier,
-    ) -> bool {
-        self.set_active_annotation(&expr.span);
-
-        if !self.allow() {
-            self.traits.insert(name, TraitUsage::new(expr));
-        }
-
-        true
-    }
-
-    /// Override so that we only traverse the params, and not the entire function
-    fn traverse_define_read_only(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        parameters: Option<Vec<TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        self.visit_define_read_only(expr, name, parameters, body)
-    }
-
-    fn visit_define_read_only(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        parameters: Option<Vec<TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
-    ) -> bool {
-        if let Some(params) = parameters {
-            self.process_param_list(&params, |usage| usage.read_only_fn = true);
-        }
-        true
-    }
-
-    /// Override so that we only traverse the params, and not the entire function
-    fn traverse_define_public(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        parameters: Option<Vec<TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        self.visit_define_public(expr, name, parameters, body)
-    }
-
-    fn visit_define_public(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        parameters: Option<Vec<TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
-    ) -> bool {
-        if let Some(params) = parameters {
-            self.process_param_list(&params, |usage| usage.public_fn = true);
-        }
-        true
-    }
-
-    fn traverse_define_private(
-        &mut self,
-        expr: &'a SymbolicExpression,
-        name: &'a ClarityName,
-        parameters: Option<Vec<TypedVar<'a>>>,
-        body: &'a SymbolicExpression,
-    ) -> bool {
-        self.visit_define_private(expr, name, parameters, body)
-    }
-
-    fn visit_define_private(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        parameters: Option<Vec<TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
-    ) -> bool {
-        if let Some(params) = parameters {
-            self.process_param_list(&params, |usage| usage.private_fn = true);
-        }
-        true
-    }
-
-    fn visit_define_trait(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        functions: &'a [SymbolicExpression],
-    ) -> bool {
-        for expr in functions {
-            self.process_symbolic_expr(expr, |usage| usage.declare_trait = true);
-        }
-        true
-    }
-
-    /// Skip, not relevant to this lint
-    fn traverse_define_constant(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        _value: &'a SymbolicExpression,
-    ) -> bool {
-        true
-    }
-
-    /// Skip, not relevant to this lint
-    fn traverse_define_nft(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        _nft_type: &'a SymbolicExpression,
-    ) -> bool {
-        true
-    }
-
-    /// Skip, not relevant to this lint
-    fn traverse_define_ft(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        _supply: Option<&'a SymbolicExpression>,
-    ) -> bool {
-        true
-    }
-
-    /// Skip, not relevant to this lint
-    fn traverse_define_map(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        _key_type: &'a SymbolicExpression,
-        _value_type: &'a SymbolicExpression,
-    ) -> bool {
-        true
-    }
-
-    /// Skip, not relevant to this lint
-    fn traverse_define_data_var(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _name: &'a ClarityName,
-        _data_type: &'a SymbolicExpression,
-        _initial: &'a SymbolicExpression,
-    ) -> bool {
-        true
-    }
-
-    /// Skip, not relevant to this lint
-    fn traverse_impl_trait(
-        &mut self,
-        _expr: &'a SymbolicExpression,
-        _trait_identifier: &TraitIdentifier,
-    ) -> bool {
-        true
-    }
-}
-
-impl AnalysisPass for UnusedTrait<'_> {
+impl<'a, 'b> AnalysisPass for UnusedTrait<'a, 'b> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let settings = UnusedTraitSettings::new();
-        let lint = UnusedTrait::new(
-            analysis_cache.contract_analysis.clarity_version,
-            analysis_cache.annotations,
-            level,
-            settings,
-        );
-        lint.run(analysis_cache.contract_analysis)
+        let mut lint = UnusedTrait::new(analysis_cache, level);
+        lint.run()
     }
 }
 
-impl Lint for UnusedTrait<'_> {
+impl Lint for UnusedTrait<'_, '_> {
     fn get_name() -> LintName {
         LintName::UnusedTrait
     }

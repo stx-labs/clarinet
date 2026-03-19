@@ -4,7 +4,7 @@ use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use strum::{EnumString, VariantArray};
+use strum::{EnumMessage, EnumString, VariantArray};
 
 use crate::analysis::annotation::Annotation;
 
@@ -19,6 +19,7 @@ use crate::analysis::annotation::Annotation;
     Deserialize,
     Hash,
     VariantArray,
+    EnumMessage,
     EnumString,
     strum::Display,
 )]
@@ -27,20 +28,45 @@ use crate::analysis::annotation::Annotation;
 #[strum(serialize_all = "snake_case")]
 pub enum LintName {
     // Keep sorted alphabetically
+    /// Warn about usage of deprecated `at-block`
     AtBlock,
+    /// Enforce kebab-case for bindings
     CaseBinding,
+    /// Enforce SCREAMING_SNAKE_CASE for constants
     CaseConst,
+    /// Enforce kebab-case for data variables
+    CaseDataVar,
+    /// Enforce kebab-case for function names
+    CaseFn,
+    /// Enforce kebab-case for maps
+    CaseMap,
+    /// Enforce kebab-case for FT and NFT names
+    CaseToken,
+    /// Enforce kebab-case for trait names
+    CaseTrait,
+    /// Check that ERR_ constants are unique and use `(err ...)` values
     ErrorConst,
+    /// Find expressions that have no effect
     Noop,
+    /// Warn about `unwrap-panic` and `unwrap-err-panic`
     Panic,
+    /// Find unnecessary `as-max-len?` calls
     UnnecessaryAsMaxLen,
+    /// Find public functions that could be read-only
     UnnecessaryPublic,
+    /// Find unused variable bindings
     UnusedBinding,
+    /// Find unused constants
     UnusedConst,
+    /// Find unused data variables
     UnusedDataVar,
+    /// Find unused maps
     UnusedMap,
+    /// Find unused private functions
     UnusedPrivateFn,
+    /// Find unused tokens
     UnusedToken,
+    /// Find unused traits
     UnusedTrait,
 }
 
@@ -55,7 +81,18 @@ impl TryFrom<String> for LintName {
 
 /// Represents a set of linter passes
 #[derive(
-    Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, Hash, VariantArray, EnumString,
+    Debug,
+    PartialEq,
+    Eq,
+    Copy,
+    Clone,
+    Serialize,
+    Deserialize,
+    Hash,
+    VariantArray,
+    EnumMessage,
+    EnumString,
+    strum::Display,
 )]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case", try_from = "String")]
@@ -74,6 +111,14 @@ pub enum LintGroup {
 }
 
 impl LintGroup {
+    /// Find all groups a lint belongs to (excluding `All`)
+    pub fn of(lint: &LintName) -> Vec<&'static Self> {
+        LintGroup::VARIANTS
+            .iter()
+            .filter(|g| !matches!(g, LintGroup::All) && g.lints().contains(lint))
+            .collect()
+    }
+
     /// Returns lints which belong to group
     pub fn lints(&self) -> &[LintName] {
         use LintGroup::*;
@@ -87,7 +132,15 @@ impl LintGroup {
                 LintName::Noop,
                 LintName::Panic,
             ],
-            Style => &[LintName::CaseBinding, LintName::CaseConst],
+            Style => &[
+                LintName::CaseBinding,
+                LintName::CaseConst,
+                LintName::CaseDataVar,
+                LintName::CaseFn,
+                LintName::CaseMap,
+                LintName::CaseToken,
+                LintName::CaseTrait,
+            ],
             Unused => &[
                 LintName::UnusedConst,
                 LintName::UnusedDataVar,
@@ -210,9 +263,28 @@ mod tests {
         for lint in LintName::VARIANTS {
             assert!(
                 lints.contains_key(lint),
-                "{} is not part of any `LintGroup` variant",
-                lint
+                "{lint} is not part of any `LintGroup` variant"
             )
+        }
+    }
+
+    #[test]
+    fn all_lints_have_documentation() {
+        for lint in LintName::VARIANTS {
+            assert!(
+                lint.get_documentation().is_some(),
+                "LintName::{lint} is missing a doc comment"
+            );
+        }
+    }
+
+    #[test]
+    fn all_lint_groups_have_documentation() {
+        for group in LintGroup::VARIANTS {
+            assert!(
+                group.get_documentation().is_some(),
+                "LintGroup::{group} is missing a doc comment"
+            );
         }
     }
 }

@@ -119,7 +119,7 @@ fn strip_env_simnet_exprs(exprs: &[PreSymbolicExpression], lines: &mut [Option<&
     let mut found_env_simnet = false;
     let mut global_found = false;
 
-    for expr in exprs {
+    for (idx, expr) in exprs.iter().enumerate() {
         // remove the annotation comment and the next non-comment expression
         if found_env_simnet {
             for i in expr.span.start_line..=expr.span.end_line {
@@ -133,10 +133,19 @@ fn strip_env_simnet_exprs(exprs: &[PreSymbolicExpression], lines: &mut [Option<&
 
         if let Comment(comment) = &expr.pre_expr {
             if let Ok(AnnotationKind::Env(_)) = AnnotationKind::from_str(comment) {
-                found_env_simnet = true;
-                global_found = true;
-                for i in expr.span.start_line..=expr.span.end_line {
-                    lines[(i - 1) as usize] = None;
+                // ignore the annotation if there is a non-comment expression before it
+                // on the same line (i.e. it's an end-of-line comment, not its own line)
+                let annotation_line = expr.span.start_line;
+                let is_eol_comment = exprs[..idx].iter().any(|prev| {
+                    prev.span.end_line == annotation_line && !matches!(prev.pre_expr, Comment(_))
+                });
+
+                if !is_eol_comment {
+                    found_env_simnet = true;
+                    global_found = true;
+                    for i in expr.span.start_line..=expr.span.end_line {
+                        lines[(i - 1) as usize] = None;
+                    }
                 }
             }
         }
@@ -237,5 +246,23 @@ mod tests {
             remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
         assert_eq!(clean, without_env_simnet);
         assert!(found);
+    }
+
+    #[test]
+    fn ignores_eol_env_simnet_annotation() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY) ;; #[env(simnet)]
+                    (ok true)
+                )
+            )
+        "#);
+
+        let (clean, found) =
+            remove_env_simnet(source.to_string()).expect("remove_env_simnet failed");
+        assert_eq!(clean, source);
+        assert!(!found);
     }
 }

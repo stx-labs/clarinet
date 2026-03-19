@@ -696,7 +696,7 @@ impl Session {
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let contract_identifier =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
@@ -747,7 +747,7 @@ impl Session {
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let contract_identifier =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
@@ -1640,7 +1640,7 @@ mod tests {
             deployer: ContractDeployer::Address("ST000000000000000000002AMW42H".into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: Epoch::Specific(StacksEpochId::Epoch2_05),
-            is_requirement: false,
+            skip_analysis: false,
         };
 
         let result = session.deploy_contract(&contract, false, None);
@@ -1723,7 +1723,7 @@ mod tests {
             deployer: ContractDeployer::Address("ST000000000000000000002AMW42H".into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: Epoch::Specific(StacksEpochId::Epoch25),
-            is_requirement: false,
+            skip_analysis: false,
         };
 
         let _ = session.deploy_contract(&contract, false, None);

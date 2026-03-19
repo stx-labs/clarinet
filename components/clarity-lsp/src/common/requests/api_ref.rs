@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use clarity_repl::clarity::docs::{
+use clarity::vm::docs::{
     make_api_reference, make_define_reference, make_keyword_reference, FunctionAPI,
 };
-use clarity_repl::clarity::functions::define::DefineFunctions;
-use clarity_repl::clarity::functions::NativeFunctions;
-use clarity_repl::clarity::variables::NativeVariables;
-use clarity_repl::clarity::ClarityVersion;
+use clarity::vm::functions::define::DefineFunctions;
+use clarity::vm::functions::NativeFunctions;
+use clarity::vm::variables::NativeVariables;
+use clarity::vm::ClarityVersion;
 
 fn code(code: &str) -> String {
     ["```clarity", code.trim(), "```"].join("\n")

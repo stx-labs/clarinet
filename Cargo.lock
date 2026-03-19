@@ -637,6 +637,7 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 name = "clarinet-cli"
 version = "3.15.0"
 dependencies = [
+ "chrono",
  "clap",
  "clap_complete",
  "clarinet-defaults",
@@ -644,6 +645,7 @@ dependencies = [
  "clarinet-files",
  "clarinet-format",
  "clarinet-utils",
+ "clarity",
  "clarity-lsp",
  "clarity-repl",
  "colored",
@@ -654,12 +656,15 @@ dependencies = [
  "indoc",
  "mac_address",
  "ratatui",
+ "reqwest",
  "rpassword",
  "segment",
+ "semver",
  "serde",
  "serde_json",
  "similar",
  "stacks-network",
+ "strum",
  "tempfile",
  "tikv-jemallocator",
  "tokio",
@@ -805,6 +810,7 @@ version = "3.15.0"
 dependencies = [
  "clap",
  "clarinet-files",
+ "clarity",
  "clarity-repl",
  "serde",
  "serde_json",

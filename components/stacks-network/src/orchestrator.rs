@@ -22,7 +22,7 @@ use bollard::Docker;
 use clarinet_deployments::types::BurnchainEpochConfig;
 use clarinet_files::{
     DevnetConfig, DevnetConfigFile, NetworkManifest, ProjectManifest, StacksNetwork,
-    DEFAULT_DOCKER_PLATFORM,
+    DEFAULT_DOCKER_PLATFORM, DEFAULT_POX_PREPARE_LENGTH, DEFAULT_POX_REWARD_LENGTH,
 };
 use clarity::types::chainstate::StacksPrivateKey;
 use clarity::types::PrivateKey;
@@ -945,8 +945,8 @@ impl DevnetOrchestrator {
             mode = "krypton"
             magic_bytes = "T3"
             first_burn_block_height = 100
-            pox_prepare_length = 5
-            pox_reward_length = 20
+            pox_prepare_length = {pox_prepare_length}
+            pox_reward_length = {pox_reward_length}
             burn_fee_cap = 20_000
             poll_time_secs = 1
             timeout = 2
@@ -958,6 +958,8 @@ impl DevnetOrchestrator {
             rpc_port = {orchestrator_ingestion_port}
             peer_port = {bitcoin_node_p2p_port}
             "#,
+            pox_prepare_length = DEFAULT_POX_PREPARE_LENGTH,
+            pox_reward_length = DEFAULT_POX_REWARD_LENGTH,
             bitcoin_node_username = devnet_config.bitcoin_node_username,
             bitcoin_node_password = devnet_config.bitcoin_node_password,
             bitcoin_node_p2p_port = devnet_config.bitcoin_node_p2p_port,

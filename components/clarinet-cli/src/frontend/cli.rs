@@ -24,13 +24,15 @@ use clarinet_files::{
     StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
+use clarity::types::StacksEpochId;
+use clarity::vm::analysis::AnalysisDatabase;
+use clarity::vm::costs::LimitedCostTracker;
+use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::types::QualifiedContractIdentifier;
+use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
-use clarity_repl::clarity::vm::analysis::AnalysisDatabase;
-use clarity_repl::clarity::vm::costs::LimitedCostTracker;
-use clarity_repl::clarity::vm::diagnostic::Diagnostic;
-use clarity_repl::clarity::vm::types::QualifiedContractIdentifier;
-use clarity_repl::clarity::{ClarityVersion, StacksEpochId};
+use clarity_repl::analysis::linter::{LintGroup, LintName};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -41,10 +43,12 @@ use clarity_repl::utils::CHECK_ENVIRONMENTS;
 use clarity_repl::{analysis, repl};
 use serde::Serialize;
 use stacks_network::{self, DevnetOrchestrator};
+use strum::{EnumMessage, VariantArray};
 use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
+use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
 use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
@@ -558,6 +562,9 @@ struct Check {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
+    /// List available lints and lint groups
+    #[clap(long = "show-lints")]
+    pub show_lints: bool,
     /// Set the output format
     #[clap(long = "output", default_value = "standard")]
     pub output_format: OutputFormat,
@@ -599,6 +606,8 @@ pub fn main() {
     };
 
     let clarinetrc = ClarinetRC::from_rc_file();
+
+    let update_handle = update_check::check_for_update_async();
 
     match opts.command {
         Command::Completions(cmd) => {
@@ -673,13 +682,15 @@ pub fn main() {
                             println!("{}",
                                 yellow!("Enable or disable clarinet telemetry globally with this command:")
                             );
-                            println!(
-                                "{}",
-                                blue!(
-                                    "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
-                                    ClarinetRC::get_settings_file_path()
-                                )
-                            );
+                            if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+                                println!(
+                                    "{}",
+                                    blue!(
+                                        "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
+                                        settings_path.display()
+                                    )
+                                );
+                            }
                             // TODO(lgalabru): once we have a privacy policy available, add a link
                             // println!("{}", yellow!("Visit http://hiro.so/clarinet-privacy for details."));
                             println!("{}", yellow!("Enable [Y/n]?"));
@@ -1112,6 +1123,7 @@ pub fn main() {
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
                             cmd.use_computed_deployment_plan,
+                            false,
                             Environment::Simnet,
                         );
 
@@ -1186,6 +1198,9 @@ pub fn main() {
                 display_contract_new_hint(None);
             }
         }
+        Command::Check(cmd) if cmd.show_lints => {
+            print_available_lints();
+        }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
             let mut settings = repl::SessionSettings {
@@ -1210,7 +1225,7 @@ pub fn main() {
                 name: "transient".to_string(),
                 clarity_version: ClarityVersion::default_for_epoch(epoch),
                 epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                is_requirement: false,
+                skip_analysis: false,
             };
             let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
             let (annotations, mut annotation_diagnostics) = session
@@ -1285,6 +1300,7 @@ pub fn main() {
                         &cmd.deployment_plan_path,
                         cmd.use_on_disk_deployment_plan,
                         cmd.use_computed_deployment_plan,
+                        true,
                         environment,
                     );
                 global_found_env_simnet |= found_env_simnet;
@@ -1469,6 +1485,48 @@ pub fn main() {
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
     };
+
+    update_check::print_update_message(update_handle);
+}
+
+fn print_available_lints() {
+    println!("Lint groups:");
+    println!();
+    for group in LintGroup::VARIANTS {
+        println!(
+            "  {group:<12} {}",
+            group.get_documentation().unwrap_or_default()
+        );
+    }
+
+    println!();
+    println!("Lints:");
+    println!();
+    for lint in LintName::VARIANTS {
+        let groups: Vec<_> = LintGroup::of(lint)
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+        let groups = format!("[{}]", groups.join(", "));
+        println!(
+            "  {lint:<28} {groups:<12} {}",
+            lint.get_documentation().unwrap_or_default()
+        );
+    }
+
+    indoc::printdoc! {r#"
+
+        Configure lints in Clarinet.toml:
+
+          [repl.analysis.lint_groups]
+          style = "warning"
+
+          [repl.analysis.lints]
+          unused_const = "error"
+          at_block = false
+
+        Suppress a lint in source code with: ;; #[allow(lint_name)]
+    "#};
 }
 
 fn overwrite_formatted(file_path: &str, output: &str) -> io::Result<()> {
@@ -1538,6 +1596,7 @@ pub fn load_deployment_and_artifacts_or_exit(
     deployment_plan_path: &Option<String>,
     force_on_disk: bool,
     force_computed: bool,
+    enable_analysis: bool,
     environment: Environment,
 ) -> (
     (
@@ -1564,7 +1623,12 @@ pub fn load_deployment_and_artifacts_or_exit(
                     if environment == Environment::OnChain {
                         found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
                     }
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     Ok((deployment, None, artifacts))
                 }
                 None => {
@@ -1581,6 +1645,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                             manifest,
                             &mut deployment,
                             Some(&ast_artifacts.asts),
+                            enable_analysis,
                         );
                         for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
                             // Merge parser's diags with analysis' diags.
@@ -1604,7 +1669,12 @@ pub fn load_deployment_and_artifacts_or_exit(
                     if environment == Environment::OnChain {
                         found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
                     }
-                    let artifacts = setup_session_with_deployment(manifest, &mut deployment, None);
+                    let artifacts = setup_session_with_deployment(
+                        manifest,
+                        &mut deployment,
+                        None,
+                        enable_analysis,
+                    );
                     (
                         deployment,
                         Some(deployment_location.to_string_lossy().to_string()),
@@ -1990,20 +2060,22 @@ fn display_hint_header() {
 }
 
 fn display_hint_footer() {
-    println!(
-        "{}",
-        yellow!(
-            "These hints can be disabled in the {} file.",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
-    println!(
-        "{}",
-        blue!(
-            "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
+    if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+        println!(
+            "{}",
+            yellow!(
+                "These hints can be disabled in the {} file.",
+                settings_path.display()
+            )
+        );
+        println!(
+            "{}",
+            blue!(
+                "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
+                settings_path.display()
+            )
+        );
+    }
     display_separator();
 }
 
@@ -2299,7 +2371,7 @@ mod tests {
                 deployer: ContractDeployer::DefaultDeployer,
                 clarity_version: ClarityVersion::Clarity2,
                 epoch: Epoch::Latest,
-                is_requirement: false,
+                skip_analysis: false,
             }
         }
 
@@ -2774,8 +2846,8 @@ mod tests {
                 name: "special".to_string(),
                 deployer: ContractDeployer::LabeledDeployer("wallet_1".to_string()),
                 clarity_version: ClarityVersion::Clarity3,
-                epoch: Epoch::Specific(clarity_repl::clarity::StacksEpochId::Epoch25),
-                is_requirement: false,
+                epoch: Epoch::Specific(StacksEpochId::Epoch25),
+                skip_analysis: false,
             };
 
             add_contract_to_doc(&mut doc, "special", &contract);
@@ -2982,7 +3054,7 @@ mod tests {
 
     #[test]
     fn test_check_json_output() {
-        use clarity_repl::clarity::vm::diagnostic::Level as DiagnosticLevel;
+        use clarity::vm::diagnostic::Level as DiagnosticLevel;
 
         let snippet = indoc::indoc! {"
             (define-constant A u1)
@@ -3008,7 +3080,7 @@ mod tests {
             name: "transient".to_string(),
             clarity_version: ClarityVersion::default_for_epoch(epoch),
             epoch: clarity_repl::repl::Epoch::Specific(epoch),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let (ast, mut diagnostics, mut success) = session.interpreter.build_ast(&contract);
         let (annotations, mut annotation_diagnostics) = session

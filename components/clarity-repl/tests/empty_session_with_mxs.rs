@@ -383,7 +383,7 @@ mod test_mxs_session_test {
             deployer: repl::ContractDeployer::Address(deployer.into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_ok());
@@ -420,7 +420,7 @@ mod test_mxs_session_test {
             deployer: repl::ContractDeployer::Address(deployer.into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch24),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_ok());
@@ -469,7 +469,7 @@ mod test_mxs_session_test {
             deployer: repl::ContractDeployer::Address(deployer.into()),
             clarity_version: ClarityVersion::Clarity2,
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
-            is_requirement: false,
+            skip_analysis: false,
         };
         let result = session.deploy_contract(&contract, false, None);
         assert!(result.is_ok());
