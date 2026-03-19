@@ -13,7 +13,11 @@ fn level_to_string(level: &Level, lint_name: Option<&str>) -> String {
         Level::Error => red!("error"),
     };
     match lint_name {
-        Some(name) => format!("{level_str}[{name}]:"),
+        Some(name) => {
+            use colored::Colorize;
+            let styled_name = name.purple().bold();
+            format!("{level_str}[{styled_name}]:")
+        }
         None => format!("{level_str}:"),
     }
 }
