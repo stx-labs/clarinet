@@ -206,7 +206,7 @@ mod tests {
         let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unset(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -227,7 +227,7 @@ mod tests {
         let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unread(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -248,7 +248,7 @@ mod tests {
         let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unused(&var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }

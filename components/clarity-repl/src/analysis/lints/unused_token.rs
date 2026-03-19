@@ -172,7 +172,7 @@ mod tests {
         let expected_message = UnusedToken::make_diagnostic_message_ft(&ft_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(ft_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -256,7 +256,7 @@ mod tests {
         let expected_message = UnusedToken::make_diagnostic_message_nft(&nft_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(nft_name));
         assert!(output[0].contains(&expected_message));
     }

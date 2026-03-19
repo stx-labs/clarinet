@@ -227,7 +227,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -252,7 +252,7 @@ mod tests {
                 );
 
                 assert_eq!(result.diagnostics.len(), 1);
-                assert!(output[0].contains("warning:"));
+                assert!(output[0].contains("warning["));
                 assert!(output[0].contains(const_name));
                 assert!(output[0].contains(&expected_message));
             }
@@ -278,7 +278,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -299,7 +299,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -324,7 +324,7 @@ mod tests {
                 );
 
                 assert_eq!(result.diagnostics.len(), 1);
-                assert!(output[0].contains("warning:"));
+                assert!(output[0].contains("warning["));
                 assert!(output[0].contains(const_name));
                 assert!(output[0].contains(&expected_message));
             }

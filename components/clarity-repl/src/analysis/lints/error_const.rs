@@ -266,7 +266,7 @@ mod tests {
         let expected_message = ErrorConst::make_not_err_message(&const_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -284,7 +284,7 @@ mod tests {
         let expected_message = ErrorConst::make_not_err_message(&const_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -302,7 +302,7 @@ mod tests {
         let expected_message = ErrorConst::make_duplicate_message(&"ERR_B".into(), &"ERR_A".into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(&expected_message));
     }
 
@@ -320,7 +320,7 @@ mod tests {
         let expected_message = ErrorConst::make_duplicate_message(&"ERR_C".into(), &"ERR_A".into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(&expected_message));
     }
 

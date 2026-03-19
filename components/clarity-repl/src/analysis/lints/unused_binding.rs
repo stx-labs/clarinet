@@ -220,7 +220,7 @@ mod tests {
             UnusedBinding::make_diagnostic_strings(BindingType::FunctionArg, &var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -327,7 +327,7 @@ mod tests {
             UnusedBinding::make_diagnostic_strings(BindingType::LetBinding, &var_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }

@@ -170,7 +170,7 @@ mod tests {
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'_'));
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -189,7 +189,7 @@ mod tests {
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'B'));
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -208,7 +208,7 @@ mod tests {
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'U'));
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -227,7 +227,7 @@ mod tests {
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::ConsecutiveHyphens);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
     }

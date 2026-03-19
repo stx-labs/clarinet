@@ -542,7 +542,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("could be declared as `define-read-only`"));
     }
 

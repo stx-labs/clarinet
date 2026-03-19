@@ -261,7 +261,7 @@ mod tests {
             UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -288,7 +288,7 @@ mod tests {
             UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -360,7 +360,7 @@ mod tests {
         let (expected_message, _) = UnusedTrait::make_diagnostic_strings_unused(&trait_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }

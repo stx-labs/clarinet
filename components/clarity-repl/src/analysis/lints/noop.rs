@@ -720,7 +720,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`is-eq` with a single operand always returns `true`"));
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
@@ -743,7 +743,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`+` with fewer than 2 operands has no effect"));
     }
 
@@ -762,7 +762,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`and` with fewer than 2 operands has no effect"));
     }
 
@@ -837,7 +837,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`or` with fewer than 2 operands has no effect"));
     }
 
@@ -856,7 +856,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`-` with fewer than 2 operands has no effect"));
     }
 
@@ -889,7 +889,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("comparing with `true` is unnecessary"));
     }
 
@@ -918,7 +918,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("comparing with `false` is unnecessary, use `not` instead"));
     }
 
@@ -933,7 +933,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("double negation is unnecessary"));
     }
 
@@ -1286,7 +1286,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            "`true` is the identity element for `and` and has no effect"
+            "[noop] `true` is the identity element for `and` and has no effect"
         );
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
@@ -1307,7 +1307,7 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            "`false` is the identity element for `or` and has no effect"
+            "[noop] `false` is the identity element for `or` and has no effect"
         );
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
@@ -2007,11 +2007,11 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 2);
         assert_eq!(
             result.diagnostics[0].message,
-            "dividing zero always evaluates to `u0`"
+            "[noop] dividing zero always evaluates to `u0`"
         );
         assert_eq!(
             result.diagnostics[1].message,
-            "division by zero will cause a runtime error"
+            "[noop] division by zero will cause a runtime error"
         );
     }
 
@@ -2029,11 +2029,11 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 2);
         assert_eq!(
             result.diagnostics[0].message,
-            "dividing zero always evaluates to `u0`"
+            "[noop] dividing zero always evaluates to `u0`"
         );
         assert_eq!(
             result.diagnostics[1].message,
-            "dividing by one has no effect"
+            "[noop] dividing by one has no effect"
         );
     }
 
