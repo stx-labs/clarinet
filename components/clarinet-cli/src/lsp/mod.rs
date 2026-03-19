@@ -6,9 +6,7 @@ use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityL
 use clarity_lsp::utils;
 use clarity_repl::analysis::extract_lint_tag;
 use crossbeam_channel::unbounded;
-use tower_lsp_server::ls_types::{
-    Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range,
-};
+use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 use tower_lsp_server::{LspService, Server};
 
 use self::native_bridge::LspNativeBridge;
