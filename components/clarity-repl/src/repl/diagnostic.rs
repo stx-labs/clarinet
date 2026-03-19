@@ -1,32 +1,45 @@
 use clarity::vm::diagnostic::{Diagnostic, Level};
 
-fn level_to_string(level: &Level) -> String {
-    match level {
-        Level::Note => blue!("note:"),
-        Level::Warning => yellow!("warning:"),
-        Level::Error => red!("error:"),
+use crate::analysis::extract_lint_tag;
+
+/// Format the level string, including the lint name if provided.
+///
+/// With a lint name: `warning[unused_const]:`
+/// Without: `warning:`
+fn level_to_string(level: &Level, lint_name: Option<&str>) -> String {
+    let level_str = match level {
+        Level::Note => blue!("note"),
+        Level::Warning => yellow!("warning"),
+        Level::Error => red!("error"),
+    };
+    match lint_name {
+        Some(name) => format!("{level_str}[{name}]:"),
+        None => format!("{level_str}:"),
     }
-    .to_string()
 }
 
 // Generate the formatted output for this diagnostic, given the source code.
 // TODO: Preferably a filename would be saved in the Span, but for now, pass a name here.
 pub fn output_diagnostic(diagnostic: &Diagnostic, name: &str, lines: &[String]) -> Vec<String> {
     let mut output = Vec::new();
+
+    // Extract lint name tag from the message if present
+    let (lint_name, message) = extract_lint_tag(&diagnostic.message);
+
     if !diagnostic.spans.is_empty() {
         output.push(format!(
             "{}:{}:{}: {} {}",
             name, // diagnostic.spans[0].filename,
             diagnostic.spans[0].start_line,
             diagnostic.spans[0].start_column,
-            level_to_string(&diagnostic.level),
-            diagnostic.message,
+            level_to_string(&diagnostic.level, lint_name),
+            message,
         ));
     } else {
         output.push(format!(
             "{} {}",
-            level_to_string(&diagnostic.level),
-            diagnostic.message,
+            level_to_string(&diagnostic.level, lint_name),
+            message,
         ));
     }
     output.append(&mut output_code(diagnostic, lines));

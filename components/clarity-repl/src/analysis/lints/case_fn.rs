@@ -221,7 +221,7 @@ mod tests {
             CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'_'));
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -241,7 +241,7 @@ mod tests {
             CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'B'));
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -261,7 +261,7 @@ mod tests {
             CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'D'));
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
     }

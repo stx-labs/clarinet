@@ -305,7 +305,12 @@ impl ClarityInterpreter {
                 annotations,
                 &self.repl_settings.analysis,
             )
-            .map_err(|mut diagnostics| diagnostics.pop().unwrap())?
+            .map(|lds| {
+                lds.into_iter()
+                    .map(|ld| ld.into_diagnostic())
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|mut lds| lds.pop().unwrap().into_diagnostic())?
         } else {
             vec![]
         };

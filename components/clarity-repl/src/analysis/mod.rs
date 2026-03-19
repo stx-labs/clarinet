@@ -29,6 +29,46 @@ use crate::analysis::annotation::Annotation;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::LintGroup;
 
+/// A `Diagnostic` paired with the `LintName` that produced it (if any).
+///
+/// Non-lint analysis passes (e.g. `CheckChecker`) produce diagnostics with
+/// `lint_name: None`.
+#[derive(Debug, Clone)]
+pub struct LintDiagnostic {
+    pub lint_name: Option<LintName>,
+    pub diagnostic: Diagnostic,
+}
+
+/// Diagnostic message prefix used to tag lint names.
+const LINT_TAG_START: &str = "[";
+const LINT_TAG_END: &str = "] ";
+
+impl LintDiagnostic {
+    /// Convert into a plain `Diagnostic`, embedding the lint name as a
+    /// `[lint_name]` prefix in the message so it survives through boundaries
+    /// that only carry `Diagnostic` (e.g. `ExecutionResult`).
+    pub fn into_diagnostic(self) -> Diagnostic {
+        let mut diag = self.diagnostic;
+        if let Some(name) = self.lint_name {
+            diag.message = format!("{LINT_TAG_START}{name}{LINT_TAG_END}{}", diag.message);
+        }
+        diag
+    }
+}
+
+/// Extract a `[lint_name]` tag from the start of a diagnostic message.
+///
+/// Returns `(Some(lint_name_str), rest_of_message)` if a tag is found,
+/// or `(None, original_message)` otherwise.
+pub fn extract_lint_tag(message: &str) -> (Option<&str>, &str) {
+    if let Some(rest) = message.strip_prefix(LINT_TAG_START) {
+        if let Some((tag, rest)) = rest.split_once(LINT_TAG_END) {
+            return (Some(tag), rest);
+        }
+    }
+    (None, message)
+}
+
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
     &mut AnalysisDatabase,
@@ -265,30 +305,42 @@ pub fn run_analysis(
     analysis_db: &mut AnalysisDatabase,
     annotations: &Vec<Annotation>,
     settings: &Settings,
-) -> AnalysisResult {
-    let mut errors: Vec<Diagnostic> = vec![];
-    let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel)> = vec![];
+) -> Result<Vec<LintDiagnostic>, Vec<LintDiagnostic>> {
+    let mut errors: Vec<LintDiagnostic> = vec![];
 
+    // Collect non-lint analysis passes (no lint name)
+    let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel, Option<LintName>)> = vec![];
     for pass in &settings.passes {
         let f = AnalysisPassFn::try_from(pass).unwrap();
-        passes.push((f, pass.default_level()));
+        passes.push((f, pass.default_level(), None));
     }
 
+    // Collect lint passes (with lint name)
     for (name, level) in &settings.lints {
         let lint = AnalysisPassFn::from(name);
-        passes.push((lint, level.clone()));
+        passes.push((lint, level.clone(), Some(*name)));
     }
 
     // Create shared cache for all passes/lints
     let mut cache = AnalysisCache::new(contract_analysis, annotations);
 
     execute(analysis_db, |database| {
-        for (pass, level) in passes {
+        for (pass, level, lint_name) in passes {
+            let wrap = |diagnostics: Vec<Diagnostic>| -> Vec<LintDiagnostic> {
+                diagnostics
+                    .into_iter()
+                    .map(|d| LintDiagnostic {
+                        lint_name,
+                        diagnostic: d,
+                    })
+                    .collect()
+            };
+
             // Collect warnings and continue, or if there is an error, return.
             match pass(database, &mut cache, level, settings) {
-                Ok(mut w) => errors.append(&mut w),
-                Err(mut e) => {
-                    errors.append(&mut e);
+                Ok(w) => errors.extend(wrap(w)),
+                Err(e) => {
+                    errors.extend(wrap(e));
                     return Err(errors);
                 }
             }

@@ -1241,18 +1241,21 @@ pub fn main() {
                 contract.clarity_version,
             );
             let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-            let mut analysis_diagnostics = match analysis::run_analysis(
+            let mut analysis_diagnostics: Vec<_> = match analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,
                 &annotations,
                 &settings.repl_settings.analysis,
             ) {
-                Ok(diagnostics) => diagnostics,
-                Err(diagnostics) => {
+                Ok(lint_diags) => lint_diags,
+                Err(lint_diags) => {
                     success = false;
-                    diagnostics
+                    lint_diags
                 }
-            };
+            }
+            .into_iter()
+            .map(|ld| ld.into_diagnostic())
+            .collect();
             diagnostics.append(&mut analysis_diagnostics);
 
             match cmd.output_format {
@@ -3096,18 +3099,21 @@ mod tests {
             contract.clarity_version,
         );
         let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-        let mut analysis_diagnostics = match analysis::run_analysis(
+        let mut analysis_diagnostics: Vec<_> = match analysis::run_analysis(
             &mut contract_analysis,
             &mut analysis_db,
             &annotations,
             &settings.repl_settings.analysis,
         ) {
-            Ok(diagnostics) => diagnostics,
-            Err(diagnostics) => {
+            Ok(lint_diags) => lint_diags,
+            Err(lint_diags) => {
                 success = false;
-                diagnostics
+                lint_diags
             }
-        };
+        }
+        .into_iter()
+        .map(|ld| ld.into_diagnostic())
+        .collect();
         diagnostics.append(&mut analysis_diagnostics);
 
         let filename = "test-contract.clar".to_string();

@@ -174,7 +174,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -195,7 +195,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -216,7 +216,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -235,7 +235,7 @@ mod tests {
             CaseDataVar::make_diagnostic_message(&var_name.into(), &CaseError::ConsecutiveHyphens);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
     }

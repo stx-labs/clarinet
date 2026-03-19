@@ -219,7 +219,7 @@ mod tests {
 
         // Only square-plus-one should warn; square is "used" by square-plus-one
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -260,7 +260,7 @@ mod tests {
         let (expected_message, _) = UnusedPrivateFn::make_diagnostic_strings(&fn_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
     }

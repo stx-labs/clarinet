@@ -186,9 +186,12 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
+            format!(
+                "[unnecessary_as_max_len] {}",
+                UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
+            )
         );
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -205,9 +208,12 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(5, 5)
+            format!(
+                "[unnecessary_as_max_len] {}",
+                UnnecessaryAsMaxLen::make_diagnostic_message(5, 5)
+            )
         );
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -238,9 +244,12 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(8, 20)
+            format!(
+                "[unnecessary_as_max_len] {}",
+                UnnecessaryAsMaxLen::make_diagnostic_message(8, 20)
+            )
         );
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -257,9 +266,12 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
+            format!(
+                "[unnecessary_as_max_len] {}",
+                UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
+            )
         );
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -276,9 +288,12 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
+            format!(
+                "[unnecessary_as_max_len] {}",
+                UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
+            )
         );
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -310,9 +325,12 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(
             result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
+            format!(
+                "[unnecessary_as_max_len] {}",
+                UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
+            )
         );
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]

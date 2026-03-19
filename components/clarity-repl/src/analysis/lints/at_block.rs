@@ -149,7 +149,7 @@ mod tests {
         ").to_string();
 
         let output = run_snippet(snippet);
-        assert!(output.iter().any(|line| line.contains("warning:")));
+        assert!(output.iter().any(|line| line.contains("warning[")));
         assert!(output.iter().any(|line| line.contains("at-block")));
     }
 
@@ -167,6 +167,6 @@ mod tests {
         ").to_string();
 
         let output = run_snippet(snippet);
-        assert!(!output.iter().any(|line| line.contains("warning:")));
+        assert!(!output.iter().any(|line| line.contains("warning[")));
     }
 }

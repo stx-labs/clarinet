@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use clarinet_files::paths;
 use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
-use ls_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity, Position, Range, Uri};
+use clarity_repl::analysis::extract_lint_tag;
+use ls_types::{
+    Diagnostic as LspDiagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
+};
 
 #[allow(unused_macros)]
 #[cfg(target_arch = "wasm32")]
@@ -37,6 +40,11 @@ pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiag
             },
         },
     };
+
+    // Extract lint name from the message tag and populate the LSP `code` field
+    let (lint_name, message) = extract_lint_tag(&diagnostic.message);
+    let code = lint_name.map(|name| NumberOrString::String(name.to_string()));
+
     // TODO(lgalabru): add hint for contracts not found errors
     LspDiagnostic {
         range,
@@ -45,10 +53,10 @@ pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiag
             ClarityLevel::Warning => Some(DiagnosticSeverity::WARNING),
             ClarityLevel::Note => Some(DiagnosticSeverity::INFORMATION),
         },
-        code: None,
+        code,
         code_description: None,
         source: Some("clarity".to_string()),
-        message: diagnostic.message.clone(),
+        message: message.to_string(),
         related_information: None,
         tags: None,
         data: None,
