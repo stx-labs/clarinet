@@ -96,7 +96,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
-    env: Option<&clarity::vm::contexts::Environment>,
+    env: Option<&clarity::vm::contexts::ContractContext>,
 ) -> Result<StaticCost, StaticCostError> {
     // Derive clarity_version from epoch for lookup_reserved_functions
     let clarity_version = ClarityVersion::default_for_epoch(epoch);

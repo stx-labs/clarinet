@@ -2,10 +2,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
 
 use clarity::vm::ast::build_ast_with_diagnostics;
-use clarity::vm::contexts::{Environment, LocalContext};
+use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::contracts::Contract;
 use clarity::vm::diagnostic::Level;
-use clarity::vm::errors::VmExecutionError;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{eval, ClarityVersion, ContractName, SymbolicExpressionType};
@@ -320,7 +319,8 @@ impl DebugState {
 
     fn evaluate(
         &mut self,
-        env: &mut Environment,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
         context: &LocalContext,
         snippet: &str,
     ) -> Result<Value, Vec<String>> {
@@ -349,7 +349,9 @@ impl DebugState {
             return Err(errors);
         }
 
-        eval(&ast.expressions[0], env, context).map_err(|e| vec![format_err!(e)])
+        eval(&ast.expressions[0], env, invoke_ctx, context)
+            .and_then(|value| value.clone_with_cost(env))
+            .map_err(|e| vec![format_err!(e)])
     }
 
     fn did_hit_source_breakpoint(
@@ -458,7 +460,7 @@ impl DebugState {
     // it should wait for input (false).
     fn will_begin_eval(
         &mut self,
-        env: &mut Environment,
+        invoke_ctx: &InvocationContext,
         _context: &LocalContext,
         expr: &SymbolicExpression,
     ) -> bool {
@@ -470,8 +472,8 @@ impl DebugState {
         }
 
         // Check if we have hit a source breakpoint
-        if let Some(breakpoint) =
-            self.did_hit_source_breakpoint(&env.contract_context.contract_identifier, &expr.span)
+        if let Some(breakpoint) = self
+            .did_hit_source_breakpoint(&invoke_ctx.contract_context.contract_identifier, &expr.span)
         {
             self.active_breakpoints.insert(breakpoint);
             let top = self.stack.last_mut().unwrap();
@@ -487,7 +489,7 @@ impl DebugState {
         };
 
         if let Some((watchpoint, access_type)) =
-            self.did_hit_data_breakpoint(&env.contract_context.contract_identifier, expr)
+            self.did_hit_data_breakpoint(&invoke_ctx.contract_context.contract_identifier, expr)
         {
             self.state = State::DataBreak(watchpoint, access_type);
         }
@@ -513,13 +515,7 @@ impl DebugState {
     }
 
     // Returns a bool which indicates if the result should be printed (finish)
-    fn did_finish_eval(
-        &mut self,
-        _env: &mut Environment,
-        _context: &LocalContext,
-        expr: &SymbolicExpression,
-        _res: &Result<Value, VmExecutionError>,
-    ) -> bool {
+    fn did_finish_eval(&mut self, expr: &SymbolicExpression) -> bool {
         let state = self.stack.pop().unwrap();
         assert_eq!(state.id, expr.id);
 
@@ -540,7 +536,8 @@ impl DebugState {
 }
 
 pub fn extract_watch_variable<'a>(
-    env: &mut Environment,
+    env: &mut ExecutionState,
+    invoke_ctx: &InvocationContext,
     expr: &'a str,
     default_sender: Option<&StandardPrincipalData>,
 ) -> Result<(Contract, &'a str), String> {
@@ -554,7 +551,10 @@ pub fn extract_watch_variable<'a>(
             if default_sender.is_some() {
                 return Err("must use qualified name".to_string());
             } else {
-                (env.contract_context.contract_identifier.clone(), parts[0])
+                (
+                    invoke_ctx.contract_context.contract_identifier.clone(),
+                    parts[0],
+                )
             }
         }
         3 => {
@@ -563,7 +563,11 @@ pub fn extract_watch_variable<'a>(
                     QualifiedContractIdentifier::new(sender.clone(), ContractName::from(parts[1]))
                 } else {
                     QualifiedContractIdentifier::new(
-                        env.contract_context.contract_identifier.issuer.clone(),
+                        invoke_ctx
+                            .contract_context
+                            .contract_identifier
+                            .issuer
+                            .clone(),
                         ContractName::from(parts[1]),
                     )
                 }

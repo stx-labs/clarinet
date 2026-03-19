@@ -7,7 +7,9 @@ use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast_with_diagnostics, ContractAST};
-use clarity::vm::contexts::{CallStack, ContractContext, Environment, GlobalContext, LocalContext};
+use clarity::vm::contexts::{
+    CallStack, ContractContext, ExecutionState, GlobalContext, InvocationContext, LocalContext,
+};
 use clarity::vm::contracts::Contract;
 use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::{ClarityBackingStore, ClarityDatabase, StoreType};
@@ -431,14 +433,16 @@ impl ClarityInterpreter {
             if contract_ast.expressions.len() == 1 && !snippet.contains("(define-") {
                 let context = LocalContext::new();
                 let mut call_stack = CallStack::new();
-                let mut env = Environment::new(
-                    g,
-                    &contract_context,
-                    &mut call_stack,
-                    Some(tx_sender.clone()),
-                    Some(tx_sender.clone()),
-                    None,
-                );
+                let invoke_ctx = InvocationContext {
+                    contract_context: &contract_context,
+                    sender: Some(tx_sender.clone()),
+                    caller: Some(tx_sender.clone()),
+                    sponsor: None,
+                };
+                let mut env = ExecutionState {
+                    global_context: g,
+                    call_stack: &mut call_stack,
+                };
 
                 // call a function
                 if let List(expression) = &contract_ast.expressions[0].expr {
@@ -455,7 +459,8 @@ impl ClarityInterpreter {
                             let method = expression[2].match_atom().unwrap().to_string();
                             let mut args = vec![];
                             for arg in expression[3..].iter() {
-                                let evaluated_arg = eval(arg, &mut env, &context)?;
+                                let evaluated_arg = eval(arg, &mut env, &invoke_ctx, &context)
+                                    .and_then(|v| v.clone_with_cost(&mut env))?;
                                 args.push(evaluated_arg);
                             }
 
@@ -466,7 +471,13 @@ impl ClarityInterpreter {
                                 .iter()
                                 .map(|a| SymbolicExpression::atom_value(a.clone()))
                                 .collect();
-                            let res = env.execute_contract(&contract_id, &method, &args, false)?;
+                            let res = env.execute_contract(
+                                &invoke_ctx,
+                                &contract_id,
+                                &method,
+                                &args,
+                                false,
+                            )?;
 
                             #[cfg(not(target_arch = "wasm32"))]
                             if show_timings {
@@ -481,7 +492,13 @@ impl ClarityInterpreter {
                 #[cfg(not(target_arch = "wasm32"))]
                 let start = std::time::Instant::now();
 
-                let result = eval(&contract_ast.expressions[0], &mut env, &context);
+                let result = eval(
+                    &contract_ast.expressions[0],
+                    &mut env,
+                    &invoke_ctx,
+                    &context,
+                )
+                .and_then(|v| v.clone_with_cost(&mut env));
 
                 #[cfg(not(target_arch = "wasm32"))]
                 if show_timings {
@@ -633,18 +650,26 @@ impl ClarityInterpreter {
         global_context.begin();
         let result = global_context.execute(|g| {
             let mut call_stack = CallStack::new();
-            let mut env = Environment::new(
-                g,
-                &contract_context,
-                &mut call_stack,
-                Some(tx_sender.clone()),
-                Some(tx_sender.clone()),
-                None,
-            );
+            let invoke_ctx = InvocationContext {
+                contract_context: &contract_context,
+                sender: Some(tx_sender.clone()),
+                caller: Some(tx_sender.clone()),
+                sponsor: None,
+            };
+            let mut env = ExecutionState {
+                global_context: g,
+                call_stack: &mut call_stack,
+            };
 
             match allow_private {
-                true => env.execute_contract_allow_private(contract_id, method, args, false),
-                false => env.execute_contract(contract_id, method, args, false),
+                true => env.execute_contract_allow_private(
+                    &invoke_ctx,
+                    contract_id,
+                    method,
+                    args,
+                    false,
+                ),
+                false => env.execute_contract(&invoke_ctx, contract_id, method, args, false),
             }
         });
 
