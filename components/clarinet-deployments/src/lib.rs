@@ -21,7 +21,7 @@ use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_DEPOSIT_MAINNET_ADDRESS,
     SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_MAINNET_ADDRESS,
 };
-use clarity_repl::repl::session::ExecutionResultMap;
+use clarity_repl::repl::session::{AnnotatedExecutionResult, ExecutionResultMap};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
@@ -73,7 +73,8 @@ pub fn setup_session_with_deployment(
     let mut success = true;
     for (contract_id, res) in contracts.into_iter() {
         match res {
-            Ok(execution_result) => {
+            Ok(annotated) => {
+                let execution_result = annotated.into_inner();
                 diags.insert(contract_id.clone(), execution_result.diagnostics);
                 if let EvaluationResult::Contract(contract_result) = execution_result.result {
                     results_values.insert(contract_id.clone(), contract_result.result);
@@ -247,7 +248,7 @@ fn handle_emulated_contract_publish(
     tx: &EmulatedContractPublishSpecification,
     contract_ast: Option<&ContractAST>,
     epoch: StacksEpochId,
-) -> Result<ExecutionResult, Vec<Diagnostic>> {
+) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.emulated_sender.to_string());
 
@@ -1036,7 +1037,7 @@ mod tests {
         name: &str,
         source: &str,
         epoch: StacksEpochId,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let emulated_publish_spec = EmulatedContractPublishSpecification {
             contract_name: ContractName::from(name),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
