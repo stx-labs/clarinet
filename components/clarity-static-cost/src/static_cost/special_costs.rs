@@ -283,13 +283,13 @@ fn resolve_data_var_type<'a>(
 /// Resolve key and value TypeSignatures for a map, trying environment first then user context.
 fn resolve_map_types(
     args: &[SymbolicExpression],
-    env: Option<&clarity::vm::contexts::Environment>,
+    env: Option<&clarity::vm::contexts::ContractContext>,
     user_args: Option<&UserArgumentsContext>,
 ) -> Option<(TypeSignature, TypeSignature)> {
     let map_name = args.first().and_then(|arg| arg.match_atom())?;
 
     // Try environment first
-    if let Some(map_metadata) = env.and_then(|e| e.contract_context.meta_data_map.get(map_name)) {
+    if let Some(map_metadata) = env.and_then(|e| e.meta_data_map.get(map_name)) {
         return Some((
             map_metadata.key_type.clone(),
             map_metadata.value_type.clone(),
@@ -306,7 +306,7 @@ pub fn get_cost_for_special_function(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
     user_args: Option<&UserArgumentsContext>,
-    env: Option<&clarity::vm::contexts::Environment>,
+    env: Option<&clarity::vm::contexts::ContractContext>,
 ) -> StaticCost {
     match native_function {
         NativeFunctions::Let => {
@@ -749,7 +749,7 @@ pub fn cost_set_var(
 pub fn cost_fetch_entry(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
-    env: Option<&clarity::vm::contexts::Environment>,
+    env: Option<&clarity::vm::contexts::ContractContext>,
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // FetchEntry args: [map-name, key]
@@ -786,7 +786,7 @@ pub fn cost_fetch_entry(
 pub fn cost_set_entry(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
-    env: Option<&clarity::vm::contexts::Environment>,
+    env: Option<&clarity::vm::contexts::ContractContext>,
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // SetEntry args: [map-name, key, value]
@@ -839,7 +839,7 @@ pub fn cost_set_entry(
 pub fn cost_insert_entry(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
-    env: Option<&clarity::vm::contexts::Environment>,
+    env: Option<&clarity::vm::contexts::ContractContext>,
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // InsertEntry uses the same cost calculation as SetEntry
@@ -851,7 +851,7 @@ pub fn cost_insert_entry(
 pub fn cost_delete_entry(
     args: &[SymbolicExpression],
     epoch: StacksEpochId,
-    env: Option<&clarity::vm::contexts::Environment>,
+    env: Option<&clarity::vm::contexts::ContractContext>,
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // DeleteEntry uses the same cost calculation as SetEntry

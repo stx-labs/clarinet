@@ -203,23 +203,25 @@ impl CoverageHook {
 impl EvalHook for CoverageHook {
     fn will_begin_eval(
         &mut self,
-        env: &mut clarity::vm::Environment,
+        _env: &mut clarity::vm::contexts::ExecutionState,
+        invoke_ctx: &clarity::vm::contexts::InvocationContext,
         _context: &clarity::vm::LocalContext,
         expr: &SymbolicExpression,
     ) {
-        let contract = &env.contract_context.contract_identifier;
+        let contract = &invoke_ctx.contract_context.contract_identifier;
         let mut contract_report = self.contracts_coverage.remove(contract).unwrap_or_default();
         report_eval(&mut contract_report, expr);
         self.contracts_coverage
             .insert(contract.clone(), contract_report);
     }
 
-    fn did_finish_eval(
+    fn did_finish_eval<'a>(
         &mut self,
-        _env: &mut clarity::vm::Environment,
-        _context: &clarity::vm::LocalContext,
+        _env: &mut clarity::vm::contexts::ExecutionState,
+        _invoke_ctx: &'a clarity::vm::contexts::InvocationContext,
+        _context: &'a clarity::vm::LocalContext,
         _expr: &SymbolicExpression,
-        _res: &Result<clarity::vm::Value, VmExecutionError>,
+        _res: &Result<clarity::vm::ValueRef<'a>, VmExecutionError>,
     ) {
     }
 
