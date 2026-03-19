@@ -43,13 +43,13 @@ pub struct LintDiagnostic {
 const LINT_TAG_START: &str = "[";
 const LINT_TAG_END: &str = "] ";
 
-impl LintDiagnostic {
+impl From<LintDiagnostic> for Diagnostic {
     /// Convert into a plain `Diagnostic`, embedding the lint name as a
     /// `[lint_name]` prefix in the message so it survives through boundaries
     /// that only carry `Diagnostic` (e.g. `ExecutionResult`).
-    pub fn into_diagnostic(self) -> Diagnostic {
-        let mut diag = self.diagnostic;
-        if let Some(name) = self.lint_name {
+    fn from(ld: LintDiagnostic) -> Self {
+        let mut diag = ld.diagnostic;
+        if let Some(name) = ld.lint_name {
             diag.message = format!("{LINT_TAG_START}{name}{LINT_TAG_END}{}", diag.message);
         }
         diag

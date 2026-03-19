@@ -1260,7 +1260,7 @@ pub fn main() {
                 }
             }
             .into_iter()
-            .map(|ld| ld.into_diagnostic())
+            .map(Diagnostic::from)
             .collect();
             diagnostics.append(&mut analysis_diagnostics);
 
@@ -3159,7 +3159,7 @@ mod tests {
             }
         }
         .into_iter()
-        .map(|ld| ld.into_diagnostic())
+        .map(Diagnostic::from)
         .collect();
         diagnostics.append(&mut analysis_diagnostics);
 
