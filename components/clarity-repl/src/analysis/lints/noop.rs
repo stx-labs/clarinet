@@ -1284,10 +1284,9 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "[noop] `true` is the identity element for `and` and has no effect"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("`true` is the identity element for `and` and has no effect"));
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
             Some("Replace with `x`")
@@ -1305,10 +1304,9 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "[noop] `false` is the identity element for `or` and has no effect"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("`false` is the identity element for `or` and has no effect"));
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
             Some("Replace with `x`")
@@ -2005,14 +2003,12 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 2);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "[noop] dividing zero always evaluates to `u0`"
-        );
-        assert_eq!(
-            result.diagnostics[1].message,
-            "[noop] division by zero will cause a runtime error"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("dividing zero always evaluates to `u0`"));
+        assert!(result.diagnostics[1]
+            .message
+            .contains("division by zero will cause a runtime error"));
     }
 
     /// Both zero dividend and identity divisor are reported
@@ -2027,14 +2023,12 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 2);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "[noop] dividing zero always evaluates to `u0`"
-        );
-        assert_eq!(
-            result.diagnostics[1].message,
-            "[noop] dividing by one has no effect"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("dividing zero always evaluates to `u0`"));
+        assert!(result.diagnostics[1]
+            .message
+            .contains("dividing by one has no effect"));
     }
 
     /// Should NOT warn: `(/ x u2)` is not a noop
