@@ -1560,13 +1560,14 @@ fn print_available_lints(settings: &analysis::Settings) {
 
     println!();
     println!("{}", "Configure lints in Clarinet.toml:".bold());
-    let sample = "\
-\n  [repl.analysis.lint_groups]\
-\n  style = \"warning\"\
-\n\
-\n  [repl.analysis.lints]\
-\n  unused_const = \"error\"\
-\n  at_block = false\n";
+    let sample = r#"
+  [repl.analysis.lint_groups]
+  style = "warning"
+
+  [repl.analysis.lints]
+  unused_const = "error"
+  at_block = false
+"#;
     println!("{}", sample.dimmed());
     println!(
         "{} {}",
