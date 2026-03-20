@@ -20,6 +20,7 @@ members = [
 ]
 default-members = ["components/clarinet-cli"]
 
+# Argon2 key derivation is extremely slow without optimization (245s vs 13s in tests)
 [profile.dev.package.argon2]
 opt-level = 3
 

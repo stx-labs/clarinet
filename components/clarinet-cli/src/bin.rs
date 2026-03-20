@@ -1,13 +1,4 @@
-#[macro_use]
-extern crate hiro_system_kit;
-
-mod deployments;
-mod devnet;
-mod frontend;
-mod generate;
-mod lsp;
-
-use frontend::cli;
+use clarinet_lib::frontend::cli;
 #[cfg(not(any(target_env = "msvc", target_os = "macos")))]
 use tikv_jemallocator::Jemalloc;
 
