@@ -908,7 +908,8 @@ pub async fn build_state(
             }
 
             match result {
-                Ok(mut execution_result) => {
+                Ok(annotated) => {
+                    let mut execution_result = annotated.into_inner();
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         tag_diagnostics(
                             environment,

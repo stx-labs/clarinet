@@ -193,16 +193,15 @@ impl Lint for ErrorConst<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::ErrorConst;
     use crate::analysis::linter::Lint;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -266,7 +265,7 @@ mod tests {
         let expected_message = ErrorConst::make_not_err_message(&const_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -284,7 +283,7 @@ mod tests {
         let expected_message = ErrorConst::make_not_err_message(&const_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -302,7 +301,7 @@ mod tests {
         let expected_message = ErrorConst::make_duplicate_message(&"ERR_B".into(), &"ERR_A".into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(&expected_message));
     }
 
@@ -320,7 +319,7 @@ mod tests {
         let expected_message = ErrorConst::make_duplicate_message(&"ERR_C".into(), &"ERR_A".into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(&expected_message));
     }
 

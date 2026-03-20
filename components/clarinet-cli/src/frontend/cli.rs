@@ -1247,18 +1247,22 @@ pub fn main() {
                 contract.clarity_version,
             );
             let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-            let mut analysis_diagnostics = match analysis::run_analysis(
+            let lint_diagnostics = match analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,
                 &annotations,
                 &settings.repl_settings.analysis,
             ) {
-                Ok(diagnostics) => diagnostics,
-                Err(diagnostics) => {
+                Ok(lint_diags) => lint_diags,
+                Err(lint_diags) => {
                     success = false;
-                    diagnostics
+                    lint_diags
                 }
             };
+            let mut analysis_diagnostics: Vec<_> = lint_diagnostics
+                .iter()
+                .map(|ld| ld.diagnostic.clone())
+                .collect();
             diagnostics.append(&mut analysis_diagnostics);
 
             match cmd.output_format {
@@ -1281,8 +1285,22 @@ pub fn main() {
                 OutputFormat::Standard => {
                     let lines = contract.expect_in_memory_code_source().lines();
                     let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-                    for d in diagnostics {
-                        for line in output_diagnostic(&d, &file, &formatted_lines) {
+                    // Output non-lint diagnostics first (parse errors, etc.)
+                    let lint_count = lint_diagnostics.len();
+                    let non_lint_count = diagnostics.len() - lint_count;
+                    for d in &diagnostics[..non_lint_count] {
+                        for line in output_diagnostic(d, &file, &formatted_lines, None) {
+                            println!("{line}");
+                        }
+                    }
+                    // Output lint diagnostics with their structured lint name
+                    for ld in &lint_diagnostics {
+                        for line in output_diagnostic(
+                            &ld.diagnostic,
+                            &file,
+                            &formatted_lines,
+                            ld.lint_name.as_ref(),
+                        ) {
                             println!("{line}");
                         }
                     }
@@ -3143,18 +3161,21 @@ mod tests {
             contract.clarity_version,
         );
         let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-        let mut analysis_diagnostics = match analysis::run_analysis(
+        let mut analysis_diagnostics: Vec<_> = match analysis::run_analysis(
             &mut contract_analysis,
             &mut analysis_db,
             &annotations,
             &settings.repl_settings.analysis,
         ) {
-            Ok(diagnostics) => diagnostics,
-            Err(diagnostics) => {
+            Ok(lint_diags) => lint_diags,
+            Err(lint_diags) => {
                 success = false;
-                diagnostics
+                lint_diags
             }
-        };
+        }
+        .into_iter()
+        .map(|ld| ld.diagnostic)
+        .collect();
         diagnostics.append(&mut analysis_diagnostics);
 
         let filename = "test-contract.clar".to_string();

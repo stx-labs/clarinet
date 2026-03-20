@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use clarinet_files::paths;
 use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
-use ls_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity, Position, Range, Uri};
+use clarity_repl::analysis::linter::LintName;
+use ls_types::{
+    Diagnostic as LspDiagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
+};
 
 #[allow(unused_macros)]
 #[cfg(target_arch = "wasm32")]
@@ -18,12 +21,15 @@ pub(crate) use log;
 pub fn clarity_diagnostics_to_lsp_type(diagnostics: &Vec<ClarityDiagnostic>) -> Vec<LspDiagnostic> {
     let mut dst = vec![];
     for d in diagnostics {
-        dst.push(clarity_diagnostic_to_lsp_type(d));
+        dst.push(clarity_diagnostic_to_lsp_type(d, None));
     }
     dst
 }
 
-pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiagnostic {
+pub fn clarity_diagnostic_to_lsp_type(
+    diagnostic: &ClarityDiagnostic,
+    lint_name: Option<&LintName>,
+) -> LspDiagnostic {
     let range = match diagnostic.spans.len() {
         0 => Range::default(),
         _ => Range {
@@ -37,6 +43,9 @@ pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiag
             },
         },
     };
+
+    let code = lint_name.map(|name| NumberOrString::String(name.to_string()));
+
     // TODO(lgalabru): add hint for contracts not found errors
     LspDiagnostic {
         range,
@@ -45,7 +54,7 @@ pub fn clarity_diagnostic_to_lsp_type(diagnostic: &ClarityDiagnostic) -> LspDiag
             ClarityLevel::Warning => Some(DiagnosticSeverity::WARNING),
             ClarityLevel::Note => Some(DiagnosticSeverity::INFORMATION),
         },
-        code: None,
+        code,
         code_description: None,
         source: Some("clarity".to_string()),
         message: diagnostic.message.clone(),

@@ -684,16 +684,15 @@ impl Lint for NoopChecker<'_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::NoopChecker;
     use crate::analysis::linter::Lint;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -720,7 +719,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`is-eq` with a single operand always returns `true`"));
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
@@ -743,7 +742,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`+` with fewer than 2 operands has no effect"));
     }
 
@@ -762,7 +761,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`and` with fewer than 2 operands has no effect"));
     }
 
@@ -837,7 +836,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`or` with fewer than 2 operands has no effect"));
     }
 
@@ -856,7 +855,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`-` with fewer than 2 operands has no effect"));
     }
 
@@ -889,7 +888,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("comparing with `true` is unnecessary"));
     }
 
@@ -918,7 +917,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("comparing with `false` is unnecessary, use `not` instead"));
     }
 
@@ -933,7 +932,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("double negation is unnecessary"));
     }
 
@@ -1284,10 +1283,9 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "`true` is the identity element for `and` and has no effect"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("`true` is the identity element for `and` and has no effect"));
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
             Some("Replace with `x`")
@@ -1305,10 +1303,9 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "`false` is the identity element for `or` and has no effect"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("`false` is the identity element for `or` and has no effect"));
         assert_eq!(
             result.diagnostics[0].suggestion.as_deref(),
             Some("Replace with `x`")
@@ -2005,14 +2002,12 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 2);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "dividing zero always evaluates to `u0`"
-        );
-        assert_eq!(
-            result.diagnostics[1].message,
-            "division by zero will cause a runtime error"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("dividing zero always evaluates to `u0`"));
+        assert!(result.diagnostics[1]
+            .message
+            .contains("division by zero will cause a runtime error"));
     }
 
     /// Both zero dividend and identity divisor are reported
@@ -2027,14 +2022,12 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 2);
-        assert_eq!(
-            result.diagnostics[0].message,
-            "dividing zero always evaluates to `u0`"
-        );
-        assert_eq!(
-            result.diagnostics[1].message,
-            "dividing by one has no effect"
-        );
+        assert!(result.diagnostics[0]
+            .message
+            .contains("dividing zero always evaluates to `u0`"));
+        assert!(result.diagnostics[1]
+            .message
+            .contains("dividing by one has no effect"));
     }
 
     /// Should NOT warn: `(/ x u2)` is not a noop
