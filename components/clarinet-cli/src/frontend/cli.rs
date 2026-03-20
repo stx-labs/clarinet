@@ -121,6 +121,9 @@ enum Command {
     /// Step by step debugging and breakpoints from your code editor (VSCode, vim, emacs, etc)
     #[clap(name = "dap", bin_name = "dap")]
     DAP,
+    /// Tools for working with project manifest (Clarinet.toml) files
+    #[clap(subcommand, name = "manifest")]
+    Manifest(Manifest),
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -228,6 +231,22 @@ enum Devnet {
     /// Start a local Devnet network for interacting with your contracts from your browser
     #[clap(name = "start", bin_name = "start")]
     DevnetStart(DevnetStart),
+}
+
+#[derive(Subcommand, PartialEq, Clone, Debug)]
+enum Manifest {
+    /// Output the JSON schema for Clarinet.toml
+    #[clap(name = "schema", bin_name = "schema")]
+    Schema,
+    /// Validate a Clarinet.toml file against the schema
+    #[clap(name = "check", bin_name = "check")]
+    Check(ManifestCheck),
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+struct ManifestCheck {
+    /// Path to the Clarinet.toml file to validate (defaults to project manifest)
+    pub file: Option<String>,
 }
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
@@ -1477,6 +1496,19 @@ pub fn main() {
                 }
             }
         }
+        Command::Manifest(subcommand) => match subcommand {
+            Manifest::Schema => {
+                let schema = clarinet_files::schema::generate_clarinet_manifest_schema();
+                println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+            }
+            Manifest::Check(cmd) => {
+                let path = match cmd.file {
+                    Some(f) => PathBuf::from(f),
+                    None => get_manifest_location_or_exit(None),
+                };
+                check_manifest(&path);
+            }
+        },
         Command::Devnet(subcommand) => match subcommand {
             Devnet::Package(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, false);
@@ -1530,6 +1562,27 @@ fn print_available_lints() {
 
         Suppress a lint in source code with: ;; #[allow(lint_name)]
     "#};
+}
+
+fn check_manifest(path: &Path) {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{} {}: {e}", red!("error:"), path.display());
+            process::exit(1);
+        }
+    };
+
+    // Try parsing as ProjectManifestFile to get detailed TOML errors
+    match toml::from_str::<clarinet_files::ProjectManifestFile>(&content) {
+        Ok(_) => {
+            println!("{} {} is valid", green!("✔"), path.display());
+        }
+        Err(e) => {
+            eprintln!("{} {}\n{}", red!("error:"), path.display(), e);
+            process::exit(1);
+        }
+    }
 }
 
 fn overwrite_formatted(file_path: &str, output: &str) -> io::Result<()> {

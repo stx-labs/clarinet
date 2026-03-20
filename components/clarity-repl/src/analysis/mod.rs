@@ -112,7 +112,6 @@ static ALL_PASSES: [Pass; 2] = [Pass::CheckChecker, Pass::CallChecker];
 static DEFAULT_PASSES: [Pass; 1] = [Pass::CallChecker];
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     passes: HashSet<Pass>,
     lints: HashMap<LintName, ClarityDiagnosticLevel>,
@@ -211,9 +210,77 @@ impl From<BoolOr<Self>> for LintLevel {
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
     passes: Option<OneOrList<Pass>>,
+    #[cfg_attr(
+        feature = "json_schema",
+        schemars(schema_with = "lint_groups_schema", default)
+    )]
     lint_groups: Option<IndexMap<LintGroup, BoolOr<LintLevel>>>,
+    #[cfg_attr(
+        feature = "json_schema",
+        schemars(schema_with = "lints_schema", default)
+    )]
     lints: Option<IndexMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
+}
+
+#[cfg(feature = "json_schema")]
+fn lint_groups_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    use schemars::json_schema;
+    use strum::VariantArray;
+
+    let value_schema = gen.subschema_for::<BoolOr<LintLevel>>();
+    let names: Vec<String> = LintGroup::VARIANTS
+        .iter()
+        .map(|v| {
+            serde_json::to_value(v)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+
+    json_schema!({
+        "anyOf": [
+            {
+                "type": "object",
+                "description": "Configure lint groups (e.g. safety = \"warning\")",
+                "propertyNames": { "enum": names },
+                "additionalProperties": value_schema
+            },
+            { "type": "null" }
+        ]
+    })
+}
+
+#[cfg(feature = "json_schema")]
+fn lints_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    use schemars::json_schema;
+    use strum::VariantArray;
+
+    let value_schema = gen.subschema_for::<BoolOr<LintLevel>>();
+    let names: Vec<String> = LintName::VARIANTS
+        .iter()
+        .map(|v| {
+            serde_json::to_value(v)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+
+    json_schema!({
+        "anyOf": [
+            {
+                "type": "object",
+                "description": "Configure individual lints (e.g. unused_const = \"error\")",
+                "propertyNames": { "enum": names },
+                "additionalProperties": value_schema
+            },
+            { "type": "null" }
+        ]
+    })
 }
 
 impl From<SettingsFile> for Settings {
