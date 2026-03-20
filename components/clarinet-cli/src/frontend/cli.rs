@@ -32,7 +32,7 @@ use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
-use clarity_repl::analysis::linter::{LintGroup, LintName};
+use clarity_repl::analysis::linter::{level_name, LintGroup, LintName};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -1202,7 +1202,10 @@ pub fn main() {
             }
         }
         Command::Check(cmd) if cmd.show_lints => {
-            print_available_lints();
+            let settings = load_manifest_or_warn(cmd.manifest_path)
+                .map(|m| m.repl_settings.analysis)
+                .unwrap_or_else(analysis::Settings::with_default_lints);
+            print_available_lints(&settings);
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
@@ -1492,7 +1495,9 @@ pub fn main() {
     update_check::print_update_message(update_handle);
 }
 
-fn print_available_lints() {
+fn print_available_lints(settings: &analysis::Settings) {
+    use clarity::vm::diagnostic::Level;
+
     println!("Lint groups:");
     println!();
     for group in LintGroup::VARIANTS {
@@ -1515,6 +1520,24 @@ fn print_available_lints() {
             "  {lint:<28} {groups:<12} {}",
             lint.get_documentation().unwrap_or_default()
         );
+    }
+
+    println!();
+    println!("Active lint configuration:");
+    println!();
+
+    let lints = settings.lints();
+    for level in [Level::Error, Level::Warning, Level::Note] {
+        let mut names: Vec<_> = lints
+            .iter()
+            .filter(|(_, l)| **l == level)
+            .map(|(name, _)| name.to_string())
+            .collect();
+        names.sort();
+
+        if !names.is_empty() {
+            println!("  [{:<7}]    {}", level_name(&level), names.join(", "));
+        }
     }
 
     indoc::printdoc! {r#"
