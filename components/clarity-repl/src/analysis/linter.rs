@@ -227,14 +227,6 @@ pub enum LintLevel {
     Error,
 }
 
-pub fn level_name(level: &ClarityDiagnosticLevel) -> &'static str {
-    match level {
-        ClarityDiagnosticLevel::Note => "note",
-        ClarityDiagnosticLevel::Warning => "warning",
-        ClarityDiagnosticLevel::Error => "error",
-    }
-}
-
 impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
     fn from(level: LintLevel) -> Self {
         match level {

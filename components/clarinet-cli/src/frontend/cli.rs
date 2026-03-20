@@ -32,7 +32,7 @@ use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
-use clarity_repl::analysis::linter::{level_name, LintGroup, LintName};
+use clarity_repl::analysis::linter::{LintGroup, LintName};
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -1497,33 +1497,51 @@ pub fn main() {
 
 fn print_available_lints(settings: &analysis::Settings) {
     use clarity::vm::diagnostic::Level;
+    use colored::Colorize;
 
-    println!("Lint groups:");
+    fn colored_level(level: &Level) -> String {
+        match level {
+            Level::Error => red!("error").to_string(),
+            Level::Warning => yellow!("warning").to_string(),
+            Level::Note => blue!("note").to_string(),
+        }
+    }
+
+    println!("{}", "Lint groups:".bold());
     println!();
     for group in LintGroup::VARIANTS {
+        let name = format!("{group:<12}");
         println!(
-            "  {group:<12} {}",
+            "  {} {}",
+            name.bright_yellow(),
             group.get_documentation().unwrap_or_default()
         );
     }
 
     println!();
-    println!("Lints:");
+    println!("{}", "Lints:".bold());
     println!();
     for lint in LintName::VARIANTS {
         let groups: Vec<_> = LintGroup::of(lint)
             .into_iter()
             .map(ToString::to_string)
             .collect();
-        let groups = format!("[{}]", groups.join(", "));
+        // Pad the plain text first, then color the group names inside
+        let groups_plain = format!("{:<12}", format!("[{}]", groups.join(", ")));
+        let groups = groups.iter().fold(groups_plain, |s, g| {
+            s.replacen(g.as_str(), &g.bright_yellow().to_string(), 1)
+        });
+        let name = format!("{lint:<28}");
         println!(
-            "  {lint:<28} {groups:<12} {}",
+            "  {} {} {}",
+            name.bright_yellow(),
+            groups,
             lint.get_documentation().unwrap_or_default()
         );
     }
 
     println!();
-    println!("Active lint configuration:");
+    println!("{}", "Active lint configuration:".bold());
     println!();
 
     let lints = settings.lints();
@@ -1531,28 +1549,30 @@ fn print_available_lints(settings: &analysis::Settings) {
         let mut names: Vec<_> = lints
             .iter()
             .filter(|(_, l)| **l == level)
-            .map(|(name, _)| name.to_string())
+            .map(|(name, _)| name.to_string().bright_yellow().to_string())
             .collect();
         names.sort();
 
         if !names.is_empty() {
-            println!("  [{:<7}]    {}", level_name(&level), names.join(", "));
+            println!("  [{}]    {}", colored_level(&level), names.join(", "));
         }
     }
 
-    indoc::printdoc! {r#"
-
-        Configure lints in Clarinet.toml:
-
-          [repl.analysis.lint_groups]
-          style = "warning"
-
-          [repl.analysis.lints]
-          unused_const = "error"
-          at_block = false
-
-        Suppress a lint in source code with: ;; #[allow(lint_name)]
-    "#};
+    println!();
+    println!("{}", "Configure lints in Clarinet.toml:".bold());
+    let sample = "\
+\n  [repl.analysis.lint_groups]\
+\n  style = \"warning\"\
+\n\
+\n  [repl.analysis.lints]\
+\n  unused_const = \"error\"\
+\n  at_block = false\n";
+    println!("{}", sample.dimmed());
+    println!(
+        "{} {}",
+        "Suppress a lint in source code with:".bold(),
+        ";; #[allow(lint_name)]".dimmed()
+    );
 }
 
 fn overwrite_formatted(file_path: &str, output: &str) -> io::Result<()> {
