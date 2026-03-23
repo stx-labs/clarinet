@@ -31,5 +31,21 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - uses: DeterminateSystems/determinate-nix-action@dbda91f6efef3ee627f56175120aa9543687d830  # v3.11.2
       - uses: DeterminateSystems/flake-checker-action@3164002371bc90729c68af0e24d5aacf20d7c9f6  # v12
+      - name: Check Rust version in nixpkgs
+        run: |
+          NIX_RUST=$(nix eval --raw nixpkgs#rustc.version)
+          LATEST=$(curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml | grep -m1 '^version = ' | sed 's/version = "\(.*\)"/\1/' | cut -d' ' -f1)
+          echo "Rust in nixpkgs: $NIX_RUST"
+          echo "Latest stable:   $LATEST"
+          if [ "$NIX_RUST" != "$LATEST" ]; then
+            echo "::error::nixpkgs Rust ($NIX_RUST) is behind latest stable ($LATEST)."
+            echo ""
+            nix flake update nixpkgs
+            echo "Updated flake.lock diff:"
+            git diff flake.lock
+            exit 1
+          fi
       - run: nix run .#check-git-dependencies-hash
       - run: nix flake check
+      - name: Build clarinet
+        run: nix build .#clarinet
