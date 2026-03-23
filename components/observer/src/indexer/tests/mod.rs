@@ -1,7 +1,4 @@
 pub mod helpers;
-use std::thread::sleep;
-use std::time::Duration;
-
 use self::helpers::BlockEvent;
 use super::fork_scratch_pad::ForkScratchPad;
 use super::StacksBlockPool;
@@ -26,7 +23,6 @@ pub fn process_stacks_blocks_and_check_expectations(
     }
 
     for (block_event, check_chain_event_expectations) in steps.into_iter() {
-        sleep(Duration::new(0, 200_000_000));
         match block_event {
             BlockEvent::Block(block) => {
                 let chain_event = blocks_processor.process_block(*block, &ctx).unwrap();

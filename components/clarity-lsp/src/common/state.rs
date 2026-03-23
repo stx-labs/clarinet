@@ -18,11 +18,12 @@ use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpress
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::ContractDeployer;
-use clarity_repl::utils::CHECK_ENVIRONMENTS;
+use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
 use clarity_types::execution_cost::ExecutionCost;
 use ls_types::{
-    CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
+    CompletionItem, Diagnostic as LspDiagnostic, DiagnosticSeverity, DiagnosticTag, DocumentSymbol,
+    Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
 
 use super::requests::capabilities::{CostDisplayFormat, InitializationOptions};
@@ -688,6 +689,40 @@ impl EditorState {
         };
 
         (contracts, tldr)
+    }
+
+    pub fn get_env_simnet_diagnostics(&self) -> Vec<(PathBuf, Vec<LspDiagnostic>)> {
+        let mut result = Vec::new();
+        for (path, contract_data) in &self.active_contracts {
+            let Ok(spans) = get_env_simnet_spans(&contract_data.source) else {
+                continue;
+            };
+            if spans.is_empty() {
+                continue;
+            }
+            let diags = spans
+                .iter()
+                .map(|span| LspDiagnostic {
+                    range: Range {
+                        start: Position {
+                            line: span.start_line - 1,
+                            character: span.start_column - 1,
+                        },
+                        end: Position {
+                            line: span.end_line - 1,
+                            character: span.end_column,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::HINT),
+                    source: Some("clarity".to_string()),
+                    message: "simnet-only code (excluded from on-chain deployments)".to_string(),
+                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                    ..LspDiagnostic::default()
+                })
+                .collect();
+            result.push((path.clone(), diags));
+        }
+        result
     }
 
     pub fn insert_active_contract(
