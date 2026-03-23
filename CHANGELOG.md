@@ -1,4 +1,39 @@
-#### 2026-03-12
+# [3.15.1](https://github.com/stx-labs/clarinet/compare/v3.15.0...v3.15.1) (2026-03-19)
+
+##### New Features
+
+- **linter:**
+  - Add lint `case_fn` (#2305) (59e3ef38)
+  - Add lints `case_trait` and `case_token` (#2304) (47e02fdf)
+  - Add `clarinet check --show-lints` to show details about lints and lint groups (#2298) (0fd88828)
+  - Add lints `case_data_var` and `case_map` (#2293) (3c678a31)
+- Latest version check for cli (#2278) (e4189bd7)
+- Codelens config enhancements (#2273) (6909d116)
+- Add a strength option for key derivation when using encrypted mnemonics (#2284) (1a24c27)
+- Dim #[env(simnet)] annotated code with DiagnosticTag::Unnecessary (#2306) (9d194bb)
+
+##### Chores
+
+- Update default explorer image (#2286) (36684f60)
+- Add tests covering every diagnostic path in collect_annotations (#2292) (03d9853)
+- Never lint boot contracts, and don't run linter on certain core commands (#2258) (1b9dba7)
+
+
+##### Continuous Integration
+
+- clarity vscode workflow (#2285) (2e0783a3)
+
+##### Bug Fixes
+
+- Check client capabilities before running cost analysis (#2283) (4682586)
+- Ignore env(simnet) annotations that are at end of line (#2291) (56b339b)
+- Fix pox cycle length check (#2295) (2132ad3)
+
+##### Refactors
+
+- don't expose clarity crate from clarity-repl (#2260) (891707af)
+
+# [3.15.0](https://github.com/stx-labs/clarinet/compare/v3.14.1...v3.15.0) (2026-03-12)
 
 ##### New Features
 
@@ -16,6 +51,7 @@
 - Update stacks docker images (#2269) (87c53287)
 - Remove chainhooks v1 (#2236) (a395f0f1)
 - Upgrade npm dependencies (#2249) (afa70845)
+- Rename Default to Basic; make Medium the default; add Extreme encryption (#2301) (6a8a961)
 
 ##### Continuous Integration
 
@@ -31,7 +67,7 @@
 
 - Devnet orchestrator improvements (#2225) (6a45e07d)
 
-#### 2026-02-27
+# [3.14.1](https://github.com/stx-labs/clarinet/compare/v3.14.0...v3.14.1) (2026-02-27)
 
 ##### New Features
 
