@@ -10,6 +10,30 @@ use stacks_common::types::StacksEpochId;
 use super::cost_analysis::{StaticCost, UserArgumentsContext};
 use super::cost_functions::{from_native_function, ClarityCostFunctionExt};
 
+/// Compute (min_serialized_size, max_serialized_size) for a type.
+///
+/// `TypeSignature::min_size()` omits the 1-byte type prefix for some types
+/// (e.g. UIntType returns 16 instead of 17) but includes it for others
+/// (e.g. BoolType returns 1). `max_serialized_size()` consistently includes
+/// the prefix. To get a correct lower bound, we ensure min is never less
+/// than the prefix byte (1) and never exceeds max.
+fn serialized_size_range(type_sig: &TypeSignature) -> (u64, u64) {
+    let max = type_sig
+        .max_serialized_size()
+        .ok()
+        .map(u64::from)
+        .unwrap_or(0);
+    let min_raw = u64::from(type_sig.min_size().unwrap_or(0));
+    // If min_size < max_serialized_size by exactly the type prefix byte,
+    // the type is fixed-size and min should equal max.
+    let min = if min_raw.saturating_add(1) == max {
+        max
+    } else {
+        min_raw.min(max)
+    };
+    (min, max)
+}
+
 // Constants for tuple serialization overhead
 const TUPLE_LENGTH_ENCODING_BYTES: u64 = 4;
 const TUPLE_FIELD_OVERHEAD_BYTES: u64 = 2;
@@ -667,15 +691,7 @@ pub fn cost_fetch_var(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     let (min_size, max_size) = resolve_data_var_type(args, user_args)
-        .map(|type_sig| {
-            let min = u64::from(type_sig.min_size().unwrap_or(0));
-            let max = type_sig
-                .max_serialized_size()
-                .ok()
-                .map(u64::from)
-                .unwrap_or(0);
-            (min, max)
-        })
+        .map(serialized_size_range)
         .unwrap_or((0, 0));
 
     let min_cost = ClarityCostFunction::FetchVar
@@ -718,15 +734,7 @@ pub fn cost_set_var(
 
     // Fall back to type-based range when the value isn't a literal
     let (min_size, max_size) = resolve_data_var_type(args, user_args)
-        .map(|type_sig| {
-            let min = u64::from(type_sig.min_size().unwrap_or(0));
-            let max = type_sig
-                .max_serialized_size()
-                .ok()
-                .map(u64::from)
-                .unwrap_or(0);
-            (min, max)
-        })
+        .map(serialized_size_range)
         .unwrap_or((0, 0));
 
     let min_cost = ClarityCostFunction::SetVar

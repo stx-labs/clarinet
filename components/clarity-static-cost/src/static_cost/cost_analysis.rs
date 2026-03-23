@@ -9,8 +9,8 @@ use clarity::vm::costs::ExecutionCost;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use clarity::vm::types::{
-    parse_name_type_pairs, PrincipalData, QualifiedContractIdentifier, SequenceSubtype,
-    TupleTypeSignature, TypeSignature, TypeSignatureExt,
+    parse_name_type_pairs, ListTypeData, PrincipalData, QualifiedContractIdentifier,
+    SequenceSubtype, TupleTypeSignature, TypeSignature, TypeSignatureExt,
 };
 use clarity::vm::variables::lookup_reserved_variable;
 use clarity::vm::{ClarityVersion, Value};
@@ -470,6 +470,15 @@ pub fn static_cost_tree_from_ast(
             }
         }
     }
+    // Build function_defs map for call-site narrowing
+    let function_defs: HashMap<String, &[SymbolicExpression]> = exprs
+        .iter()
+        .filter_map(|expr| {
+            let function_name = extract_function_name(expr)?;
+            let list = expr.match_list()?;
+            Some((function_name, list))
+        })
+        .collect();
     // second pass computes the cost
     for expr in exprs {
         if let Some(function_name) = extract_function_name(expr) {
@@ -477,6 +486,7 @@ pub fn static_cost_tree_from_ast(
                 expr,
                 &user_args,
                 &costs_map,
+                &function_defs,
                 clarity_version,
                 epoch,
                 env,
@@ -485,8 +495,9 @@ pub fn static_cost_tree_from_ast(
             )?;
             // Compute static cost for this function so subsequent calls can look it up.
             // Include the overhead costs so that callers get the full cost
-            // of invoking this function. Note: LookupFunction is NOT added here because
-            // the dynamic VM does not charge it for user-defined function calls.
+            // of invoking this function. Note: LookupFunction is NOT added here;
+            // it is added at the call site instead (in build_listlike_cost_analysis_tree
+            // for direct calls, and via fn_lookup_cost for map/filter/fold).
             let mut sc: StaticCost =
                 calculate_total_cost_with_branching(&cost_analysis_tree).into();
             let overhead = compute_function_overhead_costs(None, &function_name, exprs, epoch);
@@ -599,6 +610,7 @@ pub fn build_cost_analysis_tree(
     expr: &SymbolicExpression,
     user_args: &UserArgumentsContext,
     cost_map: &HashMap<String, Option<StaticCost>>,
+    function_defs: &HashMap<String, &[SymbolicExpression]>,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
     env: &mut ExecutionState,
@@ -614,8 +626,10 @@ pub fn build_cost_analysis_tree(
                             list,
                             user_args,
                             cost_map,
+                            function_defs,
                             clarity_version,
                             epoch,
+                            None,
                             env,
                             invoke_ctx,
                         )?;
@@ -625,6 +639,7 @@ pub fn build_cost_analysis_tree(
                         list,
                         user_args,
                         cost_map,
+                        function_defs,
                         clarity_version,
                         epoch,
                         env,
@@ -638,6 +653,7 @@ pub fn build_cost_analysis_tree(
                     list,
                     user_args,
                     cost_map,
+                    function_defs,
                     clarity_version,
                     epoch,
                     env,
@@ -695,7 +711,9 @@ pub fn build_cost_analysis_tree(
                     // For now, we use let_depth which tracks let-binding depth
                     type_sig
                         .as_ref()
-                        .map(|sig| calculate_variable_lookup_cost_from_type(sig, let_depth, epoch))
+                        .map(|sig| {
+                            calculate_variable_lookup_cost_from_type(sig, let_depth, epoch, false)
+                        })
                         .unwrap_or(StaticCost::ZERO)
                 }
             };
@@ -705,7 +723,7 @@ pub fn build_cost_analysis_tree(
             let final_cost = if let CostExprNode::UserArgument(ref arg_name, _) = expr_node {
                 // Get the type from user_args and calculate cost from it
                 if let Some(arg_type) = user_args.get_argument_type(arg_name) {
-                    calculate_variable_lookup_cost_from_type(arg_type, let_depth, epoch)
+                    calculate_variable_lookup_cost_from_type(arg_type, let_depth, epoch, false)
                 } else {
                     cost
                 }
@@ -732,14 +750,25 @@ pub fn build_cost_analysis_tree(
     }
 }
 
-/// Calculate variable lookup cost from a TypeSignature
+/// Calculate variable lookup cost from a TypeSignature.
+///
+/// `exact` controls whether the type fully determines the runtime value size:
+/// - `false` (declared types): the actual value size is unknown, so min uses
+///   `min_size()` (e.g. empty list) and max uses `size()` (e.g. full-length list).
+/// - `true` (narrowed call sites): the type is fully determined by the caller,
+///   so `size()` is used for both min and max.
 fn calculate_variable_lookup_cost_from_type(
     type_sig: &TypeSignature,
     let_depth: u64,
     epoch: StacksEpochId,
+    exact: bool,
 ) -> StaticCost {
     let type_size = u64::from(type_sig.size().unwrap_or(0));
-    let type_min_size = u64::from(type_sig.min_size().unwrap_or(0));
+    let type_min_size = if exact {
+        type_size
+    } else {
+        u64::from(type_sig.min_size().unwrap_or(0))
+    };
 
     let mut variable_size_cost = ClarityCostFunction::LookupVariableSize
         .eval_for_epoch(type_size, epoch)
@@ -822,6 +851,10 @@ fn infer_type_from_expression_with_args(
             if let Some(tuple_type) = infer_tuple_type_from_tuplecons(exprs, user_args, epoch) {
                 return Ok(tuple_type);
             }
+            // Try ListCons inference: (list elem1 elem2 ...)
+            if let Some(list_type) = infer_type_from_listcons(exprs, user_args, epoch) {
+                return Ok(list_type);
+            }
             infer_type_from_expression(expr, epoch)
         }
         _ => infer_type_from_expression(expr, epoch),
@@ -855,6 +888,28 @@ fn infer_tuple_type_from_tuplecons(
     TupleTypeSignature::try_from(field_map)
         .ok()
         .map(TypeSignature::TupleType)
+}
+
+/// Try to infer a `ListType` from a ListCons expression like `(list u1 u2)`.
+/// Returns the list type with max_len equal to the number of elements.
+fn infer_type_from_listcons(
+    exprs: &[SymbolicExpression],
+    user_args: &UserArgumentsContext,
+    epoch: StacksEpochId,
+) -> Option<TypeSignature> {
+    if exprs.first()?.match_atom()?.as_str() != "list" {
+        return None;
+    }
+    let elements = &exprs[1..];
+    if elements.is_empty() {
+        return None;
+    }
+    // Infer the element type from the first element
+    let elem_type = infer_type_from_expression_with_args(&elements[0], user_args, epoch).ok()?;
+    let list_type = ListTypeData::new_list(elem_type, elements.len() as u32).ok()?;
+    Some(TypeSignature::SequenceType(SequenceSubtype::ListType(
+        list_type,
+    )))
 }
 
 /// Infer type from a SymbolicExpression by examining its structure.
@@ -922,13 +977,165 @@ fn get_map_filter_fold_list_max_len(
     1
 }
 
+/// Check if `actual` is a narrower type than `declared` (e.g., shorter list max length).
+fn is_narrower_type(actual: &TypeSignature, declared: &TypeSignature) -> bool {
+    match (actual, declared) {
+        (
+            TypeSignature::SequenceType(SequenceSubtype::ListType(actual_list)),
+            TypeSignature::SequenceType(SequenceSubtype::ListType(declared_list)),
+        ) => actual_list.get_max_len() < declared_list.get_max_len(),
+        _ => false,
+    }
+}
+
+/// Try to compute a narrowed cost for a user-function call when the actual
+/// arguments have tighter types than the declared parameters. For example,
+/// when calling `(add-many-64 (list u1))` where `add-many-64` declares
+/// `(ns (list 64 uint))`, the list is known to be length 1 instead of up to 64.
+///
+/// Returns `Some(narrowed_cost)` when narrowing is possible, `None` otherwise.
+/// Walk the cost tree and recalculate UserArgument lookup costs using exact mode
+/// (size() for both min and max). This is used after re-analyzing a function body
+/// with narrowed argument types, where we know the actual types precisely.
+/// Tracks `let_depth` by incrementing when entering `Let` or `If` nodes, mirroring
+/// the depth tracking in `build_cost_analysis_tree`.
+fn fix_user_arg_costs_exact(node: &mut CostAnalysisNode, let_depth: u64, epoch: StacksEpochId) {
+    if let CostExprNode::UserArgument(_, ref arg_type) = node.expr {
+        node.cost = calculate_variable_lookup_cost_from_type(arg_type, let_depth, epoch, true);
+    }
+    let child_depth = match &node.expr {
+        CostExprNode::NativeFunction(NativeFunctions::Let | NativeFunctions::If) => let_depth + 1,
+        _ => let_depth,
+    };
+    for child in &mut node.children {
+        fix_user_arg_costs_exact(child, child_depth, epoch);
+    }
+}
+
+fn try_narrow_user_function_cost(
+    fn_name: &str,
+    call_args: &[SymbolicExpression],
+    caller_user_args: &UserArgumentsContext,
+    function_defs: &HashMap<String, &[SymbolicExpression]>,
+    cost_map: &HashMap<String, Option<StaticCost>>,
+    clarity_version: &ClarityVersion,
+    epoch: StacksEpochId,
+    env: &mut ExecutionState,
+    invoke_ctx: &InvocationContext,
+) -> Option<StaticCost> {
+    let fn_def_list = function_defs.get(fn_name)?;
+    let signature = fn_def_list.get(1)?.match_list()?;
+
+    // Extract declared parameter types from the function signature
+    let mut free_tracker = clarity::vm::costs::LimitedCostTracker::new_free();
+    let params: Vec<(ClarityName, TypeSignature)> = signature
+        .iter()
+        .skip(1)
+        .filter_map(|arg_expr| {
+            let arg_list = arg_expr.match_list()?;
+            if arg_list.len() != 2 {
+                return None;
+            }
+            let name = arg_list[0].match_atom()?.clone();
+            let arg_type =
+                TypeSignature::parse_type_repr(epoch, &arg_list[1], &mut free_tracker).ok()?;
+            Some((name, arg_type))
+        })
+        .collect();
+
+    // Infer actual argument types from the call site and check if any are narrower
+    let mut any_narrower = false;
+    let mut narrowed_types: Vec<TypeSignature> = Vec::with_capacity(params.len());
+    for (i, (_param_name, declared_type)) in params.iter().enumerate() {
+        if let Some(call_arg) = call_args.get(i) {
+            if let Ok(actual_type) =
+                infer_type_from_expression_with_args(call_arg, caller_user_args, epoch)
+            {
+                if is_narrower_type(&actual_type, declared_type) {
+                    narrowed_types.push(actual_type);
+                    any_narrower = true;
+                    continue;
+                }
+            }
+        }
+        narrowed_types.push(declared_type.clone());
+    }
+
+    if !any_narrower {
+        return None;
+    }
+
+    // Re-analyze the function body with narrowed argument types
+    let (_, mut narrowed_tree) = build_function_definition_cost_analysis_tree(
+        fn_def_list,
+        caller_user_args,
+        cost_map,
+        function_defs,
+        clarity_version,
+        epoch,
+        Some(&narrowed_types),
+        env,
+        invoke_ctx,
+    )
+    .ok()?;
+
+    // Fix UserArgument lookup costs to be exact in body subtrees only.
+    // Top-level UserArgument children are parameter declarations which don't
+    // incur variable lookup costs — only references within the body do.
+    for child in &mut narrowed_tree.children {
+        if !matches!(child.expr, CostExprNode::UserArgument(..)) {
+            fix_user_arg_costs_exact(child, 0, epoch);
+        }
+    }
+
+    let mut sc: StaticCost = super::calculate_total_cost_with_branching(&narrowed_tree).into();
+
+    // Add overhead (UserFunctionApplication + InnerTypeCheckCost per declared param).
+    let (arg_count, _) = extract_function_signature_from_list(fn_def_list).unwrap_or((0, &[]));
+
+    let application_cost = ClarityCostFunction::UserFunctionApplication
+        .eval_for_epoch(arg_count as u64, epoch)
+        .unwrap_or(ExecutionCost::ZERO);
+    super::saturating_add_cost(&mut sc.min, &application_cost);
+    super::saturating_add_cost(&mut sc.max, &application_cost);
+
+    // Use narrowed types for InnerTypeCheckCost. Since we know the exact argument types
+    // at this call site, we use size() for both min and max. In Epoch33+ the VM charges
+    // based on the actual argument's Value::size() which equals TypeSignature::type_of(arg).size(),
+    // matching our narrowed type's size().
+    for narrowed_type in &narrowed_types {
+        let type_check_cost = ClarityCostFunction::InnerTypeCheckCost
+            .eval_for_epoch(u64::from(narrowed_type.size().unwrap_or(0)), epoch)
+            .unwrap_or(ExecutionCost::ZERO);
+        super::saturating_add_cost(&mut sc.min, &type_check_cost);
+        super::saturating_add_cost(&mut sc.max, &type_check_cost);
+    }
+
+    Some(sc)
+}
+
+/// Extract function parameter count and signature args from a function definition list.
+/// The list is the inner contents of a `define-public`/`define-private`/`define-read-only`.
+fn extract_function_signature_from_list(
+    list: &[SymbolicExpression],
+) -> Option<(usize, &[SymbolicExpression])> {
+    let signature = list.get(1)?.match_list()?;
+    if signature.len() <= 1 {
+        return Some((0, &[]));
+    }
+    let args = &signature[1..];
+    Some((args.len(), args))
+}
+
 /// Build an expression tree for function definitions like (define-public (foo (a u64)) (ok a))
 fn build_function_definition_cost_analysis_tree(
     list: &[SymbolicExpression],
     outer_user_args: &UserArgumentsContext,
     cost_map: &HashMap<String, Option<StaticCost>>,
+    function_defs: &HashMap<String, &[SymbolicExpression]>,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
+    arg_type_overrides: Option<&[TypeSignature]>,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
 ) -> Result<(String, CostAnalysisNode), StaticCostError> {
@@ -951,7 +1158,7 @@ fn build_function_definition_cost_analysis_tree(
     // Process function arguments: (a u64)
     // Use a free cost tracker since we're just parsing types
     let mut free_tracker = clarity::vm::costs::LimitedCostTracker::new_free();
-    for arg_expr in signature.iter().skip(1) {
+    for (i, arg_expr) in signature.iter().skip(1).enumerate() {
         if let Some(arg_list) = arg_expr.match_list() {
             if arg_list.len() == 2 {
                 let arg_name = arg_list[0]
@@ -962,10 +1169,16 @@ fn build_function_definition_cost_analysis_tree(
 
                 let arg_type_expr = &arg_list[1];
 
-                // Parse the type from the AST to TypeSignature
-                let arg_type =
+                // Parse the declared type from the AST
+                let declared_type =
                     TypeSignature::parse_type_repr(epoch, arg_type_expr, &mut free_tracker)
                         .map_err(|e| StaticCostError::TypeParse(format!("{e:?}")))?;
+
+                // Use the override type if provided (for call-site narrowing)
+                let arg_type = arg_type_overrides
+                    .and_then(|overrides| overrides.get(i))
+                    .cloned()
+                    .unwrap_or(declared_type);
 
                 // Add to function's user arguments context
                 function_user_args.add_argument(arg_name.clone(), arg_type.clone());
@@ -984,6 +1197,7 @@ fn build_function_definition_cost_analysis_tree(
         body,
         &function_user_args,
         cost_map,
+        function_defs,
         clarity_version,
         epoch,
         env,
@@ -1083,6 +1297,7 @@ fn build_listlike_cost_analysis_tree(
     exprs: &[SymbolicExpression],
     user_args: &UserArgumentsContext,
     cost_map: &HashMap<String, Option<StaticCost>>,
+    function_defs: &HashMap<String, &[SymbolicExpression]>,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
     env: &mut ExecutionState,
@@ -1104,6 +1319,7 @@ fn build_listlike_cost_analysis_tree(
                 &exprs[0],
                 user_args,
                 cost_map,
+                function_defs,
                 clarity_version,
                 epoch,
                 env,
@@ -1115,6 +1331,7 @@ fn build_listlike_cost_analysis_tree(
                     expr,
                     user_args,
                     cost_map,
+                    function_defs,
                     clarity_version,
                     epoch,
                     env,
@@ -1169,6 +1386,7 @@ fn build_listlike_cost_analysis_tree(
                             &exprs[1],
                             &extended_user_args,
                             cost_map,
+                            function_defs,
                             clarity_version,
                             epoch,
                             env,
@@ -1184,6 +1402,7 @@ fn build_listlike_cost_analysis_tree(
                             expr,
                             &extended_user_args,
                             cost_map,
+                            function_defs,
                             clarity_version,
                             epoch,
                             env,
@@ -1200,6 +1419,7 @@ fn build_listlike_cost_analysis_tree(
                             expr,
                             user_args,
                             cost_map,
+                            function_defs,
                             clarity_version,
                             epoch,
                             env,
@@ -1215,6 +1435,7 @@ fn build_listlike_cost_analysis_tree(
                             expr,
                             user_args,
                             cost_map,
+                            function_defs,
                             clarity_version,
                             epoch,
                             env,
@@ -1285,6 +1506,7 @@ fn build_listlike_cost_analysis_tree(
                         expr,
                         user_args,
                         cost_map,
+                        function_defs,
                         clarity_version,
                         epoch,
                         env,
@@ -1305,7 +1527,26 @@ fn build_listlike_cost_analysis_tree(
                 });
                 if cost_map.contains_key(name.as_str()) {
                     let expr_node = CostExprNode::UserFunction(name.clone());
-                    let cost = calculate_function_cost(name.as_str(), cost_map)?;
+                    let default_cost = calculate_function_cost(name.as_str(), cost_map)?;
+                    let mut cost = try_narrow_user_function_cost(
+                        name.as_str(),
+                        &exprs[1..],
+                        user_args,
+                        function_defs,
+                        cost_map,
+                        clarity_version,
+                        epoch,
+                        env,
+                        invoke_ctx,
+                    )
+                    .unwrap_or(default_cost);
+                    // The VM's eval() charges LookupFunction(0) for every list
+                    // expression, including user-defined function calls.
+                    let fn_lookup_cost = ClarityCostFunction::LookupFunction
+                        .eval_for_epoch(0, epoch)
+                        .unwrap_or(ExecutionCost::ZERO);
+                    super::saturating_add_cost(&mut cost.min, &fn_lookup_cost);
+                    super::saturating_add_cost(&mut cost.max, &fn_lookup_cost);
                     (expr_node, cost)
                 } else if is_callable_arg {
                     // Callable (trait) arguments used in call position — the actual
@@ -1324,6 +1565,7 @@ fn build_listlike_cost_analysis_tree(
                     expr,
                     user_args,
                     cost_map,
+                    function_defs,
                     clarity_version,
                     epoch,
                     env,
@@ -1341,6 +1583,7 @@ fn build_listlike_cost_analysis_tree(
                     expr,
                     user_args,
                     cost_map,
+                    function_defs,
                     clarity_version,
                     epoch,
                     env,
@@ -1360,6 +1603,7 @@ fn build_listlike_cost_analysis_tree(
                     expr,
                     user_args,
                     cost_map,
+                    function_defs,
                     clarity_version,
                     epoch,
                     env,
@@ -1379,6 +1623,7 @@ fn build_listlike_cost_analysis_tree(
                     expr,
                     user_args,
                     cost_map,
+                    function_defs,
                     clarity_version,
                     epoch,
                     env,
@@ -1567,6 +1812,7 @@ mod tests {
         clarity_version: &ClarityVersion,
     ) -> Result<StaticCost, StaticCostError> {
         let cost_map: HashMap<String, Option<StaticCost>> = HashMap::new();
+        let function_defs: HashMap<String, &[SymbolicExpression]> = HashMap::new();
 
         let epoch = StacksEpochId::latest(); // XXX this should be matched with the clarity version
         let ast = make_ast(source, epoch, clarity_version)?;
@@ -1583,6 +1829,7 @@ mod tests {
             expr,
             &user_args,
             &cost_map,
+            &function_defs,
             clarity_version,
             epoch,
             &mut env,
@@ -1653,11 +1900,13 @@ mod tests {
             QualifiedContractIdentifier::transient(),
             ClarityVersion::Clarity3,
         );
+        let function_defs = HashMap::new();
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
         let (_, cost_tree) = build_cost_analysis_tree(
             expr,
             &user_args,
             &cost_map,
+            &function_defs,
             &ClarityVersion::Clarity3,
             epoch,
             &mut env,
@@ -1717,11 +1966,13 @@ mod tests {
             QualifiedContractIdentifier::transient(),
             ClarityVersion::Clarity3,
         );
+        let function_defs = HashMap::new();
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
         let (_, cost_tree) = build_cost_analysis_tree(
             expr,
             &user_args,
             &cost_map,
+            &function_defs,
             &ClarityVersion::Clarity3,
             epoch,
             &mut env,
@@ -1767,11 +2018,13 @@ mod tests {
             QualifiedContractIdentifier::transient(),
             ClarityVersion::Clarity3,
         );
+        let function_defs = HashMap::new();
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
         let (_, cost_tree) = build_cost_analysis_tree(
             expr,
             &user_args,
             &cost_map,
+            &function_defs,
             &ClarityVersion::Clarity3,
             epoch,
             &mut env,
@@ -1807,11 +2060,13 @@ mod tests {
             QualifiedContractIdentifier::transient(),
             ClarityVersion::Clarity3,
         );
+        let function_defs = HashMap::new();
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
         let (_, cost_tree) = build_cost_analysis_tree(
             expr,
             &user_args,
             &cost_map,
+            &function_defs,
             &ClarityVersion::Clarity3,
             epoch,
             &mut env,
@@ -1960,6 +2215,64 @@ mod tests {
             small.min.runtime,
             large.min.runtime,
         );
+    }
+
+    #[test]
+    fn test_infer_type_from_listcons_single_uint() {
+        let ast = build_test_ast("(list u1)");
+        let exprs = ast.expressions[0].match_list().unwrap();
+        let user_args = UserArgumentsContext::new();
+        let result = infer_type_from_listcons(exprs, &user_args, StacksEpochId::latest()).unwrap();
+        let expected = TypeSignature::SequenceType(SequenceSubtype::ListType(
+            ListTypeData::new_list(TypeSignature::UIntType, 1).unwrap(),
+        ));
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_infer_type_from_listcons_multiple_uints() {
+        let ast = build_test_ast("(list u1 u2 u3)");
+        let exprs = ast.expressions[0].match_list().unwrap();
+        let user_args = UserArgumentsContext::new();
+        let result = infer_type_from_listcons(exprs, &user_args, StacksEpochId::latest()).unwrap();
+        let expected = TypeSignature::SequenceType(SequenceSubtype::ListType(
+            ListTypeData::new_list(TypeSignature::UIntType, 3).unwrap(),
+        ));
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_infer_type_from_listcons_empty_returns_none() {
+        // (list) with no elements should return None
+        let ast = build_test_ast("(list)");
+        let exprs = ast.expressions[0].match_list().unwrap();
+        let user_args = UserArgumentsContext::new();
+        let result = infer_type_from_listcons(exprs, &user_args, StacksEpochId::latest());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_infer_type_from_listcons_not_list_returns_none() {
+        // A non-list expression like (+ u1 u2) should return None
+        let ast = build_test_ast("(+ u1 u2)");
+        let exprs = ast.expressions[0].match_list().unwrap();
+        let user_args = UserArgumentsContext::new();
+        let result = infer_type_from_listcons(exprs, &user_args, StacksEpochId::latest());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_infer_type_from_listcons_with_user_arg() {
+        // When a list element references a known user argument, infer from that type
+        let mut user_args = UserArgumentsContext::new();
+        user_args.add_argument("x".into(), TypeSignature::IntType);
+        let ast = build_test_ast("(list x)");
+        let exprs = ast.expressions[0].match_list().unwrap();
+        let result = infer_type_from_listcons(exprs, &user_args, StacksEpochId::latest()).unwrap();
+        let expected = TypeSignature::SequenceType(SequenceSubtype::ListType(
+            ListTypeData::new_list(TypeSignature::IntType, 1).unwrap(),
+        ));
+        assert_eq!(result, expected);
     }
 
     #[test]

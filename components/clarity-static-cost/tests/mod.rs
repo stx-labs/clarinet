@@ -74,10 +74,12 @@ fn test_build_cost_analysis_tree_function_definition() {
         &contract_id,
         clarity_version,
         |env, invoke_ctx| {
+            let function_defs = std::collections::HashMap::new();
             build_cost_analysis_tree(
                 expr,
                 &user_args,
                 &cost_map,
+                &function_defs,
                 &clarity_version,
                 epoch,
                 env,
@@ -997,6 +999,32 @@ fn test_against_dynamic_cost_analysis() {
             "add-many-32",
             &list_32_uint_args,
             false,
+        ),
+        // call a function that maps over a list, passing a shorter literal list
+        (
+            indoc! {r#"
+                (define-data-var count uint u0)
+
+                (define-private (add (n uint))
+                  (begin
+                    (var-set count (+ (var-get count) n))
+                  )
+                )
+
+                (define-public (add-many-64 (ns (list 64 uint)))
+                  (begin
+                    (map add ns)
+                    (ok true)
+                  )
+                )
+
+                (define-public (add-u1)
+                  (add-many-64 (list u1))
+                )
+            "#},
+            "add-u1",
+            &[],
+            true,
         ),
     ];
 
