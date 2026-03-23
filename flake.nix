@@ -60,7 +60,12 @@
 
           # Skip tests that require network access or additional setup
           doCheck = false;
+
+          passthru = {
+            inherit (pkgs) rustc;
+          };
         };
+
         # Script to check git dependency hashes match between Cargo.lock and flake.nix
         check-git-dependencies-hash = pkgs.writeShellApplication {
           name = "check-git-dependencies-hash";
@@ -102,7 +107,7 @@
 
               if [ "$expected_hash" != "$current_hash" ]; then
                 echo ""
-                echo "Error: clarity hash mismatch!"
+                echo "::error::nix clarity hash mismatch!"
                 echo "Please update outputHashes in flake.nix to:"
                 echo "  \"clarity-0.0.1\" = \"$expected_hash\";"
                 exit 1
@@ -112,13 +117,71 @@
               echo "Clarity hash is up to date!"
             '';
         };
+
+        # Script to check git dependency hashes match between Cargo.lock and flake.nix
+        check-rust-stable = pkgs.writeShellApplication {
+          name = "check-rust-stable";
+          runtimeInputs = [
+            pkgs.curl
+            pkgs.jq
+            pkgs.yj
+            pkgs.coreutils
+          ];
+          text =
+            let
+              rust-stable-url = "https://static.rust-lang.org/dist/channel-rust-stable.toml";
+            in
+            ''
+              MANIFEST=$(curl -sS "${rust-stable-url}")
+              MANIFEST_JSON=$(echo "$MANIFEST" | yj -t)
+
+              # Looks like "1.77.0 (aedd173a2 2024-03-17)"
+              LATEST_RUST=$(echo "$MANIFEST_JSON" | jq -r '.pkg.rust.version' | cut -d' ' -f1)
+              MANIFEST_DATE=$(echo "$MANIFEST_JSON" | jq -r '.date')
+
+              NIX_RUST="${clarinet.rustc.version}"
+
+              echo "Rust in nixpkgs: $NIX_RUST"
+              echo "Latest stable:   $LATEST_RUST (released $MANIFEST_DATE)"
+
+              if [ "$NIX_RUST" == "$LATEST_RUST" ]; then
+                echo "Rust version is up to date."
+                exit 0
+              fi
+
+              # Check if the stable version is older than 7 days
+              TODAY=$(date +%s)
+              MANIFEST_TS=$(date -d "$MANIFEST_DATE" +%s)
+              DIFF_SEC=$((TODAY - MANIFEST_TS))
+              DIFF_DAYS=$((DIFF_SEC / 86400))
+
+              echo "Stable version was released $DIFF_DAYS days ago."
+
+              if [ "$DIFF_DAYS" -gt 7 ]; then
+                echo "::error::nixpkgs Rust ($NIX_RUST) is behind latest stable ($LATEST_RUST) which is > 7 days old."
+                echo ""
+                echo "Please update nixpkgs:"
+                echo "  nix flake update nixpkgs"
+                exit 1
+              else
+                 echo "::warning::nixpkgs Rust ($NIX_RUST) is behind latest stable ($LATEST_RUST), but it is within the 7-day grace period."
+                 exit 0
+              fi
+            '';
+        };
       in
       {
-        packages.default = clarinet;
-        packages.clarinet = clarinet;
+        packages = {
+          default = clarinet;
+          inherit clarinet;
+        };
         apps.check-git-dependencies-hash = {
           type = "app";
           program = toString (pkgs.lib.getExe check-git-dependencies-hash);
+        };
+        apps.check-rust-stable = {
+          type = "app";
+          program = toString (pkgs.lib.getExe check-rust-stable);
         };
       }
     );
