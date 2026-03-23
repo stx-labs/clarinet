@@ -39,5 +39,5 @@ jobs:
       - run: nix flake check
 
       # Run the full build on a nightly because it takes a long time without caching (KISS)
-      - if: github.event_name == "schedule"
+      - if: github.event_name == 'schedule'
         run: nix build
