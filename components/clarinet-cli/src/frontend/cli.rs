@@ -1262,14 +1262,10 @@ pub fn main() {
                     lint_diags
                 }
             };
-            let mut analysis_diagnostics: Vec<_> = lint_diagnostics
-                .iter()
-                .map(|ld| ld.diagnostic.clone())
-                .collect();
-            diagnostics.append(&mut analysis_diagnostics);
 
             match cmd.output_format {
                 OutputFormat::Json | OutputFormat::JsonPretty => {
+                    diagnostics.extend(lint_diagnostics.into_iter().map(Diagnostic::from));
                     let output = JsonCheckOutput {
                         success,
                         diagnostics: HashMap::from([(file, diagnostics)]),
@@ -1288,15 +1284,20 @@ pub fn main() {
                 OutputFormat::Standard => {
                     let lines = contract.expect_in_memory_code_source().lines();
                     let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
+                    // Output parse/annotation diagnostics (no lint name)
                     for d in &diagnostics {
-                        // Look up the lint name for this diagnostic
-                        let lint_name = lint_diagnostics
-                            .iter()
-                            .find(|ld| {
-                                ld.diagnostic.message == d.message && ld.diagnostic.spans == d.spans
-                            })
-                            .and_then(|ld| ld.lint_name.as_ref());
-                        for line in output_diagnostic(d, &file, &formatted_lines, lint_name) {
+                        for line in output_diagnostic(d, &file, &formatted_lines, None) {
+                            println!("{line}");
+                        }
+                    }
+                    // Output lint diagnostics with their structured lint name
+                    for ld in &lint_diagnostics {
+                        for line in output_diagnostic(
+                            &ld.diagnostic,
+                            &file,
+                            &formatted_lines,
+                            ld.lint_name.as_ref(),
+                        ) {
                             println!("{line}");
                         }
                     }
