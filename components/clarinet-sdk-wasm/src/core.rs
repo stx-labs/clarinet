@@ -1049,7 +1049,7 @@ impl SDK {
     pub fn run_snippet(&mut self, snippet: String) -> String {
         let session = self.get_session_mut();
         match session.eval(snippet.clone(), false) {
-            Ok(res) => match res.result {
+            Ok(res) => match res.into_inner().result {
                 EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
                 EvaluationResult::Contract(_) => unreachable!(
                     "Contract evaluation result should not be returned from eval_snippet",
