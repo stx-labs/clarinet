@@ -458,7 +458,8 @@ impl SDK {
                 }
                 Err(diagnostics) => {
                     let contract_diagnostics = HashMap::from([(contract_id, diagnostics)]);
-                    let diags_digest = DiagnosticsDigest::new(&contract_diagnostics, &deployment);
+                    let diags_digest =
+                        DiagnosticsDigest::new(&contract_diagnostics, &HashMap::new(), &deployment);
                     if diags_digest.errors > 0 {
                         return Err(diags_digest.message);
                     }
@@ -510,7 +511,8 @@ impl SDK {
         .await?;
 
         if !artifacts.success {
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+            let diags_digest =
+                DiagnosticsDigest::new(&artifacts.diags, &artifacts.lint_diags, &deployment);
             if diags_digest.errors > 0 {
                 return Err(diags_digest.message);
             }

@@ -26,6 +26,15 @@ pub fn clarity_diagnostics_to_lsp_type(diagnostics: &Vec<ClarityDiagnostic>) -> 
     dst
 }
 
+pub fn clarity_diagnostics_with_lint_names_to_lsp_type(
+    diagnostics: &[(ClarityDiagnostic, Option<LintName>)],
+) -> Vec<LspDiagnostic> {
+    diagnostics
+        .iter()
+        .map(|(d, lint_name)| clarity_diagnostic_to_lsp_type(d, lint_name.as_ref()))
+        .collect()
+}
+
 pub fn clarity_diagnostic_to_lsp_type(
     diagnostic: &ClarityDiagnostic,
     lint_name: Option<&LintName>,

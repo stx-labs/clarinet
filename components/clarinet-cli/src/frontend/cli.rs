@@ -1131,8 +1131,11 @@ pub fn main() {
                         );
 
                         if !artifacts.success {
-                            let diags_digest =
-                                DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                            let diags_digest = DiagnosticsDigest::new(
+                                &artifacts.diags,
+                                &artifacts.lint_diags,
+                                &deployment,
+                            );
                             if diags_digest.has_feedbacks() {
                                 println!("{}", diags_digest.message);
                             }
@@ -1285,22 +1288,15 @@ pub fn main() {
                 OutputFormat::Standard => {
                     let lines = contract.expect_in_memory_code_source().lines();
                     let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-                    // Output non-lint diagnostics first (parse errors, etc.)
-                    let lint_count = lint_diagnostics.len();
-                    let non_lint_count = diagnostics.len() - lint_count;
-                    for d in &diagnostics[..non_lint_count] {
-                        for line in output_diagnostic(d, &file, &formatted_lines, None) {
-                            println!("{line}");
-                        }
-                    }
-                    // Output lint diagnostics with their structured lint name
-                    for ld in &lint_diagnostics {
-                        for line in output_diagnostic(
-                            &ld.diagnostic,
-                            &file,
-                            &formatted_lines,
-                            ld.lint_name.as_ref(),
-                        ) {
+                    for d in &diagnostics {
+                        // Look up the lint name for this diagnostic
+                        let lint_name = lint_diagnostics
+                            .iter()
+                            .find(|ld| {
+                                ld.diagnostic.message == d.message && ld.diagnostic.spans == d.spans
+                            })
+                            .and_then(|ld| ld.lint_name.as_ref());
+                        for line in output_diagnostic(d, &file, &formatted_lines, lint_name) {
                             println!("{line}");
                         }
                     }
@@ -1367,7 +1363,11 @@ pub fn main() {
                                 }
                             }
                         }
-                        let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                        let diags_digest = DiagnosticsDigest::new(
+                            &artifacts.diags,
+                            &artifacts.lint_diags,
+                            &deployment,
+                        );
                         if diags_digest.has_feedbacks() {
                             println!("{}", diags_digest.message);
                         }

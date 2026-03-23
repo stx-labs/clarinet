@@ -67,6 +67,7 @@ pub fn setup_session_with_deployment(
 
     let deps = BTreeMap::new();
     let mut diags = HashMap::new();
+    let mut lint_diags = HashMap::new();
     let mut results_values = HashMap::new();
     let mut asts = BTreeMap::new();
     let mut contracts_analysis = HashMap::new();
@@ -74,7 +75,11 @@ pub fn setup_session_with_deployment(
     for (contract_id, res) in contracts.into_iter() {
         match res {
             Ok(annotated) => {
-                let execution_result = annotated.into_inner();
+                let AnnotatedExecutionResult {
+                    execution_result,
+                    lint_diagnostics,
+                } = annotated;
+                lint_diags.insert(contract_id.clone(), lint_diagnostics);
                 diags.insert(contract_id.clone(), execution_result.diagnostics);
                 if let EvaluationResult::Contract(contract_result) = execution_result.result {
                     results_values.insert(contract_id.clone(), contract_result.result);
@@ -93,6 +98,7 @@ pub fn setup_session_with_deployment(
         asts,
         deps,
         diags,
+        lint_diags,
         results_values,
         success,
         session,
@@ -974,6 +980,7 @@ pub async fn generate_default_deployment(
         asts: contract_asts,
         deps: dependencies,
         diags: contract_diags,
+        lint_diags: HashMap::new(),
         success: asts_success,
         results_values: HashMap::new(),
         analysis: HashMap::new(),

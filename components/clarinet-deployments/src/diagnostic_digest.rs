@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity_repl::analysis::linter::LintName;
+use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::diagnostic::output_code;
 use colored::Colorize;
 
@@ -37,6 +38,7 @@ pub struct DiagnosticsDigest {
 impl DiagnosticsDigest {
     pub fn new(
         contracts_diags: &HashMap<QualifiedContractIdentifier, Vec<Diagnostic>>,
+        contracts_lint_diags: &HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>>,
         deployment: &DeploymentSpecification,
     ) -> DiagnosticsDigest {
         let mut full_success = 0;
@@ -65,13 +67,24 @@ impl DiagnosticsDigest {
             let lines = source.lines();
             let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
 
+            let lint_diags = contracts_lint_diags.get(contract_id);
             for diagnostic in diags {
+                // Look up lint name for this diagnostic
+                let lint_name = lint_diags
+                    .and_then(|lds| {
+                        lds.iter().find(|ld| {
+                            ld.diagnostic.message == diagnostic.message
+                                && ld.diagnostic.spans == diagnostic.spans
+                        })
+                    })
+                    .and_then(|ld| ld.lint_name.as_ref());
+
                 match diagnostic.level {
                     Level::Error => {
                         errors += 1;
                         outputs.push(format!(
                             "{} {}",
-                            level_string(&diagnostic.level, None),
+                            level_string(&diagnostic.level, lint_name),
                             diagnostic.message,
                         ));
                     }
@@ -79,14 +92,14 @@ impl DiagnosticsDigest {
                         warnings += 1;
                         outputs.push(format!(
                             "{} {}",
-                            level_string(&diagnostic.level, None),
+                            level_string(&diagnostic.level, lint_name),
                             diagnostic.message,
                         ));
                     }
                     Level::Note => {
                         outputs.push(format!(
                             "{} {}",
-                            level_string(&diagnostic.level, None),
+                            level_string(&diagnostic.level, lint_name),
                             diagnostic.message,
                         ));
                         outputs.append(&mut output_code(diagnostic, &formatted_lines));

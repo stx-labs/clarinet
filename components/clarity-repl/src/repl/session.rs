@@ -26,6 +26,7 @@ use super::{
     SessionSettings,
 };
 use crate::analysis::coverage::CoverageHook;
+use crate::analysis::linter::LintName;
 use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
@@ -126,6 +127,22 @@ impl AnnotatedExecutionResult {
     /// Extract the inner `ExecutionResult`, discarding lint metadata.
     pub fn into_inner(self) -> ExecutionResult {
         self.execution_result
+    }
+
+    /// Iterate all diagnostics, pairing each with its `LintName` if it
+    /// originated from a lint pass.  This avoids relying on any particular
+    /// ordering of diagnostics inside `ExecutionResult`.
+    pub fn diagnostics_with_lint_names(
+        &self,
+    ) -> impl Iterator<Item = (&Diagnostic, Option<&LintName>)> {
+        self.execution_result.diagnostics.iter().map(|d| {
+            let lint_name = self
+                .lint_diagnostics
+                .iter()
+                .find(|ld| ld.diagnostic.message == d.message && ld.diagnostic.spans == d.spans)
+                .and_then(|ld| ld.lint_name.as_ref());
+            (d, lint_name)
+        })
     }
 }
 
@@ -428,24 +445,12 @@ impl Session {
 
         match result {
             Ok(result) => {
-                // Output non-lint diagnostics first (those that don't match any lint diagnostic)
-                let lint_count = result.lint_diagnostics.len();
-                let non_lint_count = result.diagnostics.len().saturating_sub(lint_count);
-                for diagnostic in &result.diagnostics[..non_lint_count] {
+                for (diagnostic, lint_name) in result.diagnostics_with_lint_names() {
                     output.append(&mut output_diagnostic(
                         diagnostic,
                         &contract_name,
                         &formatted_lines,
-                        None,
-                    ));
-                }
-                // Output lint diagnostics with their structured lint name
-                for ld in &result.lint_diagnostics {
-                    output.append(&mut output_diagnostic(
-                        &ld.diagnostic,
-                        &contract_name,
-                        &formatted_lines,
-                        ld.lint_name.as_ref(),
+                        lint_name,
                     ));
                 }
                 if !result.events.is_empty() {
