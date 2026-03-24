@@ -800,12 +800,7 @@ impl DevnetOrchestrator {
             .map_err(|e| format!("Failed to create bitcoin directory: {e}"))?;
         if !no_snapshot {
             // Ensure the destination directory exists in the container
-            let docker_host = &self
-                .network_config
-                .as_ref()
-                .and_then(|c| c.devnet.as_ref())
-                .ok_or("unable to read devnet config")?
-                .docker_host;
+            let docker_host = &self.get_devnet_config()?.docker_host;
 
             copy_snapshot_to_container(
                 container,
@@ -1105,12 +1100,7 @@ impl DevnetOrchestrator {
         let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
 
         if !no_snapshot {
-            let docker_host = &self
-                .network_config
-                .as_ref()
-                .and_then(|c| c.devnet.as_ref())
-                .ok_or("unable to read devnet config")?
-                .docker_host;
+            let docker_host = &self.get_devnet_config()?.docker_host;
 
             copy_snapshot_to_container(
                 container,
