@@ -1556,10 +1556,12 @@ fn test_empty_list_in_expression_does_not_panic() {
     let db = memory_store.as_clarity_db();
     let mut owned_env = OwnedEnvironment::new(db, epoch);
 
-    let result =
-        with_cost_analysis_environment(&mut owned_env, &contract_id, clarity_version, |env| {
-            static_cost_from_ast(&ast, &clarity_version, epoch, env)
-        });
+    let result = with_cost_analysis_environment(
+        &mut owned_env,
+        &contract_id,
+        clarity_version,
+        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+    );
 
     // Should complete without panicking
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result.err());

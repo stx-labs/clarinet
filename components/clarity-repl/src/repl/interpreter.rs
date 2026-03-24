@@ -436,7 +436,7 @@ impl ClarityInterpreter {
                 let invoke_ctx = InvocationContext {
                     contract_context: &contract_context,
                     sender: Some(tx_sender.clone()),
-                    caller: Some(tx_sender.clone()),
+                    caller: Some(tx_sender),
                     sponsor: None,
                 };
                 let mut env = ExecutionState {
@@ -468,8 +468,8 @@ impl ClarityInterpreter {
                             let start = std::time::Instant::now();
 
                             let args: Vec<SymbolicExpression> = args
-                                .iter()
-                                .map(|a| SymbolicExpression::atom_value(a.clone()))
+                                .into_iter()
+                                .map(SymbolicExpression::atom_value)
                                 .collect();
                             let res = env.execute_contract(
                                 &invoke_ctx,
@@ -653,7 +653,7 @@ impl ClarityInterpreter {
             let invoke_ctx = InvocationContext {
                 contract_context: &contract_context,
                 sender: Some(tx_sender.clone()),
-                caller: Some(tx_sender.clone()),
+                caller: Some(tx_sender),
                 sponsor: None,
             };
             let mut env = ExecutionState {
@@ -1026,7 +1026,7 @@ impl ClarityInterpreter {
     }
 
     pub fn get_accounts(&self) -> Vec<String> {
-        self.accounts.clone().into_iter().collect::<Vec<_>>()
+        self.accounts.iter().cloned().collect()
     }
 
     pub fn get_balance_for_account(&self, account: &str, token: &str) -> u128 {

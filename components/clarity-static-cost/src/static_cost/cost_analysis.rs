@@ -1069,7 +1069,7 @@ fn build_function_definition_cost_analysis_tree(
 
     // Create the function definition node with zero cost (function definitions themselves don't have execution cost)
     Ok((
-        function_name.clone().to_string(),
+        function_name.to_string(),
         CostAnalysisNode::new(
             CostExprNode::UserFunction(define_type.clone()),
             StaticCost::ZERO,
