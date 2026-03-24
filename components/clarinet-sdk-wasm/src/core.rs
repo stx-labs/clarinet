@@ -38,6 +38,43 @@ use wasm_bindgen::JsValue;
 
 use crate::utils::events::serialize_event;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RecordedTx {
+    CallPublicFn {
+        contract: String,
+        method: String,
+        args: Vec<Vec<u8>>,
+        sender: String,
+    },
+    CallPrivateFn {
+        contract: String,
+        method: String,
+        args: Vec<Vec<u8>>,
+        sender: String,
+    },
+    CallReadOnlyFn {
+        contract: String,
+        method: String,
+        args: Vec<Vec<u8>>,
+        sender: String,
+    },
+    DeployContract {
+        name: String,
+        content: String,
+        sender: String,
+        clarity_version: Option<u32>,
+    },
+    TransferSTX {
+        amount: u64,
+        recipient: String,
+        sender: String,
+    },
+    AdvanceChainTip {
+        count: u32,
+    },
+}
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(typescript_type = "Map<string, Map<string, bigint>>")]
@@ -299,6 +336,7 @@ pub struct SDK {
     current_test_name: String,
     costs_reports: Vec<CostsReport>,
     api_base_url: Option<String>,
+    transaction_log: Vec<RecordedTx>,
 }
 
 #[wasm_bindgen]
@@ -329,6 +367,7 @@ impl SDK {
             current_test_name: String::new(),
             costs_reports: vec![],
             api_base_url: None,
+            transaction_log: Vec::new(),
         }
     }
 
@@ -828,6 +867,12 @@ impl SDK {
                 return Err(format!("{} is not a read-only function", &args.method));
             }
         }
+        self.transaction_log.push(RecordedTx::CallReadOnlyFn {
+            contract: args.contract.clone(),
+            method: args.method.clone(),
+            args: args.args.clone(),
+            sender: args.sender.clone(),
+        });
         self.call_contract_fn(args, false)
     }
 
@@ -843,9 +888,17 @@ impl SDK {
         }
 
         if advance_chain_tip {
+            self.transaction_log
+                .push(RecordedTx::AdvanceChainTip { count: 1 });
             let session = self.get_session_mut();
             session.advance_chain_tip(1);
         }
+        self.transaction_log.push(RecordedTx::CallPublicFn {
+            contract: args.contract.clone(),
+            method: args.method.clone(),
+            args: args.args.clone(),
+            sender: args.sender.clone(),
+        });
         self.call_contract_fn(args, false)
     }
 
@@ -860,9 +913,17 @@ impl SDK {
             }
         }
         if advance_chain_tip {
+            self.transaction_log
+                .push(RecordedTx::AdvanceChainTip { count: 1 });
             let session = self.get_session_mut();
             session.advance_chain_tip(1);
         }
+        self.transaction_log.push(RecordedTx::CallPrivateFn {
+            contract: args.contract.clone(),
+            method: args.method.clone(),
+            args: args.args.clone(),
+            sender: args.sender.clone(),
+        });
         self.call_contract_fn(args, true)
     }
 
@@ -878,6 +939,16 @@ impl SDK {
         if PrincipalData::parse(&args.recipient).is_err() {
             return Err(format!("Invalid recipient address '{}'.", args.recipient));
         }
+
+        if advance_chain_tip {
+            self.transaction_log
+                .push(RecordedTx::AdvanceChainTip { count: 1 });
+        }
+        self.transaction_log.push(RecordedTx::TransferSTX {
+            amount: args.amount,
+            recipient: args.recipient.clone(),
+            sender: args.sender.clone(),
+        });
 
         let session = self.get_session_mut();
         let initial_tx_sender = session.get_tx_sender();
@@ -909,6 +980,17 @@ impl SDK {
         if PrincipalData::parse_standard_principal(&args.sender).is_err() {
             return Err(format!("Invalid sender address '{}'.", args.sender));
         }
+
+        if advance_chain_tip {
+            self.transaction_log
+                .push(RecordedTx::AdvanceChainTip { count: 1 });
+        }
+        self.transaction_log.push(RecordedTx::DeployContract {
+            name: args.name.clone(),
+            content: args.content.clone(),
+            sender: args.sender.clone(),
+            clarity_version: args.options.as_ref().and_then(|o| o.clarity_version),
+        });
 
         let track_costs = self.options.track_costs;
         let execution = {
@@ -985,6 +1067,8 @@ impl SDK {
             .into_serde()
             .map_err(|e| format!("Failed to parse js txs: {e}"))?;
 
+        self.transaction_log
+            .push(RecordedTx::AdvanceChainTip { count: 1 });
         {
             let session = self.get_session_mut();
             session.advance_chain_tip(1);
@@ -1018,6 +1102,8 @@ impl SDK {
     }
     #[wasm_bindgen(js_name=mineEmptyStacksBlock)]
     pub fn mine_empty_stacks_block(&mut self) -> Result<u32, String> {
+        self.transaction_log
+            .push(RecordedTx::AdvanceChainTip { count: 1 });
         let session = self.get_session_mut();
         match session.advance_stacks_chain_tip(1) {
             Ok(new_height) => Ok(new_height),
@@ -1027,8 +1113,11 @@ impl SDK {
 
     #[wasm_bindgen(js_name=mineEmptyStacksBlocks)]
     pub fn mine_empty_stacks_blocks(&mut self, count: Option<u32>) -> Result<u32, String> {
+        let c = count.unwrap_or(1);
+        self.transaction_log
+            .push(RecordedTx::AdvanceChainTip { count: c });
         let session = self.get_session_mut();
-        match session.advance_stacks_chain_tip(count.unwrap_or(1)) {
+        match session.advance_stacks_chain_tip(c) {
             Ok(new_height) => Ok(new_height),
             Err(_) => Err("use mineEmptyBurnBlocks in epoch lower than 3.0".to_string()),
         }
@@ -1036,13 +1125,18 @@ impl SDK {
 
     #[wasm_bindgen(js_name=mineEmptyBurnBlock)]
     pub fn mine_empty_burn_block(&mut self) -> u32 {
+        self.transaction_log
+            .push(RecordedTx::AdvanceChainTip { count: 1 });
         let session = self.get_session_mut();
         session.advance_burn_chain_tip(1)
     }
     #[wasm_bindgen(js_name=mineEmptyBurnBlocks)]
     pub fn mine_empty_burn_blocks(&mut self, count: Option<u32>) -> u32 {
+        let c = count.unwrap_or(1);
+        self.transaction_log
+            .push(RecordedTx::AdvanceChainTip { count: c });
         let session = self.get_session_mut();
-        session.advance_burn_chain_tip(count.unwrap_or(1))
+        session.advance_burn_chain_tip(c)
     }
 
     #[wasm_bindgen(js_name=runSnippet)]
@@ -1095,6 +1189,16 @@ impl SDK {
     pub fn get_last_contract_call_trace(&self) -> Option<String> {
         let session = self.get_session();
         session.last_contract_call_trace.clone()
+    }
+
+    #[wasm_bindgen(js_name=getTransactionLog)]
+    pub fn get_transaction_log(&self) -> Result<JsValue, String> {
+        encode_to_js(&self.transaction_log).map_err(|e| format!("error serializing tx log: {e}"))
+    }
+
+    #[wasm_bindgen(js_name=clearTransactionLog)]
+    pub fn clear_transaction_log(&mut self) {
+        self.transaction_log.clear();
     }
 
     #[wasm_bindgen(js_name=setLocalAccounts)]
