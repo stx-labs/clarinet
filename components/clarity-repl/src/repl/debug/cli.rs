@@ -1,9 +1,8 @@
-use clarity::vm::contexts::{Environment, LocalContext};
+use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::representations::Span;
-use clarity::vm::{ContractName, EvalHook, SymbolicExpression};
+use clarity::vm::{ContractName, EvalHook, SymbolicExpression, ValueRef};
 use clarity_types::types::QualifiedContractIdentifier;
-use clarity_types::Value;
 use indoc::printdoc;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
@@ -34,7 +33,13 @@ impl CLIDebugger {
         }
     }
 
-    fn prompt(&mut self, env: &mut Environment, context: &LocalContext, expr: &SymbolicExpression) {
+    fn prompt(
+        &mut self,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
+        context: &LocalContext,
+        expr: &SymbolicExpression,
+    ) {
         let prompt = black!("(debug) ");
         loop {
             let readline = self.editor.readline(&prompt);
@@ -46,7 +51,7 @@ impl CLIDebugger {
                         }
                     }
                     let _ = self.editor.add_history_entry(&command);
-                    self.handle_command(&command, env, context, expr)
+                    self.handle_command(&command, env, invoke_ctx, context, expr)
                 }
                 Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                     println!("Use \"q\" or \"quit\" to exit debug mode");
@@ -99,8 +104,13 @@ impl CLIDebugger {
     }
 
     // Print the source of the current expr (if it has a valid span).
-    fn print_source(&mut self, env: &mut Environment, expr: &SymbolicExpression) {
-        let contract_id = &env.contract_context.contract_identifier;
+    fn print_source(
+        &mut self,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
+        expr: &SymbolicExpression,
+    ) {
+        let contract_id = &invoke_ctx.contract_context.contract_identifier;
         if contract_id == &self.state.debug_cmd_contract {
             self.print_source_from_str(
                 "<command>",
@@ -132,7 +142,8 @@ impl CLIDebugger {
     fn handle_command(
         &mut self,
         command: &str,
-        env: &mut Environment,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
         context: &LocalContext,
         expr: &SymbolicExpression,
     ) -> bool {
@@ -162,23 +173,23 @@ impl CLIDebugger {
                 true
             }
             "b" | "break" => {
-                self.break_command(args, env);
+                self.break_command(args, env, invoke_ctx);
                 false
             }
             "w" | "watch" => {
-                self.watch_command(args, env, AccessType::Write);
+                self.watch_command(args, env, invoke_ctx, AccessType::Write);
                 false
             }
             "rw" | "rwatch" => {
-                self.watch_command(args, env, AccessType::Read);
+                self.watch_command(args, env, invoke_ctx, AccessType::Read);
                 false
             }
             "aw" | "awatch" => {
-                self.watch_command(args, env, AccessType::ReadWrite);
+                self.watch_command(args, env, invoke_ctx, AccessType::ReadWrite);
                 false
             }
             "p" | "print" => {
-                match self.state.evaluate(env, context, args) {
+                match self.state.evaluate(env, invoke_ctx, context, args) {
                     Ok(value) => {
                         println!("{value}");
                     }
@@ -202,7 +213,12 @@ impl CLIDebugger {
         }
     }
 
-    fn break_command(&mut self, args: &str, env: &mut Environment) {
+    fn break_command(
+        &mut self,
+        args: &str,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
+    ) {
         if args.is_empty() {
             println!("{}", format_err!("invalid break command"));
             print_help_breakpoint();
@@ -259,7 +275,7 @@ impl CLIDebugger {
                     }
 
                     let contract_id = if parts[0].is_empty() {
-                        env.contract_context.contract_identifier.clone()
+                        invoke_ctx.contract_context.contract_identifier.clone()
                     } else {
                         let contract_parts: Vec<&str> = parts[0].split('.').collect();
                         if contract_parts.len() != 2 {
@@ -269,7 +285,11 @@ impl CLIDebugger {
                         }
                         if contract_parts[0].is_empty() {
                             QualifiedContractIdentifier::new(
-                                env.contract_context.contract_identifier.issuer.clone(),
+                                invoke_ctx
+                                    .contract_context
+                                    .contract_identifier
+                                    .issuer
+                                    .clone(),
                                 ContractName::from(contract_parts[1]),
                             )
                         } else {
@@ -328,11 +348,18 @@ impl CLIDebugger {
                     // - function
                     let parts: Vec<&str> = args.split('.').collect();
                     let (contract_id, function_name) = match parts.len() {
-                        1 => (env.contract_context.contract_identifier.clone(), parts[0]),
+                        1 => (
+                            invoke_ctx.contract_context.contract_identifier.clone(),
+                            parts[0],
+                        ),
                         3 => {
                             let contract_id = if parts[0].is_empty() {
                                 QualifiedContractIdentifier::new(
-                                    env.contract_context.contract_identifier.issuer.clone(),
+                                    invoke_ctx
+                                        .contract_context
+                                        .contract_identifier
+                                        .issuer
+                                        .clone(),
                                     ContractName::from(parts[1]),
                                 )
                             } else {
@@ -388,7 +415,13 @@ impl CLIDebugger {
         }
     }
 
-    fn watch_command(&mut self, args: &str, env: &mut Environment, access_type: AccessType) {
+    fn watch_command(
+        &mut self,
+        args: &str,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
+        access_type: AccessType,
+    ) {
         if args.is_empty() {
             println!("{}", format_err!("invalid watch command"));
             print_help_watchpoint();
@@ -432,7 +465,7 @@ impl CLIDebugger {
                     return;
                 }
 
-                match extract_watch_variable(env, args, None) {
+                match extract_watch_variable(env, invoke_ctx, args, None) {
                     Ok((contract, name)) => self.state.add_watchpoint(
                         &contract.contract_context.contract_identifier,
                         name,
@@ -451,11 +484,12 @@ impl CLIDebugger {
 impl EvalHook for CLIDebugger {
     fn will_begin_eval(
         &mut self,
-        env: &mut Environment,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
         context: &LocalContext,
         expr: &SymbolicExpression,
     ) {
-        if !self.state.will_begin_eval(env, context, expr) {
+        if !self.state.will_begin_eval(invoke_ctx, context, expr) {
             match self.state.state {
                 State::Break(id) => println!("{} hit breakpoint {}", black!("*"), id),
                 State::DataBreak(id, access_type) => println!(
@@ -470,21 +504,26 @@ impl EvalHook for CLIDebugger {
                 ),
                 _ => (),
             }
-            self.print_source(env, expr);
-            self.prompt(env, context, expr);
+            self.print_source(env, invoke_ctx, expr);
+            self.prompt(env, invoke_ctx, context, expr);
         }
     }
 
-    fn did_finish_eval(
+    fn did_finish_eval<'a>(
         &mut self,
-        env: &mut Environment,
-        context: &LocalContext,
+        _env: &mut ExecutionState,
+        _invoke_ctx: &'a InvocationContext,
+        _context: &'a LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, VmExecutionError>,
+        res: &Result<ValueRef<'a>, VmExecutionError>,
     ) {
-        if self.state.did_finish_eval(env, context, expr, res) {
+        if self.state.did_finish_eval(expr) {
             match res {
-                Ok(value) => println!("{}: {}", green!("Return value"), black!("{value}")),
+                Ok(value) => println!(
+                    "{}: {}",
+                    green!("Return value"),
+                    black!("{}", value.as_ref())
+                ),
                 Err(e) => println!("{}", format_err!(e)),
             }
         }
