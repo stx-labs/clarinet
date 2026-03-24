@@ -27,6 +27,14 @@ use super::{extract_watch_variable, AccessType, DebugState, State};
 
 pub mod codec;
 
+pub enum LaunchMode {
+    /// Debug a single Clarity expression (existing behavior)
+    Expression {
+        manifest: String,
+        expression: String,
+    },
+}
+
 /*
  * DAP Session:
  *      VSCode                    DAPDebugger
@@ -112,14 +120,18 @@ impl DAPDebugger {
     }
 
     // Process all messages before launching the REPL
-    pub fn init(&mut self) -> Result<(String, String), ParseError> {
+    pub fn init(&mut self) -> Result<LaunchMode, ParseError> {
         while self.launched.is_none() {
             match self.wait_for_command(None, None) {
                 Ok(_) => (),
                 Err(e) => return Err(e),
             }
         }
-        Ok(self.launched.take().unwrap())
+        let (manifest, expression) = self.launched.take().unwrap();
+        Ok(LaunchMode::Expression {
+            manifest,
+            expression,
+        })
     }
 
     // Successful result boolean indicates if execution should continue based on the message received
