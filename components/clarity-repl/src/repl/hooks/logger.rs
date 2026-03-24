@@ -1,8 +1,9 @@
-use clarity::vm::contexts::{Environment, LocalContext};
+use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::functions::NativeFunctions;
-use clarity::vm::{EvalHook, ExecutionResult, SymbolicExpression, SymbolicExpressionType};
-use clarity_types::Value;
+use clarity::vm::{
+    EvalHook, ExecutionResult, SymbolicExpression, SymbolicExpressionType, ValueRef,
+};
 
 use crate::repl::clarity_values::value_to_string;
 
@@ -16,14 +17,22 @@ impl LoggerHook {
 }
 
 impl EvalHook for LoggerHook {
-    fn will_begin_eval(&mut self, _: &mut Environment, _: &LocalContext, _: &SymbolicExpression) {}
-
-    fn did_finish_eval(
+    fn will_begin_eval(
         &mut self,
-        env: &mut Environment,
-        _context: &LocalContext,
+        _: &mut ExecutionState,
+        _: &InvocationContext,
+        _: &LocalContext,
+        _: &SymbolicExpression,
+    ) {
+    }
+
+    fn did_finish_eval<'a>(
+        &mut self,
+        _env: &mut ExecutionState,
+        invoke_ctx: &'a InvocationContext,
+        _context: &'a LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, VmExecutionError>,
+        res: &Result<ValueRef<'a>, VmExecutionError>,
     ) {
         let SymbolicExpressionType::List(list) = &expr.expr else {
             return;
@@ -36,13 +45,13 @@ impl EvalHook for LoggerHook {
         };
 
         if let Some(NativeFunctions::Print) = NativeFunctions::lookup_by_name(function_name) {
-            let contract_name = &env.contract_context.contract_identifier.name;
+            let contract_name = &invoke_ctx.contract_context.contract_identifier.name;
             let span = &expr.span;
             let line_annotation = format!("({}:{})", contract_name, span.start_line);
 
             match res {
                 Ok(value) => {
-                    let value_str = value_to_string(value);
+                    let value_str = value_to_string(value.as_ref());
                     uprint!("{value_str} {line_annotation}");
                 }
                 Err(err) => {

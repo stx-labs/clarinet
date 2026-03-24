@@ -48,6 +48,7 @@ use toml_edit::DocumentMut;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
+use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
 use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
@@ -266,7 +267,7 @@ enum Deployments {
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct EncryptDeployment {
     /// Encryption strength
-    #[clap(long = "strength", default_value = "default")]
+    #[clap(long = "strength", default_value = "medium")]
     pub strength: clarinet_utils::MnemonicEncryptionStrength,
 }
 
@@ -606,6 +607,8 @@ pub fn main() {
 
     let clarinetrc = ClarinetRC::from_rc_file();
 
+    let update_handle = update_check::check_for_update_async();
+
     match opts.command {
         Command::Completions(cmd) => {
             let mut app = Opts::command();
@@ -679,13 +682,15 @@ pub fn main() {
                             println!("{}",
                                 yellow!("Enable or disable clarinet telemetry globally with this command:")
                             );
-                            println!(
-                                "{}",
-                                blue!(
-                                    "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
-                                    ClarinetRC::get_settings_file_path()
-                                )
-                            );
+                            if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+                                println!(
+                                    "{}",
+                                    blue!(
+                                        "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
+                                        settings_path.display()
+                                    )
+                                );
+                            }
                             // TODO(lgalabru): once we have a privacy policy available, add a link
                             // println!("{}", yellow!("Visit http://hiro.so/clarinet-privacy for details."));
                             println!("{}", yellow!("Enable [Y/n]?"));
@@ -1024,11 +1029,14 @@ pub fn main() {
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password, cmd.strength)
                         .unwrap();
                 let key = match cmd.strength {
-                    clarinet_utils::MnemonicEncryptionStrength::Default => "encrypted_mnemonic",
+                    clarinet_utils::MnemonicEncryptionStrength::Basic => "encrypted_mnemonic",
                     clarinet_utils::MnemonicEncryptionStrength::Medium => {
                         "encrypted_mnemonic_medium"
                     }
                     clarinet_utils::MnemonicEncryptionStrength::High => "encrypted_mnemonic_high",
+                    clarinet_utils::MnemonicEncryptionStrength::Extreme => {
+                        "encrypted_mnemonic_extreme"
+                    }
                 };
                 println!("{key} = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
@@ -1194,7 +1202,10 @@ pub fn main() {
             }
         }
         Command::Check(cmd) if cmd.show_lints => {
-            print_available_lints();
+            let settings = load_manifest_or_warn(cmd.manifest_path)
+                .map(|m| m.repl_settings.analysis)
+                .unwrap_or_else(analysis::Settings::with_default_lints);
+            print_available_lints(&settings);
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
@@ -1480,46 +1491,89 @@ pub fn main() {
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
     };
+
+    update_check::print_update_message(update_handle);
 }
 
-fn print_available_lints() {
-    println!("Lint groups:");
+fn print_available_lints(settings: &analysis::Settings) {
+    use clarity::vm::diagnostic::Level;
+    use colored::Colorize;
+
+    fn colored_level(level: &Level) -> String {
+        match level {
+            Level::Error => red!("error").to_string(),
+            Level::Warning => yellow!("warning").to_string(),
+            Level::Note => blue!("note").to_string(),
+        }
+    }
+
+    println!("{}", "Lint groups:".bold());
     println!();
     for group in LintGroup::VARIANTS {
+        let name = format!("{group:<12}");
         println!(
-            "  {group:<12} {}",
+            "  {} {}",
+            name.bright_yellow(),
             group.get_documentation().unwrap_or_default()
         );
     }
 
     println!();
-    println!("Lints:");
+    println!("{}", "Lints:".bold());
     println!();
     for lint in LintName::VARIANTS {
         let groups: Vec<_> = LintGroup::of(lint)
             .into_iter()
             .map(ToString::to_string)
             .collect();
-        let groups = format!("[{}]", groups.join(", "));
+        // Pad the plain text first, then color the group names inside
+        let groups_plain = format!("{:<12}", format!("[{}]", groups.join(", ")));
+        let groups = groups.iter().fold(groups_plain, |s, g| {
+            s.replacen(g.as_str(), &g.bright_yellow().to_string(), 1)
+        });
+        let name = format!("{lint:<28}");
         println!(
-            "  {lint:<28} {groups:<12} {}",
+            "  {} {} {}",
+            name.bright_yellow(),
+            groups,
             lint.get_documentation().unwrap_or_default()
         );
     }
 
-    indoc::printdoc! {r#"
+    println!();
+    println!("{}", "Active lint configuration:".bold());
+    println!();
 
-        Configure lints in Clarinet.toml:
+    let lints = settings.lints();
+    for level in [Level::Error, Level::Warning, Level::Note] {
+        let mut names: Vec<_> = lints
+            .iter()
+            .filter(|(_, l)| **l == level)
+            .map(|(name, _)| name.to_string().bright_yellow().to_string())
+            .collect();
+        names.sort();
 
-          [repl.analysis.lint_groups]
-          style = "warning"
+        if !names.is_empty() {
+            println!("  [{}]    {}", colored_level(&level), names.join(", "));
+        }
+    }
 
-          [repl.analysis.lints]
-          unused_const = "error"
-          at_block = false
+    println!();
+    println!("{}", "Configure lints in Clarinet.toml:".bold());
+    let sample = r#"
+  [repl.analysis.lint_groups]
+  style = "warning"
 
-        Suppress a lint in source code with: ;; #[allow(lint_name)]
-    "#};
+  [repl.analysis.lints]
+  unused_const = "error"
+  at_block = false
+"#;
+    println!("{}", sample.dimmed());
+    println!(
+        "{} {}",
+        "Suppress a lint in source code with:".bold(),
+        ";; #[allow(lint_name)]".dimmed()
+    );
 }
 
 fn overwrite_formatted(file_path: &str, output: &str) -> io::Result<()> {
@@ -2053,20 +2107,22 @@ fn display_hint_header() {
 }
 
 fn display_hint_footer() {
-    println!(
-        "{}",
-        yellow!(
-            "These hints can be disabled in the {} file.",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
-    println!(
-        "{}",
-        blue!(
-            "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
-            ClarinetRC::get_settings_file_path()
-        )
-    );
+    if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
+        println!(
+            "{}",
+            yellow!(
+                "These hints can be disabled in the {} file.",
+                settings_path.display()
+            )
+        );
+        println!(
+            "{}",
+            blue!(
+                "  $ mkdir -p ~/.clarinet; echo \"enable_hints = false\" >> {}",
+                settings_path.display()
+            )
+        );
+    }
     display_separator();
 }
 

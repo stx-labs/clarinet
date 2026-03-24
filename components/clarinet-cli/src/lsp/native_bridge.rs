@@ -104,23 +104,41 @@ impl LspNativeBridge {
     // Call after receiving `LspNotification` message
     async fn after_receive_lsp_notification(&self) {
         let mut aggregated_diagnostics = vec![];
+        let mut env_simnet_diagnostics = vec![];
         let mut notification = None;
         if let Ok(response_rx) = self.response_rx.lock() {
             if let Ok(LspResponse::Notification(ref mut notification_response)) = response_rx.recv()
             {
                 aggregated_diagnostics.append(&mut notification_response.aggregated_diagnostics);
+                env_simnet_diagnostics.append(&mut notification_response.env_simnet_diagnostics);
                 notification = notification_response.notification.take();
             }
         }
 
+        // Build a map of extra LSP diagnostics keyed by location
+        let mut extra_diags: std::collections::HashMap<_, Vec<_>> =
+            std::collections::HashMap::new();
+        for (location, diags) in env_simnet_diagnostics {
+            extra_diags.entry(location).or_default().extend(diags);
+        }
+
         for (location, diags) in aggregated_diagnostics {
             if let Ok(url) = clarinet_files::paths::path_to_url_string(&location) {
+                let mut lsp_diags = clarity_diagnostics_to_tower_lsp_type(&diags);
+                if let Some(extra) = extra_diags.remove(&location) {
+                    lsp_diags.extend(extra);
+                }
                 self.client
-                    .publish_diagnostics(
-                        url.parse().expect("Failed to parse URL"),
-                        clarity_diagnostics_to_tower_lsp_type(&diags),
-                        None,
-                    )
+                    .publish_diagnostics(url.parse().expect("Failed to parse URL"), lsp_diags, None)
+                    .await;
+            }
+        }
+
+        // Publish any remaining env_simnet diagnostics for contracts not in aggregated
+        for (location, diags) in extra_diags {
+            if let Ok(url) = clarinet_files::paths::path_to_url_string(&location) {
+                self.client
+                    .publish_diagnostics(url.parse().expect("Failed to parse URL"), diags, None)
                     .await;
             }
         }

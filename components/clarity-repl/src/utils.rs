@@ -4,8 +4,8 @@ use ::clarity::types::StacksEpochId;
 use ::clarity::vm::ast::parser;
 use ::clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use ::clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
-use ::clarity::vm::representations::PreSymbolicExpression;
 use ::clarity::vm::representations::PreSymbolicExpressionType::{self as PSEType, Comment};
+use ::clarity::vm::representations::{PreSymbolicExpression, Span};
 use serde_json::json;
 use strum::{Display, EnumString};
 
@@ -87,9 +87,11 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     }
 }
 
-pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
-    let (pre_expressions, mut _diagnostics, success) = parser::v2::parse_collect_diagnostics(
-        &source,
+/// Returns the spans of all `#[env(simnet)]` annotated blocks in the source.
+/// Each span covers from the annotation comment through the annotated expression.
+pub fn get_env_simnet_spans(source: &str) -> Result<Vec<Span>, String> {
+    let (pre_expressions, _diagnostics, success) = parser::v2::parse_collect_diagnostics(
+        source,
         StackDepthLimits::for_epoch(StacksEpochId::latest()),
     );
 
@@ -97,66 +99,73 @@ pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
         return Err("failed to parse pre_expressions from source".to_string());
     }
 
-    let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
-    let found = strip_env_simnet_exprs(&pre_expressions, &mut lines);
-
-    if !found {
-        Ok((source, false))
-    } else {
-        let mut source = String::new();
-        for line in lines {
-            if let Some(line) = line {
-                source.push_str(line);
-            }
-            source.push('\n');
-        }
-
-        Ok((source, true))
-    }
+    let mut spans = Vec::new();
+    collect_env_simnet_spans(&pre_expressions, &mut spans);
+    Ok(spans)
 }
 
-fn strip_env_simnet_exprs(exprs: &[PreSymbolicExpression], lines: &mut [Option<&str>]) -> bool {
-    let mut found_env_simnet = false;
-    let mut global_found = false;
+pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
+    let spans = get_env_simnet_spans(&source)?;
+
+    if spans.is_empty() {
+        return Ok((source, false));
+    }
+
+    let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
+    for span in &spans {
+        for i in span.start_line..=span.end_line {
+            lines[(i - 1) as usize] = None;
+        }
+    }
+
+    let mut result = String::new();
+    for line in lines {
+        if let Some(line) = line {
+            result.push_str(line);
+        }
+        result.push('\n');
+    }
+
+    Ok((result, true))
+}
+
+fn collect_env_simnet_spans(exprs: &[PreSymbolicExpression], out: &mut Vec<Span>) {
+    let mut annotation_start: Option<Span> = None;
 
     for (idx, expr) in exprs.iter().enumerate() {
-        // remove the annotation comment and the next non-comment expression
-        if found_env_simnet {
-            for i in expr.span.start_line..=expr.span.end_line {
-                lines[(i - 1) as usize] = None;
-            }
-            if !matches!(expr.pre_expr, Comment(_)) {
-                found_env_simnet = false;
+        if let Some(start_span) = annotation_start.take() {
+            if matches!(expr.pre_expr, Comment(_)) {
+                // intermediate comment, keep accumulating
+                annotation_start = Some(start_span);
+            } else {
+                out.push(Span {
+                    start_line: start_span.start_line,
+                    start_column: start_span.start_column,
+                    end_line: expr.span.end_line,
+                    end_column: expr.span.end_column,
+                });
             }
             continue;
         }
 
         if let Comment(comment) = &expr.pre_expr {
             if let Ok(AnnotationKind::Env(_)) = AnnotationKind::from_str(comment) {
-                // ignore the annotation if there is a non-comment expression before it
-                // on the same line (i.e. it's an end-of-line comment, not its own line)
                 let annotation_line = expr.span.start_line;
                 let is_eol_comment = exprs[..idx].iter().any(|prev| {
                     prev.span.end_line == annotation_line && !matches!(prev.pre_expr, Comment(_))
                 });
 
                 if !is_eol_comment {
-                    found_env_simnet = true;
-                    global_found = true;
-                    for i in expr.span.start_line..=expr.span.end_line {
-                        lines[(i - 1) as usize] = None;
-                    }
+                    annotation_start = Some(expr.span.clone());
                 }
             }
         }
 
         // recurse into nested lists and tuples
         if let PSEType::List(children) | PSEType::Tuple(children) = &expr.pre_expr {
-            global_found |= strip_env_simnet_exprs(children, lines);
+            collect_env_simnet_spans(children, out);
         }
     }
-
-    global_found
 }
 
 #[cfg(test)]
@@ -264,5 +273,89 @@ mod tests {
             remove_env_simnet(source.to_string()).expect("remove_env_simnet failed");
         assert_eq!(clean, source);
         assert!(!found);
+    }
+
+    #[test]
+    fn get_spans_top_level() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            (define-public (mint (amount uint)) (ok true))
+
+            ;; #[env(simnet)]
+            (define-public (minty-fresh (amount uint) (recipient principal))
+                (begin
+                    (ft-mint? drachma amount recipient)
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].start_line, 3);
+        assert_eq!(spans[0].end_line, 8);
+    }
+
+    #[test]
+    fn get_spans_nested() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY)
+                    ;; #[env(simnet)]
+                    (minty-fresh amount recipient)
+                    (ok true)
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].start_line, 4);
+        assert_eq!(spans[0].end_line, 5);
+    }
+
+    #[test]
+    fn get_spans_eol_annotation_ignored() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            (define-public (mint (amount uint) (recipient principal))
+                (begin
+                    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-OWNER-ONLY) ;; #[env(simnet)]
+                    (ok true)
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn get_spans_no_annotations() {
+        let source = "(define-read-only (get-owner) (ok tx-sender))";
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn get_spans_multiple() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; #[env(simnet)]
+            (define-constant FIRST u1)
+
+            (define-constant KEEP u2)
+
+            ;; #[env(simnet)]
+            (define-constant SECOND u3)
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].start_line, 1);
+        assert_eq!(spans[0].end_line, 2);
+        assert_eq!(spans[1].start_line, 6);
+        assert_eq!(spans[1].end_line, 7);
     }
 }

@@ -1,14 +1,13 @@
-use clarity::vm::contexts::{Environment, LocalContext};
+use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::events::StacksTransactionEvent;
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::{
     eval, ClarityVersion, EvalHook, EvaluationResult, SymbolicExpression, SymbolicExpressionType,
+    ValueRef,
 };
-use clarity_types::types::{
-    PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, Value,
-};
+use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 
 pub struct TracerErrorOutput {
     contract_id: QualifiedContractIdentifier,
@@ -66,7 +65,8 @@ impl TracerHook {
 impl EvalHook for TracerHook {
     fn will_begin_eval(
         &mut self,
-        env: &mut Environment,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
         context: &LocalContext,
         expr: &SymbolicExpression,
     ) {
@@ -94,7 +94,7 @@ impl EvalHook for TracerHook {
                                 expr,
                                 black!(
                                     "{}:{}:{}",
-                                    env.contract_context.contract_identifier.name,
+                                    invoke_ctx.contract_context.contract_identifier.name,
                                     expr.span.start_line,
                                     expr.span.start_column,
                                 ),
@@ -102,11 +102,12 @@ impl EvalHook for TracerHook {
 
                             let mut lines = Vec::new();
                             if args[0].match_atom().is_some() {
-                                let callee = if let Ok(value) = eval(&args[0], env, context) {
-                                    value.to_string()
-                                } else {
-                                    "?".to_string()
-                                };
+                                let callee =
+                                    if let Ok(value) = eval(&args[0], env, invoke_ctx, context) {
+                                        value.as_ref().to_string()
+                                    } else {
+                                        "?".to_string()
+                                    };
                                 lines.push(format!(
                                     "{}│ {}",
                                     "│   ".repeat(
@@ -159,7 +160,7 @@ impl EvalHook for TracerHook {
                         expr,
                         black!(
                             "{}:{}:{}",
-                            env.contract_context.contract_identifier.name,
+                            invoke_ctx.contract_context.contract_identifier.name,
                             expr.span.start_line,
                             expr.span.start_column,
                         ),
@@ -197,17 +198,18 @@ impl EvalHook for TracerHook {
         self.stack.push(expr.id);
     }
 
-    fn did_finish_eval(
+    fn did_finish_eval<'a>(
         &mut self,
-        env: &mut Environment,
-        _context: &LocalContext,
+        env: &mut ExecutionState,
+        invoke_ctx: &'a InvocationContext,
+        _context: &'a LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, VmExecutionError>,
+        res: &Result<ValueRef<'a>, VmExecutionError>,
     ) {
         if let Err(e) = res {
             if self.error.is_none() {
                 self.error = Some(TracerErrorOutput {
-                    contract_id: env.contract_context.contract_identifier.clone(),
+                    contract_id: invoke_ctx.contract_context.contract_identifier.clone(),
                     expr: expr.clone(),
                     error: e.to_string(),
                 });
@@ -249,7 +251,7 @@ impl EvalHook for TracerHook {
                                 .saturating_sub(self.pending_call_string.len())
                                 .saturating_sub(1)
                         ),
-                        blue!("{value}")
+                        blue!("{}", value.as_ref())
                     ));
                 }
                 self.stack.pop();
@@ -264,7 +266,7 @@ impl EvalHook for TracerHook {
                         self.pending_call_string
                             .last_mut()
                             .unwrap()
-                            .push_str(format!(" {value}").as_str());
+                            .push_str(format!(" {}", value.as_ref()).as_str());
                     }
 
                     // If this was the last argument, print the pending call and pop the stack

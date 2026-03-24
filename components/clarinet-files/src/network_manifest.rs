@@ -462,6 +462,13 @@ impl NetworkManifest {
 
                     let (encrypted_mnemonic, encryption_strength) =
                         if let Some(Value::String(cipher)) =
+                            account_settings.get("encrypted_mnemonic_extreme")
+                        {
+                            (
+                                cipher.clone(),
+                                clarinet_utils::MnemonicEncryptionStrength::Extreme,
+                            )
+                        } else if let Some(Value::String(cipher)) =
                             account_settings.get("encrypted_mnemonic_high")
                         {
                             (
@@ -480,12 +487,12 @@ impl NetworkManifest {
                         {
                             (
                                 cipher.clone(),
-                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                                clarinet_utils::MnemonicEncryptionStrength::Basic,
                             )
                         } else {
                             (
                                 String::new(),
-                                clarinet_utils::MnemonicEncryptionStrength::Default,
+                                clarinet_utils::MnemonicEncryptionStrength::Basic,
                             )
                         };
 

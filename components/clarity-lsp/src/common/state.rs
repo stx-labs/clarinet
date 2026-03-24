@@ -18,11 +18,12 @@ use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpress
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::ContractDeployer;
-use clarity_repl::utils::CHECK_ENVIRONMENTS;
+use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
 use clarity_types::execution_cost::ExecutionCost;
 use ls_types::{
-    CompletionItem, DocumentSymbol, Hover, Location, MessageType, Position, Range, SignatureHelp,
+    CompletionItem, Diagnostic as LspDiagnostic, DiagnosticSeverity, DiagnosticTag, DocumentSymbol,
+    Hover, Location, MessageType, Position, Range, SignatureHelp,
 };
 
 use super::requests::capabilities::{CostDisplayFormat, InitializationOptions};
@@ -690,6 +691,40 @@ impl EditorState {
         (contracts, tldr)
     }
 
+    pub fn get_env_simnet_diagnostics(&self) -> Vec<(PathBuf, Vec<LspDiagnostic>)> {
+        let mut result = Vec::new();
+        for (path, contract_data) in &self.active_contracts {
+            let Ok(spans) = get_env_simnet_spans(&contract_data.source) else {
+                continue;
+            };
+            if spans.is_empty() {
+                continue;
+            }
+            let diags = spans
+                .iter()
+                .map(|span| LspDiagnostic {
+                    range: Range {
+                        start: Position {
+                            line: span.start_line - 1,
+                            character: span.start_column - 1,
+                        },
+                        end: Position {
+                            line: span.end_line - 1,
+                            character: span.end_column,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::HINT),
+                    source: Some("clarity".to_string()),
+                    message: "simnet-only code (excluded from on-chain deployments)".to_string(),
+                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                    ..LspDiagnostic::default()
+                })
+                .collect();
+            result.push((path.clone(), diags));
+        }
+        result
+    }
+
     pub fn insert_active_contract(
         &mut self,
         contract_location: PathBuf,
@@ -976,7 +1011,7 @@ async fn get_cost_analysis(
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
 ) -> Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>> {
-    use clarity::vm::contexts::{CallStack, ContractContext, Environment};
+    use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
     use clarity_static_cost::static_cost::static_cost;
 
@@ -1007,18 +1042,20 @@ async fn get_cost_analysis(
         let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
         let mut call_stack = CallStack::new();
 
-        let mut env = Environment::new(
-            g,
-            &contract_context,
-            &mut call_stack,
-            Some(tx_sender.clone()),
-            Some(tx_sender),
-            None,
-        );
+        let invoke_ctx = InvocationContext {
+            contract_context: &contract_context,
+            sender: Some(tx_sender.clone()),
+            caller: Some(tx_sender),
+            sponsor: None,
+        };
+        let mut env = ExecutionState {
+            global_context: g,
+            call_stack: &mut call_stack,
+        };
 
         // Use static_cost which returns (StaticCost, Option<TraitCount>)
         // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
-        static_cost(&mut env, contract_id).map_err(|e| {
+        static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
             clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
             let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
             VmExecutionError::Internal(VmInternalError::Expect(error_msg))

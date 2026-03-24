@@ -1,0 +1,13 @@
+[profile.default]
+# Warn about slow tests (helps identify regressions)
+slow-timeout = { period = "10s", terminate-after = 4 }
+
+# The argon2-based encryption test is CPU-intensive and can starve parallel tests.
+# Run it in a dedicated group with limited concurrency.
+[[profile.default.overrides]]
+filter = "test(test_encrypt_mnemonic)"
+test-group = "cpu-heavy"
+threads-required = 4
+
+[test-groups.cpu-heavy]
+max-threads = 4

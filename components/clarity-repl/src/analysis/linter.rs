@@ -36,8 +36,14 @@ pub enum LintName {
     CaseConst,
     /// Enforce kebab-case for data variables
     CaseDataVar,
+    /// Enforce kebab-case for function names
+    CaseFn,
     /// Enforce kebab-case for maps
     CaseMap,
+    /// Enforce kebab-case for FT and NFT names
+    CaseToken,
+    /// Enforce kebab-case for trait names
+    CaseTrait,
     /// Check that ERR_ constants are unique and use `(err ...)` values
     ErrorConst,
     /// Find expressions that have no effect
@@ -130,7 +136,10 @@ impl LintGroup {
                 LintName::CaseBinding,
                 LintName::CaseConst,
                 LintName::CaseDataVar,
+                LintName::CaseFn,
                 LintName::CaseMap,
+                LintName::CaseToken,
+                LintName::CaseTrait,
             ],
             Unused => &[
                 LintName::UnusedConst,
