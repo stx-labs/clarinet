@@ -1492,3 +1492,32 @@ fn test_trait_counts_for_gl_contract() {
     let (_mint_min, mint_max) = trait_count_map.get("mint").unwrap();
     assert_eq!(*mint_max, 11);
 }
+
+#[test]
+fn test_empty_list_in_expression_does_not_panic() {
+    // Regression test: an empty list `()` (e.g. as an argument to `as-contract?`)
+    // caused an index-out-of-bounds panic in build_listlike_cost_analysis_tree.
+    let src = indoc! {r#"
+        (define-public (foo)
+          (ok (list () u1 u2))
+        )
+    "#};
+
+    let contract_id = QualifiedContractIdentifier::transient();
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+    let ast = clarity::vm::ast::build_ast(&contract_id, src, &mut (), clarity_version, epoch)
+        .expect("Failed to parse");
+
+    let mut memory_store = MemoryBackingStore::new();
+    let db = memory_store.as_clarity_db();
+    let mut owned_env = OwnedEnvironment::new(db, epoch);
+
+    let result =
+        with_cost_analysis_environment(&mut owned_env, &contract_id, clarity_version, |env| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, env)
+        });
+
+    // Should complete without panicking
+    assert!(result.is_ok(), "Expected Ok, got: {:?}", result.err());
+}

@@ -1072,6 +1072,13 @@ fn build_listlike_cost_analysis_tree(
 ) -> Result<CostAnalysisNode, StaticCostError> {
     let mut children = Vec::new();
 
+    if exprs.is_empty() {
+        return Ok(CostAnalysisNode::leaf(
+            CostExprNode::NestedExpression,
+            StaticCost::ZERO,
+        ));
+    }
+
     let (expr_node, cost) = match &exprs[0].expr {
         SymbolicExpressionType::List(_) => {
             let (_, nested_tree) = build_cost_analysis_tree(
