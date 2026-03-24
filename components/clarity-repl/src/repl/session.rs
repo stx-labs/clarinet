@@ -26,7 +26,6 @@ use super::{
     SessionSettings,
 };
 use crate::analysis::coverage::CoverageHook;
-use crate::analysis::linter::LintName;
 use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
@@ -129,20 +128,10 @@ impl AnnotatedExecutionResult {
         self.execution_result
     }
 
-    /// Iterate all diagnostics, pairing each with its `LintName` if it
-    /// originated from a lint pass.  This avoids relying on any particular
-    /// ordering of diagnostics inside `ExecutionResult`.
-    pub fn diagnostics_with_lint_names(
-        &self,
-    ) -> impl Iterator<Item = (&Diagnostic, Option<&LintName>)> {
-        self.execution_result.diagnostics.iter().map(|d| {
-            let lint_name = self
-                .lint_diagnostics
-                .iter()
-                .find(|ld| ld.diagnostic.message == d.message && ld.diagnostic.spans == d.spans)
-                .and_then(|ld| ld.lint_name.as_ref());
-            (d, lint_name)
-        })
+    /// The non-lint diagnostics (parse errors, annotations, etc.).
+    pub fn non_lint_diagnostics(&self) -> &[Diagnostic] {
+        let count = self.execution_result.diagnostics.len() - self.lint_diagnostics.len();
+        &self.execution_result.diagnostics[..count]
     }
 }
 
@@ -445,12 +434,20 @@ impl Session {
 
         match result {
             Ok(result) => {
-                for (diagnostic, lint_name) in result.diagnostics_with_lint_names() {
+                for d in result.non_lint_diagnostics() {
                     output.append(&mut output_diagnostic(
-                        diagnostic,
+                        d,
                         &contract_name,
                         &formatted_lines,
-                        lint_name,
+                        None,
+                    ));
+                }
+                for ld in &result.lint_diagnostics {
+                    output.append(&mut output_diagnostic(
+                        &ld.diagnostic,
+                        &contract_name,
+                        &formatted_lines,
+                        ld.lint_name.as_ref(),
                     ));
                 }
                 if !result.events.is_empty() {

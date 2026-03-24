@@ -19,6 +19,7 @@ use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::linter::LintName;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
+use clarity_repl::repl::session::AnnotatedExecutionResult;
 use clarity_repl::repl::ContractDeployer;
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
@@ -933,8 +934,10 @@ pub async fn build_state(
 
             match result {
                 Ok(annotated) => {
-                    let contract_lint_diags = annotated.lint_diagnostics.clone();
-                    let mut execution_result = annotated.into_inner();
+                    let AnnotatedExecutionResult {
+                        mut execution_result,
+                        lint_diagnostics: contract_lint_diags,
+                    } = annotated;
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         tag_diagnostics(
                             environment,

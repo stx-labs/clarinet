@@ -74,7 +74,6 @@ struct JsonCheckOutput<D: Serialize> {
     environment: String,
 }
 
-
 /// Clarinet is a command line tool for Clarity smart contract development.
 #[derive(Parser, PartialEq, Clone, Debug)]
 #[clap(version = env!("CARGO_PKG_VERSION"), name = "clarinet", bin_name = "clarinet")]
@@ -1339,8 +1338,7 @@ pub fn main() {
 
                 match cmd.output_format {
                     OutputFormat::Json | OutputFormat::JsonPretty => {
-                        let mut diagnostics: HashMap<String, Vec<LintDiagnostic>> =
-                            HashMap::new();
+                        let mut diagnostics: HashMap<String, Vec<LintDiagnostic>> = HashMap::new();
                         for (contract_id, diags) in artifacts.diags {
                             let Some((_, path)) = deployment.contracts.get(&contract_id) else {
                                 continue;
