@@ -1197,8 +1197,7 @@ dependencies = [
 [[package]]
 name = "debug_types"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2613f33760bd27a70ee84f5a8c0bd97e874fa6f89e205356ef8325786dd22cef"
+source = "git+https://github.com/brady-stacks/debug_types.git?branch=feat%2Flaunch-additional-data#be2dec5d070736bed66725c7f57bd1433cfacef6"
 dependencies = [
  "serde",
  "serde_derive",

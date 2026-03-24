@@ -1,5 +1,6 @@
 pub mod clarinetrc;
 pub mod paths;
+pub mod transaction_log;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod devnet_diff;

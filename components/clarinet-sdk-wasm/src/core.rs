@@ -11,6 +11,7 @@ use clarinet_deployments::{
     generate_default_deployment, get_default_deployment_path, initiate_session_from_manifest,
     update_session_with_deployment_plan,
 };
+use clarinet_files::transaction_log::RecordedTx;
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::Address;
@@ -37,43 +38,6 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
 use crate::utils::events::serialize_event;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum RecordedTx {
-    CallPublicFn {
-        contract: String,
-        method: String,
-        args: Vec<Vec<u8>>,
-        sender: String,
-    },
-    CallPrivateFn {
-        contract: String,
-        method: String,
-        args: Vec<Vec<u8>>,
-        sender: String,
-    },
-    CallReadOnlyFn {
-        contract: String,
-        method: String,
-        args: Vec<Vec<u8>>,
-        sender: String,
-    },
-    DeployContract {
-        name: String,
-        content: String,
-        sender: String,
-        clarity_version: Option<u32>,
-    },
-    TransferSTX {
-        amount: u64,
-        recipient: String,
-        sender: String,
-    },
-    AdvanceChainTip {
-        count: u32,
-    },
-}
 
 #[wasm_bindgen]
 extern "C" {
