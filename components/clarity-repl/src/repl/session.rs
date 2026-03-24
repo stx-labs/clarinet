@@ -1461,6 +1461,35 @@ mod tests {
     use crate::repl::settings::Account;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
+    #[test]
+    fn non_lint_diagnostics_excludes_lint_warnings() {
+        use crate::analysis::linter::LintName;
+
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(LintName::UnusedConst, Level::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+        let result = session
+            .eval(
+                "(define-constant UNUSED u1) (define-read-only (f) (ok u1))".into(),
+                false,
+            )
+            .expect("valid contract");
+
+        // The lint should fire
+        assert!(!result.lint_diagnostics.is_empty());
+        // All diagnostics should be lint diagnostics (no parse errors)
+        assert_eq!(result.non_lint_diagnostics().len(), 0);
+        // Total diagnostics = non-lint + lint
+        assert_eq!(
+            result.diagnostics.len(),
+            result.non_lint_diagnostics().len() + result.lint_diagnostics.len()
+        );
+    }
+
     #[track_caller]
     fn run_session_snippet(session: &mut Session, snippet: &str) -> Value {
         let annotated = session.eval(snippet.to_string(), false).unwrap();
