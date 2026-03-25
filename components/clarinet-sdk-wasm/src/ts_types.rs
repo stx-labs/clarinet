@@ -160,7 +160,8 @@ const STACKS_EPOCH_ID_STRING: &'static str = r#"export type StacksEpochId =
   | "Epoch31"
   | "Epoch32"
   | "Epoch33"
-  | "Epoch34";"#;
+  | "Epoch34"
+  | "Epoch35";"#;
 
 #[wasm_bindgen(typescript_custom_section)]
 const CLARITY_VERSION_STRING: &'static str = r#"export type ClarityVersionString = "Clarity1" | "Clarity2" | "Clarity3"| "Clarity4" | "Clarity5";"#;
