@@ -11,6 +11,8 @@ on:
     paths-ignore:
       - "**/CHANGELOG.md"
   workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
 
 concurrency:
   group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
@@ -29,7 +31,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
       - uses: DeterminateSystems/determinate-nix-action@dbda91f6efef3ee627f56175120aa9543687d830  # v3.11.2
       - uses: DeterminateSystems/flake-checker-action@3164002371bc90729c68af0e24d5aacf20d7c9f6  # v12
+
       - run: nix run .#check-git-dependencies-hash
+      - run: nix run .#check-rust-stable
       - run: nix flake check
+
+      # Run the full build on a nightly because it takes a long time without caching (KISS)
+      - if: github.event_name == 'schedule'
+        run: nix build

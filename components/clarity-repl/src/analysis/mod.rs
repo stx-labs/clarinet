@@ -177,6 +177,10 @@ impl Settings {
         self.disable_all_lints();
         self.disable_all_passes();
     }
+
+    pub fn lints(&self) -> &HashMap<LintName, ClarityDiagnosticLevel> {
+        &self.lints
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

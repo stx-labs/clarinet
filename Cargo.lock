@@ -787,7 +787,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=f61c76b901622f8ad91561ed4dbcf97b9c040240#f61c76b901622f8ad91561ed4dbcf97b9c040240"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -902,7 +902,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=f61c76b901622f8ad91561ed4dbcf97b9c040240#f61c76b901622f8ad91561ed4dbcf97b9c040240"
 dependencies = [
  "lazy_static",
  "regex",
@@ -935,7 +935,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1292,7 +1292,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1448,7 +1448,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2299,7 +2299,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2485,7 +2485,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=f61c76b901622f8ad91561ed4dbcf97b9c040240#f61c76b901622f8ad91561ed4dbcf97b9c040240"
 dependencies = [
  "clarity",
  "serde",
@@ -2783,7 +2783,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3027,7 +3027,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=f61c76b901622f8ad91561ed4dbcf97b9c040240#f61c76b901622f8ad91561ed4dbcf97b9c040240"
 dependencies = [
  "clarity",
  "slog",
@@ -3153,7 +3153,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3594,7 +3594,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3623,9 +3623,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.9"
+version = "0.103.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
+checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -4212,7 +4212,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=f61c76b901622f8ad91561ed4dbcf97b9c040240#f61c76b901622f8ad91561ed4dbcf97b9c040240"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4301,7 +4301,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=962e7ab9b3a473aaf5bd931ce28e415fd107d841#962e7ab9b3a473aaf5bd931ce28e415fd107d841"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=f61c76b901622f8ad91561ed4dbcf97b9c040240#f61c76b901622f8ad91561ed4dbcf97b9c040240"
 dependencies = [
  "clarity",
  "ed25519-dalek",
@@ -4419,9 +4419,9 @@ checksum = "f764005d11ee5f36500a149ace24e00e3da98b0158b3e2d53a7495660d3f4d60"
 
 [[package]]
 name = "tar"
-version = "0.4.44"
+version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a"
+checksum = "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973"
 dependencies = [
  "filetime",
  "libc",
@@ -4438,7 +4438,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4447,7 +4447,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5230,7 +5230,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

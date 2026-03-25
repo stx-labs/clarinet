@@ -1213,15 +1213,17 @@ impl DeploymentSpecification {
         let mut custom_txs_batches = vec![];
 
         for batch in deployment_only_contract_publish_txs.plan.batches.iter_mut() {
-            let (ref contract_publish_txs, custom_txs): (
+            let (contract_publish_txs, custom_txs): (
                 Vec<TransactionSpecification>,
                 Vec<TransactionSpecification>,
-            ) = batch.transactions.clone().into_iter().partition(|tx| {
-                matches!(tx, TransactionSpecification::ContractPublish(_))
-                    || matches!(tx, TransactionSpecification::EmulatedContractPublish(_))
-            });
+            ) = std::mem::take(&mut batch.transactions)
+                .into_iter()
+                .partition(|tx| {
+                    matches!(tx, TransactionSpecification::ContractPublish(_))
+                        || matches!(tx, TransactionSpecification::EmulatedContractPublish(_))
+                });
 
-            batch.transactions.clone_from(contract_publish_txs);
+            batch.transactions = contract_publish_txs;
             if !custom_txs.is_empty() {
                 custom_txs_batches.push(TransactionsBatchSpecification {
                     id: batch.id,

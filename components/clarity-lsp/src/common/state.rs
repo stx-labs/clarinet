@@ -1011,7 +1011,7 @@ async fn get_cost_analysis(
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
 ) -> Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>> {
-    use clarity::vm::contexts::{CallStack, ContractContext, Environment};
+    use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
     use clarity_static_cost::static_cost::static_cost;
 
@@ -1042,18 +1042,20 @@ async fn get_cost_analysis(
         let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
         let mut call_stack = CallStack::new();
 
-        let mut env = Environment::new(
-            g,
-            &contract_context,
-            &mut call_stack,
-            Some(tx_sender.clone()),
-            Some(tx_sender),
-            None,
-        );
+        let invoke_ctx = InvocationContext {
+            contract_context: &contract_context,
+            sender: Some(tx_sender.clone()),
+            caller: Some(tx_sender),
+            sponsor: None,
+        };
+        let mut env = ExecutionState {
+            global_context: g,
+            call_stack: &mut call_stack,
+        };
 
         // Use static_cost which returns (StaticCost, Option<TraitCount>)
         // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
-        static_cost(&mut env, contract_id).map_err(|e| {
+        static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
             clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
             let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
             VmExecutionError::Internal(VmInternalError::Expect(error_msg))
