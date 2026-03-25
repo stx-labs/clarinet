@@ -1267,7 +1267,7 @@ async fn export_stacks_api_events(
     let export_command = format!(
         "docker exec {container_name} node /app/lib/index.js export-events --file /tmp/events_cache.tsv --overwrite-file"
     );
-    let docker_host = &config.devnet_config.docker_host;
+    let docker_host = config.devnet_config.docker_host.as_deref();
     let output = run_docker_command(&export_command, docker_host)
         .map_err(|e| format!("Failed to execute export command: {e}"))?;
 

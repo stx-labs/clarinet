@@ -123,11 +123,11 @@ impl DevnetOrchestrator {
         let docker_client = match should_use_docker {
             true => match network_config.devnet {
                 Some(ref devnet) => {
-                    let client = Docker::connect_with_socket(
-                        &devnet.docker_host,
-                        120,
-                        bollard::API_DEFAULT_VERSION,
-                    )
+                    let client = if let Some(ref host) = devnet.docker_host {
+                        Docker::connect_with_socket(host, 120, bollard::API_DEFAULT_VERSION)
+                    } else {
+                        Docker::connect_with_socket_defaults()
+                    }
                     .or_else(|_| Docker::connect_with_socket_defaults())
                     .or_else(|_| {
                         let mut user_space_docker_socket =
@@ -800,7 +800,7 @@ impl DevnetOrchestrator {
             .map_err(|e| format!("Failed to create bitcoin directory: {e}"))?;
         if !no_snapshot {
             // Ensure the destination directory exists in the container
-            let docker_host = &self.get_devnet_config()?.docker_host;
+            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
@@ -1100,7 +1100,7 @@ impl DevnetOrchestrator {
         let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
 
         if !no_snapshot {
-            let docker_host = &self.get_devnet_config()?.docker_host;
+            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
@@ -1412,8 +1412,9 @@ impl DevnetOrchestrator {
                     events_path.display(),
                     container_name
                 );
-                let output = run_docker_command(&copy_command, &devnet_config.docker_host)
-                    .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
+                let output =
+                    run_docker_command(&copy_command, devnet_config.docker_host.as_deref())
+                        .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
 
                 if !output.status.success() {
                     return Err(format!(
@@ -1426,8 +1427,9 @@ impl DevnetOrchestrator {
                 let import_command = format!(
                     "docker exec {container_name} node /app/lib/index.js import-events --file /tmp/events_cache.tsv --wipe-db"
                 );
-                let output = run_docker_command(&import_command, &devnet_config.docker_host)
-                    .map_err(|e| format!("Failed to import events: {e}"))?;
+                let output =
+                    run_docker_command(&import_command, devnet_config.docker_host.as_deref())
+                        .map_err(|e| format!("Failed to import events: {e}"))?;
 
                 if !output.status.success() {
                     ctx.try_log(|logger| {
@@ -2370,7 +2372,7 @@ pub async fn copy_snapshot_to_container(
     dest_path: &str,
     devnet_event_tx: &Sender<DevnetEvent>,
     service_name: &str,
-    docker_host: &str,
+    docker_host: Option<&str>,
 ) -> Result<(), String> {
     if !source_path.exists() {
         return Ok(()); // No snapshot to copy
