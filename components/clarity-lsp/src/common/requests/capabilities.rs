@@ -35,7 +35,7 @@ impl Default for InitializationOptions {
             completion: true,
             completion_smart_parenthesis_wrap: true,
             completion_include_native_placeholders: true,
-            document_symbols: false,
+            document_symbols: true,
             formatting: true,
             go_to_definition: true,
             hover: true,
