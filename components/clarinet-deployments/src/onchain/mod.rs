@@ -737,8 +737,9 @@ pub fn apply_on_chain_deployment(
                 EpochSpec::Epoch3_1 => devnet.epoch_3_1,
                 EpochSpec::Epoch3_2 => devnet.epoch_3_2,
                 EpochSpec::Epoch3_3 => devnet.epoch_3_3,
-                // this version of clarinet has to handle optional support for epoch 3_4
+                // this version of clarinet has to handle optional support for epoch 3_4 and 3_5
                 EpochSpec::Epoch3_4 => devnet.epoch_3_4.unwrap_or(u64::MAX),
+                EpochSpec::Epoch3_5 => devnet.epoch_3_5.unwrap_or(u64::MAX),
             };
             let mut epoch_transition_successful =
                 current_bitcoin_block_height > after_bitcoin_block;

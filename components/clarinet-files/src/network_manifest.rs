@@ -179,6 +179,7 @@ pub struct DevnetConfigFile {
     pub epoch_3_2: Option<u64>,
     pub epoch_3_3: Option<u64>,
     pub epoch_3_4: Option<u64>,
+    pub epoch_3_5: Option<u64>,
     pub use_docker_gateway_routing: Option<bool>,
     pub docker_platform: Option<String>,
 }
@@ -318,6 +319,7 @@ pub struct DevnetConfig {
     pub epoch_3_2: u64,
     pub epoch_3_3: u64,
     pub epoch_3_4: Option<u64>,
+    pub epoch_3_5: Option<u64>,
     pub use_docker_gateway_routing: bool,
     pub docker_platform: Option<String>,
 }
@@ -987,6 +989,7 @@ impl NetworkManifest {
                 epoch_3_2: devnet_config.epoch_3_2.unwrap_or(DEFAULT_EPOCH_3_2),
                 epoch_3_3: devnet_config.epoch_3_3.unwrap_or(DEFAULT_EPOCH_3_3),
                 epoch_3_4: devnet_config.epoch_3_4,
+                epoch_3_5: devnet_config.epoch_3_5,
                 stacks_node_env_vars: devnet_config
                     .stacks_node_env_vars
                     .take()
@@ -1116,6 +1119,7 @@ impl Default for DevnetConfig {
             epoch_3_2: DEFAULT_EPOCH_3_2,
             epoch_3_3: DEFAULT_EPOCH_3_3,
             epoch_3_4: None,
+            epoch_3_5: None,
             use_docker_gateway_routing: false,
             docker_platform: None,
         }
