@@ -29,6 +29,24 @@ use crate::analysis::annotation::Annotation;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::LintGroup;
 
+/// A `Diagnostic` paired with the `LintName` that produced it (if any).
+///
+/// Non-lint analysis passes (e.g. `CheckChecker`) produce diagnostics with
+/// `lint_name: None`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LintDiagnostic {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lint_name: Option<LintName>,
+    #[serde(flatten)]
+    pub diagnostic: Diagnostic,
+}
+
+impl From<LintDiagnostic> for Diagnostic {
+    fn from(ld: LintDiagnostic) -> Self {
+        ld.diagnostic
+    }
+}
+
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
     &mut AnalysisDatabase,
@@ -269,30 +287,42 @@ pub fn run_analysis(
     analysis_db: &mut AnalysisDatabase,
     annotations: &Vec<Annotation>,
     settings: &Settings,
-) -> AnalysisResult {
-    let mut errors: Vec<Diagnostic> = vec![];
-    let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel)> = vec![];
+) -> Result<Vec<LintDiagnostic>, Vec<LintDiagnostic>> {
+    let mut errors: Vec<LintDiagnostic> = vec![];
 
+    // Collect non-lint analysis passes (no lint name)
+    let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel, Option<LintName>)> = vec![];
     for pass in &settings.passes {
         let f = AnalysisPassFn::try_from(pass).unwrap();
-        passes.push((f, pass.default_level()));
+        passes.push((f, pass.default_level(), None));
     }
 
+    // Collect lint passes (with lint name)
     for (name, level) in &settings.lints {
         let lint = AnalysisPassFn::from(name);
-        passes.push((lint, level.clone()));
+        passes.push((lint, level.clone(), Some(*name)));
     }
 
     // Create shared cache for all passes/lints
     let mut cache = AnalysisCache::new(contract_analysis, annotations);
 
     execute(analysis_db, |database| {
-        for (pass, level) in passes {
+        for (pass, level, lint_name) in passes {
+            let wrap = |diagnostics: Vec<Diagnostic>| -> Vec<LintDiagnostic> {
+                diagnostics
+                    .into_iter()
+                    .map(|d| LintDiagnostic {
+                        lint_name,
+                        diagnostic: d,
+                    })
+                    .collect()
+            };
+
             // Collect warnings and continue, or if there is an error, return.
             match pass(database, &mut cache, level, settings) {
-                Ok(mut w) => errors.append(&mut w),
-                Err(mut e) => {
-                    errors.append(&mut e);
+                Ok(w) => errors.extend(wrap(w)),
+                Err(e) => {
+                    errors.extend(wrap(e));
                     return Err(errors);
                 }
             }

@@ -28,7 +28,9 @@ use crate::backend::{
 use crate::state::EditorState;
 #[cfg(debug_assertions)]
 use crate::utils::log;
-use crate::utils::{clarity_diagnostics_to_lsp_type, get_contract_location, get_manifest_location};
+use crate::utils::{
+    clarity_diagnostics_with_lint_names_to_lsp_type, get_contract_location, get_manifest_location,
+};
 
 #[wasm_bindgen]
 pub struct LspVscodeBridge {
@@ -190,7 +192,7 @@ impl LspVscodeBridge {
 
             for (location, diags) in aggregated_diagnostics.into_iter() {
                 if let Ok(uri) = paths::path_to_url_string(&location)?.parse() {
-                    let mut lsp_diags = clarity_diagnostics_to_lsp_type(&diags);
+                    let mut lsp_diags = clarity_diagnostics_with_lint_names_to_lsp_type(&diags);
                     if let Some(extra) = extra_diags.remove(&location) {
                         lsp_diags.extend(extra);
                     }

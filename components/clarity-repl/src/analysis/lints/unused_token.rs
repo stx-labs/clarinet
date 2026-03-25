@@ -119,16 +119,15 @@ impl Lint for UnusedToken<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::Level;
     use indoc::{formatdoc, indoc};
 
     use super::UnusedToken;
     use crate::analysis::linter::Lint;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -172,7 +171,7 @@ mod tests {
         let expected_message = UnusedToken::make_diagnostic_message_ft(&ft_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(ft_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -256,7 +255,7 @@ mod tests {
         let expected_message = UnusedToken::make_diagnostic_message_nft(&nft_name.into());
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(nft_name));
         assert!(output[0].contains(&expected_message));
     }

@@ -126,20 +126,19 @@ impl Lint for CaseTrait<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::{Diagnostic, Level};
     use indoc::indoc;
 
     use super::CaseTrait;
     use crate::analysis::linter::Lint;
     use crate::analysis::util::CaseError;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     fn run_snippet_no_panic(
         snippet: String,
-    ) -> Result<(Vec<String>, ExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
+    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -170,7 +169,7 @@ mod tests {
         session.formatted_interpretation(snippet, Some("unit-test".to_owned()), false, None)
     }
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         run_snippet_no_panic(snippet).expect("Invalid code snippet")
     }
 
@@ -207,7 +206,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -231,7 +230,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -269,7 +268,7 @@ mod tests {
         );
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }

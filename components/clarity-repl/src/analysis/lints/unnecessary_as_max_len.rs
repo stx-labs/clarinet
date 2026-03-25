@@ -151,16 +151,15 @@ impl Lint for UnnecessaryAsMaxLen<'_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::UnnecessaryAsMaxLen;
     use crate::analysis::linter::Lint;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -184,11 +183,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
-        );
-        assert!(output[0].contains("warning:"));
+        assert!(result.diagnostics[0]
+            .message
+            .contains(&UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -203,11 +201,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(5, 5)
-        );
-        assert!(output[0].contains("warning:"));
+        assert!(result.diagnostics[0]
+            .message
+            .contains(&UnnecessaryAsMaxLen::make_diagnostic_message(5, 5)));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -236,11 +233,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(8, 20)
-        );
-        assert!(output[0].contains("warning:"));
+        assert!(result.diagnostics[0]
+            .message
+            .contains(&UnnecessaryAsMaxLen::make_diagnostic_message(8, 20)));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -255,11 +251,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
-        );
-        assert!(output[0].contains("warning:"));
+        assert!(result.diagnostics[0]
+            .message
+            .contains(&UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -274,11 +269,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)
-        );
-        assert!(output[0].contains("warning:"));
+        assert!(result.diagnostics[0]
+            .message
+            .contains(&UnnecessaryAsMaxLen::make_diagnostic_message(10, 50)));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]
@@ -308,11 +302,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].message,
-            UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)
-        );
-        assert!(output[0].contains("warning:"));
+        assert!(result.diagnostics[0]
+            .message
+            .contains(&UnnecessaryAsMaxLen::make_diagnostic_message(5, 10)));
+        assert!(output[0].contains("warning["));
     }
 
     #[test]

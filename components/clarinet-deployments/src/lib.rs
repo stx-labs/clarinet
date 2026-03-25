@@ -21,7 +21,7 @@ use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_DEPOSIT_MAINNET_ADDRESS,
     SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_MAINNET_ADDRESS,
 };
-use clarity_repl::repl::session::ExecutionResultMap;
+use clarity_repl::repl::session::{AnnotatedExecutionResult, ExecutionResultMap};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
@@ -67,13 +67,19 @@ pub fn setup_session_with_deployment(
 
     let deps = BTreeMap::new();
     let mut diags = HashMap::new();
+    let mut lint_diags = HashMap::new();
     let mut results_values = HashMap::new();
     let mut asts = BTreeMap::new();
     let mut contracts_analysis = HashMap::new();
     let mut success = true;
     for (contract_id, res) in contracts.into_iter() {
         match res {
-            Ok(execution_result) => {
+            Ok(annotated) => {
+                let AnnotatedExecutionResult {
+                    execution_result,
+                    lint_diagnostics,
+                } = annotated;
+                lint_diags.insert(contract_id.clone(), lint_diagnostics);
                 diags.insert(contract_id.clone(), execution_result.diagnostics);
                 if let EvaluationResult::Contract(contract_result) = execution_result.result {
                     results_values.insert(contract_id.clone(), contract_result.result);
@@ -92,6 +98,7 @@ pub fn setup_session_with_deployment(
         asts,
         deps,
         diags,
+        lint_diags,
         results_values,
         success,
         session,
@@ -247,7 +254,7 @@ fn handle_emulated_contract_publish(
     tx: &EmulatedContractPublishSpecification,
     contract_ast: Option<&ContractAST>,
     epoch: StacksEpochId,
-) -> Result<ExecutionResult, Vec<Diagnostic>> {
+) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.emulated_sender.to_string());
 
@@ -973,6 +980,7 @@ pub async fn generate_default_deployment(
         asts: contract_asts,
         deps: dependencies,
         diags: contract_diags,
+        lint_diags: HashMap::new(),
         success: asts_success,
         results_values: HashMap::new(),
         analysis: HashMap::new(),
@@ -1036,7 +1044,7 @@ mod tests {
         name: &str,
         source: &str,
         epoch: StacksEpochId,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let emulated_publish_spec = EmulatedContractPublishSpecification {
             contract_name: ContractName::from(name),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),

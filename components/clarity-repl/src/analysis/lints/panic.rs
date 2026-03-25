@@ -146,16 +146,15 @@ impl Lint for PanicChecker<'_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::PanicChecker;
     use crate::analysis::linter::Lint;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -179,7 +178,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`unwrap-panic`"));
     }
 
@@ -195,7 +194,7 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains("`unwrap-err-panic`"));
     }
 

@@ -21,7 +21,7 @@ use tower_lsp_server::ls_types::{
 use tower_lsp_server::{Client, LanguageServer};
 
 use super::utils;
-use crate::lsp::clarity_diagnostics_to_tower_lsp_type;
+use crate::lsp::clarity_diagnostic_to_tower_lsp_type_with_lint;
 
 pub enum LspResponse {
     Notification(LspNotificationResponse),
@@ -124,7 +124,12 @@ impl LspNativeBridge {
 
         for (location, diags) in aggregated_diagnostics {
             if let Ok(url) = clarinet_files::paths::path_to_url_string(&location) {
-                let mut lsp_diags = clarity_diagnostics_to_tower_lsp_type(&diags);
+                let mut lsp_diags: Vec<_> = diags
+                    .iter()
+                    .map(|(d, lint_name)| {
+                        clarity_diagnostic_to_tower_lsp_type_with_lint(d, lint_name.as_ref())
+                    })
+                    .collect();
                 if let Some(extra) = extra_diags.remove(&location) {
                     lsp_diags.extend(extra);
                 }
