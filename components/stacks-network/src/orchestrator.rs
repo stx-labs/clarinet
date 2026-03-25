@@ -32,7 +32,7 @@ use indoc::formatdoc;
 use observer::utils::Context;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
-use crate::command::run_command;
+use crate::command::run_docker_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 
 const BITCOIND_DATA_DIR: &str = "/home/bitcoin/.bitcoin";
@@ -123,11 +123,11 @@ impl DevnetOrchestrator {
         let docker_client = match should_use_docker {
             true => match network_config.devnet {
                 Some(ref devnet) => {
-                    let client = Docker::connect_with_socket(
-                        &devnet.docker_host,
-                        120,
-                        bollard::API_DEFAULT_VERSION,
-                    )
+                    let client = if let Some(ref host) = devnet.docker_host {
+                        Docker::connect_with_socket(host, 120, bollard::API_DEFAULT_VERSION)
+                    } else {
+                        Docker::connect_with_socket_defaults()
+                    }
                     .or_else(|_| Docker::connect_with_socket_defaults())
                     .or_else(|_| {
                         let mut user_space_docker_socket =
@@ -800,6 +800,7 @@ impl DevnetOrchestrator {
             .map_err(|e| format!("Failed to create bitcoin directory: {e}"))?;
         if !no_snapshot {
             // Ensure the destination directory exists in the container
+            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
@@ -807,6 +808,7 @@ impl DevnetOrchestrator {
                 BITCOIND_DATA_DIR,
                 devnet_event_tx,
                 "Bitcoin",
+                docker_host,
             )
             .await?;
         }
@@ -1098,12 +1100,15 @@ impl DevnetOrchestrator {
         let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
 
         if !no_snapshot {
+            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
+
             copy_snapshot_to_container(
                 container,
                 &stacks_snapshot,
                 "/devnet",
                 devnet_event_tx,
                 "Stacks",
+                docker_host,
             )
             .await?;
         }
@@ -1407,8 +1412,9 @@ impl DevnetOrchestrator {
                     events_path.display(),
                     container_name
                 );
-                let output = run_command(&copy_command)
-                    .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
+                let output =
+                    run_docker_command(&copy_command, devnet_config.docker_host.as_deref())
+                        .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
 
                 if !output.status.success() {
                     return Err(format!(
@@ -1421,8 +1427,9 @@ impl DevnetOrchestrator {
                 let import_command = format!(
                     "docker exec {container_name} node /app/lib/index.js import-events --file /tmp/events_cache.tsv --wipe-db"
                 );
-                let output = run_command(&import_command)
-                    .map_err(|e| format!("Failed to import events: {e}"))?;
+                let output =
+                    run_docker_command(&import_command, devnet_config.docker_host.as_deref())
+                        .map_err(|e| format!("Failed to import events: {e}"))?;
 
                 if !output.status.success() {
                     ctx.try_log(|logger| {
@@ -2365,6 +2372,7 @@ pub async fn copy_snapshot_to_container(
     dest_path: &str,
     devnet_event_tx: &Sender<DevnetEvent>,
     service_name: &str,
+    docker_host: Option<&str>,
 ) -> Result<(), String> {
     if !source_path.exists() {
         return Ok(()); // No snapshot to copy
@@ -2381,8 +2389,8 @@ pub async fn copy_snapshot_to_container(
         container_id,
         dest_path
     );
-    let output =
-        run_command(&copy_command).map_err(|e| format!("Failed to execute docker cp: {e}"))?;
+    let output = run_docker_command(&copy_command, docker_host)
+        .map_err(|e| format!("Failed to execute docker cp: {e}"))?;
 
     if !output.status.success() {
         return Err(format!(
