@@ -368,6 +368,7 @@ pub struct AccountConfig {
     pub derivation: String,
     pub balance: u64,
     pub sbtc_balance: u64,
+    pub btc_balance: u64,
     pub stx_address: String,
     pub btc_address: String,
     pub is_mainnet: bool,
@@ -474,6 +475,10 @@ impl NetworkManifest {
                         Some(Value::Integer(balance)) => *balance as u64,
                         _ => 1_000_000_000, // mint 10 sBTC by default
                     };
+                    let btc_balance = match account_settings.get("btc_balance") {
+                        Some(Value::Integer(balance)) => *balance as u64,
+                        _ => 500_000_000, // 5 BTC by default
+                    };
 
                     let mut mnemonic = match account_settings.get("mnemonic") {
                         Some(Value::String(phrase)) => match mnemonic_from_phrase(phrase) {
@@ -560,6 +565,7 @@ impl NetworkManifest {
                             derivation,
                             balance,
                             sbtc_balance,
+                            btc_balance,
                             stx_address,
                             btc_address,
                             is_mainnet,
@@ -844,6 +850,7 @@ impl NetworkManifest {
                     derivation: stacker_derivation_path.clone(),
                     balance: 100_000_000_000_000,
                     sbtc_balance: 1_000_000_000,
+                    btc_balance: 500_000_000,
                     stx_address,
                     btc_address,
                     is_mainnet: false,
