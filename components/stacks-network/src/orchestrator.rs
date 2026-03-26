@@ -1971,6 +1971,27 @@ impl DevnetOrchestrator {
             let _ = devnet_event_tx.send(DevnetEvent::info(
                 "Initializing blockchain with fresh blocks".to_string(),
             ));
+
+            // Generate 1 block per account that has btc_balance > 0.
+            // These are generated first so the coinbase outputs have time to mature
+            // (100 confirmations) before they need to be spent.
+            let mut account_blocks = 0u64;
+            for (_, account) in accounts.iter() {
+                if account.btc_balance > 0 {
+                    let account_address = Address::from_str(&account.btc_address)
+                        .map_err(|e| format!("unable to create account address: {e:?}"))?;
+                    btc_rpc
+                        .call_with_retry(
+                            "generatetoaddress",
+                            json!([1, account_address]),
+                            MAX_ERRORS,
+                            devnet_event_tx,
+                        )
+                        .await?;
+                    account_blocks += 1;
+                }
+            }
+
             btc_rpc
                 .call_with_retry(
                     "generatetoaddress",
@@ -1979,10 +2000,12 @@ impl DevnetOrchestrator {
                     devnet_event_tx,
                 )
                 .await?;
+            // Reduce faucet blocks to keep total block count close to 101
+            let faucet_blocks = 97u64.saturating_sub(account_blocks);
             btc_rpc
                 .call_with_retry(
                     "generatetoaddress",
-                    json!([97, faucet_address]),
+                    json!([faucet_blocks, faucet_address]),
                     MAX_ERRORS,
                     devnet_event_tx,
                 )
