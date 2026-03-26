@@ -1,11 +1,11 @@
 use std::fmt::Display;
 use std::io::Write;
 
-use clarity::vm::contexts::{Environment, LocalContext};
+use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::errors::VmExecutionError;
-use clarity::vm::{EvalHook, SymbolicExpression, SymbolicExpressionType};
-use clarity_types::types::{QualifiedContractIdentifier, Value};
+use clarity::vm::{EvalHook, SymbolicExpression, SymbolicExpressionType, ValueRef};
+use clarity_types::types::QualifiedContractIdentifier;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CostField {
@@ -216,11 +216,12 @@ impl Default for PerfHook {
 impl EvalHook for PerfHook {
     fn will_begin_eval(
         &mut self,
-        env: &mut Environment,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
         _context: &LocalContext,
         expr: &SymbolicExpression,
     ) {
-        let contract = &env.contract_context.contract_identifier;
+        let contract = &invoke_ctx.contract_context.contract_identifier;
 
         // Store contract identifier for overhead tracking
         if self.contract_identifier.is_none() {
@@ -270,12 +271,13 @@ impl EvalHook for PerfHook {
         });
     }
 
-    fn did_finish_eval(
+    fn did_finish_eval<'a>(
         &mut self,
-        env: &mut Environment,
-        _context: &LocalContext,
+        env: &mut ExecutionState,
+        _invoke_ctx: &'a InvocationContext,
+        _context: &'a LocalContext,
         expr: &SymbolicExpression,
-        _res: &Result<Value, VmExecutionError>,
+        _res: &Result<ValueRef<'a>, VmExecutionError>,
     ) {
         // Get the full call stack as a string
         let call_stack = self

@@ -3,10 +3,12 @@ use std::path::PathBuf;
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::vm::callables::FunctionIdentifier;
-use clarity::vm::contexts::{ContractContext, Environment, GlobalContext, LocalContext};
+use clarity::vm::contexts::{
+    ContractContext, ExecutionState, GlobalContext, InvocationContext, LocalContext,
+};
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::representations::Span;
-use clarity::vm::{EvalHook, EvaluationResult, ExecutionResult, SymbolicExpression};
+use clarity::vm::{EvalHook, EvaluationResult, ExecutionResult, SymbolicExpression, ValueRef};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceData, StandardPrincipalData,
 };
@@ -114,7 +116,7 @@ impl DAPDebugger {
     // Process all messages before launching the REPL
     pub fn init(&mut self) -> Result<(String, String), ParseError> {
         while self.launched.is_none() {
-            match self.wait_for_command(None, None) {
+            match self.wait_for_command(None, None, None) {
                 Ok(_) => (),
                 Err(e) => return Err(e),
             }
@@ -125,7 +127,8 @@ impl DAPDebugger {
     // Successful result boolean indicates if execution should continue based on the message received
     fn wait_for_command(
         &mut self,
-        env: Option<&mut Environment>,
+        env: Option<&mut ExecutionState>,
+        invoke_ctx: Option<&InvocationContext>,
         context: Option<&LocalContext>,
     ) -> Result<bool, ParseError> {
         if let Some(msg) = self.rt.block_on(self.reader.next()) {
@@ -133,7 +136,9 @@ impl DAPDebugger {
                 Ok(msg) => {
                     use debug_types::MessageKind::*;
                     Ok(match msg.message {
-                        Request(command) => self.handle_request(env, context, msg.seq, command),
+                        Request(command) => {
+                            self.handle_request(env, invoke_ctx, context, msg.seq, command)
+                        }
                         Response(response) => {
                             self.handle_response(msg.seq, response);
                             false
@@ -187,7 +192,8 @@ impl DAPDebugger {
 
     pub fn handle_request(
         &mut self,
-        env: Option<&mut Environment>,
+        env: Option<&mut ExecutionState>,
+        invoke_ctx: Option<&InvocationContext>,
         context: Option<&LocalContext>,
         seq: i64,
         command: RequestCommand,
@@ -210,7 +216,7 @@ impl DAPDebugger {
             Next(arguments) => self.next(seq, arguments),
             Continue(arguments) => self.continue_(seq, arguments),
             Pause(arguments) => self.pause(seq, arguments),
-            Evaluate(arguments) => self.evaluate(seq, arguments, env, context),
+            Evaluate(arguments) => self.evaluate(seq, arguments, env, invoke_ctx, context),
             _ => {
                 self.send_response(Response {
                     request_seq: seq,
@@ -633,10 +639,11 @@ impl DAPDebugger {
         &mut self,
         seq: i64,
         arguments: EvaluateArguments,
-        env: Option<&mut Environment>,
+        env: Option<&mut ExecutionState>,
+        invoke_ctx: Option<&InvocationContext>,
         context: Option<&LocalContext>,
     ) -> bool {
-        let (Some(env), Some(context)) = (env, context) else {
+        let (Some(env), Some(invoke_ctx), Some(context)) = (env, invoke_ctx, context) else {
             self.log("cannot evaluate an expression before initialization is complete");
             return true;
         };
@@ -650,6 +657,7 @@ impl DAPDebugger {
             Some(EvalContext::Watch) => {
                 match extract_watch_variable(
                     env,
+                    invoke_ctx,
                     &arguments.expression,
                     self.default_sender.as_ref(),
                 ) {
@@ -743,7 +751,7 @@ impl DAPDebugger {
             }
             _ => match self
                 .get_state()
-                .evaluate(env, context, &arguments.expression)
+                .evaluate(env, invoke_ctx, context, &arguments.expression)
             {
                 Ok(value) => Response {
                     request_seq: seq,
@@ -934,16 +942,17 @@ impl DAPDebugger {
 impl EvalHook for DAPDebugger {
     fn will_begin_eval(
         &mut self,
-        env: &mut Environment,
+        env: &mut ExecutionState,
+        invoke_ctx: &InvocationContext,
         context: &LocalContext,
         expr: &SymbolicExpression,
     ) {
         let source = Source {
-            name: Some(env.contract_context.contract_identifier.to_string()),
+            name: Some(invoke_ctx.contract_context.contract_identifier.to_string()),
             path: Some(
                 match self
                     .contract_id_to_path
-                    .get(&env.contract_context.contract_identifier)
+                    .get(&invoke_ctx.contract_context.contract_identifier)
                 {
                     Some(path) => path.to_str().unwrap().to_string(),
                     _ => "debugger".to_string(),
@@ -977,7 +986,7 @@ impl EvalHook for DAPDebugger {
                 self.save_scopes_for_frame(
                     &stack_top,
                     context,
-                    env.contract_context,
+                    invoke_ctx.contract_context,
                     env.global_context,
                 );
                 self.stack_frames
@@ -999,7 +1008,7 @@ impl EvalHook for DAPDebugger {
                 self.save_scopes_for_frame(
                     &stack_frame,
                     context,
-                    env.contract_context,
+                    invoke_ctx.contract_context,
                     env.global_context,
                 );
 
@@ -1008,13 +1017,13 @@ impl EvalHook for DAPDebugger {
             }
         }
 
-        if !self.get_state().will_begin_eval(env, context, expr) {
+        if !self.get_state().will_begin_eval(invoke_ctx, context, expr) {
             if self.get_state().state == State::Start {
                 // Sending this initialized event triggers the configuration
                 // (e.g. setting breakpoints), after which the ConfigurationDone
                 // request should be sent, but it's not, so there is an ugly
                 // hack in threads to handle that.
-                self.default_sender = Some(match &env.sender {
+                self.default_sender = Some(match &invoke_ctx.sender {
                     Some(sender) => match sender {
                         PrincipalData::Standard(standard) => standard.clone(),
                         PrincipalData::Contract(contract) => contract.issuer.clone(),
@@ -1064,7 +1073,7 @@ impl EvalHook for DAPDebugger {
 
             let mut proceed = false;
             while !proceed {
-                proceed = match self.wait_for_command(Some(env), Some(context)) {
+                proceed = match self.wait_for_command(Some(env), Some(invoke_ctx), Some(context)) {
                     Ok(proceed) => proceed,
                     Err(e) => {
                         self.log(format!("error: {e}"));
@@ -1080,14 +1089,15 @@ impl EvalHook for DAPDebugger {
         }
     }
 
-    fn did_finish_eval(
+    fn did_finish_eval<'a>(
         &mut self,
-        env: &mut Environment,
-        context: &LocalContext,
+        _env: &mut ExecutionState,
+        _invoke_ctx: &'a InvocationContext,
+        _context: &'a LocalContext,
         expr: &SymbolicExpression,
-        res: &Result<Value, VmExecutionError>,
+        _res: &Result<ValueRef<'a>, VmExecutionError>,
     ) {
-        self.get_state().did_finish_eval(env, context, expr, res);
+        self.get_state().did_finish_eval(expr);
     }
 
     fn did_complete(&mut self, result: Result<&mut ExecutionResult, String>) {
