@@ -1509,8 +1509,9 @@ fn get_pox5_grant_signer_key_args(
 }
 
 /// Compute the unlock burn height for a pox-5 stake.
-/// unlock_cycle = current_cycle + duration
-/// unlock_burn_height = first_burnchain_block_height + (unlock_cycle + 1) * reward_cycle_length
+/// Matches the pox-5.clar `reward-cycle-to-unlock-height` function:
+///   unlock_cycle = current_cycle + duration
+///   unlock_height = first_burnchain_block_height + unlock_cycle * reward_cycle_length + reward_cycle_length / 2
 fn compute_unlock_burn_height(
     bitcoin_block_height: u32,
     first_burnchain_block_height: u32,
@@ -1520,14 +1521,13 @@ fn compute_unlock_burn_height(
     let effective_height = bitcoin_block_height.saturating_sub(first_burnchain_block_height);
     let current_cycle = effective_height / reward_cycle_length;
     let unlock_cycle = current_cycle + duration;
-    // unlock height is the start of the cycle after the last staking cycle
-    first_burnchain_block_height + (unlock_cycle + 1) * reward_cycle_length
+    // unlock height is halfway through the unlock cycle, matching pox-5.clar
+    first_burnchain_block_height + unlock_cycle * reward_cycle_length + reward_cycle_length / 2
 }
 
 /// Create and broadcast a Bitcoin lockup transaction for pox-5 staking.
 ///
 /// Sends BTC from the stacker's wallet to a P2WSH address derived from the pox-5 locking script.
-/// The stacker's wallet is funded during devnet initialization via `generatetoaddress`.
 fn send_pox5_bitcoin_lockup(
     bitcoin_node_host: &str,
     bitcoin_node_username: &str,
