@@ -36,12 +36,15 @@ use observer::utils::Context;
 use serde::Deserialize;
 use serde_json::json;
 use stacks_common::address::AddressHashMode;
-use stacks_common::types::chainstate::{StacksPrivateKey, StacksPublicKey};
+use stacks_common::types::chainstate::{StacksAddress, StacksPrivateKey, StacksPublicKey};
 use stacks_rpc_client::rpc_client::PoxInfo;
 use stacks_rpc_client::StacksRpc;
 use stackslib::chainstate::stacks::address::PoxAddress;
 use stackslib::util_lib::signed_structured_data::pox4::{
     make_pox_4_signer_key_signature, Pox4SignatureTopic,
+};
+use stackslib::util_lib::signed_structured_data::pox5::{
+    make_pox_5_signer_grant_signature, make_pox_5_signer_key_signature, Pox5SignatureTopic,
 };
 
 use super::ChainsCoordinatorCommand;
@@ -872,17 +875,57 @@ pub async fn publish_stacking_orders(
         let signer_key =
             devnet_config.stacks_signers_keys[i % devnet_config.stacks_signers_keys.len()].clone();
 
+        let bitcoin_node_host = services_map_hosts.bitcoin_node_host.clone();
+        let bitcoin_node_username = devnet_config.bitcoin_node_username.clone();
+        let bitcoin_node_password = devnet_config.bitcoin_node_password.clone();
+        let pox_reward_length = pox_info.reward_cycle_length;
+        let first_burnchain_block_height = pox_info.first_burnchain_block_height;
+
+        let stx_address_moved = account.stx_address.clone();
         let stacking_result =
             hiro_system_kit::thread_named("Stacking orders handler").spawn(move || {
                 let default_fee = fee_rate * 1000;
                 let stacks_rpc = StacksRpc::new(&node_rpc_url_moved);
-                let nonce = stacks_rpc.get_nonce(&account.stx_address)?;
+                let mut nonce = stacks_rpc
+                    .get_nonce(&account.stx_address)
+                    .map_err(|e| format!("{e:?}"))?;
 
                 let (_, _, account_secret_key) = clarinet_files::compute_addresses(
                     &account.mnemonic,
                     &account.derivation,
                     &StacksNetwork::Devnet.get_networks(),
                 );
+
+                let auth_id: u128 = i.try_into().unwrap();
+
+                // For pox-5, submit a grant-signer-key transaction before staking
+                if pox_version >= 5 {
+                    let stacker_principal =
+                        PrincipalData::parse(&stx_address_moved).expect("Invalid stx address");
+                    let pox_addr_tuple = make_pox_addr_tuple(&btc_address_moved);
+                    let pox_addr = PoxAddress::try_from_pox_tuple(false, &pox_addr_tuple).unwrap();
+
+                    let grant_args = get_pox5_grant_signer_key_args(
+                        &stacker_principal,
+                        &pox_addr,
+                        &signer_key,
+                        auth_id,
+                    );
+
+                    let grant_tx = stacks_codec::codec::build_contract_call_transaction(
+                        pox_contract_id_moved.clone(),
+                        "grant-signer-key".to_string(),
+                        grant_args,
+                        nonce,
+                        default_fee,
+                        &hex_bytes(&account_secret_key).unwrap(),
+                    );
+
+                    stacks_rpc
+                        .post_transaction(&grant_tx)
+                        .map_err(|e| format!("{e:?}"))?;
+                    nonce += 1;
+                }
 
                 let (method, arguments) = get_stacking_tx_method_and_args(
                     pox_version,
@@ -893,7 +936,7 @@ pub async fn publish_stacking_orders(
                     &btc_address_moved,
                     stx_amount,
                     duration,
-                    i.try_into().unwrap(),
+                    auth_id,
                 );
 
                 let tx = stacks_codec::codec::build_contract_call_transaction(
@@ -905,7 +948,32 @@ pub async fn publish_stacking_orders(
                     &hex_bytes(&account_secret_key).unwrap(),
                 );
 
-                stacks_rpc.post_transaction(&tx)
+                stacks_rpc
+                    .post_transaction(&tx)
+                    .map_err(|e| format!("{e:?}"))?;
+
+                // For pox-5, create and broadcast the Bitcoin lockup transaction
+                if pox_version >= 5 {
+                    let unlock_burn_height = compute_unlock_burn_height(
+                        bitcoin_block_height,
+                        first_burnchain_block_height,
+                        pox_reward_length,
+                        duration,
+                    );
+
+                    let btc_secret_key = hex_bytes(&account_secret_key).unwrap();
+                    send_pox5_bitcoin_lockup(
+                        &bitcoin_node_host,
+                        &bitcoin_node_username,
+                        &bitcoin_node_password,
+                        &stx_address_moved,
+                        &btc_address_moved,
+                        &btc_secret_key,
+                        unlock_burn_height,
+                    )?;
+                }
+
+                Ok::<String, String>("".to_string())
             });
 
         match stacking_result {
@@ -1163,21 +1231,11 @@ async fn handle_bitcoin_mining(
     }
 }
 
-fn get_stacking_tx_method_and_args(
-    pox_version: u32,
-    bitcoin_block_height: u32,
-    cycle: u128,
-    signer_key: &StacksPrivateKey,
-    extend_stacking: bool,
-    btc_address: &str,
-    stx_amount: u64,
-    duration: u32,
-    auth_id: u128,
-) -> (String, Vec<ClarityValue>) {
+fn make_pox_addr_tuple(btc_address: &str) -> ClarityValue {
     let addr_bytes = btc_address
         .from_base58()
         .expect("Unable to get bytes from btc address");
-    let pox_addr_tuple = ClarityValue::Tuple(
+    ClarityValue::Tuple(
         TupleData::from_data(vec![
             (
                 ClarityName::try_from("version".to_owned()).unwrap(),
@@ -1194,9 +1252,102 @@ fn get_stacking_tx_method_and_args(
             ),
         ])
         .unwrap(),
-    );
+    )
+}
 
+/// Build the unlock script bytes for a pox-5 lockup.
+/// For devnet, this is a simple P2PKH script: OP_DUP OP_HASH160 <pubkey-hash> OP_EQUALVERIFY OP_CHECKSIG
+fn build_unlock_script(btc_address: &str) -> Vec<u8> {
+    let addr_bytes = btc_address
+        .from_base58()
+        .expect("Unable to get bytes from btc address");
+    let pubkey_hash = &addr_bytes[1..21];
+
+    // Standard P2PKH script
+    vec![
+        0x76, // OP_DUP
+        0xa9, // OP_HASH160
+        0x14, // Push 20 bytes
+    ]
+    .into_iter()
+    .chain(pubkey_hash.iter().copied())
+    .chain([
+        0x88, // OP_EQUALVERIFY
+        0xac, // OP_CHECKSIG
+    ])
+    .collect()
+}
+
+/// Build the full pox-5 locking script.
+///
+/// Format:
+///   OP_PUSH_22 <05 || addr_version || addr_hash160>  OP_DROP
+///   OP_PUSH3 <unlock_height_3bytes_LE>  OP_CHECKLOCKTIMEVERIFY  OP_DROP
+///   <unlock_script>
+fn build_pox5_locking_script(
+    stacker_stx_address: &str,
+    unlock_burn_height: u32,
+    unlock_bytes: &[u8],
+) -> Vec<u8> {
+    let stx_addr =
+        <StacksAddress as stacks_common::types::Address>::from_string(stacker_stx_address)
+            .expect("Unable to parse stacks address");
+    let addr_version = stx_addr.version();
+    let addr_hash = stx_addr.bytes().as_bytes();
+
+    let mut script = Vec::new();
+
+    // Push stacks address (22 bytes: 0x05 || version || hash160)
+    script.push(0x16); // OP_PUSH_22 (push next 22 bytes)
+    script.push(0x05);
+    script.push(addr_version);
+    script.extend_from_slice(addr_hash); // 20 bytes
+
+    script.push(0x75); // OP_DROP
+
+    // Push unlock height as 3 bytes little-endian
+    let height_bytes = unlock_burn_height.to_le_bytes();
+    script.push(0x03); // OP_PUSH3 (push next 3 bytes)
+    script.extend_from_slice(&height_bytes[..3]);
+
+    script.push(0xb1); // OP_CHECKLOCKTIMEVERIFY
+    script.push(0x75); // OP_DROP
+
+    // Append the unlock script
+    script.extend_from_slice(unlock_bytes);
+
+    script
+}
+
+fn get_stacking_tx_method_and_args(
+    pox_version: u32,
+    bitcoin_block_height: u32,
+    cycle: u128,
+    signer_key: &StacksPrivateKey,
+    extend_stacking: bool,
+    btc_address: &str,
+    stx_amount: u64,
+    duration: u32,
+    auth_id: u128,
+) -> (String, Vec<ClarityValue>) {
+    let pox_addr_tuple = make_pox_addr_tuple(btc_address);
     let burn_block_height: u128 = (bitcoin_block_height - 1).into();
+    let pox_addr = PoxAddress::try_from_pox_tuple(false, &pox_addr_tuple).unwrap();
+
+    if pox_version >= 5 {
+        return get_pox5_stacking_tx_method_and_args(
+            &pox_addr,
+            pox_addr_tuple,
+            burn_block_height,
+            cycle,
+            signer_key,
+            extend_stacking,
+            btc_address,
+            stx_amount,
+            duration,
+            auth_id,
+        );
+    }
 
     let method = if extend_stacking {
         "stack-extend"
@@ -1204,7 +1355,6 @@ fn get_stacking_tx_method_and_args(
         "stack-stx"
     };
 
-    let pox_addr = PoxAddress::try_from_pox_tuple(false, &pox_addr_tuple).unwrap();
     let mut arguments = if extend_stacking {
         vec![ClarityValue::UInt(duration.into()), pox_addr_tuple]
     } else {
@@ -1250,6 +1400,304 @@ fn get_stacking_tx_method_and_args(
     };
 
     (method.to_string(), arguments)
+}
+
+/// Build the method and arguments for a pox-5 `stake` or `stake-extend` call.
+///
+/// pox-5 `stake` signature:
+///   (amount-ustx uint) (pox-addr tuple) (start-burn-ht uint)
+///   (signer-sig (optional (buff 65))) (signer-key (buff 33))
+///   (max-amount uint) (auth-id uint) (num-cycles uint) (unlock-bytes (buff 683))
+///
+/// pox-5 `stake-extend` signature:
+///   (amount-ustx uint) (pox-addr tuple)
+///   (signer-sig (optional (buff 65))) (signer-key (buff 33))
+///   (max-amount uint) (auth-id uint) (num-cycles uint) (unlock-bytes (buff 683))
+fn get_pox5_stacking_tx_method_and_args(
+    pox_addr: &PoxAddress,
+    pox_addr_tuple: ClarityValue,
+    burn_block_height: u128,
+    cycle: u128,
+    signer_key: &StacksPrivateKey,
+    extend_stacking: bool,
+    btc_address: &str,
+    stx_amount: u64,
+    duration: u32,
+    auth_id: u128,
+) -> (String, Vec<ClarityValue>) {
+    let method = if extend_stacking {
+        "stake-extend"
+    } else {
+        "stake"
+    };
+
+    let topic = if extend_stacking {
+        Pox5SignatureTopic::StakeExtend
+    } else {
+        Pox5SignatureTopic::Stake
+    };
+
+    let signature = make_pox_5_signer_key_signature(
+        pox_addr,
+        signer_key,
+        cycle,
+        &topic,
+        CHAIN_ID_TESTNET,
+        duration.into(),
+        stx_amount.into(),
+        auth_id,
+    )
+    .expect("Unable to make pox 5 signature");
+
+    let signer_sig = signature.to_rsv();
+    let pub_key = StacksPublicKey::from_private(signer_key);
+    let unlock_bytes = build_unlock_script(btc_address);
+
+    let mut arguments = vec![ClarityValue::UInt(stx_amount.into()), pox_addr_tuple];
+
+    if !extend_stacking {
+        arguments.push(ClarityValue::UInt(burn_block_height));
+    }
+
+    arguments.extend([
+        ClarityValue::some(ClarityValue::buff_from(signer_sig).unwrap()).unwrap(),
+        ClarityValue::buff_from(pub_key.to_bytes()).unwrap(),
+        ClarityValue::UInt(stx_amount.into()),
+        ClarityValue::UInt(auth_id),
+        ClarityValue::UInt(duration.into()),
+        ClarityValue::buff_from(unlock_bytes).unwrap(),
+    ]);
+
+    (method.to_string(), arguments)
+}
+
+/// Build the arguments for a pox-5 `grant-signer-key` call.
+///
+/// grant-signer-key signature:
+///   (signer-key (buff 33)) (staker principal) (pox-addr (optional tuple))
+///   (auth-id uint) (signer-sig (buff 65))
+fn get_pox5_grant_signer_key_args(
+    stacker_principal: &PrincipalData,
+    pox_addr: &PoxAddress,
+    signer_key: &StacksPrivateKey,
+    auth_id: u128,
+) -> Vec<ClarityValue> {
+    let pub_key = StacksPublicKey::from_private(signer_key);
+
+    let grant_sig = make_pox_5_signer_grant_signature(
+        stacker_principal,
+        Some(pox_addr),
+        auth_id,
+        CHAIN_ID_TESTNET,
+        signer_key,
+    )
+    .expect("Unable to make pox 5 grant signature");
+
+    let pox_addr_clarity = pox_addr
+        .clone()
+        .as_clarity_tuple()
+        .expect("Invalid pox address")
+        .into();
+
+    vec![
+        ClarityValue::buff_from(pub_key.to_bytes()).unwrap(),
+        ClarityValue::Principal(stacker_principal.clone()),
+        ClarityValue::some(pox_addr_clarity).unwrap(),
+        ClarityValue::UInt(auth_id),
+        ClarityValue::buff_from(grant_sig.to_rsv()).unwrap(),
+    ]
+}
+
+/// Compute the unlock burn height for a pox-5 stake.
+/// Matches the pox-5.clar `reward-cycle-to-unlock-height` function:
+///   unlock_cycle = current_cycle + duration
+///   unlock_height = first_burnchain_block_height + unlock_cycle * reward_cycle_length + reward_cycle_length / 2
+fn compute_unlock_burn_height(
+    bitcoin_block_height: u32,
+    first_burnchain_block_height: u32,
+    reward_cycle_length: u32,
+    duration: u32,
+) -> u32 {
+    let effective_height = bitcoin_block_height.saturating_sub(first_burnchain_block_height);
+    let current_cycle = effective_height / reward_cycle_length;
+    let unlock_cycle = current_cycle + duration;
+    // unlock height is halfway through the unlock cycle, matching pox-5.clar
+    first_burnchain_block_height + unlock_cycle * reward_cycle_length + reward_cycle_length / 2
+}
+
+/// Create and broadcast a Bitcoin lockup transaction for pox-5 staking.
+///
+/// Sends BTC from the stacker's wallet to a P2WSH address derived from the pox-5 locking script.
+fn send_pox5_bitcoin_lockup(
+    bitcoin_node_host: &str,
+    bitcoin_node_username: &str,
+    bitcoin_node_password: &str,
+    stacker_stx_address: &str,
+    btc_address: &str,
+    btc_secret_key: &[u8],
+    unlock_burn_height: u32,
+) -> Result<String, String> {
+    use bitcoincore_rpc::bitcoin::blockdata::opcodes;
+    use bitcoincore_rpc::bitcoin::blockdata::script::Builder;
+    use bitcoincore_rpc::bitcoin::hashes::Hash as _;
+    use bitcoincore_rpc::bitcoin::script::PushBytes;
+    use bitcoincore_rpc::bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
+    use bitcoincore_rpc::bitcoin::sighash::SighashCache;
+    use bitcoincore_rpc::bitcoin::{
+        Amount, OutPoint, PubkeyHash, ScriptBuf, Sequence, Transaction, TxIn, TxOut, WScriptHash,
+        Witness,
+    };
+
+    let unlock_bytes = build_unlock_script(btc_address);
+    let locking_script =
+        build_pox5_locking_script(stacker_stx_address, unlock_burn_height, &unlock_bytes);
+
+    // Create P2WSH output: the scriptPubKey is OP_0 <32-byte-sha256-of-script>
+    let script_buf = ScriptBuf::from(locking_script);
+    let script_hash = WScriptHash::hash(script_buf.as_bytes());
+    let p2wsh_script = ScriptBuf::new_p2wsh(&script_hash);
+
+    let bitcoin_rpc_url = format!("http://{bitcoin_node_host}");
+    let wallet_url = format!("{bitcoin_rpc_url}/wallet/devnet");
+    let client = reqwest::blocking::Client::new();
+
+    // List UTXOs for the stacker's BTC address
+    let listunspent_resp = client
+        .post(&wallet_url)
+        .basic_auth(bitcoin_node_username, Some(bitcoin_node_password))
+        .json(&serde_json::json!({
+            "jsonrpc": "1.0",
+            "id": "clarinet",
+            "method": "listunspent",
+            "params": [100, 9999999, [btc_address]]
+        }))
+        .send()
+        .map_err(|e| format!("Failed to list unspent UTXOs: {e}"))?
+        .json::<serde_json::Value>()
+        .map_err(|e| format!("Failed to parse listunspent response: {e}"))?;
+
+    let utxos = listunspent_resp["result"]
+        .as_array()
+        .ok_or_else(|| format!("No UTXOs available for pox-5 lockup (address: {btc_address})"))?;
+
+    let lockup_sats: u64 = 10_000;
+    let fee_sats: u64 = 1_000;
+
+    let utxo = utxos
+        .iter()
+        .find(|u| {
+            u["amount"]
+                .as_f64()
+                .map(|a| (a * 100_000_000.0) as u64 >= lockup_sats + fee_sats)
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            format!("No UTXO with sufficient funds for pox-5 lockup (address: {btc_address})")
+        })?;
+
+    let txid_str = utxo["txid"].as_str().ok_or("Missing txid in UTXO")?;
+    let vout = utxo["vout"].as_u64().ok_or("Missing vout in UTXO")? as u32;
+    let utxo_amount_btc = utxo["amount"].as_f64().ok_or("Missing amount in UTXO")?;
+    let utxo_amount_sats = (utxo_amount_btc * 100_000_000.0) as u64;
+    let utxo_script_hex = utxo["scriptPubKey"]
+        .as_str()
+        .ok_or("Missing scriptPubKey in UTXO")?;
+
+    let txid = txid_str
+        .parse()
+        .map_err(|e| format!("Failed to parse txid: {e}"))?;
+
+    // Build the transaction
+    let input = TxIn {
+        previous_output: OutPoint { txid, vout },
+        script_sig: ScriptBuf::default(),
+        sequence: Sequence(0xFFFFFFFD),
+        witness: Witness::new(),
+    };
+
+    let lockup_output = TxOut {
+        value: Amount::from_sat(lockup_sats),
+        script_pubkey: p2wsh_script,
+    };
+
+    // Return change to the stacker's address
+    let change_sats = utxo_amount_sats - lockup_sats - fee_sats;
+    let addr_bytes = btc_address
+        .from_base58()
+        .expect("Unable to decode btc address");
+    let pubkey_hash = PubkeyHash::from_slice(&addr_bytes[1..21]).expect("Invalid hash");
+    let change_script = Builder::new()
+        .push_opcode(opcodes::all::OP_DUP)
+        .push_opcode(opcodes::all::OP_HASH160)
+        .push_slice(pubkey_hash)
+        .push_opcode(opcodes::all::OP_EQUALVERIFY)
+        .push_opcode(opcodes::all::OP_CHECKSIG)
+        .into_script();
+
+    let change_output = TxOut {
+        value: Amount::from_sat(change_sats),
+        script_pubkey: change_script,
+    };
+
+    let mut raw_tx = Transaction {
+        version: bitcoincore_rpc::bitcoin::transaction::Version::TWO,
+        lock_time: bitcoincore_rpc::bitcoin::absolute::LockTime::ZERO,
+        input: vec![input],
+        output: vec![lockup_output, change_output],
+    };
+
+    // Sign the transaction manually using the stacker's private key
+    let utxo_script = ScriptBuf::from(hex_bytes(utxo_script_hex).map_err(|e| format!("{e}"))?);
+    let sig_hash_all = 0x01u32;
+    let sig_hash = SighashCache::new(raw_tx.clone())
+        .legacy_signature_hash(0, &utxo_script, sig_hash_all)
+        .map_err(|e| format!("Failed to compute sighash: {e}"))?;
+
+    let secp = Secp256k1::new();
+    let secret_key =
+        SecretKey::from_slice(btc_secret_key).map_err(|e| format!("Invalid secret key: {e}"))?;
+    let message =
+        Message::from_digest_slice(&sig_hash[..]).map_err(|e| format!("Invalid message: {e}"))?;
+    let signature = secp.sign_ecdsa_recoverable(&message, &secret_key);
+    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+    let sig_der = signature.to_standard().serialize_der();
+    let sig_bytes = [&*sig_der, &[sig_hash_all as u8][..]].concat();
+
+    raw_tx.input[0].script_sig = Builder::new()
+        .push_slice(<&PushBytes>::try_from(sig_bytes.as_slice()).unwrap())
+        .push_slice(public_key.serialize())
+        .into_script();
+
+    // Broadcast the signed transaction
+    let raw_tx_hex = bitcoincore_rpc::bitcoin::consensus::encode::serialize_hex(&raw_tx);
+
+    let send_resp = client
+        .post(&bitcoin_rpc_url)
+        .basic_auth(bitcoin_node_username, Some(bitcoin_node_password))
+        .json(&serde_json::json!({
+            "jsonrpc": "1.0",
+            "id": "clarinet",
+            "method": "sendrawtransaction",
+            "params": [raw_tx_hex]
+        }))
+        .send()
+        .map_err(|e| format!("Failed to broadcast Bitcoin lockup transaction: {e}"))?
+        .json::<serde_json::Value>()
+        .map_err(|e| format!("Failed to parse sendrawtransaction response: {e}"))?;
+
+    if let Some(error) = send_resp["error"].as_object() {
+        return Err(format!(
+            "Bitcoin lockup transaction failed: {}",
+            error["message"].as_str().unwrap_or("unknown error")
+        ));
+    }
+
+    let lockup_txid = send_resp["result"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+
+    Ok(lockup_txid)
 }
 
 async fn export_stacks_api_events(
@@ -1411,6 +1859,7 @@ mod test_rpc_client {
             derivation: DEFAULT_DERIVATION_PATH.to_string(),
             balance: 10000000,
             sbtc_balance: 100000000,
+            btc_balance: 500_000_000,
             stx_address: "ST2JHG361ZXG51QTKY2NQCVBPPRRE2KZB1HR05NNC".to_string(),
             btc_address: "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7".to_string(),
             is_mainnet: false,

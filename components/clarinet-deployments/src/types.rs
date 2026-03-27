@@ -43,6 +43,8 @@ pub enum EpochSpec {
     Epoch3_3,
     #[serde(rename = "3.4")]
     Epoch3_4,
+    #[serde(rename = "3.5")]
+    Epoch3_5,
 }
 
 impl From<StacksEpochId> for EpochSpec {
@@ -60,6 +62,7 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch32 => EpochSpec::Epoch3_2,
             StacksEpochId::Epoch33 => EpochSpec::Epoch3_3,
             StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
+            StacksEpochId::Epoch35 => EpochSpec::Epoch3_5,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
         }
     }
@@ -80,6 +83,7 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_2 => StacksEpochId::Epoch32,
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
             EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
+            EpochSpec::Epoch3_5 => StacksEpochId::Epoch35,
         }
     }
 }
@@ -117,6 +121,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
                     EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
                     EpochSpec::Epoch3_4 => config.epoch_3_4,
+                    EpochSpec::Epoch3_5 => config.epoch_3_5,
                 };
                 start_height.map(|start_height| EpochConfig {
                     epoch_name: epoch,

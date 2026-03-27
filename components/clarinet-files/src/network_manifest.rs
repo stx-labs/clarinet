@@ -179,6 +179,7 @@ pub struct DevnetConfigFile {
     pub epoch_3_2: Option<u64>,
     pub epoch_3_3: Option<u64>,
     pub epoch_3_4: Option<u64>,
+    pub epoch_3_5: Option<u64>,
     pub use_docker_gateway_routing: Option<bool>,
     pub docker_platform: Option<String>,
 }
@@ -318,6 +319,7 @@ pub struct DevnetConfig {
     pub epoch_3_2: u64,
     pub epoch_3_3: u64,
     pub epoch_3_4: Option<u64>,
+    pub epoch_3_5: Option<u64>,
     pub use_docker_gateway_routing: bool,
     pub docker_platform: Option<String>,
 }
@@ -340,6 +342,7 @@ pub struct AccountConfig {
     pub derivation: String,
     pub balance: u64,
     pub sbtc_balance: u64,
+    pub btc_balance: u64,
     pub stx_address: String,
     pub btc_address: String,
     pub is_mainnet: bool,
@@ -446,6 +449,10 @@ impl NetworkManifest {
                         Some(Value::Integer(balance)) => *balance as u64,
                         _ => 1_000_000_000, // mint 10 sBTC by default
                     };
+                    let btc_balance = match account_settings.get("btc_balance") {
+                        Some(Value::Integer(balance)) => *balance as u64,
+                        _ => 500_000_000, // 5 BTC by default
+                    };
 
                     let mut mnemonic = match account_settings.get("mnemonic") {
                         Some(Value::String(phrase)) => match mnemonic_from_phrase(phrase) {
@@ -532,6 +539,7 @@ impl NetworkManifest {
                             derivation,
                             balance,
                             sbtc_balance,
+                            btc_balance,
                             stx_address,
                             btc_address,
                             is_mainnet,
@@ -816,6 +824,7 @@ impl NetworkManifest {
                     derivation: stacker_derivation_path.clone(),
                     balance: 100_000_000_000_000,
                     sbtc_balance: 1_000_000_000,
+                    btc_balance: 500_000_000,
                     stx_address,
                     btc_address,
                     is_mainnet: false,
@@ -987,6 +996,7 @@ impl NetworkManifest {
                 epoch_3_2: devnet_config.epoch_3_2.unwrap_or(DEFAULT_EPOCH_3_2),
                 epoch_3_3: devnet_config.epoch_3_3.unwrap_or(DEFAULT_EPOCH_3_3),
                 epoch_3_4: devnet_config.epoch_3_4,
+                epoch_3_5: devnet_config.epoch_3_5,
                 stacks_node_env_vars: devnet_config
                     .stacks_node_env_vars
                     .take()
@@ -1116,6 +1126,7 @@ impl Default for DevnetConfig {
             epoch_3_2: DEFAULT_EPOCH_3_2,
             epoch_3_3: DEFAULT_EPOCH_3_3,
             epoch_3_4: None,
+            epoch_3_5: None,
             use_docker_gateway_routing: false,
             docker_platform: None,
         }

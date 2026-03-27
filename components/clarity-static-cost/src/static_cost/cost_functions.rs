@@ -36,7 +36,7 @@ impl ClarityCostFunctionExt for ClarityCostFunction {
             | StacksEpochId::Epoch31
             | StacksEpochId::Epoch32 => self.eval::<Costs3>(n),
             StacksEpochId::Epoch33 => self.eval::<Costs4>(n),
-            StacksEpochId::Epoch34 => self.eval::<Costs4>(n),
+            StacksEpochId::Epoch34 | StacksEpochId::Epoch35 => self.eval::<Costs4>(n),
         }
     }
 }
