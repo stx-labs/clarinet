@@ -51,7 +51,7 @@ rustyline = { version = "17.0.2" }
 tokio = { workspace = true, optional = true}
 tokio-util = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
-debug_types = { version = "1.0.0", optional = true }
+debug_types = { git = "https://github.com/brady-stacks/debug_types.git", branch = "feat/launch-additional-data", optional = true }
 httparse = { version = "1.6.0", optional = true }
 bytes = { version = "1.11.1", optional = true }
 log = { version = "0.4.16", optional = true }

@@ -103,7 +103,6 @@ fn deploy_boot_contracts(
     boot_contracts
 }
 
-#[derive(Clone)]
 pub struct Session {
     pub settings: SessionSettings,
     pub boot_contracts: ExecutionResultMap,
@@ -115,6 +114,25 @@ pub struct Session {
     coverage_hook: Option<CoverageHook>,
     logger_hook: Option<LoggerHook>,
     perf_hook: Option<PerfHook>,
+    debug_hook: Option<Box<dyn EvalHook>>,
+}
+
+impl Clone for Session {
+    fn clone(&self) -> Self {
+        Self {
+            settings: self.settings.clone(),
+            boot_contracts: self.boot_contracts.clone(),
+            contracts: self.contracts.clone(),
+            interpreter: self.interpreter.clone(),
+            show_costs: self.show_costs,
+            last_contract_call_trace: self.last_contract_call_trace.clone(),
+            coverage_hook: self.coverage_hook.clone(),
+            logger_hook: self.logger_hook.clone(),
+            perf_hook: self.perf_hook.clone(),
+            // Debug hooks hold runtime state and are not cloned
+            debug_hook: None,
+        }
+    }
 }
 
 impl Session {
@@ -152,6 +170,7 @@ impl Session {
             coverage_hook: None,
             logger_hook: None,
             perf_hook: None,
+            debug_hook: None,
         }
     }
 
@@ -165,6 +184,10 @@ impl Session {
 
     pub fn enable_performance(&mut self, cost_field: CostField) {
         self.perf_hook = Some(PerfHook::new(cost_field));
+    }
+
+    pub fn set_debug_hook(&mut self, hook: Box<dyn EvalHook>) {
+        self.debug_hook = Some(hook);
     }
 
     pub fn set_test_name(&mut self, name: String) {
@@ -582,6 +605,9 @@ impl Session {
         if let Some(ref mut perf_hook) = self.perf_hook {
             hooks.push(perf_hook);
         }
+        if let Some(ref mut debug_hook) = self.debug_hook {
+            hooks.push(debug_hook.as_mut());
+        }
 
         if contract.clarity_version > ClarityVersion::default_for_epoch(contract.epoch.resolve()) {
             let diagnostic = Diagnostic {
@@ -641,6 +667,9 @@ impl Session {
         }
         if let Some(ref mut perf_hook) = self.perf_hook {
             hooks.push(perf_hook);
+        }
+        if let Some(ref mut debug_hook) = self.debug_hook {
+            hooks.push(debug_hook.as_mut());
         }
 
         let current_epoch = self.interpreter.datastore.get_current_epoch();
@@ -710,6 +739,9 @@ impl Session {
         }
         if let Some(ref mut perf_hook) = self.perf_hook {
             hooks.push(perf_hook);
+        }
+        if let Some(ref mut debug_hook) = self.debug_hook {
+            hooks.push(debug_hook.as_mut());
         }
 
         let result = self

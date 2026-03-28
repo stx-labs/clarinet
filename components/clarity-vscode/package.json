@@ -202,8 +202,7 @@
         "configurationAttributes": {
           "launch": {
             "required": [
-              "manifest",
-              "expression"
+              "manifest"
             ],
             "properties": {
               "manifest": {
@@ -213,6 +212,10 @@
               "expression": {
                 "type": "string",
                 "description": "Expression to debug."
+              },
+              "transactionLog": {
+                "type": "string",
+                "description": "Path to a recorded transaction log JSON file to replay with debugging."
               }
             }
           }

@@ -29,6 +29,16 @@ use super::{extract_watch_variable, AccessType, DebugState, State};
 
 pub mod codec;
 
+pub enum LaunchMode {
+    /// Debug a single Clarity expression (existing behavior)
+    Expression {
+        manifest: String,
+        expression: String,
+    },
+    /// Replay a recorded transaction log with debug support
+    TransactionLog { manifest: String, path: String },
+}
+
 /*
  * DAP Session:
  *      VSCode                    DAPDebugger
@@ -63,7 +73,7 @@ pub struct DAPDebugger {
     writer: FramedWrite<Stdout, DebugAdapterCodec<ProtocolMessage>>,
     state: Option<DebugState>,
     send_seq: i64,
-    launched: Option<(String, String)>,
+    launched: Option<debug_types::requests::LaunchRequestArguments>,
     launch_seq: i64,
     current: Option<Current>,
     init_complete: bool,
@@ -114,14 +124,27 @@ impl DAPDebugger {
     }
 
     // Process all messages before launching the REPL
-    pub fn init(&mut self) -> Result<(String, String), ParseError> {
+    pub fn init(&mut self) -> Result<LaunchMode, ParseError> {
         while self.launched.is_none() {
             match self.wait_for_command(None, None, None) {
                 Ok(_) => (),
                 Err(e) => return Err(e),
             }
         }
-        Ok(self.launched.take().unwrap())
+        let args = self.launched.take().unwrap();
+        let manifest = args.manifest.unwrap();
+
+        if let Some(serde_json::Value::String(path)) = args.additional_data.get("transactionLog") {
+            Ok(LaunchMode::TransactionLog {
+                manifest,
+                path: path.clone(),
+            })
+        } else {
+            Ok(LaunchMode::Expression {
+                manifest,
+                expression: args.expression.unwrap(),
+            })
+        }
     }
 
     // Successful result boolean indicates if execution should continue based on the message received
@@ -346,8 +369,8 @@ impl DAPDebugger {
     }
 
     fn launch(&mut self, seq: i64, arguments: LaunchRequestArguments) -> bool {
-        // Verify that the manifest and expression were specified
-        let Some(manifest) = arguments.manifest else {
+        // Verify that the manifest was specified
+        if arguments.manifest.is_none() {
             self.send_response(Response {
                 request_seq: seq,
                 success: false,
@@ -355,20 +378,26 @@ impl DAPDebugger {
                 body: None,
             });
             return false;
-        };
-        let Some(expression) = arguments.expression else {
+        }
+
+        let has_tx_log = arguments.additional_data.contains_key("transactionLog");
+        let has_expression = arguments.expression.is_some();
+
+        if !has_tx_log && !has_expression {
             self.send_response(Response {
                 request_seq: seq,
                 success: false,
-                message: Some("expression to debug must be specified".to_string()),
+                message: Some("either expression or transactionLog must be specified".to_string()),
                 body: None,
             });
             return false;
-        };
+        }
 
+        // Initialize debug state with expression or a placeholder for tx log mode
+        let expr = arguments.expression.as_deref().unwrap_or("(tx-log-replay)");
         let contract_id = QualifiedContractIdentifier::transient();
-        self.state = Some(DebugState::new(&contract_id, &expression));
-        self.launched = Some((manifest, expression));
+        self.state = Some(DebugState::new(&contract_id, expr));
+        self.launched = Some(arguments);
 
         self.launch_seq = seq;
 
