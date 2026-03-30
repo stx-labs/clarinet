@@ -126,8 +126,11 @@ impl LspNativeBridge {
             if let Ok(url) = clarinet_files::paths::path_to_url_string(&location) {
                 let mut lsp_diags: Vec<_> = diags
                     .iter()
-                    .map(|(d, lint_name)| {
-                        clarity_diagnostic_to_tower_lsp_type_with_lint(d, lint_name.as_ref())
+                    .map(|ld| {
+                        clarity_diagnostic_to_tower_lsp_type_with_lint(
+                            &ld.diagnostic,
+                            ld.lint_name.as_ref(),
+                        )
                     })
                     .collect();
                 if let Some(extra) = extra_diags.remove(&location) {

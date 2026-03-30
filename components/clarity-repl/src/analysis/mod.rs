@@ -33,7 +33,7 @@ use crate::analysis::linter::LintGroup;
 ///
 /// Non-lint analysis passes (e.g. `CheckChecker`) produce diagnostics with
 /// `lint_name: None`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LintDiagnostic {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lint_name: Option<LintName>,

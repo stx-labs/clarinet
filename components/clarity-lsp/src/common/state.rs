@@ -16,7 +16,6 @@ use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
-use clarity_repl::analysis::linter::LintName;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::session::AnnotatedExecutionResult;
@@ -629,7 +628,7 @@ impl EditorState {
     pub fn get_aggregated_diagnostics(
         &self,
     ) -> (
-        Vec<(PathBuf, Vec<(ClarityDiagnostic, Option<LintName>)>)>,
+        Vec<(PathBuf, Vec<LintDiagnostic>)>,
         Option<(MessageType, String)>,
     ) {
         let mut contracts = vec![];
@@ -638,7 +637,7 @@ impl EditorState {
 
         for (_, protocol_state) in self.protocols.iter() {
             for (contract_url, state) in protocol_state.contracts.iter() {
-                let mut diags: Vec<(ClarityDiagnostic, Option<LintName>)> = vec![];
+                let mut diags: Vec<LintDiagnostic> = vec![];
 
                 let ContractMetadata { relative_path, .. } = self
                     .contracts_lookup
@@ -649,17 +648,17 @@ impl EditorState {
                 if !state.errors.is_empty() {
                     erroring_files.insert(relative_path.clone());
                     for error in state.errors.iter() {
-                        diags.push((error.clone(), None));
+                        diags.push(LintDiagnostic { lint_name: None, diagnostic: error.clone() });
                     }
                 }
                 if !state.warnings.is_empty() {
                     warning_files.insert(relative_path.clone());
                     for warning in state.warnings.iter() {
-                        diags.push((warning.clone(), None));
+                        diags.push(LintDiagnostic { lint_name: None, diagnostic: warning.clone() });
                     }
                 }
                 for note in state.notes.iter() {
-                    diags.push((note.clone(), None));
+                    diags.push(LintDiagnostic { lint_name: None, diagnostic: note.clone() });
                 }
 
                 // Collect lint diagnostics directly with their lint names
@@ -673,7 +672,7 @@ impl EditorState {
                         }
                         ClarityLevel::Note => {}
                     }
-                    diags.push((ld.diagnostic.clone(), ld.lint_name));
+                    diags.push(ld.clone());
                 }
                 contracts.push((contract_url.clone(), diags));
             }

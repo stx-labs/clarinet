@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clarinet_files::paths;
 use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
 use clarity_repl::analysis::linter::LintName;
+use clarity_repl::analysis::LintDiagnostic;
 use ls_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
 };
@@ -26,12 +27,10 @@ pub fn clarity_diagnostics_to_lsp_type(diagnostics: &Vec<ClarityDiagnostic>) -> 
     dst
 }
 
-pub fn clarity_diagnostics_with_lint_names_to_lsp_type(
-    diagnostics: &[(ClarityDiagnostic, Option<LintName>)],
-) -> Vec<LspDiagnostic> {
+pub fn lint_diagnostics_to_lsp_type(diagnostics: &[LintDiagnostic]) -> Vec<LspDiagnostic> {
     diagnostics
         .iter()
-        .map(|(d, lint_name)| clarity_diagnostic_to_lsp_type(d, lint_name.as_ref()))
+        .map(|ld| clarity_diagnostic_to_lsp_type(&ld.diagnostic, ld.lint_name.as_ref()))
         .collect()
 }
 

@@ -2,10 +2,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use clarinet_files::{paths, FileAccessor, ProjectManifest};
-use clarity_repl::analysis::linter::LintName;
+use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version;
 use clarity_repl::repl::ContractDeployer;
-use clarity_types::diagnostic::Diagnostic;
 use ls_types::{
     CodeLens, CodeLensParams, CompletionItem, CompletionParams, Diagnostic as LspDiagnostic,
     DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
@@ -64,7 +63,7 @@ pub enum LspNotification {
 
 #[derive(Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct LspNotificationResponse {
-    pub aggregated_diagnostics: Vec<(PathBuf, Vec<(Diagnostic, Option<LintName>)>)>,
+    pub aggregated_diagnostics: Vec<(PathBuf, Vec<LintDiagnostic>)>,
     pub env_simnet_diagnostics: Vec<(PathBuf, Vec<LspDiagnostic>)>,
     pub notification: Option<(MessageType, String)>,
 }
@@ -934,15 +933,10 @@ mod lsp_tests {
             1,
             "Diagnostics array should have one item"
         );
-        // Each entry is a (Diagnostic, Option<LintName>) tuple, serialized as a 2-element array
-        let diag_tuple = diagnostics_array
+        // Each entry is a LintDiagnostic, serialized as a flat object
+        let diagnostic = diagnostics_array
             .first()
-            .expect("Failed to get expected diagnostic tuple");
-        let diagnostic = diag_tuple
-            .as_array()
-            .expect("diagnostic tuple should be an array")
-            .first()
-            .expect("tuple should have diagnostic at index 0");
+            .expect("Failed to get expected diagnostic");
         let level = diagnostic
             .get("level")
             .expect("Failed to find \"level\": in diagnostic")
@@ -1096,15 +1090,10 @@ mod lsp_tests {
             3,
             "Diagnostics array should have three items"
         );
-        // Each entry is a (Diagnostic, Option<LintName>) tuple, serialized as a 2-element array
-        let diag_tuple = diagnostics_array
+        // Each entry is a LintDiagnostic, serialized as a flat object
+        let diagnostic = diagnostics_array
             .first()
-            .expect("Failed to get expected diagnostic tuple");
-        let diagnostic = diag_tuple
-            .as_array()
-            .expect("diagnostic tuple should be an array")
-            .first()
-            .expect("tuple should have diagnostic at index 0");
+            .expect("Failed to get expected diagnostic");
         let level = diagnostic
             .get("level")
             .expect("Failed to find \"level\": in diagnostic")
