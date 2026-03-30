@@ -25,14 +25,11 @@ fn level_string(level: &Level, lint_name: Option<&LintName>) -> String {
     }
 }
 
-#[allow(dead_code)]
 pub struct DiagnosticsDigest {
     pub message: String,
     pub errors: usize,
     pub warnings: usize,
     pub contracts_checked: usize,
-    full_success: usize,
-    total: usize,
 }
 
 impl DiagnosticsDigest {
@@ -41,12 +38,10 @@ impl DiagnosticsDigest {
         contracts_lint_diags: &HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>>,
         deployment: &DeploymentSpecification,
     ) -> DiagnosticsDigest {
-        let mut full_success = 0;
         let mut warnings = 0;
         let mut errors = 0;
         let mut contracts_checked = 0;
         let mut outputs = vec![];
-        let total = deployment.contracts.len();
 
         for (contract_id, diags) in contracts_diags.iter() {
             let (source, contract_location) = match deployment.contracts.get(contract_id) {
@@ -64,7 +59,6 @@ impl DiagnosticsDigest {
             let has_lint_diags = lint_diags.is_some_and(|lds| !lds.is_empty());
 
             if diags.is_empty() && !has_lint_diags {
-                full_success += 1;
                 continue;
             }
 
@@ -126,10 +120,8 @@ impl DiagnosticsDigest {
         }
 
         DiagnosticsDigest {
-            full_success,
             errors,
             warnings,
-            total,
             contracts_checked,
             message: outputs.join("\n"),
         }

@@ -74,7 +74,6 @@ pub fn output_code(diagnostic: &Diagnostic, lines: &[String]) -> Vec<String> {
             (span.end_column - span.start_column) as usize
         );
     }
-    pointer = pointer.to_string();
     output.push(pointer);
 
     for span in diagnostic.spans.iter().skip(1) {

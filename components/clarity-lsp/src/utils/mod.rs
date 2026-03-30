@@ -19,14 +19,6 @@ macro_rules! log {
 #[cfg(target_arch = "wasm32")]
 pub(crate) use log;
 
-pub fn clarity_diagnostics_to_lsp_type(diagnostics: &Vec<ClarityDiagnostic>) -> Vec<LspDiagnostic> {
-    let mut dst = vec![];
-    for d in diagnostics {
-        dst.push(clarity_diagnostic_to_lsp_type(d, None));
-    }
-    dst
-}
-
 pub fn lint_diagnostics_to_lsp_type(diagnostics: &[LintDiagnostic]) -> Vec<LspDiagnostic> {
     diagnostics
         .iter()

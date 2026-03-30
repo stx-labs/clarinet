@@ -306,7 +306,11 @@ impl ClarityInterpreter {
                 annotations,
                 &self.repl_settings.analysis,
             )
-            .map_err(|mut lds| Diagnostic::from(lds.pop().unwrap()))?
+            .map_err(|lds| {
+                // Extract the last diagnostic as the representative error.
+                // Safe: run_analysis only returns Err after accumulating at least one diagnostic.
+                Diagnostic::from(lds.into_iter().last().expect("non-empty error list"))
+            })?
         } else {
             vec![]
         };
