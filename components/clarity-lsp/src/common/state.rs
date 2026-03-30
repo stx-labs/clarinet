@@ -645,39 +645,35 @@ impl EditorState {
                     .get(contract_url)
                     .expect("contract not in lookup");
 
-                // Helper: look up the lint name for a diagnostic
-                let find_lint_name = |d: &ClarityDiagnostic| -> Option<LintName> {
-                    state
-                        .lint_diagnostics
-                        .iter()
-                        .find(|ld| {
-                            ld.diagnostic.message == d.message && ld.diagnostic.spans == d.spans
-                        })
-                        .and_then(|ld| ld.lint_name)
-                };
-
-                // Convert and collect errors
+                // Collect non-lint diagnostics
                 if !state.errors.is_empty() {
                     erroring_files.insert(relative_path.clone());
                     for error in state.errors.iter() {
-                        let lint_name = find_lint_name(error);
-                        diags.push((error.clone(), lint_name));
+                        diags.push((error.clone(), None));
                     }
                 }
-
-                // Convert and collect warnings
                 if !state.warnings.is_empty() {
                     warning_files.insert(relative_path.clone());
                     for warning in state.warnings.iter() {
-                        let lint_name = find_lint_name(warning);
-                        diags.push((warning.clone(), lint_name));
+                        diags.push((warning.clone(), None));
                     }
                 }
-
-                // Convert and collect notes
                 for note in state.notes.iter() {
-                    let lint_name = find_lint_name(note);
-                    diags.push((note.clone(), lint_name));
+                    diags.push((note.clone(), None));
+                }
+
+                // Collect lint diagnostics directly with their lint names
+                for ld in state.lint_diagnostics.iter() {
+                    match ld.diagnostic.level {
+                        ClarityLevel::Error => {
+                            erroring_files.insert(relative_path.clone());
+                        }
+                        ClarityLevel::Warning => {
+                            warning_files.insert(relative_path.clone());
+                        }
+                        ClarityLevel::Note => {}
+                    }
+                    diags.push((ld.diagnostic.clone(), ld.lint_name));
                 }
                 contracts.push((contract_url.clone(), diags));
             }
@@ -860,6 +856,18 @@ fn tag_diagnostics(
     }
 }
 
+fn tag_lint_diagnostics(
+    environment: Environment,
+    found_env_simnet: bool,
+    lint_diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    if found_env_simnet {
+        for ld in lint_diagnostics {
+            let _ = write!(ld.diagnostic.message, " ({environment})");
+        }
+    }
+}
+
 pub async fn build_state(
     manifest_location: &Path,
     protocol_state: &mut ProtocolState,
@@ -936,7 +944,7 @@ pub async fn build_state(
                 Ok(annotated) => {
                     let AnnotatedExecutionResult {
                         mut execution_result,
-                        lint_diagnostics: contract_lint_diags,
+                        lint_diagnostics: mut contract_lint_diags,
                     } = annotated;
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         tag_diagnostics(
@@ -946,6 +954,11 @@ pub async fn build_state(
                         );
                         entry.append(&mut execution_result.diagnostics);
                     }
+                    tag_lint_diagnostics(
+                        environment,
+                        global_found_env_simnet,
+                        &mut contract_lint_diags,
+                    );
                     lint_diagnostics
                         .entry(contract_id.clone())
                         .or_default()

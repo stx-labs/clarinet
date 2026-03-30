@@ -144,7 +144,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -160,7 +160,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -176,7 +176,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -192,7 +192,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// A private fn that calls another private fn, but neither is called from public/read-only.
@@ -217,7 +217,7 @@ mod tests {
         let (expected_message, _) = UnusedPrivateFn::make_diagnostic_strings(&fn_name.into());
 
         // Only square-plus-one should warn; square is "used" by square-plus-one
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
@@ -239,7 +239,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(result.lint_diagnostics.len(), 2);
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
         let fn_name = "square";
         let (expected_message, _) = UnusedPrivateFn::make_diagnostic_strings(&fn_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
@@ -278,7 +278,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -294,7 +294,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -321,6 +321,6 @@ mod tests {
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
             .expect("Invalid code snippet");
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 }

@@ -187,7 +187,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -201,7 +201,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
         let (expected_message, _) =
             UnusedBinding::make_diagnostic_strings(BindingType::FunctionArg, &var_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
@@ -234,7 +234,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(result.lint_diagnostics.len(), 2);
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -261,7 +261,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -275,7 +275,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -290,7 +290,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -325,7 +325,7 @@ mod tests {
         let (expected_message, _) =
             UnusedBinding::make_diagnostic_strings(BindingType::LetBinding, &var_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(var_name));
         assert!(output[0].contains(&expected_message));
@@ -343,7 +343,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -357,7 +357,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Linter assumes we cannot redeclare or "shadow" bindings

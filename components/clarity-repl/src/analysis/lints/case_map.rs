@@ -152,7 +152,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -168,7 +168,7 @@ mod tests {
         let expected_message =
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'_'));
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
@@ -187,7 +187,7 @@ mod tests {
         let expected_message =
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'B'));
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
@@ -206,7 +206,7 @@ mod tests {
         let expected_message =
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'U'));
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
@@ -225,7 +225,7 @@ mod tests {
         let expected_message =
             CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::ConsecutiveHyphens);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(map_name));
         assert!(output[0].contains(&expected_message));
@@ -241,7 +241,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -253,7 +253,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     // We may allow leading hyphens in Clarity some day
@@ -281,7 +281,7 @@ mod tests {
 
         match res {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             Err(..) => {
                 // Map name may be illegal in Clarity, so allow interpretation to fail

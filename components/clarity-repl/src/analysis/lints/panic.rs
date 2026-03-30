@@ -177,7 +177,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("`unwrap-panic`"));
     }
@@ -193,7 +193,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("`unwrap-err-panic`"));
     }
@@ -209,7 +209,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -226,6 +226,6 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 }

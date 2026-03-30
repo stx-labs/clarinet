@@ -178,7 +178,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -219,7 +219,7 @@ mod tests {
         let expected_message =
             CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'_'));
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
@@ -239,7 +239,7 @@ mod tests {
         let expected_message =
             CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'B'));
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
@@ -259,7 +259,7 @@ mod tests {
         let expected_message =
             CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'D'));
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(fn_name));
         assert!(output[0].contains(&expected_message));
@@ -278,7 +278,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 3);
+        assert_eq!(result.lint_diagnostics.len(), 3);
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -303,6 +303,6 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 }

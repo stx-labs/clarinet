@@ -35,9 +35,9 @@ use crate::utils::serialize_event;
 
 /// Wraps an `ExecutionResult` with structured lint diagnostics.
 ///
-/// `execution_result.diagnostics` contains ALL diagnostics (including lint
-/// ones as plain `Diagnostic`), while `lint_diagnostics` carries the lint
-/// subset with their structured `LintName`.
+/// `execution_result.diagnostics` contains only non-lint diagnostics (parse
+/// errors, annotations, etc.), while `lint_diagnostics` carries the lint
+/// diagnostics with their structured `LintName`.
 #[derive(Debug, Clone)]
 pub struct AnnotatedExecutionResult {
     pub execution_result: ExecutionResult,
@@ -128,11 +128,6 @@ impl AnnotatedExecutionResult {
         self.execution_result
     }
 
-    /// The non-lint diagnostics (parse errors, annotations, etc.).
-    pub fn non_lint_diagnostics(&self) -> &[Diagnostic] {
-        let count = self.execution_result.diagnostics.len() - self.lint_diagnostics.len();
-        &self.execution_result.diagnostics[..count]
-    }
 }
 
 #[derive(Clone)]
@@ -434,7 +429,7 @@ impl Session {
 
         match result {
             Ok(result) => {
-                for d in result.non_lint_diagnostics() {
+                for d in result.diagnostics.iter() {
                     output.append(&mut output_diagnostic(
                         d,
                         &contract_name,
@@ -1462,7 +1457,7 @@ mod tests {
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     #[test]
-    fn non_lint_diagnostics_excludes_lint_warnings() {
+    fn lint_diagnostics_not_duplicated_in_execution_result() {
         use crate::analysis::linter::LintName;
 
         let mut settings = SessionSettings::default();
@@ -1472,22 +1467,15 @@ mod tests {
             .enable_lint(LintName::UnusedConst, Level::Warning);
 
         let mut session = Session::new_without_boot_contracts(settings);
+        let snippet = "(define-constant UNUSED u1) (define-read-only (f) (ok u1))";
         let result = session
-            .eval(
-                "(define-constant UNUSED u1) (define-read-only (f) (ok u1))".into(),
-                false,
-            )
+            .eval(snippet.into(), false)
             .expect("valid contract");
 
         // The lint should fire
         assert!(!result.lint_diagnostics.is_empty());
-        // All diagnostics should be lint diagnostics (no parse errors)
-        assert_eq!(result.non_lint_diagnostics().len(), 0);
-        // Total diagnostics = non-lint + lint
-        assert_eq!(
-            result.diagnostics.len(),
-            result.non_lint_diagnostics().len() + result.lint_diagnostics.len()
-        );
+        // Lint diagnostics should NOT be duplicated in execution_result.diagnostics
+        assert!(result.diagnostics.is_empty());
     }
 
     #[track_caller]

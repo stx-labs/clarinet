@@ -223,7 +223,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -236,7 +236,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -249,7 +249,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod tests {
         let const_name = "ERR_NOT_AUTHORIZED";
         let expected_message = ErrorConst::make_not_err_message(&const_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
@@ -282,7 +282,7 @@ mod tests {
         let const_name = "ERR_FOO";
         let expected_message = ErrorConst::make_not_err_message(&const_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(const_name));
         assert!(output[0].contains(&expected_message));
@@ -300,7 +300,7 @@ mod tests {
 
         let expected_message = ErrorConst::make_duplicate_message(&"ERR_B".into(), &"ERR_A".into());
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(&expected_message));
     }
@@ -318,7 +318,7 @@ mod tests {
 
         let expected_message = ErrorConst::make_duplicate_message(&"ERR_C".into(), &"ERR_A".into());
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(&expected_message));
     }
@@ -335,7 +335,7 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         // ERR_B duplicates ERR_A, ERR_C duplicates ERR_A
-        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(result.lint_diagnostics.len(), 2);
     }
 
     #[test]
@@ -348,7 +348,7 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         // Should not warn: the value IS an (err ...) expression
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -361,7 +361,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -375,7 +375,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -391,6 +391,6 @@ mod tests {
 
         // ERR_B: not an error type
         // ERR_C: duplicate of ERR_A
-        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(result.lint_diagnostics.len(), 2);
     }
 }

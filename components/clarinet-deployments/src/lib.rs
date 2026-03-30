@@ -1210,14 +1210,14 @@ mod tests {
         };
 
         let result = handle_emulated_contract_publish(&mut session, &spec, None, epoch);
-        let execution_result = result.expect("contract should deploy successfully");
+        let annotated = result.expect("contract should deploy successfully");
         assert!(
-            execution_result
-                .diagnostics
+            annotated
+                .lint_diagnostics
                 .iter()
-                .any(|d| d.message.contains("never used")),
+                .any(|ld| ld.diagnostic.message.contains("never used")),
             "expected 'never used' lint warning, got: {:?}",
-            execution_result.diagnostics
+            annotated.lint_diagnostics
         );
     }
 
@@ -1375,9 +1375,9 @@ mod tests {
         let has_lint_warning = results.into_iter().any(|(_, result)| {
             result
                 .map(|r| {
-                    r.diagnostics
+                    r.lint_diagnostics
                         .iter()
-                        .any(|d| d.message.contains("never used"))
+                        .any(|ld| ld.diagnostic.message.contains("never used"))
                 })
                 .unwrap_or(false)
         });

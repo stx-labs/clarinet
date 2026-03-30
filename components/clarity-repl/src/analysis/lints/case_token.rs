@@ -162,7 +162,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -192,7 +192,7 @@ mod tests {
             &CaseError::IllegalCharacter(b'_'),
         );
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(token_name));
         assert!(output[0].contains(&expected_message));
@@ -213,7 +213,7 @@ mod tests {
             &CaseError::IllegalCharacter(b'M'),
         );
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains(token_name));
         assert!(output[0].contains(&expected_message));
@@ -228,7 +228,7 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -239,6 +239,6 @@ mod tests {
         ").to_string();
 
         let (_, result) = run_snippet(snippet);
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 }

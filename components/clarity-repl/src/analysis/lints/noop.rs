@@ -718,11 +718,11 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("`is-eq` with a single operand always returns `true`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `true`")
         );
     }
@@ -741,7 +741,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("`+` with fewer than 2 operands has no effect"));
     }
@@ -760,7 +760,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("`and` with fewer than 2 operands has no effect"));
     }
@@ -776,7 +776,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Shoult NOT warn on `sqrti`, whcih expects single arg
@@ -790,7 +790,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Shoult NOT warn on `not`, whcih expects single arg
@@ -804,7 +804,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Should NOT warn when there are 2+ operands
@@ -818,7 +818,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -835,7 +835,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("`or` with fewer than 2 operands has no effect"));
     }
@@ -854,7 +854,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("`-` with fewer than 2 operands has no effect"));
     }
@@ -874,7 +874,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -887,7 +887,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("comparing with `true` is unnecessary"));
     }
@@ -902,7 +902,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("comparing with `true` is unnecessary"));
     }
 
@@ -916,7 +916,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("comparing with `false` is unnecessary, use `not` instead"));
     }
@@ -931,7 +931,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
         assert!(output[0].contains("double negation is unnecessary"));
     }
@@ -947,7 +947,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Should NOT warn for single `not`
@@ -961,7 +961,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -976,7 +976,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -991,7 +991,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     // --- Suggestion text tests ---
@@ -1010,9 +1010,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `true`")
         );
     }
@@ -1027,9 +1027,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1044,9 +1044,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1061,9 +1061,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1078,9 +1078,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1095,9 +1095,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1112,9 +1112,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1129,9 +1129,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(not x)`")
         );
     }
@@ -1148,10 +1148,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("comparing two boolean literals always returns `true`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `true`")
         );
     }
@@ -1166,10 +1166,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("comparing two boolean literals always returns `false`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `false`")
         );
     }
@@ -1184,10 +1184,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("comparing two boolean literals always returns `true`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `true`")
         );
     }
@@ -1204,10 +1204,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("`and` with a `false` operand always evaluates to `false`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `false`")
         );
     }
@@ -1222,7 +1222,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("`and` with a `false` operand always evaluates to `false`"));
     }
 
@@ -1236,7 +1236,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("`and` with a `false` operand always evaluates to `false`"));
     }
 
@@ -1250,10 +1250,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("`or` with a `true` operand always evaluates to `true`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `true`")
         );
     }
@@ -1268,7 +1268,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("`or` with a `true` operand always evaluates to `true`"));
     }
 
@@ -1282,12 +1282,12 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(result.diagnostics[0]
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0].diagnostic
             .message
             .contains("`true` is the identity element for `and` and has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1302,12 +1302,12 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(result.diagnostics[0]
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0].diagnostic
             .message
             .contains("`false` is the identity element for `or` and has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1322,9 +1322,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(and x y)`")
         );
     }
@@ -1339,9 +1339,9 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(or x y)`")
         );
     }
@@ -1357,7 +1357,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Should NOT warn for `(or x y)` without true
@@ -1371,7 +1371,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -1386,7 +1386,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -1401,7 +1401,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     // --- Arithmetic identity element tests ---
@@ -1416,10 +1416,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("adding zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1434,10 +1434,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("adding zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1452,10 +1452,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("subtracting zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1470,10 +1470,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1488,10 +1488,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("dividing by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1506,10 +1506,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("adding zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1524,10 +1524,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("subtracting zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1542,10 +1542,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1560,10 +1560,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("dividing by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1580,10 +1580,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("subtracting zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1598,10 +1598,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1616,10 +1616,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("dividing by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `x`")
         );
     }
@@ -1637,7 +1637,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Should NOT warn for `(* x u2)` — not multiplying by one
@@ -1651,7 +1651,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Should NOT warn for `(- u0 x)` — result is not x
@@ -1665,7 +1665,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Should NOT warn for `(/ u1 x)` — result is not x
@@ -1679,7 +1679,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// `(+ x y u0)` should warn and suggest `(+ x y)`
@@ -1693,10 +1693,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("adding zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(+ x y)`")
         );
     }
@@ -1712,10 +1712,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("adding zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(+ x y)`")
         );
     }
@@ -1731,10 +1731,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("subtracting zero has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(- x y)`")
         );
     }
@@ -1750,10 +1750,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(* x y)`")
         );
     }
@@ -1769,10 +1769,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("dividing by one has no effect"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `(/ x y)`")
         );
     }
@@ -1788,7 +1788,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// Should NOT warn: `(- x y u1)` — not subtracting zero
@@ -1802,7 +1802,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -1817,7 +1817,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     // --- Multiply by zero tests ---
@@ -1832,10 +1832,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by zero always evaluates to `u0`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `u0`")
         );
     }
@@ -1850,10 +1850,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by zero always evaluates to `0`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `0`")
         );
     }
@@ -1868,7 +1868,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by zero always evaluates to `u0`"));
     }
 
@@ -1882,10 +1882,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("multiplying by zero always evaluates to `u0`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `u0`")
         );
     }
@@ -1902,10 +1902,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("dividing zero always evaluates to `u0`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `u0`")
         );
     }
@@ -1920,10 +1920,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("dividing zero always evaluates to `0`"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Replace with `0`")
         );
     }
@@ -1938,7 +1938,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("dividing zero always evaluates to `u0`"));
     }
 
@@ -1954,10 +1954,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("division by zero will cause a runtime error"));
         assert_eq!(
-            result.diagnostics[0].suggestion.as_deref(),
+            result.lint_diagnostics[0].diagnostic.suggestion.as_deref(),
             Some("Remove this expression or use a non-zero divisor")
         );
     }
@@ -1972,7 +1972,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("division by zero will cause a runtime error"));
     }
 
@@ -1986,7 +1986,7 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("division by zero will cause a runtime error"));
     }
 
@@ -2001,11 +2001,11 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 2);
-        assert!(result.diagnostics[0]
+        assert_eq!(result.lint_diagnostics.len(), 2);
+        assert!(result.lint_diagnostics[0].diagnostic
             .message
             .contains("dividing zero always evaluates to `u0`"));
-        assert!(result.diagnostics[1]
+        assert!(result.lint_diagnostics[1].diagnostic
             .message
             .contains("division by zero will cause a runtime error"));
     }
@@ -2021,11 +2021,11 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 2);
-        assert!(result.diagnostics[0]
+        assert_eq!(result.lint_diagnostics.len(), 2);
+        assert!(result.lint_diagnostics[0].diagnostic
             .message
             .contains("dividing zero always evaluates to `u0`"));
-        assert!(result.diagnostics[1]
+        assert!(result.lint_diagnostics[1].diagnostic
             .message
             .contains("dividing by one has no effect"));
     }
@@ -2041,7 +2041,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     // --- Annotation tests for new checks ---
@@ -2058,7 +2058,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -2073,7 +2073,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -2088,7 +2088,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -2103,6 +2103,6 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 }

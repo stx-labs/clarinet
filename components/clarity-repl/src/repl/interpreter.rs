@@ -151,8 +151,6 @@ impl ClarityInterpreter {
                 return Err(diagnostics.to_vec());
             }
         };
-        diagnostics.extend(lint_diagnostics.iter().map(|ld| ld.diagnostic.clone()));
-
         if !success {
             return Err(diagnostics.to_vec());
         }
