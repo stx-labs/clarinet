@@ -120,7 +120,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_1 => Some(config.epoch_3_1),
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
                     EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
-                    EpochSpec::Epoch3_4 => config.epoch_3_4,
+                    EpochSpec::Epoch3_4 => Some(config.epoch_3_4),
                     EpochSpec::Epoch3_5 => config.epoch_3_5,
                 };
                 start_height.map(|start_height| EpochConfig {
@@ -1597,13 +1597,17 @@ mod tests {
                 [[burnchain.epochs]]
                 epoch_name = "3.3"
                 start_height = 11
+
+                [[burnchain.epochs]]
+                epoch_name = "3.4"
+                start_height = 150
                 "#
             }
         );
     }
 
     #[test]
-    fn test_epoch_config_with_optional_next_epoch() {
+    fn test_epoch_config_with_custom_epochs() {
         let devnet_config = DevnetConfig {
             epoch_2_0: 1,
             epoch_2_05: 2,
@@ -1616,7 +1620,8 @@ mod tests {
             epoch_3_1: 9,
             epoch_3_2: 10,
             epoch_3_3: 11,
-            epoch_3_4: Some(12),
+            epoch_3_4: 12,
+            epoch_3_5: Some(13),
             ..Default::default()
         };
 
@@ -1673,6 +1678,10 @@ mod tests {
                 [[burnchain.epochs]]
                 epoch_name = "3.4"
                 start_height = 12
+
+                [[burnchain.epochs]]
+                epoch_name = "3.5"
+                start_height = 13
                 "#
             }
         );
