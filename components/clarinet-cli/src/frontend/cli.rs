@@ -1265,13 +1265,8 @@ pub fn main() {
 
             match cmd.output_format {
                 OutputFormat::Json | OutputFormat::JsonPretty => {
-                    let mut all_diags: Vec<LintDiagnostic> = diagnostics
-                        .into_iter()
-                        .map(|d| LintDiagnostic {
-                            lint_name: None,
-                            diagnostic: d,
-                        })
-                        .collect();
+                    let mut all_diags: Vec<LintDiagnostic> =
+                        diagnostics.into_iter().map(LintDiagnostic::from).collect();
                     all_diags.extend(lint_diagnostics);
                     let output = JsonCheckOutput {
                         success,
@@ -1345,10 +1340,7 @@ pub fn main() {
                             };
                             let key = path.to_string_lossy().to_string();
                             let entry = diagnostics.entry(key).or_default();
-                            entry.extend(diags.into_iter().map(|d| LintDiagnostic {
-                                lint_name: None,
-                                diagnostic: d,
-                            }));
+                            entry.extend(diags.into_iter().map(LintDiagnostic::from));
                             if let Some(lds) = artifacts.lint_diags.remove(&contract_id) {
                                 entry.extend(lds);
                             }
@@ -3187,13 +3179,8 @@ mod tests {
                 lint_diags
             }
         };
-        let mut all_diags: Vec<LintDiagnostic> = diagnostics
-            .into_iter()
-            .map(|d| LintDiagnostic {
-                lint_name: None,
-                diagnostic: d,
-            })
-            .collect();
+        let mut all_diags: Vec<LintDiagnostic> =
+            diagnostics.into_iter().map(LintDiagnostic::from).collect();
         all_diags.extend(lint_diagnostics);
 
         let filename = "test-contract.clar".to_string();

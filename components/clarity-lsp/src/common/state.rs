@@ -647,28 +647,13 @@ impl EditorState {
                 // Collect non-lint diagnostics
                 if !state.errors.is_empty() {
                     erroring_files.insert(relative_path.clone());
-                    for error in state.errors.iter() {
-                        diags.push(LintDiagnostic {
-                            lint_name: None,
-                            diagnostic: error.clone(),
-                        });
-                    }
+                    diags.extend(state.errors.iter().cloned().map(LintDiagnostic::from));
                 }
                 if !state.warnings.is_empty() {
                     warning_files.insert(relative_path.clone());
-                    for warning in state.warnings.iter() {
-                        diags.push(LintDiagnostic {
-                            lint_name: None,
-                            diagnostic: warning.clone(),
-                        });
-                    }
+                    diags.extend(state.warnings.iter().cloned().map(LintDiagnostic::from));
                 }
-                for note in state.notes.iter() {
-                    diags.push(LintDiagnostic {
-                        lint_name: None,
-                        diagnostic: note.clone(),
-                    });
-                }
+                diags.extend(state.notes.iter().cloned().map(LintDiagnostic::from));
 
                 // Collect lint diagnostics directly with their lint names
                 for ld in state.lint_diagnostics.iter() {

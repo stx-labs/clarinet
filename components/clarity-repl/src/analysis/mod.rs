@@ -47,6 +47,15 @@ impl From<LintDiagnostic> for Diagnostic {
     }
 }
 
+impl From<Diagnostic> for LintDiagnostic {
+    fn from(diagnostic: Diagnostic) -> Self {
+        Self {
+            lint_name: None,
+            diagnostic,
+        }
+    }
+}
+
 pub type AnalysisResult = Result<Vec<Diagnostic>, Vec<Diagnostic>>;
 pub type AnalysisPassFn = fn(
     &mut AnalysisDatabase,
