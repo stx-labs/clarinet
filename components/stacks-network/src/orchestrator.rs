@@ -1972,9 +1972,19 @@ impl DevnetOrchestrator {
                 "Initializing blockchain with fresh blocks".to_string(),
             ));
 
+            // Miner blocks must come first so coinbase outputs have time to mature
+            // (100 confirmations required). With 101 total blocks, the miner's
+            // first block at position 1 gets exactly 100 confirmations.
+            btc_rpc
+                .call_with_retry(
+                    "generatetoaddress",
+                    json!([3, miner_address]),
+                    MAX_ERRORS,
+                    devnet_event_tx,
+                )
+                .await?;
+
             // Generate 1 block per account that has btc_balance > 0.
-            // These are generated first so the coinbase outputs have time to mature
-            // (100 confirmations) before they need to be spent.
             let mut account_blocks = 0u64;
             for (_, account) in accounts.iter() {
                 if account.btc_balance > 0 {
@@ -1992,14 +2002,6 @@ impl DevnetOrchestrator {
                 }
             }
 
-            btc_rpc
-                .call_with_retry(
-                    "generatetoaddress",
-                    json!([3, miner_address]),
-                    MAX_ERRORS,
-                    devnet_event_tx,
-                )
-                .await?;
             // Reduce faucet blocks to keep total block count close to 101
             let faucet_blocks = 97u64.saturating_sub(account_blocks);
             btc_rpc
