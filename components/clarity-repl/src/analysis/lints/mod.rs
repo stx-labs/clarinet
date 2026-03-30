@@ -72,6 +72,6 @@ mod tests {
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
             .expect("Invalid code snippet");
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 }

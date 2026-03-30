@@ -248,8 +248,8 @@ pub fn update_deployment_costs(
                         .parameters
                         .iter()
                         .map(|value| {
-                            let execution = session.eval(value.to_string(), false).unwrap();
-                            match execution.result {
+                            let annotated = session.eval(value.to_string(), false).unwrap();
+                            match annotated.into_inner().result {
                                 EvaluationResult::Snippet(result) => result.result,
                                 _ => unreachable!("Contract result from snippet"),
                             }
@@ -486,7 +486,7 @@ pub fn apply_on_chain_deployment(
                                 return;
                             }
                         };
-                        match execution.result {
+                        match execution.into_inner().result {
                             EvaluationResult::Snippet(result) => function_args.push(result.result),
                             _ => unreachable!("Contract result from snippet"),
                         };

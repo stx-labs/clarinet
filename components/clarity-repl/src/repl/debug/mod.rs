@@ -344,6 +344,7 @@ impl DebugState {
                     &diagnostic,
                     "print expression",
                     &formatted_lines,
+                    None,
                 ));
             }
             return Err(errors);

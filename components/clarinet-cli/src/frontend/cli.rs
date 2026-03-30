@@ -27,12 +27,12 @@ use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::AnalysisDatabase;
 use clarity::vm::costs::LimitedCostTracker;
-use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::analysis::linter::{LintGroup, LintName};
+use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -68,9 +68,9 @@ enum OutputFormat {
 }
 
 #[derive(Serialize)]
-struct JsonCheckOutput {
+struct JsonCheckOutput<D: Serialize> {
     success: bool,
-    diagnostics: HashMap<String, Vec<Diagnostic>>,
+    diagnostics: HashMap<String, Vec<D>>,
     environment: String,
 }
 
@@ -1131,8 +1131,11 @@ pub fn main() {
                         );
 
                         if !artifacts.success {
-                            let diags_digest =
-                                DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                            let diags_digest = DiagnosticsDigest::new(
+                                &artifacts.diags,
+                                &artifacts.lint_diags,
+                                &deployment,
+                            );
                             if diags_digest.has_feedbacks() {
                                 println!("{}", diags_digest.message);
                             }
@@ -1247,25 +1250,27 @@ pub fn main() {
                 contract.clarity_version,
             );
             let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-            let mut analysis_diagnostics = match analysis::run_analysis(
+            let lint_diagnostics = match analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,
                 &annotations,
                 &settings.repl_settings.analysis,
             ) {
-                Ok(diagnostics) => diagnostics,
-                Err(diagnostics) => {
+                Ok(lint_diags) => lint_diags,
+                Err(lint_diags) => {
                     success = false;
-                    diagnostics
+                    lint_diags
                 }
             };
-            diagnostics.append(&mut analysis_diagnostics);
 
             match cmd.output_format {
                 OutputFormat::Json | OutputFormat::JsonPretty => {
+                    let mut all_diags: Vec<LintDiagnostic> =
+                        diagnostics.into_iter().map(LintDiagnostic::from).collect();
+                    all_diags.extend(lint_diagnostics);
                     let output = JsonCheckOutput {
                         success,
-                        diagnostics: HashMap::from([(file, diagnostics)]),
+                        diagnostics: HashMap::from([(file, all_diags)]),
                         environment: Environment::Simnet.to_string(),
                     };
                     let json = if cmd.output_format == OutputFormat::JsonPretty {
@@ -1281,8 +1286,20 @@ pub fn main() {
                 OutputFormat::Standard => {
                     let lines = contract.expect_in_memory_code_source().lines();
                     let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-                    for d in diagnostics {
-                        for line in output_diagnostic(&d, &file, &formatted_lines) {
+                    // Output parse/annotation diagnostics (no lint name)
+                    for d in &diagnostics {
+                        for line in output_diagnostic(d, &file, &formatted_lines, None) {
+                            println!("{line}");
+                        }
+                    }
+                    // Output lint diagnostics with their structured lint name
+                    for ld in &lint_diagnostics {
+                        for line in output_diagnostic(
+                            &ld.diagnostic,
+                            &file,
+                            &formatted_lines,
+                            ld.lint_name.as_ref(),
+                        ) {
                             println!("{line}");
                         }
                     }
@@ -1300,7 +1317,7 @@ pub fn main() {
             let mut exit_codes = Vec::new();
             let mut global_found_env_simnet = false;
             for environment in CHECK_ENVIRONMENTS {
-                let ((deployment, _, artifacts), found_env_simnet) =
+                let ((deployment, _, mut artifacts), found_env_simnet) =
                     load_deployment_and_artifacts_or_exit(
                         &manifest,
                         &cmd.deployment_plan_path,
@@ -1316,15 +1333,18 @@ pub fn main() {
 
                 match cmd.output_format {
                     OutputFormat::Json | OutputFormat::JsonPretty => {
-                        let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
-                            .diags
-                            .into_iter()
-                            .filter(|(_, diags)| !diags.is_empty())
-                            .filter_map(|(contract_id, diags)| {
-                                let (_, path) = deployment.contracts.get(&contract_id)?;
-                                Some((path.to_string_lossy().to_string(), diags))
-                            })
-                            .collect();
+                        let mut diagnostics: HashMap<String, Vec<LintDiagnostic>> = HashMap::new();
+                        for (contract_id, diags) in artifacts.diags {
+                            let Some((_, path)) = deployment.contracts.get(&contract_id) else {
+                                continue;
+                            };
+                            let key = path.to_string_lossy().to_string();
+                            let entry = diagnostics.entry(key).or_default();
+                            entry.extend(diags.into_iter().map(LintDiagnostic::from));
+                            if let Some(lds) = artifacts.lint_diags.remove(&contract_id) {
+                                entry.extend(lds);
+                            }
+                        }
                         let environment = environment.to_string();
                         let output = JsonCheckOutput {
                             success: artifacts.success,
@@ -1349,7 +1369,11 @@ pub fn main() {
                                 }
                             }
                         }
-                        let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                        let diags_digest = DiagnosticsDigest::new(
+                            &artifacts.diags,
+                            &artifacts.lint_diags,
+                            &deployment,
+                        );
                         if diags_digest.has_feedbacks() {
                             println!("{}", diags_digest.message);
                         }
@@ -3143,24 +3167,26 @@ mod tests {
             contract.clarity_version,
         );
         let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-        let mut analysis_diagnostics = match analysis::run_analysis(
+        let lint_diagnostics = match analysis::run_analysis(
             &mut contract_analysis,
             &mut analysis_db,
             &annotations,
             &settings.repl_settings.analysis,
         ) {
-            Ok(diagnostics) => diagnostics,
-            Err(diagnostics) => {
+            Ok(lint_diags) => lint_diags,
+            Err(lint_diags) => {
                 success = false;
-                diagnostics
+                lint_diags
             }
         };
-        diagnostics.append(&mut analysis_diagnostics);
+        let mut all_diags: Vec<LintDiagnostic> =
+            diagnostics.into_iter().map(LintDiagnostic::from).collect();
+        all_diags.extend(lint_diagnostics);
 
         let filename = "test-contract.clar".to_string();
         let output = JsonCheckOutput {
             success,
-            diagnostics: HashMap::from([(filename.clone(), diagnostics)]),
+            diagnostics: HashMap::from([(filename.clone(), all_diags)]),
             environment: Environment::Simnet.to_string(),
         };
 
@@ -3183,17 +3209,32 @@ mod tests {
                 diags.len()
             );
 
-            // Verify diagnostic structure
+            // Verify diagnostic structure (fields are flattened from Diagnostic)
             let diag = &diags[0];
             assert!(diag["level"].is_string());
             assert!(diag["message"].is_string());
             assert!(diag["spans"].is_array());
 
-            // Verify at least one diagnostic mentions an unused constant
+            // Verify at least one diagnostic mentions an unused constant and has a lint_name
             let messages: Vec<&str> = diags.iter().filter_map(|d| d["message"].as_str()).collect();
             assert!(
                 messages.iter().any(|m| m.contains("never used")),
                 "expected a 'never used' diagnostic, got: {messages:?}"
+            );
+
+            // Verify lint diagnostics include lint_name
+            let lint_diag = diags
+                .iter()
+                .find(|d| {
+                    d["message"]
+                        .as_str()
+                        .is_some_and(|m| m.contains("never used"))
+                })
+                .expect("expected a lint diagnostic");
+            assert_eq!(
+                lint_diag["lint_name"].as_str(),
+                Some("unused_const"),
+                "expected lint_name field on lint diagnostics"
             );
         }
     }

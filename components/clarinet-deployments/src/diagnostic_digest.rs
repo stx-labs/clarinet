@@ -2,32 +2,46 @@ use std::collections::HashMap;
 
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::types::QualifiedContractIdentifier;
+use clarity_repl::analysis::linter::LintName;
+use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::diagnostic::output_code;
 use colored::Colorize;
 
 use crate::types::DeploymentSpecification;
 
-#[allow(dead_code)]
+/// Format the diagnostic level with an optional lint name.
+///
+/// With a lint name: `warning[unused_const]:`
+/// Without: `warning:`
+fn level_string(level: &Level, lint_name: Option<&LintName>) -> String {
+    let level_str = match level {
+        Level::Error => "error".red().bold(),
+        Level::Warning => "warning".yellow().bold(),
+        Level::Note => "note".blue().bold(),
+    };
+    match lint_name {
+        Some(name) => format!("{level_str}[{}]:", name.to_string().purple().bold()),
+        None => format!("{level_str}:"),
+    }
+}
+
 pub struct DiagnosticsDigest {
     pub message: String,
     pub errors: usize,
     pub warnings: usize,
     pub contracts_checked: usize,
-    full_success: usize,
-    total: usize,
 }
 
 impl DiagnosticsDigest {
     pub fn new(
         contracts_diags: &HashMap<QualifiedContractIdentifier, Vec<Diagnostic>>,
+        contracts_lint_diags: &HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>>,
         deployment: &DeploymentSpecification,
     ) -> DiagnosticsDigest {
-        let mut full_success = 0;
         let mut warnings = 0;
         let mut errors = 0;
         let mut contracts_checked = 0;
         let mut outputs = vec![];
-        let total = deployment.contracts.len();
 
         for (contract_id, diags) in contracts_diags.iter() {
             let (source, contract_location) = match deployment.contracts.get(contract_id) {
@@ -40,30 +54,48 @@ impl DiagnosticsDigest {
                     continue;
                 }
             };
-            if diags.is_empty() {
-                full_success += 1;
+
+            let lint_diags = contracts_lint_diags.get(contract_id);
+            let has_lint_diags = lint_diags.is_some_and(|lds| !lds.is_empty());
+
+            if diags.is_empty() && !has_lint_diags {
                 continue;
             }
 
-            let lines = source.lines();
-            let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
+            let formatted_lines: Vec<String> = source.lines().map(|l| l.to_string()).collect();
 
-            for diagnostic in diags {
+            // Chain parse/annotation diagnostics (no lint name) with lint diagnostics (with lint name)
+            let all_diags = diags.iter().map(|d| (d, None)).chain(
+                lint_diags
+                    .into_iter()
+                    .flatten()
+                    .map(|ld| (&ld.diagnostic, ld.lint_name.as_ref())),
+            );
+
+            for (diagnostic, lint_name) in all_diags {
                 match diagnostic.level {
                     Level::Error => {
                         errors += 1;
-                        outputs.push(format!("{} {}", "error:".red().bold(), diagnostic.message));
+                        outputs.push(format!(
+                            "{} {}",
+                            level_string(&diagnostic.level, lint_name),
+                            diagnostic.message,
+                        ));
                     }
                     Level::Warning => {
                         warnings += 1;
                         outputs.push(format!(
                             "{} {}",
-                            "warning:".yellow().bold(),
-                            diagnostic.message
+                            level_string(&diagnostic.level, lint_name),
+                            diagnostic.message,
                         ));
                     }
                     Level::Note => {
-                        outputs.push(format!("{}: {}", "note:".blue().bold(), diagnostic.message));
+                        outputs.push(format!(
+                            "{} {}",
+                            level_string(&diagnostic.level, lint_name),
+                            diagnostic.message,
+                        ));
                         outputs.append(&mut output_code(diagnostic, &formatted_lines));
                         continue;
                     }
@@ -88,10 +120,8 @@ impl DiagnosticsDigest {
         }
 
         DiagnosticsDigest {
-            full_success,
             errors,
             warnings,
-            total,
             contracts_checked,
             message: outputs.join("\n"),
         }
