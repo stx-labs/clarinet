@@ -1610,7 +1610,7 @@ mod tests {
     }
 
     #[test]
-    fn test_epoch_config_with_optional_next_epoch() {
+    fn test_epoch_config_with_epoch_3_5() {
         let devnet_config = DevnetConfig {
             epoch_2_0: 1,
             epoch_2_05: 2,
