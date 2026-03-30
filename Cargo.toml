@@ -30,11 +30,11 @@ version = "3.16.0"
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "clarity-types" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/hstove-stacks/stacks-core.git", rev = "6bd37369111e0d6d31b50e1b8f6853ec4677e445", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/hstove-stacks/stacks-core.git", rev = "6bd37369111e0d6d31b50e1b8f6853ec4677e445", package = "clarity-types" }
+stacks-common = { git = "https://github.com/hstove-stacks/stacks-core.git", rev = "6bd37369111e0d6d31b50e1b8f6853ec4677e445", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/hstove-stacks/stacks-core.git", rev = "6bd37369111e0d6d31b50e1b8f6853ec4677e445", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/hstove-stacks/stacks-core.git", rev = "6bd37369111e0d6d31b50e1b8f6853ec4677e445", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }

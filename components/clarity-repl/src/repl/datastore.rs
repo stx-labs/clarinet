@@ -1259,6 +1259,10 @@ impl BurnStateDB for Datastore {
         0
     }
 
+    fn get_pox_5_activation_height(&self) -> u32 {
+        0
+    }
+
     fn get_tip_burn_block_height(&self) -> Option<u32> {
         use StacksEpochId::*;
         match self.current_epoch {

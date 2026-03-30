@@ -477,7 +477,7 @@ impl NetworkManifest {
                     };
                     let btc_balance = match account_settings.get("btc_balance") {
                         Some(Value::Integer(balance)) => *balance as u64,
-                        _ => 500_000_000, // 5 BTC by default
+                        _ => 0,
                     };
 
                     let mut mnemonic = match account_settings.get("mnemonic") {

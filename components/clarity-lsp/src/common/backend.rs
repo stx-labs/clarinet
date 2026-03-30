@@ -663,6 +663,7 @@ pub fn process_mutating_request(
                             version: Some(String::from(env!("CARGO_PKG_VERSION"))),
                         }),
                         capabilities: get_capabilities(&initialization_options),
+                        offset_encoding: None,
                     }))
                 })
         }
