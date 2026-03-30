@@ -531,3 +531,44 @@ fn test_check_skips_requirement_lint_warnings() {
         }
     }
 }
+
+/// `clarinet check` (project-wide, standard output) should display lint warnings
+/// from `DiagnosticsDigest`, not just in JSON mode.
+#[test]
+fn test_check_project_standard_output_shows_lint_warnings() {
+    let project_name = "test_std_lint_output";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n")
+        .expect("Failed to write contract");
+
+    strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
+
+    // Run clarinet check with standard output (no --output json)
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["check"])
+        .env("NO_COLOR", "1")
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute clarinet check");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("warning") && stdout.contains("never used"),
+        "expected lint warning in standard output, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("warning detected"),
+        "expected warning count in standard output, got:\n{stdout}"
+    );
+}

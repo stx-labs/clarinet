@@ -59,26 +59,26 @@ impl DiagnosticsDigest {
                     continue;
                 }
             };
-            if diags.is_empty() {
+
+            let lint_diags = contracts_lint_diags.get(contract_id);
+            let has_lint_diags = lint_diags.is_some_and(|lds| !lds.is_empty());
+
+            if diags.is_empty() && !has_lint_diags {
                 full_success += 1;
                 continue;
             }
 
-            let lines = source.lines();
-            let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
+            let formatted_lines: Vec<String> = source.lines().map(|l| l.to_string()).collect();
 
-            let lint_diags = contracts_lint_diags.get(contract_id);
-            for diagnostic in diags {
-                // Look up lint name for this diagnostic
-                let lint_name = lint_diags
-                    .and_then(|lds| {
-                        lds.iter().find(|ld| {
-                            ld.diagnostic.message == diagnostic.message
-                                && ld.diagnostic.spans == diagnostic.spans
-                        })
-                    })
-                    .and_then(|ld| ld.lint_name.as_ref());
+            // Chain parse/annotation diagnostics (no lint name) with lint diagnostics (with lint name)
+            let all_diags = diags.iter().map(|d| (d, None)).chain(
+                lint_diags
+                    .into_iter()
+                    .flatten()
+                    .map(|ld| (&ld.diagnostic, ld.lint_name.as_ref())),
+            );
 
+            for (diagnostic, lint_name) in all_diags {
                 match diagnostic.level {
                     Level::Error => {
                         errors += 1;
