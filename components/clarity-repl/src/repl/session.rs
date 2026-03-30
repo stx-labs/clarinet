@@ -127,7 +127,6 @@ impl AnnotatedExecutionResult {
     pub fn into_inner(self) -> ExecutionResult {
         self.execution_result
     }
-
 }
 
 #[derive(Clone)]
@@ -1468,9 +1467,7 @@ mod tests {
 
         let mut session = Session::new_without_boot_contracts(settings);
         let snippet = "(define-constant UNUSED u1) (define-read-only (f) (ok u1))";
-        let result = session
-            .eval(snippet.into(), false)
-            .expect("valid contract");
+        let result = session.eval(snippet.into(), false).expect("valid contract");
 
         // The lint should fire
         assert!(!result.lint_diagnostics.is_empty());

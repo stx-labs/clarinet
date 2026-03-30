@@ -1283,7 +1283,8 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.lint_diagnostics.len(), 1);
-        assert!(result.lint_diagnostics[0].diagnostic
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
             .message
             .contains("`true` is the identity element for `and` and has no effect"));
         assert_eq!(
@@ -1303,7 +1304,8 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.lint_diagnostics.len(), 1);
-        assert!(result.lint_diagnostics[0].diagnostic
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
             .message
             .contains("`false` is the identity element for `or` and has no effect"));
         assert_eq!(
@@ -2002,10 +2004,12 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.lint_diagnostics.len(), 2);
-        assert!(result.lint_diagnostics[0].diagnostic
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
             .message
             .contains("dividing zero always evaluates to `u0`"));
-        assert!(result.lint_diagnostics[1].diagnostic
+        assert!(result.lint_diagnostics[1]
+            .diagnostic
             .message
             .contains("division by zero will cause a runtime error"));
     }
@@ -2022,10 +2026,12 @@ mod tests {
         let (_, result) = run_snippet(snippet);
 
         assert_eq!(result.lint_diagnostics.len(), 2);
-        assert!(result.lint_diagnostics[0].diagnostic
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
             .message
             .contains("dividing zero always evaluates to `u0`"));
-        assert!(result.lint_diagnostics[1].diagnostic
+        assert!(result.lint_diagnostics[1]
+            .diagnostic
             .message
             .contains("dividing by one has no effect"));
     }

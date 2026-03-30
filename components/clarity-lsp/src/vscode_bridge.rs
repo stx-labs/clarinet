@@ -28,9 +28,7 @@ use crate::backend::{
 use crate::state::EditorState;
 #[cfg(debug_assertions)]
 use crate::utils::log;
-use crate::utils::{
-    get_contract_location, get_manifest_location, lint_diagnostics_to_lsp_type,
-};
+use crate::utils::{get_contract_location, get_manifest_location, lint_diagnostics_to_lsp_type};
 
 #[wasm_bindgen]
 pub struct LspVscodeBridge {
