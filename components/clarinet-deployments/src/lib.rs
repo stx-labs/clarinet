@@ -1343,7 +1343,7 @@ mod tests {
 
     /// End-to-end test: `update_session_with_deployment_plan` with analysis
     /// disabled should produce no lint diagnostics in execution results.
-    /// This simulates the `clarinet console` and `pnpm test` codepaths.
+    /// This simulates the `clarinet console` and `npm test` codepaths.
     #[test]
     fn update_session_no_lint_diagnostics_when_analysis_disabled() {
         let results = deploy_lint_triggering_contract_via_deployment_plan(true);
