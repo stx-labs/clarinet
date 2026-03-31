@@ -254,6 +254,7 @@
     "copy-webpack-plugin": "14.0.0",
     "eslint": "10.1.0",
     "ovsx": "0.10.10",
+    "playwright": "1.58.2",
     "path-browserify": "1.0.1",
     "regenerator-runtime": "0.14.1",
     "rimraf": "6.1.3",

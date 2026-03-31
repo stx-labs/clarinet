@@ -50,6 +50,9 @@ importers:
       path-browserify:
         specifier: 1.0.1
         version: 1.0.1
+      playwright:
+        specifier: 1.58.2
+        version: 1.58.2
       regenerator-runtime:
         specifier: 0.14.1
         version: 0.14.1
