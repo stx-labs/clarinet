@@ -27,6 +27,7 @@ use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::AnalysisDatabase;
 use clarity::vm::costs::LimitedCostTracker;
+use clarity::vm::diagnostic::Level;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
@@ -1285,25 +1286,43 @@ pub fn main() {
                 }
                 OutputFormat::Standard => {
                     let lines = contract.expect_in_memory_code_source().lines();
-                    let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-                    // Output parse/annotation diagnostics (no lint name)
-                    for d in &diagnostics {
-                        for line in output_diagnostic(d, &file, &formatted_lines, None) {
-                            println!("{line}");
+                    let formatted_lines: Vec<String> = lines.map(String::from).collect();
+                    let mut warnings = 0usize;
+                    let mut errors = 0usize;
+
+                    // Chain parse/annotation diagnostics (no lint name) with lint diagnostics (with lint name)
+                    let all_diags = diagnostics
+                        .iter()
+                        .map(|d| (d, None))
+                        .chain(lint_diagnostics.iter().map(|ld| {
+                            (&ld.diagnostic, ld.lint_name.as_ref())
+                        }));
+
+                    for (d, lint_name) in all_diags {
+                        match d.level {
+                            Level::Warning => warnings += 1,
+                            Level::Error => errors += 1,
+                            Level::Note => {}
                         }
-                    }
-                    // Output lint diagnostics with their structured lint name
-                    for ld in &lint_diagnostics {
-                        for line in output_diagnostic(
-                            &ld.diagnostic,
-                            &file,
-                            &formatted_lines,
-                            ld.lint_name.as_ref(),
-                        ) {
+                        for line in output_diagnostic(d, &file, &formatted_lines, lint_name) {
                             println!("{line}");
                         }
                     }
 
+                    if warnings > 0 {
+                        println!(
+                            "{} {} detected",
+                            yellow!("!"),
+                            pluralize!(warnings, "warning")
+                        );
+                    }
+                    if errors > 0 {
+                        println!(
+                            "{} {} detected",
+                            red!("x"),
+                            pluralize!(errors, "error")
+                        );
+                    }
                     if success {
                         println!("{} Contract successfully checked", green!("✔"))
                     } else {
@@ -1520,7 +1539,6 @@ pub fn main() {
 }
 
 fn print_available_lints(settings: &analysis::Settings) {
-    use clarity::vm::diagnostic::Level;
     use colored::Colorize;
 
     fn colored_level(level: &Level) -> String {

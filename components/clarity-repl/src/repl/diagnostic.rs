@@ -6,7 +6,7 @@ use crate::analysis::linter::LintName;
 ///
 /// With a lint name: `warning[unused_const]:`
 /// Without: `warning:`
-fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
+pub fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
     let level_str = match level {
         Level::Note => blue!("note"),
         Level::Warning => yellow!("warning"),
@@ -32,23 +32,34 @@ pub fn output_diagnostic(
 ) -> Vec<String> {
     let mut output = Vec::new();
 
-    if !diagnostic.spans.is_empty() {
+    let level_str = level_to_string(&diagnostic.level, lint_name);
+
+    match diagnostic.level {
+        Level::Note => {
+            output.push(format!("{level_str} {}", diagnostic.message));
+            output.append(&mut output_code(diagnostic, lines));
+            return output;
+        }
+        _ => {
+            output.push(format!("{level_str} {}", diagnostic.message));
+        }
+    }
+
+    if let Some(span) = diagnostic.spans.first() {
         output.push(format!(
-            "{}:{}:{}: {} {}",
-            name, // diagnostic.spans[0].filename,
-            diagnostic.spans[0].start_line,
-            diagnostic.spans[0].start_column,
-            level_to_string(&diagnostic.level, lint_name),
-            diagnostic.message,
-        ));
-    } else {
-        output.push(format!(
-            "{} {}",
-            level_to_string(&diagnostic.level, lint_name),
-            diagnostic.message,
+            "{} {}:{}:{}",
+            blue!("-->"),
+            name,
+            span.start_line,
+            span.start_column
         ));
     }
     output.append(&mut output_code(diagnostic, lines));
+
+    if let Some(ref suggestion) = diagnostic.suggestion {
+        output.push(suggestion.to_string());
+    }
+
     output
 }
 

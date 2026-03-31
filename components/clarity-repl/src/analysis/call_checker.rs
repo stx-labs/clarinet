@@ -242,18 +242,17 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Err((output, _)) => {
-                assert_eq!(output.len(), 3);
+                assert_eq!(output.len(), 4);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:6:9: {}",
-                        format_err!(
-                            "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
-                        )
+                    format_err!(
+                        "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
                     )
+                    .to_string()
                 );
-                assert_eq!(output[1], "    (ok (foo u1 u2))");
-                assert_eq!(output[2], "        ^~~~~~~~~~~");
+                assert_eq!(output[1], format!("{} checker:6:9", blue!("-->")));
+                assert_eq!(output[2], "    (ok (foo u1 u2))");
+                assert_eq!(output[3], "        ^~~~~~~~~~~");
             }
             _ => panic!("Expected error"),
         };
@@ -274,18 +273,17 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Err((output, _)) => {
-                assert_eq!(output.len(), 3);
+                assert_eq!(output.len(), 4);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:6:9: {}",
-                        format_err!(
-                            "incorrect number of arguments in call to 'foo' (expected 1 got 0)"
-                        )
+                    format_err!(
+                        "incorrect number of arguments in call to 'foo' (expected 1 got 0)"
                     )
+                    .to_string()
                 );
-                assert_eq!(output[1], "    (ok (foo))");
-                assert_eq!(output[2], "        ^~~~~");
+                assert_eq!(output[1], format!("{} checker:6:9", blue!("-->")));
+                assert_eq!(output[2], "    (ok (foo))");
+                assert_eq!(output[3], "        ^~~~~");
             }
             _ => panic!("Expected error"),
         };
@@ -306,18 +304,17 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Err((output, _)) => {
-                assert_eq!(output.len(), 3);
+                assert_eq!(output.len(), 4);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:6:9: {}",
-                        format_err!(
-                            "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
-                        )
+                    format_err!(
+                        "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
                     )
+                    .to_string()
                 );
-                assert_eq!(output[1], "    (ok (foo u1 u2))");
-                assert_eq!(output[2], "        ^~~~~~~~~~~");
+                assert_eq!(output[1], format!("{} checker:6:9", blue!("-->")));
+                assert_eq!(output[2], "    (ok (foo u1 u2))");
+                assert_eq!(output[3], "        ^~~~~~~~~~~");
             }
             _ => panic!("Expected error"),
         };
@@ -359,13 +356,12 @@ mod tests {
         {
             assert_eq!(
                 err_output[0],
-                format!(
-                    "checker:4:5: {}",
-                    format_err!(
-                        "incorrect number of arguments in call to 'map-set' (expected 3 got 4)"
-                    )
+                format_err!(
+                    "incorrect number of arguments in call to 'map-set' (expected 3 got 4)"
                 )
+                .to_string()
             );
+            assert_eq!(err_output[1], format!("{} checker:4:5", blue!("-->")));
         } else {
             panic!("expected error")
         }
@@ -382,13 +378,12 @@ mod tests {
         {
             assert_eq!(
                 err_output[0],
-                format!(
-                    "checker:4:5: {}",
-                    format_err!(
-                        "incorrect number of arguments in call to 'map-insert' (expected 3 got 4)"
-                    )
+                format_err!(
+                    "incorrect number of arguments in call to 'map-insert' (expected 3 got 4)"
                 )
+                .to_string()
             );
+            assert_eq!(err_output[1], format!("{} checker:4:5", blue!("-->")));
         } else {
             panic!("expected error")
         }
@@ -405,13 +400,12 @@ mod tests {
         {
             assert_eq!(
                 err_output[0],
-                format!(
-                    "checker:4:5: {}",
-                    format_err!(
-                        "incorrect number of arguments in call to 'map-delete' (expected 2 got 3)"
-                    )
+                format_err!(
+                    "incorrect number of arguments in call to 'map-delete' (expected 2 got 3)"
                 )
+                .to_string()
             );
+            assert_eq!(err_output[1], format!("{} checker:4:5", blue!("-->")));
         } else {
             panic!("expected error")
         }
