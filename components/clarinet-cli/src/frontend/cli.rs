@@ -1291,12 +1291,11 @@ pub fn main() {
                     let mut errors = 0usize;
 
                     // Chain parse/annotation diagnostics (no lint name) with lint diagnostics (with lint name)
-                    let all_diags = diagnostics
-                        .iter()
-                        .map(|d| (d, None))
-                        .chain(lint_diagnostics.iter().map(|ld| {
-                            (&ld.diagnostic, ld.lint_name.as_ref())
-                        }));
+                    let all_diags = diagnostics.iter().map(|d| (d, None)).chain(
+                        lint_diagnostics
+                            .iter()
+                            .map(|ld| (&ld.diagnostic, ld.lint_name.as_ref())),
+                    );
 
                     for (d, lint_name) in all_diags {
                         match d.level {
@@ -1317,11 +1316,7 @@ pub fn main() {
                         );
                     }
                     if errors > 0 {
-                        println!(
-                            "{} {} detected",
-                            red!("x"),
-                            pluralize!(errors, "error")
-                        );
+                        println!("{} {} detected", red!("x"), pluralize!(errors, "error"));
                     }
                     if success {
                         println!("{} Contract successfully checked", green!("✔"))

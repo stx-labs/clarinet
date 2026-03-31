@@ -47,9 +47,8 @@ pub fn output_diagnostic(
 
     if let Some(span) = diagnostic.spans.first() {
         output.push(format!(
-            "{} {}:{}:{}",
+            "{} {name}:{}:{}",
             blue!("-->"),
-            name,
             span.start_line,
             span.start_column
         ));

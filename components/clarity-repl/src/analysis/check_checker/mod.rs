@@ -950,20 +950,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:6:21", blue!("-->")));
                 assert_eq!(output[2], "        (var-set p1 p)");
                 assert_eq!(output[3], "                    ^");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -1007,10 +1001,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:2:20", blue!("-->")));
                 assert_eq!(
@@ -1020,10 +1011,7 @@ mod tests {
                 assert_eq!(output[3], "                   ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted (amount uint))");
                 assert_eq!(output[6], "                         ^~~~~~");
@@ -1046,10 +1034,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:2:20", blue!("-->")));
                 assert_eq!(
@@ -1059,10 +1044,7 @@ mod tests {
                 assert_eq!(output[3], "                   ^~~~~~~~~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (expr-tainted (amount uint))");
                 assert_eq!(output[6], "                              ^~~~~~");
@@ -1087,10 +1069,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
                 assert_eq!(
@@ -1100,10 +1079,7 @@ mod tests {
                 assert_eq!(output[3], "                       ^");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (let-tainted (amount uint))");
                 assert_eq!(output[6], "                             ^~~~~~");
@@ -1208,10 +1184,7 @@ mod tests {
                 assert_eq!(output.len(), 10);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
                 assert_eq!(
@@ -1221,10 +1194,7 @@ mod tests {
                 assert_eq!(output[3], "                       ^");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -1233,10 +1203,7 @@ mod tests {
                 assert_eq!(output[6], "                                   ^~~~~~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[8],
@@ -1268,10 +1235,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:24", blue!("-->")));
                 assert_eq!(
@@ -1281,10 +1245,7 @@ mod tests {
                 assert_eq!(output[3], "                       ^");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (let-tainted-twice-filtered-once (amount1 uint) (amount2 uint))");
                 assert_eq!(
@@ -1368,10 +1329,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:2:20", blue!("-->")));
                 assert_eq!(output[2], "    (stx-transfer? (if (< u50 u100) amount u100) (as-contract tx-sender) tx-sender)");
@@ -1381,10 +1339,7 @@ mod tests {
                 );
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (if-not-filtered (amount uint))");
                 assert_eq!(output[6], "                                 ^~~~~~");
@@ -1409,20 +1364,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
                 assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
                 assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (and-tainted (amount uint))");
                 assert_eq!(output[6], "                             ^~~~~~");
@@ -1468,20 +1417,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
                 assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
                 assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (and-filter-after (amount uint))");
                 assert_eq!(output[6], "                                  ^~~~~~");
@@ -1506,20 +1449,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
                 assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
                 assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (or-tainted (amount uint))");
                 assert_eq!(output[6], "                            ^~~~~~");
@@ -1565,20 +1502,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
                 assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
                 assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (or-filter-after (amount uint))");
                 assert_eq!(output[6], "                                 ^~~~~~");
@@ -1621,10 +1552,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:26", blue!("-->")));
                 assert_eq!(
@@ -1634,19 +1562,13 @@ mod tests {
                 assert_eq!(output[3], "                         ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted-stx-burn (amount uint))");
                 assert_eq!(output[6], "                                  ^~~~~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:4:33", blue!("-->")));
             }
@@ -1689,10 +1611,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:35", blue!("-->")));
                 assert_eq!(
@@ -1702,19 +1621,13 @@ mod tests {
                 assert_eq!(output[3], "                                  ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted-ft-burn (amount uint))");
                 assert_eq!(output[6], "                                 ^~~~~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:5:42", blue!("-->")));
             }
@@ -1758,10 +1671,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:39", blue!("-->")));
                 assert_eq!(
@@ -1771,10 +1681,7 @@ mod tests {
                 assert_eq!(output[3], "                                      ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -1783,10 +1690,7 @@ mod tests {
                 assert_eq!(output[6], "                                     ^~~~~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:5:46", blue!("-->")));
             }
@@ -1830,10 +1734,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:35", blue!("-->")));
                 assert_eq!(
@@ -1843,19 +1744,13 @@ mod tests {
                 assert_eq!(output[3], "                                  ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted-ft-mint (amount uint))");
                 assert_eq!(output[6], "                                 ^~~~~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:5:42", blue!("-->")));
             }
@@ -1881,10 +1776,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:36", blue!("-->")));
                 assert_eq!(
@@ -1894,10 +1786,7 @@ mod tests {
                 assert_eq!(output[3], "                                   ^~~~~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -1906,10 +1795,7 @@ mod tests {
                 assert_eq!(output[6], "                                  ^~~~~~~~~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:5:43", blue!("-->")));
             }
@@ -1953,10 +1839,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:40", blue!("-->")));
                 assert_eq!(
@@ -1969,10 +1852,7 @@ mod tests {
                 );
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -1984,10 +1864,7 @@ mod tests {
                 );
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:5:47", blue!("-->")));
             }
@@ -2031,10 +1908,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:36", blue!("-->")));
                 assert_eq!(
@@ -2044,10 +1918,7 @@ mod tests {
                 assert_eq!(output[3], "                                   ^~~~~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -2056,10 +1927,7 @@ mod tests {
                 assert_eq!(output[6], "                                  ^~~~~~~~~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:5:43", blue!("-->")));
             }
@@ -2082,20 +1950,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
                 assert_eq!(output[2], "    (ok (var-set myvar amount))");
                 assert_eq!(output[3], "                       ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted-var-set (amount uint))");
                 assert_eq!(output[6], "                                 ^~~~~~");
@@ -2119,10 +1981,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:37", blue!("-->")));
                 assert_eq!(
@@ -2132,10 +1991,7 @@ mod tests {
                 assert_eq!(output[3], "                                    ^~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -2144,10 +2000,7 @@ mod tests {
                 assert_eq!(output[6], "                                 ^~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:3:55", blue!("-->")));
                 assert_eq!(
@@ -2160,10 +2013,7 @@ mod tests {
                 );
                 assert_eq!(
                     output[11],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[12],
@@ -2193,20 +2043,14 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
                 assert_eq!(output[2], "    (ok (map-set mymap key value))");
                 assert_eq!(output[3], "                       ^~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -2215,20 +2059,14 @@ mod tests {
                 assert_eq!(output[6], "                                 ^~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:3:28", blue!("-->")));
                 assert_eq!(output[9], "    (ok (map-set mymap key value))");
                 assert_eq!(output[10], "                           ^~~~~");
                 assert_eq!(
                     output[11],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[12],
@@ -2258,10 +2096,7 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:40", blue!("-->")));
                 assert_eq!(
@@ -2271,10 +2106,7 @@ mod tests {
                 assert_eq!(output[3], "                                       ^~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -2283,10 +2115,7 @@ mod tests {
                 assert_eq!(output[6], "                                    ^~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:3:58", blue!("-->")));
                 assert_eq!(
@@ -2299,10 +2128,7 @@ mod tests {
                 );
                 assert_eq!(
                     output[11],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[12],
@@ -2332,20 +2158,14 @@ mod tests {
                 assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:27", blue!("-->")));
                 assert_eq!(output[2], "    (ok (map-insert mymap key value))");
                 assert_eq!(output[3], "                          ^~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -2354,20 +2174,14 @@ mod tests {
                 assert_eq!(output[6], "                                    ^~~");
                 assert_eq!(
                     output[7],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[8], format!("{} checker:3:31", blue!("-->")));
                 assert_eq!(output[9], "    (ok (map-insert mymap key value))");
                 assert_eq!(output[10], "                              ^~~~~");
                 assert_eq!(
                     output[11],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[12],
@@ -2397,20 +2211,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:40", blue!("-->")));
                 assert_eq!(output[2], "    (ok (map-delete mymap {key-name-1: key}))");
                 assert_eq!(output[3], "                                       ^~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted-map-delete (key uint))");
                 assert_eq!(output[6], "                                    ^~~");
@@ -2436,20 +2244,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:5:21", blue!("-->")));
                 assert_eq!(output[2], "    (contract-call? untrusted multiply a b)");
                 assert_eq!(output[3], "                    ^~~~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -2501,20 +2303,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:5:18", blue!("-->")));
                 assert_eq!(output[2], "    (my-transfer amount)");
                 assert_eq!(output[3], "                 ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted (amount uint))");
                 assert_eq!(output[6], "                         ^~~~~~");
@@ -2540,20 +2336,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:2:14", blue!("-->")));
                 assert_eq!(output[2], "    (my-func amount)");
                 assert_eq!(output[3], "             ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted (amount uint))");
                 assert_eq!(output[6], "                         ^~~~~~");
@@ -2583,10 +2373,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:4:30", blue!("-->")));
                 assert_eq!(
@@ -2596,10 +2383,7 @@ mod tests {
                 assert_eq!(output[3], "                             ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-private (my-transfer (amount uint))");
                 assert_eq!(output[6], "                              ^~~~~~");
@@ -2623,20 +2407,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:5", blue!("-->")));
                 assert_eq!(output[2], "    (ok amount)");
                 assert_eq!(output[3], "    ^~~~~~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-private (my-func (amount uint))");
                 assert_eq!(output[6], "                          ^~~~~~");
@@ -2803,10 +2581,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:5:24", blue!("-->")));
                 assert_eq!(
@@ -2816,10 +2591,7 @@ mod tests {
                 assert_eq!(output[3], "                       ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted (amount uint))");
                 assert_eq!(output[6], "                         ^~~~~~");
@@ -2846,10 +2618,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:3:30", blue!("-->")));
                 assert_eq!(
@@ -2859,10 +2628,7 @@ mod tests {
                 assert_eq!(output[3], "                             ^~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (tainted (amount uint))");
                 assert_eq!(output[6], "                         ^~~~~~");
@@ -3054,10 +2820,7 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:6:24", blue!("-->")));
                 assert_eq!(
@@ -3067,10 +2830,7 @@ mod tests {
                 assert_eq!(output[3], "                       ^~~~~~~~~~~~~~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
@@ -3244,20 +3004,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:5:28", blue!("-->")));
                 assert_eq!(output[2], "        (ok (var-set owner address))");
                 assert_eq!(output[3], "                           ^~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (set-owner (address principal))");
                 assert_eq!(output[6], "                           ^~~~~~~");
@@ -3345,20 +3099,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:5:28", blue!("-->")));
                 assert_eq!(output[2], "        (ok (var-set owner address))");
                 assert_eq!(output[3], "                           ^~~~~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (set-owner (address principal))");
                 assert_eq!(output[6], "                           ^~~~~~~");
@@ -3437,20 +3185,14 @@ mod tests {
                 assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "{} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
                 assert_eq!(output[1], format!("{} checker:14:24", blue!("-->")));
                 assert_eq!(output[2], "        (var-set saved arg1)");
                 assert_eq!(output[3], "                       ^~~~");
                 assert_eq!(
                     output[4],
-                    format!(
-                        "{} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(output[5], "(define-public (handle-one (arg1 uint))");
                 assert_eq!(output[6], "                            ^~~~");

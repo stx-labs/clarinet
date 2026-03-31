@@ -1656,10 +1656,7 @@ mod tests {
         let result = session.encode("::encode (foo 1)");
         assert_eq!(
             result.split('\n').next().unwrap(),
-            format!(
-                "{} use of unresolved function 'foo'",
-                "error:".red().bold()
-            )
+            format!("{} use of unresolved function 'foo'", "error:".red().bold())
         );
     }
 
