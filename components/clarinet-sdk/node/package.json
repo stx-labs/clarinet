@@ -58,7 +58,7 @@
   "license": "GPL-3.0",
   "readme": "./README.md",
   "dependencies": {
-    "@stacks/clarinet-sdk-wasm": "3.15.1",
+    "@stacks/clarinet-sdk-wasm": "workspace:*",
     "@stacks/transactions": "7.4.0",
     "kolorist": "1.8.0",
     "prompts": "2.4.2",

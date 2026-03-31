@@ -37,8 +37,8 @@ importers:
   components/clarinet-sdk/browser:
     dependencies:
       '@stacks/clarinet-sdk-wasm-browser':
-        specifier: 3.15.1
-        version: 3.15.1
+        specifier: workspace:*
+        version: link:../../clarinet-sdk-wasm/pkg-browser
       '@stacks/transactions':
         specifier: 7.4.0
         version: 7.4.0
@@ -52,8 +52,8 @@ importers:
   components/clarinet-sdk/node:
     dependencies:
       '@stacks/clarinet-sdk-wasm':
-        specifier: 3.15.1
-        version: 3.15.1
+        specifier: workspace:*
+        version: link:../../clarinet-sdk-wasm/pkg-node
       '@stacks/transactions':
         specifier: 7.4.0
         version: 7.4.0
@@ -406,12 +406,6 @@ packages:
 
   '@scure/bip39@1.1.0':
     resolution: {integrity: sha512-pwrPOS16VeTKg98dYXQyIjJEcWfz7/1YJIwxUEPFfQPtc86Ym/1sVgQ2RLoD43AazMk2l/unK4ITySSpW2+82w==}
-
-  '@stacks/clarinet-sdk-wasm-browser@3.15.1':
-    resolution: {integrity: sha512-8T8c7ZLnx1RdAYlJHmhfi7oVhupHfM1miyM6QYSsqH/c28ylhcrJaRomWt10O9iWLgZ1tbmL0vpWGI5LSWm8rA==}
-
-  '@stacks/clarinet-sdk-wasm@3.15.1':
-    resolution: {integrity: sha512-VnmhHG8cvB6ku/OGw1LCWwHElrGCL6stq6CVQxbTdb595ZAKIvBhJY7iKW5bvqWmHHMS7jxCNXM2fO/8M997Jg==}
 
   '@stacks/common@7.3.1':
     resolution: {integrity: sha512-29ANTFcSSlXnGQlgDVWg7OQ74lgQhu3x8JkeN19Q+UE/1lbQrzcctgPHG74XHjWNp8NPBqskUYA8/HLgIKuKNQ==}
@@ -1333,10 +1327,6 @@ snapshots:
     dependencies:
       '@noble/hashes': 1.1.5
       '@scure/base': 1.1.9
-
-  '@stacks/clarinet-sdk-wasm-browser@3.15.1': {}
-
-  '@stacks/clarinet-sdk-wasm@3.15.1': {}
 
   '@stacks/common@7.3.1': {}
 

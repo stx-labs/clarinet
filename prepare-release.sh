@@ -60,22 +60,6 @@ update_cargo_toml "./Cargo.toml" "$NEW_VERSION"
 echo "Building SDK WASM..."
 pnpm run build:sdk-wasm
 
-# Update Clarinet SDK packages
-echo "Updating Clarinet SDK packages..."
-
-# Update WASM package versions first
-echo "Updating SDK wasm package versions..."
-update_package_json "components/clarinet-sdk-wasm/pkg-node/package.json" "$NEW_VERSION"
-update_package_json "components/clarinet-sdk-wasm/pkg-browser/package.json" "$NEW_VERSION"
-
-# Update SDK node package
-echo "Updating SDK node package..."
-update_package_json "components/clarinet-sdk/node/package.json" "$NEW_VERSION"
-
-# Update SDK browser package
-echo "Updating SDK browser package..."
-update_package_json "components/clarinet-sdk/browser/package.json" "$NEW_VERSION"
-
 # Update clarity-vscode
 echo "Updating clarity-vscode..."
 update_package_json "components/clarity-vscode/package.json" "$NEW_VERSION"
