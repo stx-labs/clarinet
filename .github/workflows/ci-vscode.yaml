@@ -105,6 +105,10 @@ jobs:
         working-directory: ./components/clarity-vscode
         run: pnpm install --frozen-lockfile
 
+      - name: Install Playwright browsers
+        working-directory: ./components/clarity-vscode
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Run tests
         working-directory: ./components/clarity-vscode
         run: pnpm test
