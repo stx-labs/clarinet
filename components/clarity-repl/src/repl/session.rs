@@ -430,19 +430,13 @@ impl Session {
             Ok(result) => {
                 for d in result.diagnostics.iter() {
                     output.append(&mut output_diagnostic(
-                        d,
+                        &LintDiagnostic::from(d.clone()),
                         &contract_name,
                         &formatted_lines,
-                        None,
                     ));
                 }
                 for ld in &result.lint_diagnostics {
-                    output.append(&mut output_diagnostic(
-                        &ld.diagnostic,
-                        &contract_name,
-                        &formatted_lines,
-                        ld.lint_name.as_ref(),
-                    ));
+                    output.append(&mut output_diagnostic(ld, &contract_name, &formatted_lines));
                 }
                 if !result.events.is_empty() {
                     output.push(black!("Events emitted").to_string());
@@ -465,10 +459,9 @@ impl Session {
             Err(diagnostics) => {
                 for d in &diagnostics {
                     output.append(&mut output_diagnostic(
-                        d,
+                        &LintDiagnostic::from(d.clone()),
                         &contract_name,
                         &formatted_lines,
-                        None,
                     ));
                 }
                 Err((output, diagnostics))
@@ -520,10 +513,9 @@ impl Session {
                 let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
                 for d in diagnostics {
                     output.append(&mut output_diagnostic(
-                        &d,
+                        &LintDiagnostic::from(d),
                         "<snippet>",
                         &formatted_lines,
-                        None,
                     ));
                 }
             }
@@ -565,10 +557,9 @@ impl Session {
                 let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
                 for d in diagnostics {
                     output.append(&mut output_diagnostic(
-                        &d,
+                        &LintDiagnostic::from(d),
                         "<snippet>",
                         &formatted_lines,
-                        None,
                     ));
                 }
             }
@@ -1132,7 +1123,9 @@ impl Session {
                 let lines: Vec<String> = snippet.split('\n').map(String::from).collect();
                 let mut output: Vec<String> = diagnostics
                     .iter()
-                    .flat_map(|d| output_diagnostic(d, "encode", &lines, None))
+                    .flat_map(|d| {
+                        output_diagnostic(&LintDiagnostic::from(d.clone()), "encode", &lines)
+                    })
                     .collect();
                 output.push("encoding failed".into());
                 output.join("\n")

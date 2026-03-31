@@ -1290,20 +1290,17 @@ pub fn main() {
                     let mut warnings = 0usize;
                     let mut errors = 0usize;
 
-                    // Chain parse/annotation diagnostics (no lint name) with lint diagnostics (with lint name)
-                    let all_diags = diagnostics.iter().map(|d| (d, None)).chain(
-                        lint_diagnostics
-                            .iter()
-                            .map(|ld| (&ld.diagnostic, ld.lint_name.as_ref())),
-                    );
-
-                    for (d, lint_name) in all_diags {
-                        match d.level {
+                    for ld in diagnostics
+                        .into_iter()
+                        .map(LintDiagnostic::from)
+                        .chain(lint_diagnostics)
+                    {
+                        match ld.diagnostic.level {
                             Level::Warning => warnings += 1,
                             Level::Error => errors += 1,
                             Level::Note => {}
                         }
-                        for line in output_diagnostic(d, &file, &formatted_lines, lint_name) {
+                        for line in output_diagnostic(&ld, &file, &formatted_lines) {
                             println!("{line}");
                         }
                     }

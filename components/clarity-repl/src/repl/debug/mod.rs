@@ -12,6 +12,7 @@ use clarity_types::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity_types::Value;
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::LintDiagnostic;
 use crate::repl::diagnostic::output_diagnostic;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -341,10 +342,9 @@ impl DebugState {
             let mut errors = Vec::new();
             for diagnostic in diagnostics.into_iter().filter(|d| d.level == Level::Error) {
                 errors.append(&mut output_diagnostic(
-                    &diagnostic,
+                    &LintDiagnostic::from(diagnostic),
                     "print expression",
                     &formatted_lines,
-                    None,
                 ));
             }
             return Err(errors);

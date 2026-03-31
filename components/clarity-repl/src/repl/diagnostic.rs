@@ -1,6 +1,7 @@
 use clarity::vm::diagnostic::{Diagnostic, Level};
 
 use crate::analysis::linter::LintName;
+use crate::analysis::LintDiagnostic;
 
 /// Format the level string, including the lint name if provided.
 ///
@@ -25,14 +26,14 @@ pub fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
 // Generate the formatted output for this diagnostic, given the source code.
 // TODO: Preferably a filename would be saved in the Span, but for now, pass a name here.
 pub fn output_diagnostic(
-    diagnostic: &Diagnostic,
+    lint_diagnostic: &LintDiagnostic,
     name: &str,
     lines: &[String],
-    lint_name: Option<&LintName>,
 ) -> Vec<String> {
     let mut output = Vec::new();
+    let diagnostic = &lint_diagnostic.diagnostic;
 
-    let level_str = level_to_string(&diagnostic.level, lint_name);
+    let level_str = level_to_string(&diagnostic.level, lint_diagnostic.lint_name.as_ref());
 
     match diagnostic.level {
         Level::Note => {

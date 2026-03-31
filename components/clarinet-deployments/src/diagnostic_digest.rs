@@ -47,25 +47,21 @@ impl DiagnosticsDigest {
             let formatted_lines: Vec<String> = source.lines().map(|l| l.to_string()).collect();
             let contract_path = contract_location.to_string_lossy().to_string();
 
-            // Chain parse/annotation diagnostics (no lint name) with lint diagnostics (with lint name)
-            let all_diags = diags.iter().map(|d| (d, None)).chain(
-                lint_diags
-                    .into_iter()
-                    .flatten()
-                    .map(|ld| (&ld.diagnostic, ld.lint_name.as_ref())),
-            );
-
-            for (diagnostic, lint_name) in all_diags {
-                match diagnostic.level {
+            for ld in diags
+                .iter()
+                .cloned()
+                .map(LintDiagnostic::from)
+                .chain(lint_diags.into_iter().flatten().cloned())
+            {
+                match ld.diagnostic.level {
                     Level::Error => errors += 1,
                     Level::Warning => warnings += 1,
                     Level::Note => {}
                 }
                 outputs.append(&mut output_diagnostic(
-                    diagnostic,
+                    &ld,
                     &contract_path,
                     &formatted_lines,
-                    lint_name,
                 ));
             }
         }
