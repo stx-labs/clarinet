@@ -1122,10 +1122,8 @@ impl Session {
             Err(diagnostics) => {
                 let lines: Vec<String> = snippet.split('\n').map(String::from).collect();
                 let mut output: Vec<String> = diagnostics
-                    .iter()
-                    .flat_map(|d| {
-                        output_diagnostic(&LintDiagnostic::from(d.clone()), "encode", &lines)
-                    })
+                    .into_iter()
+                    .flat_map(|d| output_diagnostic(&LintDiagnostic::from(d), "encode", &lines))
                     .collect();
                 output.push("encoding failed".into());
                 output.join("\n")
