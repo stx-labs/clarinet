@@ -141,9 +141,9 @@ Wasm target.
 The SDK is divided between the Rust lib compiled to Wasm `./components/clarinet-sdk-wasm` and a TS
 wrapper around it: `./components/clarinet-sdk`.
 
-1. Compile the Wasm package with `npm run build:sdk-wasm`
-1. Compile the SDK with `npm run build:sdk`
-1. Test with `npm test`
+1. Compile the Wasm package with `pnpm run build:sdk-wasm`
+1. Compile the SDK with `pnpm run build:sdk`
+1. Test with `pnpm test`
 
 Learn more in the [SDK README.md](./components/clarinet-sdk/README.md).
 

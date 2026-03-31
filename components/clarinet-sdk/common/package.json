@@ -3,5 +3,8 @@
   "description": "Common helpers used in the Clarinet SDK for the node.js and the browser version",
   "private": true,
   "author": "Stacks Labs",
-  "license": "GPL-3.0"
+  "license": "GPL-3.0",
+  "dependencies": {
+    "@stacks/transactions": "7.4.0"
+  }
 }

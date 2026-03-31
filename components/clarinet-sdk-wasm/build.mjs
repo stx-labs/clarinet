@@ -108,7 +108,7 @@ try {
   console.log("\n✅ Project successfully built.\n🚀 Ready to publish.");
   console.log("Run the following commands to publish");
   console.log("\n```");
-  console.log("$ npm run publish:sdk-wasm");
+  console.log("$ pnpm run publish:sdk-wasm");
   console.log("```\n");
 } catch (error) {
   console.error("❌ Error building:", error);

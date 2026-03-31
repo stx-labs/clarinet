@@ -2181,8 +2181,8 @@ fn display_post_check_hint() {
         "{}",
         yellow!("Once you are ready to write TypeScript unit tests for your contract, run the following command:\n")
     );
-    println!("{}", blue!("  $ npm install"));
-    println!("{}", blue!("  $ npm test"));
+    println!("{}", blue!("  $ pnpm install"));
+    println!("{}", blue!("  $ pnpm test"));
     println!(
         "{}",
         yellow!("    Run all run tests in the ./tests folder.\n")

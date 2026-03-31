@@ -48,7 +48,7 @@ echo "Checking out release branch..."
 git checkout -b release/next
 
 echo "Generating changelog..."
-npx generate-changelog "v$NEW_VERSION...HEAD"
+pnpm dlx generate-changelog "v$NEW_VERSION...HEAD"
 
 echo "Starting version updates to $NEW_VERSION..."
 
@@ -58,7 +58,7 @@ update_cargo_toml "./Cargo.toml" "$NEW_VERSION"
 
 # Build SDK WASM
 echo "Building SDK WASM..."
-npm run build:sdk-wasm
+pnpm run build:sdk-wasm
 
 # Update Clarinet SDK packages
 echo "Updating Clarinet SDK packages..."
@@ -79,11 +79,11 @@ update_package_json "components/clarinet-sdk/browser/package.json" "$NEW_VERSION
 # Update clarity-vscode
 echo "Updating clarity-vscode..."
 update_package_json "components/clarity-vscode/package.json" "$NEW_VERSION"
-(cd components/clarity-vscode && npm i)
+(cd components/clarity-vscode && pnpm install)
 
 # Install all deps from root to properly handle workspaces
 echo "Installing deps from root..."
-npm i
+pnpm install
 
 echo "All updates completed successfully!"
 

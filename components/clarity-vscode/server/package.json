@@ -12,9 +12,9 @@
     "url": "https://github.com/stx-labs/clarinet"
   },
   "dependencies": {
-    "node-fetch": "^3.2.10",
-    "toml": "^3.0.0",
-    "vscode-languageserver": "^9.0.1"
+    "node-fetch": "3.2.10",
+    "toml": "3.0.0",
+    "vscode-languageserver": "9.0.1"
   },
   "scripts": {}
 }

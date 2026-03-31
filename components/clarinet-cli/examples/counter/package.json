@@ -7,7 +7,7 @@
   "scripts": {
     "test": "vitest run",
     "test:report": "vitest run -- --coverage --costs",
-    "test:watch": "chokidar \"unit-tests/**/*.ts\" \"contracts/**/*.clar\" -c \"npm t\""
+    "test:watch": "chokidar \"unit-tests/**/*.ts\" \"contracts/**/*.clar\" -c \"pnpm test\""
   },
   "author": "",
   "license": "ISC",

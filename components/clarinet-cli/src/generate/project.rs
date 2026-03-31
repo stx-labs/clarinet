@@ -118,7 +118,7 @@ impl GetChangesForNewProject {
                   "script": "test",
                   "group": "test",
                   "problemMatcher": [],
-                  "label": "npm test"
+                  "label": "pnpm test"
                 }
               ]
             }
@@ -139,6 +139,7 @@ impl GetChangesForNewProject {
             logs
             *.log
             npm-debug.log*
+            pnpm-debug.log*
             coverage
             *.info
             costs-reports.json
@@ -429,7 +430,7 @@ impl GetChangesForNewProject {
               "scripts": {{
                 "test": "vitest run",
                 "test:report": "vitest run -- --coverage --costs",
-                "test:watch": "chokidar \"tests/**/*.ts\" \"contracts/**/*.clar\" -c \"npm run test:report\""
+                "test:watch": "chokidar \"tests/**/*.ts\" \"contracts/**/*.clar\" -c \"pnpm run test:report\""
               }},
               "author": "",
               "license": "ISC",

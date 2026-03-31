@@ -1,5 +1,5 @@
 # The clarinet-sdk is published to npm when a release is created.
-# It's based on the npm workspace defined in the package.json at the root of the project.
+# It's based on the pnpm workspace defined in pnpm-workspace.yaml at the root of the project.
 # Two packages are built with wasm-pack - @stacks/clarinet-sdk-wasm and @stacks/clarinet-sdk-wasm-browser
 # They need to be built first
 # Then two packages are built with tsc - @stacks/clarinet-sdk and @stacks/clarinet-sdk-browser
@@ -24,8 +24,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 10
+
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
@@ -37,16 +42,16 @@ jobs:
         run: cargo install wasm-pack
 
       - name: Build Wasm packages
-        run: npm run build:sdk-wasm
+        run: pnpm run build:sdk-wasm
 
       - name: Publish sdk-wasm package
-        run: npm publish -w components/clarinet-sdk-wasm/pkg-node -w components/clarinet-sdk-wasm/pkg-browser --access public
+        run: pnpm --filter ./components/clarinet-sdk-wasm/pkg-node --filter ./components/clarinet-sdk-wasm/pkg-browser publish --access public
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build sdk package
-        run: npm run build:sdk
+        run: pnpm run build:sdk
 
       - name: Publish sdk package
-        run: npm publish -w components/clarinet-sdk/node -w components/clarinet-sdk/browser --access public
+        run: pnpm --filter ./components/clarinet-sdk/node --filter ./components/clarinet-sdk/browser publish --access public
