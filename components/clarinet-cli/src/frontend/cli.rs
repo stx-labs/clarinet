@@ -2290,7 +2290,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                         &manifest,
                         &StacksNetwork::Devnet,
                         false,
-                        Environment::Simnet,
+                        Environment::OnChain,
                     )
                     .unwrap_or_else(|message| {
                         eprintln!("{}", red!(message));
