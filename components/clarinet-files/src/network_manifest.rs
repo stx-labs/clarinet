@@ -32,6 +32,18 @@ pub const DEFAULT_FAUCET_MNEMONIC: &str = "shadow private easily thought say log
 pub const DEFAULT_STACKER_MNEMONIC: &str = "empty lens any direct brother then drop fury rule pole win claim scissors list rescue horn rent inform relief jump sword weekend half legend";
 pub const DEFAULT_DOCKER_PLATFORM: &str = "linux/amd64";
 
+/// Normalize a user-provided docker_host value to include a scheme prefix.
+/// Bare socket paths like "/var/run/docker.sock" are converted to
+/// "unix:///var/run/docker.sock" so both the bollard API client and the
+/// `docker` CLI (via DOCKER_HOST env var) handle them correctly.
+fn normalize_docker_host(host: String) -> String {
+    if host.starts_with('/') {
+        format!("unix://{host}")
+    } else {
+        host
+    }
+}
+
 pub const DEFAULT_EPOCH_2_0: u64 = 100;
 pub const DEFAULT_EPOCH_2_05: u64 = 100;
 pub const DEFAULT_EPOCH_2_1: u64 = 101;
@@ -965,7 +977,7 @@ impl NetworkManifest {
                 disable_postgres: devnet_config.disable_postgres.unwrap_or(false),
                 disable_stacks_explorer: devnet_config.disable_stacks_explorer.unwrap_or(false),
                 bind_containers_volumes: devnet_config.bind_containers_volumes.unwrap_or(true),
-                docker_host: devnet_config.docker_host,
+                docker_host: devnet_config.docker_host.map(normalize_docker_host),
                 components_host: devnet_config.components_host.unwrap_or("127.0.0.1".into()),
                 epoch_2_0: devnet_config.epoch_2_0.unwrap_or(DEFAULT_EPOCH_2_0),
                 epoch_2_05: devnet_config.epoch_2_05.unwrap_or(DEFAULT_EPOCH_2_05),
