@@ -2176,19 +2176,20 @@ mod tests {
     #[test]
     fn can_call_clarity_4_contract_hash() {
         let mut interpreter = get_interpreter(None);
-        interpreter.set_current_epoch(StacksEpochId::Epoch33);
+        interpreter.set_current_epoch(StacksEpochId::Epoch34);
 
         let dummy_contract = ClarityContractBuilder::default()
             .name("dummy-contract")
             .code_source("(define-read-only (oktrue) (ok true))".into())
-            .epoch(StacksEpochId::Epoch33)
+            .epoch(StacksEpochId::Epoch34)
+            .clarity_version(ClarityVersion::Clarity5)
             .build();
         let _ = deploy_contract(&mut interpreter, &dummy_contract);
 
         let contract = ClarityContractBuilder::default()
             .code_source("(define-read-only (get-hash) (contract-hash? .dummy-contract))".into())
-            .epoch(StacksEpochId::Epoch33)
-            .clarity_version(ClarityVersion::Clarity4)
+            .epoch(StacksEpochId::Epoch34)
+            .clarity_version(ClarityVersion::Clarity5)
             .build();
         let _ = deploy_contract(&mut interpreter, &contract);
 
@@ -2197,8 +2198,8 @@ mod tests {
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "get-hash",
             &[],
-            StacksEpochId::Epoch33,
-            ClarityVersion::Clarity4,
+            StacksEpochId::Epoch34,
+            ClarityVersion::Clarity5,
             false,
             false,
             vec![],
