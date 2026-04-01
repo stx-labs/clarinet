@@ -84,11 +84,13 @@ pub enum BitcoinNetwork {
 
 impl StacksNetwork {
     pub fn get_networks(&self) -> (BitcoinNetwork, StacksNetwork) {
-        match &self {
-            StacksNetwork::Simnet => (BitcoinNetwork::Regtest, StacksNetwork::Simnet),
-            StacksNetwork::Devnet => (BitcoinNetwork::Testnet, StacksNetwork::Devnet),
-            StacksNetwork::Testnet => (BitcoinNetwork::Testnet, StacksNetwork::Testnet),
-            StacksNetwork::Mainnet => (BitcoinNetwork::Mainnet, StacksNetwork::Mainnet),
+        use StacksNetwork::*;
+
+        match self {
+            Simnet => (BitcoinNetwork::Regtest, self.clone()),
+            Devnet => (BitcoinNetwork::Testnet, self.clone()),
+            Testnet => (BitcoinNetwork::Testnet, self.clone()),
+            Mainnet => (BitcoinNetwork::Mainnet, self.clone()),
         }
     }
 
