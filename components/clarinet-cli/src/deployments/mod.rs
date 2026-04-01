@@ -30,12 +30,8 @@ pub fn generate_default_deployment(
 pub fn generate_devnet_deployment(
     manifest: &ProjectManifest,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
-    generate_default_deployment(
-        manifest,
-        &StacksNetwork::Devnet,
-        false,
-        StacksNetwork::Devnet.deployment_environment(),
-    )
+    let network = StacksNetwork::Devnet;
+    generate_default_deployment(manifest, &network, false, network.deployment_environment())
 }
 
 pub fn check_deployments(project_root: &Path) -> Result<(), String> {
