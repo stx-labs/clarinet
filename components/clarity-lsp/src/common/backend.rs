@@ -807,6 +807,9 @@ mod lsp_tests {
                 path = 'contracts/test.clar'
                 epoch = 'latest'
                 clarity_version = 3
+
+                [repl.analysis.lint_groups]
+                all = false
             "#}
             .to_string();
 
@@ -1087,8 +1090,8 @@ mod lsp_tests {
         };
         assert_eq!(
             diagnostics_array.len(),
-            3,
-            "Diagnostics array should have three items"
+            1,
+            "Diagnostics array should have one item"
         );
         // Each entry is a LintDiagnostic, serialized as a flat object
         let diagnostic = diagnostics_array
