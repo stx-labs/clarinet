@@ -96,9 +96,11 @@ impl StacksNetwork {
     /// Simnet is emulated in-memory; all other networks deploy on-chain
     /// and should have `#[env(simnet)]` code stripped.
     pub fn deployment_environment(&self) -> clarity_repl::utils::Environment {
+        use StacksNetwork::*;
+
         match self {
-            StacksNetwork::Simnet => clarity_repl::utils::Environment::Simnet,
-            _ => clarity_repl::utils::Environment::OnChain,
+            Simnet => clarity_repl::utils::Environment::Simnet,
+            Devnet | Testnet | Mainnet => clarity_repl::utils::Environment::OnChain,
         }
     }
 }
