@@ -677,11 +677,14 @@ fn test_deployments_generate_devnet_strips_env_simnet() {
     // Load the generated plan. `load_deployment` re-reads the .clar source from
     // disk (unstripped), but preserves the `cost` field from the YAML — which was
     // computed from the stripped source during generation.
-    let yaml_path = project_path.join("deployments/default.devnet-plan.yaml");
+    let yaml_path = project_path
+        .join("deployments")
+        .join("default.devnet-plan.yaml");
     let deployment = load_deployment(&project_path, &yaml_path)
         .expect("failed to load generated devnet deployment");
 
-    let full_source = fs::read_to_string(project_path.join("contracts/my-contract.clar")).unwrap();
+    let full_source =
+        fs::read_to_string(project_path.join("contracts").join("my-contract.clar")).unwrap();
     let default_fee_rate: u64 = 10;
     let full_cost = default_fee_rate * full_source.len() as u64;
 
