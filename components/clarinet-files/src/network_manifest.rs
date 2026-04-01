@@ -91,6 +91,16 @@ impl StacksNetwork {
             StacksNetwork::Mainnet => (BitcoinNetwork::Mainnet, StacksNetwork::Mainnet),
         }
     }
+
+    /// Returns the deployment environment for this network.
+    /// Simnet is emulated in-memory; all other networks deploy on-chain
+    /// and should have `#[env(simnet)]` code stripped.
+    pub fn deployment_environment(&self) -> clarity_repl::utils::Environment {
+        match self {
+            StacksNetwork::Simnet => clarity_repl::utils::Environment::Simnet,
+            _ => clarity_repl::utils::Environment::OnChain,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

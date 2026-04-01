@@ -26,6 +26,18 @@ pub fn generate_default_deployment(
     hiro_system_kit::nestable_block_on(future)
 }
 
+/// Generate a default deployment for devnet with `#[env(simnet)]` code stripped.
+pub fn generate_devnet_deployment(
+    manifest: &ProjectManifest,
+) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
+    generate_default_deployment(
+        manifest,
+        &StacksNetwork::Devnet,
+        false,
+        StacksNetwork::Devnet.deployment_environment(),
+    )
+}
+
 pub fn check_deployments(project_root: &Path) -> Result<(), String> {
     let deployments_path = project_root.join("deployments");
     let entries = fs::read_dir(&deployments_path).map_err(|e| e.to_string())?;

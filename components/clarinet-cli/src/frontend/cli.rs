@@ -50,7 +50,10 @@ use toml_edit::DocumentMut;
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
 use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
-use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
+use crate::deployments::{
+    self, check_deployments, generate_default_deployment, generate_devnet_deployment,
+    write_deployment,
+};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
 use crate::generate::changes::{Changes, TOMLEdition};
@@ -772,7 +775,7 @@ pub fn main() {
                     &manifest,
                     &network,
                     cmd.no_batch,
-                    Environment::Simnet,
+                    network.deployment_environment(),
                 ) {
                     Ok(result) => result,
                     Err(message) => {
@@ -883,7 +886,7 @@ pub fn main() {
                             None => {
                                 let default_deployment_path = project_root.join(get_default_deployment_path(network));
                                 let (deployment, _, _) =
-                                    generate_default_deployment(&manifest, network, false, Environment::Simnet)
+                                    generate_default_deployment(&manifest, network, false, network.deployment_environment())
                                         .unwrap_or_else(|message| {
                                             eprintln!("{}", red!(message));
                                             std::process::exit(1);
@@ -2286,16 +2289,11 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                 None => {
                     let default_deployment_path =
                         project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
-                    let (deployment, _, _) = generate_default_deployment(
-                        &manifest,
-                        &StacksNetwork::Devnet,
-                        false,
-                        Environment::OnChain,
-                    )
-                    .unwrap_or_else(|message| {
-                        eprintln!("{}", red!(message));
-                        std::process::exit(1);
-                    });
+                    let (deployment, _, _) =
+                        generate_devnet_deployment(&manifest).unwrap_or_else(|message| {
+                            eprintln!("{}", red!(message));
+                            std::process::exit(1);
+                        });
                     write_deployment(&deployment, &default_deployment_path, project_root, true)?;
                     println!(
                         "{} {}",

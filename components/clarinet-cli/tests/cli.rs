@@ -2,7 +2,10 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use clarinet_deployments::types::TransactionSpecification;
 use clarinet_files::{ProjectManifest, ProjectManifestFile};
+use clarinet_lib::deployments::generate_devnet_deployment;
+use clarinet_lib::frontend::cli::load_manifest_or_exit;
 use indoc::{formatdoc, indoc};
 
 #[track_caller]
@@ -571,4 +574,77 @@ fn test_check_project_standard_output_shows_lint_warnings() {
         stdout.contains("warning detected"),
         "expected warning count in standard output, got:\n{stdout}"
     );
+}
+
+/// Devnet deployments should strip `#[env(simnet)]` code from contract sources.
+/// This tests the fix for https://github.com/hirosystems/clarinet/issues/2338.
+#[test]
+fn test_devnet_deployment_strips_env_simnet() {
+    let project_name = "test_env_simnet_devnet";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(
+        &contract_path,
+        indoc! {r#"
+            (define-public (double (n uint))
+              (ok (* n u2))
+            )
+
+            ;; #[env(simnet)]
+            (define-private (test-double)
+              (ok (asserts! (is-eq (ok u8) (double u4)) (err "fail")))
+            )
+        "#},
+    )
+    .unwrap();
+
+    let manifest_path = project_path
+        .join("Clarinet.toml")
+        .to_string_lossy()
+        .to_string();
+    let manifest = load_manifest_or_exit(Some(manifest_path), false);
+
+    let (deployment, _, found_env_simnet) =
+        generate_devnet_deployment(&manifest).expect("Failed to generate devnet deployment");
+
+    assert!(
+        found_env_simnet,
+        "should detect #[env(simnet)] annotations in the source"
+    );
+
+    // Devnet uses ContractPublish (real transactions), not EmulatedContractPublish.
+    // Verify the simnet-only code was stripped from every contract source.
+    for batch in &deployment.plan.batches {
+        for tx in &batch.transactions {
+            if let TransactionSpecification::ContractPublish(spec) = tx {
+                assert!(
+                    spec.source.contains("double"),
+                    "non-simnet code should be preserved, got:\n{}",
+                    spec.source
+                );
+                assert!(
+                    !spec.source.contains("test-double"),
+                    "#[env(simnet)] code should be stripped from devnet ContractPublish source, got:\n{}",
+                    spec.source
+                );
+            }
+        }
+    }
+
+    // Also check the contracts map used for analysis.
+    for (source, _) in deployment.contracts.values() {
+        assert!(
+            !source.contains("test-double"),
+            "#[env(simnet)] code should be stripped from devnet contracts map, got:\n{source}"
+        );
+    }
 }
