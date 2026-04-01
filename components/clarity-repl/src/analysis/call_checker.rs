@@ -338,7 +338,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };

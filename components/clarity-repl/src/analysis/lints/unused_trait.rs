@@ -134,17 +134,16 @@ impl Lint for UnusedTrait<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::Level;
     use indoc::indoc;
 
     use super::UnusedTrait;
     use crate::analysis::linter::Lint;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -193,7 +192,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -208,7 +207,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -224,7 +223,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -240,7 +239,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     /// If trait is used *only* in an unused private function, it's unreachable, so consider it unused
@@ -260,8 +259,8 @@ mod tests {
         let (expected_message, _) =
             UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -287,8 +286,8 @@ mod tests {
         let (expected_message, _) =
             UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -307,7 +306,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -324,7 +323,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -341,7 +340,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -359,8 +358,8 @@ mod tests {
         let trait_name = "token-trait";
         let (expected_message, _) = UnusedTrait::make_diagnostic_strings_unused(&trait_name.into());
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(trait_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -378,7 +377,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -393,6 +392,6 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 }

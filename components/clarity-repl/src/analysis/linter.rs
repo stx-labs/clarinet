@@ -186,7 +186,7 @@ impl LintMapBuilder {
         LintGroup::Unused.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
         LintGroup::Perf.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
         LintGroup::Safety.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
-        //LintGroup::Style.insert_into(&mut map, ClarityDiagnosticLevel::Notice);
+        LintGroup::Style.insert_into(&mut self.map, ClarityDiagnosticLevel::Note);
 
         self
     }

@@ -5,8 +5,8 @@ use clarity_repl::repl::{Session, SessionSettings};
 
 #[track_caller]
 fn eval_snippet(session: &mut Session, snippet: &str) -> Value {
-    let execution_res = session.eval(snippet.to_string(), false).unwrap();
-    match execution_res.result {
+    let annotated = session.eval(snippet.to_string(), false).unwrap();
+    match annotated.into_inner().result {
         EvaluationResult::Contract(_) => unreachable!(),
         EvaluationResult::Snippet(res) => res.result,
     }

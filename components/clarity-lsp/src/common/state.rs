@@ -16,7 +16,9 @@ use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
+use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
+use clarity_repl::repl::session::AnnotatedExecutionResult;
 use clarity_repl::repl::ContractDeployer;
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
@@ -141,6 +143,7 @@ pub struct ContractState {
     errors: Vec<ClarityDiagnostic>,
     warnings: Vec<ClarityDiagnostic>,
     notes: Vec<ClarityDiagnostic>,
+    lint_diagnostics: Vec<LintDiagnostic>,
     analysis: Option<ContractAnalysis>,
     definitions: HashMap<ClarityName, Range>,
     clarity_version: ClarityVersion,
@@ -152,6 +155,7 @@ impl ContractState {
         _ast: ContractAST,
         _deps: DependencySet,
         diags: Vec<ClarityDiagnostic>,
+        lint_diagnostics: Vec<LintDiagnostic>,
         analysis: Option<ContractAnalysis>,
         definitions: HashMap<ClarityName, Range>,
         clarity_version: ClarityVersion,
@@ -185,6 +189,7 @@ impl ContractState {
             errors,
             warnings,
             notes,
+            lint_diagnostics,
             analysis,
             definitions,
             clarity_version,
@@ -623,7 +628,7 @@ impl EditorState {
     pub fn get_aggregated_diagnostics(
         &self,
     ) -> (
-        Vec<(PathBuf, Vec<ClarityDiagnostic>)>,
+        Vec<(PathBuf, Vec<LintDiagnostic>)>,
         Option<(MessageType, String)>,
     ) {
         let mut contracts = vec![];
@@ -632,32 +637,36 @@ impl EditorState {
 
         for (_, protocol_state) in self.protocols.iter() {
             for (contract_url, state) in protocol_state.contracts.iter() {
-                let mut diags = vec![];
+                let mut diags: Vec<LintDiagnostic> = vec![];
 
                 let ContractMetadata { relative_path, .. } = self
                     .contracts_lookup
                     .get(contract_url)
                     .expect("contract not in lookup");
 
-                // Convert and collect errors
+                // Collect non-lint diagnostics
                 if !state.errors.is_empty() {
                     erroring_files.insert(relative_path.clone());
-                    for error in state.errors.iter() {
-                        diags.push(error.clone());
-                    }
+                    diags.extend(state.errors.iter().cloned().map(LintDiagnostic::from));
                 }
-
-                // Convert and collect warnings
                 if !state.warnings.is_empty() {
                     warning_files.insert(relative_path.clone());
-                    for warning in state.warnings.iter() {
-                        diags.push(warning.clone());
-                    }
+                    diags.extend(state.warnings.iter().cloned().map(LintDiagnostic::from));
                 }
+                diags.extend(state.notes.iter().cloned().map(LintDiagnostic::from));
 
-                // Convert and collect notes
-                for note in state.notes.iter() {
-                    diags.push(note.clone());
+                // Collect lint diagnostics directly with their lint names
+                for ld in state.lint_diagnostics.iter() {
+                    match ld.diagnostic.level {
+                        ClarityLevel::Error => {
+                            erroring_files.insert(relative_path.clone());
+                        }
+                        ClarityLevel::Warning => {
+                            warning_files.insert(relative_path.clone());
+                        }
+                        ClarityLevel::Note => {}
+                    }
+                    diags.push(ld.clone());
                 }
                 contracts.push((contract_url.clone(), diags));
             }
@@ -769,6 +778,7 @@ impl ProtocolState {
         asts: &mut BTreeMap<QualifiedContractIdentifier, ContractAST>,
         deps: &mut BTreeMap<QualifiedContractIdentifier, DependencySet>,
         diags: &mut HashMap<QualifiedContractIdentifier, Vec<ClarityDiagnostic>>,
+        lint_diags: &mut HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>>,
         definitions: &mut HashMap<QualifiedContractIdentifier, HashMap<ClarityName, Range>>,
         analyses: &mut HashMap<QualifiedContractIdentifier, Option<ContractAnalysis>>,
         clarity_versions: &mut HashMap<QualifiedContractIdentifier, ClarityVersion>,
@@ -787,6 +797,7 @@ impl ProtocolState {
             };
             let deps = deps.remove(&contract_id).unwrap_or_default();
             let diags = diags.remove(&contract_id).unwrap_or_default();
+            let lint_diagnostics = lint_diags.remove(&contract_id).unwrap_or_default();
             let analysis = analyses.remove(&contract_id).unwrap_or_default();
             let clarity_version = clarity_versions
                 .remove(&contract_id)
@@ -799,6 +810,7 @@ impl ProtocolState {
                 ast,
                 deps,
                 diags,
+                lint_diagnostics,
                 analysis,
                 definitions,
                 clarity_version,
@@ -837,6 +849,18 @@ fn tag_diagnostics(
     }
 }
 
+fn tag_lint_diagnostics(
+    environment: Environment,
+    found_env_simnet: bool,
+    lint_diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    if found_env_simnet {
+        for ld in lint_diagnostics {
+            let _ = write!(ld.diagnostic.message, " ({environment})");
+        }
+    }
+}
+
 pub async fn build_state(
     manifest_location: &Path,
     protocol_state: &mut ProtocolState,
@@ -847,6 +871,8 @@ pub async fn build_state(
     let mut asts = BTreeMap::new();
     let mut deps = BTreeMap::new();
     let mut diagnostics = HashMap::new();
+    let mut lint_diagnostics: HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>> =
+        HashMap::new();
     let mut analyses = HashMap::new();
     let mut definitions = HashMap::new();
     let mut clarity_versions = HashMap::new();
@@ -908,7 +934,11 @@ pub async fn build_state(
             }
 
             match result {
-                Ok(mut execution_result) => {
+                Ok(annotated) => {
+                    let AnnotatedExecutionResult {
+                        mut execution_result,
+                        lint_diagnostics: mut contract_lint_diags,
+                    } = annotated;
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         tag_diagnostics(
                             environment,
@@ -917,6 +947,15 @@ pub async fn build_state(
                         );
                         entry.append(&mut execution_result.diagnostics);
                     }
+                    tag_lint_diagnostics(
+                        environment,
+                        global_found_env_simnet,
+                        &mut contract_lint_diags,
+                    );
+                    lint_diagnostics
+                        .entry(contract_id.clone())
+                        .or_default()
+                        .extend(contract_lint_diags);
 
                     if let EvaluationResult::Contract(contract_result) = execution_result.result {
                         if let Some(ast) = artifacts.asts.get(&contract_id) {
@@ -996,6 +1035,7 @@ pub async fn build_state(
         &mut asts,
         &mut deps,
         &mut diagnostics,
+        &mut lint_diagnostics,
         &mut definitions,
         &mut analyses,
         &mut clarity_versions,

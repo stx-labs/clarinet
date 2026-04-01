@@ -26,14 +26,33 @@ use super::{
     SessionSettings,
 };
 use crate::analysis::coverage::CoverageHook;
+use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
 use crate::repl::hooks::tracer::TracerHook;
 use crate::repl::settings::Account;
 use crate::utils::serialize_event;
 
+/// Wraps an `ExecutionResult` with structured lint diagnostics.
+///
+/// `execution_result.diagnostics` contains only non-lint diagnostics (parse
+/// errors, annotations, etc.), while `lint_diagnostics` carries the lint
+/// diagnostics with their structured `LintName`.
+#[derive(Debug, Clone)]
+pub struct AnnotatedExecutionResult {
+    pub execution_result: ExecutionResult,
+    pub lint_diagnostics: Vec<LintDiagnostic>,
+}
+
+impl std::ops::Deref for AnnotatedExecutionResult {
+    type Target = ExecutionResult;
+    fn deref(&self) -> &ExecutionResult {
+        &self.execution_result
+    }
+}
+
 pub type ExecutionResultMap =
-    BTreeMap<QualifiedContractIdentifier, Result<ExecutionResult, Vec<Diagnostic>>>;
+    BTreeMap<QualifiedContractIdentifier, Result<AnnotatedExecutionResult, Vec<Diagnostic>>>;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CostsReport {
@@ -101,6 +120,13 @@ fn deploy_boot_contracts(
         boot_contracts.insert(contract_id, result);
     }
     boot_contracts
+}
+
+impl AnnotatedExecutionResult {
+    /// Extract the inner `ExecutionResult`, discarding lint metadata.
+    pub fn into_inner(self) -> ExecutionResult {
+        self.execution_result
+    }
 }
 
 #[derive(Clone)]
@@ -323,7 +349,7 @@ impl Session {
         output: &mut Vec<String>,
         cost_track: bool,
         cmd: &str,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let (mut result, cost, execution_result) =
             match self.formatted_interpretation(cmd.to_string(), None, cost_track, None) {
                 Ok((mut output, result)) => {
@@ -394,7 +420,7 @@ impl Session {
         name: Option<String>,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-    ) -> Result<(Vec<String>, ExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
+    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
         let result = self.eval_with_hooks(snippet.to_string(), eval_hooks, cost_track);
         let mut output = Vec::<String>::new();
         let formatted_lines: Vec<String> = snippet.lines().map(|l| l.to_string()).collect();
@@ -402,11 +428,20 @@ impl Session {
 
         match result {
             Ok(result) => {
-                for diagnostic in &result.diagnostics {
+                for d in result.diagnostics.iter() {
                     output.append(&mut output_diagnostic(
-                        diagnostic,
+                        d,
                         &contract_name,
                         &formatted_lines,
+                        None,
+                    ));
+                }
+                for ld in &result.lint_diagnostics {
+                    output.append(&mut output_diagnostic(
+                        &ld.diagnostic,
+                        &contract_name,
+                        &formatted_lines,
+                        ld.lint_name.as_ref(),
                     ));
                 }
                 if !result.events.is_empty() {
@@ -429,7 +464,12 @@ impl Session {
             }
             Err(diagnostics) => {
                 for d in &diagnostics {
-                    output.append(&mut output_diagnostic(d, &contract_name, &formatted_lines));
+                    output.append(&mut output_diagnostic(
+                        d,
+                        &contract_name,
+                        &formatted_lines,
+                        None,
+                    ));
                 }
                 Err((output, diagnostics))
             }
@@ -453,7 +493,7 @@ impl Session {
             Some(vec![&mut debugger]),
         ) {
             Ok((mut output, result)) => {
-                if let EvaluationResult::Contract(contract_result) = result.result {
+                if let EvaluationResult::Contract(contract_result) = &result.result {
                     self.contract_successfully_stored(&mut output, &contract_result.contract);
                 };
                 output
@@ -479,7 +519,12 @@ impl Session {
                 let lines = snippet.lines();
                 let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
                 for d in diagnostics {
-                    output.append(&mut output_diagnostic(&d, "<snippet>", &formatted_lines));
+                    output.append(&mut output_diagnostic(
+                        &d,
+                        "<snippet>",
+                        &formatted_lines,
+                        None,
+                    ));
                 }
             }
         };
@@ -519,7 +564,12 @@ impl Session {
                 let lines = snippet.lines();
                 let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
                 for d in diagnostics {
-                    output.append(&mut output_diagnostic(&d, "<snippet>", &formatted_lines));
+                    output.append(&mut output_diagnostic(
+                        &d,
+                        "<snippet>",
+                        &formatted_lines,
+                        None,
+                    ));
                 }
             }
         };
@@ -547,7 +597,7 @@ impl Session {
         &mut self,
         amount: u64,
         recipient: &str,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
         self.eval(snippet, false)
     }
@@ -557,7 +607,7 @@ impl Session {
         contract: &ClarityContract,
         cost_track: bool,
         ast: Option<&ContractAST>,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         if contract.epoch.resolve() != current_epoch {
             let diagnostic = Diagnostic {
@@ -688,7 +738,7 @@ impl Session {
         &mut self,
         snippet: String,
         cost_track: bool,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
@@ -727,7 +777,7 @@ impl Session {
     /// Evaluate a Clarity snippet in order to use it as Clarity function arguments
     pub fn eval_clarity_string(&mut self, snippet: &str) -> SymbolicExpression {
         let eval_result = self.eval(snippet.to_string(), false);
-        let value = match eval_result.unwrap().result {
+        let value = match eval_result.unwrap().execution_result.result {
             EvaluationResult::Contract(_) => unreachable!(),
             EvaluationResult::Snippet(snippet_result) => snippet_result.result,
         };
@@ -739,7 +789,7 @@ impl Session {
         snippet: String,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
         cost_track: bool,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
@@ -1057,9 +1107,9 @@ impl Session {
 
         let result = self.eval(snippet.to_string(), false);
         match result {
-            Ok(result) => {
+            Ok(annotated) => {
                 let mut tx_bytes = vec![];
-                let value = match result.result {
+                let value = match annotated.into_inner().result {
                     EvaluationResult::Contract(contract_result) => {
                         if let Some(value) = contract_result.result {
                             value
@@ -1082,7 +1132,7 @@ impl Session {
                 let lines: Vec<String> = snippet.split('\n').map(String::from).collect();
                 let mut output: Vec<String> = diagnostics
                     .iter()
-                    .flat_map(|d| output_diagnostic(d, "encode", &lines))
+                    .flat_map(|d| output_diagnostic(d, "encode", &lines, None))
                     .collect();
                 output.push("encoding failed".into());
                 output.join("\n")
@@ -1405,10 +1455,30 @@ mod tests {
     use crate::repl::settings::Account;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
+    #[test]
+    fn lint_diagnostics_not_duplicated_in_execution_result() {
+        use crate::analysis::linter::LintName;
+
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(LintName::UnusedConst, Level::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+        let snippet = "(define-constant UNUSED u1) (define-read-only (f) (ok u1))";
+        let result = session.eval(snippet.into(), false).expect("valid contract");
+
+        // The lint should fire
+        assert!(!result.lint_diagnostics.is_empty());
+        // Lint diagnostics should NOT be duplicated in execution_result.diagnostics
+        assert!(result.diagnostics.is_empty());
+    }
+
     #[track_caller]
     fn run_session_snippet(session: &mut Session, snippet: &str) -> Value {
-        let execution_res = session.eval(snippet.to_string(), false).unwrap();
-        let res = match execution_res.result {
+        let annotated = session.eval(snippet.to_string(), false).unwrap();
+        let res = match annotated.into_inner().result {
             EvaluationResult::Contract(_) => unreachable!(),
             EvaluationResult::Snippet(res) => res,
         };
@@ -1456,10 +1526,10 @@ mod tests {
             format!("use of unresolved function 'slice?'",)
         );
         session.update_epoch(StacksEpochId::Epoch21);
-        let res = session
+        let annotated = session
             .eval("(slice? \"blockstack\" u5 u10)".into(), false)
             .unwrap();
-        let res = match res.result {
+        let res = match annotated.into_inner().result {
             EvaluationResult::Contract(_) => unreachable!(),
             EvaluationResult::Snippet(res) => res,
         };
@@ -2128,7 +2198,7 @@ mod tests {
         let contract = ClarityContractBuilder::default().code_source(src).build();
         let deploy_result = session.deploy_contract(&contract, false, None);
         assert!(deploy_result.is_ok());
-        let ExecutionResult { result, .. } = deploy_result.unwrap();
+        let ExecutionResult { result, .. } = deploy_result.unwrap().into_inner();
 
         let contract_identifier_str =
             if let EvaluationResult::Contract(contract_evaluation_result) = result {

@@ -44,7 +44,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '24.x'
+          node-version: "24.x"
 
       - name: Cache cargo
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
@@ -86,11 +86,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-    environment: ci
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node-version: [20.x, 24.x]
+        node-version: [22.x, 24.x]
     needs: build_wasm
     steps:
       - name: Checkout

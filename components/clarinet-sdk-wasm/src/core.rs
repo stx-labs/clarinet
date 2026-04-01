@@ -458,7 +458,8 @@ impl SDK {
                 }
                 Err(diagnostics) => {
                     let contract_diagnostics = HashMap::from([(contract_id, diagnostics)]);
-                    let diags_digest = DiagnosticsDigest::new(&contract_diagnostics, &deployment);
+                    let diags_digest =
+                        DiagnosticsDigest::new(&contract_diagnostics, &HashMap::new(), &deployment);
                     if diags_digest.errors > 0 {
                         return Err(diags_digest.message);
                     }
@@ -510,7 +511,8 @@ impl SDK {
         .await?;
 
         if !artifacts.success {
-            let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+            let diags_digest =
+                DiagnosticsDigest::new(&artifacts.diags, &artifacts.lint_diags, &deployment);
             if diags_digest.errors > 0 {
                 return Err(diags_digest.message);
             }
@@ -1049,7 +1051,7 @@ impl SDK {
     pub fn run_snippet(&mut self, snippet: String) -> String {
         let session = self.get_session_mut();
         match session.eval(snippet.clone(), false) {
-            Ok(res) => match res.result {
+            Ok(res) => match res.into_inner().result {
                 EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
                 EvaluationResult::Contract(_) => unreachable!(
                     "Contract evaluation result should not be returned from eval_snippet",
