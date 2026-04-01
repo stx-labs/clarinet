@@ -33,11 +33,15 @@ pub const DEFAULT_STACKER_MNEMONIC: &str = "empty lens any direct brother then d
 pub const DEFAULT_DOCKER_PLATFORM: &str = "linux/amd64";
 
 /// Normalize a user-provided docker_host value to include a scheme prefix.
-/// Bare socket paths like "/var/run/docker.sock" are converted to
-/// "unix:///var/run/docker.sock" so both the bollard API client and the
-/// `docker` CLI (via DOCKER_HOST env var) handle them correctly.
+/// Bare paths like "/var/run/docker.sock" or "//./pipe/docker_engine" are
+/// converted to their schemed equivalents so both the bollard API client and
+/// the `docker` CLI (via DOCKER_HOST env var) handle them correctly.
 fn normalize_docker_host(host: String) -> String {
-    if host.starts_with('/') {
+    if host.contains("://") {
+        host
+    } else if host.starts_with("//./pipe/") || host.starts_with(r"\\.\pipe\") {
+        format!("npipe://{host}")
+    } else if host.starts_with('/') {
         format!("unix://{host}")
     } else {
         host
