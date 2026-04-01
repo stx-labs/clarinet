@@ -17,7 +17,8 @@
     "clean": "rimraf dist",
     "compile": "tsc -b ./tsconfig.json",
     "build": "pnpm run clean && pnpm run compile",
-    "prepare": "pnpm run build"
+    "prepare": "pnpm run build",
+    "prepublishOnly": "node ../../../scripts/require-pnpm.mjs"
   },
   "keywords": [
     "stacks",

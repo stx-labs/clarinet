@@ -13,7 +13,8 @@
     "build:sdk": "pnpm --filter ./components/clarinet-sdk/node --filter ./components/clarinet-sdk/browser run build",
     "test": "pnpm -r --if-present run test",
     "publish:sdk-wasm": "pnpm --filter ./components/clarinet-sdk-wasm/pkg-node --filter ./components/clarinet-sdk-wasm/pkg-browser publish --tag beta",
-    "publish:sdk": "pnpm --filter ./components/clarinet-sdk/node --filter ./components/clarinet-sdk/browser publish --tag beta"
+    "publish:sdk": "pnpm --filter ./components/clarinet-sdk/node --filter ./components/clarinet-sdk/browser publish --tag beta",
+    "prepublishOnly": "node scripts/require-pnpm.mjs"
   },
   "devDependencies": {
     "@types/node": "24.0.14",

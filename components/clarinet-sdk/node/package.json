@@ -47,7 +47,8 @@
     "prepare": "pnpm run build",
     "pretest": "tsc -b ./tsconfig.json",
     "test": "vitest run",
-    "test:no-mxs": "vitest run --exclude=tests/remote-data.test.ts"
+    "test:no-mxs": "vitest run --exclude=tests/remote-data.test.ts",
+    "prepublishOnly": "node ../../../scripts/require-pnpm.mjs"
   },
   "keywords": [
     "stacks",
