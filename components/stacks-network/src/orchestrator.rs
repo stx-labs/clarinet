@@ -126,7 +126,7 @@ impl DevnetOrchestrator {
                     let client = if let Some(ref host) = devnet.docker_host {
                         Docker::connect_with_socket(host, 120, bollard::API_DEFAULT_VERSION)
                     } else {
-                        Docker::connect_with_socket_defaults()
+                        Docker::connect_with_defaults()
                     }
                     .or_else(|_| Docker::connect_with_socket_defaults())
                     .or_else(|_| {
