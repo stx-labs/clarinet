@@ -4,6 +4,10 @@
   "description": "Workspace hosting the Clarinet SDK for Node.js and Browser",
   "author": "Stacks Labs",
   "license": "GPL-3.0",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build:sdk-wasm": "node components/clarinet-sdk-wasm/build.mjs",
     "build:sdk": "pnpm --filter ./components/clarinet-sdk/node --filter ./components/clarinet-sdk/browser run build",

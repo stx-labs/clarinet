@@ -93,10 +93,10 @@ Before contributing to Clarinet, you need the following tools.
 Although it will work with older versions, the team always tries to keep up with the latest versions
 of Rust and Node.js (LTS) tooling.
 
-- Rust (>=1.89.0)
-- Cargo (>=1.89.0)
-- Node (>=v24.4.1)
-- NPM (>=11.5.2)
+- Rust (>=1.94.1)
+- Cargo (>=1.94.1)
+- Node (>=v24.14.1)
+- PNPM (>=10.33.0)
 
 ### Guide
 
