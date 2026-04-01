@@ -6,6 +6,7 @@ use clarinet_utils::{get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_
 use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
+use clarity_repl::utils::Environment;
 use libsecp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use toml::value::Value;
@@ -97,12 +98,12 @@ impl StacksNetwork {
     /// Returns the deployment environment for this network.
     /// Simnet is emulated in-memory; all other networks deploy on-chain
     /// and should have `#[env(simnet)]` code stripped.
-    pub fn deployment_environment(&self) -> clarity_repl::utils::Environment {
+    pub fn deployment_environment(&self) -> Environment {
         use StacksNetwork::*;
 
         match self {
-            Simnet => clarity_repl::utils::Environment::Simnet,
-            Devnet | Testnet | Mainnet => clarity_repl::utils::Environment::OnChain,
+            Simnet => Environment::Simnet,
+            Devnet | Testnet | Mainnet => Environment::OnChain,
         }
     }
 }
