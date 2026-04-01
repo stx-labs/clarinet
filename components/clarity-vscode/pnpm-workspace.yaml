@@ -1,0 +1,6 @@
+packages:
+  - "client"
+  - "server"
+  - "debug"
+
+minimumReleaseAge: 1440 # 24 hours

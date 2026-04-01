@@ -26,8 +26,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
@@ -38,17 +41,17 @@ jobs:
           cargo install wasm-pack
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build vsix
-        run: npx vsce package --out clarity.vsix
+        run: pnpm exec vsce package --out clarity.vsix
 
       - name: Publish to VSCode Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_TOKEN }}
-        run: npx vsce publish --packagePath clarity.vsix --pat "$VSCE_PAT"
+        run: pnpm exec vsce publish --packagePath clarity.vsix --pat "$VSCE_PAT"
 
       - name: Publish to Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
-        run: npx ovsx publish --packagePath clarity.vsix --pat "$OVSX_PAT"
+        run: pnpm exec ovsx publish --packagePath clarity.vsix --pat "$OVSX_PAT"

@@ -139,6 +139,7 @@ impl GetChangesForNewProject {
             logs
             *.log
             npm-debug.log*
+            pnpm-debug.log*
             coverage
             *.info
             costs-reports.json

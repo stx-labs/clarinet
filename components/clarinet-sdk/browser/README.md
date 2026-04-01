@@ -17,7 +17,7 @@ You can use this SDK to:
 ## Installation
 
 ```sh
-npm install @stacks/clarinet-sdk-browser
+pnpm install @stacks/clarinet-sdk-browser
 ```
 
 ### Usage

@@ -1,0 +1,8 @@
+packages:
+  - "components/clarinet-sdk-wasm/pkg-node"
+  - "components/clarinet-sdk-wasm/pkg-browser"
+  - "components/clarinet-sdk/common"
+  - "components/clarinet-sdk/node"
+  - "components/clarinet-sdk/browser"
+
+minimumReleaseAge: 1440 # 24 hours

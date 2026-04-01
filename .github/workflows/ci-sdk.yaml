@@ -41,8 +41,11 @@ jobs:
           RUST_VERSION=$(rustc -vV | shasum -a 256 | cut -d ' ' -f1)
           echo "hash=$RUST_VERSION" >> $GITHUB_OUTPUT
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "24.x"
 
@@ -70,7 +73,7 @@ jobs:
           fi
 
       - name: Build Wasm packages
-        run: npm run build:sdk-wasm
+        run: pnpm run build:sdk-wasm
 
       - name: Run wasm-bindgen-test
         run: wasm-pack test --node components/clarinet-sdk-wasm
@@ -97,8 +100,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: ${{ matrix.node-version }}
 
@@ -109,9 +115,9 @@ jobs:
           path: components/clarinet-sdk-wasm
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Run tests
         env:
           HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
-        run: npm run test
+        run: pnpm run test

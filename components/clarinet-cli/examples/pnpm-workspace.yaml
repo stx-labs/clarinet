@@ -1,0 +1,5 @@
+packages:
+  - "billboard"
+  - "counter"
+  - "simple-nft"
+  - "swappool"
