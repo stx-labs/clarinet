@@ -44,6 +44,8 @@ pub enum EpochSpec {
     Epoch3_3,
     #[serde(rename = "3.4")]
     Epoch3_4,
+    #[serde(rename = "3.5")]
+    Epoch3_5,
 }
 
 impl From<StacksEpochId> for EpochSpec {
@@ -81,6 +83,7 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_2 => StacksEpochId::Epoch32,
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
             EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
+            EpochSpec::Epoch3_5 => unreachable!(),
         }
     }
 }
@@ -117,7 +120,8 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_1 => Some(config.epoch_3_1),
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
                     EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
-                    EpochSpec::Epoch3_4 => config.epoch_3_4,
+                    EpochSpec::Epoch3_4 => Some(config.epoch_3_4),
+                    EpochSpec::Epoch3_5 => config.epoch_3_5,
                 };
                 start_height.map(|start_height| EpochConfig {
                     epoch_name: epoch,
@@ -1542,78 +1546,7 @@ mod tests {
             epoch_3_1: 9,
             epoch_3_2: 10,
             epoch_3_3: 11,
-            ..Default::default()
-        };
-
-        let epoch_config = BurnchainEpochConfig::from(&devnet_config);
-        let epoch_config_toml = toml::to_string(&epoch_config).unwrap();
-
-        assert_eq!(
-            epoch_config_toml,
-            indoc! { r#"
-                [[burnchain.epochs]]
-                epoch_name = "2.0"
-                start_height = 1
-
-                [[burnchain.epochs]]
-                epoch_name = "2.05"
-                start_height = 2
-
-                [[burnchain.epochs]]
-                epoch_name = "2.1"
-                start_height = 3
-
-                [[burnchain.epochs]]
-                epoch_name = "2.2"
-                start_height = 4
-
-                [[burnchain.epochs]]
-                epoch_name = "2.3"
-                start_height = 5
-
-                [[burnchain.epochs]]
-                epoch_name = "2.4"
-                start_height = 6
-
-                [[burnchain.epochs]]
-                epoch_name = "2.5"
-                start_height = 7
-
-                [[burnchain.epochs]]
-                epoch_name = "3.0"
-                start_height = 8
-
-                [[burnchain.epochs]]
-                epoch_name = "3.1"
-                start_height = 9
-
-                [[burnchain.epochs]]
-                epoch_name = "3.2"
-                start_height = 10
-
-                [[burnchain.epochs]]
-                epoch_name = "3.3"
-                start_height = 11
-                "#
-            }
-        );
-    }
-
-    #[test]
-    fn test_epoch_config_with_optional_next_epoch() {
-        let devnet_config = DevnetConfig {
-            epoch_2_0: 1,
-            epoch_2_05: 2,
-            epoch_2_1: 3,
-            epoch_2_2: 4,
-            epoch_2_3: 5,
-            epoch_2_4: 6,
-            epoch_2_5: 7,
-            epoch_3_0: 8,
-            epoch_3_1: 9,
-            epoch_3_2: 10,
-            epoch_3_3: 11,
-            epoch_3_4: Some(12),
+            epoch_3_4: 12,
             ..Default::default()
         };
 
@@ -1670,6 +1603,87 @@ mod tests {
                 [[burnchain.epochs]]
                 epoch_name = "3.4"
                 start_height = 12
+                "#
+            }
+        );
+    }
+
+    #[test]
+    fn test_epoch_config_with_optional_next_epoch() {
+        let devnet_config = DevnetConfig {
+            epoch_2_0: 1,
+            epoch_2_05: 2,
+            epoch_2_1: 3,
+            epoch_2_2: 4,
+            epoch_2_3: 5,
+            epoch_2_4: 6,
+            epoch_2_5: 7,
+            epoch_3_0: 8,
+            epoch_3_1: 9,
+            epoch_3_2: 10,
+            epoch_3_3: 11,
+            epoch_3_4: 12,
+            epoch_3_5: Some(13),
+            ..Default::default()
+        };
+
+        let epoch_config = BurnchainEpochConfig::from(&devnet_config);
+        let epoch_config_toml = toml::to_string(&epoch_config).unwrap();
+
+        assert_eq!(
+            epoch_config_toml,
+            indoc! { r#"
+                [[burnchain.epochs]]
+                epoch_name = "2.0"
+                start_height = 1
+
+                [[burnchain.epochs]]
+                epoch_name = "2.05"
+                start_height = 2
+
+                [[burnchain.epochs]]
+                epoch_name = "2.1"
+                start_height = 3
+
+                [[burnchain.epochs]]
+                epoch_name = "2.2"
+                start_height = 4
+
+                [[burnchain.epochs]]
+                epoch_name = "2.3"
+                start_height = 5
+
+                [[burnchain.epochs]]
+                epoch_name = "2.4"
+                start_height = 6
+
+                [[burnchain.epochs]]
+                epoch_name = "2.5"
+                start_height = 7
+
+                [[burnchain.epochs]]
+                epoch_name = "3.0"
+                start_height = 8
+
+                [[burnchain.epochs]]
+                epoch_name = "3.1"
+                start_height = 9
+
+                [[burnchain.epochs]]
+                epoch_name = "3.2"
+                start_height = 10
+
+                [[burnchain.epochs]]
+                epoch_name = "3.3"
+                start_height = 11
+
+                [[burnchain.epochs]]
+                epoch_name = "3.4"
+                start_height = 12
+
+                [[burnchain.epochs]]
+                epoch_name = "3.5"
+                start_height = 13
                 "#
             }
         );

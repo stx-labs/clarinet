@@ -23,6 +23,8 @@ pub const MAINNET_30_START_HEIGHT: u32 = 171_833;
 pub const MAINNET_31_START_HEIGHT: u32 = 340_555;
 pub const MAINNET_32_START_HEIGHT: u32 = 2_401_415;
 pub const MAINNET_33_START_HEIGHT: u32 = 4_717_214;
+// TODO after epoch 3.4 activates on mainnet
+pub const MAINNET_34_START_HEIGHT: u32 = u32::MAX;
 
 // the current primary testnet starts directly in epoch 2.5 (pox-4 deployment)
 pub const TESTNET_20_START_HEIGHT: u32 = 1;
@@ -36,6 +38,7 @@ pub const TESTNET_30_START_HEIGHT: u32 = 320;
 pub const TESTNET_31_START_HEIGHT: u32 = 814;
 pub const TESTNET_32_START_HEIGHT: u32 = 3_140_887;
 pub const TESTNET_33_START_HEIGHT: u32 = 3_640_102;
+pub const TESTNET_34_START_HEIGHT: u32 = 3_928_580;
 
 pub fn epoch_for_height(is_mainnet: bool, height: u32) -> StacksEpochId {
     if is_mainnet {
@@ -66,8 +69,10 @@ fn epoch_for_mainnet_height(height: u32) -> StacksEpochId {
         StacksEpochId::Epoch31
     } else if height < MAINNET_33_START_HEIGHT {
         StacksEpochId::Epoch32
-    } else {
+    } else if height < MAINNET_34_START_HEIGHT {
         StacksEpochId::Epoch33
+    } else {
+        StacksEpochId::Epoch34
     }
 }
 
@@ -92,8 +97,10 @@ fn epoch_for_testnet_height(height: u32) -> StacksEpochId {
         StacksEpochId::Epoch31
     } else if height < TESTNET_33_START_HEIGHT {
         StacksEpochId::Epoch32
-    } else {
+    } else if height < TESTNET_34_START_HEIGHT {
         StacksEpochId::Epoch33
+    } else {
+        StacksEpochId::Epoch34
     }
 }
 
