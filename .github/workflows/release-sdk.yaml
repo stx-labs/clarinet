@@ -7,6 +7,7 @@
 
 name: Publish Clarinet SDK
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
