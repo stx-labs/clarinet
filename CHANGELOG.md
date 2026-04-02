@@ -1,3 +1,38 @@
+# [3.16.0](https://github.com/stx-labs/clarinet/compare/v3.15.1...v3.16.0) (2026-04-02)
+
+##### New Features
+
+- Default to epoch 3.4 (#2342) (a641cbb1)
+- **linter:**
+  - Add lint name to diagnostic message (#2307) (d5ab7d90)
+  - Add styling and active lints to `clarinet check --show-lints` output (#2314) (57b844de)
+
+##### Chores
+
+- Set epoch 3.4 height on mainnet (#2344) (1c5d9a7b)
+- Use pnpm (#2336) (562ceddb)
+- Enable style lints at Level::Note by default (#2337) (bfa322e2)
+
+##### Continuous Integration
+
+- Remove unneeded environments (#2339) (0fb6ea91)
+
+##### Bug Fixes
+
+- Use `Environment::OnChain` for devnet (#2340) (c01bb947)
+- **linter:**
+  - Make output for single file look like project output (#2335) (90fab336)
+- Properly pass DOCKER_HOST for docker commands (#2309) (de75d2b1)
+- Update dependencies to fix new `cargo audit` warnings (#2320) (d9881c12)
+
+##### Performance Improvements
+
+- Remove some unnecessary clones (#2323) (14063e79)
+
+##### Tests
+
+- Make unit tests run faster (#2317) (de8e8fb3)
+
 # [3.15.1](https://github.com/stx-labs/clarinet/compare/v3.15.0...v3.15.1) (2026-03-19)
 
 ##### New Features
@@ -17,7 +52,6 @@
 - Update default explorer image (#2286) (36684f60)
 - Add tests covering every diagnostic path in collect_annotations (#2292) (03d9853)
 - Never lint boot contracts, and don't run linter on certain core commands (#2258) (1b9dba7)
-
 
 ##### Continuous Integration
 
