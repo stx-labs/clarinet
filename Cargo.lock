@@ -695,7 +695,6 @@ dependencies = [
  "clarinet-utils",
  "clarity",
  "clarity-repl",
- "colored",
  "indoc",
  "libsecp256k1",
  "mockito",
