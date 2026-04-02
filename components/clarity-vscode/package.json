@@ -16,13 +16,13 @@
   "private": true,
   "scripts": {
     "clean": "rimraf .vscode-test-web ./debug/dist ./client/dist ./server/dist ./server/src/clarity-lsp-*",
-    "pretest": "NODE_ENV=test concurrently \"webpack -c ./webpack.config.dev.js\" \"swc --config-file .runTests.swcrc ./client/tests/runTests.ts -o ./client/dist/tests/runTests.js\"",
+    "pretest": "NODE_ENV=test concurrently \"rspack build -c ./rspack.config.dev.js\" \"swc --config-file .runTests.swcrc ./client/tests/runTests.ts -o ./client/dist/tests/runTests.js\"",
     "test": "node client/dist/tests/runTests.js",
     "lint": "eslint ./client/src ./server/src",
-    "dev:watch": "webpack -c ./webpack.config.dev.js -w",
+    "dev:watch": "rspack build -c ./rspack.config.dev.js -w",
     "dev:browser": "vscode-test-web --extensionDevelopmentPath=. ./test-data --open-devtools",
-    "dev": "webpack -c ./webpack.config.dev.js && concurrently \"pnpm:dev:*\"",
-    "vscode:prepublish": "pnpm run clean && NODE_ENV=production webpack",
+    "dev": "rspack build -c ./rspack.config.dev.js && concurrently \"pnpm:dev:*\"",
+    "vscode:prepublish": "pnpm run clean && NODE_ENV=production rspack build",
     "vsce:package": "vsce package",
     "vsce:publish": "vsce publish",
     "vsce:prerelease": "vsce publish --pre-release"
@@ -245,6 +245,8 @@
   "devDependencies": {
     "@eslint/eslintrc": "3.3.5",
     "@eslint/js": "10.0.1",
+    "@rspack/cli": "1.3.12",
+    "@rspack/core": "1.3.12",
     "@swc/cli": "0.8.0",
     "@swc/core": "1.15.21",
     "@typescript-eslint/eslint-plugin": "8.58.0",
@@ -253,16 +255,12 @@
     "@vscode/vsce": "3.7.1",
     "@wasm-tool/wasm-pack-plugin": "1.7.0",
     "concurrently": "9.2.1",
-    "copy-webpack-plugin": "14.0.0",
     "eslint": "10.1.0",
     "ovsx": "0.10.10",
     "playwright": "1.58.2",
     "path-browserify": "1.0.1",
     "regenerator-runtime": "0.14.1",
     "rimraf": "6.1.3",
-    "swc-loader": "0.2.7",
-    "typescript": "5.9.3",
-    "webpack": "5.105.4",
-    "webpack-cli": "7.0.2"
+    "typescript": "5.9.3"
   }
 }
