@@ -4,13 +4,7 @@
   "description": "Basic workspace to easily manage the example dependencies",
   "author": "Stacks Labs",
   "license": "GPL-3.0",
-  "workspaces": [
-    "./billboard",
-    "./counter",
-    "./simple-nft",
-    "./swappool"
-  ],
   "scripts": {
-    "test": "npm test --workspaces --if-present"
+    "test": "pnpm -r --if-present run test"
   }
 }

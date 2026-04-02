@@ -1,35 +1,65 @@
 use clarity::vm::diagnostic::{Diagnostic, Level};
 
-fn level_to_string(level: &Level) -> String {
-    match level {
-        Level::Note => blue!("note:"),
-        Level::Warning => yellow!("warning:"),
-        Level::Error => red!("error:"),
+use crate::analysis::linter::LintName;
+use crate::analysis::LintDiagnostic;
+
+/// Format the level string, including the lint name if provided.
+///
+/// With a lint name: `warning[unused_const]:`
+/// Without: `warning:`
+pub fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
+    let level_str = match level {
+        Level::Note => blue!("note"),
+        Level::Warning => yellow!("warning"),
+        Level::Error => red!("error"),
+    };
+    match lint_name {
+        Some(name) => {
+            use colored::Colorize;
+            let styled_name = name.to_string().purple().bold();
+            format!("{level_str}[{styled_name}]:")
+        }
+        None => format!("{level_str}:"),
     }
-    .to_string()
 }
 
 // Generate the formatted output for this diagnostic, given the source code.
 // TODO: Preferably a filename would be saved in the Span, but for now, pass a name here.
-pub fn output_diagnostic(diagnostic: &Diagnostic, name: &str, lines: &[String]) -> Vec<String> {
+pub fn output_diagnostic(
+    lint_diagnostic: &LintDiagnostic,
+    name: &str,
+    lines: &[String],
+) -> Vec<String> {
     let mut output = Vec::new();
-    if !diagnostic.spans.is_empty() {
+    let diagnostic = &lint_diagnostic.diagnostic;
+
+    let level_str = level_to_string(&diagnostic.level, lint_diagnostic.lint_name.as_ref());
+
+    match diagnostic.level {
+        Level::Note => {
+            output.push(format!("{level_str} {}", diagnostic.message));
+            output.append(&mut output_code(diagnostic, lines));
+            return output;
+        }
+        _ => {
+            output.push(format!("{level_str} {}", diagnostic.message));
+        }
+    }
+
+    if let Some(span) = diagnostic.spans.first() {
         output.push(format!(
-            "{}:{}:{}: {} {}",
-            name, // diagnostic.spans[0].filename,
-            diagnostic.spans[0].start_line,
-            diagnostic.spans[0].start_column,
-            level_to_string(&diagnostic.level),
-            diagnostic.message,
-        ));
-    } else {
-        output.push(format!(
-            "{} {}",
-            level_to_string(&diagnostic.level),
-            diagnostic.message,
+            "{} {name}:{}:{}",
+            blue!("-->"),
+            span.start_line,
+            span.start_column
         ));
     }
     output.append(&mut output_code(diagnostic, lines));
+
+    if let Some(ref suggestion) = diagnostic.suggestion {
+        output.push(suggestion.to_string());
+    }
+
     output
 }
 
@@ -55,7 +85,6 @@ pub fn output_code(diagnostic: &Diagnostic, lines: &[String]) -> Vec<String> {
             (span.end_column - span.start_column) as usize
         );
     }
-    pointer = pointer.to_string();
     output.push(pointer);
 
     for span in diagnostic.spans.iter().skip(1) {

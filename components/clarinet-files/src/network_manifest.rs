@@ -6,6 +6,7 @@ use clarinet_utils::{get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_
 use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
+use clarity_repl::utils::Environment;
 use libsecp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use toml::value::Value;
@@ -15,9 +16,9 @@ use crate::paths;
 
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
-pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:3.3.0.0.6-alpine";
+pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:3.4.0.0.0-alpine";
 pub const DEFAULT_STACKS_SIGNER_IMAGE: &str =
-    "ghcr.io/stacks-network/stacks-signer:3.3.0.0.6.0-alpine";
+    "ghcr.io/stacks-network/stacks-signer:3.4.0.0.0.0-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
@@ -30,13 +31,23 @@ pub const DEFAULT_STACKS_EXPLORER_IMAGE: &str = "ghcr.io/stx-labs/explorer:lates
 pub const DEFAULT_STACKS_MINER_MNEMONIC: &str = "fragile loan twenty basic net assault jazz absorb diet talk art shock innocent float punch travel gadget embrace caught blossom hockey surround initial reduce";
 pub const DEFAULT_FAUCET_MNEMONIC: &str = "shadow private easily thought say logic fault paddle word top book during ignore notable orange flight clock image wealth health outside kitten belt reform";
 pub const DEFAULT_STACKER_MNEMONIC: &str = "empty lens any direct brother then drop fury rule pole win claim scissors list rescue horn rent inform relief jump sword weekend half legend";
-#[cfg(unix)]
-pub const DEFAULT_DOCKER_SOCKET: &str = "unix:///var/run/docker.sock";
-#[cfg(windows)]
-pub const DEFAULT_DOCKER_SOCKET: &str = "npipe:////./pipe/docker_engine";
-#[cfg(target_arch = "wasm32")]
-pub const DEFAULT_DOCKER_SOCKET: &str = "/var/run/docker.sock";
 pub const DEFAULT_DOCKER_PLATFORM: &str = "linux/amd64";
+
+/// Normalize a user-provided docker_host value to include a scheme prefix.
+/// Bare paths like "/var/run/docker.sock" or "//./pipe/docker_engine" are
+/// converted to their schemed equivalents so both the bollard API client and
+/// the `docker` CLI (via DOCKER_HOST env var) handle them correctly.
+fn normalize_docker_host(host: String) -> String {
+    if host.contains("://") {
+        host
+    } else if host.starts_with("//./pipe/") || host.starts_with(r"\\.\pipe\") {
+        format!("npipe://{host}")
+    } else if host.starts_with('/') {
+        format!("unix://{host}")
+    } else {
+        host
+    }
+}
 
 pub const DEFAULT_EPOCH_2_0: u64 = 100;
 pub const DEFAULT_EPOCH_2_05: u64 = 100;
@@ -85,11 +96,25 @@ pub enum BitcoinNetwork {
 
 impl StacksNetwork {
     pub fn get_networks(&self) -> (BitcoinNetwork, StacksNetwork) {
-        match &self {
-            StacksNetwork::Simnet => (BitcoinNetwork::Regtest, StacksNetwork::Simnet),
-            StacksNetwork::Devnet => (BitcoinNetwork::Testnet, StacksNetwork::Devnet),
-            StacksNetwork::Testnet => (BitcoinNetwork::Testnet, StacksNetwork::Testnet),
-            StacksNetwork::Mainnet => (BitcoinNetwork::Mainnet, StacksNetwork::Mainnet),
+        use StacksNetwork::*;
+
+        match self {
+            Simnet => (BitcoinNetwork::Regtest, self.clone()),
+            Devnet => (BitcoinNetwork::Testnet, self.clone()),
+            Testnet => (BitcoinNetwork::Testnet, self.clone()),
+            Mainnet => (BitcoinNetwork::Mainnet, self.clone()),
+        }
+    }
+
+    /// Returns the deployment environment for this network.
+    /// Simnet is emulated in-memory; all other networks deploy on-chain
+    /// and should have `#[env(simnet)]` code stripped.
+    pub fn deployment_environment(&self) -> Environment {
+        use StacksNetwork::*;
+
+        match self {
+            Simnet => Environment::Simnet,
+            Devnet | Testnet | Mainnet => Environment::OnChain,
         }
     }
 }
@@ -306,7 +331,7 @@ pub struct DevnetConfig {
     pub disable_stacks_api: bool,
     pub disable_postgres: bool,
     pub bind_containers_volumes: bool,
-    pub docker_host: String,
+    pub docker_host: Option<String>,
     pub components_host: String,
     pub epoch_2_0: u64,
     pub epoch_2_05: u64,
@@ -981,9 +1006,7 @@ impl NetworkManifest {
                 disable_postgres: devnet_config.disable_postgres.unwrap_or(false),
                 disable_stacks_explorer: devnet_config.disable_stacks_explorer.unwrap_or(false),
                 bind_containers_volumes: devnet_config.bind_containers_volumes.unwrap_or(true),
-                docker_host: devnet_config
-                    .docker_host
-                    .unwrap_or(DEFAULT_DOCKER_SOCKET.into()),
+                docker_host: devnet_config.docker_host.map(normalize_docker_host),
                 components_host: devnet_config.components_host.unwrap_or("127.0.0.1".into()),
                 epoch_2_0: devnet_config.epoch_2_0.unwrap_or(DEFAULT_EPOCH_2_0),
                 epoch_2_05: devnet_config.epoch_2_05.unwrap_or(DEFAULT_EPOCH_2_05),
@@ -1113,7 +1136,7 @@ impl Default for DevnetConfig {
             disable_stacks_api: false,
             disable_postgres: false,
             bind_containers_volumes: true,
-            docker_host: DEFAULT_DOCKER_SOCKET.to_string(),
+            docker_host: None,
             components_host: "127.0.0.1".to_string(),
             epoch_2_0: DEFAULT_EPOCH_2_0,
             epoch_2_05: DEFAULT_EPOCH_2_05,

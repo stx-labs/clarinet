@@ -32,8 +32,9 @@ use super::settings::{ApiUrl, RemoteNetworkInfo};
 use super::ClarityContract;
 use crate::analysis::annotation::{Annotation, AnnotationKind};
 use crate::analysis::ast_dependency_detector::{ASTDependencyDetector, Dependency};
-use crate::analysis::{self};
+use crate::analysis::{self, LintDiagnostic};
 use crate::repl::datastore::{ClarityDatastore, Datastore};
+use crate::repl::session::AnnotatedExecutionResult;
 use crate::repl::Settings;
 
 #[derive(Debug, Clone)]
@@ -134,7 +135,7 @@ impl ClarityInterpreter {
         cached_ast: Option<&ContractAST>,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let (ast, mut diagnostics, success) = match cached_ast {
             Some(ast) => (ast.clone(), vec![], true),
             None => self.build_ast(contract),
@@ -145,16 +146,13 @@ impl ClarityInterpreter {
         let (annotations, mut annotation_diagnostics) = self.collect_annotations(code_source);
         diagnostics.append(&mut annotation_diagnostics);
 
-        let (analysis, mut analysis_diagnostics) =
-            match self.run_analysis(contract, &ast, &annotations) {
-                Ok((analysis, diagnostics)) => (analysis, diagnostics),
-                Err(diagnostic) => {
-                    diagnostics.push(diagnostic);
-                    return Err(diagnostics.to_vec());
-                }
-            };
-        diagnostics.append(&mut analysis_diagnostics);
-
+        let (analysis, lint_diagnostics) = match self.run_analysis(contract, &ast, &annotations) {
+            Ok((analysis, lint_diags)) => (analysis, lint_diags),
+            Err(diagnostic) => {
+                diagnostics.push(diagnostic);
+                return Err(diagnostics.to_vec());
+            }
+        };
         if !success {
             return Err(diagnostics.to_vec());
         }
@@ -173,7 +171,10 @@ impl ClarityInterpreter {
         };
 
         result.diagnostics = diagnostics.to_vec();
-        Ok(result)
+        Ok(AnnotatedExecutionResult {
+            execution_result: result,
+            lint_diagnostics,
+        })
     }
 
     pub fn detect_dependencies(
@@ -283,7 +284,7 @@ impl ClarityInterpreter {
         contract: &ClarityContract,
         contract_ast: &ContractAST,
         annotations: &Vec<Annotation>,
-    ) -> Result<(ContractAnalysis, Vec<Diagnostic>), Diagnostic> {
+    ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Diagnostic> {
         let mut analysis_db = AnalysisDatabase::new(&mut self.clarity_datastore);
 
         // Run standard clarity analyses
@@ -300,19 +301,23 @@ impl ClarityInterpreter {
         .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
         // Run REPL-only analyses (linter, check_checker, etc.)
-        let diagnostics = if !contract.skip_analysis {
+        let lint_diagnostics = if !contract.skip_analysis {
             analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,
                 annotations,
                 &self.repl_settings.analysis,
             )
-            .map_err(|mut diagnostics| diagnostics.pop().unwrap())?
+            .map_err(|lds| {
+                // Extract the last diagnostic as the representative error.
+                // Safe: run_analysis only returns Err after accumulating at least one diagnostic.
+                Diagnostic::from(lds.into_iter().last().expect("non-empty error list"))
+            })?
         } else {
             vec![]
         };
 
-        Ok((contract_analysis, diagnostics))
+        Ok((contract_analysis, lint_diagnostics))
     }
 
     pub fn get_block_time(&mut self) -> u64 {
@@ -2171,19 +2176,20 @@ mod tests {
     #[test]
     fn can_call_clarity_4_contract_hash() {
         let mut interpreter = get_interpreter(None);
-        interpreter.set_current_epoch(StacksEpochId::Epoch33);
+        interpreter.set_current_epoch(StacksEpochId::Epoch34);
 
         let dummy_contract = ClarityContractBuilder::default()
             .name("dummy-contract")
             .code_source("(define-read-only (oktrue) (ok true))".into())
-            .epoch(StacksEpochId::Epoch33)
+            .epoch(StacksEpochId::Epoch34)
+            .clarity_version(ClarityVersion::Clarity5)
             .build();
         let _ = deploy_contract(&mut interpreter, &dummy_contract);
 
         let contract = ClarityContractBuilder::default()
             .code_source("(define-read-only (get-hash) (contract-hash? .dummy-contract))".into())
-            .epoch(StacksEpochId::Epoch33)
-            .clarity_version(ClarityVersion::Clarity4)
+            .epoch(StacksEpochId::Epoch34)
+            .clarity_version(ClarityVersion::Clarity5)
             .build();
         let _ = deploy_contract(&mut interpreter, &contract);
 
@@ -2192,8 +2198,8 @@ mod tests {
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "get-hash",
             &[],
-            StacksEpochId::Epoch33,
-            ClarityVersion::Clarity4,
+            StacksEpochId::Epoch34,
+            ClarityVersion::Clarity5,
             false,
             false,
             vec![],

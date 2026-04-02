@@ -98,7 +98,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-    environment: ci
     strategy:
       fail-fast: false
       matrix:
@@ -177,7 +176,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    environment: release
     strategy:
       fail-fast: false
       matrix:

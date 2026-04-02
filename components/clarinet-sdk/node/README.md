@@ -17,7 +17,7 @@ You can use this SDK to:
 ## Installation
 
 ```sh
-npm install @stacks/clarinet-sdk
+pnpm install @stacks/clarinet-sdk
 ```
 
 ## Usage
@@ -54,7 +54,7 @@ const simnet = await initSimnet("./path/to/Clarinet.toml");
 
 The SDK can be used to write unit tests for Clarinet projects.
 
-You'll need to have Node.js (>= 18) and NPM setup. If you are not sure how to set it up, [Volta](https://volta.sh/) is a nice tool to get started.
+You'll need to have Node.js (>= 18) and pnpm setup. If you are not sure how to set it up, [Volta](https://volta.sh/) is a nice tool to get started.
 
 In the terminal, run `node --version` to make sure it's available and up to date.
 
@@ -68,15 +68,15 @@ ls # you should see Clarinet.toml and package.json in the list
 Install the dependencies and run the test
 
 ```sh
-npm install
-npm test
+pnpm install
+pnpm test
 ```
 
 Visit the [clarity starter project](https://github.com/stx-labs/clarity-starter) to see the testing framework in action.
 
 ### Type checking
 
-We recommend to use TypeScript to write the unit tests, but it's also possible to do it with JavaScript. To do so, rename your test files to `.test.js` instead of `.test.ts`. You can also delete the `tsconfig.json` and uninstall typescript with `npm uninstall typescript`.
+We recommend to use TypeScript to write the unit tests, but it's also possible to do it with JavaScript. To do so, rename your test files to `.test.js` instead of `.test.ts`. You can also delete the `tsconfig.json` and uninstall typescript with `pnpm uninstall typescript`.
 
 Note: If you want to write your test in JavaScript but still have a certain level of type safety and autocompletion, VSCode can help you with that. You can create a basic `jsconfig.json` file:
 

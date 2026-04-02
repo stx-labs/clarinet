@@ -27,12 +27,13 @@ use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::AnalysisDatabase;
 use clarity::vm::costs::LimitedCostTracker;
-use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::diagnostic::Level;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
 use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::analysis::linter::{LintGroup, LintName};
+use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
@@ -50,7 +51,10 @@ use toml_edit::DocumentMut;
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
 use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
-use crate::deployments::{self, check_deployments, generate_default_deployment, write_deployment};
+use crate::deployments::{
+    self, check_deployments, generate_default_deployment, generate_devnet_deployment,
+    write_deployment,
+};
 use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
 use crate::generate::changes::{Changes, TOMLEdition};
@@ -68,9 +72,9 @@ enum OutputFormat {
 }
 
 #[derive(Serialize)]
-struct JsonCheckOutput {
+struct JsonCheckOutput<D: Serialize> {
     success: bool,
-    diagnostics: HashMap<String, Vec<Diagnostic>>,
+    diagnostics: HashMap<String, Vec<D>>,
     environment: String,
 }
 
@@ -772,7 +776,7 @@ pub fn main() {
                     &manifest,
                     &network,
                     cmd.no_batch,
-                    Environment::Simnet,
+                    network.deployment_environment(),
                 ) {
                     Ok(result) => result,
                     Err(message) => {
@@ -883,7 +887,7 @@ pub fn main() {
                             None => {
                                 let default_deployment_path = project_root.join(get_default_deployment_path(network));
                                 let (deployment, _, _) =
-                                    generate_default_deployment(&manifest, network, false, Environment::Simnet)
+                                    generate_default_deployment(&manifest, network, false, network.deployment_environment())
                                         .unwrap_or_else(|message| {
                                             eprintln!("{}", red!(message));
                                             std::process::exit(1);
@@ -1131,8 +1135,11 @@ pub fn main() {
                         );
 
                         if !artifacts.success {
-                            let diags_digest =
-                                DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                            let diags_digest = DiagnosticsDigest::new(
+                                &artifacts.diags,
+                                &artifacts.lint_diags,
+                                &deployment,
+                            );
                             if diags_digest.has_feedbacks() {
                                 println!("{}", diags_digest.message);
                             }
@@ -1247,25 +1254,27 @@ pub fn main() {
                 contract.clarity_version,
             );
             let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-            let mut analysis_diagnostics = match analysis::run_analysis(
+            let lint_diagnostics = match analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,
                 &annotations,
                 &settings.repl_settings.analysis,
             ) {
-                Ok(diagnostics) => diagnostics,
-                Err(diagnostics) => {
+                Ok(lint_diags) => lint_diags,
+                Err(lint_diags) => {
                     success = false;
-                    diagnostics
+                    lint_diags
                 }
             };
-            diagnostics.append(&mut analysis_diagnostics);
 
             match cmd.output_format {
                 OutputFormat::Json | OutputFormat::JsonPretty => {
+                    let mut all_diags: Vec<LintDiagnostic> =
+                        diagnostics.into_iter().map(LintDiagnostic::from).collect();
+                    all_diags.extend(lint_diagnostics);
                     let output = JsonCheckOutput {
                         success,
-                        diagnostics: HashMap::from([(file, diagnostics)]),
+                        diagnostics: HashMap::from([(file, all_diags)]),
                         environment: Environment::Simnet.to_string(),
                     };
                     let json = if cmd.output_format == OutputFormat::JsonPretty {
@@ -1280,13 +1289,35 @@ pub fn main() {
                 }
                 OutputFormat::Standard => {
                     let lines = contract.expect_in_memory_code_source().lines();
-                    let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-                    for d in diagnostics {
-                        for line in output_diagnostic(&d, &file, &formatted_lines) {
+                    let formatted_lines: Vec<String> = lines.map(String::from).collect();
+                    let mut warnings = 0usize;
+                    let mut errors = 0usize;
+
+                    for ld in diagnostics
+                        .into_iter()
+                        .map(LintDiagnostic::from)
+                        .chain(lint_diagnostics)
+                    {
+                        match ld.diagnostic.level {
+                            Level::Warning => warnings += 1,
+                            Level::Error => errors += 1,
+                            Level::Note => {}
+                        }
+                        for line in output_diagnostic(&ld, &file, &formatted_lines) {
                             println!("{line}");
                         }
                     }
 
+                    if warnings > 0 {
+                        println!(
+                            "{} {} detected",
+                            yellow!("!"),
+                            pluralize!(warnings, "warning")
+                        );
+                    }
+                    if errors > 0 {
+                        println!("{} {} detected", red!("x"), pluralize!(errors, "error"));
+                    }
                     if success {
                         println!("{} Contract successfully checked", green!("✔"))
                     } else {
@@ -1300,7 +1331,7 @@ pub fn main() {
             let mut exit_codes = Vec::new();
             let mut global_found_env_simnet = false;
             for environment in CHECK_ENVIRONMENTS {
-                let ((deployment, _, artifacts), found_env_simnet) =
+                let ((deployment, _, mut artifacts), found_env_simnet) =
                     load_deployment_and_artifacts_or_exit(
                         &manifest,
                         &cmd.deployment_plan_path,
@@ -1316,15 +1347,18 @@ pub fn main() {
 
                 match cmd.output_format {
                     OutputFormat::Json | OutputFormat::JsonPretty => {
-                        let diagnostics: HashMap<String, Vec<Diagnostic>> = artifacts
-                            .diags
-                            .into_iter()
-                            .filter(|(_, diags)| !diags.is_empty())
-                            .filter_map(|(contract_id, diags)| {
-                                let (_, path) = deployment.contracts.get(&contract_id)?;
-                                Some((path.to_string_lossy().to_string(), diags))
-                            })
-                            .collect();
+                        let mut diagnostics: HashMap<String, Vec<LintDiagnostic>> = HashMap::new();
+                        for (contract_id, diags) in artifacts.diags {
+                            let Some((_, path)) = deployment.contracts.get(&contract_id) else {
+                                continue;
+                            };
+                            let key = path.to_string_lossy().to_string();
+                            let entry = diagnostics.entry(key).or_default();
+                            entry.extend(diags.into_iter().map(LintDiagnostic::from));
+                            if let Some(lds) = artifacts.lint_diags.remove(&contract_id) {
+                                entry.extend(lds);
+                            }
+                        }
                         let environment = environment.to_string();
                         let output = JsonCheckOutput {
                             success: artifacts.success,
@@ -1349,7 +1383,11 @@ pub fn main() {
                                 }
                             }
                         }
-                        let diags_digest = DiagnosticsDigest::new(&artifacts.diags, &deployment);
+                        let diags_digest = DiagnosticsDigest::new(
+                            &artifacts.diags,
+                            &artifacts.lint_diags,
+                            &deployment,
+                        );
                         if diags_digest.has_feedbacks() {
                             println!("{}", diags_digest.message);
                         }
@@ -1496,7 +1534,6 @@ pub fn main() {
 }
 
 fn print_available_lints(settings: &analysis::Settings) {
-    use clarity::vm::diagnostic::Level;
     use colored::Colorize;
 
     fn colored_level(level: &Level) -> String {
@@ -1799,7 +1836,8 @@ fn load_deployment_if_exists(
     }
 
     if !force_on_disk {
-        match generate_default_deployment(manifest, network, true, Environment::Simnet) {
+        match generate_default_deployment(manifest, network, true, network.deployment_environment())
+        {
             Ok((deployment, _, _)) => {
                 use similar::{ChangeTag, TextDiff};
 
@@ -2262,16 +2300,11 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                 None => {
                     let default_deployment_path =
                         project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
-                    let (deployment, _, _) = generate_default_deployment(
-                        &manifest,
-                        &StacksNetwork::Devnet,
-                        false,
-                        Environment::Simnet,
-                    )
-                    .unwrap_or_else(|message| {
-                        eprintln!("{}", red!(message));
-                        std::process::exit(1);
-                    });
+                    let (deployment, _, _) =
+                        generate_devnet_deployment(&manifest).unwrap_or_else(|message| {
+                            eprintln!("{}", red!(message));
+                            std::process::exit(1);
+                        });
                     write_deployment(&deployment, &default_deployment_path, project_root, true)?;
                     println!(
                         "{} {}",
@@ -3143,24 +3176,26 @@ mod tests {
             contract.clarity_version,
         );
         let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-        let mut analysis_diagnostics = match analysis::run_analysis(
+        let lint_diagnostics = match analysis::run_analysis(
             &mut contract_analysis,
             &mut analysis_db,
             &annotations,
             &settings.repl_settings.analysis,
         ) {
-            Ok(diagnostics) => diagnostics,
-            Err(diagnostics) => {
+            Ok(lint_diags) => lint_diags,
+            Err(lint_diags) => {
                 success = false;
-                diagnostics
+                lint_diags
             }
         };
-        diagnostics.append(&mut analysis_diagnostics);
+        let mut all_diags: Vec<LintDiagnostic> =
+            diagnostics.into_iter().map(LintDiagnostic::from).collect();
+        all_diags.extend(lint_diagnostics);
 
         let filename = "test-contract.clar".to_string();
         let output = JsonCheckOutput {
             success,
-            diagnostics: HashMap::from([(filename.clone(), diagnostics)]),
+            diagnostics: HashMap::from([(filename.clone(), all_diags)]),
             environment: Environment::Simnet.to_string(),
         };
 
@@ -3183,17 +3218,32 @@ mod tests {
                 diags.len()
             );
 
-            // Verify diagnostic structure
+            // Verify diagnostic structure (fields are flattened from Diagnostic)
             let diag = &diags[0];
             assert!(diag["level"].is_string());
             assert!(diag["message"].is_string());
             assert!(diag["spans"].is_array());
 
-            // Verify at least one diagnostic mentions an unused constant
+            // Verify at least one diagnostic mentions an unused constant and has a lint_name
             let messages: Vec<&str> = diags.iter().filter_map(|d| d["message"].as_str()).collect();
             assert!(
                 messages.iter().any(|m| m.contains("never used")),
                 "expected a 'never used' diagnostic, got: {messages:?}"
+            );
+
+            // Verify lint diagnostics include lint_name
+            let lint_diag = diags
+                .iter()
+                .find(|d| {
+                    d["message"]
+                        .as_str()
+                        .is_some_and(|m| m.contains("never used"))
+                })
+                .expect("expected a lint diagnostic");
+            assert_eq!(
+                lint_diag["lint_name"].as_str(),
+                Some("unused_const"),
+                "expected lint_name field on lint diagnostics"
             );
         }
     }

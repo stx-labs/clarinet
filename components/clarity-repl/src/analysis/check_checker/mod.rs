@@ -946,29 +946,24 @@ mod tests {
             )        ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, result)) => {
-                assert_eq!(result.diagnostics.len(), 2);
-                assert_eq!(output.len(), 6);
+                assert_eq!(result.lint_diagnostics.len(), 2);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:6:21: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (var-set p1 p)");
-                assert_eq!(output[2], "                    ^");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:4:29: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[1], format!("{} checker:6:21", blue!("-->")));
+                assert_eq!(output[2], "        (var-set p1 p)");
+                assert_eq!(output[3], "                    ^");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-private (my-func-p (p principal) (b bool))"
                 );
-                assert_eq!(output[5], "                            ^");
+                assert_eq!(output[6], "                            ^");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -986,7 +981,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1003,28 +998,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:2:20: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:2:20", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "    (stx-transfer? amount (as-contract tx-sender) tx-sender)"
                 );
-                assert_eq!(output[2], "                   ^~~~~~");
+                assert_eq!(output[3], "                   ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:26: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted (amount uint))");
-                assert_eq!(output[5], "                         ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted (amount uint))");
+                assert_eq!(output[6], "                         ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1041,28 +1031,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:2:20: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:2:20", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "    (stx-transfer? (+ u10 amount) (as-contract tx-sender) tx-sender)"
                 );
-                assert_eq!(output[2], "                   ^~~~~~~~~~~~~~");
+                assert_eq!(output[3], "                   ^~~~~~~~~~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:31: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (expr-tainted (amount uint))");
-                assert_eq!(output[5], "                              ^~~~~~");
+                assert_eq!(output[5], "(define-public (expr-tainted (amount uint))");
+                assert_eq!(output[6], "                              ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1081,28 +1066,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (stx-transfer? x (as-contract tx-sender) tx-sender)"
                 );
-                assert_eq!(output[2], "                       ^");
+                assert_eq!(output[3], "                       ^");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:30: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (let-tainted (amount uint))");
-                assert_eq!(output[5], "                             ^~~~~~");
+                assert_eq!(output[5], "(define-public (let-tainted (amount uint))");
+                assert_eq!(output[6], "                             ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1122,7 +1102,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1142,7 +1122,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1162,7 +1142,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1182,7 +1162,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1201,44 +1181,36 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 9);
+                assert_eq!(output.len(), 10);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (stx-transfer? x (as-contract tx-sender) tx-sender)"
                 );
-                assert_eq!(output[2], "                       ^");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:36: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[3], "                       ^");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (let-tainted-twice (amount1 uint) (amount2 uint))"
                 );
-                assert_eq!(output[5], "                                   ^~~~~~~");
-                assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:1:51: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[6], "                                   ^~~~~~~");
                 assert_eq!(
                     output[7],
-                    "(define-public (let-tainted-twice (amount1 uint) (amount2 uint))"
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[8],
+                    "(define-public (let-tainted-twice (amount1 uint) (amount2 uint))"
+                );
+                assert_eq!(
+                    output[9],
                     "                                                  ^~~~~~~"
                 );
             }
@@ -1260,29 +1232,24 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:24", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (stx-transfer? x (as-contract tx-sender) tx-sender)"
                 );
-                assert_eq!(output[2], "                       ^");
+                assert_eq!(output[3], "                       ^");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:65: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (let-tainted-twice-filtered-once (amount1 uint) (amount2 uint))");
+                assert_eq!(output[5], "(define-public (let-tainted-twice-filtered-once (amount1 uint) (amount2 uint))");
                 assert_eq!(
-                    output[5],
+                    output[6],
                     "                                                                ^~~~~~~"
                 );
             }
@@ -1305,7 +1272,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1325,7 +1292,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1342,7 +1309,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1359,28 +1326,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:2:20: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (stx-transfer? (if (< u50 u100) amount u100) (as-contract tx-sender) tx-sender)");
+                assert_eq!(output[1], format!("{} checker:2:20", blue!("-->")));
+                assert_eq!(output[2], "    (stx-transfer? (if (< u50 u100) amount u100) (as-contract tx-sender) tx-sender)");
                 assert_eq!(
-                    output[2],
+                    output[3],
                     "                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
                 );
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:34: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (if-not-filtered (amount uint))");
-                assert_eq!(output[5], "                                 ^~~~~~");
+                assert_eq!(output[5], "(define-public (if-not-filtered (amount uint))");
+                assert_eq!(output[6], "                                 ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1399,25 +1361,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:38: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
-                assert_eq!(output[2], "                                     ^~~~~~");
+                assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
+                assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
+                assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:30: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (and-tainted (amount uint))");
-                assert_eq!(output[5], "                             ^~~~~~");
+                assert_eq!(output[5], "(define-public (and-tainted (amount uint))");
+                assert_eq!(output[6], "                             ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1437,7 +1394,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1457,25 +1414,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:38: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
-                assert_eq!(output[2], "                                     ^~~~~~");
+                assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
+                assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
+                assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:35: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (and-filter-after (amount uint))");
-                assert_eq!(output[5], "                                  ^~~~~~");
+                assert_eq!(output[5], "(define-public (and-filter-after (amount uint))");
+                assert_eq!(output[6], "                                  ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1494,25 +1446,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:38: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
-                assert_eq!(output[2], "                                     ^~~~~~");
+                assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
+                assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
+                assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:29: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (or-tainted (amount uint))");
-                assert_eq!(output[5], "                            ^~~~~~");
+                assert_eq!(output[5], "(define-public (or-tainted (amount uint))");
+                assert_eq!(output[6], "                            ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1532,7 +1479,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1552,25 +1499,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:38: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
-                assert_eq!(output[2], "                                     ^~~~~~");
+                assert_eq!(output[1], format!("{} checker:3:38", blue!("-->")));
+                assert_eq!(output[2], "        (unwrap-panic (stx-transfer? amount (as-contract tx-sender) tx-sender))");
+                assert_eq!(output[3], "                                     ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:34: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (or-filter-after (amount uint))");
-                assert_eq!(output[5], "                                 ^~~~~~");
+                assert_eq!(output[5], "(define-public (or-filter-after (amount uint))");
+                assert_eq!(output[6], "                                 ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1587,7 +1529,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1607,35 +1549,28 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:26: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:3:26", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (stx-burn? amount (as-contract tx-sender)))"
                 );
-                assert_eq!(output[2], "                         ^~~~~~");
+                assert_eq!(output[3], "                         ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:35: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted-stx-burn (amount uint))");
-                assert_eq!(output[5], "                                  ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted-stx-burn (amount uint))");
+                assert_eq!(output[6], "                                  ^~~~~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:4:33: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[8], format!("{} checker:4:33", blue!("-->")));
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1652,7 +1587,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1673,35 +1608,28 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:35: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:35", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (ft-burn? stackaroo amount (as-contract tx-sender)))"
                 );
-                assert_eq!(output[2], "                                  ^~~~~~");
+                assert_eq!(output[3], "                                  ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:34: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted-ft-burn (amount uint))");
-                assert_eq!(output[5], "                                 ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted-ft-burn (amount uint))");
+                assert_eq!(output[6], "                                 ^~~~~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:5:42: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[8], format!("{} checker:5:42", blue!("-->")));
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1719,7 +1647,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1740,38 +1668,31 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:39: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:39", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (ft-transfer? stackaroo amount (as-contract tx-sender) tx-sender))"
                 );
-                assert_eq!(output[2], "                                      ^~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:38: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[3], "                                      ^~~~~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (tainted-ft-transfer (amount uint))"
                 );
-                assert_eq!(output[5], "                                     ^~~~~~");
+                assert_eq!(output[6], "                                     ^~~~~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:5:46: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[8], format!("{} checker:5:46", blue!("-->")));
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1789,7 +1710,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1810,35 +1731,28 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:35: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:35", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (ft-mint? stackaroo amount (as-contract tx-sender)))"
                 );
-                assert_eq!(output[2], "                                  ^~~~~~");
+                assert_eq!(output[3], "                                  ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:34: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted-ft-mint (amount uint))");
-                assert_eq!(output[5], "                                 ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted-ft-mint (amount uint))");
+                assert_eq!(output[6], "                                 ^~~~~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:5:42: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[8], format!("{} checker:5:42", blue!("-->")));
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1859,38 +1773,31 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:36: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:36", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (nft-burn? stackaroo identifier (as-contract tx-sender)))"
                 );
-                assert_eq!(output[2], "                                   ^~~~~~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:35: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[3], "                                   ^~~~~~~~~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (tainted-nft-burn (identifier uint))"
                 );
-                assert_eq!(output[5], "                                  ^~~~~~~~~~");
+                assert_eq!(output[6], "                                  ^~~~~~~~~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:5:43: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[8], format!("{} checker:5:43", blue!("-->")));
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1908,7 +1815,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1929,44 +1836,37 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:40: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:40", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (nft-transfer? stackaroo identifier (as-contract tx-sender) tx-sender))"
                 );
                 assert_eq!(
-                    output[2],
+                    output[3],
                     "                                       ^~~~~~~~~~"
                 );
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:39: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
-                assert_eq!(
                     output[4],
-                    "(define-public (tainted-nft-transfer (identifier uint))"
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
                 assert_eq!(
                     output[5],
-                    "                                      ^~~~~~~~~~"
+                    "(define-public (tainted-nft-transfer (identifier uint))"
                 );
                 assert_eq!(
                     output[6],
-                    format!(
-                        "checker:5:47: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    "                                      ^~~~~~~~~~"
                 );
+                assert_eq!(
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
+                );
+                assert_eq!(output[8], format!("{} checker:5:47", blue!("-->")));
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -1984,7 +1884,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2005,38 +1905,31 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:36: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:36", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (nft-mint? stackaroo identifier (as-contract tx-sender)))"
                 );
-                assert_eq!(output[2], "                                   ^~~~~~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:35: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[3], "                                   ^~~~~~~~~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (tainted-nft-mint (identifier uint))"
                 );
-                assert_eq!(output[5], "                                  ^~~~~~~~~~");
+                assert_eq!(output[6], "                                  ^~~~~~~~~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:5:43: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[8], format!("{} checker:5:43", blue!("-->")));
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2054,25 +1947,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (ok (var-set myvar amount))");
-                assert_eq!(output[2], "                       ^~~~~~");
+                assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
+                assert_eq!(output[2], "    (ok (var-set myvar amount))");
+                assert_eq!(output[3], "                       ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:34: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted-var-set (amount uint))");
-                assert_eq!(output[5], "                                 ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted-var-set (amount uint))");
+                assert_eq!(output[6], "                                 ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2090,59 +1978,49 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:37: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:3:37", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "    (ok (map-set mymap {key-name-1: key} {val-name-1: value}))"
                 );
-                assert_eq!(output[2], "                                    ^~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:34: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[3], "                                    ^~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (tainted-map-set (key uint) (value int))"
                 );
-                assert_eq!(output[5], "                                 ^~~");
-                assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:3:55: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
-                );
+                assert_eq!(output[6], "                                 ^~~");
                 assert_eq!(
                     output[7],
-                    "    (ok (map-set mymap {key-name-1: key} {val-name-1: value}))"
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(
-                    output[8],
-                    "                                                      ^~~~~"
-                );
+                assert_eq!(output[8], format!("{} checker:3:55", blue!("-->")));
                 assert_eq!(
                     output[9],
-                    format!(
-                        "checker:2:45: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    "    (ok (map-set mymap {key-name-1: key} {val-name-1: value}))"
                 );
                 assert_eq!(
                     output[10],
-                    "(define-public (tainted-map-set (key uint) (value int))"
+                    "                                                      ^~~~~"
                 );
                 assert_eq!(
                     output[11],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[12],
+                    "(define-public (tainted-map-set (key uint) (value int))"
+                );
+                assert_eq!(
+                    output[13],
                     "                                            ^~~~~"
                 );
             }
@@ -2162,50 +2040,40 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (ok (map-set mymap key value))");
-                assert_eq!(output[2], "                       ^~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:34: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[1], format!("{} checker:3:24", blue!("-->")));
+                assert_eq!(output[2], "    (ok (map-set mymap key value))");
+                assert_eq!(output[3], "                       ^~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (tainted-map-set (key uint) (value int))"
                 );
-                assert_eq!(output[5], "                                 ^~~");
+                assert_eq!(output[6], "                                 ^~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:3:28: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[7], "    (ok (map-set mymap key value))");
-                assert_eq!(output[8], "                           ^~~~~");
-                assert_eq!(
-                    output[9],
-                    format!(
-                        "checker:2:45: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
-                assert_eq!(
-                    output[10],
-                    "(define-public (tainted-map-set (key uint) (value int))"
-                );
+                assert_eq!(output[8], format!("{} checker:3:28", blue!("-->")));
+                assert_eq!(output[9], "    (ok (map-set mymap key value))");
+                assert_eq!(output[10], "                           ^~~~~");
                 assert_eq!(
                     output[11],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[12],
+                    "(define-public (tainted-map-set (key uint) (value int))"
+                );
+                assert_eq!(
+                    output[13],
                     "                                            ^~~~~"
                 );
             }
@@ -2225,59 +2093,49 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:40: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:3:40", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "    (ok (map-insert mymap {key-name-1: key} {val-name-1: value}))"
                 );
-                assert_eq!(output[2], "                                       ^~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:37: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[3], "                                       ^~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (tainted-map-insert (key uint) (value int))"
                 );
-                assert_eq!(output[5], "                                    ^~~");
-                assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:3:58: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
-                );
+                assert_eq!(output[6], "                                    ^~~");
                 assert_eq!(
                     output[7],
-                    "    (ok (map-insert mymap {key-name-1: key} {val-name-1: value}))"
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(
-                    output[8],
-                    "                                                         ^~~~~"
-                );
+                assert_eq!(output[8], format!("{} checker:3:58", blue!("-->")));
                 assert_eq!(
                     output[9],
-                    format!(
-                        "checker:2:48: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    "    (ok (map-insert mymap {key-name-1: key} {val-name-1: value}))"
                 );
                 assert_eq!(
                     output[10],
-                    "(define-public (tainted-map-insert (key uint) (value int))"
+                    "                                                         ^~~~~"
                 );
                 assert_eq!(
                     output[11],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[12],
+                    "(define-public (tainted-map-insert (key uint) (value int))"
+                );
+                assert_eq!(
+                    output[13],
                     "                                               ^~~~~"
                 );
             }
@@ -2297,50 +2155,40 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 12);
+                assert_eq!(output.len(), 14);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:27: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (ok (map-insert mymap key value))");
-                assert_eq!(output[2], "                          ^~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:37: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[1], format!("{} checker:3:27", blue!("-->")));
+                assert_eq!(output[2], "    (ok (map-insert mymap key value))");
+                assert_eq!(output[3], "                          ^~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (tainted-map-insert (key uint) (value int))"
                 );
-                assert_eq!(output[5], "                                    ^~~");
+                assert_eq!(output[6], "                                    ^~~");
                 assert_eq!(
-                    output[6],
-                    format!(
-                        "checker:3:31: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    output[7],
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[7], "    (ok (map-insert mymap key value))");
-                assert_eq!(output[8], "                              ^~~~~");
-                assert_eq!(
-                    output[9],
-                    format!(
-                        "checker:2:48: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
-                assert_eq!(
-                    output[10],
-                    "(define-public (tainted-map-insert (key uint) (value int))"
-                );
+                assert_eq!(output[8], format!("{} checker:3:31", blue!("-->")));
+                assert_eq!(output[9], "    (ok (map-insert mymap key value))");
+                assert_eq!(output[10], "                              ^~~~~");
                 assert_eq!(
                     output[11],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[12],
+                    "(define-public (tainted-map-insert (key uint) (value int))"
+                );
+                assert_eq!(
+                    output[13],
                     "                                               ^~~~~"
                 );
             }
@@ -2360,25 +2208,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:40: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (ok (map-delete mymap {key-name-1: key}))");
-                assert_eq!(output[2], "                                       ^~~");
+                assert_eq!(output[1], format!("{} checker:3:40", blue!("-->")));
+                assert_eq!(output[2], "    (ok (map-delete mymap {key-name-1: key}))");
+                assert_eq!(output[3], "                                       ^~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:37: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted-map-delete (key uint))");
-                assert_eq!(output[5], "                                    ^~~");
+                assert_eq!(output[5], "(define-public (tainted-map-delete (key uint))");
+                assert_eq!(output[6], "                                    ^~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2398,28 +2241,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:5:21: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (contract-call? untrusted multiply a b)");
-                assert_eq!(output[2], "                    ^~~~~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:4:30: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[1], format!("{} checker:5:21", blue!("-->")));
+                assert_eq!(output[2], "    (contract-call? untrusted multiply a b)");
+                assert_eq!(output[3], "                    ^~~~~~~~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (my-multiply (untrusted <multiplier>) (a uint) (b uint))"
                 );
-                assert_eq!(output[5], "                             ^~~~~~~~~");
+                assert_eq!(output[6], "                             ^~~~~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2442,7 +2280,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2462,25 +2300,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:5:18: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (my-transfer amount)");
-                assert_eq!(output[2], "                 ^~~~~~");
+                assert_eq!(output[1], format!("{} checker:5:18", blue!("-->")));
+                assert_eq!(output[2], "    (my-transfer amount)");
+                assert_eq!(output[3], "                 ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:4:26: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted (amount uint))");
-                assert_eq!(output[5], "                         ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted (amount uint))");
+                assert_eq!(output[6], "                         ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2500,25 +2333,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:2:14: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (my-func amount)");
-                assert_eq!(output[2], "             ^~~~~~");
+                assert_eq!(output[1], format!("{} checker:2:14", blue!("-->")));
+                assert_eq!(output[2], "    (my-func amount)");
+                assert_eq!(output[3], "             ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:26: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted (amount uint))");
-                assert_eq!(output[5], "                         ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted (amount uint))");
+                assert_eq!(output[6], "                         ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2542,28 +2370,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:4:30: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:4:30", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))"
                 );
-                assert_eq!(output[2], "                             ^~~~~~");
+                assert_eq!(output[3], "                             ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:31: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-private (my-transfer (amount uint))");
-                assert_eq!(output[5], "                              ^~~~~~");
+                assert_eq!(output[5], "(define-private (my-transfer (amount uint))");
+                assert_eq!(output[6], "                              ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2581,25 +2404,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:5: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "    (ok amount)");
-                assert_eq!(output[2], "    ^~~~~~~~~~~");
+                assert_eq!(output[1], format!("{} checker:3:5", blue!("-->")));
+                assert_eq!(output[2], "    (ok amount)");
+                assert_eq!(output[3], "    ^~~~~~~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:27: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-private (my-func (amount uint))");
-                assert_eq!(output[5], "                          ^~~~~~");
+                assert_eq!(output[5], "(define-private (my-func (amount uint))");
+                assert_eq!(output[6], "                          ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2620,7 +2438,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2641,7 +2459,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2662,7 +2480,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2683,7 +2501,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2701,7 +2519,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2721,7 +2539,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation:"),
         };
@@ -2739,7 +2557,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2760,28 +2578,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:5:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:5:24", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (stx-transfer? amount (as-contract tx-sender) tx-sender)"
                 );
-                assert_eq!(output[2], "                       ^~~~~~");
+                assert_eq!(output[3], "                       ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:26: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted (amount uint))");
-                assert_eq!(output[5], "                         ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted (amount uint))");
+                assert_eq!(output[6], "                         ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2802,28 +2615,23 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:3:30: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:3:30", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (try! (stx-transfer? amount (as-contract tx-sender) tx-sender))"
                 );
-                assert_eq!(output[2], "                             ^~~~~~");
+                assert_eq!(output[3], "                             ^~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:1:26: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (tainted (amount uint))");
-                assert_eq!(output[5], "                         ^~~~~~");
+                assert_eq!(output[5], "(define-public (tainted (amount uint))");
+                assert_eq!(output[6], "                         ^~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2856,7 +2664,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2893,7 +2701,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2915,7 +2723,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2937,7 +2745,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2959,7 +2767,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -2981,7 +2789,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3009,31 +2817,26 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:6:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
+                assert_eq!(output[1], format!("{} checker:6:24", blue!("-->")));
                 assert_eq!(
-                    output[1],
+                    output[2],
                     "        (stx-transfer? (+ amount1 amount2) (as-contract tx-sender) tx-sender)"
                 );
-                assert_eq!(output[2], "                       ^~~~~~~~~~~~~~~~~~~");
-                assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:29: {} source of untrusted input here",
-                        blue!("note:")
-                    )
-                );
+                assert_eq!(output[3], "                       ^~~~~~~~~~~~~~~~~~~");
                 assert_eq!(
                     output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
+                );
+                assert_eq!(
+                    output[5],
                     "(define-public (filter_one (amount1 uint) (amount2 uint))"
                 );
-                assert_eq!(output[5], "                            ^~~~~~~");
+                assert_eq!(output[6], "                            ^~~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3062,7 +2865,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3083,7 +2886,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3116,7 +2919,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3143,7 +2946,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3171,7 +2974,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3198,25 +3001,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:5:28: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (ok (var-set owner address))");
-                assert_eq!(output[2], "                           ^~~~~~~");
+                assert_eq!(output[1], format!("{} checker:5:28", blue!("-->")));
+                assert_eq!(output[2], "        (ok (var-set owner address))");
+                assert_eq!(output[3], "                           ^~~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:28: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (set-owner (address principal))");
-                assert_eq!(output[5], "                           ^~~~~~~");
+                assert_eq!(output[5], "(define-public (set-owner (address principal))");
+                assert_eq!(output[6], "                           ^~~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3243,7 +3041,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3271,7 +3069,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3298,25 +3096,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:5:28: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (ok (var-set owner address))");
-                assert_eq!(output[2], "                           ^~~~~~~");
+                assert_eq!(output[1], format!("{} checker:5:28", blue!("-->")));
+                assert_eq!(output[2], "        (ok (var-set owner address))");
+                assert_eq!(output[3], "                           ^~~~~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:2:28: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (set-owner (address principal))");
-                assert_eq!(output[5], "                           ^~~~~~~");
+                assert_eq!(output[5], "(define-public (set-owner (address principal))");
+                assert_eq!(output[6], "                           ^~~~~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3352,7 +3145,7 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((_, result)) => {
-                assert_eq!(result.diagnostics.len(), 0);
+                assert_eq!(result.lint_diagnostics.len(), 0);
             }
             _ => panic!("Expected successful interpretation"),
         };
@@ -3389,25 +3182,20 @@ mod tests {
         ").to_string();
         match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
             Ok((output, _)) => {
-                assert_eq!(output.len(), 6);
+                assert_eq!(output.len(), 7);
                 assert_eq!(
                     output[0],
-                    format!(
-                        "checker:14:24: {} use of potentially unchecked data",
-                        yellow!("warning:")
-                    )
+                    format!("{} use of potentially unchecked data", yellow!("warning:"))
                 );
-                assert_eq!(output[1], "        (var-set saved arg1)");
-                assert_eq!(output[2], "                       ^~~~");
+                assert_eq!(output[1], format!("{} checker:14:24", blue!("-->")));
+                assert_eq!(output[2], "        (var-set saved arg1)");
+                assert_eq!(output[3], "                       ^~~~");
                 assert_eq!(
-                    output[3],
-                    format!(
-                        "checker:11:29: {} source of untrusted input here",
-                        blue!("note:")
-                    )
+                    output[4],
+                    format!("{} source of untrusted input here", blue!("note:"))
                 );
-                assert_eq!(output[4], "(define-public (handle-one (arg1 uint))");
-                assert_eq!(output[5], "                            ^~~~");
+                assert_eq!(output[5], "(define-public (handle-one (arg1 uint))");
+                assert_eq!(output[6], "                            ^~~~");
             }
             _ => panic!("Expected successful interpretation"),
         };

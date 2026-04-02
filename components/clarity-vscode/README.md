@@ -71,9 +71,9 @@ Stacks Labs welcomes feedback, comments and suggestions to improve this extensio
 
 ### Run the extension locally
 
-You'll need to have Rust, Node.js and NPM installed.
+You'll need to have Rust, Node.js and pnpm installed.
 
-From the `./components/clarity-vscode`, run `npm install` to install the dependencies and `npm run dev` to start the extension in a Chromium instance.
+From the `./components/clarity-vscode`, run `pnpm install` to install the dependencies and `pnpm run dev` to start the extension in a Chromium instance.
 
 ### Structure
 

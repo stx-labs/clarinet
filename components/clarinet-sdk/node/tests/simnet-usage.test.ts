@@ -14,7 +14,7 @@ const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 let simnet: Simnet;
 
 const nbOfBootContracts = 26;
-const latestEpochStr = "3.3";
+const latestEpochStr = "3.4";
 
 const deploymentPlanPath = path.join(
   process.cwd(),

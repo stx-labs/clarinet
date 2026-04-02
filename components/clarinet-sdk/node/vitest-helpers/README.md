@@ -11,5 +11,5 @@ This directory contains its own tests that are run in the parent directory (`cla
 
 ```sh
 cd clarinet/components/clarinet-sdk
-npm test # will run both sdk and custom matcher unit tests
+pnpm test # will run both sdk and custom matcher unit tests
 ```

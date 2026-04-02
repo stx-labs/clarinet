@@ -38,20 +38,20 @@ wasm-pack (install [wasm-pack](https://drager.github.io/wasm-pack/installer)).
 
 ```sh
 # build the wasm package
-npm run build:sdk-wasm
+pnpm run build:sdk-wasm
 # install dependencies and build the node package
-npm install
+pnpm install
 # make sure the installation works
-npm test
+pnpm test
 ```
 
 ### Release
 
-The Node.js and browser versions can be published with this single command.  
+The Node.js and browser versions can be published with this single command.
 Make sure to check the check both packages versions first.
 
 ```sh
 # the wasm package must be published first
-# $ npm run publish:sdk-wasm
-npm run publish:sdk
+# $ pnpm run publish:sdk-wasm
+pnpm run publish:sdk
 ```

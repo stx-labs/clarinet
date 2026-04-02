@@ -58,22 +58,22 @@ cargo fmt-stacks --check
 - `clarinet-sdk` - TypeScript wrapper around `clarinet-sdk-wasm`
 
 Exposes some of the CLI features thanks to Wasm, and contains the Clarity unit testing framework.
-The NPM workspace is configureed in the root `./package.json`
+The pnpm workspace is configured in `./pnpm-workspace.yaml`
 
 ### Commands
 
 ```bash
 # Compile the Wasm bindgen (required before SDK tests)
-npm run build:sdk-wasm
+pnpm run build:sdk-wasm
 
 # Build the SDK
-npm run build:sdk
+pnpm run build:sdk
 
 # Run all SDK tests
-npm test -w components/clarinet-sdk/node
+pnpm --filter ./components/clarinet-sdk/node run test
 
 # Run tests matching a pattern
-npm test -w components/clarinet-sdk/node -- tests/<filename>.test.ts -t <test name pattern>
+pnpm --filter ./components/clarinet-sdk/node run test -- tests/<filename>.test.ts -t <test name pattern>
 
 # Run clippy
 cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
@@ -91,10 +91,10 @@ It has it's own `package.json` in `./components/clarity-vscode/package.json`
 The commands have to run in the `components/clarity-vscode`
 ```bash
 # Build the extension
-npm run vsce:package
+pnpm run vsce:package
 
 # Run end-to-end tests
-npm test
+pnpm test
 ```
 
 ## Key Dependencies

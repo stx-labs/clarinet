@@ -41,6 +41,9 @@ jobs:
         with:
           target-cache-key: ${{ runner.os }}-${{ github.job }}
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
@@ -48,14 +51,14 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./components/clarity-vscode
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Run clippy (wasm target)
         run: cargo clippy --target=wasm32-unknown-unknown --no-default-features --package=clarity-lsp
 
       - name: Run eslint
         working-directory: ./components/clarity-vscode
-        run: npm run lint
+        run: pnpm run lint
 
   build_and_test:
     name: Build and test
@@ -86,6 +89,9 @@ jobs:
         with:
           target-cache-key: ${{ runner.os }}-${{ github.job }}
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
@@ -93,8 +99,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./components/clarity-vscode
-        run: npm ci
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: ./components/clarity-vscode
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run tests
         working-directory: ./components/clarity-vscode
-        run: npm test
+        run: pnpm test

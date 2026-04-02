@@ -130,19 +130,18 @@ impl Lint for CaseBinding<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::ExecutionResult;
     use clarity_types::diagnostic::{Diagnostic, Level};
     use indoc::indoc;
 
     use super::CaseBinding;
     use crate::analysis::linter::Lint;
     use crate::analysis::util::CaseError;
-    use crate::repl::session::Session;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
 
     fn run_snippet_no_panic(
         snippet: String,
-    ) -> Result<(Vec<String>, ExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
+    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -157,7 +156,7 @@ mod tests {
         )
     }
 
-    fn run_snippet(snippet: String) -> (Vec<String>, ExecutionResult) {
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
         run_snippet_no_panic(snippet).expect("Invalid code snippet")
     }
 
@@ -174,7 +173,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -187,7 +186,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -207,8 +206,8 @@ mod tests {
             &CaseError::IllegalCharacter(b'_'),
         );
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(binding_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -229,8 +228,8 @@ mod tests {
             &CaseError::IllegalCharacter(b'A'),
         );
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(arg_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -252,8 +251,8 @@ mod tests {
             &CaseError::ConsecutiveHyphens,
         );
 
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(output[0].contains("warning:"));
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(output[0].contains("warning["));
         assert!(output[0].contains(binding_name));
         assert!(output[0].contains(&expected_message));
     }
@@ -270,7 +269,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -284,7 +283,7 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 0);
+        assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
     #[test]
@@ -299,6 +298,6 @@ mod tests {
 
         let (_, result) = run_snippet(snippet);
 
-        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(result.lint_diagnostics.len(), 2);
     }
 }

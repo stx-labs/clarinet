@@ -2,8 +2,43 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use clarinet_files::{ProjectManifest, ProjectManifestFile};
+use clarinet_deployments::load_deployment;
+use clarinet_deployments::types::TransactionSpecification;
+use clarinet_files::{ProjectManifest, ProjectManifestFile, StacksNetwork};
+use clarinet_lib::deployments::generate_devnet_deployment;
+use clarinet_lib::frontend::cli::load_manifest_or_exit;
 use indoc::{formatdoc, indoc};
+
+const ENV_SIMNET_CONTRACT_SOURCE: &str = indoc! {r#"
+    (define-public (double (n uint))
+      (ok (* n u2))
+    )
+
+    ;; #[env(simnet)]
+    (define-private (test-double)
+      (ok (asserts! (is-eq (ok u8) (double u4)) (err "fail")))
+    )
+"#};
+
+/// Create a new project with a contract containing `#[env(simnet)]` code.
+/// Returns `(temp_dir, project_path)`.
+#[track_caller]
+fn create_project_with_env_simnet(project_name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(&contract_path, ENV_SIMNET_CONTRACT_SOURCE).unwrap();
+
+    (temp_dir, project_path)
+}
 
 #[track_caller]
 fn parse_manifest(project_dir: &Path) -> ProjectManifest {
@@ -530,4 +565,166 @@ fn test_check_skips_requirement_lint_warnings() {
             );
         }
     }
+}
+
+/// `clarinet check` (project-wide, standard output) should display lint warnings
+/// from `DiagnosticsDigest`, not just in JSON mode.
+#[test]
+fn test_check_project_standard_output_shows_lint_warnings() {
+    let project_name = "test_std_lint_output";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(&contract_path, "(define-constant MY_UNUSED_CONST u42)\n")
+        .expect("Failed to write contract");
+
+    strip_toml_section(&project_path.join("Clarinet.toml"), "[repl.analysis]");
+
+    // Run clarinet check with standard output (no --output json)
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["check"])
+        .env("NO_COLOR", "1")
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute clarinet check");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("warning") && stdout.contains("never used"),
+        "expected lint warning in standard output, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("warning detected"),
+        "expected warning count in standard output, got:\n{stdout}"
+    );
+}
+
+/// Devnet deployments should strip `#[env(simnet)]` code from contract sources.
+/// This tests the fix for https://github.com/hirosystems/clarinet/issues/2338.
+#[test]
+fn test_devnet_deployment_strips_env_simnet() {
+    let (_temp_dir, project_path) = create_project_with_env_simnet("test_env_simnet_devnet");
+
+    let manifest_path = project_path
+        .join("Clarinet.toml")
+        .to_string_lossy()
+        .to_string();
+    let manifest = load_manifest_or_exit(Some(manifest_path), false);
+
+    let (deployment, _, found_env_simnet) =
+        generate_devnet_deployment(&manifest).expect("Failed to generate devnet deployment");
+
+    assert!(
+        found_env_simnet,
+        "should detect #[env(simnet)] annotations in the source"
+    );
+
+    // Devnet uses ContractPublish (real transactions), not EmulatedContractPublish.
+    // Verify the simnet-only code was stripped from every contract source.
+    for batch in &deployment.plan.batches {
+        for tx in &batch.transactions {
+            if let TransactionSpecification::ContractPublish(spec) = tx {
+                assert!(
+                    spec.source.contains("double"),
+                    "non-simnet code should be preserved, got:\n{}",
+                    spec.source
+                );
+                assert!(
+                    !spec.source.contains("test-double"),
+                    "#[env(simnet)] code should be stripped from devnet ContractPublish source, got:\n{}",
+                    spec.source
+                );
+            }
+        }
+    }
+
+    // Also check the contracts map used for analysis.
+    for (source, _) in deployment.contracts.values() {
+        assert!(
+            !source.contains("test-double"),
+            "#[env(simnet)] code should be stripped from devnet contracts map, got:\n{source}"
+        );
+    }
+}
+
+/// `clarinet deployments generate --devnet` should produce a deployment plan
+/// whose cost reflects the stripped (shorter) source, not the full source.
+#[test]
+fn test_deployments_generate_devnet_strips_env_simnet() {
+    let (_temp_dir, project_path) =
+        create_project_with_env_simnet("test_deploy_gen_devnet_env_simnet");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["deployments", "generate", "--devnet"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "clarinet deployments generate --devnet failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Load the generated plan. `load_deployment` re-reads the .clar source from
+    // disk (unstripped), but preserves the `cost` field from the YAML — which was
+    // computed from the stripped source during generation.
+    let yaml_path = project_path
+        .join("deployments")
+        .join("default.devnet-plan.yaml");
+    let deployment = load_deployment(&project_path, &yaml_path)
+        .expect("failed to load generated devnet deployment");
+
+    let full_source =
+        fs::read_to_string(project_path.join("contracts").join("my-contract.clar")).unwrap();
+    let default_fee_rate: u64 = 10;
+    let full_cost = default_fee_rate * full_source.len() as u64;
+
+    for batch in &deployment.plan.batches {
+        for tx in &batch.transactions {
+            if let TransactionSpecification::ContractPublish(spec) = tx {
+                assert!(
+                    spec.cost < full_cost,
+                    "cost should reflect stripped source (expected < {full_cost}, got {})",
+                    spec.cost
+                );
+            }
+        }
+    }
+}
+
+/// `deployment_environment()` should return `OnChain` for all non-simnet networks.
+/// This ensures `#[env(simnet)]` code is stripped for devnet, testnet, and mainnet.
+#[test]
+fn test_deployment_environment_mapping() {
+    use clarity_repl::utils::Environment;
+
+    assert_eq!(
+        StacksNetwork::Simnet.deployment_environment(),
+        Environment::Simnet,
+        "simnet should keep #[env(simnet)] code"
+    );
+    assert_eq!(
+        StacksNetwork::Devnet.deployment_environment(),
+        Environment::OnChain,
+        "devnet should strip #[env(simnet)] code"
+    );
+    assert_eq!(
+        StacksNetwork::Testnet.deployment_environment(),
+        Environment::OnChain,
+        "testnet should strip #[env(simnet)] code"
+    );
+    assert_eq!(
+        StacksNetwork::Mainnet.deployment_environment(),
+        Environment::OnChain,
+        "mainnet should strip #[env(simnet)] code"
+    );
 }

@@ -8,6 +8,7 @@ node_modules
 target
 index.node
 npm-debug.log*
+pnpm-debug.log*
 **/settings/Mainnet.toml
 **/settings/Testnet.toml
 **/.requirements

@@ -11,6 +11,7 @@ use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
+use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
 use clarity_repl::utils::remove_env_simnet;
 use serde::{Deserialize, Serialize};
@@ -150,6 +151,7 @@ pub struct DeploymentGenerationArtifacts {
     pub asts: BTreeMap<QualifiedContractIdentifier, ContractAST>,
     pub deps: BTreeMap<QualifiedContractIdentifier, DependencySet>,
     pub diags: HashMap<QualifiedContractIdentifier, Vec<Diagnostic>>,
+    pub lint_diags: HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>>,
     pub analysis: HashMap<QualifiedContractIdentifier, ContractAnalysis>,
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
     pub session: Session,
@@ -1608,6 +1610,87 @@ mod tests {
 
     #[test]
     fn test_epoch_config_with_custom_epochs() {
+        let devnet_config = DevnetConfig {
+            epoch_2_0: 1,
+            epoch_2_05: 2,
+            epoch_2_1: 3,
+            epoch_2_2: 4,
+            epoch_2_3: 5,
+            epoch_2_4: 6,
+            epoch_2_5: 7,
+            epoch_3_0: 8,
+            epoch_3_1: 9,
+            epoch_3_2: 10,
+            epoch_3_3: 11,
+            epoch_3_4: 12,
+            epoch_3_5: Some(13),
+            ..Default::default()
+        };
+
+        let epoch_config = BurnchainEpochConfig::from(&devnet_config);
+        let epoch_config_toml = toml::to_string(&epoch_config).unwrap();
+
+        assert_eq!(
+            epoch_config_toml,
+            indoc! { r#"
+                [[burnchain.epochs]]
+                epoch_name = "2.0"
+                start_height = 1
+
+                [[burnchain.epochs]]
+                epoch_name = "2.05"
+                start_height = 2
+
+                [[burnchain.epochs]]
+                epoch_name = "2.1"
+                start_height = 3
+
+                [[burnchain.epochs]]
+                epoch_name = "2.2"
+                start_height = 4
+
+                [[burnchain.epochs]]
+                epoch_name = "2.3"
+                start_height = 5
+
+                [[burnchain.epochs]]
+                epoch_name = "2.4"
+                start_height = 6
+
+                [[burnchain.epochs]]
+                epoch_name = "2.5"
+                start_height = 7
+
+                [[burnchain.epochs]]
+                epoch_name = "3.0"
+                start_height = 8
+
+                [[burnchain.epochs]]
+                epoch_name = "3.1"
+                start_height = 9
+
+                [[burnchain.epochs]]
+                epoch_name = "3.2"
+                start_height = 10
+
+                [[burnchain.epochs]]
+                epoch_name = "3.3"
+                start_height = 11
+
+                [[burnchain.epochs]]
+                epoch_name = "3.4"
+                start_height = 12
+
+                [[burnchain.epochs]]
+                epoch_name = "3.5"
+                start_height = 13
+                "#
+            }
+        );
+    }
+
+    #[test]
+    fn test_epoch_config_with_optional_next_epoch() {
         let devnet_config = DevnetConfig {
             epoch_2_0: 1,
             epoch_2_05: 2,

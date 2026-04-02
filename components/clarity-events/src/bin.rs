@@ -45,7 +45,7 @@ pub fn main() {
             let snippet = paths::read_content_as_utf8(Path::new(&cmd.file_path)).unwrap();
             let mut session = Session::new(SessionSettings::default());
             let mut contract_analysis = match session.eval(snippet, false) {
-                Ok(execution) => match execution.result {
+                Ok(execution) => match execution.into_inner().result {
                     EvaluationResult::Contract(evaluation) => evaluation.contract.analysis,
                     _ => {
                         println!("empty contract");
