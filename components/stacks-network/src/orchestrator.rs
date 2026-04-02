@@ -179,6 +179,12 @@ impl DevnetOrchestrator {
 
     async fn pull_image(&self, image_url: &str, platform: String) -> Result<(), String> {
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
+
+        // Check if the image already exists locally before trying to pull
+        if docker.inspect_image(image_url).await.is_ok() {
+            return Ok(());
+        }
+
         docker
             .create_image(
                 Some(CreateImageOptions {

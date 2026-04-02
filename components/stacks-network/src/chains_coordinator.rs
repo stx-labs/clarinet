@@ -184,6 +184,7 @@ pub async fn start_chains_coordinator(
 ) -> Result<(), String> {
     let mut should_deploy_protocol = true; // Will change when `stacks-network` components becomes compatible with Testnet / Mainnet setups
     let boot_completed = Arc::new(AtomicBool::new(false));
+    let mut last_pox_version: Option<u32> = None;
     let mut current_burn_height = if using_snapshot {
         SNAPSHOT_BURN_START_HEIGHT
     } else {
@@ -402,6 +403,7 @@ pub async fn start_chains_coordinator(
                                 &config.services_map_hosts,
                                 config.deployment_fee_rate,
                                 bitcoin_block_height as u32,
+                                &mut last_pox_version,
                             )
                             .await;
                             if let Some(tx_count) = res {
@@ -805,6 +807,7 @@ pub async fn publish_stacking_orders(
     services_map_hosts: &ServicesMapHosts,
     fee_rate: u64,
     bitcoin_block_height: u32,
+    last_pox_version: &mut Option<u32>,
 ) -> Option<usize> {
     let node_rpc_url = format!("http://{}", &services_map_hosts.stacks_node_host);
     let pox_info: PoxInfo = match reqwest::get(format!("{node_rpc_url}/v2/pox")).await {
@@ -832,10 +835,6 @@ pub async fn publish_stacking_orders(
     let pox_cycle_length = pox_info.reward_cycle_length;
     let pox_cycle_position = effective_height % pox_cycle_length;
 
-    if pox_cycle_position != 10 {
-        return None;
-    }
-
     let pox_contract_id = pox_info.contract_id;
     let pox_version = pox_contract_id
         .rsplit('-')
@@ -843,14 +842,36 @@ pub async fn publish_stacking_orders(
         .and_then(|version| version.parse().ok())
         .unwrap_or(1); // pox 1 contract is `pox.clar`
 
+    // Detect pox change (pox-4 -> pox-5 after epoch 3.5)
+    let pox_version_changed = match *last_pox_version {
+        Some(prev) => prev != pox_version,
+        None => false,
+    };
+    *last_pox_version = Some(pox_version);
+
+    if !pox_version_changed && pox_cycle_position != 10 {
+        return None;
+    }
+
+    if pox_version_changed {
+        let _ = devnet_event_tx.send(DevnetEvent::info(format!(
+            "PoX contract changed to pox-{pox_version}, re-submitting stacking orders"
+        )));
+    }
+
     let mut transactions = 0;
     for (i, pox_stacking_order) in devnet_config.pox_stacking_orders.iter().enumerate() {
-        if !should_publish_stacking_orders(&current_cycle, pox_stacking_order) {
+        if !pox_version_changed
+            && !should_publish_stacking_orders(&current_cycle, pox_stacking_order)
+        {
             continue;
         }
 
-        // if the is not the first cycle of this stacker, then stacking order will be extended
-        let extend_stacking = current_cycle != pox_stacking_order.start_at_cycle - 1;
+        // if the is not the first cycle of this stacker, then stacking order will be extended.
+        // When the pox version changed, treat as a fresh stake since the new contract has no
+        // existing stacking state for this stacker.
+        let extend_stacking =
+            !pox_version_changed && current_cycle != pox_stacking_order.start_at_cycle - 1;
         if extend_stacking && !pox_stacking_order.auto_extend.unwrap_or_default() {
             continue;
         }
@@ -961,7 +982,9 @@ pub async fn publish_stacking_orders(
                         duration,
                     );
 
-                    let btc_secret_key = hex_bytes(&account_secret_key).unwrap();
+                    let full_key = hex_bytes(&account_secret_key).unwrap();
+                    // Strip the trailing 0x01 compression flag appended by compute_addresses
+                    let btc_secret_key = &full_key[..32];
                     send_pox5_bitcoin_lockup(
                         &bitcoin_node_host,
                         &bitcoin_node_username,
@@ -1558,18 +1581,17 @@ fn send_pox5_bitcoin_lockup(
     let p2wsh_script = ScriptBuf::new_p2wsh(&script_hash);
 
     let bitcoin_rpc_url = format!("http://{bitcoin_node_host}");
-    let wallet_url = format!("{bitcoin_rpc_url}/wallet/devnet");
     let client = reqwest::blocking::Client::new();
 
-    // List UTXOs for the stacker's BTC address
+    // List UTXOs for the stacker's BTC address (uses default wallet where descriptors are registered)
     let listunspent_resp = client
-        .post(&wallet_url)
+        .post(&bitcoin_rpc_url)
         .basic_auth(bitcoin_node_username, Some(bitcoin_node_password))
         .json(&serde_json::json!({
             "jsonrpc": "1.0",
             "id": "clarinet",
             "method": "listunspent",
-            "params": [100, 9999999, [btc_address]]
+            "params": [0, 9999999, [btc_address]]
         }))
         .send()
         .map_err(|e| format!("Failed to list unspent UTXOs: {e}"))?
@@ -1580,7 +1602,7 @@ fn send_pox5_bitcoin_lockup(
         .as_array()
         .ok_or_else(|| format!("No UTXOs available for pox-5 lockup (address: {btc_address})"))?;
 
-    let lockup_sats: u64 = 10_000;
+    let lockup_sats: u64 = 5_000;
     let fee_sats: u64 = 1_000;
 
     let utxo = utxos
