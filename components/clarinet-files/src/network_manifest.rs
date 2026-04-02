@@ -6,6 +6,7 @@ use clarinet_utils::{get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_
 use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
+use clarity_repl::utils::Environment;
 use libsecp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use toml::value::Value;
@@ -95,11 +96,25 @@ pub enum BitcoinNetwork {
 
 impl StacksNetwork {
     pub fn get_networks(&self) -> (BitcoinNetwork, StacksNetwork) {
-        match &self {
-            StacksNetwork::Simnet => (BitcoinNetwork::Regtest, StacksNetwork::Simnet),
-            StacksNetwork::Devnet => (BitcoinNetwork::Testnet, StacksNetwork::Devnet),
-            StacksNetwork::Testnet => (BitcoinNetwork::Testnet, StacksNetwork::Testnet),
-            StacksNetwork::Mainnet => (BitcoinNetwork::Mainnet, StacksNetwork::Mainnet),
+        use StacksNetwork::*;
+
+        match self {
+            Simnet => (BitcoinNetwork::Regtest, self.clone()),
+            Devnet => (BitcoinNetwork::Testnet, self.clone()),
+            Testnet => (BitcoinNetwork::Testnet, self.clone()),
+            Mainnet => (BitcoinNetwork::Mainnet, self.clone()),
+        }
+    }
+
+    /// Returns the deployment environment for this network.
+    /// Simnet is emulated in-memory; all other networks deploy on-chain
+    /// and should have `#[env(simnet)]` code stripped.
+    pub fn deployment_environment(&self) -> Environment {
+        use StacksNetwork::*;
+
+        match self {
+            Simnet => Environment::Simnet,
+            Devnet | Testnet | Mainnet => Environment::OnChain,
         }
     }
 }
