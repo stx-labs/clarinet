@@ -21,7 +21,7 @@ use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 pub struct UnnecessaryTuple<'a> {
     clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     level: Level,
     active_annotation: Option<usize>,
     /// Pointers to `SymbolicExpression` nodes that are direct arguments to
@@ -30,11 +30,7 @@ pub struct UnnecessaryTuple<'a> {
 }
 
 impl<'a> UnnecessaryTuple<'a> {
-    fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
-        level: Level,
-    ) -> Self {
+    fn new(clarity_version: ClarityVersion, annotations: &'a [Annotation], level: Level) -> Self {
         Self {
             clarity_version,
             level,

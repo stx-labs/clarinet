@@ -50,7 +50,7 @@ pub struct FnMaps<'a> {
 
 pub struct FnMapBuilder<'a> {
     clarity_version: ClarityVersion,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     public: FnMap<'a>,
     read_only: FnMap<'a>,
     private: PrivateFnMap<'a>,
@@ -60,7 +60,7 @@ impl<'a> FnMapBuilder<'a> {
     pub fn build(
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
     ) -> FnMaps<'a> {
         let mut builder = Self {
             clarity_version,

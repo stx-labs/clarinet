@@ -30,7 +30,7 @@ pub type ConstantMap<'a> = IndexMap<&'a ClarityName, ConstantData<'a>>;
 
 pub struct ConstantMapBuilder<'a> {
     clarity_version: ClarityVersion,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     map: ConstantMap<'a>,
 }
 
@@ -38,7 +38,7 @@ impl<'a> ConstantMapBuilder<'a> {
     pub fn build(
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
     ) -> ConstantMap<'a> {
         let mut builder = Self {
             clarity_version,

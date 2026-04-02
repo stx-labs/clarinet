@@ -52,7 +52,7 @@ pub type MapDefinitionMap<'a> = IndexMap<&'a ClarityName, MapData<'a>>;
 
 pub struct MapDefinitionMapBuilder<'a> {
     clarity_version: ClarityVersion,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     map: MapDefinitionMap<'a>,
 }
 
@@ -60,7 +60,7 @@ impl<'a> MapDefinitionMapBuilder<'a> {
     pub fn build(
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
     ) -> MapDefinitionMap<'a> {
         let mut builder = Self {
             clarity_version,
