@@ -45,7 +45,7 @@ use stackslib::util_lib::signed_structured_data::pox4::{
 };
 
 use super::ChainsCoordinatorCommand;
-use crate::command::run_command;
+use crate::command::run_docker_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::orchestrator::{
     copy_directory, get_global_snapshot_dir, get_project_snapshot_dir, ServicesMapHosts,
@@ -1267,7 +1267,8 @@ async fn export_stacks_api_events(
     let export_command = format!(
         "docker exec {container_name} node /app/lib/index.js export-events --file /tmp/events_cache.tsv --overwrite-file"
     );
-    let output = run_command(&export_command)
+    let docker_host = config.devnet_config.docker_host.as_deref();
+    let output = run_docker_command(&export_command, docker_host)
         .map_err(|e| format!("Failed to execute export command: {e}"))?;
 
     if !output.status.success() {
@@ -1291,8 +1292,8 @@ async fn export_stacks_api_events(
         export_path.join("events_cache.tsv").display()
     );
 
-    let output =
-        run_command(&copy_command).map_err(|e| format!("Failed to copy events file: {e}"))?;
+    let output = run_docker_command(&copy_command, docker_host)
+        .map_err(|e| format!("Failed to copy events file: {e}"))?;
 
     if !output.status.success() {
         return Err(format!(
