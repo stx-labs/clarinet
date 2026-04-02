@@ -42,7 +42,7 @@ pub use unused_trait::UnusedTrait;
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
     use super::{CaseConst, UnusedConst};

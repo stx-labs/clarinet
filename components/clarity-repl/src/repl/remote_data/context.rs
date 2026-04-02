@@ -1,12 +1,11 @@
 use clarity::types::StacksEpochId;
+use clarity::vm::analysis::errors::{StaticCheckError, StaticCheckErrorKind};
 use clarity::vm::callables::{DefineType, DefinedFunction};
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::errors::SyntaxBindingErrorType;
 use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::types::parse_name_type_pairs;
 use clarity::vm::{ClarityName, ContractContext, SymbolicExpression};
-use clarity_types::errors::analysis::StaticCheckError;
-use clarity_types::errors::StaticCheckErrorKind;
 
 fn handle_function(
     epoch_id: &StacksEpochId,

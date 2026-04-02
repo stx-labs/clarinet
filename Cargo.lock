@@ -785,7 +785,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/hstove-stacks/stacks-core.git?rev=6bd37369111e0d6d31b50e1b8f6853ec4677e445#6bd37369111e0d6d31b50e1b8f6853ec4677e445"
+source = "git+https://github.com/hstove-stacks/stacks-core.git?branch=pox-5-integration#f5424f1ea2f3c3e8ad59e6a0cb76a0a725d29e45"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -900,7 +900,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/hstove-stacks/stacks-core.git?rev=6bd37369111e0d6d31b50e1b8f6853ec4677e445#6bd37369111e0d6d31b50e1b8f6853ec4677e445"
+source = "git+https://github.com/hstove-stacks/stacks-core.git?branch=pox-5-integration#f5424f1ea2f3c3e8ad59e6a0cb76a0a725d29e45"
 dependencies = [
  "lazy_static",
  "regex",
@@ -2485,7 +2485,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/hstove-stacks/stacks-core.git?rev=6bd37369111e0d6d31b50e1b8f6853ec4677e445#6bd37369111e0d6d31b50e1b8f6853ec4677e445"
+source = "git+https://github.com/hstove-stacks/stacks-core.git?branch=pox-5-integration#f5424f1ea2f3c3e8ad59e6a0cb76a0a725d29e45"
 dependencies = [
  "clarity",
  "serde",
@@ -3027,7 +3027,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/hstove-stacks/stacks-core.git?rev=6bd37369111e0d6d31b50e1b8f6853ec4677e445#6bd37369111e0d6d31b50e1b8f6853ec4677e445"
+source = "git+https://github.com/hstove-stacks/stacks-core.git?branch=pox-5-integration#f5424f1ea2f3c3e8ad59e6a0cb76a0a725d29e45"
 dependencies = [
  "clarity",
  "slog",
@@ -4218,7 +4218,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/hstove-stacks/stacks-core.git?rev=6bd37369111e0d6d31b50e1b8f6853ec4677e445#6bd37369111e0d6d31b50e1b8f6853ec4677e445"
+source = "git+https://github.com/hstove-stacks/stacks-core.git?branch=pox-5-integration#f5424f1ea2f3c3e8ad59e6a0cb76a0a725d29e45"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4307,7 +4307,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/hstove-stacks/stacks-core.git?rev=6bd37369111e0d6d31b50e1b8f6853ec4677e445#6bd37369111e0d6d31b50e1b8f6853ec4677e445"
+source = "git+https://github.com/hstove-stacks/stacks-core.git?branch=pox-5-integration#f5424f1ea2f3c3e8ad59e6a0cb76a0a725d29e45"
 dependencies = [
  "clarity",
  "ed25519-dalek",
