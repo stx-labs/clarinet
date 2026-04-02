@@ -1,12 +1,13 @@
 use clarity::vm::diagnostic::{Diagnostic, Level};
 
 use crate::analysis::linter::LintName;
+use crate::analysis::LintDiagnostic;
 
 /// Format the level string, including the lint name if provided.
 ///
 /// With a lint name: `warning[unused_const]:`
 /// Without: `warning:`
-fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
+pub fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
     let level_str = match level {
         Level::Note => blue!("note"),
         Level::Warning => yellow!("warning"),
@@ -25,30 +26,40 @@ fn level_to_string(level: &Level, lint_name: Option<&LintName>) -> String {
 // Generate the formatted output for this diagnostic, given the source code.
 // TODO: Preferably a filename would be saved in the Span, but for now, pass a name here.
 pub fn output_diagnostic(
-    diagnostic: &Diagnostic,
+    lint_diagnostic: &LintDiagnostic,
     name: &str,
     lines: &[String],
-    lint_name: Option<&LintName>,
 ) -> Vec<String> {
     let mut output = Vec::new();
+    let diagnostic = &lint_diagnostic.diagnostic;
 
-    if !diagnostic.spans.is_empty() {
+    let level_str = level_to_string(&diagnostic.level, lint_diagnostic.lint_name.as_ref());
+
+    match diagnostic.level {
+        Level::Note => {
+            output.push(format!("{level_str} {}", diagnostic.message));
+            output.append(&mut output_code(diagnostic, lines));
+            return output;
+        }
+        _ => {
+            output.push(format!("{level_str} {}", diagnostic.message));
+        }
+    }
+
+    if let Some(span) = diagnostic.spans.first() {
         output.push(format!(
-            "{}:{}:{}: {} {}",
-            name, // diagnostic.spans[0].filename,
-            diagnostic.spans[0].start_line,
-            diagnostic.spans[0].start_column,
-            level_to_string(&diagnostic.level, lint_name),
-            diagnostic.message,
-        ));
-    } else {
-        output.push(format!(
-            "{} {}",
-            level_to_string(&diagnostic.level, lint_name),
-            diagnostic.message,
+            "{} {name}:{}:{}",
+            blue!("-->"),
+            span.start_line,
+            span.start_column
         ));
     }
     output.append(&mut output_code(diagnostic, lines));
+
+    if let Some(ref suggestion) = diagnostic.suggestion {
+        output.push(suggestion.to_string());
+    }
+
     output
 }
 
