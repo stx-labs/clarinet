@@ -23,15 +23,6 @@ update_package_json() {
     # Update package version
     sed -i'' -e "s/\"version\": \".*\"/\"version\": \"$version\"/" "$file"
 
-    # If this is a SDK package, also update the wasm dependency
-    if [[ $file == *"clarinet-sdk"* ]]; then
-        sed -i'' -e "s/\"@clarinet\/sdk-wasm\": \".*\"/\"@clarinet\/sdk-wasm\": \"$version\"/" "$file"
-        # Update @stacks/clarinet-sdk-wasm dependency for node package
-        sed -i'' -e "s/\"@stacks\/clarinet-sdk-wasm\": \".*\"/\"@stacks\/clarinet-sdk-wasm\": \"$version\"/" "$file"
-        # Update @stacks/clarinet-sdk-wasm-browser dependency for browser package
-        sed -i'' -e "s/\"@stacks\/clarinet-sdk-wasm-browser\": \".*\"/\"@stacks\/clarinet-sdk-wasm-browser\": \"$version\"/" "$file"
-    fi
-
     echo "Updated version in $file to $version"
 }
 
@@ -64,6 +55,11 @@ pnpm run build:sdk-wasm
 echo "Updating clarity-vscode..."
 update_package_json "components/clarity-vscode/package.json" "$NEW_VERSION"
 (cd components/clarity-vscode && pnpm install)
+
+# Update @stacks/clarinet-sdk and @stacks/clarinet-sdk-browser
+echo "Updating clarinet-sdk..."
+update_package_json "components/clarinet-sdk/node/package.json" "$NEW_VERSION"
+update_package_json "components/clarinet-sdk/browser/package.json" "$NEW_VERSION"
 
 # Install all deps from root to properly handle workspaces
 echo "Installing deps from root..."
