@@ -27,7 +27,6 @@ chrono = { workspace = true }
 colored = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 regex = { workspace = true }
-reqwest = { workspace = true, features = ["blocking"] }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["unbounded_depth"] }
@@ -38,6 +37,7 @@ indoc = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clarity = { workspace = true, default-features = false, features = ["rusqlite", "developer-mode", "devtools"] }
+reqwest = { workspace = true, features = ["blocking"] }
 clarity-types = { workspace = true, features = ["developer-mode"] }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 pox-locking = { workspace = true, default-features = true }
