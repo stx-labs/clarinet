@@ -157,7 +157,7 @@
 
               echo "Stable version was released $DIFF_DAYS days ago."
 
-              if [ "$DIFF_DAYS" -gt 7 ]; then
+              if [ "$DIFF_DAYS" -gt 14 ]; then
                 echo "::error::nixpkgs Rust ($NIX_RUST) is behind latest stable ($LATEST_RUST) which is > 7 days old."
                 echo ""
                 echo "Please update nixpkgs:"
