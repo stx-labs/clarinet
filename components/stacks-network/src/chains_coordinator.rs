@@ -15,7 +15,7 @@ use clarinet_deployments::onchain::{
 use clarinet_deployments::types::DeploymentSpecification;
 use clarinet_files::{
     self, AccountConfig, DevnetConfig, NetworkManifest, PoxStackingOrder, ProjectManifest,
-    StacksNetwork, DEFAULT_FIRST_BURN_HEADER_HEIGHT,
+    StacksNetwork, DEFAULT_FIRST_BURN_HEADER_HEIGHT, DEFAULT_POX_REWARD_LENGTH,
 };
 use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::PublicKey;
@@ -55,8 +55,17 @@ use crate::orchestrator::{
     EXCLUDED_STACKS_SNAPSHOT_FILES,
 };
 
-const SNAPSHOT_STACKS_START_HEIGHT: u64 = 38;
-const SNAPSHOT_BURN_START_HEIGHT: u64 = 143;
+const SNAPSHOT_EPOCH3_5_STACKS_HEIGHT: u64 = 60;
+const SNAPSHOT_EPOCH3_5_BURN_HEIGHT: u64 = 163;
+
+/// Whether to start from a snapshot or from genesis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotLevel {
+    /// No snapshot — start from genesis.
+    None,
+    /// Snapshot at epoch 3.5 (burn height 163).
+    Epoch3_5,
+}
 
 #[derive(Deserialize)]
 pub struct NewTransaction {
@@ -178,22 +187,20 @@ pub async fn start_chains_coordinator(
     observer_command_rx: Receiver<ObserverCommand>,
     mining_command_tx: Sender<BitcoinMiningCommand>,
     mining_command_rx: Receiver<BitcoinMiningCommand>,
-    using_snapshot: bool,
+    snapshot_level: SnapshotLevel,
     create_new_snapshot: bool,
     ctx: Context,
 ) -> Result<(), String> {
     let mut should_deploy_protocol = true; // Will change when `stacks-network` components becomes compatible with Testnet / Mainnet setups
     let boot_completed = Arc::new(AtomicBool::new(false));
     let mut last_pox_version: Option<u32> = None;
-    let mut current_burn_height = if using_snapshot {
-        SNAPSHOT_BURN_START_HEIGHT
-    } else {
-        0
+    let mut current_burn_height = match snapshot_level {
+        SnapshotLevel::Epoch3_5 => SNAPSHOT_EPOCH3_5_BURN_HEIGHT,
+        SnapshotLevel::None => 0,
     };
-    let starting_block_height = if using_snapshot {
-        SNAPSHOT_STACKS_START_HEIGHT
-    } else {
-        0
+    let starting_block_height = match snapshot_level {
+        SnapshotLevel::Epoch3_5 => SNAPSHOT_EPOCH3_5_STACKS_HEIGHT,
+        SnapshotLevel::None => 0,
     };
 
     let global_snapshot_dir = get_global_snapshot_dir();
@@ -237,11 +244,12 @@ pub async fn start_chains_coordinator(
     let observer_command_tx_moved = observer_command_tx.clone();
     let ctx_moved = ctx.clone();
 
-    let stacks_startup_context = if using_snapshot {
+    let stacks_startup_context = if snapshot_level != SnapshotLevel::None {
         // Load events from snapshot if available
         let event_pool: Vec<StacksBlockData> = {
             let mut events = vec![];
-            let events_cache_path = get_global_snapshot_dir()
+            let events_cache_path = snapshot_level
+                .snapshot_dir()
                 .join("events_export")
                 .join("events_cache.tsv");
 
@@ -380,17 +388,27 @@ pub async fn start_chains_coordinator(
                         let comment =
                             format!("mining blocks (chain_tip = #{bitcoin_block_height})");
 
-                        // Check if we've reached the target height for database export (142)
-                        // If we've reached epoch 3.0, create the global snapshot
-                        if create_new_snapshot
-                            && bitcoin_block_height == config.devnet_config.epoch_3_0
-                        {
-                            let _ = create_global_snapshot(
-                                &config,
-                                &devnet_event_tx,
-                                mining_command_tx.clone(),
-                            )
-                            .await;
+                        // Create snapshot at epoch 3.5 milestone
+                        if create_new_snapshot {
+                            if let Some(epoch_3_5) = config.devnet_config.epoch_3_5 {
+                                // Snapshot a few blocks after the next reward cycle
+                                // boundary following epoch 3.5 activation, so pox-5
+                                // stacking is confirmed and active.
+                                let epoch_offset = (epoch_3_5 - DEFAULT_FIRST_BURN_HEADER_HEIGHT)
+                                    % DEFAULT_POX_REWARD_LENGTH;
+                                let next_cycle_start =
+                                    epoch_3_5 + (DEFAULT_POX_REWARD_LENGTH - epoch_offset);
+                                let snapshot_height = next_cycle_start + 3;
+
+                                if bitcoin_block_height == snapshot_height {
+                                    let _ = create_snapshot(
+                                        &config,
+                                        &devnet_event_tx,
+                                        mining_command_tx.clone(),
+                                    )
+                                    .await;
+                                }
+                            }
                         }
                         // Stacking orders can't be published until devnet is ready
                         if !stacks_signers_keys.is_empty()
@@ -668,116 +686,87 @@ fn should_publish_stacking_orders(
     true
 }
 
-async fn remove_global_snapshot(devnet_event_tx: &Sender<DevnetEvent>) -> Result<(), String> {
-    let global_snapshot_dir = get_global_snapshot_dir();
+impl SnapshotLevel {
+    /// Returns the marker file name for this snapshot level.
+    pub fn marker_name(self) -> &'static str {
+        match self {
+            SnapshotLevel::Epoch3_5 => "epoch_3_5_ready",
+            SnapshotLevel::None => unreachable!(),
+        }
+    }
 
-    // Check if the global snapshot directory exists
-    if !global_snapshot_dir.exists() {
-        let _ = devnet_event_tx.send(DevnetEvent::info(
-            "No existing global snapshot found to remove".to_string(),
-        ));
+    /// Returns the snapshot directory for this level.
+    pub fn snapshot_dir(self) -> PathBuf {
+        get_global_snapshot_dir().join("epoch_3_5")
+    }
+}
+
+fn remove_snapshot(devnet_event_tx: &Sender<DevnetEvent>) -> Result<(), String> {
+    let snapshot_dir = SnapshotLevel::Epoch3_5.snapshot_dir();
+    let marker = snapshot_dir.join(SnapshotLevel::Epoch3_5.marker_name());
+
+    if !marker.exists() {
         return Ok(());
     }
 
     let _ = devnet_event_tx.send(DevnetEvent::info(
-        "Removing existing global snapshot...".to_string(),
+        "Removing existing snapshot...".to_string(),
     ));
 
-    // Remove the entire global snapshot directory
-    fs::remove_dir_all(&global_snapshot_dir)
-        .map_err(|e| format!("unable to remove global snapshot directory: {e:?}"))?;
+    let _ = fs::remove_dir_all(&snapshot_dir);
 
     let _ = devnet_event_tx.send(DevnetEvent::success(
-        "Existing global snapshot removed successfully".to_string(),
+        "Snapshot removed successfully".to_string(),
     ));
 
     Ok(())
 }
 
-pub async fn create_global_snapshot(
+pub async fn create_snapshot(
     devnet_event_observer_config: &DevnetEventObserverConfig,
     devnet_event_tx: &Sender<DevnetEvent>,
     mining_command_tx: Sender<BitcoinMiningCommand>,
 ) {
-    // First, remove the existing global snapshot if it exists
-    if let Err(e) = remove_global_snapshot(devnet_event_tx).await {
-        let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-            "Failed to remove existing global snapshot: {e}. Continuing with new snapshot creation."
-        )));
-    }
+    // Remove any existing snapshot
+    let _ = remove_snapshot(devnet_event_tx);
 
     let devnet_config = &devnet_event_observer_config.devnet_config;
-    let global_snapshot_dir = get_global_snapshot_dir();
     let project_snapshot_dir = get_project_snapshot_dir(devnet_config);
+    let snapshot_dir = SnapshotLevel::Epoch3_5.snapshot_dir();
 
-    // Project snapshot marker
-    let project_marker = project_snapshot_dir.join("epoch_3_ready");
-    if !project_marker.exists() {
-        match std::fs::File::create(&project_marker) {
-            Ok(_) => {
-                let _ = devnet_event_tx.send(DevnetEvent::success(
-                    "Project snapshot data prepared up to epoch 3.0. Future project starts will be faster.".to_string(),
-                ));
-            }
-            Err(e) => {
-                let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                    "Failed to create project snapshot marker file: {e}"
-                )));
-            }
-        }
+    fs::create_dir_all(&snapshot_dir)
+        .unwrap_or_else(|e| panic!("unable to create snapshot directory: {e:?}"));
+
+    // Copy project data to snapshot directory
+    let project_bitcoin = project_snapshot_dir.join("bitcoin");
+    let snapshot_bitcoin = snapshot_dir.join("bitcoin");
+    if project_bitcoin.exists() {
+        let _ = copy_directory(&project_bitcoin, &snapshot_bitcoin, None).inspect_err(|e| {
+            let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                "Failed to copy bitcoin snapshot: {e}"
+            )));
+        });
     }
 
-    let global_marker = global_snapshot_dir.join("epoch_3_ready");
-    if !global_marker.exists() {
-        // Copy project snapshot to global snapshot as a template
-        if project_snapshot_dir != global_snapshot_dir {
-            // Copy bitcoin data
-            let project_bitcoin_snapshot = project_snapshot_dir.join("bitcoin");
-            let global_bitcoin_snapshot = global_snapshot_dir.join("bitcoin");
-            if project_bitcoin_snapshot.exists() {
-                let _ = copy_directory(&project_bitcoin_snapshot, &global_bitcoin_snapshot, None)
-                    .inspect_err(|e| {
-                        let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                            "Failed to copy bitcoin snapshot: {e}"
-                        )));
-                    });
-            }
-
-            // Copy stacks data
-            let project_stacks_snapshot = project_snapshot_dir.join("stacks");
-            let global_stacks_snapshot = global_snapshot_dir.join("stacks");
-            if project_stacks_snapshot.exists() {
-                let _ = copy_directory(
-                    &project_stacks_snapshot,
-                    &global_stacks_snapshot,
-                    Some(EXCLUDED_STACKS_SNAPSHOT_FILES),
-                )
-                .inspect_err(|e| {
-                    let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                        "Failed to copy stacks snapshot: {e}"
-                    )));
-                });
-            }
-
-            match std::fs::File::create(&global_marker) {
-                Ok(_) => {
-                    let _ = devnet_event_tx.send(DevnetEvent::success(
-                        "Global template snapshot data prepared. Future project initializations will be faster.".to_string()
-                    ));
-                }
-                Err(e) => {
-                    let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                        "Failed to create global snapshot marker file: {e}"
-                    )));
-                }
-            }
-        }
+    let project_stacks = project_snapshot_dir.join("stacks");
+    let snapshot_stacks = snapshot_dir.join("stacks");
+    if project_stacks.exists() {
+        let _ = copy_directory(
+            &project_stacks,
+            &snapshot_stacks,
+            Some(EXCLUDED_STACKS_SNAPSHOT_FILES),
+        )
+        .inspect_err(|e| {
+            let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                "Failed to copy stacks snapshot: {e}"
+            )));
+        });
     }
+
     let _ = devnet_event_tx.send(DevnetEvent::info(
-        "Reached block height 142, preparing to export Stacks API events...".to_string(),
+        "Creating snapshot, preparing to export Stacks API events...".to_string(),
     ));
 
-    // To properly export, we need to:
     // 1. Stop mining to prevent further blocks
     let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
     // 2. Wait a moment for pausing to complete
@@ -786,8 +775,20 @@ pub async fn create_global_snapshot(
     // Export the events
     match export_stacks_api_events(devnet_event_observer_config, devnet_event_tx).await {
         Ok(_) => {
+            // Copy events to snapshot dir
+            let project_events = project_snapshot_dir
+                .join("events_export")
+                .join("events_cache.tsv");
+            let snapshot_events_dir = snapshot_dir.join("events_export");
+            let _ = fs::create_dir_all(&snapshot_events_dir);
+            if project_events.exists() {
+                let _ = fs::copy(
+                    &project_events,
+                    snapshot_events_dir.join("events_cache.tsv"),
+                );
+            }
             let _ = devnet_event_tx.send(DevnetEvent::success(
-                "Stacks API events exported successfully".to_string(),
+                "Stacks API events exported for snapshot".to_string(),
             ));
         }
         Err(e) => {
@@ -796,7 +797,22 @@ pub async fn create_global_snapshot(
             )));
         }
     }
-    // 3. Resume mining after presumed export completion
+
+    // Write the marker file
+    match std::fs::File::create(snapshot_dir.join(SnapshotLevel::Epoch3_5.marker_name())) {
+        Ok(_) => {
+            let _ = devnet_event_tx.send(DevnetEvent::success(
+                "Snapshot created successfully".to_string(),
+            ));
+        }
+        Err(e) => {
+            let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                "Failed to create snapshot marker: {e}"
+            )));
+        }
+    }
+
+    // 3. Resume mining
     let _ = mining_command_tx.send(BitcoinMiningCommand::Start);
 }
 
@@ -860,6 +876,7 @@ pub async fn publish_stacking_orders(
     }
 
     let mut transactions = 0;
+    let mut lockup_txids: Vec<String> = vec![];
     for (i, pox_stacking_order) in devnet_config.pox_stacking_orders.iter().enumerate() {
         if !pox_version_changed
             && !should_publish_stacking_orders(&current_cycle, pox_stacking_order)
@@ -974,6 +991,7 @@ pub async fn publish_stacking_orders(
                     .map_err(|e| format!("{e:?}"))?;
 
                 // For pox-5, create and broadcast the Bitcoin lockup transaction
+                let mut lockup_txid_result = String::new();
                 if pox_version >= 5 {
                     let unlock_burn_height = compute_unlock_burn_height(
                         bitcoin_block_height,
@@ -985,25 +1003,40 @@ pub async fn publish_stacking_orders(
                     let full_key = hex_bytes(&account_secret_key).unwrap();
                     // Strip the trailing 0x01 compression flag appended by compute_addresses
                     let btc_secret_key = &full_key[..32];
-                    send_pox5_bitcoin_lockup(
+                    let _ = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/pox5-debug.log")
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            writeln!(f, "pox-5 lockup: stacker={}, btc_addr={}, unlock_height={}, btc_block={}",
+                                stx_address_moved, btc_address_moved, unlock_burn_height, bitcoin_block_height)
+                        });
+                    let lockup_txid = send_pox5_bitcoin_lockup(
                         &bitcoin_node_host,
                         &bitcoin_node_username,
                         &bitcoin_node_password,
                         &stx_address_moved,
                         &btc_address_moved,
-                        &btc_secret_key,
+                        btc_secret_key,
                         unlock_burn_height,
                     )?;
+                    let _ = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/pox5-debug.log")
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            writeln!(f, "pox-5 lockup broadcast: stacker={}, lockup_txid={}", stx_address_moved, lockup_txid)
+                        });
+                    lockup_txid_result = lockup_txid;
                 }
 
-                Ok::<String, String>("".to_string())
+                Ok::<String, String>(lockup_txid_result)
             });
 
         match stacking_result {
             Ok(result) => {
                 if let Ok(result) = result.join() {
                     match result {
-                        Ok(_) => {
+                        Ok(txid) => {
+                            if !txid.is_empty() {
+                                lockup_txids.push(txid);
+                            }
                             let _ = devnet_event_tx.send(DevnetEvent::success(format!(
                                 "Stacking order for {stx_amount} STX submitted"
                             )));
@@ -1020,6 +1053,69 @@ pub async fn publish_stacking_orders(
             }
         }
     }
+
+    // After broadcasting pox-5 Bitcoin lockup transactions, mine a block immediately
+    // to ensure they are confirmed before the prepare phase begins.
+    if pox_version >= 5 && !lockup_txids.is_empty() {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let _ = mine_bitcoin_block(
+            &services_map_hosts.bitcoin_node_host,
+            &devnet_config.bitcoin_node_username,
+            &devnet_config.bitcoin_node_password,
+            &devnet_config.miner_btc_address,
+        )
+        .await;
+
+        // Verify lockup transactions are confirmed
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let bitcoin_rpc_url = format!("http://{}", &services_map_hosts.bitcoin_node_host);
+        let client = reqwest::Client::new();
+        for txid in &lockup_txids {
+            let resp = client
+                .post(&bitcoin_rpc_url)
+                .basic_auth(
+                    &devnet_config.bitcoin_node_username,
+                    Some(&devnet_config.bitcoin_node_password),
+                )
+                .json(&serde_json::json!({
+                    "jsonrpc": "1.0",
+                    "id": "clarinet",
+                    "method": "getrawtransaction",
+                    "params": [txid, true]
+                }))
+                .send()
+                .await
+                .ok();
+            let resp_json = match resp {
+                Some(r) => r.json::<serde_json::Value>().await.ok(),
+                None => None,
+            };
+            let confirmations = resp_json
+                .as_ref()
+                .and_then(|v| v["result"]["confirmations"].as_i64())
+                .unwrap_or(-1);
+            let block_hash = resp_json
+                .as_ref()
+                .and_then(|v| v["result"]["blockhash"].as_str())
+                .unwrap_or("none");
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/pox5-debug.log")
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(
+                        f,
+                        "pox-5 post-mine check: txid={txid}, confirmations={confirmations}, blockhash={block_hash}"
+                    )
+                });
+        }
+        let _ = devnet_event_tx.send(DevnetEvent::info(format!(
+            "Mined Bitcoin block to confirm {} pox-5 lockup transactions",
+            lockup_txids.len()
+        )));
+    }
+
     if transactions > 0 {
         Some(transactions)
     } else {
@@ -1532,9 +1628,12 @@ fn get_pox5_grant_signer_key_args(
 }
 
 /// Compute the unlock burn height for a pox-5 stake.
-/// Matches the pox-5.clar `reward-cycle-to-unlock-height` function:
-///   unlock_cycle = current_cycle + duration
-///   unlock_height = first_burnchain_block_height + unlock_cycle * reward_cycle_length + reward_cycle_length / 2
+/// Must match the stacks-node's internal computation for the expected P2WSH locking script.
+///
+/// The node computes unlock_height from first_reward_cycle and lock_period using
+/// the burnchain's +1 genesis offset:
+///   unlock_cycle = first_reward_cycle + duration = (current_cycle + 1) + duration
+///   unlock_height = (first_burnchain_block_height + 1) + unlock_cycle * cycle_length + cycle_length / 2
 fn compute_unlock_burn_height(
     bitcoin_block_height: u32,
     first_burnchain_block_height: u32,
@@ -1543,9 +1642,11 @@ fn compute_unlock_burn_height(
 ) -> u32 {
     let effective_height = bitcoin_block_height.saturating_sub(first_burnchain_block_height);
     let current_cycle = effective_height / reward_cycle_length;
-    let unlock_cycle = current_cycle + duration;
-    // unlock height is halfway through the unlock cycle, matching pox-5.clar
-    first_burnchain_block_height + unlock_cycle * reward_cycle_length + reward_cycle_length / 2
+    let first_reward_cycle = current_cycle + 1;
+    let unlock_cycle = first_reward_cycle + duration;
+    (first_burnchain_block_height + 1)
+        + unlock_cycle * reward_cycle_length
+        + reward_cycle_length / 2
 }
 
 /// Create and broadcast a Bitcoin lockup transaction for pox-5 staking.
@@ -1571,14 +1672,34 @@ fn send_pox5_bitcoin_lockup(
         Witness,
     };
 
+    let dbg = |msg: String| {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/pox5-debug.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                writeln!(f, "{msg}")
+            });
+    };
+
     let unlock_bytes = build_unlock_script(btc_address);
     let locking_script =
         build_pox5_locking_script(stacker_stx_address, unlock_burn_height, &unlock_bytes);
 
     // Create P2WSH output: the scriptPubKey is OP_0 <32-byte-sha256-of-script>
     let script_buf = ScriptBuf::from(locking_script);
+    dbg(format!(
+        "pox-5 locking_script hex: {}",
+        script_buf.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>(),
+    ));
     let script_hash = WScriptHash::hash(script_buf.as_bytes());
+    dbg(format!("pox-5 P2WSH script_hash: {script_hash}"));
     let p2wsh_script = ScriptBuf::new_p2wsh(&script_hash);
+    dbg(format!(
+        "pox-5 P2WSH scriptPubKey hex: {}",
+        p2wsh_script.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>(),
+    ));
 
     let bitcoin_rpc_url = format!("http://{bitcoin_node_host}");
     let client = reqwest::blocking::Client::new();
@@ -1621,6 +1742,9 @@ fn send_pox5_bitcoin_lockup(
     let vout = utxo["vout"].as_u64().ok_or("Missing vout in UTXO")? as u32;
     let utxo_amount_btc = utxo["amount"].as_f64().ok_or("Missing amount in UTXO")?;
     let utxo_amount_sats = (utxo_amount_btc * 100_000_000.0) as u64;
+    dbg(format!(
+        "pox-5 lockup UTXO: txid={txid_str}, vout={vout}, amount_sats={utxo_amount_sats}, addr={btc_address}",
+    ));
     let utxo_script_hex = utxo["scriptPubKey"]
         .as_str()
         .ok_or("Missing scriptPubKey in UTXO")?;
@@ -1692,6 +1816,7 @@ fn send_pox5_bitcoin_lockup(
 
     // Broadcast the signed transaction
     let raw_tx_hex = bitcoincore_rpc::bitcoin::consensus::encode::serialize_hex(&raw_tx);
+    dbg(format!("pox-5 lockup raw_tx_hex: {raw_tx_hex}"));
 
     let send_resp = client
         .post(&bitcoin_rpc_url)
@@ -1707,6 +1832,7 @@ fn send_pox5_bitcoin_lockup(
         .json::<serde_json::Value>()
         .map_err(|e| format!("Failed to parse sendrawtransaction response: {e}"))?;
 
+    dbg(format!("pox-5 sendrawtransaction response: {send_resp}"));
     if let Some(error) = send_resp["error"].as_object() {
         return Err(format!(
             "Bitcoin lockup transaction failed: {}",
@@ -1718,6 +1844,27 @@ fn send_pox5_bitcoin_lockup(
         .as_str()
         .unwrap_or("unknown")
         .to_string();
+
+    // Verify the transaction is in the mempool
+    let mempool_resp = client
+        .post(&bitcoin_rpc_url)
+        .basic_auth(bitcoin_node_username, Some(bitcoin_node_password))
+        .json(&serde_json::json!({
+            "jsonrpc": "1.0",
+            "id": "clarinet",
+            "method": "getmempoolentry",
+            "params": [&lockup_txid]
+        }))
+        .send()
+        .ok()
+        .and_then(|r| r.json::<serde_json::Value>().ok());
+    dbg(format!(
+        "pox-5 mempool check for {lockup_txid}: {}",
+        mempool_resp.map_or("request failed".to_string(), |v| {
+            if v["error"].is_null() { "IN MEMPOOL".to_string() }
+            else { format!("NOT IN MEMPOOL: {}", v["error"]) }
+        })
+    ));
 
     Ok(lockup_txid)
 }
@@ -1771,18 +1918,6 @@ async fn export_stacks_api_events(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-
-    // Also copy to global cache
-    let global_snapshot_dir = get_global_snapshot_dir();
-    let global_export_path = global_snapshot_dir.join("events_export");
-    fs::create_dir_all(&global_export_path)
-        .map_err(|e| format!("unable to create global events export directory: {e:?}"))?;
-
-    fs::copy(
-        export_path.join("events_cache.tsv"),
-        global_export_path.join("events_cache.tsv"),
-    )
-    .map_err(|e| format!("unable to copy to global cache: {e:?}"))?;
 
     let _ = devnet_event_tx.send(DevnetEvent::success(
         "Successfully exported Stacks API events".to_string(),
@@ -1940,5 +2075,71 @@ mod test_rpc_client {
         nonce_mock.assert();
         burn_block_mock.assert();
         tx_mock.assert();
+    }
+
+    /// Verify that the P2WSH script hash computed by clarinet matches
+    /// the stacks-node's computation (from RawPox5Entry::script_hash).
+    #[test]
+    fn pox5_locking_script_hash_matches_node() {
+        use bitcoincore_rpc::bitcoin::WScriptHash;
+        use bitcoincore_rpc::bitcoin::hashes::Hash as _;
+
+        // Use wallet_2 from the devnet log as a test case:
+        //   STX address: ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG (version=0x1a)
+        //   STX address hash160: 99e2ec69ac5b6e67b4e26edd0e2c1c1a6b9bbd23
+        //   BTC address: muYdXKmX9bByAueDe6KFfHd5Ff1gdN9ErG
+        //   unlock_height: 371
+        //   unlock_bytes (P2PKH for the BTC address):
+        //     [0x76, 0xa9, 0x14, 0x99, 0xe2, 0xec, 0x69, 0xac, 0x5b, 0x6e, 0x67,
+        //      0xb4, 0xe2, 0x6e, 0xdd, 0x0e, 0x2c, 0x1c, 0x1a, 0x6b, 0x9b, 0xbd,
+        //      0x23, 0x88, 0xac]
+        let stx_address = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+        let btc_address = "muYdXKmX9bByAueDe6KFfHd5Ff1gdN9ErG";
+        let unlock_height: u32 = 371;
+
+        let unlock_bytes = build_unlock_script(btc_address);
+        let locking_script = build_pox5_locking_script(stx_address, unlock_height, &unlock_bytes);
+
+        // Clarinet's P2WSH hash (using rust-bitcoin's WScriptHash = SHA256)
+        let clarinet_hash = WScriptHash::hash(&locking_script);
+
+        // Replicate stacks-node's RawPox5Entry::script_hash() computation
+        // Build the same byte sequence the node hashes incrementally
+        let stx_addr = <stacks_common::types::chainstate::StacksAddress as stacks_common::types::Address>::from_string(stx_address).unwrap();
+        let addr_version = stx_addr.version();
+        let addr_hash = stx_addr.bytes().as_bytes();
+
+        let mut node_script = Vec::new();
+        node_script.extend_from_slice(&[0x16u8, 0x05, addr_version]);
+        node_script.extend_from_slice(addr_hash);
+        node_script.extend_from_slice(&[0x75u8, 0x03]);
+        node_script.extend_from_slice(&unlock_height.to_le_bytes()[0..3]);
+        node_script.extend_from_slice(&[0xb1u8, 0x75]);
+        node_script.extend_from_slice(&unlock_bytes);
+        // WScriptHash uses SHA256, same as the node's Sha256::digest
+        let node_hash = WScriptHash::hash(&node_script);
+
+        assert_eq!(
+            clarinet_hash, node_hash,
+            "Clarinet P2WSH hash does not match node's expected hash",
+        );
+
+        // Also verify the locking script bytes match what we'd expect
+        let mut expected_script = Vec::new();
+        expected_script.push(0x16); // OP_PUSHBYTES_22
+        expected_script.push(0x05);
+        expected_script.push(addr_version);
+        expected_script.extend_from_slice(addr_hash);
+        expected_script.push(0x75); // OP_DROP
+        expected_script.push(0x03); // OP_PUSHBYTES_3
+        expected_script.extend_from_slice(&unlock_height.to_le_bytes()[0..3]);
+        expected_script.push(0xb1); // OP_CLTV
+        expected_script.push(0x75); // OP_DROP
+        expected_script.extend_from_slice(&unlock_bytes);
+
+        assert_eq!(
+            locking_script, expected_script,
+            "Locking script bytes mismatch"
+        );
     }
 }

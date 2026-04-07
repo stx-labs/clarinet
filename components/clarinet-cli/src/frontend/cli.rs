@@ -2354,12 +2354,14 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         },
         _ => Err("Unable to retrieve config"),
     };
-    let differ = DevnetDiffConfig::new();
-    let compatible = differ.is_compatible(&devnet_config.unwrap());
-    if let Err(incompatibles) = compatible {
-        display_devnet_incompatibilities(incompatibles);
-        prompt_user_to_continue();
-        display_devnet_incompatibilities_continue()
+    if !cmd.no_snapshot {
+        let differ = DevnetDiffConfig::new();
+        let compatible = differ.is_compatible(&devnet_config.unwrap());
+        if let Err(incompatibles) = compatible {
+            display_devnet_incompatibilities(incompatibles);
+            prompt_user_to_continue();
+            display_devnet_incompatibilities_continue()
+        }
     }
     let config = StartConfig {
         devnet: orchestrator,

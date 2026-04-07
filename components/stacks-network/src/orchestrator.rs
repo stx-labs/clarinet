@@ -785,8 +785,8 @@ impl DevnetOrchestrator {
             .await
             .map_err(|e| formatted_docker_error("unable to start bitcoind container", e))?;
         // Copy snapshot if available
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let bitcoin_snapshot = global_snapshot_dir.join("bitcoin").join("regtest");
+        let snapshot_dir = get_active_snapshot_dir();
+        let bitcoin_snapshot = snapshot_dir.join("bitcoin").join("regtest");
         // XXX This shouldn't be needed
         let exec_config = bollard::exec::CreateExecOptions {
             cmd: Some(vec!["mkdir", "-p", BITCOIND_DATA_DIR]),
@@ -1102,8 +1102,8 @@ impl DevnetOrchestrator {
             .as_ref()
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
+        let snapshot_dir = get_active_snapshot_dir();
+        let stacks_snapshot = snapshot_dir.join("stacks").join("krypton");
 
         if !no_snapshot {
             let docker_host = self.get_devnet_config()?.docker_host.as_deref();
@@ -1353,7 +1353,7 @@ impl DevnetOrchestrator {
         if project_events_path.exists() {
             Some(project_events_path)
         } else {
-            let global_events_path = get_global_snapshot_dir()
+            let global_events_path = get_active_snapshot_dir()
                 .join("events_export")
                 .join("events_cache.tsv");
 
@@ -2343,6 +2343,11 @@ fn formatted_docker_error(message: &str, error: DockerError) -> String {
 pub fn get_global_snapshot_dir() -> std::path::PathBuf {
     let home_dir = dirs::home_dir().expect("Unable to retrieve home dir");
     home_dir.join(".clarinet").join("cache").join("devnet")
+}
+
+/// Returns the epoch 3.5 snapshot directory.
+pub fn get_active_snapshot_dir() -> std::path::PathBuf {
+    get_global_snapshot_dir().join("epoch_3_5")
 }
 
 pub fn get_project_snapshot_dir(devnet_config: &DevnetConfig) -> std::path::PathBuf {
