@@ -1,0 +1,653 @@
+//! Lint to find unnecessary single-field tuples in type and value positions.
+//!
+//! A tuple with only one field adds encoding overhead without benefit — the
+//! inner type or value can be used directly instead.
+
+use std::collections::HashMap;
+
+use clarity::vm::analysis::analysis_db::AnalysisDatabase;
+use clarity::vm::analysis::types::ContractAnalysis;
+use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::representations::Span;
+use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
+
+use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
+use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
+use crate::analysis::cache::AnalysisCache;
+use crate::analysis::linter::Lint;
+use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+
+pub struct UnnecessaryTuple<'a> {
+    clarity_version: ClarityVersion,
+    diagnostics: Vec<Diagnostic>,
+    annotations: &'a Vec<Annotation>,
+    level: Level,
+    active_annotation: Option<usize>,
+}
+
+impl<'a> UnnecessaryTuple<'a> {
+    fn new(
+        clarity_version: ClarityVersion,
+        annotations: &'a Vec<Annotation>,
+        level: Level,
+    ) -> Self {
+        Self {
+            clarity_version,
+            level,
+            diagnostics: Vec::new(),
+            annotations,
+            active_annotation: None,
+        }
+    }
+
+    fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
+        traverse(&mut self, &contract_analysis.expressions);
+        Ok(self.diagnostics)
+    }
+
+    fn set_active_annotation(&mut self, span: &Span) {
+        self.active_annotation = get_index_of_span(self.annotations, span);
+    }
+
+    fn allow(&self) -> bool {
+        self.active_annotation
+            .map(|idx| Self::match_allow_annotation(&self.annotations[idx]))
+            .unwrap_or(false)
+    }
+
+    /// Check if a `SymbolicExpression` represents a single-field tuple.
+    /// Works for both type expressions like `(tuple (key uint))` and
+    /// value expressions like `(tuple (key u1))`.
+    fn is_single_field_tuple(expr: &SymbolicExpression) -> bool {
+        let Some(list) = expr.match_list() else {
+            return false;
+        };
+        let Some((first, fields)) = list.split_first() else {
+            return false;
+        };
+        let Some(name) = first.match_atom() else {
+            return false;
+        };
+        name.as_str() == "tuple" && fields.len() == 1
+    }
+
+    fn add_diagnostic(&mut self, span: &Span, message: String, suggestion: String) {
+        self.diagnostics.push(Diagnostic {
+            level: self.level.clone(),
+            message,
+            spans: vec![span.clone()],
+            suggestion: Some(suggestion),
+        });
+    }
+
+    fn add_type_diagnostic(&mut self, expr: &SymbolicExpression) {
+        self.add_diagnostic(&expr.span, Self::type_message(), Self::type_suggestion());
+    }
+
+    fn add_value_diagnostic(&mut self, expr: &SymbolicExpression) {
+        self.add_diagnostic(&expr.span, Self::value_message(), Self::value_suggestion());
+    }
+
+    fn type_message() -> String {
+        "single-field tuple type is unnecessary".to_owned()
+    }
+
+    fn type_suggestion() -> String {
+        "Use the inner type directly instead of wrapping it in a single-field tuple".to_owned()
+    }
+
+    fn value_message() -> String {
+        "single-field tuple is unnecessary".to_owned()
+    }
+
+    fn value_suggestion() -> String {
+        "Use the inner value directly instead of wrapping it in a single-field tuple".to_owned()
+    }
+
+    fn check_params(&mut self, parameters: &Option<Vec<TypedVar<'a>>>) {
+        let Some(params) = parameters else { return };
+        for param in params {
+            if Self::is_single_field_tuple(param.type_expr) {
+                self.add_type_diagnostic(param.type_expr);
+            }
+        }
+    }
+}
+
+impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
+    fn get_clarity_version(&self) -> &ClarityVersion {
+        &self.clarity_version
+    }
+
+    fn visit_define_data_var(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        data_type: &'a SymbolicExpression,
+        _initial: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if self.allow() {
+            return true;
+        }
+        if Self::is_single_field_tuple(data_type) {
+            self.add_type_diagnostic(data_type);
+        }
+        true
+    }
+
+    fn visit_define_map(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        key_type: &'a SymbolicExpression,
+        value_type: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if self.allow() {
+            return true;
+        }
+        if Self::is_single_field_tuple(key_type) {
+            self.add_type_diagnostic(key_type);
+        }
+        if Self::is_single_field_tuple(value_type) {
+            self.add_type_diagnostic(value_type);
+        }
+        true
+    }
+
+    fn visit_define_private(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        parameters: Option<Vec<TypedVar<'a>>>,
+        _body: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if !self.allow() {
+            self.check_params(&parameters);
+        }
+        true
+    }
+
+    fn visit_define_public(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        parameters: Option<Vec<TypedVar<'a>>>,
+        _body: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if !self.allow() {
+            self.check_params(&parameters);
+        }
+        true
+    }
+
+    fn visit_define_read_only(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        parameters: Option<Vec<TypedVar<'a>>>,
+        _body: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if !self.allow() {
+            self.check_params(&parameters);
+        }
+        true
+    }
+
+    fn visit_define_nft(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        nft_type: &'a SymbolicExpression,
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if self.allow() {
+            return true;
+        }
+        if Self::is_single_field_tuple(nft_type) {
+            self.add_type_diagnostic(nft_type);
+        }
+        true
+    }
+
+    fn visit_define_trait(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        _name: &'a ClarityName,
+        functions: &'a [SymbolicExpression],
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if self.allow() {
+            return true;
+        }
+
+        // `functions` is a single-element slice containing the wrapper list
+        // of all function signatures, e.g. for:
+        //   (define-trait t ((fn1 (uint) (response uint uint))))
+        // functions[0] = ((fn1 (uint) (response uint uint)))
+        for func_wrapper in functions {
+            let Some(func_sigs) = func_wrapper.match_list() else {
+                continue;
+            };
+            for func_sig in func_sigs {
+                let Some(func_parts) = func_sig.match_list() else {
+                    continue;
+                };
+                // func_parts: [fn-name, (arg-types...), response-type]
+
+                // Check argument types
+                if let Some(arg_types) = func_parts.get(1).and_then(|e| e.match_list()) {
+                    for arg_type in arg_types {
+                        if Self::is_single_field_tuple(arg_type) {
+                            self.add_type_diagnostic(arg_type);
+                        }
+                    }
+                }
+
+                // Check response type
+                if let Some(response_expr) = func_parts.get(2) {
+                    if Self::is_single_field_tuple(response_expr) {
+                        self.add_type_diagnostic(response_expr);
+                    } else if let Some(response_parts) = response_expr.match_list() {
+                        // Check inside (response ok-type err-type)
+                        if response_parts
+                            .first()
+                            .and_then(|e| e.match_atom())
+                            .is_some_and(|n| n.as_str() == "response")
+                        {
+                            for part in &response_parts[1..] {
+                                if Self::is_single_field_tuple(part) {
+                                    self.add_type_diagnostic(part);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        true
+    }
+
+    fn visit_tuple(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        values: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
+    ) -> bool {
+        self.set_active_annotation(&expr.span);
+        if self.allow() {
+            return true;
+        }
+        if values.len() == 1 {
+            self.add_value_diagnostic(expr);
+        }
+        true
+    }
+}
+
+impl AnalysisPass for UnnecessaryTuple<'_> {
+    fn run_pass(
+        _analysis_db: &mut AnalysisDatabase,
+        analysis_cache: &mut AnalysisCache,
+        level: Level,
+        _settings: &analysis::Settings,
+    ) -> AnalysisResult {
+        let checker = UnnecessaryTuple::new(
+            analysis_cache.contract_analysis.clarity_version,
+            analysis_cache.annotations,
+            level,
+        );
+        checker.run(analysis_cache.contract_analysis)
+    }
+}
+
+impl Lint for UnnecessaryTuple<'_> {
+    fn get_name() -> LintName {
+        LintName::UnnecessaryTuple
+    }
+
+    fn match_allow_annotation(annotation: &Annotation) -> bool {
+        match &annotation.kind {
+            AnnotationKind::Allow(warning_kinds) => {
+                warning_kinds.contains(&WarningKind::UnnecessaryTuple)
+            }
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clarity_types::diagnostic::Level;
+    use indoc::indoc;
+
+    use super::UnnecessaryTuple;
+    use crate::analysis::linter::Lint;
+    use crate::repl::session::{AnnotatedExecutionResult, Session};
+    use crate::repl::SessionSettings;
+
+    fn run_snippet(snippet: String) -> (Vec<String>, AnnotatedExecutionResult) {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(UnnecessaryTuple::get_name(), Level::Warning);
+
+        Session::new_without_boot_contracts(settings)
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet")
+    }
+
+    // ── data var ──────────────────────────────────────────────
+
+    #[test]
+    fn warn_data_var_single_field_tuple_type() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var my-var { key: uint } { key: u0 })
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        // value diagnostic fires first (initial traversed before visit_define_data_var),
+        // then type diagnostic for the data_type
+        assert_eq!(result.lint_diagnostics.len(), 2);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
+        assert!(result.lint_diagnostics[1]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn no_warn_data_var_multi_field_tuple() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-data-var my-var { a: uint, b: bool } { a: u0, b: false })
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    // ── map ───────────────────────────────────────────────────
+
+    #[test]
+    fn warn_map_single_field_key() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map my-map { key: uint } { a: uint, b: bool })
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn warn_map_single_field_value() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map my-map { a: uint, b: bool } { val: uint })
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn warn_map_both_single_field() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-map my-map { key: uint } { val: uint })
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 2);
+    }
+
+    // ── constant ──────────────────────────────────────────────
+
+    #[test]
+    fn warn_constant_single_field_tuple() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant MY_CONST { key: u1 })
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn no_warn_constant_multi_field_tuple() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant MY_CONST { a: u1, b: u2 })
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    // ── function params ───────────────────────────────────────
+
+    #[test]
+    fn warn_private_fn_single_field_param() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (my-func (arg { key: uint }))
+                (get key arg)
+            )
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn warn_public_fn_single_field_param() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (my-func (arg { key: uint }))
+                (ok (get key arg))
+            )
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn warn_read_only_fn_single_field_param() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-read-only (my-func (arg { key: uint }))
+                (get key arg)
+            )
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn no_warn_fn_multi_field_param() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (my-func (arg { a: uint, b: bool }))
+                (get a arg)
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    // ── return values (tuple literals) ────────────────────────
+
+    #[test]
+    fn warn_return_single_field_tuple() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (my-func)
+                { key: u1 }
+            )
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    // ── NFT ───────────────────────────────────────────────────
+
+    #[test]
+    fn warn_nft_single_field_tuple_type() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token my-nft { id: uint })
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn no_warn_nft_multi_field_tuple() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-non-fungible-token my-nft { id: uint, owner: principal })
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    // ── trait ─────────────────────────────────────────────────
+
+    #[test]
+    fn warn_trait_single_field_param() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-trait my-trait (
+                (my-fn ({ key: uint }) (response uint uint))
+            ))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn warn_trait_single_field_response_ok() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-trait my-trait (
+                (my-fn (uint) (response { key: uint } uint))
+            ))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    #[test]
+    fn warn_trait_single_field_response_err() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-trait my-trait (
+                (my-fn (uint) (response uint { err: uint }))
+            ))
+        ").to_string();
+
+        let (output, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+        assert!(output[0].contains("warning["));
+    }
+
+    // ── allow annotation ──────────────────────────────────────
+
+    #[test]
+    fn allow_with_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            ;; #[allow(unnecessary_tuple)]
+            (define-data-var my-var { key: uint } { key: u0 })
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+}
