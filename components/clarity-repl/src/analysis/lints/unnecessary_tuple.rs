@@ -582,6 +582,25 @@ mod tests {
         assert!(output[0].contains("warning["));
     }
 
+    // ── nested tuples ─────────────────────────────────────────
+
+    #[test]
+    fn warn_single_field_tuple_nested_in_multi_field() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-constant MY_CONST { a: u1, b: { inner: u2 } })
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        // The outer tuple has 2 fields (no warning), but the inner `{ inner: u2 }`
+        // is a single-field tuple literal
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
+    }
+
     // ── merge ─────────────────────────────────────────────────
 
     #[test]
@@ -705,14 +724,77 @@ mod tests {
         assert!(output[0].contains("warning["));
     }
 
+    // ── non-tuple types (sanity check) ──────────────────────
+
+    #[test]
+    fn no_warn_map_with_bare_types() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-map my-map uint bool)
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    // ── mixed params ──────────────────────────────────────────
+
+    #[test]
+    fn warn_only_single_field_params() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func (a { key: uint }) (b { x: uint, y: bool }))
+                (+ (get key a) (get x b))
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::type_message()));
+    }
+
+    // ── explicit (tuple ...) syntax ───────────────────────────
+
+    #[test]
+    fn warn_explicit_tuple_syntax() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-constant MY_CONST (tuple (key u1)))
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
+    }
+
     // ── allow annotation ──────────────────────────────────────
 
     #[test]
-    fn allow_with_annotation() {
+    fn allow_with_annotation_on_define() {
         #[rustfmt::skip]
         let snippet = indoc!(r#"
             ;; #[allow(unnecessary_tuple)]
             (define-data-var my-var { key: uint } { key: u0 })
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_annotation_on_tuple_literal() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func)
+                ;; #[allow(unnecessary_tuple)]
+                { key: u1 }
+            )
         "#).to_string();
 
         let (_, result) = run_snippet(snippet);
