@@ -57,10 +57,11 @@ pub const DEFAULT_EPOCH_2_3: u64 = 103;
 pub const DEFAULT_EPOCH_2_4: u64 = 104;
 pub const DEFAULT_EPOCH_2_5: u64 = 108;
 pub const DEFAULT_EPOCH_3_0: u64 = 142;
-pub const DEFAULT_EPOCH_3_1: u64 = 144;
-pub const DEFAULT_EPOCH_3_2: u64 = 146;
-pub const DEFAULT_EPOCH_3_3: u64 = 148;
-pub const DEFAULT_EPOCH_3_4: u64 = 150;
+pub const DEFAULT_EPOCH_3_1: u64 = 143;
+pub const DEFAULT_EPOCH_3_2: u64 = 144;
+pub const DEFAULT_EPOCH_3_3: u64 = 145;
+pub const DEFAULT_EPOCH_3_4: u64 = 146;
+pub const DEFAULT_EPOCH_3_5: u64 = 147;
 
 // Currently, the pox-4 contract has these values hardcoded:
 // https://github.com/stacks-network/stacks-core/blob/e09ab931e2f15ff70f3bb5c2f4d7afb[…]42bd7bec6/stackslib/src/chainstate/stacks/boot/pox-testnet.clar
@@ -1020,7 +1021,7 @@ impl NetworkManifest {
                 epoch_3_2: devnet_config.epoch_3_2.unwrap_or(DEFAULT_EPOCH_3_2),
                 epoch_3_3: devnet_config.epoch_3_3.unwrap_or(DEFAULT_EPOCH_3_3),
                 epoch_3_4: devnet_config.epoch_3_4.unwrap_or(DEFAULT_EPOCH_3_4),
-                epoch_3_5: devnet_config.epoch_3_5,
+                epoch_3_5: Some(devnet_config.epoch_3_5.unwrap_or(DEFAULT_EPOCH_3_5)),
                 stacks_node_env_vars: devnet_config
                     .stacks_node_env_vars
                     .take()
@@ -1150,7 +1151,7 @@ impl Default for DevnetConfig {
             epoch_3_2: DEFAULT_EPOCH_3_2,
             epoch_3_3: DEFAULT_EPOCH_3_3,
             epoch_3_4: DEFAULT_EPOCH_3_4,
-            epoch_3_5: None,
+            epoch_3_5: Some(DEFAULT_EPOCH_3_5),
             use_docker_gateway_routing: false,
             docker_platform: None,
         }

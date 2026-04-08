@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -877,6 +878,10 @@ pub async fn publish_stacking_orders(
 
     let mut transactions = 0;
     let mut lockup_txids: Vec<String> = vec![];
+    // In pox-5, the reward set validation uses a HashMap keyed by signer public key.
+    // Multiple stacking entries with the same signer key create duplicate HashMap keys,
+    // causing block signature validation to fail. Track used signer keys to prevent this.
+    let mut used_signer_keys: HashSet<Vec<u8>> = HashSet::new();
     for (i, pox_stacking_order) in devnet_config.pox_stacking_orders.iter().enumerate() {
         if !pox_version_changed
             && !should_publish_stacking_orders(&current_cycle, pox_stacking_order)
@@ -901,6 +906,23 @@ pub async fn publish_stacking_orders(
             continue;
         };
 
+        let signer_key =
+            devnet_config.stacks_signers_keys[i % devnet_config.stacks_signers_keys.len()].clone();
+
+        // For pox-5+, skip stacking orders that reuse a signer key already used by another
+        // order. The reward set validation HashMap deduplicates entries by signer key, so
+        // multiple entries with the same key causes signature validation to fail.
+        if pox_version >= 5 {
+            let pub_key_bytes = StacksPublicKey::from_private(&signer_key).to_bytes();
+            if !used_signer_keys.insert(pub_key_bytes) {
+                let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                    "Skipping stacking order for '{}': signer key already used by another order (pox-5 requires unique signer keys)",
+                    pox_stacking_order.wallet
+                )));
+                continue;
+            }
+        }
+
         transactions += 1;
 
         let stx_amount = pox_info.next_cycle.min_threshold_ustx * pox_stacking_order.slots;
@@ -909,9 +931,6 @@ pub async fn publish_stacking_orders(
         let pox_contract_id_moved = pox_contract_id.clone();
         let btc_address_moved = pox_stacking_order.btc_address.clone();
         let duration = pox_stacking_order.duration;
-
-        let signer_key =
-            devnet_config.stacks_signers_keys[i % devnet_config.stacks_signers_keys.len()].clone();
 
         let bitcoin_node_host = services_map_hosts.bitcoin_node_host.clone();
         let bitcoin_node_username = devnet_config.bitcoin_node_username.clone();
@@ -1397,45 +1416,50 @@ fn build_unlock_script(btc_address: &str) -> Vec<u8> {
     .collect()
 }
 
-/// Build the full pox-5 locking script.
+/// Build the full pox-5 locking script (witness redeem script).
 ///
-/// Format:
-///   OP_PUSH_22 <05 || addr_version || addr_hash160>  OP_DROP
-///   OP_PUSH3 <unlock_height_3bytes_LE>  OP_CHECKLOCKTIMEVERIFY  OP_DROP
-///   <unlock_script>
+/// Must match stacks-core's `RawPox5Entry::to_redeem_script()`, which uses
+/// the Bitcoin `Script::Builder`:
+///   Builder::new()
+///     .push_slice(&principal_data)       // 22 bytes: 0x05 || version || hash160
+///     .push_opcode(OP_DROP)
+///     .push_scriptint(unlock_height)     // minimal-length CScriptNum encoding
+///     .push_opcode(OP_CLTV)
+///     .push_opcode(OP_DROP)
+///     .push_slice(&unlock_bytes)         // length-prefixed data push
+///     .into_script()
 fn build_pox5_locking_script(
     stacker_stx_address: &str,
     unlock_burn_height: u32,
     unlock_bytes: &[u8],
 ) -> Vec<u8> {
+    use bitcoincore_rpc::bitcoin::blockdata::opcodes;
+    use bitcoincore_rpc::bitcoin::blockdata::script::Builder;
+    use bitcoincore_rpc::bitcoin::script::PushBytes;
+
     let stx_addr =
         <StacksAddress as stacks_common::types::Address>::from_string(stacker_stx_address)
             .expect("Unable to parse stacks address");
     let addr_version = stx_addr.version();
     let addr_hash = stx_addr.bytes().as_bytes();
 
-    let mut script = Vec::new();
+    let mut principal_data = vec![0x05, addr_version];
+    principal_data.extend_from_slice(addr_hash);
 
-    // Push stacks address (22 bytes: 0x05 || version || hash160)
-    script.push(0x16); // OP_PUSH_22 (push next 22 bytes)
-    script.push(0x05);
-    script.push(addr_version);
-    script.extend_from_slice(addr_hash); // 20 bytes
+    let builder = Builder::new()
+        .push_slice(<&PushBytes>::try_from(principal_data.as_slice()).unwrap())
+        .push_opcode(opcodes::all::OP_DROP)
+        .push_int(unlock_burn_height.into())
+        .push_opcode(opcodes::all::OP_CLTV)
+        .push_opcode(opcodes::all::OP_DROP);
 
-    script.push(0x75); // OP_DROP
+    let builder = if !unlock_bytes.is_empty() {
+        builder.push_slice(<&PushBytes>::try_from(unlock_bytes).unwrap())
+    } else {
+        builder
+    };
 
-    // Push unlock height as 3 bytes little-endian
-    let height_bytes = unlock_burn_height.to_le_bytes();
-    script.push(0x03); // OP_PUSH3 (push next 3 bytes)
-    script.extend_from_slice(&height_bytes[..3]);
-
-    script.push(0xb1); // OP_CHECKLOCKTIMEVERIFY
-    script.push(0x75); // OP_DROP
-
-    // Append the unlock script
-    script.extend_from_slice(unlock_bytes);
-
-    script
+    builder.into_script().into_bytes()
 }
 
 fn get_stacking_tx_method_and_args(
@@ -1691,14 +1715,22 @@ fn send_pox5_bitcoin_lockup(
     let script_buf = ScriptBuf::from(locking_script);
     dbg(format!(
         "pox-5 locking_script hex: {}",
-        script_buf.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        script_buf
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
     ));
     let script_hash = WScriptHash::hash(script_buf.as_bytes());
     dbg(format!("pox-5 P2WSH script_hash: {script_hash}"));
     let p2wsh_script = ScriptBuf::new_p2wsh(&script_hash);
     dbg(format!(
         "pox-5 P2WSH scriptPubKey hex: {}",
-        p2wsh_script.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        p2wsh_script
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
     ));
 
     let bitcoin_rpc_url = format!("http://{bitcoin_node_host}");
@@ -1861,8 +1893,11 @@ fn send_pox5_bitcoin_lockup(
     dbg(format!(
         "pox-5 mempool check for {lockup_txid}: {}",
         mempool_resp.map_or("request failed".to_string(), |v| {
-            if v["error"].is_null() { "IN MEMPOOL".to_string() }
-            else { format!("NOT IN MEMPOOL: {}", v["error"]) }
+            if v["error"].is_null() {
+                "IN MEMPOOL".to_string()
+            } else {
+                format!("NOT IN MEMPOOL: {}", v["error"])
+            }
         })
     ));
 
@@ -2078,21 +2113,24 @@ mod test_rpc_client {
     }
 
     /// Verify that the P2WSH script hash computed by clarinet matches
-    /// the stacks-node's computation (from RawPox5Entry::script_hash).
+    /// the stacks-node's computation (from RawPox5Entry::to_redeem_script).
+    ///
+    /// The node uses Bitcoin Script Builder:
+    ///   Builder::new()
+    ///     .push_slice(&[0x05, version, ...hash160...])
+    ///     .push_opcode(OP_DROP)
+    ///     .push_scriptint(unlock_height)
+    ///     .push_opcode(OP_CLTV)
+    ///     .push_opcode(OP_DROP)
+    ///     .push_slice(&unlock_bytes)
     #[test]
     fn pox5_locking_script_hash_matches_node() {
-        use bitcoincore_rpc::bitcoin::WScriptHash;
+        use bitcoincore_rpc::bitcoin::blockdata::opcodes;
+        use bitcoincore_rpc::bitcoin::blockdata::script::Builder;
         use bitcoincore_rpc::bitcoin::hashes::Hash as _;
+        use bitcoincore_rpc::bitcoin::script::PushBytes;
+        use bitcoincore_rpc::bitcoin::WScriptHash;
 
-        // Use wallet_2 from the devnet log as a test case:
-        //   STX address: ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG (version=0x1a)
-        //   STX address hash160: 99e2ec69ac5b6e67b4e26edd0e2c1c1a6b9bbd23
-        //   BTC address: muYdXKmX9bByAueDe6KFfHd5Ff1gdN9ErG
-        //   unlock_height: 371
-        //   unlock_bytes (P2PKH for the BTC address):
-        //     [0x76, 0xa9, 0x14, 0x99, 0xe2, 0xec, 0x69, 0xac, 0x5b, 0x6e, 0x67,
-        //      0xb4, 0xe2, 0x6e, 0xdd, 0x0e, 0x2c, 0x1c, 0x1a, 0x6b, 0x9b, 0xbd,
-        //      0x23, 0x88, 0xac]
         let stx_address = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
         let btc_address = "muYdXKmX9bByAueDe6KFfHd5Ff1gdN9ErG";
         let unlock_height: u32 = 371;
@@ -2100,45 +2138,37 @@ mod test_rpc_client {
         let unlock_bytes = build_unlock_script(btc_address);
         let locking_script = build_pox5_locking_script(stx_address, unlock_height, &unlock_bytes);
 
-        // Clarinet's P2WSH hash (using rust-bitcoin's WScriptHash = SHA256)
+        // Clarinet's P2WSH hash
         let clarinet_hash = WScriptHash::hash(&locking_script);
 
-        // Replicate stacks-node's RawPox5Entry::script_hash() computation
-        // Build the same byte sequence the node hashes incrementally
+        // Replicate stacks-node's RawPox5Entry::to_redeem_script() using the
+        // same Bitcoin Script Builder approach the node uses
         let stx_addr = <stacks_common::types::chainstate::StacksAddress as stacks_common::types::Address>::from_string(stx_address).unwrap();
         let addr_version = stx_addr.version();
         let addr_hash = stx_addr.bytes().as_bytes();
 
-        let mut node_script = Vec::new();
-        node_script.extend_from_slice(&[0x16u8, 0x05, addr_version]);
-        node_script.extend_from_slice(addr_hash);
-        node_script.extend_from_slice(&[0x75u8, 0x03]);
-        node_script.extend_from_slice(&unlock_height.to_le_bytes()[0..3]);
-        node_script.extend_from_slice(&[0xb1u8, 0x75]);
-        node_script.extend_from_slice(&unlock_bytes);
-        // WScriptHash uses SHA256, same as the node's Sha256::digest
-        let node_hash = WScriptHash::hash(&node_script);
+        let mut principal_data = vec![0x05, addr_version];
+        principal_data.extend_from_slice(addr_hash);
+
+        let node_script = Builder::new()
+            .push_slice(<&PushBytes>::try_from(principal_data.as_slice()).unwrap())
+            .push_opcode(opcodes::all::OP_DROP)
+            .push_int(unlock_height.into())
+            .push_opcode(opcodes::all::OP_CLTV)
+            .push_opcode(opcodes::all::OP_DROP)
+            .push_slice(<&PushBytes>::try_from(unlock_bytes.as_slice()).unwrap())
+            .into_script();
+
+        let node_hash = WScriptHash::hash(node_script.as_bytes());
 
         assert_eq!(
             clarinet_hash, node_hash,
             "Clarinet P2WSH hash does not match node's expected hash",
         );
 
-        // Also verify the locking script bytes match what we'd expect
-        let mut expected_script = Vec::new();
-        expected_script.push(0x16); // OP_PUSHBYTES_22
-        expected_script.push(0x05);
-        expected_script.push(addr_version);
-        expected_script.extend_from_slice(addr_hash);
-        expected_script.push(0x75); // OP_DROP
-        expected_script.push(0x03); // OP_PUSHBYTES_3
-        expected_script.extend_from_slice(&unlock_height.to_le_bytes()[0..3]);
-        expected_script.push(0xb1); // OP_CLTV
-        expected_script.push(0x75); // OP_DROP
-        expected_script.extend_from_slice(&unlock_bytes);
-
         assert_eq!(
-            locking_script, expected_script,
+            locking_script,
+            node_script.as_bytes(),
             "Locking script bytes mismatch"
         );
     }

@@ -1604,6 +1604,10 @@ mod tests {
                 [[burnchain.epochs]]
                 epoch_name = "3.4"
                 start_height = 12
+
+                [[burnchain.epochs]]
+                epoch_name = "3.5"
+                start_height = 152
                 "#
             }
         );

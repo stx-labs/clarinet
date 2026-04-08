@@ -30,11 +30,11 @@ version = "3.16.0"
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "pox-5-integration", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "pox-5-integration", package = "clarity-types" }
-stacks-common = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "pox-5-integration", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "pox-5-integration", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "pox-5-integration", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "clarity-types" }
+stacks-common = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }
