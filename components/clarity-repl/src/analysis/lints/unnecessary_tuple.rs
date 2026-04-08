@@ -3,7 +3,7 @@
 //! A tuple with only one field adds encoding overhead without benefit — the
 //! inner type or value can be used directly instead.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
@@ -24,6 +24,9 @@ pub struct UnnecessaryTuple<'a> {
     annotations: &'a Vec<Annotation>,
     level: Level,
     active_annotation: Option<usize>,
+    /// Pointers to `SymbolicExpression` nodes that are direct arguments to
+    /// `merge` — single-field tuples are required there, so we skip warnings.
+    merge_args: HashSet<*const SymbolicExpression>,
 }
 
 impl<'a> UnnecessaryTuple<'a> {
@@ -38,6 +41,7 @@ impl<'a> UnnecessaryTuple<'a> {
             diagnostics: Vec::new(),
             annotations,
             active_annotation: None,
+            merge_args: HashSet::new(),
         }
     }
 
@@ -278,11 +282,36 @@ impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
         true
     }
 
+    fn traverse_merge(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        tuple1: &'a SymbolicExpression,
+        tuple2: &'a SymbolicExpression,
+    ) -> bool {
+        // Both arguments to `merge` must be tuples, so single-field tuples
+        // are legitimate there. Track their identities so visit_tuple skips them.
+        let ptr1 = std::ptr::from_ref(tuple1);
+        let ptr2 = std::ptr::from_ref(tuple2);
+        self.merge_args.insert(ptr1);
+        self.merge_args.insert(ptr2);
+
+        let result = self.traverse_expr(tuple1)
+            && self.traverse_expr(tuple2)
+            && self.visit_merge(expr, tuple1, tuple2);
+
+        self.merge_args.remove(&ptr1);
+        self.merge_args.remove(&ptr2);
+        result
+    }
+
     fn visit_tuple(
         &mut self,
         expr: &'a SymbolicExpression,
         values: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
     ) -> bool {
+        if self.merge_args.contains(&std::ptr::from_ref(expr)) {
+            return true;
+        }
         self.set_active_annotation(&expr.span);
         if self.allow() {
             return true;
@@ -551,6 +580,40 @@ mod tests {
             .message
             .contains(&UnnecessaryTuple::value_message()));
         assert!(output[0].contains("warning["));
+    }
+
+    // ── merge ─────────────────────────────────────────────────
+
+    #[test]
+    fn no_warn_single_field_tuple_in_merge() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func (user { name: (string-ascii 50), age: uint }))
+                (merge user { age: u30 })
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_nested_single_field_tuple_inside_merge() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func (user { name: (string-ascii 50), data: { key: uint } }))
+                (merge user { data: { key: u1 } })
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        // The merge arg `{ data: ... }` is exempt, but the nested `{ key: u1 }`
+        // value literal is still flagged
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
     }
 
     // ── NFT ───────────────────────────────────────────────────
