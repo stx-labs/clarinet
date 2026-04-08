@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::Span;
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
 
@@ -58,7 +59,7 @@ impl<'a> UnnecessaryTuple<'a> {
     /// Check if a `SymbolicExpression` represents a single-field tuple.
     /// Works for both type expressions like `(tuple (key uint))` and
     /// value expressions like `(tuple (key u1))`.
-    fn is_single_field_tuple(expr: &SymbolicExpression) -> bool {
+    fn is_single_field_tuple(&self, expr: &SymbolicExpression) -> bool {
         let Some(list) = expr.match_list() else {
             return false;
         };
@@ -68,7 +69,9 @@ impl<'a> UnnecessaryTuple<'a> {
         let Some(name) = first.match_atom() else {
             return false;
         };
-        name.as_str() == "tuple" && fields.len() == 1
+        NativeFunctions::lookup_by_name_at_version(name, &self.clarity_version)
+            == Some(NativeFunctions::TupleCons)
+            && fields.len() == 1
     }
 
     fn add_diagnostic(&mut self, span: &Span, message: String, suggestion: String) {
@@ -107,7 +110,7 @@ impl<'a> UnnecessaryTuple<'a> {
     fn check_params(&mut self, parameters: &Option<Vec<TypedVar<'a>>>) {
         let Some(params) = parameters else { return };
         for param in params {
-            if Self::is_single_field_tuple(param.type_expr) {
+            if self.is_single_field_tuple(param.type_expr) {
                 self.add_type_diagnostic(param.type_expr);
             }
         }
@@ -130,7 +133,7 @@ impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
         if self.allow() {
             return true;
         }
-        if Self::is_single_field_tuple(data_type) {
+        if self.is_single_field_tuple(data_type) {
             self.add_type_diagnostic(data_type);
         }
         true
@@ -147,10 +150,10 @@ impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
         if self.allow() {
             return true;
         }
-        if Self::is_single_field_tuple(key_type) {
+        if self.is_single_field_tuple(key_type) {
             self.add_type_diagnostic(key_type);
         }
-        if Self::is_single_field_tuple(value_type) {
+        if self.is_single_field_tuple(value_type) {
             self.add_type_diagnostic(value_type);
         }
         true
@@ -208,7 +211,7 @@ impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
         if self.allow() {
             return true;
         }
-        if Self::is_single_field_tuple(nft_type) {
+        if self.is_single_field_tuple(nft_type) {
             self.add_type_diagnostic(nft_type);
         }
         true
@@ -242,7 +245,7 @@ impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
                 // Check argument types
                 if let Some(arg_types) = func_parts.get(1).and_then(|e| e.match_list()) {
                     for arg_type in arg_types {
-                        if Self::is_single_field_tuple(arg_type) {
+                        if self.is_single_field_tuple(arg_type) {
                             self.add_type_diagnostic(arg_type);
                         }
                     }
@@ -250,17 +253,19 @@ impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
 
                 // Check response type
                 if let Some(response_expr) = func_parts.get(2) {
-                    if Self::is_single_field_tuple(response_expr) {
+                    if self.is_single_field_tuple(response_expr) {
                         self.add_type_diagnostic(response_expr);
                     } else if let Some(response_parts) = response_expr.match_list() {
-                        // Check inside (response ok-type err-type)
+                        // Check inside (response ok-type err-type).
+                        // "response" is a type-level keyword with no NativeFunctions
+                        // variant, so a string comparison is necessary here.
                         if response_parts
                             .first()
                             .and_then(|e| e.match_atom())
                             .is_some_and(|n| n.as_str() == "response")
                         {
                             for part in &response_parts[1..] {
-                                if Self::is_single_field_tuple(part) {
+                                if self.is_single_field_tuple(part) {
                                     self.add_type_diagnostic(part);
                                 }
                             }
