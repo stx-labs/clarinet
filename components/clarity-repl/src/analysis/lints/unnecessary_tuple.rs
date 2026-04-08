@@ -352,9 +352,9 @@ mod tests {
     #[test]
     fn warn_data_var_single_field_tuple_type() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-data-var my-var { key: uint } { key: u0 })
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -375,9 +375,9 @@ mod tests {
     #[test]
     fn no_warn_data_var_multi_field_tuple() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-data-var my-var { a: uint, b: bool } { a: u0, b: false })
-        ").to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -388,9 +388,9 @@ mod tests {
     #[test]
     fn warn_map_single_field_key() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-map my-map { key: uint } { a: uint, b: bool })
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -405,9 +405,9 @@ mod tests {
     #[test]
     fn warn_map_single_field_value() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-map my-map { a: uint, b: bool } { val: uint })
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -422,9 +422,9 @@ mod tests {
     #[test]
     fn warn_map_both_single_field() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-map my-map { key: uint } { val: uint })
-        ").to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 2);
@@ -435,9 +435,9 @@ mod tests {
     #[test]
     fn warn_constant_single_field_tuple() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-constant MY_CONST { key: u1 })
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -452,9 +452,9 @@ mod tests {
     #[test]
     fn no_warn_constant_multi_field_tuple() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-constant MY_CONST { a: u1, b: u2 })
-        ").to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -465,11 +465,11 @@ mod tests {
     #[test]
     fn warn_private_fn_single_field_param() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-private (my-func (arg { key: uint }))
                 (get key arg)
             )
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -484,11 +484,11 @@ mod tests {
     #[test]
     fn warn_public_fn_single_field_param() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-public (my-func (arg { key: uint }))
                 (ok (get key arg))
             )
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -503,11 +503,11 @@ mod tests {
     #[test]
     fn warn_read_only_fn_single_field_param() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-read-only (my-func (arg { key: uint }))
                 (get key arg)
             )
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -522,11 +522,11 @@ mod tests {
     #[test]
     fn no_warn_fn_multi_field_param() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-private (my-func (arg { a: uint, b: bool }))
                 (get a arg)
             )
-        ").to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -537,11 +537,11 @@ mod tests {
     #[test]
     fn warn_return_single_field_tuple() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-private (my-func)
                 { key: u1 }
             )
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -558,9 +558,9 @@ mod tests {
     #[test]
     fn warn_nft_single_field_tuple_type() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-non-fungible-token my-nft { id: uint })
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -575,9 +575,9 @@ mod tests {
     #[test]
     fn no_warn_nft_multi_field_tuple() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-non-fungible-token my-nft { id: uint, owner: principal })
-        ").to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -588,11 +588,11 @@ mod tests {
     #[test]
     fn warn_trait_single_field_param() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-trait my-trait (
                 (my-fn ({ key: uint }) (response uint uint))
             ))
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -607,11 +607,11 @@ mod tests {
     #[test]
     fn warn_trait_single_field_response_ok() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-trait my-trait (
                 (my-fn (uint) (response { key: uint } uint))
             ))
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -626,11 +626,11 @@ mod tests {
     #[test]
     fn warn_trait_single_field_response_err() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             (define-trait my-trait (
                 (my-fn (uint) (response uint { err: uint }))
             ))
-        ").to_string();
+        "#).to_string();
 
         let (output, result) = run_snippet(snippet);
 
@@ -647,10 +647,10 @@ mod tests {
     #[test]
     fn allow_with_annotation() {
         #[rustfmt::skip]
-        let snippet = indoc!("
+        let snippet = indoc!(r#"
             ;; #[allow(unnecessary_tuple)]
             (define-data-var my-var { key: uint } { key: u0 })
-        ").to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
