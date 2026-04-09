@@ -192,7 +192,8 @@ pub async fn start_chains_coordinator(
     create_new_snapshot: bool,
     ctx: Context,
 ) -> Result<(), String> {
-    let mut should_deploy_protocol = true; // Will change when `stacks-network` components becomes compatible with Testnet / Mainnet setups
+    // When booting from a stacks snapshot, contracts are already deployed — skip deployment.
+    let mut should_deploy_protocol = !snapshot_level.has_snapshot();
     let boot_completed = Arc::new(AtomicBool::new(false));
     let mut last_pox_version: Option<u32> = None;
     let mut current_burn_height = match snapshot_level {
@@ -231,10 +232,16 @@ pub async fn start_chains_coordinator(
 
     // Set-up the background task in charge of monitoring contracts deployments.
     // This thread will be waiting and relaying events emitted by the thread above.
+    // When using a stacks snapshot, mining is started directly (not via deployment completion).
+    let mining_tx_for_deployment = if snapshot_level.has_snapshot() {
+        None
+    } else {
+        Some(mining_command_tx.clone())
+    };
     relay_devnet_protocol_deployment(
         deployment_events_rx,
         &devnet_event_tx,
-        Some(mining_command_tx.clone()),
+        mining_tx_for_deployment,
         &boot_completed,
     );
 
@@ -245,7 +252,7 @@ pub async fn start_chains_coordinator(
     let observer_command_tx_moved = observer_command_tx.clone();
     let ctx_moved = ctx.clone();
 
-    let stacks_startup_context = if snapshot_level != SnapshotLevel::None {
+    let stacks_startup_context = if snapshot_level.has_snapshot() {
         // Load events from snapshot if available
         let event_pool: Vec<StacksBlockData> = {
             let mut events = vec![];
@@ -324,6 +331,16 @@ pub async fn start_chains_coordinator(
             handle_bitcoin_mining(mining_command_rx, &devnet_config, &devnet_event_tx_moved);
         hiro_system_kit::nestable_block_on(future);
     });
+
+    // When booting from a stacks snapshot, contracts are already deployed.
+    // Send BootCompleted so the UI/logger starts mining immediately.
+    if snapshot_level.has_snapshot() {
+        boot_completed.store(true, Ordering::SeqCst);
+        let _ = devnet_event_tx.send(DevnetEvent::info(
+            "Snapshot boot: skipping deployment, starting mining".to_string(),
+        ));
+        let _ = devnet_event_tx.send(DevnetEvent::BootCompleted(mining_command_tx.clone()));
+    }
 
     // Loop over events being received from Bitcoin and Stacks,
     // and orchestrate the 2 chains + protocol.
@@ -700,6 +717,11 @@ impl SnapshotLevel {
     pub fn snapshot_dir(self) -> PathBuf {
         get_global_snapshot_dir().join("epoch_3_5")
     }
+
+    /// Whether a snapshot is being used.
+    pub fn has_snapshot(self) -> bool {
+        self != SnapshotLevel::None
+    }
 }
 
 fn remove_snapshot(devnet_event_tx: &Sender<DevnetEvent>) -> Result<(), String> {
@@ -738,7 +760,16 @@ pub async fn create_snapshot(
     fs::create_dir_all(&snapshot_dir)
         .unwrap_or_else(|e| panic!("unable to create snapshot directory: {e:?}"));
 
-    // Copy project data to snapshot directory
+    let _ = devnet_event_tx.send(DevnetEvent::info(
+        "Creating snapshot, pausing mining...".to_string(),
+    ));
+
+    // 1. Stop mining FIRST to ensure SQLite databases are in a consistent state
+    let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
+    // 2. Wait for the current tenure to settle and databases to flush
+    std::thread::sleep(Duration::from_secs(5));
+
+    // Copy project data to snapshot directory (after mining is paused)
     let project_bitcoin = project_snapshot_dir.join("bitcoin");
     let snapshot_bitcoin = snapshot_dir.join("bitcoin");
     if project_bitcoin.exists() {
@@ -763,15 +794,6 @@ pub async fn create_snapshot(
             )));
         });
     }
-
-    let _ = devnet_event_tx.send(DevnetEvent::info(
-        "Creating snapshot, preparing to export Stacks API events...".to_string(),
-    ));
-
-    // 1. Stop mining to prevent further blocks
-    let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
-    // 2. Wait a moment for pausing to complete
-    std::thread::sleep(Duration::from_secs(3));
 
     // Export the events
     match export_stacks_api_events(devnet_event_observer_config, devnet_event_tx).await {

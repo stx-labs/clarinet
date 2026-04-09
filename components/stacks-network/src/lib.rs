@@ -250,20 +250,19 @@ async fn do_run_devnet(
         hiro_system_kit::thread_named("Initializing bitcoin node")
             .spawn(move || {
                 let moved_orchestrator_event_tx = orchestrator_event_tx.clone();
-                let no_snapshot = snapshot_level == SnapshotLevel::None;
                 let res = if config.start_local_devnet_services {
                     let future = devnet.start(
                         moved_orchestrator_event_tx,
                         terminator_rx,
                         &ctx_moved,
-                        no_snapshot,
+                        snapshot_level,
                         config.save_container_logs,
                     );
                     let rt = hiro_system_kit::create_basic_runtime();
                     rt.block_on(future)
                 } else {
-                    let future =
-                        devnet.initialize_bitcoin_node(&moved_orchestrator_event_tx, no_snapshot);
+                    let future = devnet
+                        .initialize_bitcoin_node(&moved_orchestrator_event_tx, snapshot_level);
                     let rt = hiro_system_kit::create_basic_runtime();
                     rt.block_on(future)
                 };
