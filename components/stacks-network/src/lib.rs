@@ -7,6 +7,7 @@ mod log;
 pub use observer;
 pub mod log_event_logger;
 mod orchestrator;
+mod snapshot_extractor;
 mod ui;
 
 use std::sync::mpsc::{self, channel, Receiver, Sender};
@@ -163,7 +164,17 @@ async fn do_run_devnet(
         let _ = devnet_events_tx.send(DevnetEvent::info("Using epoch 3.5 snapshot".to_string()));
         SnapshotLevel::Epoch3_5
     } else {
-        SnapshotLevel::None
+        // No snapshot on disk — extract the embedded default snapshot
+        let snapshot_dir = SnapshotLevel::Epoch3_5.snapshot_dir();
+        match snapshot_extractor::extract_embedded_snapshot(&snapshot_dir, &devnet_events_tx) {
+            Ok(true) => {
+                let _ = devnet_events_tx.send(DevnetEvent::info(
+                    "Using embedded epoch 3.5 snapshot".to_string(),
+                ));
+                SnapshotLevel::Epoch3_5
+            }
+            _ => SnapshotLevel::None,
+        }
     };
     // if we're starting all services, all trace logs go to networking.log
     if config.start_local_devnet_services {

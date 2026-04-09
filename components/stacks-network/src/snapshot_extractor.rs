@@ -47,7 +47,7 @@ pub fn extract_embedded_snapshot(
     }
 
     // Create a marker file to indicate the snapshot is ready
-    let marker_path = snapshot_dir.join("epoch_3_ready");
+    let marker_path = snapshot_dir.join("epoch_3_5_ready");
     if let Some(parent) = marker_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create marker directory: {e}"))?;
