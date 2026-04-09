@@ -47,6 +47,13 @@ impl<'a, 'b> UnusedPrivateFn<'a, 'b> {
             .unwrap_or(false)
     }
 
+    fn has_env_annotation(fn_data: &PrivateFnData, annotations: &[Annotation]) -> bool {
+        fn_data
+            .annotation
+            .map(|idx| matches!(annotations[idx].kind, AnnotationKind::Env(_)))
+            .unwrap_or(false)
+    }
+
     /// Make diagnostic message and suggestion for unused private fn
     pub(crate) fn make_diagnostic_strings(name: &ClarityName) -> (String, Option<String>) {
         (
@@ -65,7 +72,11 @@ impl<'a, 'b> UnusedPrivateFn<'a, 'b> {
         let private_fns = self.analysis_cache.get_private_fns();
 
         for (name, fn_data) in private_fns {
-            if fn_data.called || Self::allow(fn_data, annotations) || is_explicitly_unused(name) {
+            if fn_data.called
+                || Self::allow(fn_data, annotations)
+                || Self::has_env_annotation(fn_data, annotations)
+                || is_explicitly_unused(name)
+            {
                 continue;
             }
             let (message, suggestion) = Self::make_diagnostic_strings(name);
@@ -275,6 +286,21 @@ mod tests {
             (define-read-only (cube (x uint))
                 (* x (* x x)))
         ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn allow_with_env_simnet_annotation() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            ;; #[env(simnet)]
+            (define-private (test-double)
+              (ok (asserts! (is-eq u8 (* u4 u2)) (err "double u4 does not return u8")))
+            )
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
 
