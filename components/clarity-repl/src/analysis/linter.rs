@@ -54,6 +54,8 @@ pub enum LintName {
     UnnecessaryAsMaxLen,
     /// Find public functions that could be read-only
     UnnecessaryPublic,
+    /// Find unnecessary single-field tuples
+    UnnecessaryTuple,
     /// Find unused variable bindings
     UnusedBinding,
     /// Find unused constants
@@ -125,7 +127,11 @@ impl LintGroup {
 
         match self {
             All => LintName::VARIANTS,
-            Perf => &[LintName::UnnecessaryAsMaxLen, LintName::UnnecessaryPublic],
+            Perf => &[
+                LintName::UnnecessaryAsMaxLen,
+                LintName::UnnecessaryPublic,
+                LintName::UnnecessaryTuple,
+            ],
             Safety => &[
                 LintName::AtBlock,
                 LintName::ErrorConst,
