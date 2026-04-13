@@ -2,6 +2,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -9,11 +13,23 @@
       self,
       nixpkgs,
       flake-utils,
+      rust-overlay,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
+
+        # Rust toolchain pinned via rust-overlay, independent of nixpkgs.
+        # Bump with `nix flake update rust-overlay`.
+        rustToolchain = pkgs.rust-bin.stable.latest.default;
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
 
         cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         pname = "clarinet";
@@ -23,7 +39,7 @@
         # Run `nix run .#check-git-dependencies-hash` to verify or get the new hash
         clarityHash = "sha256-RHrGd/10Z0uFS9SwBbnkH//vuGOTiExe5i+8gB/KhZc=";
 
-        clarinet = pkgs.rustPlatform.buildRustPackage {
+        clarinet = rustPlatform.buildRustPackage {
           inherit pname version;
           src = self;
           cargoLock = {
@@ -62,7 +78,7 @@
           doCheck = false;
 
           passthru = {
-            inherit (pkgs) rustc;
+            rustc = rustToolchain;
           };
         };
 
@@ -139,17 +155,17 @@
               LATEST_RUST=$(echo "$MANIFEST_JSON" | jq -r '.pkg.rust.version' | cut -d' ' -f1)
               MANIFEST_DATE=$(echo "$MANIFEST_JSON" | jq -r '.date')
 
-              NIX_RUST="${clarinet.rustc.version}"
+              FLAKE_RUST="${clarinet.rustc.version}"
 
-              echo "Rust in nixpkgs: $NIX_RUST"
-              echo "Latest stable:   $LATEST_RUST (released $MANIFEST_DATE)"
+              echo "Rust in flake:  $FLAKE_RUST"
+              echo "Latest stable:  $LATEST_RUST (released $MANIFEST_DATE)"
 
-              if [ "$NIX_RUST" == "$LATEST_RUST" ]; then
+              if [ "$FLAKE_RUST" == "$LATEST_RUST" ]; then
                 echo "Rust version is up to date."
                 exit 0
               fi
 
-              # Check if the stable version is older than 7 days
+              # Check if the stable version is older than 14 days
               TODAY=$(date +%s)
               MANIFEST_TS=$(date -d "$MANIFEST_DATE" +%s)
               DIFF_SEC=$((TODAY - MANIFEST_TS))
@@ -158,13 +174,13 @@
               echo "Stable version was released $DIFF_DAYS days ago."
 
               if [ "$DIFF_DAYS" -gt 14 ]; then
-                echo "::error::nixpkgs Rust ($NIX_RUST) is behind latest stable ($LATEST_RUST) which is > 7 days old."
+                echo "::error::Flake Rust ($FLAKE_RUST) is behind latest stable ($LATEST_RUST) which is > 14 days old."
                 echo ""
-                echo "Please update nixpkgs:"
-                echo "  nix flake update nixpkgs"
+                echo "Please update the rust-overlay input:"
+                echo "  nix flake update rust-overlay"
                 exit 1
               else
-                 echo "::warning::nixpkgs Rust ($NIX_RUST) is behind latest stable ($LATEST_RUST), but it is within the 7-day grace period."
+                 echo "::warning::Flake Rust ($FLAKE_RUST) is behind latest stable ($LATEST_RUST), but it is within the 14-day grace period."
                  exit 0
               fi
             '';
