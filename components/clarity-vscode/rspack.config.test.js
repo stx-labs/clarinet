@@ -1,7 +1,7 @@
 // @ts-check
 "use-strict";
 
-const configs = require("./webpack.config");
+const configs = require("./rspack.config");
 
 const [clientBrowserConfig] = configs;
 
