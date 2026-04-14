@@ -92,6 +92,7 @@ pub enum WarningKind {
     Panic,
     UnnecessaryAsMaxLen,
     UnnecessaryPublic,
+    UnnecessaryTuple,
     UnusedBinding,
     UnusedConst,
     UnusedDataVar,

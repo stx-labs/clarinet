@@ -90,6 +90,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::Panic => lints::PanicChecker::run_pass,
             LintName::UnnecessaryAsMaxLen => lints::UnnecessaryAsMaxLen::run_pass,
             LintName::UnnecessaryPublic => lints::UnnecessaryPublic::run_pass,
+            LintName::UnnecessaryTuple => lints::UnnecessaryTuple::run_pass,
             LintName::UnusedConst => lints::UnusedConst::run_pass,
             LintName::UnusedDataVar => lints::UnusedDataVar::run_pass,
             LintName::UnusedBinding => lints::UnusedBinding::run_pass,
