@@ -10,7 +10,7 @@ use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 use clarity::vm::types::{
     parse_name_type_pairs, ListTypeData, PrincipalData, QualifiedContractIdentifier,
-    SequenceSubtype, TupleTypeSignature, TypeSignature, TypeSignatureExt,
+    SequenceSubtype, StringSubtype, TupleTypeSignature, TypeSignature, TypeSignatureExt,
 };
 use clarity::vm::variables::lookup_reserved_variable;
 use clarity::vm::{ClarityVersion, Value};
@@ -98,6 +98,9 @@ pub struct UserArgumentsContext {
     pub map_types: HashMap<ClarityName, (TypeSignature, TypeSignature)>,
     /// Map from data-var name to its value type, pre-populated from define-data-var declarations
     pub data_var_types: HashMap<ClarityName, TypeSignature>,
+    /// Map from argument name to a known-constant value (call-site narrowing).
+    /// Treated as a hint, never required.
+    pub known_values: HashMap<ClarityName, Value>,
 }
 
 impl UserArgumentsContext {
@@ -136,6 +139,14 @@ impl UserArgumentsContext {
 
     pub fn get_data_var_type(&self, name: &ClarityName) -> Option<&TypeSignature> {
         self.data_var_types.get(name)
+    }
+
+    pub fn add_known_value(&mut self, name: ClarityName, value: Value) {
+        self.known_values.insert(name, value);
+    }
+
+    pub fn get_known_value(&self, name: &ClarityName) -> Option<&Value> {
+        self.known_values.get(name)
     }
 }
 
@@ -630,6 +641,7 @@ pub fn build_cost_analysis_tree(
                             clarity_version,
                             epoch,
                             None,
+                            None,
                             env,
                             invoke_ctx,
                         )?;
@@ -965,11 +977,11 @@ fn multiply_cost(cost: &mut ExecutionCost, factor: u64) {
 fn get_map_filter_fold_list_max_len(
     list_exprs: &[SymbolicExpression],
     user_args: &UserArgumentsContext,
+    epoch: StacksEpochId,
 ) -> u64 {
     for expr in list_exprs {
-        if let Some(TypeSignature::SequenceType(SequenceSubtype::ListType(list_data))) = expr
-            .match_atom()
-            .and_then(|name| user_args.get_argument_type(name))
+        if let Ok(TypeSignature::SequenceType(SequenceSubtype::ListType(list_data))) =
+            infer_type_from_expression_with_args(expr, user_args, epoch)
         {
             return list_data.get_max_len() as u64;
         }
@@ -977,13 +989,65 @@ fn get_map_filter_fold_list_max_len(
     1
 }
 
-/// Check if `actual` is a narrower type than `declared` (e.g., shorter list max length).
+/// Try to resolve an expression to a constant boolean known at static-analysis time.
+/// Used for folding `if` branches when the condition is constant.
+/// Returns `None` for any expression we cannot statically resolve to a literal bool.
+fn try_resolve_constant_bool(
+    expr: &SymbolicExpression,
+    user_args: &UserArgumentsContext,
+) -> Option<bool> {
+    match &expr.expr {
+        SymbolicExpressionType::LiteralValue(Value::Bool(b))
+        | SymbolicExpressionType::AtomValue(Value::Bool(b)) => Some(*b),
+        SymbolicExpressionType::Atom(name) => match name.as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => match user_args.get_known_value(name)? {
+                Value::Bool(b) => Some(*b),
+                _ => None,
+            },
+        },
+        SymbolicExpressionType::List(list) => {
+            // Recognise `(not <expr>)`
+            let head = list.first()?.match_atom()?;
+            if head.as_str() == "not" && list.len() == 2 {
+                Some(!try_resolve_constant_bool(&list[1], user_args)?)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if `actual` is a narrower type than `declared` (e.g., shorter list max length,
+/// shorter buffer/string).
 fn is_narrower_type(actual: &TypeSignature, declared: &TypeSignature) -> bool {
     match (actual, declared) {
         (
             TypeSignature::SequenceType(SequenceSubtype::ListType(actual_list)),
             TypeSignature::SequenceType(SequenceSubtype::ListType(declared_list)),
         ) => actual_list.get_max_len() < declared_list.get_max_len(),
+        (
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(actual_len)),
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(declared_len)),
+        ) => u32::from(actual_len) < u32::from(declared_len),
+        (
+            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
+                actual_len,
+            ))),
+            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
+                declared_len,
+            ))),
+        ) => u32::from(actual_len) < u32::from(declared_len),
+        (
+            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
+                actual_len,
+            ))),
+            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
+                declared_len,
+            ))),
+        ) => u32::from(actual_len) < u32::from(declared_len),
         _ => false,
     }
 }
@@ -1043,29 +1107,52 @@ fn try_narrow_user_function_cost(
         })
         .collect();
 
-    // Infer actual argument types from the call site and check if any are narrower
-    let mut any_narrower = false;
+    // Infer actual argument types from the call site and check if any are narrower.
+    // Also extract known constant values from literal arguments or by propagating
+    // from the caller's known_values when an arg is itself an atom referring to
+    // a known-constant parameter.
+    let mut any_narrower_or_known = false;
     let mut narrowed_types: Vec<TypeSignature> = Vec::with_capacity(params.len());
+    let mut known_values: Vec<Option<Value>> = Vec::with_capacity(params.len());
     for (i, (_param_name, declared_type)) in params.iter().enumerate() {
-        if let Some(call_arg) = call_args.get(i) {
-            if let Ok(actual_type) =
-                infer_type_from_expression_with_args(call_arg, caller_user_args, epoch)
-            {
-                if is_narrower_type(&actual_type, declared_type) {
-                    narrowed_types.push(actual_type);
-                    any_narrower = true;
-                    continue;
-                }
-            }
+        let call_arg = call_args.get(i);
+
+        // Type narrowing
+        let narrowed_type = call_arg
+            .and_then(|arg| infer_type_from_expression_with_args(arg, caller_user_args, epoch).ok())
+            .filter(|actual_type| is_narrower_type(actual_type, declared_type));
+        if let Some(t) = narrowed_type {
+            narrowed_types.push(t);
+            any_narrower_or_known = true;
+        } else {
+            narrowed_types.push(declared_type.clone());
         }
-        narrowed_types.push(declared_type.clone());
+
+        // Known value extraction. Literals (`u1`, `0x01`, `"hi"`) come through as
+        // AtomValue/LiteralValue. Constant atoms `true`/`false` are reserved
+        // variables parsed as plain Atom. Caller-side parameters with a known
+        // value are also propagated.
+        let known = call_arg.and_then(|arg| {
+            arg.match_atom_value()
+                .or_else(|| arg.match_literal_value())
+                .cloned()
+                .or_else(|| match arg.match_atom()?.as_str() {
+                    "true" => Some(Value::Bool(true)),
+                    "false" => Some(Value::Bool(false)),
+                    name => caller_user_args.get_known_value(&name.into()).cloned(),
+                })
+        });
+        if known.is_some() {
+            any_narrower_or_known = true;
+        }
+        known_values.push(known);
     }
 
-    if !any_narrower {
+    if !any_narrower_or_known {
         return None;
     }
 
-    // Re-analyze the function body with narrowed argument types
+    // Re-analyze the function body with narrowed argument types and known values
     let (_, mut narrowed_tree) = build_function_definition_cost_analysis_tree(
         fn_def_list,
         caller_user_args,
@@ -1074,6 +1161,7 @@ fn try_narrow_user_function_cost(
         clarity_version,
         epoch,
         Some(&narrowed_types),
+        Some(&known_values),
         env,
         invoke_ctx,
     )
@@ -1136,6 +1224,7 @@ fn build_function_definition_cost_analysis_tree(
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
     arg_type_overrides: Option<&[TypeSignature]>,
+    arg_known_values: Option<&[Option<Value>]>,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
 ) -> Result<(String, CostAnalysisNode), StaticCostError> {
@@ -1153,6 +1242,7 @@ fn build_function_definition_cost_analysis_tree(
         arguments: HashMap::new(),
         map_types: outer_user_args.map_types.clone(),
         data_var_types: outer_user_args.data_var_types.clone(),
+        known_values: HashMap::new(),
     };
 
     // Process function arguments: (a u64)
@@ -1182,6 +1272,11 @@ fn build_function_definition_cost_analysis_tree(
 
                 // Add to function's user arguments context
                 function_user_args.add_argument(arg_name.clone(), arg_type.clone());
+
+                // Seed known constant value for this argument, if provided.
+                if let Some(Some(value)) = arg_known_values.and_then(|kvs| kvs.get(i)) {
+                    function_user_args.add_known_value(arg_name.clone(), value.clone());
+                }
 
                 // Create UserArgument node
                 children.push(CostAnalysisNode::leaf(
@@ -1414,9 +1509,26 @@ fn build_listlike_cost_analysis_tree(
                 } else if native_function == NativeFunctions::If {
                     // `If` creates a nested context
                     let nested_depth = let_depth + 1;
-                    for expr in exprs[1..].iter() {
+                    // Fold the if when its condition resolves to a constant bool:
+                    // build only the condition + selected branch, and below replace
+                    // the NativeFunction(If) node with NestedExpression so the cost
+                    // sum is non-branching.
+                    let folded_branch = exprs
+                        .get(1)
+                        .and_then(|cond| try_resolve_constant_bool(cond, user_args));
+                    let selected_indices: Vec<usize> = if let Some(taken) = folded_branch {
+                        let branch_idx = if taken { 2 } else { 3 };
+                        if exprs.get(branch_idx).is_some() {
+                            vec![1, branch_idx]
+                        } else {
+                            (1..exprs.len()).collect()
+                        }
+                    } else {
+                        (1..exprs.len()).collect()
+                    };
+                    for &idx in &selected_indices {
                         let (_, child_tree) = build_cost_analysis_tree(
-                            expr,
+                            &exprs[idx],
                             user_args,
                             cost_map,
                             function_defs,
@@ -1427,6 +1539,24 @@ fn build_listlike_cost_analysis_tree(
                             nested_depth,
                         )?;
                         children.push(child_tree);
+                    }
+                    if folded_branch.is_some() {
+                        // Compute the If's own cost (lookup + special function), but
+                        // emit a NestedExpression node so calculate_total_cost_with_branching
+                        // treats it as non-branching.
+                        let cost = calculate_function_cost_from_native_function(
+                            native_function,
+                            (exprs.len() - 1) as u64,
+                            &exprs[1..],
+                            epoch,
+                            Some(user_args),
+                            Some(invoke_ctx.contract_context),
+                        )?;
+                        return Ok(CostAnalysisNode::new(
+                            CostExprNode::NestedExpression,
+                            cost,
+                            children,
+                        ));
                     }
                 } else {
                     // For other functions, build all children with current depth
@@ -1478,7 +1608,8 @@ fn build_listlike_cost_analysis_tree(
                         .and_then(|name| cost_map.get(name.as_str()))
                         .and_then(|c| c.as_ref())
                     {
-                        let list_max_len = get_map_filter_fold_list_max_len(&exprs[2..], user_args);
+                        let list_max_len =
+                            get_map_filter_fold_list_max_len(&exprs[2..], user_args, epoch);
                         let mut multiplied_min = called_fn_cost.min.clone();
                         multiply_cost(&mut multiplied_min, list_max_len);
                         let mut multiplied_max = called_fn_cost.max.clone();
