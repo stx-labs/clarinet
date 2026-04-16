@@ -511,14 +511,12 @@ pub fn build_completion_item_list(
                     Some(snippet)
                 };
             }
-            Some(CompletionItemKind::TYPE_PARAMETER) => {
-                if should_wrap {
-                    if let "tuple" | "buff" | "string-ascii" | "string-utf8" | "optional" | "list"
-                    | "response" = item.label.as_str()
-                    {
-                        item.insert_text = Some(format!("({} $0)", item.label));
-                        item.insert_text_format = Some(InsertTextFormat::SNIPPET);
-                    }
+            Some(CompletionItemKind::TYPE_PARAMETER) if should_wrap => {
+                if let "tuple" | "buff" | "string-ascii" | "string-utf8" | "optional" | "list"
+                | "response" = item.label.as_str()
+                {
+                    item.insert_text = Some(format!("({} $0)", item.label));
+                    item.insert_text_format = Some(InsertTextFormat::SNIPPET);
                 }
             }
             _ => {}

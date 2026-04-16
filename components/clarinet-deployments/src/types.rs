@@ -1208,7 +1208,7 @@ impl DeploymentSpecification {
     }
 
     pub fn sort_batches_by_epoch(&mut self) {
-        self.plan.batches.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+        self.plan.batches.sort_by_key(|a| a.epoch);
         for (i, batch) in self.plan.batches.iter_mut().enumerate() {
             batch.id = i;
         }
