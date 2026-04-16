@@ -1,0 +1,9 @@
+[package]
+name = "clarity-ts-typegen"
+version.workspace = true
+edition = "2021"
+description = "Generate TypeScript types from Clarity smart contract interfaces"
+license = "GPL-3.0"
+
+[dependencies]
+clarity = { workspace = true }

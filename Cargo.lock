@@ -660,6 +660,7 @@ dependencies = [
  "clarity",
  "clarity-lsp",
  "clarity-repl",
+ "clarity-ts-typegen",
  "colored",
  "crossbeam-channel",
  "crossterm",
@@ -907,6 +908,13 @@ dependencies = [
  "stacks-common",
  "stackslib",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "clarity-ts-typegen"
+version = "3.16.0"
+dependencies = [
+ "clarity",
 ]
 
 [[package]]
