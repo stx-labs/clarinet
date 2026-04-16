@@ -125,6 +125,9 @@ enum Command {
     /// Step by step debugging and breakpoints from your code editor (VSCode, vim, emacs, etc)
     #[clap(name = "dap", bin_name = "dap")]
     DAP,
+    /// Generate TypeScript types from contract interfaces
+    #[clap(name = "typegen", bin_name = "typegen")]
+    Typegen(Typegen),
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -572,6 +575,16 @@ struct Check {
     /// Set the output format
     #[clap(long = "output", default_value = "standard")]
     pub output_format: OutputFormat,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+struct Typegen {
+    /// Path to Clarinet.toml
+    #[clap(long = "manifest-path", short = 'm')]
+    pub manifest_path: Option<String>,
+    /// Output directory for generated types (relative to project root)
+    #[clap(long = "output-dir", short = 'o')]
+    pub output_dir: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1432,6 +1445,65 @@ pub fn main() {
             // Returns first non-zero exit code, if any
             let exit_code = exit_codes.iter().cloned().find(|c| *c != 0).unwrap_or(0);
             std::process::exit(exit_code);
+        }
+        Command::Typegen(cmd) => {
+            let manifest = load_manifest_or_exit(cmd.manifest_path, false);
+
+            let ((_, _, artifacts), _) = load_deployment_and_artifacts_or_exit(
+                &manifest,
+                &None,
+                false,
+                false,
+                true,
+                Environment::OnChain,
+            );
+
+            let output_dir_name = cmd.output_dir.as_deref().unwrap_or("generated");
+            let output_dir = manifest.root_dir.join(output_dir_name);
+
+            // Build a set of requirement contract IDs for matching
+            let requirement_ids: std::collections::HashSet<String> = manifest
+                .project
+                .requirements
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|r| r.contract_id.clone())
+                .collect();
+
+            // Collect contract interfaces for project contracts and requirements
+            let mut contracts = std::collections::BTreeMap::new();
+            for (contract_id, contract_analysis) in &artifacts.analysis {
+                let contract_name = contract_id.name.to_string();
+                let is_project_contract = manifest.contracts.contains_key(&contract_name);
+                let is_requirement = requirement_ids.contains(&contract_id.to_string());
+                if !is_project_contract && !is_requirement {
+                    continue;
+                }
+                if let Some(interface) = &contract_analysis.contract_interface {
+                    contracts.insert(contract_name, interface);
+                } else {
+                    eprintln!(
+                        "{} skipping {contract_name} (no interface available)",
+                        yellow!("warning:"),
+                    );
+                }
+            }
+
+            match clarity_ts_typegen::generate(&contracts, &output_dir) {
+                Ok(count) => {
+                    println!(
+                        "{} Generated types for {} in {}",
+                        green!("✔"),
+                        pluralize!(count, "contract"),
+                        output_dir_name,
+                    );
+                }
+                Err(e) => {
+                    eprintln!("{} {e}", red!("error:"));
+                    process::exit(1);
+                }
+            }
         }
         Command::Integrate(cmd) => {
             eprintln!(
