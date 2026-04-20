@@ -1,7 +1,7 @@
 use dirs;
 use failure::Error;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 pub fn install() -> Result<(), Error> {
@@ -24,7 +24,7 @@ pub fn install() -> Result<(), Error> {
     Ok(())
 }
 
-pub fn install_resource(dir: &PathBuf, filename: &str, bytes: &'static [u8]) -> Result<(), Error> {
+pub fn install_resource(dir: &Path, filename: &str, bytes: &'static [u8]) -> Result<(), Error> {
     let res_path = dir.join(filename);
     println!("Writing {}", res_path.to_string_lossy());
     let mut file = fs::File::create(res_path)?;

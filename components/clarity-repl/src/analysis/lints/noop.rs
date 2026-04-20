@@ -145,7 +145,7 @@ pub struct NoopChecker<'a> {
     clarity_version: ClarityVersion,
     _settings: NoopCheckerSettings,
     diagnostics: Vec<Diagnostic>,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     /// Clarity diagnostic level
     level: Level,
     active_annotation: Option<usize>,
@@ -154,7 +154,7 @@ pub struct NoopChecker<'a> {
 impl<'a> NoopChecker<'a> {
     fn new(
         clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
         level: Level,
         settings: NoopCheckerSettings,
     ) -> NoopChecker<'a> {

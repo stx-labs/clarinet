@@ -1029,7 +1029,7 @@ pub fn get_value_description(raw_value: &str, ctx: &Context) -> String {
 
 pub fn get_tx_description(
     raw_tx: &str,
-    tx_events: &Vec<&NewEvent>,
+    tx_events: &[&NewEvent],
 ) -> Result<
     (
         String, // Human readable transaction's description (contract-call, publish, ...)

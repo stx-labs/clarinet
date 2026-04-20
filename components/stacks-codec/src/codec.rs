@@ -522,7 +522,7 @@ impl std::str::FromStr for StacksString {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if !StacksString::is_valid_string(&String::from(s)) {
+        if !StacksString::is_valid_string(s) {
             return Err("Invalid string".to_string());
         }
         Ok(StacksString(s.as_bytes().to_vec()))
@@ -558,11 +558,11 @@ impl From<ContractName> for StacksString {
 
 impl StacksString {
     /// Is the given string a valid Clarity string?
-    pub fn is_valid_string(s: &String) -> bool {
+    pub fn is_valid_string(s: &str) -> bool {
         s.is_ascii() && StacksString::is_printable(s)
     }
 
-    pub fn is_printable(s: &String) -> bool {
+    pub fn is_printable(s: &str) -> bool {
         if !s.is_ascii() {
             return false;
         }

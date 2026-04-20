@@ -113,7 +113,7 @@ pub struct CheckChecker<'a> {
     tainted_nodes: HashMap<Node<'a>, TaintedNode<'a>>,
     /// Map expression ID to a generated diagnostic
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     active_annotation: Option<usize>,
     /// Record all public functions defined
     public_funcs: HashSet<&'a ClarityName>,
@@ -129,7 +129,7 @@ pub struct CheckChecker<'a> {
 impl<'a> CheckChecker<'a> {
     fn new(
         clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
         level: Level,
         settings: Settings,
     ) -> CheckChecker<'a> {
