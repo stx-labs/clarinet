@@ -283,7 +283,7 @@ impl ClarityInterpreter {
         &mut self,
         contract: &ClarityContract,
         contract_ast: &ContractAST,
-        annotations: &Vec<Annotation>,
+        annotations: &[Annotation],
     ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Diagnostic> {
         let mut analysis_db = AnalysisDatabase::new(&mut self.clarity_datastore);
 

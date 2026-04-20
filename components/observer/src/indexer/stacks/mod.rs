@@ -11,7 +11,7 @@ use clarity::vm::types::{SequenceData, Value as ClarityValue};
 use hiro_system_kit::slog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use stacks_codec::codec::{StacksTransaction, TransactionAuth, TransactionPayload};
+use stackslib::chainstate::stacks::{StacksTransaction, TransactionAuth, TransactionPayload};
 
 use crate::hooks::stacks::try_decode_clarity_value;
 use crate::indexer::{AssetClassCache, IndexerConfig, StacksChainContext};
@@ -1029,7 +1029,7 @@ pub fn get_value_description(raw_value: &str, ctx: &Context) -> String {
 
 pub fn get_tx_description(
     raw_tx: &str,
-    tx_events: &Vec<&NewEvent>,
+    tx_events: &[&NewEvent],
 ) -> Result<
     (
         String, // Human readable transaction's description (contract-call, publish, ...)

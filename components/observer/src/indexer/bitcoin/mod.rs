@@ -484,7 +484,7 @@ pub fn standardize_bitcoin_block(
 
 fn try_parse_stacks_operation(
     block_height: u64,
-    _inputs: &Vec<BitcoinTransactionInputFullBreakdown>,
+    _inputs: &[BitcoinTransactionInputFullBreakdown],
     outputs: &[BitcoinTransactionOutputFullBreakdown],
     pox_config: &PoxConfig,
     expected_magic_bytes: &[u8; 2],

@@ -40,7 +40,6 @@ stacks-rpc-client = { path = "../stacks-rpc-client" }
 clarinet-files = { path = "../clarinet-files" }
 clarinet-deployments = { path = "../clarinet-deployments" }
 hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
-stacks-codec = { path = "../stacks-codec" }
 observer = { path = "../observer" }
 libc = "0.2.173"
 

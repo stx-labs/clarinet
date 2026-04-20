@@ -17,17 +17,13 @@ use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 pub struct PanicChecker<'a> {
     clarity_version: ClarityVersion,
     diagnostics: HashMap<u64, Vec<Diagnostic>>,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     level: Level,
     active_annotation: Option<usize>,
 }
 
 impl<'a> PanicChecker<'a> {
-    fn new(
-        clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
-        level: Level,
-    ) -> Self {
+    fn new(clarity_version: ClarityVersion, annotations: &'a [Annotation], level: Level) -> Self {
         Self {
             clarity_version,
             level,

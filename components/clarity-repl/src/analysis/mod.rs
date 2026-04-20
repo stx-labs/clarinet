@@ -295,7 +295,7 @@ impl From<SettingsFile> for Settings {
 pub fn run_analysis(
     contract_analysis: &mut ContractAnalysis,
     analysis_db: &mut AnalysisDatabase,
-    annotations: &Vec<Annotation>,
+    annotations: &[Annotation],
     settings: &Settings,
 ) -> Result<Vec<LintDiagnostic>, Vec<LintDiagnostic>> {
     let mut errors: Vec<LintDiagnostic> = vec![];
