@@ -19,13 +19,14 @@ reqwest = { workspace = true, features = ["blocking"] }
 tokio = { workspace = true }
 
 clarity = { workspace = true, default-features = false, features = ["slog_json"] }
+stackslib = { workspace = true }
 
 hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
-stacks-codec = { path = "../stacks-codec" }
+stacks-codec = { path = "../stacks-codec", optional = true }
 
 [features]
 default = []
-stacks-signers = []
+stacks-signers = ["dep:stacks-codec"]
 
 [dev-dependencies]
 test-case = { workspace = true }

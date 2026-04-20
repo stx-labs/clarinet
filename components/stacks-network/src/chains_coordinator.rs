@@ -896,7 +896,7 @@ pub async fn publish_stacking_orders(
                     i.try_into().unwrap(),
                 );
 
-                let tx = stacks_codec::codec::build_contract_call_transaction(
+                let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
                     pox_contract_id_moved,
                     method,
                     arguments,
@@ -1029,7 +1029,7 @@ fn fund_genesis_account(
                 burn_height.clone(),
                 sweep_txid,
             ];
-            let tx = stacks_codec::codec::build_contract_call_transaction(
+            let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
                 contract_id.clone(),
                 "complete-deposit-wrapper".to_string(),
                 args,
