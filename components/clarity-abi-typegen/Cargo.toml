@@ -1,0 +1,10 @@
+[package]
+name = "clarity-abi-typegen"
+version.workspace = true
+edition = "2021"
+description = "Generate TypeScript ABI constants with utility types from Clarity smart contract interfaces"
+license = "GPL-3.0"
+
+[dependencies]
+clarity = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }

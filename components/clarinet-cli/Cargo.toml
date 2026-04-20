@@ -39,6 +39,7 @@ clarity-lsp = { path = "../clarity-lsp" }
 clarinet-format = { path = "../clarinet-format" }
 clarinet-deployments = { path = "../clarinet-deployments" }
 clarity-ts-typegen = { path = "../clarity-ts-typegen" }
+clarity-abi-typegen = { path = "../clarity-abi-typegen" }
 clarinet-utils = { path = "../clarinet-utils" }
 hiro-system-kit = { path = "../hiro-system-kit" }
 stacks-network = { path = "../stacks-network" }
