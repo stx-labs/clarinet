@@ -658,6 +658,7 @@ dependencies = [
  "clarinet-format",
  "clarinet-utils",
  "clarity",
+ "clarity-abi-typegen",
  "clarity-lsp",
  "clarity-repl",
  "clarity-ts-typegen",
@@ -814,6 +815,14 @@ dependencies = [
  "serde_stacker",
  "slog",
  "stacks-common",
+]
+
+[[package]]
+name = "clarity-abi-typegen"
+version = "3.16.0"
+dependencies = [
+ "clarity",
+ "serde_json",
 ]
 
 [[package]]

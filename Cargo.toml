@@ -17,6 +17,7 @@ members = [
     "components/stacks-network",
     "components/stacks-rpc-client",
     "components/clarity-ts-typegen",
+    "components/clarity-abi-typegen",
 ]
 default-members = ["components/clarinet-cli"]
 
