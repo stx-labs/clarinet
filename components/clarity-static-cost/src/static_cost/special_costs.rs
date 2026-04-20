@@ -725,7 +725,7 @@ pub fn cost_set_var(
             .cloned()
             .or_else(|| {
                 let name = e.match_atom()?;
-                user_args?.get_known_value(name).cloned()
+                user_args?.known_values.get(name).cloned()
             })?;
         value_opt.serialized_size().ok().map(u64::from)
     }) {

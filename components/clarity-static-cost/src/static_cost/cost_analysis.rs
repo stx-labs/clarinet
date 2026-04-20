@@ -140,14 +140,6 @@ impl UserArgumentsContext {
     pub fn get_data_var_type(&self, name: &ClarityName) -> Option<&TypeSignature> {
         self.data_var_types.get(name)
     }
-
-    pub fn add_known_value(&mut self, name: ClarityName, value: Value) {
-        self.known_values.insert(name, value);
-    }
-
-    pub fn get_known_value(&self, name: &ClarityName) -> Option<&Value> {
-        self.known_values.get(name)
-    }
 }
 
 /// A type to track summed execution costs for different paths
@@ -724,7 +716,12 @@ pub fn build_cost_analysis_tree(
                     type_sig
                         .as_ref()
                         .map(|sig| {
-                            calculate_variable_lookup_cost_from_type(sig, let_depth, epoch, false)
+                            calculate_variable_lookup_cost_from_type(
+                                sig,
+                                let_depth,
+                                epoch,
+                                TypeDeterminism::Indeterminate,
+                            )
                         })
                         .unwrap_or(StaticCost::ZERO)
                 }
@@ -735,7 +732,12 @@ pub fn build_cost_analysis_tree(
             let final_cost = if let CostExprNode::UserArgument(ref arg_name, _) = expr_node {
                 // Get the type from user_args and calculate cost from it
                 if let Some(arg_type) = user_args.get_argument_type(arg_name) {
-                    calculate_variable_lookup_cost_from_type(arg_type, let_depth, epoch, false)
+                    calculate_variable_lookup_cost_from_type(
+                        arg_type,
+                        let_depth,
+                        epoch,
+                        TypeDeterminism::Indeterminate,
+                    )
                 } else {
                     cost
                 }
@@ -762,24 +764,27 @@ pub fn build_cost_analysis_tree(
     }
 }
 
-/// Calculate variable lookup cost from a TypeSignature.
-///
-/// `exact` controls whether the type fully determines the runtime value size:
-/// - `false` (declared types): the actual value size is unknown, so min uses
+/// Whether a type fully determines the runtime value size.
+/// - `Indeterminate` (declared types): the actual value size is unknown, so min uses
 ///   `min_size()` (e.g. empty list) and max uses `size()` (e.g. full-length list).
-/// - `true` (narrowed call sites): the type is fully determined by the caller,
+/// - `Determinate` (narrowed call sites): the type is fully determined by the caller,
 ///   so `size()` is used for both min and max.
+enum TypeDeterminism {
+    Determinate,
+    Indeterminate,
+}
+
+/// Calculate variable lookup cost from a TypeSignature.
 fn calculate_variable_lookup_cost_from_type(
     type_sig: &TypeSignature,
     let_depth: u64,
     epoch: StacksEpochId,
-    exact: bool,
+    determinism: TypeDeterminism,
 ) -> StaticCost {
     let type_size = u64::from(type_sig.size().unwrap_or(0));
-    let type_min_size = if exact {
-        type_size
-    } else {
-        u64::from(type_sig.min_size().unwrap_or(0))
+    let type_min_size = match determinism {
+        TypeDeterminism::Determinate => type_size,
+        TypeDeterminism::Indeterminate => u64::from(type_sig.min_size().unwrap_or(0)),
     };
 
     let mut variable_size_cost = ClarityCostFunction::LookupVariableSize
@@ -916,8 +921,12 @@ fn infer_type_from_listcons(
     if elements.is_empty() {
         return None;
     }
-    // Infer the element type from the first element
-    let elem_type = infer_type_from_expression_with_args(&elements[0], user_args, epoch).ok()?;
+    let mut elem_type =
+        infer_type_from_expression_with_args(&elements[0], user_args, epoch).ok()?;
+    for element in &elements[1..] {
+        let t = infer_type_from_expression_with_args(element, user_args, epoch).ok()?;
+        elem_type = TypeSignature::least_supertype(&epoch, &elem_type, &t).ok()?;
+    }
     let list_type = ListTypeData::new_list(elem_type, elements.len() as u32).ok()?;
     Some(TypeSignature::SequenceType(SequenceSubtype::ListType(
         list_type,
@@ -1002,7 +1011,7 @@ fn try_resolve_constant_bool(
         SymbolicExpressionType::Atom(name) => match name.as_str() {
             "true" => Some(true),
             "false" => Some(false),
-            _ => match user_args.get_known_value(name)? {
+            _ => match user_args.known_values.get(name)? {
                 Value::Bool(b) => Some(*b),
                 _ => None,
             },
@@ -1065,7 +1074,12 @@ fn is_narrower_type(actual: &TypeSignature, declared: &TypeSignature) -> bool {
 /// the depth tracking in `build_cost_analysis_tree`.
 fn fix_user_arg_costs_exact(node: &mut CostAnalysisNode, let_depth: u64, epoch: StacksEpochId) {
     if let CostExprNode::UserArgument(_, ref arg_type) = node.expr {
-        node.cost = calculate_variable_lookup_cost_from_type(arg_type, let_depth, epoch, true);
+        node.cost = calculate_variable_lookup_cost_from_type(
+            arg_type,
+            let_depth,
+            epoch,
+            TypeDeterminism::Determinate,
+        );
     }
     let child_depth = match &node.expr {
         CostExprNode::NativeFunction(NativeFunctions::Let | NativeFunctions::If) => let_depth + 1,
@@ -1139,7 +1153,10 @@ fn try_narrow_user_function_cost(
                 .or_else(|| match arg.match_atom()?.as_str() {
                     "true" => Some(Value::Bool(true)),
                     "false" => Some(Value::Bool(false)),
-                    name => caller_user_args.get_known_value(&name.into()).cloned(),
+                    name => caller_user_args
+                        .known_values
+                        .get::<ClarityName>(&name.into())
+                        .cloned(),
                 })
         });
         if known.is_some() {
@@ -1187,13 +1204,20 @@ fn try_narrow_user_function_cost(
     super::saturating_add_cost(&mut sc.min, &application_cost);
     super::saturating_add_cost(&mut sc.max, &application_cost);
 
-    // Use narrowed types for InnerTypeCheckCost. Since we know the exact argument types
-    // at this call site, we use size() for both min and max. In Epoch33+ the VM charges
-    // based on the actual argument's Value::size() which equals TypeSignature::type_of(arg).size(),
-    // matching our narrowed type's size().
-    for narrowed_type in &narrowed_types {
+    // InnerTypeCheckCost size semantics are epoch-dependent (stacks-core
+    // `callables.rs::execute_apply`): from Epoch33 onward the VM charges
+    // `arg.size()` (actual value), so the narrowed type is correct; before
+    // Epoch33 it charges `arg_type.size()` (declared parameter), so we must
+    // fall back to the declared type to preserve the upper-bound contract.
+    let use_actual_size = epoch.uses_arg_size_for_cost();
+    for (narrowed_type, (_, declared_type)) in narrowed_types.iter().zip(params.iter()) {
+        let size_for_cost = if use_actual_size {
+            narrowed_type.size().unwrap_or(0)
+        } else {
+            declared_type.size().unwrap_or(0)
+        };
         let type_check_cost = ClarityCostFunction::InnerTypeCheckCost
-            .eval_for_epoch(u64::from(narrowed_type.size().unwrap_or(0)), epoch)
+            .eval_for_epoch(u64::from(size_for_cost), epoch)
             .unwrap_or(ExecutionCost::ZERO);
         super::saturating_add_cost(&mut sc.min, &type_check_cost);
         super::saturating_add_cost(&mut sc.max, &type_check_cost);
@@ -1275,7 +1299,9 @@ fn build_function_definition_cost_analysis_tree(
 
                 // Seed known constant value for this argument, if provided.
                 if let Some(Some(value)) = arg_known_values.and_then(|kvs| kvs.get(i)) {
-                    function_user_args.add_known_value(arg_name.clone(), value.clone());
+                    function_user_args
+                        .known_values
+                        .insert(arg_name.clone(), value.clone());
                 }
 
                 // Create UserArgument node
@@ -2425,5 +2451,32 @@ mod tests {
             small.min.runtime,
             large.min.runtime,
         );
+    }
+    #[test]
+    fn test_infer_type_from_listcons_uses_least_supertype_over_all_elements() {
+        let user_args = UserArgumentsContext::new();
+        let epoch = StacksEpochId::latest();
+
+        // `(list "a" "bcdefghijklm")` and `(list "bcdefghijklm" "a")` both
+        // have list type `(list 2 (string-ascii 12))` under Clarity's
+        // `least_supertype` rule (widths widen to the max). The inferred
+        // type must be element-order invariant.
+        let ast_short_first = build_test_ast(r#"(list "a" "bcdefghijklm")"#);
+        let ast_long_first = build_test_ast(r#"(list "bcdefghijklm" "a")"#);
+
+        let short_first = infer_type_from_listcons(
+            ast_short_first.expressions[0].match_list().unwrap(),
+            &user_args,
+            epoch,
+        )
+        .unwrap();
+        let long_first = infer_type_from_listcons(
+            ast_long_first.expressions[0].match_list().unwrap(),
+            &user_args,
+            epoch,
+        )
+        .unwrap();
+
+        assert_eq!(short_first, long_first,);
     }
 }
