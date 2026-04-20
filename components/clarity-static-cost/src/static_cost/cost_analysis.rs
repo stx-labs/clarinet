@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use clarity::vm::analysis::errors::SyntaxBindingErrorType;
 use clarity::vm::ast::build_ast;
 use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::costs::cost_functions::ClarityCostFunction;
@@ -14,7 +15,6 @@ use clarity::vm::types::{
 };
 use clarity::vm::variables::lookup_reserved_variable;
 use clarity::vm::{ClarityVersion, Value};
-use clarity_types::errors::analysis::SyntaxBindingErrorType;
 use clarity_types::types::TraitIdentifier;
 use stacks_common::types::StacksEpochId;
 
@@ -337,7 +337,7 @@ fn compute_function_overhead_costs(
 
     // Parse function signature for type checking costs
     if !signature_args.is_empty() {
-        match parse_name_type_pairs::<(), clarity_types::errors::CommonCheckErrorKind>(
+        match parse_name_type_pairs::<(), clarity::vm::analysis::errors::CommonCheckErrorKind>(
             epoch,
             signature_args,
             SyntaxBindingErrorType::Eval,

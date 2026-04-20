@@ -113,7 +113,7 @@ impl Lint for CaseDataVar<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
     use indoc::indoc;
 
     use super::CaseDataVar;

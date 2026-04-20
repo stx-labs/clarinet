@@ -155,6 +155,29 @@ impl StacksBlockPool {
                 fork
             }
             None => {
+                // Check if this block is far ahead of all forks (e.g., snapshot boot gap).
+                // If so, start a new fork from this block instead of orphaning it.
+                // Use a large gap threshold to avoid triggering on normal out-of-order delivery.
+                const SNAPSHOT_GAP_THRESHOLD: u64 = 10;
+                let ahead_of_all_forks = self.forks.values().all(|fork| {
+                    block.block_identifier.index > fork.get_tip().index + SNAPSHOT_GAP_THRESHOLD
+                });
+                if ahead_of_all_forks {
+                    ctx.try_log(|logger| {
+                        slog::info!(
+                            logger,
+                            "Stacks {} is ahead of all forks, creating new fork",
+                            block.block_identifier
+                        )
+                    });
+                    let mut new_fork = ChainSegment::new();
+                    new_fork.append_block_identifier(&block.block_identifier);
+                    let next_fork_id = self.forks.keys().last().map_or(0, |k| k + 1);
+                    self.forks.insert(next_fork_id, new_fork);
+                    self.canonical_fork_id = next_fork_id;
+                    return Ok(None);
+                }
+
                 ctx.try_log(|logger| {
                     slog::error!(
                         logger,

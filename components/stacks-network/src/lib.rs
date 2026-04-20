@@ -15,7 +15,7 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-use chains_coordinator::{start_chains_coordinator, BitcoinMiningCommand};
+use chains_coordinator::{start_chains_coordinator, BitcoinMiningCommand, SnapshotLevel};
 use clarinet_deployments::types::DeploymentSpecification;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::NetworkManifest;
@@ -154,40 +154,28 @@ async fn do_run_devnet(
             "Default snapshot can not be used".to_string(),
         ));
     }
-    // Check for and potentially copy snapshot data
-    if config.start_local_devnet_services && !config.no_snapshot && diff.is_ok() {
-        let global_snapshot_dir = orchestrator::get_global_snapshot_dir();
-
-        // First, try to extract embedded snapshot if it exists and we don't have snapshot yet
-        let global_snapshot_ready = global_snapshot_dir.join("epoch_3_ready").exists();
-
-        if !global_snapshot_ready {
-            let _ = devnet_events_tx.send(DevnetEvent::info(
-                "No existing snapshot found, extracting embedded snapshot data...".to_string(),
-            ));
-
-            match snapshot_extractor::extract_embedded_snapshot(
-                &global_snapshot_dir,
-                &devnet_events_tx,
-            ) {
-                Ok(true) => {
-                    let _ = devnet_events_tx.send(DevnetEvent::success(
-                        "Embedded snapshot extracted successfully".to_string(),
-                    ));
-                }
-                Ok(false) => {
-                    let _ = devnet_events_tx.send(DevnetEvent::warning(
-                        "No embedded snapshot available".to_string(),
-                    ));
-                }
-                Err(e) => {
-                    let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
-                        "Failed to extract embedded snapshot: {e}. Continuing without snapshot."
-                    )));
-                }
+    let snapshot_level = if config.no_snapshot || diff.is_err() {
+        SnapshotLevel::None
+    } else if SnapshotLevel::Epoch3_5
+        .snapshot_dir()
+        .join(SnapshotLevel::Epoch3_5.marker_name())
+        .exists()
+    {
+        let _ = devnet_events_tx.send(DevnetEvent::info("Using epoch 3.5 snapshot".to_string()));
+        SnapshotLevel::Epoch3_5
+    } else {
+        // No snapshot on disk — extract the embedded default snapshot
+        let snapshot_dir = SnapshotLevel::Epoch3_5.snapshot_dir();
+        match snapshot_extractor::extract_embedded_snapshot(&snapshot_dir, &devnet_events_tx) {
+            Ok(true) => {
+                let _ = devnet_events_tx.send(DevnetEvent::info(
+                    "Using embedded epoch 3.5 snapshot".to_string(),
+                ));
+                SnapshotLevel::Epoch3_5
             }
+            _ => SnapshotLevel::None,
         }
-    }
+    };
     // if we're starting all services, all trace logs go to networking.log
     if config.start_local_devnet_services {
         let file_appender =
@@ -242,7 +230,7 @@ async fn do_run_devnet(
                 observer_command_rx,
                 moved_mining_command_tx,
                 mining_command_rx,
-                !config.no_snapshot,
+                snapshot_level,
                 config.create_new_snapshot,
                 ctx_moved,
             );
@@ -267,14 +255,14 @@ async fn do_run_devnet(
                         moved_orchestrator_event_tx,
                         terminator_rx,
                         &ctx_moved,
-                        config.no_snapshot,
+                        snapshot_level,
                         config.save_container_logs,
                     );
                     let rt = hiro_system_kit::create_basic_runtime();
                     rt.block_on(future)
                 } else {
                     let future = devnet
-                        .initialize_bitcoin_node(&moved_orchestrator_event_tx, config.no_snapshot);
+                        .initialize_bitcoin_node(&moved_orchestrator_event_tx, snapshot_level);
                     let rt = hiro_system_kit::create_basic_runtime();
                     rt.block_on(future)
                 };

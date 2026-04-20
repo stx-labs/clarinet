@@ -1,9 +1,9 @@
 use clarity::vm::costs::cost_functions::ClarityCostFunction;
+use clarity::vm::costs::ExecutionCost;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::types::{TypeSignature, Value};
 use clarity::vm::variables::NativeVariables;
 use clarity::vm::version::ClarityVersion;
-use clarity_types::execution_cost::ExecutionCost;
 use clarity_types::representations::SymbolicExpression;
 use stacks_common::types::StacksEpochId;
 

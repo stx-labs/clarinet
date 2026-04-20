@@ -65,6 +65,7 @@ pub fn epoch_from_str(s: &str) -> Option<StacksEpochId> {
         "3.2" => Some(StacksEpochId::Epoch32),
         "3.3" => Some(StacksEpochId::Epoch33),
         "3.4" => Some(StacksEpochId::Epoch34),
+        "3.5" => Some(StacksEpochId::Epoch35),
         _ => None,
     }
 }
@@ -153,6 +154,7 @@ impl<'de> serde::Deserialize<'de> for Epoch {
                     3.2 => StacksEpochId::Epoch32,
                     3.3 => StacksEpochId::Epoch33,
                     3.4 => StacksEpochId::Epoch34,
+                    3.5 => StacksEpochId::Epoch35,
                     _ => {
                         return Err(serde::de::Error::custom(format!(
                             "unknown epoch value: {value}"

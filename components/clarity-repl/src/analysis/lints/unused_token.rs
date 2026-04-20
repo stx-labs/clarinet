@@ -119,7 +119,7 @@ impl Lint for UnusedToken<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
     use indoc::{formatdoc, indoc};
 
     use super::UnusedToken;

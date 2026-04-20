@@ -57,10 +57,10 @@ pub const DEFAULT_EPOCH_2_3: u64 = 103;
 pub const DEFAULT_EPOCH_2_4: u64 = 104;
 pub const DEFAULT_EPOCH_2_5: u64 = 108;
 pub const DEFAULT_EPOCH_3_0: u64 = 142;
-pub const DEFAULT_EPOCH_3_1: u64 = 144;
-pub const DEFAULT_EPOCH_3_2: u64 = 146;
-pub const DEFAULT_EPOCH_3_3: u64 = 148;
-pub const DEFAULT_EPOCH_3_4: u64 = 150;
+pub const DEFAULT_EPOCH_3_1: u64 = 143;
+pub const DEFAULT_EPOCH_3_2: u64 = 144;
+pub const DEFAULT_EPOCH_3_3: u64 = 145;
+pub const DEFAULT_EPOCH_3_4: u64 = 146;
 
 // Currently, the pox-4 contract has these values hardcoded:
 // https://github.com/stacks-network/stacks-core/blob/e09ab931e2f15ff70f3bb5c2f4d7afb[…]42bd7bec6/stackslib/src/chainstate/stacks/boot/pox-testnet.clar
@@ -368,6 +368,7 @@ pub struct AccountConfig {
     pub derivation: String,
     pub balance: u64,
     pub sbtc_balance: u64,
+    pub btc_balance: u64,
     pub stx_address: String,
     pub btc_address: String,
     pub is_mainnet: bool,
@@ -474,6 +475,10 @@ impl NetworkManifest {
                         Some(Value::Integer(balance)) => *balance as u64,
                         _ => 1_000_000_000, // mint 10 sBTC by default
                     };
+                    let btc_balance = match account_settings.get("btc_balance") {
+                        Some(Value::Integer(balance)) => *balance as u64,
+                        _ => 0,
+                    };
 
                     let mut mnemonic = match account_settings.get("mnemonic") {
                         Some(Value::String(phrase)) => match mnemonic_from_phrase(phrase) {
@@ -560,6 +565,7 @@ impl NetworkManifest {
                             derivation,
                             balance,
                             sbtc_balance,
+                            btc_balance,
                             stx_address,
                             btc_address,
                             is_mainnet,
@@ -844,6 +850,7 @@ impl NetworkManifest {
                     derivation: stacker_derivation_path.clone(),
                     balance: 100_000_000_000_000,
                     sbtc_balance: 1_000_000_000,
+                    btc_balance: 500_000_000,
                     stx_address,
                     btc_address,
                     is_mainnet: false,

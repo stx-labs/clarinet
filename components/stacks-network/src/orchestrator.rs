@@ -32,6 +32,7 @@ use indoc::formatdoc;
 use observer::utils::Context;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
+use crate::chains_coordinator::SnapshotLevel;
 use crate::command::run_docker_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 
@@ -179,6 +180,12 @@ impl DevnetOrchestrator {
 
     async fn pull_image(&self, image_url: &str, platform: String) -> Result<(), String> {
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
+
+        // Check if the image already exists locally before trying to pull
+        if docker.inspect_image(image_url).await.is_ok() {
+            return Ok(());
+        }
+
         docker
             .create_image(
                 Some(CreateImageOptions {
@@ -336,7 +343,7 @@ impl DevnetOrchestrator {
         event_tx: Sender<DevnetEvent>,
         terminator_rx: Receiver<bool>,
         ctx: &Context,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
         save_container_logs: bool,
     ) -> Result<(), String> {
         self.save_container_logs = save_container_logs;
@@ -395,14 +402,17 @@ impl DevnetOrchestrator {
             Status::Yellow,
             "preparing container",
         );
-        let res = self.prepare_bitcoin_node_container(ctx, no_snapshot).await;
+        let res = self
+            .prepare_bitcoin_node_container(ctx, snapshot_level)
+            .await;
         self.or_fatal(res, &event_tx, ctx).await?;
         send_status_update(&event_tx, "bitcoin-node", Status::Yellow, "booting");
         let res = self
-            .boot_bitcoin_node_container(&event_tx, no_snapshot)
+            .boot_bitcoin_node_container(&event_tx, snapshot_level)
             .await;
         self.or_fatal(res, &event_tx, ctx).await?;
-        self.initialize_bitcoin_node(&event_tx, no_snapshot).await?;
+        self.initialize_bitcoin_node(&event_tx, snapshot_level)
+            .await?;
 
         // Start postgres container
         if !disable_postgres {
@@ -424,7 +434,7 @@ impl DevnetOrchestrator {
             let _ = event_tx.send(DevnetEvent::info("Starting stacks-api".to_string()));
             let res = self.prepare_stacks_api_container(ctx).await;
             self.or_fatal(res, &event_tx, ctx).await?;
-            let res = self.boot_stacks_api_container(ctx, no_snapshot).await;
+            let res = self.boot_stacks_api_container(ctx, snapshot_level).await;
             self.or_fatal(res, &event_tx, ctx).await?;
             send_status_update(
                 &event_tx,
@@ -437,11 +447,13 @@ impl DevnetOrchestrator {
         // Start stacks-node
         let _ = event_tx.send(DevnetEvent::info("Starting stacks-node".to_string()));
         send_status_update(&event_tx, "stacks-node", Status::Yellow, "updating image");
-        let res = self.prepare_stacks_node_container(boot_index, ctx).await;
+        let res = self
+            .prepare_stacks_node_container(boot_index, ctx, snapshot_level)
+            .await;
         self.or_fatal(res, &event_tx, ctx).await?;
         send_status_update(&event_tx, "stacks-node", Status::Yellow, "booting");
         let res = self
-            .boot_stacks_node_container(&event_tx, no_snapshot)
+            .boot_stacks_node_container(&event_tx, snapshot_level)
             .await;
         self.or_fatal(res, &event_tx, ctx).await?;
 
@@ -536,7 +548,7 @@ impl DevnetOrchestrator {
 
                     let _ = event_tx.send(DevnetEvent::debug("Restarting containers".into()));
                     let (bitcoin_node_c_id, stacks_node_c_id) = self
-                        .start_containers(boot_index, no_snapshot)
+                        .start_containers(boot_index, snapshot_level)
                         .await
                         .map_err(|e| format!("unable to reboot: {e:?}"))?;
                     self.bitcoin_node_container_id = Some(bitcoin_node_c_id);
@@ -556,7 +568,7 @@ impl DevnetOrchestrator {
     pub fn prepare_bitcoin_node_config(
         &self,
         boot_index: u32,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
     ) -> Result<Config<String>, String> {
         let devnet_config = self.get_devnet_config()?;
 
@@ -655,7 +667,7 @@ impl DevnetOrchestrator {
             format!("-pid={BITCOIND_DATA_DIR}/bitcoind.pid"),
             format!("-datadir={BITCOIND_DATA_DIR}"),
         ];
-        if !no_snapshot {
+        if snapshot_level.has_snapshot() {
             cmd_args.push("-reindex".into());
         }
         let config = Config {
@@ -685,7 +697,7 @@ impl DevnetOrchestrator {
     pub async fn prepare_bitcoin_node_container(
         &mut self,
         ctx: &Context,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
     ) -> Result<(), String> {
         let devnet_config = self.get_devnet_config()?;
         self.pull_image(
@@ -701,7 +713,7 @@ impl DevnetOrchestrator {
             platform: devnet_config.docker_platform.as_deref(),
         };
 
-        let config = self.prepare_bitcoin_node_config(1, no_snapshot)?;
+        let config = self.prepare_bitcoin_node_config(1, snapshot_level)?;
 
         let container = match docker
             .create_container::<&str, String>(Some(options.clone()), config.clone())
@@ -766,7 +778,7 @@ impl DevnetOrchestrator {
     pub async fn boot_bitcoin_node_container(
         &mut self,
         devnet_event_tx: &Sender<DevnetEvent>,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
     ) -> Result<(), String> {
         let container = self
             .bitcoin_node_container_id
@@ -779,8 +791,8 @@ impl DevnetOrchestrator {
             .await
             .map_err(|e| formatted_docker_error("unable to start bitcoind container", e))?;
         // Copy snapshot if available
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let bitcoin_snapshot = global_snapshot_dir.join("bitcoin").join("regtest");
+        let snapshot_dir = get_active_snapshot_dir();
+        let bitcoin_snapshot = snapshot_dir.join("bitcoin").join("regtest");
         // XXX This shouldn't be needed
         let exec_config = bollard::exec::CreateExecOptions {
             cmd: Some(vec!["mkdir", "-p", BITCOIND_DATA_DIR]),
@@ -798,7 +810,7 @@ impl DevnetOrchestrator {
             .start_exec(&exec.id, None)
             .await
             .map_err(|e| format!("Failed to create bitcoin directory: {e}"))?;
-        if !no_snapshot {
+        if snapshot_level.has_snapshot() {
             // Ensure the destination directory exists in the container
             let docker_host = self.get_devnet_config()?.docker_host.as_deref();
 
@@ -816,7 +828,11 @@ impl DevnetOrchestrator {
         Ok(())
     }
 
-    pub fn prepare_stacks_node_config(&self, boot_index: u32) -> Result<Config<String>, String> {
+    pub fn prepare_stacks_node_config(
+        &self,
+        boot_index: u32,
+        snapshot_level: SnapshotLevel,
+    ) -> Result<Config<String>, String> {
         let network_config = self
             .network_config
             .as_ref()
@@ -868,6 +884,7 @@ impl DevnetOrchestrator {
             microblock_attempt_time_ms = 10
             pre_nakamoto_mock_signing = {pre_nakamoto_mock_signing}
             mining_key = "19ec1c3e31d139c989a23a27eac60d1abfad5277d3ae9604242514c738258efa01"
+            activated_vrf_key_path = "/devnet/krypton/vrf_key.json"
             "#,
             stacks_node_rpc_port = devnet_config.stacks_node_rpc_port,
             stacks_node_p2p_port = devnet_config.stacks_node_p2p_port,
@@ -917,7 +934,12 @@ impl DevnetOrchestrator {
             orchestrator_ingestion_port = devnet_config.orchestrator_ingestion_port,
         ));
 
-        if !devnet_config.disable_stacks_api {
+        // Skip stacks-api event observer when booting from a stacks snapshot without events cache.
+        // Without the events history, the stacks-api returns 500 for new blocks, which causes
+        // the stacks node's event dispatcher to retry indefinitely and block the run loop.
+        let skip_stacks_api_observer =
+            snapshot_level.has_snapshot() && self.has_events_to_import(devnet_config).is_none();
+        if !devnet_config.disable_stacks_api && !skip_stacks_api_observer {
             stacks_conf.push_str(&formatdoc!(
                 r#"
                 # Add stacks-api as an event observer
@@ -1058,6 +1080,7 @@ impl DevnetOrchestrator {
         &mut self,
         boot_index: u32,
         ctx: &Context,
+        snapshot_level: SnapshotLevel,
     ) -> Result<(), String> {
         let devnet_config = self.get_devnet_config()?;
         self.pull_image(
@@ -1072,7 +1095,7 @@ impl DevnetOrchestrator {
             platform: devnet_config.docker_platform.clone(),
         };
 
-        let config = self.prepare_stacks_node_config(boot_index)?;
+        let config = self.prepare_stacks_node_config(boot_index, snapshot_level)?;
 
         let container = docker
             .create_container::<String, String>(Some(options), config)
@@ -1089,17 +1112,17 @@ impl DevnetOrchestrator {
     pub async fn boot_stacks_node_container(
         &mut self,
         devnet_event_tx: &Sender<DevnetEvent>,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
     ) -> Result<(), String> {
         let container = self
             .stacks_node_container_id
             .as_ref()
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
+        let snapshot_dir = get_active_snapshot_dir();
+        let stacks_snapshot = snapshot_dir.join("stacks").join("krypton");
 
-        if !no_snapshot {
+        if snapshot_level.has_snapshot() {
             let docker_host = self.get_devnet_config()?.docker_host.as_deref();
 
             copy_snapshot_to_container(
@@ -1111,6 +1134,10 @@ impl DevnetOrchestrator {
                 docker_host,
             )
             .await?;
+        } else {
+            let _ = devnet_event_tx.send(DevnetEvent::info(
+                "Stacks node booting from genesis (no stacks snapshot)".to_string(),
+            ));
         }
 
         docker
@@ -1347,7 +1374,7 @@ impl DevnetOrchestrator {
         if project_events_path.exists() {
             Some(project_events_path)
         } else {
-            let global_events_path = get_global_snapshot_dir()
+            let global_events_path = get_active_snapshot_dir()
                 .join("events_export")
                 .join("events_cache.tsv");
 
@@ -1361,7 +1388,7 @@ impl DevnetOrchestrator {
     pub async fn boot_stacks_api_container(
         &self,
         ctx: &Context,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
     ) -> Result<(), String> {
         let container = self
             .stacks_api_container_id
@@ -1382,7 +1409,7 @@ impl DevnetOrchestrator {
         };
 
         // Check if we need to import events
-        if !no_snapshot {
+        if snapshot_level.has_snapshot() {
             if let Some(events_path) = self.has_events_to_import(devnet_config) {
                 // Wait for the container to be running
                 loop {
@@ -1780,7 +1807,7 @@ impl DevnetOrchestrator {
     pub async fn start_containers(
         &self,
         boot_index: u32,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
     ) -> Result<(String, String), String> {
         let (stacks_api_c_id, stacks_explorer_c_id, bitcoin_explorer_c_id, postgres_c_id) = match (
             &self.stacks_api_container_id,
@@ -1816,13 +1843,13 @@ impl DevnetOrchestrator {
             name: format!("bitcoin-node.{}", self.network_name),
             platform: platform.clone(),
         };
-        let bitcoin_node_config = self.prepare_bitcoin_node_config(boot_index, no_snapshot)?;
+        let bitcoin_node_config = self.prepare_bitcoin_node_config(boot_index, snapshot_level)?;
 
         let stacks_options = CreateContainerOptions {
             name: format!("stacks-node.{}", self.network_name),
             platform,
         };
-        let stacks_node_config = self.prepare_stacks_node_config(boot_index)?;
+        let stacks_node_config = self.prepare_stacks_node_config(boot_index, snapshot_level)?;
 
         // Create both node containers in parallel
         let (bitcoin_node_c_id, stacks_node_c_id) = tokio::try_join!(
@@ -1933,7 +1960,7 @@ impl DevnetOrchestrator {
     pub async fn initialize_bitcoin_node(
         &self,
         devnet_event_tx: &Sender<DevnetEvent>,
-        no_snapshot: bool,
+        snapshot_level: SnapshotLevel,
     ) -> Result<(), String> {
         use std::str::FromStr;
 
@@ -1974,10 +2001,14 @@ impl DevnetOrchestrator {
             .await?;
 
         // Only generate blocks if we're NOT using cached data
-        if no_snapshot {
+        if !snapshot_level.has_snapshot() {
             let _ = devnet_event_tx.send(DevnetEvent::info(
                 "Initializing blockchain with fresh blocks".to_string(),
             ));
+
+            // Miner blocks must come first so coinbase outputs have time to mature
+            // (100 confirmations required). With 101 total blocks, the miner's
+            // first block at position 1 gets exactly 100 confirmations.
             btc_rpc
                 .call_with_retry(
                     "generatetoaddress",
@@ -1986,10 +2017,31 @@ impl DevnetOrchestrator {
                     devnet_event_tx,
                 )
                 .await?;
+
+            // Generate 1 block per account that has btc_balance > 0.
+            let mut account_blocks = 0u64;
+            for (_, account) in accounts.iter() {
+                if account.btc_balance > 0 {
+                    let account_address = Address::from_str(&account.btc_address)
+                        .map_err(|e| format!("unable to create account address: {e:?}"))?;
+                    btc_rpc
+                        .call_with_retry(
+                            "generatetoaddress",
+                            json!([1, account_address]),
+                            MAX_ERRORS,
+                            devnet_event_tx,
+                        )
+                        .await?;
+                    account_blocks += 1;
+                }
+            }
+
+            // Reduce faucet blocks to keep total block count close to 101
+            let faucet_blocks = 97u64.saturating_sub(account_blocks);
             btc_rpc
                 .call_with_retry(
                     "generatetoaddress",
-                    json!([97, faucet_address]),
+                    json!([faucet_blocks, faucet_address]),
                     MAX_ERRORS,
                     devnet_event_tx,
                 )
@@ -2148,7 +2200,7 @@ impl DevnetOrchestrator {
             )));
         }
 
-        if !no_snapshot {
+        if snapshot_level.has_snapshot() {
             let _ = devnet_event_tx.send(DevnetEvent::info(
                 "Using cached blockchain data - mining one block".to_string(),
             ));
@@ -2312,6 +2364,11 @@ fn formatted_docker_error(message: &str, error: DockerError) -> String {
 pub fn get_global_snapshot_dir() -> std::path::PathBuf {
     let home_dir = dirs::home_dir().expect("Unable to retrieve home dir");
     home_dir.join(".clarinet").join("cache").join("devnet")
+}
+
+/// Returns the epoch 3.5 snapshot directory.
+pub fn get_active_snapshot_dir() -> std::path::PathBuf {
+    get_global_snapshot_dir().join("epoch_3_5")
 }
 
 pub fn get_project_snapshot_dir(devnet_config: &DevnetConfig) -> std::path::PathBuf {

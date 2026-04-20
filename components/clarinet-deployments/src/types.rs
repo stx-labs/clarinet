@@ -63,6 +63,7 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch32 => EpochSpec::Epoch3_2,
             StacksEpochId::Epoch33 => EpochSpec::Epoch3_3,
             StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
+            StacksEpochId::Epoch35 => EpochSpec::Epoch3_5,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
         }
     }
@@ -83,7 +84,7 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_2 => StacksEpochId::Epoch32,
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
             EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
-            EpochSpec::Epoch3_5 => unreachable!(),
+            EpochSpec::Epoch3_5 => StacksEpochId::Epoch35,
         }
     }
 }
@@ -1603,13 +1604,17 @@ mod tests {
                 [[burnchain.epochs]]
                 epoch_name = "3.4"
                 start_height = 12
+
+                [[burnchain.epochs]]
+                epoch_name = "3.5"
+                start_height = 147
                 "#
             }
         );
     }
 
     #[test]
-    fn test_epoch_config_with_optional_next_epoch() {
+    fn test_epoch_config_with_epoch_3_5() {
         let devnet_config = DevnetConfig {
             epoch_2_0: 1,
             epoch_2_05: 2,
