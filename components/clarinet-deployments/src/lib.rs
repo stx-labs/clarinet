@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
+use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
@@ -310,20 +311,16 @@ fn handle_emulated_contract_call(
 /// cache hit; `ast` is the payload we'd otherwise recompute.
 #[derive(Debug, Clone)]
 pub struct CachedContractASTData {
-    pub content_hash: u64,
+    pub content_hash: Sha256Sum,
     pub ast: ContractAST,
     pub clarity_version: ClarityVersion,
     pub epoch: StacksEpochId,
 }
 
-/// Fast, non-cryptographic hash over contract source. Used only for cache
-/// validation, not for any security property.
-pub fn compute_content_hash(source: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
+/// Hash contract source for cache validation. SHA-256 is hardware-accelerated
+/// on modern x86 (SHA-NI) and ARMv8 via the `sha2` crate's runtime dispatch.
+pub fn compute_content_hash(source: &str) -> Sha256Sum {
+    Sha256Sum::from_data(source.as_bytes())
 }
 
 pub async fn generate_default_deployment(
