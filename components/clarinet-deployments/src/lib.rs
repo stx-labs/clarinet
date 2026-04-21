@@ -16,9 +16,7 @@ use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
-use clarity::vm::{
-    ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
-};
+use clarity::vm::{ContractName, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_DEPOSIT_MAINNET_ADDRESS,
@@ -30,10 +28,10 @@ use clarity_repl::repl::{
     SessionSettings,
 };
 use clarity_repl::utils::{remove_env_simnet, Environment};
+pub use types::CachedContractAST;
 use types::{
-    ContractASTMetadata, ContractPublishSpecification, DeploymentGenerationArtifacts,
-    EmulatedContractCallSpecification, EpochSpec, RequirementPublishSpecification,
-    StxTransferSpecification, TransactionSpecification,
+    ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,
+    EpochSpec, RequirementPublishSpecification, StxTransferSpecification, TransactionSpecification,
 };
 
 use self::types::{
@@ -107,7 +105,7 @@ pub fn setup_session_with_deployment(
         success,
         session,
         analysis: contracts_analysis,
-        ast_metadata: HashMap::new(),
+        ast_cache_entries: HashMap::new(),
     }
 }
 
@@ -306,17 +304,6 @@ fn handle_emulated_contract_call(
     result
 }
 
-/// Cached AST data keyed by (contract location, environment) in the LSP.
-/// The `content_hash + clarity_version + epoch` triple is what validates a
-/// cache hit; `ast` is the payload we'd otherwise recompute.
-#[derive(Debug, Clone)]
-pub struct CachedContractASTData {
-    pub content_hash: Sha256Sum,
-    pub ast: ContractAST,
-    pub clarity_version: ClarityVersion,
-    pub epoch: StacksEpochId,
-}
-
 /// Hash contract source for cache validation. SHA-256 is hardware-accelerated
 /// on modern x86 (SHA-NI) and ARMv8 via the `sha2` crate's runtime dispatch.
 pub fn compute_content_hash(source: &str) -> Sha256Sum {
@@ -350,7 +337,7 @@ pub async fn generate_default_deployment_with_cache(
     file_accessor: Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
     environment: Environment,
-    cached_asts: Option<&HashMap<(PathBuf, Environment), CachedContractASTData>>,
+    cached_asts: Option<&HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let mut found_env_simnet = false;
     let network_manifest = match file_accessor {
@@ -875,7 +862,7 @@ pub async fn generate_default_deployment_with_cache(
 
     let mut contract_asts = BTreeMap::new();
     let mut contract_data = BTreeMap::new();
-    let mut ast_metadata = HashMap::new();
+    let mut ast_cache_entries = HashMap::new();
 
     for (contract_id, (contract, contract_location)) in contracts_sources.into_iter() {
         let source = contract.expect_in_memory_code_source();
@@ -897,14 +884,13 @@ pub async fn generate_default_deployment_with_cache(
             None => session.interpreter.build_ast(&contract),
         };
 
-        ast_metadata.insert(
-            contract_id.clone(),
-            ContractASTMetadata {
-                location: contract_location,
+        ast_cache_entries.insert(
+            (contract_location, environment),
+            CachedContractAST {
                 content_hash,
+                ast: ast.clone(),
                 clarity_version: contract.clarity_version,
                 epoch: resolved_epoch,
-                environment,
             },
         );
 
@@ -1063,7 +1049,7 @@ pub async fn generate_default_deployment_with_cache(
         results_values: HashMap::new(),
         analysis: HashMap::new(),
         session,
-        ast_metadata,
+        ast_cache_entries,
     };
 
     Ok((deployment, artifacts, found_env_simnet))

@@ -145,15 +145,15 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
     }
 }
 
-/// Metadata produced alongside each built AST, used by the LSP to key a
-/// re-usable cache of parsed contracts.
+/// A parsed AST plus the inputs that validate it — used by the LSP as a
+/// re-usable cache of parsed contracts. The hash + version + epoch triple is
+/// what gates a cache hit; `ast` is the payload we'd otherwise recompute.
 #[derive(Clone, Debug)]
-pub struct ContractASTMetadata {
-    pub location: PathBuf,
+pub struct CachedContractAST {
     pub content_hash: Sha256Sum,
+    pub ast: ContractAST,
     pub clarity_version: ClarityVersion,
     pub epoch: StacksEpochId,
-    pub environment: Environment,
 }
 
 #[derive(Clone)]
@@ -166,9 +166,9 @@ pub struct DeploymentGenerationArtifacts {
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
     pub session: Session,
     pub success: bool,
-    /// Per-contract metadata for AST cache validation. Empty for callers that
-    /// don't go through `generate_default_deployment`.
-    pub ast_metadata: HashMap<QualifiedContractIdentifier, ContractASTMetadata>,
+    /// Cache entries shaped for direct reuse by the LSP. Empty for callers
+    /// that don't go through `generate_default_deployment`.
+    pub ast_cache_entries: HashMap<(PathBuf, Environment), CachedContractAST>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
