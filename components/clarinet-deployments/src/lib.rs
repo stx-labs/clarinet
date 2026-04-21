@@ -867,22 +867,29 @@ pub async fn generate_default_deployment_with_cache(
     let mut contract_data = BTreeMap::new();
     let mut ast_cache_entries = HashMap::new();
 
-    for (contract_id, (contract, contract_location)) in contracts_sources.into_iter() {
+    for (contract_id, (contract, contract_location)) in contracts_sources {
         let source = contract.expect_in_memory_code_source();
         let content_hash = compute_content_hash(source);
         let resolved_epoch = contract.epoch.resolve();
         let cache_key = (contract_location, environment);
 
-        // On cache hit, take ownership of the entry and reuse it verbatim.
-        // Diagnostics were surfaced on the build that populated the cache.
+        // Lookup is `.remove()` (not `.get()`) so that a hit transfers
+        // ownership of the entry straight into `ast_cache_entries` below —
+        // no clone. A side-effect: anything left in `cached_asts` after
+        // this loop is either a contract removed from the manifest or an
+        // entry whose `(path, env)` key no longer appears anywhere; both
+        // drop naturally when `cached_asts` goes out of scope, so the
+        // caller never has to explicitly clear the LSP's `ast_cache`.
+        //
+        // `.filter(matches)` rejects entries whose content_hash /
+        // clarity_version / epoch no longer match the current build
+        // (e.g. the user edited the contract, or flipped Clarity version
+        // in the manifest). The rejected entry is dropped here and the
+        // fresh AST built below replaces it in `ast_cache_entries`.
         let cache_entry = cached_asts
             .as_deref_mut()
             .and_then(|c| c.remove(&cache_key))
-            .filter(|entry| {
-                entry.content_hash == content_hash
-                    && entry.clarity_version == contract.clarity_version
-                    && entry.epoch == resolved_epoch
-            });
+            .filter(|entry| entry.matches(&content_hash, contract.clarity_version, resolved_epoch));
 
         let cache_entry = match cache_entry {
             Some(entry) => {

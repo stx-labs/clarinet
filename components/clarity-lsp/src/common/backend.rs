@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use clarinet_files::{paths, FileAccessor, ProjectManifest};
@@ -16,6 +16,81 @@ use serde::{Deserialize, Serialize};
 use super::requests::capabilities::{get_capabilities, InitializationOptions};
 use crate::state::{build_state, EditorState, ProtocolState};
 use crate::utils::get_contract_location;
+
+/// Shared tail for every notification handler that rebuilds a protocol:
+/// take the AST cache out of `EditorState`, pass it to `build_state`, then
+/// re-index the protocol and merge the returned entries back in.
+///
+/// `post_commit` lets `ContractSaved` refresh its active-contract
+/// definitions inside the same write lock; other handlers pass `|_| {}`.
+///
+/// **Cache invalidation.** We pass the existing cache through to
+/// `build_state` on *every* handler (including `ManifestSaved`) rather
+/// than clearing it preemptively. Invalidation happens inside
+/// `generate_default_deployment_with_cache`:
+///   - Each current contract's entry is `.remove()`d from the cache and
+///     validated via `CachedContractAST::matches`. Still-valid entries get
+///     reused; mismatched entries (edited source, changed version/epoch)
+///     are dropped and rebuilt.
+///   - Entries for contracts no longer in the manifest are never looked
+///     up, so they remain in the local `cached_asts` and drop when it
+///     goes out of scope at the end of `build_state`.
+///
+/// `es.ast_cache.extend(new_cache_entries)` below therefore restores the
+/// cache to exactly the set of contracts in the current manifest — no
+/// explicit `clear_ast_cache` needed, and no stale accumulation even if
+/// the user rapidly flips Clarity version or epoch.
+async fn build_and_commit<F>(
+    editor_state: &mut EditorStateInput,
+    manifest_location: PathBuf,
+    file_accessor: Option<&dyn FileAccessor>,
+    static_cost_analysis: bool,
+    post_commit: F,
+) -> Result<LspNotificationResponse, String>
+where
+    F: FnOnce(&mut EditorState),
+{
+    let cached_asts = editor_state.try_write(|es| std::mem::take(&mut es.ast_cache))?;
+
+    let mut protocol_state = ProtocolState::new();
+    let new_cache_entries = match build_state(
+        &manifest_location,
+        &mut protocol_state,
+        file_accessor,
+        static_cost_analysis,
+        Some(cached_asts),
+    )
+    .await
+    {
+        Ok(entries) => entries,
+        Err(e) => return Ok(LspNotificationResponse::error(&e)),
+    };
+
+    editor_state.try_write(|es| {
+        es.index_protocol(manifest_location, protocol_state);
+        es.ast_cache.extend(new_cache_entries);
+        post_commit(es);
+    })?;
+
+    let (aggregated_diagnostics, notification) =
+        editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
+    let env_simnet_diagnostics = editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
+    Ok(LspNotificationResponse {
+        aggregated_diagnostics,
+        env_simnet_diagnostics,
+        notification,
+    })
+}
+
+async fn resolve_manifest_location(
+    contract_location: &Path,
+    file_accessor: Option<&dyn FileAccessor>,
+) -> Result<PathBuf, String> {
+    match file_accessor {
+        None => paths::find_manifest_location(contract_location),
+        Some(fa) => paths::find_manifest_location_async(contract_location, fa).await,
+    }
+}
 
 #[derive(Debug, Clone)]
 // The `Owned` variant contains the full `EditorState` (several HashMaps,
@@ -95,79 +170,34 @@ pub async fn process_notification(
             if editor_state.try_read(|es| es.protocols.contains_key(&manifest_location))? {
                 return Ok(LspNotificationResponse::default());
             }
-
-            // With this manifest_location, let's initialize our state.
-            // First build: no cache yet.
-            let mut protocol_state = ProtocolState::new();
-            match build_state(
-                &manifest_location,
-                &mut protocol_state,
+            build_and_commit(
+                editor_state,
+                manifest_location,
                 file_accessor,
                 static_cost_analysis,
-                None,
+                |_| {},
             )
             .await
-            {
-                Ok(new_cache_entries) => {
-                    editor_state.try_write(|es| {
-                        es.index_protocol(manifest_location, protocol_state);
-                        es.ast_cache.extend(new_cache_entries);
-                    })?;
-                    let (aggregated_diagnostics, notification) =
-                        editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
-                    let env_simnet_diagnostics =
-                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
-                    Ok(LspNotificationResponse {
-                        aggregated_diagnostics,
-                        env_simnet_diagnostics,
-                        notification,
-                    })
-                }
-                Err(e) => Ok(LspNotificationResponse::error(&e)),
-            }
         }
 
         LspNotification::ManifestSaved(manifest_location) => {
-            // Manifest edits can flip clarity_version or epoch for any
-            // contract, so previously cached ASTs are no longer trustworthy.
-            editor_state.try_write(|es| es.clear_ast_cache())?;
-
-            let mut protocol_state = ProtocolState::new();
-            match build_state(
-                &manifest_location,
-                &mut protocol_state,
+            // No preemptive `clear_ast_cache` — `build_and_commit` threads
+            // the cache through, entries are validated per-contract
+            // against the new manifest, and removed-contract entries drop
+            // on their own. See `build_and_commit` for the full story.
+            build_and_commit(
+                editor_state,
+                manifest_location,
                 file_accessor,
                 static_cost_analysis,
-                None,
+                |_| {},
             )
             .await
-            {
-                Ok(new_cache_entries) => {
-                    editor_state.try_write(|es| {
-                        es.index_protocol(manifest_location, protocol_state);
-                        es.ast_cache.extend(new_cache_entries);
-                    })?;
-                    let (aggregated_diagnostics, notification) =
-                        editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
-                    let env_simnet_diagnostics =
-                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
-                    Ok(LspNotificationResponse {
-                        aggregated_diagnostics,
-                        env_simnet_diagnostics,
-                        notification,
-                    })
-                }
-                Err(e) => Ok(LspNotificationResponse::error(&e)),
-            }
         }
 
         LspNotification::ContractOpened(contract_location) => {
-            let manifest_location = match file_accessor {
-                None => paths::find_manifest_location(&contract_location)?,
-                Some(file_accessor) => {
-                    paths::find_manifest_location_async(&contract_location, file_accessor).await?
-                }
-            };
+            let manifest_location =
+                resolve_manifest_location(&contract_location, file_accessor).await?;
 
             // store the contract in the active_contracts map
             if !editor_state.try_read(|es| es.active_contracts.contains_key(&contract_location))? {
@@ -253,92 +283,36 @@ pub async fn process_notification(
             if editor_state.try_read(|es| es.protocols.contains_key(&manifest_location))? {
                 return Ok(LspNotificationResponse::default());
             }
-
-            let mut protocol_state = ProtocolState::new();
-            match build_state(
-                &manifest_location,
-                &mut protocol_state,
+            build_and_commit(
+                editor_state,
+                manifest_location,
                 file_accessor,
                 static_cost_analysis,
-                None,
+                |_| {},
             )
             .await
-            {
-                Ok(new_cache_entries) => {
-                    editor_state.try_write(|es| {
-                        es.index_protocol(manifest_location, protocol_state);
-                        es.ast_cache.extend(new_cache_entries);
-                    })?;
-                    let (aggregated_diagnostics, notification) =
-                        editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
-                    let env_simnet_diagnostics =
-                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
-                    Ok(LspNotificationResponse {
-                        aggregated_diagnostics,
-                        env_simnet_diagnostics,
-                        notification,
-                    })
-                }
-                Err(e) => Ok(LspNotificationResponse::error(&e)),
-            }
         }
 
         LspNotification::ContractSaved(contract_location) => {
-            // Move the cache out under a single write lock, together with
-            // clearing the contract's stale protocol state. The rebuild will
-            // repopulate the cache from the return of `build_state`; if the
-            // rebuild errors we drop these entries and the next successful
-            // save re-indexes from scratch.
-            let (cached_asts, existing_manifest) = editor_state.try_write(|es| {
-                (
-                    std::mem::take(&mut es.ast_cache),
-                    es.clear_protocol_associated_with_contract(&contract_location),
-                )
-            })?;
-
+            let existing_manifest = editor_state
+                .try_write(|es| es.clear_protocol_associated_with_contract(&contract_location))?;
             let manifest_location = match existing_manifest {
-                Some(manifest_location) => manifest_location,
-                None => match file_accessor {
-                    None => paths::find_manifest_location(&contract_location)?,
-                    Some(file_accessor) => {
-                        paths::find_manifest_location_async(&contract_location, file_accessor)
-                            .await?
-                    }
-                },
+                Some(m) => m,
+                None => resolve_manifest_location(&contract_location, file_accessor).await?,
             };
-
-            // TODO(): introduce partial analysis #604
-            let mut protocol_state = ProtocolState::new();
-            match build_state(
-                &manifest_location,
-                &mut protocol_state,
+            build_and_commit(
+                editor_state,
+                manifest_location,
                 file_accessor,
                 static_cost_analysis,
-                Some(cached_asts),
+                // TODO(): introduce partial analysis #604
+                |es| {
+                    if let Some(contract) = es.active_contracts.get_mut(&contract_location) {
+                        contract.update_definitions();
+                    }
+                },
             )
             .await
-            {
-                Ok(new_cache_entries) => {
-                    editor_state.try_write(|es| {
-                        es.index_protocol(manifest_location, protocol_state);
-                        es.ast_cache.extend(new_cache_entries);
-                        if let Some(contract) = es.active_contracts.get_mut(&contract_location) {
-                            contract.update_definitions();
-                        };
-                    })?;
-
-                    let (aggregated_diagnostics, notification) =
-                        editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
-                    let env_simnet_diagnostics =
-                        editor_state.try_read(|es| es.get_env_simnet_diagnostics())?;
-                    Ok(LspNotificationResponse {
-                        aggregated_diagnostics,
-                        env_simnet_diagnostics,
-                        notification,
-                    })
-                }
-                Err(e) => Ok(LspNotificationResponse::error(&e)),
-            }
         }
 
         LspNotification::ContractChanged(contract_location, contract_source) => {
@@ -1429,7 +1403,9 @@ mod lsp_tests {
             assert_eq!(first.content_hash, second.content_hash);
         }
 
-        // ManifestSaved clears the cache (settings may have changed).
+        // ManifestSaved threads the cache through per-entry validation;
+        // entries whose version/epoch still match survive, others get
+        // rebuilt. Either way the cache stays populated.
         let manifest = LspNotification::ManifestSaved(PathBuf::from("Clarinet.toml"));
         process_notification(manifest, &mut editor_state_input, Some(&file_accessor))
             .await
@@ -1438,11 +1414,9 @@ mod lsp_tests {
         let cache_after_manifest_save = editor_state_input
             .try_read(|es| es.ast_cache.clone())
             .unwrap();
-        // The handler clears then rebuilds, so the cache ends up repopulated
-        // with fresh entries — but they are fresh, not carryover.
         assert!(
             !cache_after_manifest_save.is_empty(),
-            "rebuild after manifest save should repopulate cache"
+            "cache should stay populated after a manifest save"
         );
     }
 }

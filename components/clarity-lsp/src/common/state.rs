@@ -282,10 +282,6 @@ impl EditorState {
         }
     }
 
-    pub fn clear_ast_cache(&mut self) {
-        self.ast_cache.clear();
-    }
-
     pub fn index_protocol(&mut self, manifest_location: PathBuf, protocol: ProtocolState) {
         // Get the project directory (parent of Clarinet.toml)
         let base_location = manifest_location

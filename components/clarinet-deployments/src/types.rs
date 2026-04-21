@@ -156,6 +156,24 @@ pub struct CachedContractAST {
     pub epoch: StacksEpochId,
 }
 
+impl CachedContractAST {
+    /// Returns `true` if this cached entry is still valid for a contract
+    /// whose source hashes to `content_hash` and that would be parsed at
+    /// `clarity_version` / `epoch`. (We deliberately don't derive
+    /// `PartialEq` because it would include the `ast` field — expensive to
+    /// compare and not what cache validation is asking.)
+    pub fn matches(
+        &self,
+        content_hash: &Sha256Sum,
+        clarity_version: ClarityVersion,
+        epoch: StacksEpochId,
+    ) -> bool {
+        &self.content_hash == content_hash
+            && self.clarity_version == clarity_version
+            && self.epoch == epoch
+    }
+}
+
 #[derive(Clone)]
 pub struct DeploymentGenerationArtifacts {
     pub asts: BTreeMap<QualifiedContractIdentifier, ContractAST>,
