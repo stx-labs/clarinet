@@ -10,6 +10,30 @@ use stacks_common::types::StacksEpochId;
 use super::cost_analysis::{StaticCost, UserArgumentsContext};
 use super::cost_functions::{from_native_function, ClarityCostFunctionExt};
 
+/// Compute (min_serialized_size, max_serialized_size) for a type.
+///
+/// `TypeSignature::min_size()` omits the 1-byte type prefix for some types
+/// (e.g. UIntType returns 16 instead of 17) but includes it for others
+/// (e.g. BoolType returns 1). `max_serialized_size()` consistently includes
+/// the prefix. To get a correct lower bound, we ensure min is never less
+/// than the prefix byte (1) and never exceeds max.
+fn serialized_size_range(type_sig: &TypeSignature) -> (u64, u64) {
+    let max = type_sig
+        .max_serialized_size()
+        .ok()
+        .map(u64::from)
+        .unwrap_or(0);
+    let min_raw = u64::from(type_sig.min_size().unwrap_or(0));
+    // If min_size < max_serialized_size by exactly the type prefix byte,
+    // the type is fixed-size and min should equal max.
+    let min = if min_raw.saturating_add(1) == max {
+        max
+    } else {
+        min_raw.min(max)
+    };
+    (min, max)
+}
+
 // Constants for tuple serialization overhead
 const TUPLE_LENGTH_ENCODING_BYTES: u64 = 4;
 const TUPLE_FIELD_OVERHEAD_BYTES: u64 = 2;
@@ -667,15 +691,7 @@ pub fn cost_fetch_var(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     let (min_size, max_size) = resolve_data_var_type(args, user_args)
-        .map(|type_sig| {
-            let min = u64::from(type_sig.min_size().unwrap_or(0));
-            let max = type_sig
-                .max_serialized_size()
-                .ok()
-                .map(u64::from)
-                .unwrap_or(0);
-            (min, max)
-        })
+        .map(serialized_size_range)
         .unwrap_or((0, 0));
 
     let min_cost = ClarityCostFunction::FetchVar
@@ -699,13 +715,19 @@ pub fn cost_set_var(
     user_args: Option<&UserArgumentsContext>,
 ) -> StaticCost {
     // SetVar args: [var-name, value]
-    // If the value expression is a literal, use its exact serialized size
+    // If the value expression is a literal — or an atom referring to a user
+    // argument with a known constant value — use its exact serialized size
     // since the runtime cost is based on the actual stored value.
     if let Some(exact_size) = args.get(1).and_then(|e| {
-        e.match_atom_value()
+        let value_opt = e
+            .match_atom_value()
             .or_else(|| e.match_literal_value())
-            .and_then(|v| v.serialized_size().ok())
-            .map(u64::from)
+            .cloned()
+            .or_else(|| {
+                let name = e.match_atom()?;
+                user_args?.known_values.get(name).cloned()
+            })?;
+        value_opt.serialized_size().ok().map(u64::from)
     }) {
         let cost = ClarityCostFunction::SetVar
             .eval_for_epoch(exact_size, epoch)
@@ -716,18 +738,17 @@ pub fn cost_set_var(
         };
     }
 
+    // If the value expression is an atom referring to a user argument with a
+    // narrower type than the data var's declared type, use that narrower type.
+    // This is set at the call site by `try_narrow_user_function_cost`.
+    let value_type = args.get(1).and_then(|e| {
+        let name = e.match_atom()?;
+        user_args?.get_argument_type(name)
+    });
+    let resolved_type = value_type.or_else(|| resolve_data_var_type(args, user_args));
+
     // Fall back to type-based range when the value isn't a literal
-    let (min_size, max_size) = resolve_data_var_type(args, user_args)
-        .map(|type_sig| {
-            let min = u64::from(type_sig.min_size().unwrap_or(0));
-            let max = type_sig
-                .max_serialized_size()
-                .ok()
-                .map(u64::from)
-                .unwrap_or(0);
-            (min, max)
-        })
-        .unwrap_or((0, 0));
+    let (min_size, max_size) = resolved_type.map(serialized_size_range).unwrap_or((0, 0));
 
     let min_cost = ClarityCostFunction::SetVar
         .eval_for_epoch(min_size, epoch)

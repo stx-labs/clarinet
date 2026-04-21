@@ -11,7 +11,8 @@ use clarity::vm::types::{
 use clarity::vm::{ast, ClarityVersion};
 use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
-    static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, UserArgumentsContext,
+    static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode, CostExprNode,
+    UserArgumentsContext,
 };
 use indoc::indoc;
 #[cfg(test)]
@@ -74,16 +75,15 @@ fn test_build_cost_analysis_tree_function_definition() {
         &contract_id,
         clarity_version,
         |env, invoke_ctx| {
-            build_cost_analysis_tree(
-                expr,
-                &user_args,
-                &cost_map,
-                &clarity_version,
+            let function_defs = std::collections::HashMap::new();
+            let ctx = AnalysisContext {
+                cost_map: &cost_map,
+                function_defs: &function_defs,
+                clarity_version: &clarity_version,
                 epoch,
-                env,
                 invoke_ctx,
-                0,
-            )
+            };
+            build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)
         },
     );
 
@@ -997,6 +997,145 @@ fn test_against_dynamic_cost_analysis() {
             "add-many-32",
             &list_32_uint_args,
             false,
+        ),
+        // call a function that maps over a list, passing a shorter literal list
+        (
+            indoc! {r#"
+                (define-data-var count uint u0)
+
+                (define-private (add (n uint))
+                  (begin
+                    (var-set count (+ (var-get count) n))
+                  )
+                )
+
+                (define-public (add-many-64 (ns (list 64 uint)))
+                  (begin
+                    (map add ns)
+                    (ok true)
+                  )
+                )
+
+                (define-public (add-u1)
+                  (add-many-64 (list u1))
+                )
+            "#},
+            "add-u1",
+            &[],
+            true,
+        ),
+        // Buffer narrowing: pass a 1-byte literal to a function declared `(buff 128)`.
+        // Static cost should match the dynamic cost of writing only 1 byte.
+        (
+            indoc! {r#"
+                (define-data-var data-buff (buff 128) 0x)
+
+                (define-private (write-buff (data (buff 128)))
+                  (var-set data-buff data)
+                )
+
+                (define-public (do-write-buff)
+                  (ok (write-buff 0x01))
+                )
+            "#},
+            "do-write-buff",
+            &[],
+            true,
+        ),
+        // String narrowing: pass a short literal to a function declared `(string-ascii 100)`.
+        (
+            indoc! {r#"
+                (define-data-var msg (string-ascii 100) "")
+
+                (define-private (write-msg (s (string-ascii 100)))
+                  (var-set msg s)
+                )
+
+                (define-public (do-write-msg)
+                  (ok (write-msg "hi"))
+                )
+            "#},
+            "do-write-msg",
+            &[],
+            true,
+        ),
+        // Map over a literal list: cost should be 3x per-iteration, not 64x.
+        (
+            indoc! {r#"
+                (define-data-var count uint u0)
+
+                (define-private (add (n uint))
+                  (begin
+                    (var-set count (+ (var-get count) n))
+                  )
+                )
+
+                (define-public (map-literal)
+                  (begin
+                    (map add (list u1 u2 u3))
+                    (ok true)
+                  )
+                )
+            "#},
+            "map-literal",
+            &[],
+            true,
+        ),
+        // `if true` folding: literal true selects the write branch.
+        (
+            indoc! {r#"
+                (define-data-var data-buff (buff 128) 0x)
+
+                (define-private (write-if-true (write bool) (data (buff 128)))
+                  (if write (var-set data-buff data) false)
+                )
+
+                (define-public (do-write)
+                  (ok (write-if-true true 0x01))
+                )
+            "#},
+            "do-write",
+            &[],
+            true,
+        ),
+        // `if false` folding: literal false selects the no-op branch.
+        (
+            indoc! {r#"
+                (define-data-var data-buff (buff 128) 0x)
+
+                (define-private (write-if-true (write bool) (data (buff 128)))
+                  (if write (var-set data-buff data) false)
+                )
+
+                (define-public (dont-write)
+                  (ok (write-if-true false 0x00))
+                )
+            "#},
+            "dont-write",
+            &[],
+            true,
+        ),
+        // Indirect constant: a parent function whose own arg is a constant still
+        // folds when inlined into the child via known-value propagation.
+        (
+            indoc! {r#"
+                (define-data-var data-buff (buff 128) 0x)
+
+                (define-private (write-if-true (write bool) (data (buff 128)))
+                  (if write (var-set data-buff data) false)
+                )
+
+                (define-private (always-true)
+                  (write-if-true true 0x01)
+                )
+
+                (define-public (do-write-indirect)
+                  (ok (always-true))
+                )
+            "#},
+            "do-write-indirect",
+            &[],
+            true,
         ),
     ];
 
