@@ -15,8 +15,8 @@ use clarity::vm::{ClarityVersion, Value};
 use clarity_types::representations::SymbolicExpression;
 pub use cost_analysis::{
     build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_source,
-    static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, StaticCost, SummingExecutionCost,
-    UserArgumentsContext,
+    static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode, CostExprNode, StaticCost,
+    SummingExecutionCost, UserArgumentsContext,
 };
 pub use cost_functions::ClarityCostFunctionExt;
 pub use error::StaticCostError;

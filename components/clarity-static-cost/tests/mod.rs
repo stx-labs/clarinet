@@ -11,7 +11,8 @@ use clarity::vm::types::{
 use clarity::vm::{ast, ClarityVersion};
 use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
-    static_cost_tree_from_ast, CostAnalysisNode, CostExprNode, UserArgumentsContext,
+    static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode, CostExprNode,
+    UserArgumentsContext,
 };
 use indoc::indoc;
 #[cfg(test)]
@@ -75,17 +76,14 @@ fn test_build_cost_analysis_tree_function_definition() {
         clarity_version,
         |env, invoke_ctx| {
             let function_defs = std::collections::HashMap::new();
-            build_cost_analysis_tree(
-                expr,
-                &user_args,
-                &cost_map,
-                &function_defs,
-                &clarity_version,
+            let ctx = AnalysisContext {
+                cost_map: &cost_map,
+                function_defs: &function_defs,
+                clarity_version: &clarity_version,
                 epoch,
-                env,
                 invoke_ctx,
-                0,
-            )
+            };
+            build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)
         },
     );
 
