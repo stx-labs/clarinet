@@ -282,10 +282,6 @@ impl EditorState {
         }
     }
 
-    pub fn cache_ast(&mut self, key: (PathBuf, Environment), cached: CachedContractAST) {
-        self.ast_cache.insert(key, cached);
-    }
-
     pub fn clear_ast_cache(&mut self) {
         self.ast_cache.clear();
     }
