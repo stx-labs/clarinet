@@ -874,7 +874,9 @@ pub async fn build_state(
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
     static_cost_analysis: bool,
-    cached_asts: Option<&HashMap<(PathBuf, Environment), CachedContractAST>>,
+    // Taken by value so `generate_default_deployment_with_cache` can consume
+    // hit entries in place (avoiding a per-hit `ContractAST` clone).
+    mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -911,7 +913,7 @@ pub async fn build_state(
             file_accessor,
             None,
             environment,
-            cached_asts,
+            cached_asts.as_mut(),
         )
         .await?;
         global_found_env_simnet |= found_env_simnet;

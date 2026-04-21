@@ -337,7 +337,11 @@ pub async fn generate_default_deployment_with_cache(
     file_accessor: Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
     environment: Environment,
-    cached_asts: Option<&HashMap<(PathBuf, Environment), CachedContractAST>>,
+    // Taken by `&mut` so hit entries can be *removed* and reused directly in
+    // the returned `ast_cache_entries`, avoiding a per-hit `ContractAST.clone()`.
+    // Leftover entries (misses, hash mismatches, stale contracts) are dropped
+    // by the caller when the HashMap goes out of scope.
+    mut cached_asts: Option<&mut HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let mut found_env_simnet = false;
     let network_manifest = match file_accessor {
@@ -869,33 +873,44 @@ pub async fn generate_default_deployment_with_cache(
         let resolved_epoch = contract.epoch.resolve();
         let cache_key = (contract_location, environment);
 
-        let cache_hit = cached_asts.and_then(|c| c.get(&cache_key)).filter(|entry| {
-            entry.content_hash == content_hash
-                && entry.clarity_version == contract.clarity_version
-                && entry.epoch == resolved_epoch
-        });
+        // On cache hit, take ownership of the entry and reuse it verbatim.
+        // Diagnostics were surfaced on the build that populated the cache.
+        let cache_entry = cached_asts
+            .as_deref_mut()
+            .and_then(|c| c.remove(&cache_key))
+            .filter(|entry| {
+                entry.content_hash == content_hash
+                    && entry.clarity_version == contract.clarity_version
+                    && entry.epoch == resolved_epoch
+            });
 
-        let (ast, diags, ast_success) = match cache_hit {
-            // Reuse the cached AST. Diagnostics were surfaced on the build
-            // that populated the cache, so we return none here.
-            Some(entry) => (entry.ast.clone(), vec![], true),
-            None => session.interpreter.build_ast(&contract),
+        let cache_entry = match cache_entry {
+            Some(entry) => {
+                // Empty diags for hits so downstream execution can still
+                // append its own diagnostics into this entry.
+                contract_diags.insert(contract_id.clone(), vec![]);
+                entry
+            }
+            None => {
+                let (ast, diags, ast_success_for_contract) =
+                    session.interpreter.build_ast(&contract);
+                contract_diags.insert(contract_id.clone(), diags);
+                asts_success = asts_success && ast_success_for_contract;
+                CachedContractAST {
+                    content_hash,
+                    ast,
+                    clarity_version: contract.clarity_version,
+                    epoch: resolved_epoch,
+                }
+            }
         };
 
-        ast_cache_entries.insert(
-            cache_key,
-            CachedContractAST {
-                content_hash,
-                ast: ast.clone(),
-                clarity_version: contract.clarity_version,
-                epoch: resolved_epoch,
-            },
+        contract_data.insert(
+            contract_id.clone(),
+            (cache_entry.clarity_version, cache_entry.ast.clone()),
         );
-
-        contract_data.insert(contract_id.clone(), (contract.clarity_version, ast));
-        contract_diags.insert(contract_id.clone(), diags);
         contract_epochs.insert(contract_id, resolved_epoch);
-        asts_success = asts_success && ast_success;
+        ast_cache_entries.insert(cache_key, cache_entry);
     }
 
     let dependencies =
