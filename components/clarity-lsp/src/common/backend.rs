@@ -314,7 +314,7 @@ pub async fn process_notification(
                 &mut protocol_state,
                 file_accessor,
                 static_cost_analysis,
-                Some(&cached_asts),
+                Some(cached_asts),
             )
             .await
             {
