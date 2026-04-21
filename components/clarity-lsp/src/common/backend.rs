@@ -111,9 +111,7 @@ pub async fn process_notification(
                 Ok(new_cache_entries) => {
                     editor_state.try_write(|es| {
                         es.index_protocol(manifest_location, protocol_state);
-                        for (key, cached) in new_cache_entries {
-                            es.cache_ast(key, cached);
-                        }
+                        es.ast_cache.extend(new_cache_entries);
                     })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
@@ -147,9 +145,7 @@ pub async fn process_notification(
                 Ok(new_cache_entries) => {
                     editor_state.try_write(|es| {
                         es.index_protocol(manifest_location, protocol_state);
-                        for (key, cached) in new_cache_entries {
-                            es.cache_ast(key, cached);
-                        }
+                        es.ast_cache.extend(new_cache_entries);
                     })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
@@ -271,9 +267,7 @@ pub async fn process_notification(
                 Ok(new_cache_entries) => {
                     editor_state.try_write(|es| {
                         es.index_protocol(manifest_location, protocol_state);
-                        for (key, cached) in new_cache_entries {
-                            es.cache_ast(key, cached);
-                        }
+                        es.ast_cache.extend(new_cache_entries);
                     })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
@@ -290,14 +284,19 @@ pub async fn process_notification(
         }
 
         LspNotification::ContractSaved(contract_location) => {
-            // Snapshot the cache before touching protocol state so we can
-            // pass it into the rebuild. Cloning is cheap compared to the
-            // parse work we're avoiding.
-            let cached_asts = editor_state.try_read(|es| es.ast_cache.clone())?;
+            // Move the cache out under a single write lock, together with
+            // clearing the contract's stale protocol state. The rebuild will
+            // repopulate the cache from the return of `build_state`; if the
+            // rebuild errors we drop these entries and the next successful
+            // save re-indexes from scratch.
+            let (cached_asts, existing_manifest) = editor_state.try_write(|es| {
+                (
+                    std::mem::take(&mut es.ast_cache),
+                    es.clear_protocol_associated_with_contract(&contract_location),
+                )
+            })?;
 
-            let manifest_location = match editor_state
-                .try_write(|es| es.clear_protocol_associated_with_contract(&contract_location))?
-            {
+            let manifest_location = match existing_manifest {
                 Some(manifest_location) => manifest_location,
                 None => match file_accessor {
                     None => paths::find_manifest_location(&contract_location)?,
@@ -322,9 +321,7 @@ pub async fn process_notification(
                 Ok(new_cache_entries) => {
                     editor_state.try_write(|es| {
                         es.index_protocol(manifest_location, protocol_state);
-                        for (key, cached) in new_cache_entries {
-                            es.cache_ast(key, cached);
-                        }
+                        es.ast_cache.extend(new_cache_entries);
                         if let Some(contract) = es.active_contracts.get_mut(&contract_location) {
                             contract.update_definitions();
                         };
