@@ -917,7 +917,7 @@ pub async fn build_state(
         global_found_env_simnet |= found_env_simnet;
 
         // Deployments already shaped the cache entries; merge them in.
-        new_cache_entries.extend(artifacts.ast_cache_entries.drain());
+        new_cache_entries.extend(artifacts.ast_cache_entries);
 
         let mut session = initiate_session_from_manifest(&manifest);
         let contracts =

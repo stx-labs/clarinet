@@ -860,7 +860,6 @@ pub async fn generate_default_deployment_with_cache(
 
     let session = Session::new(settings);
 
-    let mut contract_asts = BTreeMap::new();
     let mut contract_data = BTreeMap::new();
     let mut ast_cache_entries = HashMap::new();
 
@@ -893,7 +892,6 @@ pub async fn generate_default_deployment_with_cache(
             },
         );
 
-        contract_asts.insert(contract_id.clone(), ast.clone());
         contract_data.insert(contract_id.clone(), (contract.clarity_version, ast));
         contract_diags.insert(contract_id.clone(), diags);
         contract_epochs.insert(contract_id, resolved_epoch);
@@ -911,6 +909,13 @@ pub async fn generate_default_deployment_with_cache(
             dependencies
         }
     };
+
+    // `contract_data` is no longer borrowed; consume it for the final
+    // `asts` output so we don't clone each AST a second time.
+    let contract_asts: BTreeMap<_, _> = contract_data
+        .into_iter()
+        .map(|(id, (_version, ast))| (id, ast))
+        .collect();
 
     for contract_id in boot_contracts_ids.into_iter() {
         dependencies.insert(contract_id.clone(), DependencySet::new());
