@@ -842,6 +842,7 @@ dependencies = [
  "clarity-types",
  "console_error_panic_hook",
  "getrandom 0.3.4",
+ "divan",
  "indoc",
  "js-sys",
  "ls-types",
