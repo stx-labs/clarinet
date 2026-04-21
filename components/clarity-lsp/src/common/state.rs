@@ -5,8 +5,8 @@ use std::vec;
 
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarinet_deployments::{
-    generate_default_deployment, initiate_session_from_manifest,
-    update_session_with_deployment_plan,
+    generate_default_deployment_with_cache, initiate_session_from_manifest,
+    update_session_with_deployment_plan, CachedContractASTData,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
@@ -21,6 +21,7 @@ use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::session::AnnotatedExecutionResult;
 use clarity_repl::repl::{ContractDeployer, Session};
+pub use clarity_repl::utils::Environment;
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
 use ls_types::{
@@ -41,6 +42,17 @@ use super::requests::helpers::get_atom_or_field_start_at_position;
 use super::requests::hover::get_expression_documentation;
 use super::requests::signature_help::get_signatures;
 use crate::common::requests::completion::check_if_should_wrap;
+
+/// AST entry cached across `build_state` invocations, keyed by
+/// `(contract_location, environment)`. Lives on `EditorState` so it
+/// survives between notification handlers.
+#[derive(Debug, Clone)]
+pub struct CachedContractAST {
+    pub content_hash: u64,
+    pub ast: ContractAST,
+    pub clarity_version: ClarityVersion,
+    pub epoch: StacksEpochId,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActiveContractData {
@@ -264,6 +276,9 @@ pub struct EditorState {
     pub contracts_lookup: HashMap<PathBuf, ContractMetadata>,
     pub active_contracts: HashMap<PathBuf, ActiveContractData>,
     pub settings: InitializationOptions,
+    /// Parsed ASTs keyed by (contract path, environment). Reused by
+    /// `build_state` to skip re-parsing files whose source hasn't changed.
+    pub ast_cache: HashMap<(PathBuf, Environment), CachedContractAST>,
 }
 
 impl EditorState {
@@ -273,7 +288,16 @@ impl EditorState {
             contracts_lookup: HashMap::new(),
             active_contracts: HashMap::new(),
             settings: InitializationOptions::default(),
+            ast_cache: HashMap::new(),
         }
+    }
+
+    pub fn cache_ast(&mut self, key: (PathBuf, Environment), cached: CachedContractAST) {
+        self.ast_cache.insert(key, cached);
+    }
+
+    pub fn clear_ast_cache(&mut self) {
+        self.ast_cache.clear();
     }
 
     pub fn index_protocol(&mut self, manifest_location: PathBuf, protocol: ProtocolState) {
@@ -835,8 +859,6 @@ impl ProtocolState {
     }
 }
 
-pub use clarity_repl::utils::Environment;
-
 fn tag_diagnostics(
     environment: Environment,
     found_env_simnet: bool,
@@ -866,7 +888,8 @@ pub async fn build_state(
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
     static_cost_analysis: bool,
-) -> Result<(), String> {
+    cached_asts: Option<&HashMap<(PathBuf, Environment), CachedContractAST>>,
+) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
     let mut deps = BTreeMap::new();
@@ -889,21 +912,59 @@ pub async fn build_state(
         }
     };
 
+    // Translate the LSP-facing cache into the deployments-facing shape.
+    // Same fields; a separate type lets the deployments crate stay unaware
+    // of LSP-specific concerns.
+    let cached_asts_data: Option<HashMap<(PathBuf, Environment), CachedContractASTData>> =
+        cached_asts.map(|cache| {
+            cache
+                .iter()
+                .map(|(key, cached)| {
+                    (
+                        key.clone(),
+                        CachedContractASTData {
+                            content_hash: cached.content_hash,
+                            ast: cached.ast.clone(),
+                            clarity_version: cached.clarity_version,
+                            epoch: cached.epoch,
+                        },
+                    )
+                })
+                .collect()
+        });
+
+    let mut new_cache_entries: HashMap<(PathBuf, Environment), CachedContractAST> = HashMap::new();
     let mut global_found_env_simnet = false;
     // Populated by the final loop iteration; cost analysis (below) needs the
     // fully-deployed session but only cares about the last iteration's state.
     let mut final_session: Option<Session> = None;
     for environment in CHECK_ENVIRONMENTS {
-        let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment(
+        let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment_with_cache(
             &manifest,
             &StacksNetwork::Simnet,
             false,
             file_accessor,
             None,
             environment,
+            cached_asts_data.as_ref(),
         )
         .await?;
         global_found_env_simnet |= found_env_simnet;
+
+        // Capture post-build metadata so the next call can skip re-parsing.
+        for (contract_id, ast) in artifacts.asts.iter() {
+            if let Some(metadata) = artifacts.ast_metadata.get(contract_id) {
+                new_cache_entries.insert(
+                    (metadata.location.clone(), metadata.environment),
+                    CachedContractAST {
+                        content_hash: metadata.content_hash,
+                        ast: ast.clone(),
+                        clarity_version: metadata.clarity_version,
+                        epoch: metadata.epoch,
+                    },
+                );
+            }
+        }
 
         let mut session = initiate_session_from_manifest(&manifest);
         let contracts =
@@ -1050,7 +1111,7 @@ pub async fn build_state(
         &mut cost_analyses,
     );
 
-    Ok(())
+    Ok(new_cache_entries)
 }
 
 // Helper function to compute cost analysis for a contract

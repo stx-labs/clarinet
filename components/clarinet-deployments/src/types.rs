@@ -13,7 +13,7 @@ use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
-use clarity_repl::utils::remove_env_simnet;
+use clarity_repl::utils::{remove_env_simnet, Environment};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 use yaml_serde;
@@ -145,6 +145,17 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
     }
 }
 
+/// Metadata produced alongside each built AST, used by the LSP to key a
+/// re-usable cache of parsed contracts.
+#[derive(Clone, Debug)]
+pub struct ContractASTMetadata {
+    pub location: PathBuf,
+    pub content_hash: u64,
+    pub clarity_version: ClarityVersion,
+    pub epoch: StacksEpochId,
+    pub environment: Environment,
+}
+
 #[derive(Clone)]
 pub struct DeploymentGenerationArtifacts {
     pub asts: BTreeMap<QualifiedContractIdentifier, ContractAST>,
@@ -155,6 +166,9 @@ pub struct DeploymentGenerationArtifacts {
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
     pub session: Session,
     pub success: bool,
+    /// Per-contract metadata for AST cache validation. Empty for callers that
+    /// don't go through `generate_default_deployment`.
+    pub ast_metadata: HashMap<QualifiedContractIdentifier, ContractASTMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

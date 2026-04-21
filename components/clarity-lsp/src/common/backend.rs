@@ -18,6 +18,10 @@ use crate::state::{build_state, EditorState, ProtocolState};
 use crate::utils::get_contract_location;
 
 #[derive(Debug, Clone)]
+// The `Owned` variant contains the full `EditorState` (several HashMaps,
+// now including an AST cache). Boxing it would force an extra indirection
+// through every mutation path; we accept the size mismatch instead.
+#[allow(clippy::large_enum_variant)]
 pub enum EditorStateInput {
     Owned(EditorState),
     RwLock(Arc<RwLock<EditorState>>),
@@ -93,18 +97,24 @@ pub async fn process_notification(
             }
 
             // With this manifest_location, let's initialize our state.
+            // First build: no cache yet.
             let mut protocol_state = ProtocolState::new();
             match build_state(
                 &manifest_location,
                 &mut protocol_state,
                 file_accessor,
                 static_cost_analysis,
+                None,
             )
             .await
             {
-                Ok(_) => {
-                    editor_state
-                        .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
+                Ok(new_cache_entries) => {
+                    editor_state.try_write(|es| {
+                        es.index_protocol(manifest_location, protocol_state);
+                        for (key, cached) in new_cache_entries {
+                            es.cache_ast(key, cached);
+                        }
+                    })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
                     let env_simnet_diagnostics =
@@ -120,19 +130,27 @@ pub async fn process_notification(
         }
 
         LspNotification::ManifestSaved(manifest_location) => {
-            // We will rebuild the entire state, without to try any optimizations for now
+            // Manifest edits can flip clarity_version or epoch for any
+            // contract, so previously cached ASTs are no longer trustworthy.
+            editor_state.try_write(|es| es.clear_ast_cache())?;
+
             let mut protocol_state = ProtocolState::new();
             match build_state(
                 &manifest_location,
                 &mut protocol_state,
                 file_accessor,
                 static_cost_analysis,
+                None,
             )
             .await
             {
-                Ok(_) => {
-                    editor_state
-                        .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
+                Ok(new_cache_entries) => {
+                    editor_state.try_write(|es| {
+                        es.index_protocol(manifest_location, protocol_state);
+                        for (key, cached) in new_cache_entries {
+                            es.cache_ast(key, cached);
+                        }
+                    })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
                     let env_simnet_diagnostics =
@@ -246,12 +264,17 @@ pub async fn process_notification(
                 &mut protocol_state,
                 file_accessor,
                 static_cost_analysis,
+                None,
             )
             .await
             {
-                Ok(_) => {
-                    editor_state
-                        .try_write(|es| es.index_protocol(manifest_location, protocol_state))?;
+                Ok(new_cache_entries) => {
+                    editor_state.try_write(|es| {
+                        es.index_protocol(manifest_location, protocol_state);
+                        for (key, cached) in new_cache_entries {
+                            es.cache_ast(key, cached);
+                        }
+                    })?;
                     let (aggregated_diagnostics, notification) =
                         editor_state.try_read(|es| es.get_aggregated_diagnostics())?;
                     let env_simnet_diagnostics =
@@ -267,6 +290,11 @@ pub async fn process_notification(
         }
 
         LspNotification::ContractSaved(contract_location) => {
+            // Snapshot the cache before touching protocol state so we can
+            // pass it into the rebuild. Cloning is cheap compared to the
+            // parse work we're avoiding.
+            let cached_asts = editor_state.try_read(|es| es.ast_cache.clone())?;
+
             let manifest_location = match editor_state
                 .try_write(|es| es.clear_protocol_associated_with_contract(&contract_location))?
             {
@@ -287,12 +315,16 @@ pub async fn process_notification(
                 &mut protocol_state,
                 file_accessor,
                 static_cost_analysis,
+                Some(&cached_asts),
             )
             .await
             {
-                Ok(_) => {
+                Ok(new_cache_entries) => {
                     editor_state.try_write(|es| {
                         es.index_protocol(manifest_location, protocol_state);
+                        for (key, cached) in new_cache_entries {
+                            es.cache_ast(key, cached);
+                        }
                         if let Some(contract) = es.active_contracts.get_mut(&contract_location) {
                             contract.update_definitions();
                         };
@@ -1288,5 +1320,132 @@ mod lsp_tests {
         // annotation on line 3 (0-indexed: 2), block ends on line 6 (0-indexed: 5)
         assert_eq!(diags[0].range.start.line, 2);
         assert_eq!(diags[0].range.end.line, 5);
+    }
+
+    /// Proves cache hits actually short-circuit the parser. We populate the
+    /// cache naturally, then mutate the cached AST so that it no longer
+    /// matches the source (empty expressions vs. a define-data-var). On the
+    /// next rebuild:
+    ///  - cache hit  => the poisoned (empty) AST is what the pipeline sees
+    ///  - cache miss => build_ast runs afresh and produces a non-empty AST
+    /// The final cache state lets us tell the two cases apart.
+    #[tokio::test]
+    async fn test_ast_cache_hit_reuses_cached_ast() {
+        let source = "(define-data-var count uint u0)";
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        // Save 1: populate the cache with a real AST.
+        let save = LspNotification::ContractSaved(PathBuf::from("test.clar"));
+        process_notification(save, &mut editor_state_input, Some(&file_accessor))
+            .await
+            .expect("first save failed");
+
+        let entries = editor_state_input
+            .try_read(|es| es.ast_cache.clone())
+            .unwrap();
+        assert_eq!(entries.len(), 1, "expected exactly one cached contract");
+        let (key, initial) = entries.iter().next().unwrap();
+        assert!(
+            !initial.ast.expressions.is_empty(),
+            "sanity: freshly-built AST must have expressions"
+        );
+        let key = key.clone();
+
+        // Poison the cached AST. Hash/version/epoch are untouched so it
+        // still validates; the body is what a cache hit will surface.
+        editor_state_input
+            .try_write(|es| {
+                let entry = es
+                    .ast_cache
+                    .get_mut(&key)
+                    .expect("cache entry should exist");
+                entry.ast.expressions.clear();
+                entry.ast.pre_expressions.clear();
+                entry.ast.top_level_expression_sorting = None;
+            })
+            .unwrap();
+
+        // Save 2: if caching is honored, the pipeline sees the poisoned AST
+        // and re-stores it. If caching is broken, build_ast runs and the
+        // entry gets replaced with a correctly-parsed AST.
+        let save = LspNotification::ContractSaved(PathBuf::from("test.clar"));
+        process_notification(save, &mut editor_state_input, Some(&file_accessor))
+            .await
+            .expect("second save failed");
+
+        let entry_after = editor_state_input
+            .try_read(|es| es.ast_cache.get(&key).cloned())
+            .unwrap()
+            .expect("cache entry should persist after rebuild");
+
+        assert!(
+            entry_after.ast.expressions.is_empty(),
+            "cache miss: source was re-parsed (AST has {} expressions) \
+             instead of reusing the poisoned cache entry",
+            entry_after.ast.expressions.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ast_cache_is_wired_through_saves() {
+        let source = "(define-data-var count uint u0)";
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        assert!(
+            editor_state_input
+                .try_read(|es| es.ast_cache.is_empty())
+                .unwrap(),
+            "cache should start empty"
+        );
+
+        // First save populates the cache.
+        let save = LspNotification::ContractSaved(PathBuf::from("test.clar"));
+        process_notification(save, &mut editor_state_input, Some(&file_accessor))
+            .await
+            .expect("failed to process first save");
+
+        let cache_after_first = editor_state_input
+            .try_read(|es| es.ast_cache.clone())
+            .unwrap();
+        assert!(
+            !cache_after_first.is_empty(),
+            "cache should be populated after first save"
+        );
+
+        // Second save with identical source preserves hashes, proving the
+        // cache survives indexing and the rebuild path reads/writes it.
+        let save = LspNotification::ContractSaved(PathBuf::from("test.clar"));
+        process_notification(save, &mut editor_state_input, Some(&file_accessor))
+            .await
+            .expect("failed to process second save");
+
+        let cache_after_second = editor_state_input
+            .try_read(|es| es.ast_cache.clone())
+            .unwrap();
+        assert_eq!(cache_after_first.len(), cache_after_second.len());
+        for (key, first) in &cache_after_first {
+            let second = cache_after_second
+                .get(key)
+                .expect("cache entry should persist across saves");
+            assert_eq!(first.content_hash, second.content_hash);
+        }
+
+        // ManifestSaved clears the cache (settings may have changed).
+        let manifest = LspNotification::ManifestSaved(PathBuf::from("Clarinet.toml"));
+        process_notification(manifest, &mut editor_state_input, Some(&file_accessor))
+            .await
+            .expect("failed to process manifest save");
+
+        let cache_after_manifest_save = editor_state_input
+            .try_read(|es| es.ast_cache.clone())
+            .unwrap();
+        // The handler clears then rebuilds, so the cache ends up repopulated
+        // with fresh entries — but they are fresh, not carryover.
+        assert!(
+            !cache_after_manifest_save.is_empty(),
+            "rebuild after manifest save should repopulate cache"
+        );
     }
 }
