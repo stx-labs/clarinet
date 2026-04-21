@@ -18,8 +18,13 @@ clarinet-deployments = { path = "../clarinet-deployments" }
 clarity-static-cost = { path = "../clarity-static-cost" }
 
 [dev-dependencies]
+divan = { workspace = true }
 indoc = { workspace = true }
 tokio = { workspace = true }
+
+[[bench]]
+name = "ast_cache"
+harness = false
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 clarity = { workspace = true, default-features = false, features = ["wasm-web", "developer-mode"] }

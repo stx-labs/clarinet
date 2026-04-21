@@ -840,6 +840,7 @@ dependencies = [
  "clarity-static-cost",
  "clarity-types",
  "console_error_panic_hook",
+ "divan",
  "indoc",
  "js-sys",
  "ls-types",
