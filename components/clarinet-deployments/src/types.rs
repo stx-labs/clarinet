@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
 use clarity::types::StacksEpochId;
-use clarity::util::hash::{hex_bytes, to_hex};
+use clarity::util::hash::{hex_bytes, to_hex, Sha256Sum};
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
@@ -150,7 +150,7 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
 #[derive(Clone, Debug)]
 pub struct ContractASTMetadata {
     pub location: PathBuf,
-    pub content_hash: u64,
+    pub content_hash: Sha256Sum,
     pub clarity_version: ClarityVersion,
     pub epoch: StacksEpochId,
     pub environment: Environment,

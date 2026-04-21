@@ -10,6 +10,7 @@ use clarinet_deployments::{
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
+use clarity::util::hash::Sha256Sum;
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::ast::{build_ast, ContractAST};
 use clarity::vm::costs::ExecutionCost;
@@ -48,7 +49,7 @@ use crate::common::requests::completion::check_if_should_wrap;
 /// survives between notification handlers.
 #[derive(Debug, Clone)]
 pub struct CachedContractAST {
-    pub content_hash: u64,
+    pub content_hash: Sha256Sum,
     pub ast: ContractAST,
     pub clarity_version: ClarityVersion,
     pub epoch: StacksEpochId,
@@ -923,7 +924,7 @@ pub async fn build_state(
                     (
                         key.clone(),
                         CachedContractASTData {
-                            content_hash: cached.content_hash,
+                            content_hash: cached.content_hash.clone(),
                             ast: cached.ast.clone(),
                             clarity_version: cached.clarity_version,
                             epoch: cached.epoch,
@@ -957,7 +958,7 @@ pub async fn build_state(
                 new_cache_entries.insert(
                     (metadata.location.clone(), metadata.environment),
                     CachedContractAST {
-                        content_hash: metadata.content_hash,
+                        content_hash: metadata.content_hash.clone(),
                         ast: ast.clone(),
                         clarity_version: metadata.clarity_version,
                         epoch: metadata.epoch,
