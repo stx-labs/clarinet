@@ -868,14 +868,13 @@ pub async fn generate_default_deployment_with_cache(
         let source = contract.expect_in_memory_code_source();
         let content_hash = compute_content_hash(source);
         let resolved_epoch = contract.epoch.resolve();
+        let cache_key = (contract_location, environment);
 
-        let cache_hit = cached_asts
-            .and_then(|c| c.get(&(contract_location.clone(), environment)))
-            .filter(|entry| {
-                entry.content_hash == content_hash
-                    && entry.clarity_version == contract.clarity_version
-                    && entry.epoch == resolved_epoch
-            });
+        let cache_hit = cached_asts.and_then(|c| c.get(&cache_key)).filter(|entry| {
+            entry.content_hash == content_hash
+                && entry.clarity_version == contract.clarity_version
+                && entry.epoch == resolved_epoch
+        });
 
         let (ast, diags, ast_success) = match cache_hit {
             // Reuse the cached AST. Diagnostics were surfaced on the build
@@ -885,7 +884,7 @@ pub async fn generate_default_deployment_with_cache(
         };
 
         ast_cache_entries.insert(
-            (contract_location, environment),
+            cache_key,
             CachedContractAST {
                 content_hash,
                 ast: ast.clone(),
