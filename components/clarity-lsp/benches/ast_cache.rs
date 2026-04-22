@@ -272,7 +272,13 @@ fn warm_cache(
     manifest: &ProjectManifest,
     accessor: &BenchFileAccessor,
 ) -> HashMap<(PathBuf, Environment), CachedContractAST> {
-    run(rt, manifest, accessor, None)
+    // `Some(empty)` opts into cache population even though there's
+    // nothing to reuse. Passing `None` here would short-circuit
+    // cache-entry construction (see the `is_some()` gate in
+    // `generate_default_deployment_with_cache`), leaving us with an
+    // empty warm cache — the `all_hit` / `one_miss` benches would
+    // then silently measure cold-cache behavior.
+    run(rt, manifest, accessor, Some(HashMap::new()))
 }
 
 // ---- benches ----
