@@ -148,10 +148,17 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
 /// A parsed AST plus the inputs that validate it — used by the LSP as a
 /// re-usable cache of parsed contracts. The hash + version + epoch triple is
 /// what gates a cache hit; `ast` is the payload we'd otherwise recompute.
+///
+/// `diags` and `ast_success` are also cached so that a subsequent save
+/// reproduces the same parser diagnostics the user saw on the first save —
+/// otherwise a contract with a syntax error would appear clean on every
+/// rebuild after the first.
 #[derive(Clone, Debug)]
 pub struct CachedContractAST {
     pub content_hash: Sha256Sum,
     pub ast: ContractAST,
+    pub diags: Vec<Diagnostic>,
+    pub ast_success: bool,
     pub clarity_version: ClarityVersion,
     pub epoch: StacksEpochId,
 }

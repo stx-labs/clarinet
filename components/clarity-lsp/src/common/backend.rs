@@ -1419,4 +1419,54 @@ mod lsp_tests {
             "cache should stay populated after a manifest save"
         );
     }
+
+    /// Regression test: a contract with a parse error must keep reporting
+    /// its diagnostics on subsequent saves, not just the first one. The
+    /// cache stores parser diagnostics alongside the AST so hits replay
+    /// them rather than emitting an empty list.
+    #[tokio::test]
+    async fn test_ast_cache_hit_preserves_parser_diagnostics() {
+        // Unbalanced parens — `build_ast` returns errors.
+        let broken_source = indoc! {r#"
+            (define-data-var count uint u0
+        "#};
+        let file_accessor = TestFileAccessor::new(broken_source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        let diag_count = |resp: &LspNotificationResponse| -> usize {
+            resp.aggregated_diagnostics
+                .iter()
+                .map(|(_, d)| d.len())
+                .sum()
+        };
+
+        // First save parses the source and surfaces the error.
+        let first = process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("first save failed");
+        let first_count = diag_count(&first);
+        assert!(
+            first_count > 0,
+            "first save should surface parser diagnostics"
+        );
+
+        // Second save hits the cache. Before the fix this would re-emit
+        // an empty diagnostic list and the error would silently disappear.
+        let second = process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("second save failed");
+        assert_eq!(
+            diag_count(&second),
+            first_count,
+            "cache hit should replay parser diagnostics, not drop them"
+        );
+    }
 }
