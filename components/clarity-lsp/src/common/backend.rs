@@ -32,14 +32,15 @@ use crate::utils::get_contract_location;
 ///     validated via `CachedContractAST::matches`. Still-valid entries get
 ///     reused; mismatched entries (edited source, changed version/epoch)
 ///     are dropped and rebuilt.
-///   - Entries for contracts no longer in the manifest are never looked
-///     up, so they remain in the local `cached_asts` and drop when it
-///     goes out of scope at the end of `build_state`.
+///   - Entries we didn't touch (contracts from other manifests open in
+///     the same LSP session, contracts removed from this manifest, etc.)
+///     stay in `cached_asts` as "leftover." On the commit step below we
+///     `or_insert` them back into `es.ast_cache` so other manifests'
+///     caches survive a rebuild here. `new_cache_entries` is extended in
+///     last so the current rebuild's fresh values win any collision.
 ///
-/// `es.ast_cache.extend(new_cache_entries)` below therefore restores the
-/// cache to exactly the set of contracts in the current manifest — no
-/// explicit `clear_ast_cache` needed, and no stale accumulation even if
-/// the user rapidly flips Clarity version or epoch.
+/// No explicit `clear_ast_cache` is needed, and no stale accumulation
+/// even if the user rapidly flips Clarity version or epoch.
 async fn build_and_commit<F>(
     editor_state: &mut EditorStateInput,
     manifest_location: PathBuf,
@@ -89,6 +90,16 @@ where
 
     editor_state.try_write(|es| {
         es.index_protocol(manifest_location, protocol_state);
+        // Put back cache entries the rebuild didn't touch — they belong
+        // to other manifests open in the same LSP session and would be
+        // permanently dropped otherwise. `or_insert` (vs. `extend`) keeps
+        // a concurrent handler's fresh writes on the same key, which can
+        // happen if two notifications race across different manifests.
+        if let Some(leftover) = cached_asts.take() {
+            for (key, entry) in leftover {
+                es.ast_cache.entry(key).or_insert(entry);
+            }
+        }
         es.ast_cache.extend(new_cache_entries);
         post_commit(es);
     })?;
@@ -1573,6 +1584,63 @@ mod lsp_tests {
             diag_count(&second),
             first_count,
             "cache hit should replay parser diagnostics, not drop them"
+        );
+    }
+
+    /// Regression test: in a multi-manifest LSP session, rebuilding one
+    /// manifest must not wipe cache entries that belong to a different
+    /// manifest. `build_and_commit` `mem::take`s the whole cache before
+    /// calling `build_state`; without explicit leftover-restoration the
+    /// other manifest's entries would be dropped.
+    #[tokio::test]
+    async fn test_other_manifest_cache_survives_rebuild() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+        "#};
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        // First save populates the cache for test.clar.
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("first save failed");
+
+        // Inject a synthetic entry keyed on a different path, standing
+        // in for a cache entry from a second manifest that's also open.
+        let other_manifest_key = (
+            PathBuf::from("/other/workspace/contracts/other.clar"),
+            Environment::OnChain,
+        );
+        let template = editor_state_input
+            .try_read(|es| es.ast_cache.values().next().cloned())
+            .unwrap()
+            .expect("sanity: cache should have one entry after first save");
+        editor_state_input
+            .try_write(|es| {
+                es.ast_cache.insert(other_manifest_key.clone(), template);
+            })
+            .unwrap();
+
+        // Rebuild test.clar. Before the fix, this would wipe the other
+        // manifest's entry; after the fix, `or_insert` restores leftover.
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("second save failed");
+
+        let survived = editor_state_input
+            .try_read(|es| es.ast_cache.contains_key(&other_manifest_key))
+            .unwrap();
+        assert!(
+            survived,
+            "other-manifest cache entry must not be dropped by a rebuild of a different manifest"
         );
     }
 }
