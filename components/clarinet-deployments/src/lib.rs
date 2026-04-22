@@ -917,6 +917,15 @@ pub async fn generate_default_deployment_with_cache(
             }
         };
 
+        // TODO: eliminate this `ContractAST.clone()`. The same AST ends up
+        // owned in two maps — `contract_data` (later becomes
+        // `artifacts.asts`) and `ast_cache_entries` — because both are
+        // returned as owned data in `DeploymentGenerationArtifacts`. On a
+        // 20-contract project this costs ~20 ms/build. The fix requires
+        // either wrapping the AST in `Arc`, changing `detect_dependencies`
+        // in `clarity-repl` to accept `&ContractAST`, or collapsing the
+        // two output maps into one — each is its own refactor across
+        // crates, so left for a follow-up PR.
         contract_data.insert(
             contract_id.clone(),
             (cache_entry.clarity_version, cache_entry.ast.clone()),
