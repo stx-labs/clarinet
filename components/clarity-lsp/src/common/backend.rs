@@ -67,11 +67,21 @@ where
         Ok(entries) => entries,
         Err(e) => {
             // Transient failure (bad manifest, file read error, etc.).
-            // Don't drop the cache — restore it so the next save starts
-            // warm. On success we intentionally drop `cached_asts`
-            // because stale/removed-contract entries shouldn't carry over.
+            // Restore cache entries so the next save starts warm — but
+            // *only for keys missing from the current cache*. Under
+            // `EditorStateInput::RwLock`, another notification could
+            // have rebuilt successfully while we held no lock across
+            // the async `build_state`; wholesale-assigning back would
+            // clobber that newer state. `or_insert` is a no-op when
+            // the newer rebuild already wrote an entry for the key.
+            // On success we intentionally drop `cached_asts`: stale /
+            // removed-contract entries shouldn't carry over.
             if let Some(cache) = cached_asts.take() {
-                editor_state.try_write(|es| es.ast_cache = cache)?;
+                editor_state.try_write(|es| {
+                    for (key, entry) in cache {
+                        es.ast_cache.entry(key).or_insert(entry);
+                    }
+                })?;
             }
             return Ok(LspNotificationResponse::error(&e));
         }
