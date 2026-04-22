@@ -876,7 +876,7 @@ pub async fn generate_default_deployment_with_cache(
         // `CachedContractAST` construction, `ast_cache_entries`
         // insertion, and — not least — the `ContractAST.clone()` into
         // `contract_data`, since nothing else needs to own a copy.
-        let ast = if let Some(cache) = cached_asts.as_deref_mut() {
+        let ast_for_data = if let Some(cache) = cached_asts.as_deref_mut() {
             let source = contract.expect_in_memory_code_source();
             let content_hash = compute_content_hash(source);
             let cache_key = (contract_location, environment);
@@ -933,9 +933,9 @@ pub async fn generate_default_deployment_with_cache(
             // `clarity-repl` to accept `&ContractAST`, or collapsing
             // the two output maps into one — each is its own refactor
             // across crates, so left for a follow-up PR.
-            let ast = cache_entry.ast.clone();
+            let ast_for_data = cache_entry.ast.clone();
             ast_cache_entries.insert(cache_key, cache_entry);
-            ast
+            ast_for_data
         } else {
             // Cache-free path: move the AST straight into contract_data.
             let (ast, diags, ast_success_for_contract) = session.interpreter.build_ast(&contract);
@@ -944,7 +944,7 @@ pub async fn generate_default_deployment_with_cache(
             ast
         };
 
-        contract_data.insert(contract_id.clone(), (clarity_version, ast));
+        contract_data.insert(contract_id.clone(), (clarity_version, ast_for_data));
         contract_epochs.insert(contract_id, resolved_epoch);
     }
 

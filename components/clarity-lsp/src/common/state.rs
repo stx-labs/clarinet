@@ -971,6 +971,11 @@ pub async fn build_state(
                         lint_diagnostics: mut contract_lint_diags,
                     } = annotated;
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
+                        // Only execution diagnostics get env-tagged. Parser
+                        // diagnostics are already env-segregated upstream:
+                        // cache entries are keyed `(path, env)` and the
+                        // env-stripped source hashes differently per env,
+                        // so each env has its own parser-diag stream.
                         tag_diagnostics(
                             environment,
                             global_found_env_simnet,
