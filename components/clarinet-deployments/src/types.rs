@@ -191,8 +191,10 @@ pub struct DeploymentGenerationArtifacts {
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
     pub session: Session,
     pub success: bool,
-    /// Cache entries shaped for direct reuse by the LSP. Empty for callers
-    /// that don't go through `generate_default_deployment`.
+    /// Cache entries shaped for direct reuse by the LSP. Populated only
+    /// when the caller passes `Some(...)` for `cached_asts`; empty
+    /// otherwise (which is the case for `generate_default_deployment` and
+    /// `setup_session_with_deployment`).
     pub ast_cache_entries: HashMap<(PathBuf, Environment), CachedContractAST>,
 }
 

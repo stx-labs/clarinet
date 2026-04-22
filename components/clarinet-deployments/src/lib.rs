@@ -868,70 +868,84 @@ pub async fn generate_default_deployment_with_cache(
     let mut ast_cache_entries = HashMap::new();
 
     for (contract_id, (contract, contract_location)) in contracts_sources {
-        let source = contract.expect_in_memory_code_source();
-        let content_hash = compute_content_hash(source);
         let resolved_epoch = contract.epoch.resolve();
-        let cache_key = (contract_location, environment);
+        let clarity_version = contract.clarity_version;
 
-        // Lookup is `.remove()` (not `.get()`) so that a hit transfers
-        // ownership of the entry straight into `ast_cache_entries` below —
-        // no clone. A side-effect: anything left in `cached_asts` after
-        // this loop is either a contract removed from the manifest or an
-        // entry whose `(path, env)` key no longer appears anywhere; both
-        // drop naturally when `cached_asts` goes out of scope, so the
-        // caller never has to explicitly clear the LSP's `ast_cache`.
-        //
-        // `.filter(matches)` rejects entries whose content_hash /
-        // clarity_version / epoch no longer match the current build
-        // (e.g. the user edited the contract, or flipped Clarity version
-        // in the manifest). The rejected entry is dropped here and the
-        // fresh AST built below replaces it in `ast_cache_entries`.
-        let cache_entry = cached_asts
-            .as_deref_mut()
-            .and_then(|c| c.remove(&cache_key))
-            .filter(|entry| entry.matches(&content_hash, contract.clarity_version, resolved_epoch));
+        // Two paths: callers that opted into caching (LSP) vs callers
+        // that didn't (CLI, SDK). The cache-free path skips hashing,
+        // `CachedContractAST` construction, `ast_cache_entries`
+        // insertion, and — not least — the `ContractAST.clone()` into
+        // `contract_data`, since nothing else needs to own a copy.
+        let ast = if let Some(cache) = cached_asts.as_deref_mut() {
+            let source = contract.expect_in_memory_code_source();
+            let content_hash = compute_content_hash(source);
+            let cache_key = (contract_location, environment);
 
-        let cache_entry = match cache_entry {
-            Some(entry) => {
-                // Re-emit the cached parser diagnostics + success flag so
-                // downstream diagnostics and the overall `asts_success`
-                // report match what the first parse produced. Downstream
-                // execution in `build_state` appends onto this slot.
-                contract_diags.insert(contract_id.clone(), entry.diags.clone());
-                asts_success = asts_success && entry.ast_success;
-                entry
-            }
-            None => {
-                let (ast, diags, ast_success_for_contract) =
-                    session.interpreter.build_ast(&contract);
-                contract_diags.insert(contract_id.clone(), diags.clone());
-                asts_success = asts_success && ast_success_for_contract;
-                CachedContractAST {
-                    content_hash,
-                    ast,
-                    diags,
-                    ast_success: ast_success_for_contract,
-                    clarity_version: contract.clarity_version,
-                    epoch: resolved_epoch,
+            // Lookup is `.remove()` (not `.get()`) so that a hit transfers
+            // ownership of the entry straight into `ast_cache_entries`
+            // below — no clone. A side-effect: anything left in the cache
+            // after this loop is either a contract removed from the
+            // manifest or an entry whose `(path, env)` key no longer
+            // appears anywhere; both drop naturally when `cached_asts`
+            // goes out of scope, so the caller never has to explicitly
+            // clear the LSP's `ast_cache`.
+            //
+            // `.filter(matches)` rejects entries whose
+            // content_hash / clarity_version / epoch no longer match
+            // (e.g. source edited, or Clarity version flipped in the
+            // manifest). Rejected entries are dropped and the fresh AST
+            // built below replaces them.
+            let cache_entry = cache
+                .remove(&cache_key)
+                .filter(|entry| entry.matches(&content_hash, clarity_version, resolved_epoch));
+
+            let cache_entry = match cache_entry {
+                Some(entry) => {
+                    // Re-emit the cached parser diagnostics + success
+                    // flag so downstream diagnostics and the overall
+                    // `asts_success` match what the first parse produced.
+                    contract_diags.insert(contract_id.clone(), entry.diags.clone());
+                    asts_success = asts_success && entry.ast_success;
+                    entry
                 }
-            }
+                None => {
+                    let (ast, diags, ast_success_for_contract) =
+                        session.interpreter.build_ast(&contract);
+                    contract_diags.insert(contract_id.clone(), diags.clone());
+                    asts_success = asts_success && ast_success_for_contract;
+                    CachedContractAST {
+                        content_hash,
+                        ast,
+                        diags,
+                        ast_success: ast_success_for_contract,
+                        clarity_version,
+                        epoch: resolved_epoch,
+                    }
+                }
+            };
+
+            // TODO: eliminate this `ContractAST.clone()`. The same AST
+            // ends up owned in both `contract_data` (→ `artifacts.asts`)
+            // and `ast_cache_entries`, because both are returned as
+            // owned data in `DeploymentGenerationArtifacts`. ~20ms/build
+            // on a 20-contract project. Requires either wrapping the
+            // AST in `Arc`, changing `detect_dependencies` in
+            // `clarity-repl` to accept `&ContractAST`, or collapsing
+            // the two output maps into one — each is its own refactor
+            // across crates, so left for a follow-up PR.
+            let ast = cache_entry.ast.clone();
+            ast_cache_entries.insert(cache_key, cache_entry);
+            ast
+        } else {
+            // Cache-free path: move the AST straight into contract_data.
+            let (ast, diags, ast_success_for_contract) = session.interpreter.build_ast(&contract);
+            contract_diags.insert(contract_id.clone(), diags);
+            asts_success = asts_success && ast_success_for_contract;
+            ast
         };
 
-        // TODO: eliminate this `ContractAST.clone()`. The same AST ends up
-        // owned in two maps — `contract_data` (later becomes
-        // `artifacts.asts`) and `ast_cache_entries` — because both are
-        // returned as owned data in `DeploymentGenerationArtifacts`. On a
-        // 20-contract project this costs ~20 ms/build. The fix requires
-        // either wrapping the AST in `Arc`, changing `detect_dependencies`
-        // in `clarity-repl` to accept `&ContractAST`, or collapsing the
-        // two output maps into one — each is its own refactor across
-        // crates, so left for a follow-up PR.
-        contract_data.insert(
-            contract_id.clone(),
-            (cache_entry.clarity_version, cache_entry.ast.clone()),
-        );
+        contract_data.insert(contract_id.clone(), (clarity_version, ast));
         contract_epochs.insert(contract_id, resolved_epoch);
-        ast_cache_entries.insert(cache_key, cache_entry);
     }
 
     let dependencies =
