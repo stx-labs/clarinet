@@ -973,9 +973,20 @@ pub async fn generate_default_deployment_with_cache(
 
     dependencies.extend(requirements_deps);
 
+    // Fallible post-loop calls must restore `ast_cache_entries` into
+    // `cached_asts` on error — the cache-mutating loop above has already
+    // `.remove()`d entries from the caller's input, so a bare `?` would
+    // drop them and cold-start the next build.
     let ordered_contracts_ids =
-        ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs)
-            .map_err(|e| e.to_string())?;
+        match ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs) {
+            Ok(v) => v,
+            Err(e) => {
+                if let Some(cache) = cached_asts.as_deref_mut() {
+                    cache.extend(std::mem::take(&mut ast_cache_entries));
+                }
+                return Err(e.to_string());
+            }
+        };
 
     // Track the latest epoch that a contract is deployed in, so that we can
     // ensure that all contracts are deployed after their dependencies.
@@ -1028,8 +1039,17 @@ pub async fn generate_default_deployment_with_cache(
     let mut wallets = vec![];
     if matches!(network, StacksNetwork::Simnet) {
         for (name, account) in network_manifest.accounts {
-            let address = PrincipalData::parse_standard_principal(&account.stx_address)
-                .map_err(|_| format!("unable to parse address {}", account.stx_address))?;
+            // Same atomicity concern as `order_contracts` above: restore
+            // partially-built cache entries on error.
+            let address = match PrincipalData::parse_standard_principal(&account.stx_address) {
+                Ok(v) => v,
+                Err(_) => {
+                    if let Some(cache) = cached_asts.as_deref_mut() {
+                        cache.extend(std::mem::take(&mut ast_cache_entries));
+                    }
+                    return Err(format!("unable to parse address {}", account.stx_address));
+                }
+            };
             wallets.push(WalletSpecification {
                 name,
                 address,

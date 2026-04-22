@@ -162,11 +162,16 @@ fn build_manifest(n: usize) -> String {
 }
 
 fn contract_source(i: usize, salt: &str) -> String {
-    // `salt` lets the caller distinguish the "modified" fixture used by
-    // `one_miss` — changing it invalidates the content hash for that file.
-    let mut out = CONTRACT_HEADER.replace("{i}", &format!("{i}{salt}"));
+    let mut out = CONTRACT_HEADER.replace("{i}", &i.to_string());
     for f in 0..FUNCTIONS_PER_CONTRACT {
-        out.push_str(&CONTRACT_FUNCTIONS.replace("{f}", &format!("{f}")));
+        out.push_str(&CONTRACT_FUNCTIONS.replace("{f}", &f.to_string()));
+    }
+    // The salt lives in a trailing comment so it changes the content
+    // hash for `one_miss` without corrupting any syntax-sensitive tokens
+    // (e.g. the `CONTRACT-ID u{i}` literal would become `u0_modified`,
+    // which isn't a valid uint).
+    if !salt.is_empty() {
+        out.push_str(&format!("\n;; bench salt: {salt}\n"));
     }
     out
 }
@@ -283,14 +288,19 @@ fn warm_cache(
 
 // ---- benches ----
 
-/// Fresh session: no cache entries to validate, every contract parses.
+/// Fresh LSP session: empty cache, every contract parses. Pass
+/// `Some(HashMap::new())` rather than `None` to match LSP behavior —
+/// the LSP always opts into caching, so the cold path still pays for
+/// hashing + `CachedContractAST` construction. `None` would exercise
+/// the CLI/SDK cache-free path instead, understating the cold cost
+/// and inflating the apparent cache savings.
 #[divan::bench(args = [1, 5, 20], sample_count = 30)]
 fn cold(bencher: Bencher, n: usize) {
     let rt = runtime();
     let accessor = BenchFileAccessor::new(n, None);
     let manifest = load_manifest(&rt, &accessor);
-    bencher.bench_local(|| {
-        black_box(run(&rt, &manifest, black_box(&accessor), None));
+    bencher.with_inputs(HashMap::new).bench_values(|cache| {
+        black_box(run(&rt, &manifest, black_box(&accessor), Some(cache)));
     });
 }
 
