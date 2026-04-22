@@ -50,7 +50,9 @@ async fn build_and_commit<F>(
 where
     F: FnOnce(&mut EditorState),
 {
-    let cached_asts = editor_state.try_write(|es| std::mem::take(&mut es.ast_cache))?;
+    // Wrap in `Some(…)` so `build_state` can mutate it and, on error,
+    // leave behind a fully-restorable cache for us to pour back in.
+    let mut cached_asts = Some(editor_state.try_write(|es| std::mem::take(&mut es.ast_cache))?);
 
     let mut protocol_state = ProtocolState::new();
     let new_cache_entries = match build_state(
@@ -58,12 +60,21 @@ where
         &mut protocol_state,
         file_accessor,
         static_cost_analysis,
-        Some(cached_asts),
+        &mut cached_asts,
     )
     .await
     {
         Ok(entries) => entries,
-        Err(e) => return Ok(LspNotificationResponse::error(&e)),
+        Err(e) => {
+            // Transient failure (bad manifest, file read error, etc.).
+            // Don't drop the cache — restore it so the next save starts
+            // warm. On success we intentionally drop `cached_asts`
+            // because stale/removed-contract entries shouldn't carry over.
+            if let Some(cache) = cached_asts.take() {
+                editor_state.try_write(|es| es.ast_cache = cache)?;
+            }
+            return Ok(LspNotificationResponse::error(&e));
+        }
     };
 
     editor_state.try_write(|es| {
@@ -874,6 +885,33 @@ mod lsp_tests {
         }
     }
 
+    /// File accessor that always fails reads — used to simulate a
+    /// transient build failure (e.g. a bad/disappearing manifest) and
+    /// verify the cache isn't lost on the error path.
+    struct FailingFileAccessor;
+
+    impl FileAccessor for FailingFileAccessor {
+        fn file_exists(&self, _path: String) -> clarinet_files::FileAccessorResult<bool> {
+            Box::pin(async { Ok(true) })
+        }
+        fn read_file(&self, _path: String) -> clarinet_files::FileAccessorResult<String> {
+            Box::pin(async { Err("simulated read failure".to_string()) })
+        }
+        fn read_files(
+            &self,
+            _paths: Vec<String>,
+        ) -> clarinet_files::FileAccessorResult<HashMap<String, String>> {
+            Box::pin(async { Err("simulated read failure".to_string()) })
+        }
+        fn write_file(
+            &self,
+            _path: String,
+            _content: &[u8],
+        ) -> clarinet_files::FileAccessorResult<()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
     #[tokio::test]
     async fn test_env_simnet() {
         let with_env_simnet = indoc! {r#"
@@ -1417,6 +1455,56 @@ mod lsp_tests {
         assert!(
             !cache_after_manifest_save.is_empty(),
             "cache should stay populated after a manifest save"
+        );
+    }
+
+    /// Regression test: a transient `build_state` failure (bad manifest,
+    /// file read error, etc.) must not drop the existing AST cache. The
+    /// mem::take pattern in `build_and_commit` previously consumed the
+    /// cache on the way in; on error we'd wind up starting cold on the
+    /// next save. Now it's restored.
+    #[tokio::test]
+    async fn test_ast_cache_survives_transient_build_failure() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+        "#};
+        let good_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        // First save populates the cache.
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&good_accessor),
+        )
+        .await
+        .expect("first save failed");
+        let entries_before = editor_state_input
+            .try_read(|es| es.ast_cache.len())
+            .unwrap();
+        assert!(entries_before > 0, "sanity: cache should be populated");
+
+        // Second save fails — bad file accessor causes `build_state` to
+        // error. Before the fix the cache would be gone after this.
+        let bad_accessor = FailingFileAccessor;
+        let response = process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&bad_accessor),
+        )
+        .await
+        .expect("process_notification itself shouldn't bubble an Err");
+        assert!(
+            matches!(response.notification, Some((MessageType::ERROR, _))),
+            "response should carry an error notification"
+        );
+
+        let entries_after = editor_state_input
+            .try_read(|es| es.ast_cache.len())
+            .unwrap();
+        assert_eq!(
+            entries_after, entries_before,
+            "cache should be restored after a failed rebuild"
         );
     }
 
