@@ -893,19 +893,24 @@ pub async fn generate_default_deployment_with_cache(
 
         let cache_entry = match cache_entry {
             Some(entry) => {
-                // Empty diags for hits so downstream execution can still
-                // append its own diagnostics into this entry.
-                contract_diags.insert(contract_id.clone(), vec![]);
+                // Re-emit the cached parser diagnostics + success flag so
+                // downstream diagnostics and the overall `asts_success`
+                // report match what the first parse produced. Downstream
+                // execution in `build_state` appends onto this slot.
+                contract_diags.insert(contract_id.clone(), entry.diags.clone());
+                asts_success = asts_success && entry.ast_success;
                 entry
             }
             None => {
                 let (ast, diags, ast_success_for_contract) =
                     session.interpreter.build_ast(&contract);
-                contract_diags.insert(contract_id.clone(), diags);
+                contract_diags.insert(contract_id.clone(), diags.clone());
                 asts_success = asts_success && ast_success_for_contract;
                 CachedContractAST {
                     content_hash,
                     ast,
+                    diags,
+                    ast_success: ast_success_for_contract,
                     clarity_version: contract.clarity_version,
                     epoch: resolved_epoch,
                 }
