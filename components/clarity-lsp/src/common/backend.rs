@@ -702,6 +702,7 @@ mod lsp_tests {
     use std::path::PathBuf;
 
     use clarity::vm::ClarityVersion;
+    use clarity_repl::utils::Environment;
     use indoc::indoc;
     use ls_types::{
         DocumentRangeFormattingParams, FormattingOptions, Position, Range, TextDocumentIdentifier,
@@ -1360,11 +1361,18 @@ mod lsp_tests {
             .await
             .expect("first save failed");
 
+        // Pick the OnChain entry explicitly — the cache is keyed by
+        // `(path, environment)`, and if the fixture ever grows simnet
+        // annotations `CHECK_ENVIRONMENTS` would produce a second entry
+        // per contract. Looking up by `Environment` keeps the test
+        // deterministic regardless of which envs were processed.
         let entries = editor_state_input
             .try_read(|es| es.ast_cache.clone())
             .unwrap();
-        assert_eq!(entries.len(), 1, "expected exactly one cached contract");
-        let (key, initial) = entries.iter().next().unwrap();
+        let (key, initial) = entries
+            .iter()
+            .find(|((_, env), _)| *env == Environment::OnChain)
+            .expect("OnChain cache entry should exist after first save");
         assert!(
             !initial.ast.expressions.is_empty(),
             "sanity: freshly-built AST must have expressions"
