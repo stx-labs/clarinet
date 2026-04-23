@@ -1643,4 +1643,169 @@ mod lsp_tests {
             "other-manifest cache entry must not be dropped by a rebuild of a different manifest"
         );
     }
+
+    /// Regression test (gap A): editing a contract's source must
+    /// invalidate its cache entry — the `matches()` filter should reject
+    /// the stale entry (content_hash mismatch) and `build_ast` should
+    /// re-run, producing a new entry with the new hash.
+    #[tokio::test]
+    async fn test_source_change_invalidates_cache() {
+        let source_v1 = indoc! {r#"
+            (define-data-var count uint u0)
+        "#};
+        let source_v2 = indoc! {r#"
+            (define-data-var total-supply uint u100)
+            (define-read-only (get-supply) (var-get total-supply))
+        "#};
+
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        // Save v1 → cache entry with v1's hash.
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&TestFileAccessor::new(source_v1.to_string())),
+        )
+        .await
+        .expect("v1 save failed");
+        let hash_v1 = editor_state_input
+            .try_read(|es| es.ast_cache.values().next().map(|e| e.content_hash.clone()))
+            .unwrap()
+            .expect("sanity: cache should have an entry after v1 save");
+
+        // Save v2 (different source). The cache entry should be rebuilt
+        // — same key, fresh hash matching v2.
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&TestFileAccessor::new(source_v2.to_string())),
+        )
+        .await
+        .expect("v2 save failed");
+        let hash_v2 = editor_state_input
+            .try_read(|es| es.ast_cache.values().next().map(|e| e.content_hash.clone()))
+            .unwrap()
+            .expect("cache should still have an entry after v2 save");
+
+        assert_ne!(
+            hash_v1, hash_v2,
+            "cache entry should have been rebuilt for the changed source"
+        );
+    }
+
+    /// Regression test (gap C): a contract with `#[env(simnet)]`
+    /// annotations triggers both CHECK_ENVIRONMENTS iterations, producing
+    /// *two* cache entries per contract (one per environment). Verifies
+    /// both entries exist and carry distinct content hashes (the
+    /// env-stripped source differs from the full source).
+    #[tokio::test]
+    async fn test_both_environments_populate_cache() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+
+            ;; #[env(simnet)]
+            (define-public (increment)
+              (ok (var-set count (+ (var-get count) u1)))
+            )
+
+            (define-public (decrement)
+              (ok (var-set count (- (var-get count) u1)))
+            )
+        "#};
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("save failed");
+
+        let entries = editor_state_input
+            .try_read(|es| es.ast_cache.clone())
+            .unwrap();
+        assert_eq!(
+            entries.len(),
+            2,
+            "simnet-annotated contract should produce one entry per CHECK_ENVIRONMENTS"
+        );
+
+        let onchain = entries
+            .iter()
+            .find(|((_, env), _)| *env == Environment::OnChain)
+            .expect("OnChain cache entry should exist");
+        let simnet = entries
+            .iter()
+            .find(|((_, env), _)| *env == Environment::Simnet)
+            .expect("Simnet cache entry should exist");
+
+        // OnChain source has env_simnet blocks stripped; Simnet source
+        // keeps them — so hashes must differ.
+        assert_ne!(
+            onchain.1.content_hash, simnet.1.content_hash,
+            "OnChain and Simnet should hash different sources (env-strip effect)"
+        );
+    }
+
+    /// Regression test (gap D): `matches()` must reject a cache entry
+    /// whose `clarity_version` no longer matches what the current rebuild
+    /// would produce, even when the source is unchanged. We poison a
+    /// live entry's version field, save, and expect the entry to be
+    /// rebuilt with the manifest-configured version.
+    #[tokio::test]
+    async fn test_version_mismatch_invalidates_cache() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+        "#};
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        // Populate cache normally. Manifest specifies clarity_version = 3.
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("first save failed");
+        let original_version = editor_state_input
+            .try_read(|es| es.ast_cache.values().next().map(|e| e.clarity_version))
+            .unwrap()
+            .expect("cache should be populated");
+        assert_eq!(
+            original_version,
+            ClarityVersion::Clarity3,
+            "sanity: manifest pins clarity_version = 3"
+        );
+
+        // Poison the entry with a different version. `matches()` should
+        // reject it on the next save and trigger a rebuild.
+        let poison_to = ClarityVersion::Clarity1;
+        editor_state_input
+            .try_write(|es| {
+                for entry in es.ast_cache.values_mut() {
+                    entry.clarity_version = poison_to;
+                }
+            })
+            .unwrap();
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("second save failed");
+
+        let restored_version = editor_state_input
+            .try_read(|es| es.ast_cache.values().next().map(|e| e.clarity_version))
+            .unwrap()
+            .expect("cache should still be populated");
+        assert_eq!(
+            restored_version, original_version,
+            "version-mismatched entry should have been rebuilt under the manifest's clarity_version"
+        );
+    }
 }

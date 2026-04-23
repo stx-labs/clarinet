@@ -1601,4 +1601,77 @@ mod tests {
         assert_eq!(*stx_maps.get(sender).unwrap(), 999000);
         assert_eq!(*stx_maps.get(receiver).unwrap(), 1000);
     }
+
+    // -------- AstCacheRestoreGuard unit tests (gap B) --------
+    //
+    // The integration-level `test_ast_cache_survives_transient_build_failure`
+    // only exercises the *pre-loop* failure path, where the guard's
+    // `pending` map is empty when Drop fires. The interesting branch —
+    // "entries were built, then a post-loop `?` propagated an Err, Drop
+    // pushes them back into the input cache" — is what these unit tests
+    // cover directly.
+
+    fn fake_cached_ast() -> CachedContractAST {
+        let session = Session::new(SessionSettings::default());
+        let source = "(define-data-var x uint u0)";
+        let contract = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(source.to_string()),
+            deployer: ContractDeployer::Address(DEPLOYER.to_string()),
+            name: "dummy".to_string(),
+            clarity_version: ClarityVersion::Clarity3,
+            epoch: clarity_repl::repl::Epoch::Specific(StacksEpochId::Epoch31),
+            skip_analysis: false,
+        };
+        let (ast, diags, ast_success) = session.interpreter.build_ast(&contract);
+        CachedContractAST {
+            content_hash: compute_content_hash(source),
+            ast,
+            diags,
+            ast_success,
+            clarity_version: ClarityVersion::Clarity3,
+            epoch: StacksEpochId::Epoch31,
+        }
+    }
+
+    #[test]
+    fn ast_cache_restore_guard_drops_pending_into_input_on_uncommitted_drop() {
+        let mut input = HashMap::new();
+        let key = (PathBuf::from("/contracts/test.clar"), Environment::OnChain);
+
+        {
+            let mut guard = AstCacheRestoreGuard::new(&mut input);
+            guard.insert(key.clone(), fake_cached_ast());
+            // Intentionally drop without `.commit()`.
+        }
+
+        assert_eq!(
+            input.len(),
+            1,
+            "Drop without commit should push pending entries back into input"
+        );
+        assert!(input.contains_key(&key));
+    }
+
+    #[test]
+    fn ast_cache_restore_guard_commit_yields_pending_and_leaves_input_empty() {
+        let mut input = HashMap::new();
+        let key = (PathBuf::from("/contracts/test.clar"), Environment::OnChain);
+
+        let committed = {
+            let mut guard = AstCacheRestoreGuard::new(&mut input);
+            guard.insert(key.clone(), fake_cached_ast());
+            guard.commit()
+        };
+
+        assert_eq!(
+            committed.len(),
+            1,
+            "commit() should hand the caller the accumulated entries"
+        );
+        assert!(committed.contains_key(&key));
+        assert!(
+            input.is_empty(),
+            "committed entries must not leak back into the input cache"
+        );
+    }
 }
