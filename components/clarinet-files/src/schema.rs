@@ -25,7 +25,7 @@ pub(crate) struct ContractConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(
         feature = "json_schema",
-        schemars(schema_with = "clarity_version_schema")
+        schemars(schema_with = "clarity_version_schema", default)
     )]
     clarity_version: Option<u8>,
     /// Stacks blockchain epoch
