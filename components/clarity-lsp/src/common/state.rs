@@ -19,7 +19,7 @@ use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::session::AnnotatedExecutionResult;
-use clarity_repl::repl::ContractDeployer;
+use clarity_repl::repl::{ContractDeployer, Session};
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
 use clarity_types::execution_cost::ExecutionCost;
@@ -890,7 +890,9 @@ pub async fn build_state(
     };
 
     let mut global_found_env_simnet = false;
-    let mut session = initiate_session_from_manifest(&manifest);
+    // Populated by the final loop iteration; cost analysis (below) needs the
+    // fully-deployed session but only cares about the last iteration's state.
+    let mut final_session: Option<Session> = None;
     for environment in CHECK_ENVIRONMENTS {
         let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment(
             &manifest,
@@ -903,7 +905,7 @@ pub async fn build_state(
         .await?;
         global_found_env_simnet |= found_env_simnet;
 
-        session = initiate_session_from_manifest(&manifest);
+        let mut session = initiate_session_from_manifest(&manifest);
         let contracts =
             update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
         for (contract_id, mut result) in contracts.into_iter() {
@@ -990,6 +992,7 @@ pub async fn build_state(
             entry.append(diags);
         }
 
+        final_session = Some(session);
         if !global_found_env_simnet {
             break;
         }
@@ -1000,6 +1003,11 @@ pub async fn build_state(
     // static_cost_tree needs the contract to be available in the global context
     let mut cost_analyses = HashMap::new();
     if static_cost_analysis {
+        // `CHECK_ENVIRONMENTS` is a non-empty const array, so the loop above
+        // always runs at least once and populates `final_session`.
+        let session = final_session
+            .as_mut()
+            .expect("CHECK_ENVIRONMENTS ran at least once");
         for contract_id in locations.keys() {
             // Skip cost analysis for empty contracts (no expressions to analyze)
             if asts
@@ -1016,7 +1024,7 @@ pub async fn build_state(
 
             // Run static_cost_tree for this contract
             if let Some(cost_analysis) =
-                get_cost_analysis(&mut session, contract_id, clarity_version).await
+                get_cost_analysis(session, contract_id, clarity_version).await
             {
                 clarity_repl::uprint!(
                     "[LSP] Cost analysis completed for {}: {} functions analyzed",
