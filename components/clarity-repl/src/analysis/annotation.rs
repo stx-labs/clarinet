@@ -25,7 +25,7 @@ impl std::str::FromStr for AnnotationKind {
             .trim();
         let (name, value) = match s.find('(') {
             Some(open) => {
-                let name = &s[..open];
+                let name = s[..open].trim();
                 let rest = &s[open + 1..];
                 let value = rest
                     .strip_suffix(')')
