@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use ::clarity::types::StacksEpochId;
 use ::clarity::vm::ast::parser;
 use ::clarity::vm::ast::stack_depth_checker::StackDepthLimits;
@@ -149,7 +147,12 @@ fn collect_env_simnet_spans(exprs: &[PreSymbolicExpression], out: &mut Vec<Span>
         }
 
         if let Comment(comment) = &expr.pre_expr {
-            if let Ok(AnnotationKind::Env(_)) = AnnotationKind::from_str(comment) {
+            let is_env_annotation = comment
+                .trim()
+                .strip_prefix("#[")
+                .and_then(|s| s.strip_suffix(']'))
+                .is_some_and(|inner| matches!(inner.trim().parse(), Ok(AnnotationKind::Env(_))));
+            if is_env_annotation {
                 let annotation_line = expr.span.start_line;
                 let is_eol_comment = exprs[..idx].iter().any(|prev| {
                     prev.span.end_line == annotation_line && !matches!(prev.pre_expr, Comment(_))
@@ -357,5 +360,37 @@ mod tests {
         assert_eq!(spans[0].end_line, 2);
         assert_eq!(spans[1].start_line, 6);
         assert_eq!(spans[1].end_line, 7);
+    }
+
+    #[test]
+    fn ignores_malformed_env_annotation_missing_hash() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; [env(simnet)]
+            (define-public (set-admin (new-admin principal))
+                (begin
+                    (ok (var-set contract-owner new-admin))
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn ignores_malformed_env_annotation_hash_inside_brackets() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; [#env(simnet)]
+            (define-public (set-admin (new-admin principal))
+                (begin
+                    (ok (var-set contract-owner new-admin))
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
     }
 }
