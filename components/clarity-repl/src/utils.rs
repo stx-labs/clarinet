@@ -393,4 +393,20 @@ mod tests {
         let spans = get_env_simnet_spans(source).unwrap();
         assert!(spans.is_empty());
     }
+
+    #[test]
+    fn ignores_malformed_env_annotation_trailing_garbage_inside_brackets() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; #[env(simnet) this is not a real annotation]
+            (define-public (set-admin (new-admin principal))
+                (begin
+                    (ok (var-set contract-owner new-admin))
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
+    }
 }

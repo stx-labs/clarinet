@@ -867,7 +867,6 @@ dependencies = [
  "mockito",
  "pico-args",
  "pox-locking",
- "regex",
  "reqwest",
  "rusqlite",
  "rustyline",

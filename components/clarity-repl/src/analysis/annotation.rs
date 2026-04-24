@@ -1,6 +1,5 @@
 use clarity::vm::representations::Span;
 use clarity::vm::ClarityName;
-use regex::Regex;
 use strum::EnumString;
 
 use crate::utils::Environment;
@@ -16,58 +15,63 @@ pub enum AnnotationKind {
 impl std::str::FromStr for AnnotationKind {
     type Err = String;
 
+    /// Parse an annotation body, e.g. `env(simnet)` or `allow(unchecked_data)`.
+    /// The `#[…]` wrapper must already be stripped by the caller.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let re = Regex::new(r"([[:word:]]+)(\(([^)]+)\))?").unwrap();
-        if let Some(captures) = re.captures(s) {
-            let (base, value) = if captures.get(1).is_some() && captures.get(3).is_some() {
-                (&captures[1], &captures[3])
-            } else {
-                (&captures[1], "")
-            };
-            match base {
-                "allow" => {
-                    let params: Vec<WarningKind> = value
+        let s = s.trim();
+        let (name, value) = match s.find('(') {
+            Some(open) => {
+                let name = &s[..open];
+                let rest = &s[open + 1..];
+                let value = rest
+                    .strip_suffix(')')
+                    .ok_or_else(|| "malformed annotation: missing closing ')'".to_string())?;
+                (name, value.trim())
+            }
+            None => (s, ""),
+        };
+
+        match name {
+            "allow" => {
+                let params: Vec<WarningKind> = value
+                    .split(',')
+                    .filter(|s| !s.is_empty())
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect();
+                if params.is_empty() {
+                    Err("missing value for 'allow' annotation".to_string())
+                } else {
+                    Ok(AnnotationKind::Allow(params))
+                }
+            }
+            "env" => {
+                let env: Environment = value
+                    .parse()
+                    .map_err(|_| format!("bad environment {value} for 'env' annotation"))?;
+                if env == Environment::OnChain {
+                    return Err(
+                        "'onchain' is not a valid environment for 'env' annotation".to_string()
+                    );
+                }
+                Ok(AnnotationKind::Env(env))
+            }
+            "filter" => {
+                if value == "*" {
+                    Ok(AnnotationKind::FilterAll)
+                } else {
+                    let params: Vec<ClarityName> = value
                         .split(',')
                         .filter(|s| !s.is_empty())
-                        .filter_map(|s| s.trim().parse().ok())
+                        .map(|s| ClarityName::from(s.trim()))
                         .collect();
                     if params.is_empty() {
-                        Err("missing value for 'allow' annotation".to_string())
+                        Err("missing value for 'filter' annotation".to_string())
                     } else {
-                        Ok(AnnotationKind::Allow(params))
+                        Ok(AnnotationKind::Filter(params))
                     }
                 }
-                "env" => {
-                    let env: Environment = value
-                        .parse()
-                        .map_err(|_| format!("bad environment {value} for 'env' annotation"))?;
-                    if env == Environment::OnChain {
-                        return Err(
-                            "'onchain' is not a valid environment for 'env' annotation".to_string()
-                        );
-                    }
-                    Ok(AnnotationKind::Env(env))
-                }
-                "filter" => {
-                    if value == "*" {
-                        Ok(AnnotationKind::FilterAll)
-                    } else {
-                        let params: Vec<ClarityName> = value
-                            .split(',')
-                            .filter(|s| !s.is_empty())
-                            .map(|s| ClarityName::from(s.trim()))
-                            .collect();
-                        if params.is_empty() {
-                            Err("missing value for 'filter' annotation".to_string())
-                        } else {
-                            Ok(AnnotationKind::Filter(params))
-                        }
-                    }
-                }
-                _ => Err("unrecognized annotation".to_string()),
             }
-        } else {
-            Err("malformed annotation".to_string())
+            _ => Err("unrecognized annotation".to_string()),
         }
     }
 }
