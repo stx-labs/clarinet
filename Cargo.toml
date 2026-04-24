@@ -13,7 +13,6 @@ members = [
     "components/clarity-repl",
     "components/clarity-events",
     "components/hiro-system-kit",
-    "components/stacks-codec",
     "components/observer",
     "components/stacks-network",
     "components/stacks-rpc-client",
@@ -32,6 +31,7 @@ version = "3.16.0"
 # stacks-core git dependencies
 clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "clarity", default-features = false }
 clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "clarity-types" }
+libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "libsigner", default-features = false }
 stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "stacks-common", default-features = false }
 pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "pox-locking", default-features = false }
 stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "stackslib", default-features = false }
@@ -96,6 +96,18 @@ yaml_serde = "0.10.3"
 # [patch.'https://github.com/stacks-network/stacks-core.git']
 # clarity = { path = "../stacks-core/clarity" }
 # clarity-types = { path = "../stacks-core/clarity-types" }
+# libsigner = { path = "../stacks-core/libsigner" }
 # stacks-common = { path = "../stacks-core/stacks-common" }
 # stackslib = { path = "../stacks-core/stackslib" }
 # pox-locking = { path = "../stacks-core/pox-locking" }
+
+# Dev-only: patch in local stacks-core worktree at Clarinet's pinned commit
+# (../stacks-core-at-pin is cecca4ac19 + the libsigner pub visibility change).
+# Remove before opening the Clarinet PR.
+[patch.'https://github.com/stacks-network/stacks-core.git']
+clarity = { path = "../stacks-core-at-pin/clarity" }
+clarity-types = { path = "../stacks-core-at-pin/clarity-types" }
+libsigner = { path = "../stacks-core-at-pin/libsigner" }
+stacks-common = { path = "../stacks-core-at-pin/stacks-common" }
+stackslib = { path = "../stacks-core-at-pin/stackslib" }
+pox-locking = { path = "../stacks-core-at-pin/pox-locking" }

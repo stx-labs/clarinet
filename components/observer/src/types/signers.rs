@@ -54,6 +54,11 @@ pub enum BlockValidationFailedCode {
     UnknownParent,
     NonCanonicalTenure,
     NoSuchTenure,
+    InvalidTransactionReplay,
+    InvalidParentBlock,
+    InvalidTimestamp,
+    NetworkChainMismatch,
+    NotFoundError,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
