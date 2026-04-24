@@ -147,12 +147,7 @@ fn collect_env_simnet_spans(exprs: &[PreSymbolicExpression], out: &mut Vec<Span>
         }
 
         if let Comment(comment) = &expr.pre_expr {
-            let is_env_annotation = comment
-                .trim()
-                .strip_prefix("#[")
-                .and_then(|s| s.strip_suffix(']'))
-                .is_some_and(|inner| matches!(inner.trim().parse(), Ok(AnnotationKind::Env(_))));
-            if is_env_annotation {
+            if let Ok(AnnotationKind::Env(_)) = comment.parse() {
                 let annotation_line = expr.span.start_line;
                 let is_eol_comment = exprs[..idx].iter().any(|prev| {
                     prev.span.end_line == annotation_line && !matches!(prev.pre_expr, Comment(_))

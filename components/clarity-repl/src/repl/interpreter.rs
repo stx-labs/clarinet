@@ -227,35 +227,26 @@ impl ClarityInterpreter {
         let mut diagnostics = vec![];
         for (n, line) in code_source.lines().enumerate() {
             if let Some(comment) = line.trim().strip_prefix(";;") {
-                if let Some(annotation_string) = comment.trim().strip_prefix("#[") {
+                if comment.trim().starts_with("#[") {
                     let span = Span {
                         start_line: (n + 1) as u32,
                         start_column: (line.find('#').unwrap_or(0) + 1) as u32,
                         end_line: (n + 1) as u32,
                         end_column: line.len() as u32,
                     };
-                    if let Some(annotation_string) = annotation_string.strip_suffix(']') {
-                        let kind: AnnotationKind = match annotation_string.trim().parse() {
-                            Ok(kind) => kind,
-                            Err(e) => {
-                                diagnostics.push(Diagnostic {
-                                    level: Level::Warning,
-                                    message: e.to_string(),
-                                    spans: vec![span.clone()],
-                                    suggestion: None,
-                                });
-                                continue;
-                            }
-                        };
-                        annotations.push(Annotation { kind, span });
-                    } else {
-                        diagnostics.push(Diagnostic {
-                            level: Level::Warning,
-                            message: "malformed annotation".to_string(),
-                            spans: vec![span],
-                            suggestion: None,
-                        });
-                    }
+                    let kind: AnnotationKind = match comment.trim().parse() {
+                        Ok(kind) => kind,
+                        Err(e) => {
+                            diagnostics.push(Diagnostic {
+                                level: Level::Warning,
+                                message: e.to_string(),
+                                spans: vec![span],
+                                suggestion: None,
+                            });
+                            continue;
+                        }
+                    };
+                    annotations.push(Annotation { kind, span });
                 }
             } else if let Some(comment_pos) = line.find(";;") {
                 let comment = &line[comment_pos + 2..];
@@ -2322,7 +2313,10 @@ mod tests {
         let (annotations, diagnostics) = interpreter.collect_annotations(source);
         assert!(annotations.is_empty());
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message, "malformed annotation");
+        assert_eq!(
+            diagnostics[0].message,
+            "malformed annotation: expected #[...]"
+        );
     }
 
     #[test]

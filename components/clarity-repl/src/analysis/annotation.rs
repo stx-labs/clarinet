@@ -15,10 +15,14 @@ pub enum AnnotationKind {
 impl std::str::FromStr for AnnotationKind {
     type Err = String;
 
-    /// Parse an annotation body, e.g. `env(simnet)` or `allow(unchecked_data)`.
-    /// The `#[…]` wrapper must already be stripped by the caller.
+    /// Parse an annotation, e.g. `#[env(simnet)]` or `#[allow(unchecked_data)]`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
+        let s = s
+            .trim()
+            .strip_prefix("#[")
+            .and_then(|s| s.strip_suffix(']'))
+            .ok_or_else(|| "malformed annotation: expected #[...]".to_string())?
+            .trim();
         let (name, value) = match s.find('(') {
             Some(open) => {
                 let name = &s[..open];
@@ -26,14 +30,15 @@ impl std::str::FromStr for AnnotationKind {
                 let value = rest
                     .strip_suffix(')')
                     .ok_or_else(|| "malformed annotation: missing closing ')'".to_string())?;
-                (name, value.trim())
+                (name, Some(value.trim()))
             }
-            None => (s, ""),
+            None => (s, None),
         };
 
         match name {
             "allow" => {
                 let params: Vec<WarningKind> = value
+                    .unwrap_or("")
                     .split(',')
                     .filter(|s| !s.is_empty())
                     .filter_map(|s| s.trim().parse().ok())
@@ -45,6 +50,8 @@ impl std::str::FromStr for AnnotationKind {
                 }
             }
             "env" => {
+                let value =
+                    value.ok_or_else(|| "missing value for 'env' annotation".to_string())?;
                 let env: Environment = value
                     .parse()
                     .map_err(|_| format!("bad environment {value} for 'env' annotation"))?;
@@ -56,6 +63,8 @@ impl std::str::FromStr for AnnotationKind {
                 Ok(AnnotationKind::Env(env))
             }
             "filter" => {
+                let value =
+                    value.ok_or_else(|| "missing value for 'filter' annotation".to_string())?;
                 if value == "*" {
                     Ok(AnnotationKind::FilterAll)
                 } else {
@@ -149,7 +158,7 @@ mod tests {
 
     #[test]
     fn parse_allow_unchecked_data() {
-        match "allow(unchecked_data)".parse::<AnnotationKind>() {
+        match "#[allow(unchecked_data)]".parse::<AnnotationKind>() {
             Ok(AnnotationKind::Allow(params)) => {
                 assert_eq!(params.len(), 1);
                 assert!(matches!(params[0], WarningKind::UncheckedData));
@@ -160,7 +169,7 @@ mod tests {
 
     #[test]
     fn parse_allow_multiple() {
-        match "allow(unused_const, case_const)".parse::<AnnotationKind>() {
+        match "#[allow(unused_const, case_const)]".parse::<AnnotationKind>() {
             Ok(AnnotationKind::Allow(params)) => {
                 assert_eq!(params.len(), 2);
                 assert!(params.contains(&WarningKind::UnusedConst));
@@ -172,7 +181,7 @@ mod tests {
 
     #[test]
     fn parse_annotation_kind_error() {
-        match "invalid_string".parse::<AnnotationKind>() {
+        match "#[invalid_string]".parse::<AnnotationKind>() {
             Err(_) => (),
             _ => panic!("failed to return error for bad string"),
         };
@@ -180,7 +189,7 @@ mod tests {
 
     #[test]
     fn parse_annotation_kind_error2() {
-        match "invalid(string)".parse::<AnnotationKind>() {
+        match "#[invalid(string)]".parse::<AnnotationKind>() {
             Err(_) => (),
             _ => panic!("failed to return error for bad string"),
         };
@@ -195,8 +204,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_annotation_missing_brackets() {
+        match "allow(unchecked_data)".parse::<AnnotationKind>() {
+            Err(_) => (),
+            _ => panic!("failed to return error for annotation without #[...]"),
+        };
+    }
+
+    #[test]
     fn parse_filter() {
-        match "filter(foo,bar)".parse::<AnnotationKind>() {
+        match "#[filter(foo,bar)]".parse::<AnnotationKind>() {
             Ok(AnnotationKind::Filter(params)) => {
                 assert!(
                     params.len() == 2 && params[0].as_str() == "foo" && params[1].as_str() == "bar",
@@ -209,7 +226,7 @@ mod tests {
 
     #[test]
     fn parse_filter_all() {
-        match "filter(*)".parse::<AnnotationKind>() {
+        match "#[filter(*)]".parse::<AnnotationKind>() {
             Ok(AnnotationKind::FilterAll) => (),
             _ => panic!("failed to parse 'filter(*)' correctly"),
         };
@@ -217,7 +234,7 @@ mod tests {
 
     #[test]
     fn parse_filter_empty() {
-        match "filter".parse::<AnnotationKind>() {
+        match "#[filter]".parse::<AnnotationKind>() {
             Err(_) => (),
             _ => panic!("failed to return error for 'filter' with no parameters"),
         };
