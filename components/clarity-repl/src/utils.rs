@@ -147,12 +147,7 @@ fn collect_env_simnet_spans(exprs: &[PreSymbolicExpression], out: &mut Vec<Span>
         }
 
         if let Comment(comment) = &expr.pre_expr {
-            let is_env_annotation = comment
-                .trim()
-                .strip_prefix("#[")
-                .and_then(|s| s.strip_suffix(']'))
-                .is_some_and(|inner| matches!(inner.trim().parse(), Ok(AnnotationKind::Env(_))));
-            if is_env_annotation {
+            if let Ok(AnnotationKind::Env(_)) = comment.parse() {
                 let annotation_line = expr.span.start_line;
                 let is_eol_comment = exprs[..idx].iter().any(|prev| {
                     prev.span.end_line == annotation_line && !matches!(prev.pre_expr, Comment(_))
@@ -383,6 +378,22 @@ mod tests {
         #[rustfmt::skip]
         let source = indoc!(r#"
             ;; [#env(simnet)]
+            (define-public (set-admin (new-admin principal))
+                (begin
+                    (ok (var-set contract-owner new-admin))
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn ignores_malformed_env_annotation_trailing_garbage_inside_brackets() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; #[env(simnet) this is not a real annotation]
             (define-public (set-admin (new-admin principal))
                 (begin
                     (ok (var-set contract-owner new-admin))
