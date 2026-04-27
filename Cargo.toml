@@ -32,8 +32,8 @@ version = "3.16.0"
 clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "clarity", default-features = false }
 clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "clarity-types" }
 libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "libsigner", default-features = false }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "stacks-common", default-features = false }
 pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "pox-locking", default-features = false }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "stacks-common", default-features = false }
 stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "stackslib", default-features = false }
 
 # Internal crates
