@@ -42,7 +42,7 @@ pub enum CostWarningKind {
     /// contract is unknown, so the cost of the called function is not
     /// included in the estimate.
     UnresolvedTraitCall {
-        /// The variable name used as the contract target (e.g. `pool-trait`).
+        /// The parameter variable name used as the contract target (e.g. `token-contract`).
         target_variable: String,
         /// The function being called on the trait (e.g. `get-active-bin-id`).
         called_function: String,

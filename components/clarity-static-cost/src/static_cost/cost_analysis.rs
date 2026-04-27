@@ -149,8 +149,11 @@ pub struct AnalysisContext<'a> {
     pub clarity_version: &'a ClarityVersion,
     pub epoch: StacksEpochId,
     pub invoke_ctx: &'a InvocationContext<'a>,
-    /// Mapping from trait identifier strings to concrete contract implementations.
+    /// Mapping from unqualified trait names to concrete contract implementations.
     /// Used to resolve trait-based `contract-call?` targets during static analysis.
+    /// Note: keys are simple trait names (e.g. `"sip-010-trait"`), not fully-qualified
+    /// identifiers. This is sufficient for in-project analysis where trait names are
+    /// unique, but could collide if multiple traits share the same name.
     pub trait_implementations: &'a HashMap<String, Vec<QualifiedContractIdentifier>>,
     /// Warnings accumulated during analysis (e.g. unresolved trait calls).
     pub warnings: &'a RefCell<Vec<CostWarning>>,
@@ -258,7 +261,7 @@ pub fn static_cost(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
     contract_identifier: &QualifiedContractIdentifier,
-) -> Result<HashMap<String, (StaticCost, Option<TraitCount>)>, StaticCostError> {
+) -> Result<StaticCostResult, StaticCostError> {
     let contract_source = env
         .global_context
         .database
@@ -276,15 +279,14 @@ pub fn static_cost(
     let epoch = env.global_context.epoch_id;
     let ast = make_ast(&contract_source, epoch, clarity_version)?;
 
-    let result = static_cost_from_ast_with_source(
+    static_cost_from_ast_with_source(
         &ast,
         clarity_version,
         epoch,
         Some(&contract_source),
         env,
         invoke_ctx,
-    )?;
-    Ok(result.costs)
+    )
 }
 
 /// Extract function signature arguments from a function definition expression.
@@ -648,14 +650,20 @@ fn extract_function_name(expr: &SymbolicExpression) -> Option<String> {
 /// Look up the cost of the function targeted by a `contract-call?`.
 ///
 /// `args` corresponds to `exprs[1..]` of the contract-call expression:
-///   args[0] = target contract — either an AtomValue(Principal(Contract(..)))
-///             for static dispatch, or a Field(TraitIdentifier) / trait ref
-///             for dynamic dispatch
-///   args[1] = function name   (Atom)
+///   args[0] = target contract, one of:
+///             - `LiteralValue(Principal(Contract(..)))` — fully-qualified static dispatch
+///             - `Field(TraitIdentifier)` — `.contract-name` sugar, also static dispatch
+///             - `Atom(name)` — a variable bound to a trait type, dynamic dispatch
+///   args[1] = function name (Atom)
 ///   args[2..] = call arguments
 ///
-/// Returns `None` for dynamic (trait-based) dispatch or if the target
-/// contract / function cannot be resolved.
+/// For static dispatch the target contract's cost is looked up directly.
+/// For dynamic (trait-based) dispatch, trait resolution is attempted via the
+/// `trait_implementations` map on the analysis context. If unresolved, a
+/// `CostWarning` is emitted and `None` is returned.
+///
+/// Note: `TraitReference` is not a valid `contract-call?` target in Clarity
+/// (it appears only in `use-trait` / `impl-trait` / trait definitions).
 fn get_contract_call_target_cost(
     args: &[SymbolicExpression],
     user_args: &UserArgumentsContext,
@@ -675,8 +683,8 @@ fn get_contract_call_target_cost(
     };
 
     if let Some(contract_id) = contract_id {
-        let costs = static_cost(env, ctx.invoke_ctx, &contract_id).ok()?;
-        let (cost, _trait_count) = costs.get(function_name.as_str())?;
+        let result = static_cost(env, ctx.invoke_ctx, &contract_id).ok()?;
+        let (cost, _trait_count) = result.costs.get(function_name.as_str())?;
         return Some(cost.clone());
     }
 
@@ -726,8 +734,8 @@ fn resolve_trait_call_cost(
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
-        let costs = static_cost(env, ctx.invoke_ctx, impl_contract).ok()?;
-        let (cost, _) = costs.get(function_name.as_str())?;
+        let result = static_cost(env, ctx.invoke_ctx, impl_contract).ok()?;
+        let (cost, _) = result.costs.get(function_name.as_str())?;
         envelope = Some(match envelope {
             None => cost.clone(),
             Some(prev) => StaticCost {

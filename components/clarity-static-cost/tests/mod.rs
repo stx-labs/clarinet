@@ -13,7 +13,7 @@ use clarity::vm::{ast, ClarityVersion, ContractName};
 use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_options,
     static_cost_from_ast_with_source, static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode,
-    CostExprNode, UserArgumentsContext,
+    CostExprNode, CostWarning, CostWarningKind, UserArgumentsContext,
 };
 use indoc::indoc;
 #[cfg(test)]
@@ -1738,8 +1738,6 @@ fn test_empty_list_in_expression_does_not_panic() {
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result.err());
 }
 
-use clarity_static_cost::static_cost::{CostWarning, CostWarningKind};
-
 /// Test that a contract with trait-based contract-call? whose target cannot be
 /// resolved emits an UnresolvedTraitCall warning.
 #[test]
@@ -1896,8 +1894,10 @@ fn test_trait_resolution_with_implementations() {
     "#};
 
     let deployer = StandardPrincipalData::transient();
-    let pool_id = QualifiedContractIdentifier::new(deployer.clone(), "pool".into());
-    let caller_id = QualifiedContractIdentifier::new(deployer, "caller".into());
+    let pool_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("pool"));
+    let caller_id =
+        QualifiedContractIdentifier::new(deployer, ContractName::from_literal("caller"));
 
     // Set up environment with deployed contracts
     let mut memory_store = MemoryBackingStore::new();
