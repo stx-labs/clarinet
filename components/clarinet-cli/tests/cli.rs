@@ -630,9 +630,11 @@ fn test_devnet_deployment_strips_env_simnet() {
 
     // Devnet uses ContractPublish (real transactions), not EmulatedContractPublish.
     // Verify the simnet-only code was stripped from every contract source.
+    let mut publish_txs_inspected = 0;
     for batch in &deployment.plan.batches {
         for tx in &batch.transactions {
             if let TransactionSpecification::ContractPublish(spec) = tx {
+                publish_txs_inspected += 1;
                 assert!(
                     spec.source.contains("double"),
                     "non-simnet code should be preserved, got:\n{}",
@@ -646,8 +648,16 @@ fn test_devnet_deployment_strips_env_simnet() {
             }
         }
     }
+    assert!(
+        publish_txs_inspected > 0,
+        "expected at least one ContractPublish transaction in the devnet plan"
+    );
 
     // Also check the contracts map used for analysis.
+    assert!(
+        !deployment.contracts.is_empty(),
+        "expected at least one contract in the deployment"
+    );
     for (source, _) in deployment.contracts.values() {
         assert!(
             !source.contains("test-double"),
@@ -690,9 +700,11 @@ fn test_deployments_generate_devnet_strips_env_simnet() {
     let default_fee_rate: u64 = 10;
     let full_cost = default_fee_rate * full_source.len() as u64;
 
+    let mut publish_txs_inspected = 0;
     for batch in &deployment.plan.batches {
         for tx in &batch.transactions {
             if let TransactionSpecification::ContractPublish(spec) = tx {
+                publish_txs_inspected += 1;
                 assert!(
                     spec.source.contains("double"),
                     "non-simnet code should be preserved after load, got:\n{}",
@@ -711,7 +723,15 @@ fn test_deployments_generate_devnet_strips_env_simnet() {
             }
         }
     }
+    assert!(
+        publish_txs_inspected > 0,
+        "expected at least one ContractPublish transaction in the loaded plan"
+    );
 
+    assert!(
+        !deployment.contracts.is_empty(),
+        "expected at least one contract in the loaded deployment"
+    );
     for (source, _) in deployment.contracts.values() {
         assert!(
             !source.contains("test-double"),
