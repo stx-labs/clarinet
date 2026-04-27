@@ -29,12 +29,12 @@ version = "3.16.0"
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "clarity-types" }
-libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "libsigner", default-features = false }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "cecca4ac19cdc836c8f806dae0c63a90f0087fb9", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "clarity-types" }
+libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "libsigner", default-features = false }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "stacks-common", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "pox-locking", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "549b39f8ede50bf504c25ff1a31fe01e647cfedd", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }
@@ -100,14 +100,3 @@ yaml_serde = "0.10.3"
 # stacks-common = { path = "../stacks-core/stacks-common" }
 # stackslib = { path = "../stacks-core/stackslib" }
 # pox-locking = { path = "../stacks-core/pox-locking" }
-
-# Dev-only: patch in local stacks-core worktree at Clarinet's pinned commit
-# (../stacks-core-at-pin is cecca4ac19 + the libsigner pub visibility change).
-# Remove before opening the Clarinet PR.
-[patch.'https://github.com/stacks-network/stacks-core.git']
-clarity = { path = "../stacks-core-at-pin/clarity" }
-clarity-types = { path = "../stacks-core-at-pin/clarity-types" }
-libsigner = { path = "../stacks-core-at-pin/libsigner" }
-stacks-common = { path = "../stacks-core-at-pin/stacks-common" }
-stackslib = { path = "../stacks-core-at-pin/stackslib" }
-pox-locking = { path = "../stacks-core-at-pin/pox-locking" }

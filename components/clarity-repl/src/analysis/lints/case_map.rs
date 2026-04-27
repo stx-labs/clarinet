@@ -111,7 +111,8 @@ impl Lint for CaseMap<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseMap;
@@ -165,8 +166,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let map_name = "user_roles";
-        let expected_message =
-            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'_'));
+        let expected_message = CaseMap::make_diagnostic_message(
+            &ClarityName::try_from(map_name).unwrap(),
+            &CaseError::IllegalCharacter(b'_'),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -184,8 +187,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let map_name = "Balances";
-        let expected_message =
-            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'B'));
+        let expected_message = CaseMap::make_diagnostic_message(
+            &ClarityName::try_from(map_name).unwrap(),
+            &CaseError::IllegalCharacter(b'B'),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -203,8 +208,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let map_name = "USER_ROLES";
-        let expected_message =
-            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::IllegalCharacter(b'U'));
+        let expected_message = CaseMap::make_diagnostic_message(
+            &ClarityName::try_from(map_name).unwrap(),
+            &CaseError::IllegalCharacter(b'U'),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -222,8 +229,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let map_name = "user--roles";
-        let expected_message =
-            CaseMap::make_diagnostic_message(&map_name.into(), &CaseError::ConsecutiveHyphens);
+        let expected_message = CaseMap::make_diagnostic_message(
+            &ClarityName::try_from(map_name).unwrap(),
+            &CaseError::ConsecutiveHyphens,
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

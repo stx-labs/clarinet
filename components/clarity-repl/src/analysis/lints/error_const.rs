@@ -193,7 +193,8 @@ impl Lint for ErrorConst<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::ErrorConst;
@@ -262,7 +263,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let const_name = "ERR_NOT_AUTHORIZED";
-        let expected_message = ErrorConst::make_not_err_message(&const_name.into());
+        let expected_message =
+            ErrorConst::make_not_err_message(&ClarityName::try_from(const_name).unwrap());
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -280,7 +282,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let const_name = "ERR_FOO";
-        let expected_message = ErrorConst::make_not_err_message(&const_name.into());
+        let expected_message =
+            ErrorConst::make_not_err_message(&ClarityName::try_from(const_name).unwrap());
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -298,7 +301,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        let expected_message = ErrorConst::make_duplicate_message(&"ERR_B".into(), &"ERR_A".into());
+        let expected_message = ErrorConst::make_duplicate_message(
+            &ClarityName::from_literal("ERR_B"),
+            &ClarityName::from_literal("ERR_A"),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -316,7 +322,10 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        let expected_message = ErrorConst::make_duplicate_message(&"ERR_C".into(), &"ERR_A".into());
+        let expected_message = ErrorConst::make_duplicate_message(
+            &ClarityName::from_literal("ERR_C"),
+            &ClarityName::from_literal("ERR_A"),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

@@ -130,7 +130,8 @@ impl Lint for CaseConst<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseConst;
@@ -221,7 +222,7 @@ mod tests {
 
         let const_name = "SECONDS_PER_MINUTE__";
         let expected_message = CaseConst::make_diagnostic_message(
-            &const_name.into(),
+            &ClarityName::try_from(const_name).unwrap(),
             &CaseError::ConsecutiveUnderscores,
         );
 
@@ -246,7 +247,7 @@ mod tests {
             Ok((output, result)) => {
                 let const_name = "__SECONDS_PER_MINUTE";
                 let expected_message = CaseConst::make_diagnostic_message(
-                    &const_name.into(),
+                    &ClarityName::try_from(const_name).unwrap(),
                     &CaseError::ConsecutiveUnderscores,
                 );
 
@@ -272,7 +273,7 @@ mod tests {
 
         let const_name = "MINUTES-PER-HOUR";
         let expected_message = CaseConst::make_diagnostic_message(
-            &const_name.into(),
+            &ClarityName::try_from(const_name).unwrap(),
             &CaseError::IllegalCharacter(b'-'),
         );
 
@@ -293,7 +294,7 @@ mod tests {
 
         let const_name = "minutes_per_hour";
         let expected_message = CaseConst::make_diagnostic_message(
-            &const_name.into(),
+            &ClarityName::try_from(const_name).unwrap(),
             &CaseError::IllegalCharacter(b'm'),
         );
 
@@ -318,7 +319,7 @@ mod tests {
             Ok((output, result)) => {
                 let const_name = "MINUTES__PER__HOUR ";
                 let expected_message = CaseConst::make_diagnostic_message(
-                    &const_name.into(),
+                    &ClarityName::try_from(const_name).unwrap(),
                     &CaseError::ConsecutiveUnderscores,
                 );
 

@@ -561,7 +561,10 @@ pub fn extract_watch_variable<'a>(
         3 => {
             let contract_id = if parts[0].is_empty() {
                 if let Some(sender) = default_sender {
-                    QualifiedContractIdentifier::new(sender.clone(), ContractName::from(parts[1]))
+                    QualifiedContractIdentifier::new(
+                        sender.clone(),
+                        ContractName::try_from(parts[1]).unwrap(),
+                    )
                 } else {
                     QualifiedContractIdentifier::new(
                         invoke_ctx
@@ -569,7 +572,7 @@ pub fn extract_watch_variable<'a>(
                             .contract_identifier
                             .issuer
                             .clone(),
-                        ContractName::from(parts[1]),
+                        ContractName::try_from(parts[1]).unwrap(),
                     )
                 }
             } else {

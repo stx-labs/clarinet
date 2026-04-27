@@ -17,8 +17,7 @@ use call_checker::CallChecker;
 use check_checker::CheckChecker;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
-use clarity::vm::diagnostic::Diagnostic;
-use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use clarity::vm::diagnostic::{Diagnostic, Level as ClarityDiagnosticLevel};
 use indexmap::IndexMap;
 use linter::{LintLevel, LintMapBuilder, LintName};
 #[cfg(feature = "json_schema")]

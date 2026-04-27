@@ -147,7 +147,8 @@ impl Lint for UnusedBinding<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::UnusedBinding;
@@ -215,8 +216,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let var_name = "x";
-        let (expected_message, _) =
-            UnusedBinding::make_diagnostic_strings(BindingType::FunctionArg, &var_name.into());
+        let (expected_message, _) = UnusedBinding::make_diagnostic_strings(
+            BindingType::FunctionArg,
+            &ClarityName::try_from(var_name).unwrap(),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -322,8 +325,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let var_name = "doubled";
-        let (expected_message, _) =
-            UnusedBinding::make_diagnostic_strings(BindingType::LetBinding, &var_name.into());
+        let (expected_message, _) = UnusedBinding::make_diagnostic_strings(
+            BindingType::LetBinding,
+            &ClarityName::try_from(var_name).unwrap(),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

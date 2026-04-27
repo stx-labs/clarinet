@@ -154,7 +154,8 @@ impl Lint for UnusedDataVar<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::UnusedDataVar;
@@ -202,7 +203,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let var_name = "counter";
-        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unset(&var_name.into());
+        let (expected_message, _) =
+            UnusedDataVar::make_diagnostic_strings_unset(&ClarityName::try_from(var_name).unwrap());
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -223,7 +225,9 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let var_name = "counter";
-        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unread(&var_name.into());
+        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unread(
+            &ClarityName::try_from(var_name).unwrap(),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -244,7 +248,9 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let var_name = "counter";
-        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unused(&var_name.into());
+        let (expected_message, _) = UnusedDataVar::make_diagnostic_strings_unused(
+            &ClarityName::try_from(var_name).unwrap(),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

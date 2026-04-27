@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use clarity::vm::analysis::errors::SyntaxBindingErrorType;
 use clarity::vm::ast::build_ast;
 use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::costs::cost_functions::ClarityCostFunction;
@@ -14,7 +15,6 @@ use clarity::vm::types::{
 };
 use clarity::vm::variables::lookup_reserved_variable;
 use clarity::vm::{ClarityVersion, Value};
-use clarity_types::errors::analysis::SyntaxBindingErrorType;
 use clarity_types::types::TraitIdentifier;
 use stacks_common::types::StacksEpochId;
 
@@ -348,7 +348,7 @@ fn compute_function_overhead_costs(
 
     // Parse function signature for type checking costs
     if !signature_args.is_empty() {
-        match parse_name_type_pairs::<(), clarity_types::errors::CommonCheckErrorKind>(
+        match parse_name_type_pairs::<(), clarity::vm::analysis::CommonCheckErrorKind>(
             epoch,
             signature_args,
             SyntaxBindingErrorType::Eval,
@@ -1113,7 +1113,7 @@ fn try_narrow_user_function_cost(
                     "false" => Some(Value::Bool(false)),
                     name => caller_user_args
                         .known_values
-                        .get::<ClarityName>(&name.into())
+                        .get::<ClarityName>(&ClarityName::try_from(name).ok()?)
                         .cloned(),
                 })
         });
@@ -2247,7 +2247,7 @@ mod tests {
     fn test_infer_type_from_listcons_with_user_arg() {
         // When a list element references a known user argument, infer from that type
         let mut user_args = UserArgumentsContext::new();
-        user_args.add_argument("x".into(), TypeSignature::IntType);
+        user_args.add_argument(ClarityName::from_literal("x"), TypeSignature::IntType);
         let ast = build_test_ast("(list x)");
         let exprs = ast.expressions[0].match_list().unwrap();
         let result = infer_type_from_listcons(exprs, &user_args, StacksEpochId::latest()).unwrap();

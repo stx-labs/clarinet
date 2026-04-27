@@ -123,7 +123,8 @@ impl Lint for CaseToken<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseToken;
@@ -188,7 +189,7 @@ mod tests {
 
         let token_name = "my_token";
         let expected_message = CaseToken::make_diagnostic_message(
-            &token_name.into(),
+            &ClarityName::try_from(token_name).unwrap(),
             &CaseError::IllegalCharacter(b'_'),
         );
 
@@ -209,7 +210,7 @@ mod tests {
 
         let token_name = "MyNFT";
         let expected_message = CaseToken::make_diagnostic_message(
-            &token_name.into(),
+            &ClarityName::try_from(token_name).unwrap(),
             &CaseError::IllegalCharacter(b'M'),
         );
 

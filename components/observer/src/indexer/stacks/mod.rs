@@ -771,6 +771,9 @@ pub fn standardize_stacks_stackerdb_chunks(
                                         ValidateRejectCode::NotFoundError => {
                                             BlockValidationFailedCode::NotFoundError
                                         }
+                                        ValidateRejectCode::ProblematicTransaction => {
+                                            BlockValidationFailedCode::ProblematicTransaction
+                                        }
                                     },
                                 }
                             }

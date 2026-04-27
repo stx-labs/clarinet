@@ -290,7 +290,7 @@ impl CLIDebugger {
                                     .contract_identifier
                                     .issuer
                                     .clone(),
-                                ContractName::from(contract_parts[1]),
+                                ContractName::try_from(contract_parts[1]).unwrap(),
                             )
                         } else {
                             match QualifiedContractIdentifier::parse(parts[0]) {
@@ -360,7 +360,7 @@ impl CLIDebugger {
                                         .contract_identifier
                                         .issuer
                                         .clone(),
-                                    ContractName::from(parts[1]),
+                                    ContractName::try_from(parts[1]).unwrap(),
                                 )
                             } else {
                                 match QualifiedContractIdentifier::parse(

@@ -124,7 +124,8 @@ impl Lint for UnusedConst<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::UnusedConst;
@@ -187,7 +188,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let const_name = "MINUTES_PER_HOUR";
-        let expected_message = UnusedConst::make_diagnostic_message(&const_name.into());
+        let expected_message =
+            UnusedConst::make_diagnostic_message(&ClarityName::try_from(const_name).unwrap());
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

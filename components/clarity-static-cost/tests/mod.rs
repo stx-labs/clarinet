@@ -8,7 +8,7 @@ use clarity::vm::types::{
     ListData, ListTypeData, PrincipalData, QualifiedContractIdentifier, SequenceData,
     StandardPrincipalData, TypeSignature,
 };
-use clarity::vm::{ast, ClarityVersion};
+use clarity::vm::{ast, ClarityVersion, ContractName};
 use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
     static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode, CostExprNode,
@@ -1193,8 +1193,10 @@ fn test_contract_call_includes_callee_cost() {
     "#};
 
     let deployer = StandardPrincipalData::transient();
-    let callee_id = QualifiedContractIdentifier::new(deployer.clone(), "counter".into());
-    let caller_id = QualifiedContractIdentifier::new(deployer, "caller".into());
+    let callee_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("counter"));
+    let caller_id =
+        QualifiedContractIdentifier::new(deployer, ContractName::from_literal("caller"));
 
     // Set up environment with cost tracking
     let mut memory_store = MemoryBackingStore::new();

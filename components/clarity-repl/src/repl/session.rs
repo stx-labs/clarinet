@@ -8,8 +8,8 @@ use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::{
-    ClarityVersion, CostSynthesis, EvalHook, EvaluationResult, ExecutionResult, ParsedContract,
-    SymbolicExpression,
+    ClarityName, ClarityVersion, CostSynthesis, EvalHook, EvaluationResult, ExecutionResult,
+    ParsedContract, SymbolicExpression,
 };
 use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier};
 use clarity_types::Value;
@@ -69,6 +69,7 @@ pub enum AssetIdentifierParseError {
     EndsWithPeriod,
     ContractIdentifierParseError,
     NoPrefixPeriod,
+    InvalidAssetName,
 }
 
 impl std::fmt::Display for AssetIdentifierParseError {
@@ -78,6 +79,7 @@ impl std::fmt::Display for AssetIdentifierParseError {
             Self::EndsWithPeriod => write!(f, "ends with period"),
             Self::ContractIdentifierParseError => write!(f, "error parsing ContractIdentifier"),
             Self::NoPrefixPeriod => write!(f, "no period in the prefix of the asset name"),
+            Self::InvalidAssetName => write!(f, "invalid asset name"),
         }
     }
 }
@@ -1299,7 +1301,8 @@ impl Session {
 
         Ok(AssetIdentifier {
             contract_identifier,
-            asset_name: asset_name.into(),
+            asset_name: ClarityName::try_from(asset_name)
+                .map_err(|_| AssetIdentifierParseError::InvalidAssetName)?,
         })
     }
 
@@ -1875,12 +1878,24 @@ mod tests {
             &result,
             Value::okay(Value::Tuple(
                 TupleData::from_data(vec![
-                    ("min-amount-ustx".into(), Value::UInt(0)),
-                    ("reward-cycle-id".into(), Value::UInt(0)),
-                    ("prepare-cycle-length".into(), Value::UInt(50)),
-                    ("first-burnchain-block-height".into(), Value::UInt(0)),
-                    ("reward-cycle-length".into(), Value::UInt(1050)),
-                    ("total-liquid-supply-ustx".into(), Value::UInt(0)),
+                    (ClarityName::from_literal("min-amount-ustx"), Value::UInt(0)),
+                    (ClarityName::from_literal("reward-cycle-id"), Value::UInt(0)),
+                    (
+                        ClarityName::from_literal("prepare-cycle-length"),
+                        Value::UInt(50),
+                    ),
+                    (
+                        ClarityName::from_literal("first-burnchain-block-height"),
+                        Value::UInt(0),
+                    ),
+                    (
+                        ClarityName::from_literal("reward-cycle-length"),
+                        Value::UInt(1050),
+                    ),
+                    (
+                        ClarityName::from_literal("total-liquid-supply-ustx"),
+                        Value::UInt(0),
+                    ),
                 ])
                 .unwrap(),
             ))

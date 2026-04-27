@@ -18,13 +18,13 @@ use clarity::vm::events::*;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
 use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{
-    eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
+    eval, eval_all, ClarityName, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
     EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult,
 };
 use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
-use clarity_types::Value;
+use clarity_types::{ContractName, Value};
 
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
@@ -1341,7 +1341,7 @@ mod tests {
             QualifiedContractIdentifier::parse(&contract_identifier_string).unwrap();
         let asset_identifier = AssetIdentifier {
             contract_identifier: contract_identifier.clone(),
-            asset_name: token_name.into(),
+            asset_name: ClarityName::try_from(token_name).unwrap(),
         };
 
         let amount = 1000;
@@ -1508,7 +1508,7 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier {
             issuer: StandardPrincipalData::transient(),
-            name: "contract".into(),
+            name: ContractName::from_literal("contract"),
         };
         let count = interpreter.get_data_var(&contract_id, "count");
 
@@ -1536,7 +1536,7 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier {
             issuer: StandardPrincipalData::transient(),
-            name: "contract".into(),
+            name: ContractName::from_literal("contract"),
         };
         let name = interpreter.get_map_entry(&contract_id, "people", &Value::UInt(0));
         assert_eq!(name, Some("0x0a0d000000077361746f736869".to_owned()));
@@ -1725,7 +1725,11 @@ mod tests {
         assert_execution_result_value(
             result,
             Value::Tuple(
-                TupleData::from_data(vec![("block-height".into(), Value::UInt(0))]).unwrap(),
+                TupleData::from_data(vec![(
+                    ClarityName::from_literal("block-height"),
+                    Value::UInt(0),
+                )])
+                .unwrap(),
             ),
         );
 
@@ -1744,7 +1748,11 @@ mod tests {
         assert_execution_result_value(
             result,
             Value::Tuple(
-                TupleData::from_data(vec![("block-height".into(), Value::UInt(10))]).unwrap(),
+                TupleData::from_data(vec![(
+                    ClarityName::from_literal("block-height"),
+                    Value::UInt(10),
+                )])
+                .unwrap(),
             ),
         );
 
@@ -1796,7 +1804,11 @@ mod tests {
         assert_execution_result_value(
             result,
             Value::Tuple(
-                TupleData::from_data(vec![("block-height".into(), Value::UInt(1))]).unwrap(),
+                TupleData::from_data(vec![(
+                    ClarityName::from_literal("block-height"),
+                    Value::UInt(1),
+                )])
+                .unwrap(),
             ),
         );
 
@@ -1858,8 +1870,11 @@ mod tests {
             result,
             Value::Tuple(
                 TupleData::from_data(vec![
-                    ("stacks-block-height".into(), Value::UInt(1)),
-                    ("tenure-height".into(), Value::UInt(1)),
+                    (
+                        ClarityName::from_literal("stacks-block-height"),
+                        Value::UInt(1),
+                    ),
+                    (ClarityName::from_literal("tenure-height"), Value::UInt(1)),
                 ])
                 .unwrap(),
             ),
@@ -1881,8 +1896,11 @@ mod tests {
             result,
             Value::Tuple(
                 TupleData::from_data(vec![
-                    ("stacks-block-height".into(), Value::UInt(11)),
-                    ("tenure-height".into(), Value::UInt(11)),
+                    (
+                        ClarityName::from_literal("stacks-block-height"),
+                        Value::UInt(11),
+                    ),
+                    (ClarityName::from_literal("tenure-height"), Value::UInt(11)),
                 ])
                 .unwrap(),
             ),
@@ -2087,7 +2105,7 @@ mod tests {
         let result = interpreter.call_contract_fn(
             &QualifiedContractIdentifier {
                 issuer: StandardPrincipalData::transient(),
-                name: "unexisting".into(),
+                name: ContractName::from_literal("unexisting"),
             },
             "undefined-function",
             &[],
@@ -2280,7 +2298,7 @@ mod tests {
             result,
             Value::Principal(PrincipalData::Contract(QualifiedContractIdentifier {
                 issuer: StandardPrincipalData::transient(),
-                name: "my-contract".into(),
+                name: ContractName::from_literal("my-contract"),
             })),
         );
     }

@@ -59,6 +59,7 @@ pub enum BlockValidationFailedCode {
     InvalidTimestamp,
     NetworkChainMismatch,
     NotFoundError,
+    ProblematicTransaction,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

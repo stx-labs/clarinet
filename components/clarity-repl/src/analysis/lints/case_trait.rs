@@ -126,7 +126,8 @@ impl Lint for CaseTrait<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseTrait;
@@ -201,7 +202,7 @@ mod tests {
 
         let trait_name = "token_trait";
         let expected_message = CaseTrait::make_diagnostic_message(
-            &trait_name.into(),
+            &ClarityName::try_from(trait_name).unwrap(),
             &CaseError::IllegalCharacter(b'_'),
         );
 
@@ -225,7 +226,7 @@ mod tests {
 
         let trait_name = "TokenTrait";
         let expected_message = CaseTrait::make_diagnostic_message(
-            &trait_name.into(),
+            &ClarityName::try_from(trait_name).unwrap(),
             &CaseError::IllegalCharacter(b'T'),
         );
 
@@ -263,7 +264,7 @@ mod tests {
 
         let trait_name = "my_trait";
         let expected_message = CaseTrait::make_diagnostic_message(
-            &trait_name.into(),
+            &ClarityName::try_from(trait_name).unwrap(),
             &CaseError::IllegalCharacter(b'_'),
         );
 
