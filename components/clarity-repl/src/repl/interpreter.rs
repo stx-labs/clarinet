@@ -1041,9 +1041,8 @@ mod tests {
     use clarity::types::chainstate::StacksAddress;
     use clarity::types::Address;
     use clarity::util::hash::hex_bytes;
-    use clarity::vm::{self, ClarityName, ClarityVersion};
+    use clarity::vm::{self, ClarityName, ClarityVersion, ContractName};
     use clarity_types::types::TupleData;
-    use clarity_types::ContractName;
     use indoc::{formatdoc, indoc};
 
     use super::*;

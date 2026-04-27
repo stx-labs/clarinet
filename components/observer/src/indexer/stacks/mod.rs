@@ -697,8 +697,7 @@ pub fn standardize_stacks_stackerdb_chunks(
     stackerdb_chunks: &NewStackerDbChunks,
     ctx: &Context,
 ) -> Result<Vec<StacksStackerDbChunk>, String> {
-    use libsigner::v0::messages::{BlockResponse, RejectCode, SignerMessage};
-    use stackslib::net::api::postblock_proposal::ValidateRejectCode;
+    use libsigner::v0::messages::{BlockResponse, SignerMessage};
 
     let contract_id = &stackerdb_chunks.contract_id.name;
     let mut parsed_chunks: Vec<StacksStackerDbChunk> = vec![];
@@ -731,64 +730,7 @@ pub fn standardize_stacks_stackerdb_chunks(
                 BlockResponse::Rejected(block_rejection) => StacksSignerMessage::BlockResponse(
                     BlockResponseData::Rejected(BlockRejectedResponse {
                         reason: block_rejection.reason,
-                        reason_code: match block_rejection.reason_code {
-                            RejectCode::ValidationFailed(validate_reject_code) => {
-                                BlockRejectReasonCode::ValidationFailed {
-                                    validation_failed: match validate_reject_code {
-                                        ValidateRejectCode::BadBlockHash => {
-                                            BlockValidationFailedCode::BadBlockHash
-                                        }
-                                        ValidateRejectCode::BadTransaction => {
-                                            BlockValidationFailedCode::BadTransaction
-                                        }
-                                        ValidateRejectCode::InvalidBlock => {
-                                            BlockValidationFailedCode::InvalidBlock
-                                        }
-                                        ValidateRejectCode::ChainstateError => {
-                                            BlockValidationFailedCode::ChainstateError
-                                        }
-                                        ValidateRejectCode::UnknownParent => {
-                                            BlockValidationFailedCode::UnknownParent
-                                        }
-                                        ValidateRejectCode::NonCanonicalTenure => {
-                                            BlockValidationFailedCode::NonCanonicalTenure
-                                        }
-                                        ValidateRejectCode::NoSuchTenure => {
-                                            BlockValidationFailedCode::NoSuchTenure
-                                        }
-                                        ValidateRejectCode::InvalidTransactionReplay => {
-                                            BlockValidationFailedCode::InvalidTransactionReplay
-                                        }
-                                        ValidateRejectCode::InvalidParentBlock => {
-                                            BlockValidationFailedCode::InvalidParentBlock
-                                        }
-                                        ValidateRejectCode::InvalidTimestamp => {
-                                            BlockValidationFailedCode::InvalidTimestamp
-                                        }
-                                        ValidateRejectCode::NetworkChainMismatch => {
-                                            BlockValidationFailedCode::NetworkChainMismatch
-                                        }
-                                        ValidateRejectCode::NotFoundError => {
-                                            BlockValidationFailedCode::NotFoundError
-                                        }
-                                        ValidateRejectCode::ProblematicTransaction => {
-                                            BlockValidationFailedCode::ProblematicTransaction
-                                        }
-                                    },
-                                }
-                            }
-                            RejectCode::NoSortitionView => BlockRejectReasonCode::NoSortitionView,
-                            RejectCode::ConnectivityIssues(_) => {
-                                BlockRejectReasonCode::ConnectivityIssues
-                            }
-                            RejectCode::RejectedInPriorRound => {
-                                BlockRejectReasonCode::RejectedInPriorRound
-                            }
-                            RejectCode::SortitionViewMismatch => {
-                                BlockRejectReasonCode::SortitionViewMismatch
-                            }
-                            RejectCode::TestingDirective => BlockRejectReasonCode::TestingDirective,
-                        },
+                        reason_code: block_rejection.reason_code.into(),
                         signer_signature_hash: format!(
                             "0x{}",
                             block_rejection.signer_signature_hash.to_hex()
@@ -832,12 +774,15 @@ pub fn standardize_stacks_stackerdb_chunks(
             }),
             // Newer protocol variants (StateMachineUpdate, BlockPreCommit) are not yet
             // exposed to downstream consumers; drop the slot rather than fail the batch.
+            // `SignerMessageTypePrefix` is upstream's per-variant unit enum, kept in
+            // lockstep with `SignerMessage` — its `Debug` impl is the variant name,
+            // so future upstream variants log with their real name automatically.
             other => {
+                let prefix = libsigner::v0::messages::SignerMessageTypePrefix::from(&other);
                 ctx.try_log(|logger| {
                     slog::warn!(
                         logger,
-                        "skipping unhandled SignerMessage variant: {:?}",
-                        std::mem::discriminant(&other)
+                        "skipping unhandled SignerMessage variant: {prefix:?}"
                     )
                 });
                 continue;
