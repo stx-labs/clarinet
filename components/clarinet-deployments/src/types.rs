@@ -1129,11 +1129,17 @@ impl DeploymentSpecification {
                                     TransactionSpecification::RequirementPublish(spec)
                                 }
                                 TransactionSpecificationFile::ContractPublish(spec) => {
-                                    let spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
+
+                                    // Devnet/Testnet/Mainnet are all on-chain; strip
+                                    // `#[env(simnet)]` code from the source that gets broadcast.
+                                    // The YAML never persists `source` for ContractPublish (it
+                                    // only stores `path`), so this fires on every load.
+                                    let (clean, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
+                                    spec.source = clean;
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    let (source, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
-                                    contracts.insert(contract_id, (source, spec.location.clone()));
+                                    contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
                                 TransactionSpecificationFile::BtcTransfer(spec) => {
@@ -1267,12 +1273,14 @@ impl DeploymentSpecification {
         let mut global_found_env_simnet = false;
         for batch in self.plan.batches.iter_mut() {
             for transaction in batch.transactions.iter_mut() {
-                if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = transaction
-                {
-                    let (clean, found_env_simnet) = remove_env_simnet(spec.source.to_string())?;
-                    spec.source = clean;
-                    global_found_env_simnet |= found_env_simnet;
-                }
+                let source = match transaction {
+                    TransactionSpecification::EmulatedContractPublish(spec) => &mut spec.source,
+                    TransactionSpecification::ContractPublish(spec) => &mut spec.source,
+                    _ => continue,
+                };
+                let (clean, found_env_simnet) = remove_env_simnet(source.to_string())?;
+                *source = clean;
+                global_found_env_simnet |= found_env_simnet;
             }
         }
 

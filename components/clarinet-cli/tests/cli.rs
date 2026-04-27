@@ -656,8 +656,13 @@ fn test_devnet_deployment_strips_env_simnet() {
     }
 }
 
-/// `clarinet deployments generate --devnet` should produce a deployment plan
-/// whose cost reflects the stripped (shorter) source, not the full source.
+/// `clarinet deployments generate --devnet` produces a YAML plan; loading that
+/// plan back via `load_deployment` must strip `#[env(simnet)]` from the source
+/// that ends up in `ContractPublish` transactions. `ContractPublishSpecificationFile`
+/// has no `source` field — the YAML only stores `path` — so source is re-read
+/// from disk on every load. Stripping has to happen at load time, otherwise
+/// `clarinet deployments apply --use-on-disk-deployment-plan` ships simnet code
+/// on-chain (see https://github.com/hirosystems/clarinet/issues/2343).
 #[test]
 fn test_deployments_generate_devnet_strips_env_simnet() {
     let (_temp_dir, project_path) =
@@ -674,9 +679,6 @@ fn test_deployments_generate_devnet_strips_env_simnet() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Load the generated plan. `load_deployment` re-reads the .clar source from
-    // disk (unstripped), but preserves the `cost` field from the YAML — which was
-    // computed from the stripped source during generation.
     let yaml_path = project_path
         .join("deployments")
         .join("default.devnet-plan.yaml");
@@ -692,12 +694,29 @@ fn test_deployments_generate_devnet_strips_env_simnet() {
         for tx in &batch.transactions {
             if let TransactionSpecification::ContractPublish(spec) = tx {
                 assert!(
+                    spec.source.contains("double"),
+                    "non-simnet code should be preserved after load, got:\n{}",
+                    spec.source
+                );
+                assert!(
+                    !spec.source.contains("test-double"),
+                    "#[env(simnet)] code should be stripped from ContractPublish source after load_deployment, got:\n{}",
+                    spec.source
+                );
+                assert!(
                     spec.cost < full_cost,
                     "cost should reflect stripped source (expected < {full_cost}, got {})",
                     spec.cost
                 );
             }
         }
+    }
+
+    for (source, _) in deployment.contracts.values() {
+        assert!(
+            !source.contains("test-double"),
+            "#[env(simnet)] code should be stripped from contracts map after load, got:\n{source}"
+        );
     }
 }
 
