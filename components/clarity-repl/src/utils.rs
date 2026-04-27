@@ -102,11 +102,15 @@ pub fn get_env_simnet_spans(source: &str) -> Result<Vec<Span>, String> {
     Ok(spans)
 }
 
-pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
-    let spans = get_env_simnet_spans(&source)?;
+/// Strips `#[env(simnet)]`-annotated code from `source`. Returns `Ok(None)` if
+/// no annotation is found (the caller should keep the original `source`),
+/// `Ok(Some(stripped))` if annotated code was removed, or `Err` if `source`
+/// could not be parsed.
+pub fn remove_env_simnet(source: &str) -> Result<Option<String>, String> {
+    let spans = get_env_simnet_spans(source)?;
 
     if spans.is_empty() {
-        return Ok((source, false));
+        return Ok(None);
     }
 
     let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
@@ -124,7 +128,7 @@ pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
         result.push('\n');
     }
 
-    Ok((result, true))
+    Ok(Some(result))
 }
 
 fn collect_env_simnet_spans(exprs: &[PreSymbolicExpression], out: &mut Vec<Span>) {
@@ -211,16 +215,14 @@ mod tests {
         "#);
 
         // test that we can remove a marked fn
-        let (clean, found) =
-            remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(with_env_simnet)
+            .expect("remove_env_simnet failed")
+            .expect("expected stripped source");
         assert_eq!(clean, without_env_simnet);
-        assert!(found);
 
         // test that nothing is removed if nothing is marked
-        let (clean, found) =
-            remove_env_simnet(without_env_simnet.to_string()).expect("remove_env_simnet failed");
-        assert_eq!(clean, without_env_simnet);
-        assert!(!found);
+        let result = remove_env_simnet(without_env_simnet).expect("remove_env_simnet failed");
+        assert!(result.is_none(), "expected no change");
     }
 
     #[test]
@@ -249,10 +251,10 @@ mod tests {
             )
         "#);
 
-        let (clean, found) =
-            remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(with_env_simnet)
+            .expect("remove_env_simnet failed")
+            .expect("expected stripped source");
         assert_eq!(clean, without_env_simnet);
-        assert!(found);
     }
 
     #[test]
@@ -267,10 +269,8 @@ mod tests {
             )
         "#);
 
-        let (clean, found) =
-            remove_env_simnet(source.to_string()).expect("remove_env_simnet failed");
-        assert_eq!(clean, source);
-        assert!(!found);
+        let result = remove_env_simnet(source).expect("remove_env_simnet failed");
+        assert!(result.is_none(), "EOL annotation should be ignored");
     }
 
     #[test]

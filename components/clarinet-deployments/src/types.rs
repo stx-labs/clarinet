@@ -1135,8 +1135,11 @@ impl DeploymentSpecification {
                                     // `#[env(simnet)]` code from the source that gets broadcast.
                                     // The YAML never persists `source` for ContractPublish (it
                                     // only stores `path`), so this fires on every load.
-                                    let (clean, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
-                                    spec.source = clean;
+                                    if let Some(stripped) = remove_env_simnet(&spec.source).map_err(|e|
+                                        format!("failed to strip #[env(simnet)] code from contract publish source at {:?}: {e}", spec.location)
+                                    )? {
+                                        spec.source = stripped;
+                                    }
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
                                     contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
@@ -1278,16 +1281,18 @@ impl DeploymentSpecification {
                     TransactionSpecification::ContractPublish(spec) => &mut spec.source,
                     _ => continue,
                 };
-                let (clean, found_env_simnet) = remove_env_simnet(source.to_string())?;
-                *source = clean;
-                global_found_env_simnet |= found_env_simnet;
+                if let Some(clean) = remove_env_simnet(source)? {
+                    *source = clean;
+                    global_found_env_simnet = true;
+                }
             }
         }
 
-        for (ref mut source, _) in self.contracts.values_mut() {
-            let (clean, found_env_simnet) = remove_env_simnet(source.to_string())?;
-            *source = clean;
-            global_found_env_simnet |= found_env_simnet;
+        for (source, _) in self.contracts.values_mut() {
+            if let Some(clean) = remove_env_simnet(source)? {
+                *source = clean;
+                global_found_env_simnet = true;
+            }
         }
 
         Ok(global_found_env_simnet)
