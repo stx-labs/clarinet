@@ -134,7 +134,8 @@ impl Lint for UnusedTrait<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::UnusedTrait;
@@ -256,8 +257,9 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let trait_name = "token-trait";
-        let (expected_message, _) =
-            UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
+        let (expected_message, _) = UnusedTrait::make_diagnostic_strings_private_fn_only(
+            &ClarityName::try_from(trait_name).unwrap(),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -283,8 +285,9 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let trait_name = "token-trait";
-        let (expected_message, _) =
-            UnusedTrait::make_diagnostic_strings_private_fn_only(&trait_name.into());
+        let (expected_message, _) = UnusedTrait::make_diagnostic_strings_private_fn_only(
+            &ClarityName::try_from(trait_name).unwrap(),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -356,7 +359,9 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let trait_name = "token-trait";
-        let (expected_message, _) = UnusedTrait::make_diagnostic_strings_unused(&trait_name.into());
+        let (expected_message, _) = UnusedTrait::make_diagnostic_strings_unused(
+            &ClarityName::try_from(trait_name).unwrap(),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

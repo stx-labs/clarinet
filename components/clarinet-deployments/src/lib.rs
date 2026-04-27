@@ -496,7 +496,7 @@ pub async fn generate_default_deployment(
                     QualifiedContractIdentifier::new(
                         default_deployer_address.clone(),
                         ContractName::try_from(contract_name.clone())
-                            .unwrap_or_else(|_| ContractName::from("unknown")),
+                            .unwrap_or_else(|_| ContractName::from_literal("unknown")),
                     ),
                     diagnostics,
                 );
@@ -1046,7 +1046,7 @@ mod tests {
         epoch: StacksEpochId,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let emulated_publish_spec = EmulatedContractPublishSpecification {
-            contract_name: ContractName::from(name),
+            contract_name: ContractName::try_from(name).unwrap(),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
             source: source.to_string(),
             clarity_version: ClarityVersion::Clarity2,
@@ -1084,13 +1084,13 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier::new(
             PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
-            ContractName::from("contract_1"),
+            ContractName::from_literal("contract_1"),
         );
 
         let contract_call_spec = EmulatedContractCallSpecification {
             contract_id: contract_id.clone(),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
-            method: ClarityName::from("add"),
+            method: ClarityName::from_literal("add"),
             parameters: vec!["1".to_string()],
         };
         let result = handle_emulated_contract_call(&mut session, &contract_call_spec);
@@ -1118,13 +1118,13 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier::new(
             PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
-            ContractName::from("contract_1"),
+            ContractName::from_literal("contract_1"),
         );
 
         let contract_call_spec = EmulatedContractCallSpecification {
             contract_id: contract_id.clone(),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
-            method: ClarityName::from("set-sum"),
+            method: ClarityName::from_literal("set-sum"),
             parameters: vec!["2".to_string(), "(list 20 20)".to_string()],
         };
         let result = handle_emulated_contract_call(&mut session, &contract_call_spec);
@@ -1152,13 +1152,13 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier::new(
             PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
-            ContractName::from("contract_1"),
+            ContractName::from_literal("contract_1"),
         );
 
         let contract_call_spec = EmulatedContractCallSpecification {
             contract_id: contract_id.clone(),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
-            method: ClarityName::from("set-data"),
+            method: ClarityName::from_literal("set-data"),
             parameters: vec!["{ a: 2 }".to_string(), "{ b: u3 }".to_string()],
         };
         let result = handle_emulated_contract_call(&mut session, &contract_call_spec);
@@ -1201,7 +1201,7 @@ mod tests {
             clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
 
         let spec = EmulatedContractPublishSpecification {
-            contract_name: ContractName::from("lint-test"),
+            contract_name: ContractName::from_literal("lint-test"),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
             source: LINT_TRIGGERING_SOURCE.to_string(),
             clarity_version: ClarityVersion::Clarity2,
@@ -1235,7 +1235,7 @@ mod tests {
             clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
 
         let spec = EmulatedContractPublishSpecification {
-            contract_name: ContractName::from("lint-test"),
+            contract_name: ContractName::from_literal("lint-test"),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
             source: LINT_TRIGGERING_SOURCE.to_string(),
             clarity_version: ClarityVersion::Clarity2,
@@ -1275,7 +1275,7 @@ mod tests {
         session.interpreter.repl_settings.analysis.disable_all();
 
         let spec = EmulatedContractPublishSpecification {
-            contract_name: ContractName::from("lint-test"),
+            contract_name: ContractName::from_literal("lint-test"),
             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
             source: LINT_TRIGGERING_SOURCE.to_string(),
             clarity_version: ClarityVersion::Clarity2,
@@ -1324,7 +1324,7 @@ mod tests {
                     id: 0,
                     transactions: vec![TransactionSpecification::EmulatedContractPublish(
                         EmulatedContractPublishSpecification {
-                            contract_name: ContractName::from("lint-test"),
+                            contract_name: ContractName::from_literal("lint-test"),
                             emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER)
                                 .unwrap(),
                             source: LINT_TRIGGERING_SOURCE.to_string(),

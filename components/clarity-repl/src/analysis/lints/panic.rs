@@ -142,7 +142,7 @@ impl Lint for PanicChecker<'_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
     use super::PanicChecker;

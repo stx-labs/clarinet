@@ -139,7 +139,8 @@ impl Lint for CaseFn<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseFn;
@@ -216,8 +217,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let fn_name = "transfer_tokens";
-        let expected_message =
-            CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'_'));
+        let expected_message = CaseFn::make_diagnostic_message(
+            &ClarityName::try_from(fn_name).unwrap(),
+            &CaseError::IllegalCharacter(b'_'),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -236,8 +239,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let fn_name = "getBalance";
-        let expected_message =
-            CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'B'));
+        let expected_message = CaseFn::make_diagnostic_message(
+            &ClarityName::try_from(fn_name).unwrap(),
+            &CaseError::IllegalCharacter(b'B'),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -256,8 +261,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let fn_name = "DO_TRANSFER";
-        let expected_message =
-            CaseFn::make_diagnostic_message(&fn_name.into(), &CaseError::IllegalCharacter(b'D'));
+        let expected_message = CaseFn::make_diagnostic_message(
+            &ClarityName::try_from(fn_name).unwrap(),
+            &CaseError::IllegalCharacter(b'D'),
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

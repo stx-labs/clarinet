@@ -695,9 +695,9 @@ pub fn standardize_stacks_marshalled_stackerdb_chunks(
 #[cfg(feature = "stacks-signers")]
 pub fn standardize_stacks_stackerdb_chunks(
     stackerdb_chunks: &NewStackerDbChunks,
-    _ctx: &Context,
+    ctx: &Context,
 ) -> Result<Vec<StacksStackerDbChunk>, String> {
-    use stacks_codec::codec::{BlockResponse, RejectCode, SignerMessage, ValidateRejectCode};
+    use libsigner::v0::messages::{BlockResponse, SignerMessage};
 
     let contract_id = &stackerdb_chunks.contract_id.name;
     let mut parsed_chunks: Vec<StacksStackerDbChunk> = vec![];
@@ -730,46 +730,7 @@ pub fn standardize_stacks_stackerdb_chunks(
                 BlockResponse::Rejected(block_rejection) => StacksSignerMessage::BlockResponse(
                     BlockResponseData::Rejected(BlockRejectedResponse {
                         reason: block_rejection.reason,
-                        reason_code: match block_rejection.reason_code {
-                            RejectCode::ValidationFailed(validate_reject_code) => {
-                                BlockRejectReasonCode::ValidationFailed {
-                                    validation_failed: match validate_reject_code {
-                                        ValidateRejectCode::BadBlockHash => {
-                                            BlockValidationFailedCode::BadBlockHash
-                                        }
-                                        ValidateRejectCode::BadTransaction => {
-                                            BlockValidationFailedCode::BadTransaction
-                                        }
-                                        ValidateRejectCode::InvalidBlock => {
-                                            BlockValidationFailedCode::InvalidBlock
-                                        }
-                                        ValidateRejectCode::ChainstateError => {
-                                            BlockValidationFailedCode::ChainstateError
-                                        }
-                                        ValidateRejectCode::UnknownParent => {
-                                            BlockValidationFailedCode::UnknownParent
-                                        }
-                                        ValidateRejectCode::NonCanonicalTenure => {
-                                            BlockValidationFailedCode::NonCanonicalTenure
-                                        }
-                                        ValidateRejectCode::NoSuchTenure => {
-                                            BlockValidationFailedCode::NoSuchTenure
-                                        }
-                                    },
-                                }
-                            }
-                            RejectCode::NoSortitionView => BlockRejectReasonCode::NoSortitionView,
-                            RejectCode::ConnectivityIssues => {
-                                BlockRejectReasonCode::ConnectivityIssues
-                            }
-                            RejectCode::RejectedInPriorRound => {
-                                BlockRejectReasonCode::RejectedInPriorRound
-                            }
-                            RejectCode::SortitionViewMismatch => {
-                                BlockRejectReasonCode::SortitionViewMismatch
-                            }
-                            RejectCode::TestingDirective => BlockRejectReasonCode::TestingDirective,
-                        },
+                        reason_code: block_rejection.reason_code.into(),
                         signer_signature_hash: format!(
                             "0x{}",
                             block_rejection.signer_signature_hash.to_hex()
@@ -811,6 +772,21 @@ pub fn standardize_stacks_stackerdb_chunks(
                         },
                     )?,
             }),
+            // Newer protocol variants (StateMachineUpdate, BlockPreCommit) are not yet
+            // exposed to downstream consumers; drop the slot rather than fail the batch.
+            // `SignerMessageTypePrefix` is upstream's per-variant unit enum, kept in
+            // lockstep with `SignerMessage` — its `Debug` impl is the variant name,
+            // so future upstream variants log with their real name automatically.
+            other => {
+                let prefix = libsigner::v0::messages::SignerMessageTypePrefix::from(&other);
+                ctx.try_log(|logger| {
+                    slog::warn!(
+                        logger,
+                        "skipping unhandled SignerMessage variant: {prefix:?}"
+                    )
+                });
+                continue;
+            }
         };
         parsed_chunks.push(StacksStackerDbChunk {
             contract: contract_id.clone(),
@@ -828,7 +804,7 @@ pub fn standardize_stacks_stackerdb_chunks(
 
 #[cfg(feature = "stacks-signers")]
 pub fn standardize_stacks_signer_mock_signature(
-    signature: &stacks_codec::codec::MockSignature,
+    signature: &libsigner::v0::messages::MockSignature,
 ) -> Result<MockSignatureData, String> {
     let pubkey = get_signer_pubkey_from_message_hash(
         signature
@@ -852,7 +828,7 @@ pub fn standardize_stacks_signer_mock_signature(
 
 #[cfg(feature = "stacks-signers")]
 pub fn standardize_stacks_signer_peer_info(
-    peer_info: &stacks_codec::codec::PeerInfo,
+    peer_info: &libsigner::v0::messages::PeerInfo,
 ) -> Result<PeerInfoData, String> {
     let block_hash = format!("0x{}", peer_info.stacks_tip.to_hex());
     Ok(PeerInfoData {
@@ -872,7 +848,7 @@ pub fn standardize_stacks_signer_peer_info(
 
 #[cfg(feature = "stacks-signers")]
 pub fn standardize_stacks_nakamoto_block(
-    block: &stacks_codec::codec::NakamotoBlock,
+    block: &stackslib::chainstate::nakamoto::NakamotoBlock,
 ) -> Result<NakamotoBlockData, String> {
     use miniscript::bitcoin::hex::{Case, DisplayHex};
 
@@ -911,7 +887,9 @@ pub fn standardize_stacks_nakamoto_block(
 }
 
 #[cfg(feature = "stacks-signers")]
-fn get_nakamoto_block_hash(block: &stacks_codec::codec::NakamotoBlock) -> Result<String, String> {
+fn get_nakamoto_block_hash(
+    block: &stackslib::chainstate::nakamoto::NakamotoBlock,
+) -> Result<String, String> {
     use clarity::util::hash::Sha512Trunc256Sum;
 
     let mut block_header_bytes = vec![block.header.version];

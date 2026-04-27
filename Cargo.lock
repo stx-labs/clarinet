@@ -115,7 +115,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -126,7 +126,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -176,6 +176,12 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
+name = "ascii"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
 
 [[package]]
 name = "assert-json-diff"
@@ -574,6 +580,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "chunked_transfer"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
+
+[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -786,7 +798,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=cecca4ac19cdc836c8f806dae0c63a90f0087fb9#cecca4ac19cdc836c8f806dae0c63a90f0087fb9"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -900,7 +912,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=cecca4ac19cdc836c8f806dae0c63a90f0087fb9#cecca4ac19cdc836c8f806dae0c63a90f0087fb9"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
 dependencies = [
  "lazy_static",
  "regex",
@@ -933,7 +945,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1290,7 +1302,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1446,7 +1458,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1481,7 +1493,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if 1.0.4",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2297,7 +2309,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2470,6 +2482,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsigner"
+version = "0.0.1"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
+dependencies = [
+ "clarity",
+ "hashbrown 0.15.5",
+ "libc",
+ "libstackerdb",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "slog",
+ "stacks-common",
+ "stackslib",
+ "thiserror 1.0.69",
+ "tiny_http",
+]
+
+[[package]]
 name = "libsqlite3-sys"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2483,7 +2514,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=cecca4ac19cdc836c8f806dae0c63a90f0087fb9#cecca4ac19cdc836c8f806dae0c63a90f0087fb9"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
 dependencies = [
  "clarity",
  "serde",
@@ -2781,7 +2812,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2846,11 +2877,11 @@ dependencies = [
  "crossbeam-channel",
  "hex",
  "hiro-system-kit",
+ "libsigner",
  "miniscript",
  "reqwest",
  "serde",
  "serde_json",
- "stacks-codec",
  "stackslib",
  "strum",
  "test-case",
@@ -3026,7 +3057,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=cecca4ac19cdc836c8f806dae0c63a90f0087fb9#cecca4ac19cdc836c8f806dae0c63a90f0087fb9"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
 dependencies = [
  "clarity",
  "slog",
@@ -3593,7 +3624,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4196,23 +4227,18 @@ dependencies = [
  "cfg-if 1.0.4",
  "libc",
  "psm",
- "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "stacks-codec"
-version = "3.16.0"
-dependencies = [
- "clarity",
- "serde",
- "stacks-common",
-]
+version = "0.1.0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
 
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=cecca4ac19cdc836c8f806dae0c63a90f0087fb9#cecca4ac19cdc836c8f806dae0c63a90f0087fb9"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4235,6 +4261,7 @@ dependencies = [
  "slog",
  "slog-json",
  "slog-term",
+ "stacks-codec",
  "thiserror 1.0.69",
  "toml",
  "winapi 0.3.9",
@@ -4300,7 +4327,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=cecca4ac19cdc836c8f806dae0c63a90f0087fb9#cecca4ac19cdc836c8f806dae0c63a90f0087fb9"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=549b39f8ede50bf504c25ff1a31fe01e647cfedd#549b39f8ede50bf504c25ff1a31fe01e647cfedd"
 dependencies = [
  "clarity",
  "ed25519-dalek",
@@ -4437,7 +4464,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4446,7 +4473,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4592,6 +4619,18 @@ checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "tiny_http"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "389915df6413a2e74fb181895f933386023c71110878cd0825588928e64cdc82"
+dependencies = [
+ "ascii",
+ "chunked_transfer",
+ "httpdate",
+ "log",
 ]
 
 [[package]]
@@ -5229,7 +5268,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

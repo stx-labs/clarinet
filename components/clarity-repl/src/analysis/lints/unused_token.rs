@@ -119,7 +119,8 @@ impl Lint for UnusedToken<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
+    use clarity::vm::ClarityName;
     use indoc::{formatdoc, indoc};
 
     use super::UnusedToken;
@@ -168,7 +169,8 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        let expected_message = UnusedToken::make_diagnostic_message_ft(&ft_name.into());
+        let expected_message =
+            UnusedToken::make_diagnostic_message_ft(&ClarityName::try_from(ft_name).unwrap());
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
@@ -252,7 +254,8 @@ mod tests {
 
         let (output, result) = run_snippet(snippet);
 
-        let expected_message = UnusedToken::make_diagnostic_message_nft(&nft_name.into());
+        let expected_message =
+            UnusedToken::make_diagnostic_message_nft(&ClarityName::try_from(nft_name).unwrap());
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

@@ -28,7 +28,7 @@ pub struct LetBinding<'a> {
 // we may need a default value for some expressions. This can be used for a
 // missing `ClarityName`.
 pub static DEFAULT_NAME: LazyLock<ClarityName> =
-    LazyLock::new(|| ClarityName::from("placeholder__"));
+    LazyLock::new(|| ClarityName::from_literal("placeholder__"));
 pub static DEFAULT_EXPR: LazyLock<SymbolicExpression> =
     LazyLock::new(|| SymbolicExpression::atom(DEFAULT_NAME.clone()));
 

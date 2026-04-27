@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use clarity_types::diagnostic::Level as ClarityDiagnosticLevel;
+use clarity::vm::diagnostic::Level as ClarityDiagnosticLevel;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -217,7 +217,7 @@ impl TryFrom<String> for LintGroup {
     }
 }
 
-/// Map user intput to `clarity_types::diagnostic::Level` or ignore
+/// Map user input to `clarity::vm::diagnostic::Level` or ignore
 #[derive(Debug, Default, PartialEq, Copy, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]

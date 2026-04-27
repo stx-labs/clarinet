@@ -130,7 +130,8 @@ impl Lint for CaseBinding<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseBinding;
@@ -202,7 +203,7 @@ mod tests {
 
         let binding_name = "my_var";
         let expected_message = CaseBinding::make_diagnostic_message(
-            &binding_name.into(),
+            &ClarityName::try_from(binding_name).unwrap(),
             &CaseError::IllegalCharacter(b'_'),
         );
 
@@ -224,7 +225,7 @@ mod tests {
 
         let arg_name = "Amount";
         let expected_message = CaseBinding::make_diagnostic_message(
-            &arg_name.into(),
+            &ClarityName::try_from(arg_name).unwrap(),
             &CaseError::IllegalCharacter(b'A'),
         );
 
@@ -247,7 +248,7 @@ mod tests {
 
         let binding_name = "my--var";
         let expected_message = CaseBinding::make_diagnostic_message(
-            &binding_name.into(),
+            &ClarityName::try_from(binding_name).unwrap(),
             &CaseError::ConsecutiveHyphens,
         );
 

@@ -7,11 +7,11 @@ use std::sync::LazyLock;
 use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::types::StacksEpochId;
 pub use clarity::vm::analysis::types::ContractAnalysis;
+use clarity::vm::analysis::RuntimeCheckErrorKind;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::representations::{SymbolicExpression, TraitDefinition};
 use clarity::vm::types::{FunctionSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpressionType};
-use clarity_types::errors::analysis::RuntimeCheckErrorKind;
 use clarity_types::types::signatures::CallableSubtype;
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceSubtype, TraitIdentifier, TypeSignature,
@@ -21,7 +21,8 @@ use clarity_types::types::{
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 
-pub static DEFAULT_NAME: LazyLock<ClarityName> = LazyLock::new(|| ClarityName::from("placeholder"));
+pub static DEFAULT_NAME: LazyLock<ClarityName> =
+    LazyLock::new(|| ClarityName::from_literal("placeholder"));
 
 pub struct ASTDependencyDetector<'a> {
     dependencies: BTreeMap<QualifiedContractIdentifier, DependencySet>,

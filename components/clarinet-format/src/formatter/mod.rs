@@ -1193,7 +1193,7 @@ impl<'a> Aggregator<'a> {
     fn is_list_type_signature(&self, exprs: &[PreSymbolicExpression]) -> bool {
         // the 1st item is a different type than the 2nd
         exprs.len() >= 3
-            && exprs[0].match_atom() == Some(&clarity::vm::ClarityName::from("list"))
+            && exprs[0].match_atom() == Some(&clarity::vm::ClarityName::from_literal("list"))
             && self.is_integer_expr(&exprs[1])
             && !self.is_integer_expr(&exprs[2])
     }

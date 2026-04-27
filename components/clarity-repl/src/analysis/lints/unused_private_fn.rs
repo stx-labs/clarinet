@@ -122,7 +122,8 @@ impl Lint for UnusedPrivateFn<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::Level;
+    use clarity::vm::diagnostic::Level;
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::UnusedPrivateFn;
@@ -225,7 +226,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let fn_name = "square-plus-one";
-        let (expected_message, _) = UnusedPrivateFn::make_diagnostic_strings(&fn_name.into());
+        let (expected_message, _) =
+            UnusedPrivateFn::make_diagnostic_strings(&ClarityName::try_from(fn_name).unwrap());
 
         // Only square-plus-one should warn; square is "used" by square-plus-one
         assert_eq!(result.lint_diagnostics.len(), 1);
@@ -267,7 +269,8 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let fn_name = "square";
-        let (expected_message, _) = UnusedPrivateFn::make_diagnostic_strings(&fn_name.into());
+        let (expected_message, _) =
+            UnusedPrivateFn::make_diagnostic_strings(&ClarityName::try_from(fn_name).unwrap());
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));

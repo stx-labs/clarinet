@@ -12,6 +12,7 @@ use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::ast::{build_ast, ContractAST};
+use clarity::vm::costs::ExecutionCost;
 use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
@@ -22,7 +23,6 @@ use clarity_repl::repl::session::AnnotatedExecutionResult;
 use clarity_repl::repl::{ContractDeployer, Session};
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
-use clarity_types::execution_cost::ExecutionCost;
 use ls_types::{
     CompletionItem, Diagnostic as LspDiagnostic, DiagnosticSeverity, DiagnosticTag, DocumentSymbol,
     Hover, Location, MessageType, Position, Range, SignatureHelp,

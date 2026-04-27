@@ -560,8 +560,11 @@ pub fn extract_watch_variable<'a>(
         }
         3 => {
             let contract_id = if parts[0].is_empty() {
+                let contract_name = ContractName::try_from(parts[1]).map_err(|_| {
+                    format!("unable to parse watchpoint contract identifier: invalid contract name `{}`", parts[1])
+                })?;
                 if let Some(sender) = default_sender {
-                    QualifiedContractIdentifier::new(sender.clone(), ContractName::from(parts[1]))
+                    QualifiedContractIdentifier::new(sender.clone(), contract_name)
                 } else {
                     QualifiedContractIdentifier::new(
                         invoke_ctx
@@ -569,7 +572,7 @@ pub fn extract_watch_variable<'a>(
                             .contract_identifier
                             .issuer
                             .clone(),
-                        ContractName::from(parts[1]),
+                        contract_name,
                     )
                 }
             } else {

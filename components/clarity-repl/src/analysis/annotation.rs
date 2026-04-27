@@ -71,8 +71,9 @@ impl std::str::FromStr for AnnotationKind {
                     let params: Vec<ClarityName> = value
                         .split(',')
                         .filter(|s| !s.is_empty())
-                        .map(|s| ClarityName::from(s.trim()))
-                        .collect();
+                        .map(|s| ClarityName::try_from(s.trim()))
+                        .collect::<Result<_, _>>()
+                        .map_err(|e| format!("invalid filter name: {e:?}"))?;
                     if params.is_empty() {
                         Err("missing value for 'filter' annotation".to_string())
                     } else {

@@ -284,13 +284,23 @@ impl CLIDebugger {
                             return;
                         }
                         if contract_parts[0].is_empty() {
+                            let Ok(contract_name) = ContractName::try_from(contract_parts[1])
+                            else {
+                                println!(
+                                    "{} invalid contract name: {}",
+                                    red!("error:"),
+                                    contract_parts[1]
+                                );
+                                print_help_breakpoint();
+                                return;
+                            };
                             QualifiedContractIdentifier::new(
                                 invoke_ctx
                                     .contract_context
                                     .contract_identifier
                                     .issuer
                                     .clone(),
-                                ContractName::from(contract_parts[1]),
+                                contract_name,
                             )
                         } else {
                             match QualifiedContractIdentifier::parse(parts[0]) {
@@ -354,13 +364,22 @@ impl CLIDebugger {
                         ),
                         3 => {
                             let contract_id = if parts[0].is_empty() {
+                                let Ok(contract_name) = ContractName::try_from(parts[1]) else {
+                                    println!(
+                                        "{} invalid contract name: {}",
+                                        red!("error:"),
+                                        parts[1]
+                                    );
+                                    print_help_breakpoint();
+                                    return;
+                                };
                                 QualifiedContractIdentifier::new(
                                     invoke_ctx
                                         .contract_context
                                         .contract_identifier
                                         .issuer
                                         .clone(),
-                                    ContractName::from(parts[1]),
+                                    contract_name,
                                 )
                             } else {
                                 match QualifiedContractIdentifier::parse(

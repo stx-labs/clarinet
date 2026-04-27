@@ -113,7 +113,8 @@ impl Lint for CaseDataVar<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity_types::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseDataVar;
@@ -168,7 +169,7 @@ mod tests {
 
         let var_name = "total_supply";
         let expected_message = CaseDataVar::make_diagnostic_message(
-            &var_name.into(),
+            &ClarityName::try_from(var_name).unwrap(),
             &CaseError::IllegalCharacter(b'_'),
         );
 
@@ -189,7 +190,7 @@ mod tests {
 
         let var_name = "COUNTER";
         let expected_message = CaseDataVar::make_diagnostic_message(
-            &var_name.into(),
+            &ClarityName::try_from(var_name).unwrap(),
             &CaseError::IllegalCharacter(b'C'),
         );
 
@@ -210,7 +211,7 @@ mod tests {
 
         let var_name = "totalSupply";
         let expected_message = CaseDataVar::make_diagnostic_message(
-            &var_name.into(),
+            &ClarityName::try_from(var_name).unwrap(),
             &CaseError::IllegalCharacter(b'S'),
         );
 
@@ -230,8 +231,10 @@ mod tests {
         let (output, result) = run_snippet(snippet);
 
         let var_name = "total--supply";
-        let expected_message =
-            CaseDataVar::make_diagnostic_message(&var_name.into(), &CaseError::ConsecutiveHyphens);
+        let expected_message = CaseDataVar::make_diagnostic_message(
+            &ClarityName::try_from(var_name).unwrap(),
+            &CaseError::ConsecutiveHyphens,
+        );
 
         assert_eq!(result.lint_diagnostics.len(), 1);
         assert!(output[0].contains("warning["));
