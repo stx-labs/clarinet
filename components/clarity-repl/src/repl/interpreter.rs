@@ -18,13 +18,13 @@ use clarity::vm::events::*;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
 use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{
-    eval, eval_all, ClarityName, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
+    eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
     EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult,
 };
 use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
-use clarity_types::{ContractName, Value};
+use clarity_types::Value;
 
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
@@ -1041,8 +1041,9 @@ mod tests {
     use clarity::types::chainstate::StacksAddress;
     use clarity::types::Address;
     use clarity::util::hash::hex_bytes;
-    use clarity::vm::{self, ClarityVersion};
+    use clarity::vm::{self, ClarityName, ClarityVersion};
     use clarity_types::types::TupleData;
+    use clarity_types::ContractName;
     use indoc::{formatdoc, indoc};
 
     use super::*;

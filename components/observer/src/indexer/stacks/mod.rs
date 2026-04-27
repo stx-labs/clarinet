@@ -695,7 +695,7 @@ pub fn standardize_stacks_marshalled_stackerdb_chunks(
 #[cfg(feature = "stacks-signers")]
 pub fn standardize_stacks_stackerdb_chunks(
     stackerdb_chunks: &NewStackerDbChunks,
-    _ctx: &Context,
+    ctx: &Context,
 ) -> Result<Vec<StacksStackerDbChunk>, String> {
     use libsigner::v0::messages::{BlockResponse, RejectCode, SignerMessage};
     use stackslib::net::api::postblock_proposal::ValidateRejectCode;
@@ -832,7 +832,16 @@ pub fn standardize_stacks_stackerdb_chunks(
             }),
             // Newer protocol variants (StateMachineUpdate, BlockPreCommit) are not yet
             // exposed to downstream consumers; drop the slot rather than fail the batch.
-            _ => continue,
+            other => {
+                ctx.try_log(|logger| {
+                    slog::warn!(
+                        logger,
+                        "skipping unhandled SignerMessage variant: {:?}",
+                        std::mem::discriminant(&other)
+                    )
+                });
+                continue;
+            }
         };
         parsed_chunks.push(StacksStackerDbChunk {
             contract: contract_id.clone(),

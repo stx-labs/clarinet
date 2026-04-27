@@ -2182,6 +2182,23 @@ mod tests {
             "S1G2081040G2081040G2081040G208105NK8PE5.contract.ctb",
         )
         .is_ok());
+
+        // Invalid asset names: ClarityName must start with a letter and only
+        // contain `[a-zA-Z0-9-_!?+<>=/*]`
+        assert_eq!(
+            Err(AssetIdentifierParseError::InvalidAssetName),
+            Session::parse_asset_identifier(
+                "",
+                "S1G2081040G2081040G2081040G208105NK8PE5.contract.1starts-with-digit",
+            )
+        );
+        assert_eq!(
+            Err(AssetIdentifierParseError::InvalidAssetName),
+            Session::parse_asset_identifier(
+                "",
+                "S1G2081040G2081040G2081040G208105NK8PE5.contract.bad@char",
+            )
+        );
     }
 
     #[test]
