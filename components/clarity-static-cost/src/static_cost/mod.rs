@@ -14,12 +14,12 @@ use clarity::vm::representations::ClarityName;
 use clarity::vm::{ClarityVersion, Value};
 use clarity_types::representations::SymbolicExpression;
 pub use cost_analysis::{
-    build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_source,
-    static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode, CostExprNode, StaticCost,
-    SummingExecutionCost, UserArgumentsContext,
+    build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_options,
+    static_cost_from_ast_with_source, static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode,
+    CostExprNode, StaticCost, StaticCostResult, SummingExecutionCost, UserArgumentsContext,
 };
 pub use cost_functions::ClarityCostFunctionExt;
-pub use error::StaticCostError;
+pub use error::{CostWarning, CostWarningKind, StaticCostError};
 pub use special_costs::get_cost_for_special_function;
 use stacks_common::types::StacksEpochId;
 pub use trait_counter::{

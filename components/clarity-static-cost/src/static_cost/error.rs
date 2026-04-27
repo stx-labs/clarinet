@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug, thiserror::Error)]
 pub enum StaticCostError {
     /// The contract's Clarity source could not be parsed into an AST.
@@ -23,4 +25,42 @@ pub enum StaticCostError {
     /// A cost function evaluation failed.
     #[error("cost calculation failed: {0}")]
     CostCalculation(String),
+}
+
+/// A warning emitted during static cost analysis when the analysis is
+/// incomplete — e.g. a trait-based `contract-call?` whose target cost
+/// cannot be resolved statically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CostWarning {
+    pub function_name: String,
+    pub kind: CostWarningKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CostWarningKind {
+    /// A `contract-call?` targets a trait parameter whose implementing
+    /// contract is unknown, so the cost of the called function is not
+    /// included in the estimate.
+    UnresolvedTraitCall {
+        /// The variable name used as the contract target (e.g. `pool-trait`).
+        target_variable: String,
+        /// The function being called on the trait (e.g. `get-active-bin-id`).
+        called_function: String,
+    },
+}
+
+impl fmt::Display for CostWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            CostWarningKind::UnresolvedTraitCall {
+                target_variable,
+                called_function,
+            } => write!(
+                f,
+                "{}: contract-call? to trait parameter `{}` function `{}` \
+                 has unresolved cost (target contract unknown)",
+                self.function_name, target_variable, called_function,
+            ),
+        }
+    }
 }

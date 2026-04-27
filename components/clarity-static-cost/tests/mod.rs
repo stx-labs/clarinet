@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -10,9 +11,9 @@ use clarity::vm::types::{
 };
 use clarity::vm::{ast, ClarityVersion, ContractName};
 use clarity_static_cost::static_cost::{
-    build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_source,
-    static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode, CostExprNode,
-    UserArgumentsContext,
+    build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_options,
+    static_cost_from_ast_with_source, static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode,
+    CostExprNode, UserArgumentsContext,
 };
 use indoc::indoc;
 #[cfg(test)]
@@ -76,12 +77,17 @@ fn test_build_cost_analysis_tree_function_definition() {
         clarity_version,
         |env, invoke_ctx| {
             let function_defs = std::collections::HashMap::new();
+            let trait_impls = std::collections::HashMap::new();
+            let warnings = RefCell::new(Vec::new());
             let ctx = AnalysisContext {
                 cost_map: &cost_map,
                 function_defs: &function_defs,
                 clarity_version: &clarity_version,
                 epoch,
                 invoke_ctx,
+                trait_implementations: &trait_impls,
+                warnings: &warnings,
+                current_function: None,
             };
             build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)
         },
@@ -120,15 +126,15 @@ fn test_let_cost() {
     let db = memory_store.as_clarity_db();
     let mut owned_env = OwnedEnvironment::new(db, epoch);
 
-    let function_map = with_cost_analysis_environment(
+    let result = with_cost_analysis_environment(
         &mut owned_env,
         &contract_id,
         clarity_version,
         |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
     )
     .unwrap();
-    let (let_cost, _) = function_map.get("let").unwrap();
-    let (let2_cost, _) = function_map.get("let2").unwrap();
+    let (let_cost, _) = result.costs.get("let").unwrap();
+    let (let2_cost, _) = result.costs.get("let2").unwrap();
     assert_ne!(let2_cost.min.runtime, let_cost.min.runtime);
 }
 
@@ -163,7 +169,7 @@ fn test_dependent_function_calls() {
     let db = memory_store.as_clarity_db();
     let mut owned_env = OwnedEnvironment::new(db, epoch);
 
-    let function_map = with_cost_analysis_environment(
+    let result = with_cost_analysis_environment(
         &mut owned_env,
         &contract_id,
         clarity_version,
@@ -171,8 +177,8 @@ fn test_dependent_function_calls() {
     )
     .unwrap();
 
-    let (add_one_cost, _) = function_map.get("add-one").unwrap();
-    let (somefunc_cost, _) = function_map.get("somefunc").unwrap();
+    let (add_one_cost, _) = result.costs.get("add-one").unwrap();
+    let (somefunc_cost, _) = result.costs.get("somefunc").unwrap();
 
     assert!(add_one_cost.min.runtime >= somefunc_cost.min.runtime);
     assert!(add_one_cost.max.runtime >= somefunc_cost.max.runtime);
@@ -201,11 +207,20 @@ fn test_get_trait_count_direct() {
     let db = memory_store.as_clarity_db();
     let mut owned_env = OwnedEnvironment::new(db, epoch);
 
-    let costs = with_cost_analysis_environment(
+    let (costs, _warnings) = with_cost_analysis_environment(
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_tree_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_tree_from_ast(
+                &ast,
+                &clarity_version,
+                epoch,
+                &HashMap::new(),
+                env,
+                invoke_ctx,
+            )
+        },
     )
     .unwrap();
 
@@ -247,7 +262,7 @@ fn test_trait_counting() {
     let mut memory_store = MemoryBackingStore::new();
     let db = memory_store.as_clarity_db();
     let mut owned_env = OwnedEnvironment::new(db, epoch);
-    let static_cost = with_cost_analysis_environment(
+    let result = with_cost_analysis_environment(
         &mut owned_env,
         &contract_id,
         ClarityVersion::Clarity3,
@@ -257,12 +272,12 @@ fn test_trait_counting() {
     )
     .unwrap();
 
-    let send_trait_count_map = static_cost.get("send").unwrap().1.clone().unwrap();
+    let send_trait_count_map = result.costs.get("send").unwrap().1.clone().unwrap();
     let send_trait_count = send_trait_count_map.get("send").unwrap();
     assert_eq!(send_trait_count.0, 1);
     assert_eq!(send_trait_count.1, 1);
 
-    let something_trait_count_map = static_cost.get("something").unwrap().1.clone().unwrap();
+    let something_trait_count_map = result.costs.get("something").unwrap().1.clone().unwrap();
     let something_trait_count = something_trait_count_map.get("something").unwrap();
     assert_eq!(something_trait_count.0, 0);
     assert_eq!(something_trait_count.1, 10);
@@ -365,7 +380,7 @@ fn test_pox_4_costs() {
     let mut memory_store = MemoryBackingStore::new();
     let db = memory_store.as_clarity_db();
     let mut owned_env = OwnedEnvironment::new(db, epoch);
-    let cost_map = with_cost_analysis_environment(
+    let result = with_cost_analysis_environment(
         &mut owned_env,
         &contract_id,
         clarity_version,
@@ -386,12 +401,13 @@ fn test_pox_4_costs() {
 
     for function_name in key_functions {
         assert!(
-            cost_map.contains_key(function_name),
+            result.costs.contains_key(function_name),
             "Expected function '{}' to be present in cost map",
             function_name
         );
 
-        let (_cost, _trait_count) = cost_map
+        let (_cost, _trait_count) = result
+            .costs
             .get(function_name)
             .unwrap_or_else(|| panic!("Failed to get cost for function '{}'", function_name));
     }
@@ -511,6 +527,7 @@ fn run_cost_analysis_test(
     .expect("Failed to get static cost analysis");
 
     let (static_cost, _) = static_cost_map
+        .costs
         .get(function_name)
         .unwrap_or_else(|| panic!("Function '{}' not found in static cost map", function_name));
 
@@ -519,11 +536,20 @@ fn run_cost_analysis_test(
     println!("dynamic cost: {:?}", dynamic_cost);
 
     // Get the cost tree to debug and print it with values
-    let cost_trees_with_traits = with_cost_analysis_environment(
+    let (cost_trees_with_traits, _warnings) = with_cost_analysis_environment(
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_tree_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_tree_from_ast(
+                &ast,
+                &clarity_version,
+                epoch,
+                &HashMap::new(),
+                env,
+                invoke_ctx,
+            )
+        },
     )
     .expect("Failed to get static cost tree");
     if let Some((cost_tree, _)) = cost_trees_with_traits.get(function_name) {
@@ -1289,6 +1315,7 @@ fn test_contract_call_includes_callee_cost() {
     let _ = owned_env.commit();
 
     let (static_cost, _) = static_cost_map
+        .costs
         .get("call-counter")
         .expect("call-counter not found in static cost map");
 
@@ -1378,6 +1405,7 @@ fn test_trait_counts_simplified() {
     .expect("Failed to get static cost analysis");
 
     let trait_count = static_cost_map
+        .costs
         .values()
         .next()
         .and_then(|(_, trait_count)| trait_count.clone());
@@ -1449,6 +1477,7 @@ fn test_trait_counts_let_bound_variable() {
     .expect("Failed to get static cost analysis");
 
     let trait_count = static_cost_map
+        .costs
         .values()
         .next()
         .and_then(|(_, trait_count)| trait_count.clone());
@@ -1648,6 +1677,7 @@ fn test_trait_counts_for_gl_contract() {
     .expect("Failed to get static cost analysis");
 
     let trait_count = static_cost_map
+        .costs
         .values()
         .next()
         .and_then(|(_, trait_count)| trait_count.clone());
@@ -1706,4 +1736,301 @@ fn test_empty_list_in_expression_does_not_panic() {
 
     // Should complete without panicking
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result.err());
+}
+
+use clarity_static_cost::static_cost::{CostWarning, CostWarningKind};
+
+/// Test that a contract with trait-based contract-call? whose target cannot be
+/// resolved emits an UnresolvedTraitCall warning.
+#[test]
+fn test_unresolved_trait_call_emits_warning() {
+    let src = indoc! {r#"
+        (define-trait pool-trait (
+            (get-balance (principal) (response uint uint))
+        ))
+
+        (define-public (check-balance (pool <pool-trait>) (who principal))
+            (contract-call? pool get-balance who)
+        )
+    "#};
+
+    let contract_id = QualifiedContractIdentifier::transient();
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+    let ast =
+        clarity::vm::ast::build_ast(&contract_id, src, &mut (), clarity_version, epoch).unwrap();
+
+    let mut memory_store = MemoryBackingStore::new();
+    let db = memory_store.as_clarity_db();
+    let mut owned_env = OwnedEnvironment::new(db, epoch);
+
+    let result = with_cost_analysis_environment(
+        &mut owned_env,
+        &contract_id,
+        clarity_version,
+        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+    )
+    .expect("static cost analysis should succeed");
+
+    // Should have at least one warning about the unresolved trait call
+    assert!(
+        !result.warnings.is_empty(),
+        "Expected warnings for unresolved trait-based contract-call?, got none"
+    );
+
+    let warning = &result.warnings[0];
+    assert_eq!(warning.function_name, "check-balance");
+    assert_eq!(
+        warning.kind,
+        CostWarningKind::UnresolvedTraitCall {
+            target_variable: "pool".to_string(),
+            called_function: "get-balance".to_string(),
+        }
+    );
+}
+
+/// Test that a fold over a function containing an unresolved trait call
+/// emits a warning. This mimics the DLMM router pattern.
+#[test]
+fn test_fold_with_trait_call_emits_warning() {
+    let src = indoc! {r#"
+        (define-trait pool-trait (
+            (swap (uint) (response {in: uint, out: uint} uint))
+        ))
+
+        (define-private (swap-step
+            (bin-id int)
+            (acc (response {pool: <pool-trait>, amount: uint, total: uint} uint))
+        )
+            (let (
+                (data (unwrap! acc (err u1)))
+                (pool (get pool data))
+                (amount (get amount data))
+            )
+                (if (> amount u0)
+                    (let ((result (try! (contract-call? pool swap amount))))
+                        (ok {pool: pool, amount: (- amount (get in result)), total: (+ (get total data) (get out result))}))
+                    (ok data))
+            )
+        )
+
+        (define-constant BIN_RANGE (list 0 1 2 3 4 5 6 7 8 9))
+
+        (define-public (swap-multi
+            (pool <pool-trait>)
+            (amount uint)
+        )
+            (let (
+                (result (try! (fold swap-step BIN_RANGE (ok {pool: pool, amount: amount, total: u0}))))
+            )
+                (ok (get total result))
+            )
+        )
+    "#};
+
+    let contract_id = QualifiedContractIdentifier::transient();
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+    let ast =
+        clarity::vm::ast::build_ast(&contract_id, src, &mut (), clarity_version, epoch).unwrap();
+
+    let mut memory_store = MemoryBackingStore::new();
+    let db = memory_store.as_clarity_db();
+    let mut owned_env = OwnedEnvironment::new(db, epoch);
+
+    let result = with_cost_analysis_environment(
+        &mut owned_env,
+        &contract_id,
+        clarity_version,
+        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+    )
+    .expect("static cost analysis should succeed");
+
+    // The swap-step function has a trait-based contract-call? that can't be resolved
+    let swap_step_warnings: Vec<&CostWarning> = result
+        .warnings
+        .iter()
+        .filter(|w| w.function_name == "swap-step")
+        .collect();
+
+    assert!(
+        !swap_step_warnings.is_empty(),
+        "Expected warnings for swap-step's unresolved trait call, got none. All warnings: {:?}",
+        result.warnings
+    );
+
+    assert_eq!(
+        swap_step_warnings[0].kind,
+        CostWarningKind::UnresolvedTraitCall {
+            target_variable: "pool".to_string(),
+            called_function: "swap".to_string(),
+        }
+    );
+}
+
+/// Test that providing trait implementations resolves the cost and produces
+/// no warnings for the resolved calls.
+#[test]
+fn test_trait_resolution_with_implementations() {
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+
+    // The "pool" contract that implements the trait
+    let pool_src = indoc! {r#"
+        (define-data-var balance uint u1000)
+
+        (define-public (get-balance (who principal))
+            (ok (var-get balance))
+        )
+    "#};
+
+    // The contract that calls via a trait
+    let caller_src = indoc! {r#"
+        (define-trait pool-trait (
+            (get-balance (principal) (response uint uint))
+        ))
+
+        (define-public (check-balance (pool <pool-trait>) (who principal))
+            (contract-call? pool get-balance who)
+        )
+    "#};
+
+    let deployer = StandardPrincipalData::transient();
+    let pool_id = QualifiedContractIdentifier::new(deployer.clone(), "pool".into());
+    let caller_id = QualifiedContractIdentifier::new(deployer, "caller".into());
+
+    // Set up environment with deployed contracts
+    let mut memory_store = MemoryBackingStore::new();
+    let mut db = memory_store.as_clarity_db();
+    db.begin();
+    db.set_clarity_epoch_version(epoch).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.set_tenure_height(1).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.setup_block_metadata(Some(1)).unwrap();
+    db.commit().unwrap();
+
+    let costs_contract_id = boot_code_id("costs", false);
+    let costs_4_contract_id = boot_code_id("costs-4", false);
+    let cost_voting_contract_id = boot_code_id("cost-voting", false);
+    {
+        let mut temp_env = OwnedEnvironment::new(db, epoch);
+        temp_env
+            .initialize_versioned_contract(
+                costs_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS,
+                None,
+            )
+            .expect("Failed to initialize costs contract");
+        temp_env
+            .initialize_versioned_contract(
+                costs_4_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS_4,
+                None,
+            )
+            .expect("Failed to initialize costs-4 contract");
+        temp_env
+            .initialize_versioned_contract(
+                cost_voting_contract_id,
+                clarity_version,
+                &BOOT_CODE_COST_VOTING_TESTNET.to_string(),
+                None,
+            )
+            .expect("Failed to initialize cost-voting contract");
+        let (extracted_db, _) = temp_env.destruct().unwrap();
+        db = extracted_db;
+    }
+
+    let mut owned_env = OwnedEnvironment::new_max_limit(db, epoch, false);
+
+    // Deploy pool contract first, then caller
+    owned_env
+        .initialize_versioned_contract(pool_id.clone(), clarity_version, pool_src, None)
+        .expect("Failed to deploy pool contract");
+    owned_env
+        .initialize_versioned_contract(caller_id.clone(), clarity_version, caller_src, None)
+        .expect("Failed to deploy caller contract");
+
+    // First: analyze WITHOUT trait implementations — should get warnings
+    let caller_ast = ast::build_ast(&caller_id, caller_src, &mut (), clarity_version, epoch)
+        .expect("Failed to build caller AST");
+    owned_env.begin();
+    let result_no_impls = {
+        let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
+        let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
+        static_cost_from_ast_with_source(
+            &caller_ast,
+            &clarity_version,
+            epoch,
+            Some(caller_src),
+            &mut env,
+            &invoke_ctx,
+        )
+        .expect("Failed to get static cost analysis")
+    };
+    let _ = owned_env.commit();
+
+    assert!(
+        !result_no_impls.warnings.is_empty(),
+        "Expected warnings without trait implementations"
+    );
+
+    // Second: analyze WITH trait implementations — should resolve and no warnings
+    let mut trait_impls: HashMap<String, Vec<QualifiedContractIdentifier>> = HashMap::new();
+    trait_impls.insert("pool-trait".to_string(), vec![pool_id.clone()]);
+
+    owned_env.begin();
+    let result_with_impls = {
+        let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
+        let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
+        static_cost_from_ast_with_options(
+            &caller_ast,
+            &clarity_version,
+            epoch,
+            Some(caller_src),
+            &trait_impls,
+            &mut env,
+            &invoke_ctx,
+        )
+        .expect("Failed to get static cost analysis with trait implementations")
+    };
+    let _ = owned_env.commit();
+
+    assert!(
+        result_with_impls.warnings.is_empty(),
+        "Expected no warnings with trait implementations, got: {:?}",
+        result_with_impls.warnings
+    );
+
+    // The resolved cost should be higher than the unresolved one (which had zero cost
+    // for the trait call)
+    let (cost_no_impls, _) = result_no_impls
+        .costs
+        .get("check-balance")
+        .expect("check-balance not found");
+    let (cost_with_impls, _) = result_with_impls
+        .costs
+        .get("check-balance")
+        .expect("check-balance not found");
+
+    println!("Cost without trait impl: {:?}", cost_no_impls);
+    println!("Cost with trait impl: {:?}", cost_with_impls);
+
+    assert!(
+        cost_with_impls.max.runtime > cost_no_impls.max.runtime,
+        "Resolved cost ({}) should be higher than unresolved cost ({}) due to callee function cost",
+        cost_with_impls.max.runtime,
+        cost_no_impls.max.runtime
+    );
+
+    assert!(
+        cost_with_impls.max.read_count > cost_no_impls.max.read_count,
+        "Resolved read_count ({}) should be higher than unresolved ({})",
+        cost_with_impls.max.read_count,
+        cost_no_impls.max.read_count
+    );
 }
