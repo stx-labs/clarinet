@@ -1279,6 +1279,7 @@ impl DeploymentSpecification {
                 let source = match transaction {
                     TransactionSpecification::EmulatedContractPublish(spec) => &mut spec.source,
                     TransactionSpecification::ContractPublish(spec) => &mut spec.source,
+                    TransactionSpecification::RequirementPublish(spec) => &mut spec.source,
                     _ => continue,
                 };
                 if let Some(clean) = remove_env_simnet(source)? {
