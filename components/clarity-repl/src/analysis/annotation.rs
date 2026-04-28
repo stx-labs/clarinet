@@ -40,9 +40,14 @@ impl std::str::FromStr for AnnotationKind {
                 let params: Vec<WarningKind> = value
                     .unwrap_or("")
                     .split(',')
+                    .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
+                    .map(|s| {
+                        s.parse().map_err(|_| {
+                            format!("unknown warning kind '{s}' in 'allow' annotation")
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
                 if params.is_empty() {
                     Err("missing value for 'allow' annotation".to_string())
                 } else {
@@ -178,6 +183,20 @@ mod tests {
             }
             _ => panic!("failed to parse multiple allow annotation correctly"),
         };
+    }
+
+    #[test]
+    fn parse_allow_rejects_unknown_warning_kind() {
+        // If the user includes an unknown warning kind alongside a valid one,
+        // parsing should fail rather than silently dropping the unknown name and
+        // accepting only the recognized parts. Today the `filter_map(.. .ok())`
+        // in the `allow` arm hides the typo.
+        let result = "#[allow(unused_const, not_a_real_warning)]".parse::<AnnotationKind>();
+        assert!(
+            result.is_err(),
+            "expected Err for unknown warning kind, got {result:?} \
+             (the unknown kind 'not_a_real_warning' was silently dropped)"
+        );
     }
 
     #[test]
