@@ -42,8 +42,7 @@ impl std::str::FromStr for AnnotationKind {
                     .split(',')
                     .filter(|s| !s.is_empty())
                     .map(|s| {
-                        let s = s.trim();
-                        s.parse().map_err(|_| {
+                        s.trim().parse().map_err(|_| {
                             format!("unknown warning kind '{s}' in 'allow' annotation")
                         })
                     })
