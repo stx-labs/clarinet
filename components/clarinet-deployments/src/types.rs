@@ -1125,7 +1125,16 @@ impl DeploymentSpecification {
                                     if matches!(network, StacksNetwork::Mainnet) {
                                         return Err(format!("{} only supports transactions of type 'contract-call' and 'contract-publish", specs.network.to_lowercase()))
                                     }
-                                    let spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
+
+                                    // Devnet/Testnet broadcast RequirementPublish on-chain;
+                                    // strip `#[env(simnet)]` from those sources too.
+                                    if let Some(stripped) = remove_env_simnet(&spec.source).map_err(|e|
+                                        format!("failed to strip #[env(simnet)] code from requirement publish source at {:?}: {e}", spec.location)
+                                    )? {
+                                        spec.source = stripped;
+                                    }
+
                                     TransactionSpecification::RequirementPublish(spec)
                                 }
                                 TransactionSpecificationFile::ContractPublish(spec) => {

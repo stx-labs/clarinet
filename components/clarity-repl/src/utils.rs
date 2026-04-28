@@ -103,9 +103,9 @@ pub fn get_env_simnet_spans(source: &str) -> Result<Vec<Span>, String> {
 }
 
 /// Strips `#[env(simnet)]`-annotated code from `source`. Returns `Ok(None)` if
-/// no annotation is found (the caller should keep the original `source`),
-/// `Ok(Some(stripped))` if annotated code was removed, or `Err` if `source`
-/// could not be parsed.
+/// no removable `#[env(simnet)]` blocks are found (the caller should keep the
+/// original `source`), `Ok(Some(stripped))` if annotated code was removed, or
+/// `Err` if `source` could not be parsed.
 pub fn remove_env_simnet(source: &str) -> Result<Option<String>, String> {
     let spans = get_env_simnet_spans(source)?;
 
