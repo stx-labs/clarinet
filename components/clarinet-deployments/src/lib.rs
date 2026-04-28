@@ -775,10 +775,12 @@ pub async fn generate_default_deployment(
             .clone();
 
         if environment == Environment::OnChain {
-            let (clean, had_annotation) =
-                remove_env_simnet(source.clone()).unwrap_or((source, false));
-            source = clean;
-            found_env_simnet |= had_annotation;
+            // Best effort: if the source can't be parsed, fall through to the
+            // analysis pass below which will surface the parse error.
+            if let Ok(Some(clean)) = remove_env_simnet(&source) {
+                source = clean;
+                found_env_simnet = true;
+            }
         }
 
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
