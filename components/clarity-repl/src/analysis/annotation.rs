@@ -37,12 +37,21 @@ impl std::str::FromStr for AnnotationKind {
 
         match name {
             "allow" => {
+                // Surface unknown warning kinds instead of silently
+                // dropping them with `filter_map(.. .ok())`. A typo
+                // like `not_a_real_warning` should be a hard error so
+                // the developer notices, not a silent allow-list miss.
                 let params: Vec<WarningKind> = value
                     .unwrap_or("")
                     .split(',')
+                    .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
+                    .map(|s| {
+                        s.parse::<WarningKind>().map_err(|_| {
+                            format!("unknown warning kind '{s}' in 'allow' annotation")
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
                 if params.is_empty() {
                     Err("missing value for 'allow' annotation".to_string())
                 } else {
@@ -231,6 +240,39 @@ mod tests {
             Ok(AnnotationKind::FilterAll) => (),
             _ => panic!("failed to parse 'filter(*)' correctly"),
         };
+    }
+
+    #[test]
+    fn parse_allow_rejects_unknown_warning_kind() {
+        // Regression for stx-labs/clarinet#2372: if the user includes
+        // an unknown warning kind alongside a valid one, parsing must
+        // fail instead of silently dropping the unknown name and
+        // accepting only the recognized parts.
+        let result = "#[allow(unused_const, not_a_real_warning)]".parse::<AnnotationKind>();
+        match result {
+            Err(msg) => assert!(
+                msg.contains("not_a_real_warning"),
+                "error message should name the unknown kind, got: {msg:?}"
+            ),
+            Ok(_) => panic!(
+                "expected Err for unknown warning kind, got Ok (the unknown kind \
+                 'not_a_real_warning' was silently dropped)"
+            ),
+        }
+    }
+
+    #[test]
+    fn parse_allow_rejects_only_unknown_warning_kind() {
+        // Single unknown kind: must error with a useful message rather
+        // than failing the empty-vec branch with a generic complaint.
+        let result = "#[allow(not_a_real_warning)]".parse::<AnnotationKind>();
+        match result {
+            Err(msg) => assert!(
+                msg.contains("not_a_real_warning"),
+                "error message should name the unknown kind, got: {msg:?}"
+            ),
+            Ok(_) => panic!("expected Err for unknown warning kind, got Ok"),
+        }
     }
 
     #[test]
