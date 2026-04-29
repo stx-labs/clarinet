@@ -1125,15 +1125,33 @@ impl DeploymentSpecification {
                                     if matches!(network, StacksNetwork::Mainnet) {
                                         return Err(format!("{} only supports transactions of type 'contract-call' and 'contract-publish", specs.network.to_lowercase()))
                                     }
-                                    let spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
+
+                                    // Devnet/Testnet broadcast RequirementPublish on-chain;
+                                    // strip `#[env(simnet)]` from those sources too.
+                                    if let Some(stripped) = remove_env_simnet(&spec.source).map_err(|e|
+                                        format!("failed to strip #[env(simnet)] code from requirement publish source at {:?}: {e}", spec.location)
+                                    )? {
+                                        spec.source = stripped;
+                                    }
+
                                     TransactionSpecification::RequirementPublish(spec)
                                 }
                                 TransactionSpecificationFile::ContractPublish(spec) => {
-                                    let spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
+
+                                    // Devnet/Testnet/Mainnet are all on-chain; strip
+                                    // `#[env(simnet)]` code from the source that gets broadcast.
+                                    // The YAML never persists `source` for ContractPublish (it
+                                    // only stores `path`), so this fires on every load.
+                                    if let Some(stripped) = remove_env_simnet(&spec.source).map_err(|e|
+                                        format!("failed to strip #[env(simnet)] code from contract publish source at {:?}: {e}", spec.location)
+                                    )? {
+                                        spec.source = stripped;
+                                    }
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    let (source, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
-                                    contracts.insert(contract_id, (source, spec.location.clone()));
+                                    contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
                                 TransactionSpecificationFile::BtcTransfer(spec) => {
@@ -1267,19 +1285,24 @@ impl DeploymentSpecification {
         let mut global_found_env_simnet = false;
         for batch in self.plan.batches.iter_mut() {
             for transaction in batch.transactions.iter_mut() {
-                if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = transaction
-                {
-                    let (clean, found_env_simnet) = remove_env_simnet(spec.source.to_string())?;
-                    spec.source = clean;
-                    global_found_env_simnet |= found_env_simnet;
+                let source = match transaction {
+                    TransactionSpecification::EmulatedContractPublish(spec) => &mut spec.source,
+                    TransactionSpecification::ContractPublish(spec) => &mut spec.source,
+                    TransactionSpecification::RequirementPublish(spec) => &mut spec.source,
+                    _ => continue,
+                };
+                if let Some(clean) = remove_env_simnet(source)? {
+                    *source = clean;
+                    global_found_env_simnet = true;
                 }
             }
         }
 
-        for (ref mut source, _) in self.contracts.values_mut() {
-            let (clean, found_env_simnet) = remove_env_simnet(source.to_string())?;
-            *source = clean;
-            global_found_env_simnet |= found_env_simnet;
+        for (source, _) in self.contracts.values_mut() {
+            if let Some(clean) = remove_env_simnet(source)? {
+                *source = clean;
+                global_found_env_simnet = true;
+            }
         }
 
         Ok(global_found_env_simnet)
