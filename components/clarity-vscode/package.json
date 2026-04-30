@@ -106,7 +106,7 @@
           },
           "clarity-lsp.documentSymbols": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "order": 0,
             "description": "Show contract symbols in breadcrumb (beta)."
           },
