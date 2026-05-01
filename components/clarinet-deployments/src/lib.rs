@@ -107,7 +107,7 @@ pub fn setup_session_with_deployment(
         success,
         session,
         analysis: contracts_analysis,
-        ast_cache_entries: HashMap::new(),
+        ast_cache_entries: None,
     }
 }
 
@@ -308,7 +308,7 @@ fn handle_emulated_contract_call(
 
 /// Hash contract source for cache validation. SHA-256 is hardware-accelerated
 /// on modern x86 (SHA-NI) and ARMv8 via the `sha2` crate's runtime dispatch.
-pub fn compute_content_hash(source: &str) -> Sha256Sum {
+pub(crate) fn compute_content_hash(source: &str) -> Sha256Sum {
     Sha256Sum::from_data(source.as_bytes())
 }
 
@@ -968,14 +968,14 @@ pub async fn generate_default_deployment_with_cache(
                             session.interpreter.build_ast(&contract);
                         contract_diags.insert(contract_id.clone(), diags.clone());
                         asts_success = asts_success && ast_success_for_contract;
-                        CachedContractAST {
-                            content_hash,
+                        CachedContractAST::new(
+                            source,
                             ast,
                             diags,
-                            ast_success: ast_success_for_contract,
+                            ast_success_for_contract,
                             clarity_version,
-                            epoch: resolved_epoch,
-                        }
+                            resolved_epoch,
+                        )
                     }
                 };
 
@@ -1153,10 +1153,9 @@ pub async fn generate_default_deployment_with_cache(
 
     // Disarm the guard (if any) — we're committed to returning Ok, so
     // the accumulated entries belong in the artifacts, not back in the
-    // caller's input cache. `None` → empty map (cache-free caller).
-    let ast_cache_entries = cache_guard
-        .map(AstCacheRestoreGuard::commit)
-        .unwrap_or_default();
+    // caller's input cache. `None` carries through for cache-free callers
+    // so they're structurally distinguishable from "opted in, zero hits".
+    let ast_cache_entries = cache_guard.map(AstCacheRestoreGuard::commit);
 
     let artifacts = DeploymentGenerationArtifacts {
         asts: contract_asts,
@@ -1620,14 +1619,14 @@ mod tests {
             skip_analysis: false,
         };
         let (ast, diags, ast_success) = session.interpreter.build_ast(&contract);
-        CachedContractAST {
-            content_hash: compute_content_hash(source),
+        CachedContractAST::new(
+            source,
             ast,
             diags,
             ast_success,
-            clarity_version: ClarityVersion::Clarity3,
-            epoch: StacksEpochId::Epoch31,
-        }
+            ClarityVersion::Clarity3,
+            StacksEpochId::Epoch31,
+        )
     }
 
     #[test]
