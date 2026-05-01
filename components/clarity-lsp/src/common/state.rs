@@ -870,11 +870,11 @@ pub async fn build_state(
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
     static_cost_analysis: bool,
-    // Passed by `&mut Option<...>` so the caller retains ownership and can
-    // restore whatever's left into `EditorState.ast_cache` if this function
-    // errors. On error we also merge any AST entries we already built in
-    // this call back into `*cached_asts`, so the caller's restore captures
-    // "untouched inputs + freshly built entries" rather than leaking them.
+    // The caller's snapshot of `EditorState.ast_cache` (a `clone()`).
+    // Per-environment iterations consume hits from this map via
+    // `AstCacheRestoreGuard` inside `generate_default_deployment_with_cache`.
+    // On any error we just drop it — the caller's original cache is
+    // untouched, so no restore step is needed.
     cached_asts: &mut Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
@@ -905,30 +905,16 @@ pub async fn build_state(
     // fully-deployed session but only cares about the last iteration's state.
     let mut final_session: Option<Session> = None;
     for environment in CHECK_ENVIRONMENTS {
-        let (deployment, mut artifacts, found_env_simnet) =
-            match generate_default_deployment_with_cache(
-                &manifest,
-                &StacksNetwork::Simnet,
-                false,
-                file_accessor,
-                None,
-                environment,
-                cached_asts.as_mut(),
-            )
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    // Entries we built before erroring (e.g. from the
-                    // prior env iteration) would otherwise be dropped here.
-                    // Hand them back to the caller via `cached_asts` so
-                    // restore-on-error is complete.
-                    if let Some(cache) = cached_asts.as_mut() {
-                        cache.extend(new_cache_entries);
-                    }
-                    return Err(e);
-                }
-            };
+        let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment_with_cache(
+            &manifest,
+            &StacksNetwork::Simnet,
+            false,
+            file_accessor,
+            None,
+            environment,
+            cached_asts.as_mut(),
+        )
+        .await?;
         global_found_env_simnet |= found_env_simnet;
 
         // Deployments already shaped the cache entries; merge them in.

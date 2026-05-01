@@ -1602,14 +1602,11 @@ mod tests {
         assert_eq!(*stx_maps.get(receiver).unwrap(), 1000);
     }
 
-    // -------- AstCacheRestoreGuard unit tests (gap B) --------
+    // -------- AstCacheRestoreGuard unit tests --------
     //
-    // The integration-level `test_ast_cache_survives_transient_build_failure`
-    // only exercises the *pre-loop* failure path, where the guard's
-    // `pending` map is empty when Drop fires. The interesting branch —
-    // "entries were built, then a post-loop `?` propagated an Err, Drop
-    // pushes them back into the input cache" — is what these unit tests
-    // cover directly.
+    // Cover the two branches directly: an uncommitted `Drop` must push
+    // `pending` back into the input cache, and `commit()` must hand the
+    // entries to the caller while leaving the input cache empty.
 
     fn fake_cached_ast() -> CachedContractAST {
         let session = Session::new(SessionSettings::default());
