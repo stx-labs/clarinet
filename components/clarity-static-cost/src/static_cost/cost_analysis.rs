@@ -669,9 +669,24 @@ fn get_contract_call_target_cost(
     };
 
     if let Some(contract_id) = contract_id {
-        let result = static_cost(env, ctx.invoke_ctx, &contract_id).ok()?;
-        let (cost, _trait_count) = result.costs.get(function_name.as_str())?;
-        return Some(cost.clone());
+        match static_cost(env, ctx.invoke_ctx, &contract_id) {
+            Ok(result) => {
+                if let Some((cost, _trait_count)) = result.costs.get(function_name.as_str()) {
+                    return Some(cost.clone());
+                }
+            }
+            Err(e) => {
+                ctx.warnings.borrow_mut().push(CostWarning {
+                    function_name: ctx.current_function.unwrap_or("<unknown>").to_string(),
+                    kind: CostWarningKind::ContractCallCostError {
+                        contract_id: contract_id.to_string(),
+                        called_function: function_name.to_string(),
+                        error: e.to_string(),
+                    },
+                });
+            }
+        }
+        return None;
     }
 
     // Try trait-based dispatch: the target is an Atom referencing a trait parameter.
@@ -720,8 +735,14 @@ fn resolve_trait_call_cost(
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
-        let result = static_cost(env, ctx.invoke_ctx, impl_contract).ok()?;
-        let (cost, _) = result.costs.get(function_name.as_str())?;
+        let result = match static_cost(env, ctx.invoke_ctx, impl_contract) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let (cost, _) = match result.costs.get(function_name.as_str()) {
+            Some(entry) => entry,
+            None => continue,
+        };
         envelope = Some(match envelope {
             None => cost.clone(),
             Some(prev) => StaticCost {

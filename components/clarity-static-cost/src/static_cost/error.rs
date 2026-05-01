@@ -47,6 +47,16 @@ pub enum CostWarningKind {
         /// The function being called on the trait (e.g. `get-active-bin-id`).
         called_function: String,
     },
+    /// A `contract-call?` targets a known contract, but computing its cost
+    /// failed (e.g. the contract source was not found or could not be parsed).
+    ContractCallCostError {
+        /// The fully-qualified contract identifier that was called.
+        contract_id: String,
+        /// The function being called.
+        called_function: String,
+        /// Description of the error.
+        error: String,
+    },
 }
 
 impl fmt::Display for CostWarning {
@@ -60,6 +70,15 @@ impl fmt::Display for CostWarning {
                 "{}: contract-call? to trait parameter `{}` function `{}` \
                  has unresolved cost (target contract unknown)",
                 self.function_name, target_variable, called_function,
+            ),
+            CostWarningKind::ContractCallCostError {
+                contract_id,
+                called_function,
+                error,
+            } => write!(
+                f,
+                "{}: contract-call? to `{}` function `{}` failed: {}",
+                self.function_name, contract_id, called_function, error,
             ),
         }
     }

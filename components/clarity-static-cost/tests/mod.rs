@@ -2078,3 +2078,149 @@ fn test_trait_resolution_with_implementations() {
         cost_no_impls.max.read_count
     );
 }
+
+/// Test that when trait implementations include a contract that is NOT deployed
+/// (i.e. `static_cost()` fails for it), the failing implementation is skipped
+/// and the valid one is still used. No unresolved-trait warning should be emitted
+/// because at least one implementation resolved successfully.
+#[test]
+fn test_trait_resolution_skips_failing_implementation() {
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+
+    let pool_src = indoc! {r#"
+        (define-data-var balance uint u1000)
+
+        (define-public (get-balance (who principal))
+            (ok (var-get balance))
+        )
+    "#};
+
+    let caller_src = indoc! {r#"
+        (define-trait pool-trait (
+            (get-balance (principal) (response uint uint))
+        ))
+
+        (define-public (check-balance (pool <pool-trait>) (who principal))
+            (contract-call? pool get-balance who)
+        )
+    "#};
+
+    let deployer = StandardPrincipalData::transient();
+    let pool_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("pool"));
+    let caller_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("caller"));
+    // A contract that is NOT deployed
+    let ghost_id = QualifiedContractIdentifier::new(deployer, ContractName::from_literal("ghost"));
+
+    let mut memory_store = MemoryBackingStore::new();
+    let mut db = memory_store.as_clarity_db();
+    db.begin();
+    db.set_clarity_epoch_version(epoch).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.set_tenure_height(1).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.setup_block_metadata(Some(1)).unwrap();
+    db.commit().unwrap();
+
+    let costs_contract_id = boot_code_id("costs", false);
+    let costs_4_contract_id = boot_code_id("costs-4", false);
+    let cost_voting_contract_id = boot_code_id("cost-voting", false);
+    {
+        let mut temp_env = OwnedEnvironment::new(db, epoch);
+        temp_env
+            .initialize_versioned_contract(
+                costs_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS,
+                None,
+            )
+            .expect("Failed to initialize costs contract");
+        temp_env
+            .initialize_versioned_contract(
+                costs_4_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS_4,
+                None,
+            )
+            .expect("Failed to initialize costs-4 contract");
+        temp_env
+            .initialize_versioned_contract(
+                cost_voting_contract_id,
+                clarity_version,
+                &BOOT_CODE_COST_VOTING_TESTNET.to_string(),
+                None,
+            )
+            .expect("Failed to initialize cost-voting contract");
+        let (extracted_db, _) = temp_env.destruct().unwrap();
+        db = extracted_db;
+    }
+
+    let mut owned_env = OwnedEnvironment::new_max_limit(db, epoch, false);
+
+    // Deploy only pool and caller — ghost is NOT deployed
+    owned_env
+        .initialize_versioned_contract(pool_id.clone(), clarity_version, pool_src, None)
+        .expect("Failed to deploy pool contract");
+    owned_env
+        .initialize_versioned_contract(caller_id.clone(), clarity_version, caller_src, None)
+        .expect("Failed to deploy caller contract");
+
+    let caller_ast = ast::build_ast(&caller_id, caller_src, &mut (), clarity_version, epoch)
+        .expect("Failed to build caller AST");
+
+    // Provide two implementations: one real (pool) and one missing (ghost)
+    let pool_trait_id = TraitIdentifier::new(
+        caller_id.issuer.clone(),
+        caller_id.name.clone(),
+        ClarityName::from_literal("pool-trait"),
+    );
+    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
+        HashMap::new();
+    trait_impls.insert(pool_trait_id, vec![pool_id.clone(), ghost_id]);
+
+    owned_env.begin();
+    let result = {
+        let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
+        let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
+        static_cost_from_ast(
+            &caller_ast,
+            &clarity_version,
+            epoch,
+            Some(&StaticCostConfig {
+                contract_source: caller_src.to_string(),
+                trait_implementations: trait_impls,
+            }),
+            &mut env,
+            &invoke_ctx,
+        )
+        .expect("Analysis should succeed even with missing implementation")
+    };
+    let _ = owned_env.commit();
+
+    // The failing implementation is skipped; the valid one (pool) still resolves,
+    // so there should be no unresolved-trait warning.
+    let unresolved_warnings: Vec<_> = result
+        .warnings
+        .iter()
+        .filter(|w| matches!(w.kind, CostWarningKind::UnresolvedTraitCall { .. }))
+        .collect();
+    assert!(
+        unresolved_warnings.is_empty(),
+        "Expected no unresolved-trait warnings when at least one implementation succeeds, got: {:?}",
+        unresolved_warnings
+    );
+
+    // The resolved cost should include the pool contract's cost
+    let (cost, _) = result
+        .costs
+        .get("check-balance")
+        .expect("check-balance not found");
+    assert!(
+        cost.max.runtime > 0,
+        "Resolved cost should be non-zero when valid implementation exists"
+    );
+}
