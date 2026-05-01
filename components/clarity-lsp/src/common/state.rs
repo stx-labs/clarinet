@@ -1101,13 +1101,17 @@ async fn get_cost_analysis(
             call_stack: &mut call_stack,
         };
 
-        // Use static_cost which returns (StaticCost, Option<TraitCount>)
-        // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
-        static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
+        let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
             clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
             let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
             VmExecutionError::Internal(VmInternalError::Expect(error_msg))
-        })
+        })?;
+
+        for warning in &result.warnings {
+            clarity_repl::uprint!("[LSP] Cost warning: {}", warning);
+        }
+
+        Ok(result.costs)
     });
 
     cost_result

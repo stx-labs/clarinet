@@ -1,5 +1,6 @@
 // Static cost analysis for Clarity contracts
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use clarity::vm::analysis::errors::SyntaxBindingErrorType;
@@ -19,12 +20,23 @@ use clarity_types::types::TraitIdentifier;
 use stacks_common::types::StacksEpochId;
 
 use super::cost_functions::ClarityCostFunctionExt;
-use super::error::StaticCostError;
+use super::error::{CostWarning, CostWarningKind, StaticCostError};
 use super::{
     calculate_function_cost, calculate_function_cost_from_native_function,
     calculate_total_cost_with_branching, calculate_value_cost, TraitCount, TraitCountCollector,
     TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
+
+/// Configuration for static cost analysis.
+#[derive(Debug, Clone)]
+pub struct StaticCostConfig {
+    /// Size of the contract source in bytes, used to compute contract-size overhead.
+    pub contract_size: u64,
+    /// Mapping from fully-qualified trait identifiers to concrete contract
+    /// implementations. Used to resolve trait-based `contract-call?` targets
+    /// during static analysis.
+    pub trait_implementations: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+}
 // TODO:
 // unwrap evaluates both branches (https://github.com/clarity-lang/reference/issues/59)
 
@@ -148,6 +160,14 @@ pub struct AnalysisContext<'a> {
     pub clarity_version: &'a ClarityVersion,
     pub epoch: StacksEpochId,
     pub invoke_ctx: &'a InvocationContext<'a>,
+    /// Mapping from fully-qualified trait identifiers to concrete contract
+    /// implementations. Used to resolve trait-based `contract-call?` targets
+    /// during static analysis.
+    pub trait_implementations: &'a HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    /// Warnings accumulated during analysis (e.g. unresolved trait calls).
+    pub warnings: &'a RefCell<Vec<CostWarning>>,
+    /// Name of the function currently being analyzed (for warning context).
+    pub current_function: Option<&'a str>,
 }
 
 /// A type to track summed execution costs for different paths
@@ -235,6 +255,14 @@ fn make_ast(
     .map_err(|e| StaticCostError::AstParse(format!("{e:?}")))
 }
 
+/// Result of static cost analysis, containing per-function costs and any
+/// warnings about incomplete analysis (e.g. unresolved trait calls).
+#[derive(Debug, Clone)]
+pub struct StaticCostResult {
+    pub costs: HashMap<String, (StaticCost, Option<TraitCount>)>,
+    pub warnings: Vec<CostWarning>,
+}
+
 /// Static execution cost for functions within Environment.
 /// Returns the static cost for each function in the contract.
 /// {some-function-name: (StaticCost, Some({some-function-name: (1,1)}))}
@@ -242,7 +270,7 @@ pub fn static_cost(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
     contract_identifier: &QualifiedContractIdentifier,
-) -> Result<HashMap<String, (StaticCost, Option<TraitCount>)>, StaticCostError> {
+) -> Result<StaticCostResult, StaticCostError> {
     let contract_source = env
         .global_context
         .database
@@ -260,11 +288,14 @@ pub fn static_cost(
     let epoch = env.global_context.epoch_id;
     let ast = make_ast(&contract_source, epoch, clarity_version)?;
 
-    static_cost_from_ast_with_source(
+    static_cost_from_ast(
         &ast,
         clarity_version,
         epoch,
-        Some(&contract_source),
+        Some(&StaticCostConfig {
+            contract_size: contract_source.len() as u64,
+            trait_implementations: HashMap::new(),
+        }),
         env,
         invoke_ctx,
     )
@@ -383,24 +414,24 @@ pub fn static_cost_from_ast(
     contract_ast: &clarity::vm::ast::ContractAST,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
+    config: Option<&StaticCostConfig>,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
-) -> Result<HashMap<String, (StaticCost, Option<TraitCount>)>, StaticCostError> {
-    static_cost_from_ast_with_source(contract_ast, clarity_version, epoch, None, env, invoke_ctx)
-}
+) -> Result<StaticCostResult, StaticCostError> {
+    let empty_impls = HashMap::new();
+    let contract_size = config.map(|c| c.contract_size);
+    let trait_implementations = config
+        .map(|c| &c.trait_implementations)
+        .unwrap_or(&empty_impls);
 
-pub fn static_cost_from_ast_with_source(
-    contract_ast: &clarity::vm::ast::ContractAST,
-    clarity_version: &ClarityVersion,
-    epoch: StacksEpochId,
-    contract_source: Option<&str>,
-    env: &mut ExecutionState,
-    invoke_ctx: &InvocationContext,
-) -> Result<HashMap<String, (StaticCost, Option<TraitCount>)>, StaticCostError> {
-    let contract_size = contract_source.map(|s| s.len() as u64);
-
-    let cost_trees_with_traits =
-        static_cost_tree_from_ast(contract_ast, clarity_version, epoch, env, invoke_ctx)?;
+    let (cost_trees_with_traits, warnings) = static_cost_tree_from_ast(
+        contract_ast,
+        clarity_version,
+        epoch,
+        trait_implementations,
+        env,
+        invoke_ctx,
+    )?;
 
     let trait_count = cost_trees_with_traits
         .values()
@@ -427,23 +458,35 @@ pub fn static_cost_from_ast_with_source(
         })
         .collect();
 
-    Ok(costs
-        .into_iter()
-        .map(|(name, cost)| (name, (cost, trait_count.clone())))
-        .collect())
+    Ok(StaticCostResult {
+        costs: costs
+            .into_iter()
+            .map(|(name, cost)| (name, (cost, trait_count.clone())))
+            .collect(),
+        warnings,
+    })
 }
 
 pub fn static_cost_tree_from_ast(
     ast: &clarity::vm::ast::ContractAST,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
+    trait_implementations: &HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
-) -> Result<HashMap<String, (CostAnalysisNode, Option<TraitCount>)>, StaticCostError> {
+) -> Result<
+    (
+        HashMap<String, (CostAnalysisNode, Option<TraitCount>)>,
+        Vec<CostWarning>,
+    ),
+    StaticCostError,
+> {
     let exprs = &ast.expressions;
     let mut user_args = UserArgumentsContext::new();
     let mut costs_map: HashMap<String, Option<StaticCost>> = HashMap::new();
     let mut costs: HashMap<String, Option<CostAnalysisNode>> = HashMap::new();
+    let warnings = RefCell::new(Vec::new());
+
     // first pass: extract function names and collect define-map key/value types
     {
         let mut free_tracker = clarity::vm::costs::LimitedCostTracker::new_free();
@@ -499,6 +542,9 @@ pub fn static_cost_tree_from_ast(
                 clarity_version,
                 epoch,
                 invoke_ctx,
+                trait_implementations,
+                warnings: &warnings,
+                current_function: Some(&function_name),
             };
             let (_, cost_analysis_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)?;
             // Compute static cost for this function so subsequent calls can look it up.
@@ -525,11 +571,16 @@ pub fn static_cost_tree_from_ast(
     // Compute trait_count while creating the root CostAnalysisNode
     let trait_count = get_trait_count(&cost_trees);
 
-    // Return each node with its trait_count
-    Ok(cost_trees
-        .into_iter()
-        .map(|(name, node)| (name, (node, trait_count.clone())))
-        .collect())
+    let warnings = warnings.into_inner();
+
+    // Return each node with its trait_count, plus warnings
+    Ok((
+        cost_trees
+            .into_iter()
+            .map(|(name, node)| (name, (node, trait_count.clone())))
+            .collect(),
+        warnings,
+    ))
 }
 
 /// Compute the `data_size` that the VM accumulates during `eval_all`.
@@ -585,33 +636,153 @@ fn extract_function_name(expr: &SymbolicExpression) -> Option<String> {
 /// Look up the cost of the function targeted by a `contract-call?`.
 ///
 /// `args` corresponds to `exprs[1..]` of the contract-call expression:
-///   args[0] = target contract — either an AtomValue(Principal(Contract(..)))
-///             for static dispatch, or a Field(TraitIdentifier) / trait ref
-///             for dynamic dispatch
-///   args[1] = function name   (Atom)
+///   args[0] = target contract, one of:
+///             - `LiteralValue(Principal(Contract(..)))` — fully-qualified static dispatch
+///             - `Field(TraitIdentifier)` — `.contract-name` sugar, also static dispatch
+///             - `Atom(name)` — a variable bound to a trait type, dynamic dispatch
+///   args[1] = function name (Atom)
 ///   args[2..] = call arguments
 ///
-/// Returns `None` for dynamic (trait-based) dispatch or if the target
-/// contract / function cannot be resolved.
+/// For static dispatch the target contract's cost is looked up directly.
+/// For dynamic (trait-based) dispatch, trait resolution is attempted via the
+/// `trait_implementations` map on the analysis context. If unresolved, a
+/// `CostWarning` is emitted and `None` is returned.
+///
+/// Note: `TraitReference` is not a valid `contract-call?` target in Clarity
+/// (it appears only in `use-trait` / `impl-trait` / trait definitions).
 fn get_contract_call_target_cost(
     args: &[SymbolicExpression],
+    user_args: &UserArgumentsContext,
+    ctx: &AnalysisContext,
     env: &mut ExecutionState,
-    invoke_ctx: &InvocationContext,
 ) -> Option<StaticCost> {
     let first = args.first()?;
     let function_name = args.get(1)?.match_atom()?;
 
+    // Try static dispatch: literal contract principal or .contract-name field
     let contract_id = match first
         .match_atom_value()
         .or_else(|| first.match_literal_value())
     {
-        Some(Value::Principal(PrincipalData::Contract(id))) => id.clone(),
-        _ => first.match_field()?.contract_identifier.clone(),
+        Some(Value::Principal(PrincipalData::Contract(id))) => Some(id.clone()),
+        _ => first.match_field().map(|f| f.contract_identifier.clone()),
     };
 
-    let costs = static_cost(env, invoke_ctx, &contract_id).ok()?;
-    let (cost, _trait_count) = costs.get(function_name.as_str())?;
-    Some(cost.clone())
+    if let Some(contract_id) = contract_id {
+        match static_cost(env, ctx.invoke_ctx, &contract_id) {
+            Ok(result) => {
+                // Propagate any warnings from the callee analysis so that
+                // incomplete analysis in transitive dependencies is surfaced.
+                ctx.warnings.borrow_mut().extend(result.warnings);
+
+                if let Some((cost, _trait_count)) = result.costs.get(function_name.as_str()) {
+                    return Some(cost.clone());
+                }
+                // Contract resolved but the called function was not found in
+                // its cost map — emit a warning rather than silently returning
+                // zero cost.
+                ctx.warnings.borrow_mut().push(CostWarning {
+                    function_name: ctx.current_function.unwrap_or("<unknown>").to_string(),
+                    kind: CostWarningKind::ContractCallCostError {
+                        contract_id: contract_id.to_string(),
+                        called_function: function_name.to_string(),
+                        error: format!(
+                            "function '{}' not found in contract cost map",
+                            function_name
+                        ),
+                    },
+                });
+            }
+            Err(e) => {
+                ctx.warnings.borrow_mut().push(CostWarning {
+                    function_name: ctx.current_function.unwrap_or("<unknown>").to_string(),
+                    kind: CostWarningKind::ContractCallCostError {
+                        contract_id: contract_id.to_string(),
+                        called_function: function_name.to_string(),
+                        error: e.to_string(),
+                    },
+                });
+            }
+        }
+        return None;
+    }
+
+    // Try trait-based dispatch: the target is an Atom referencing a trait parameter.
+    let trait_var_name = first.match_atom()?;
+    if let Some(cost) = resolve_trait_call_cost(trait_var_name, function_name, user_args, ctx, env)
+    {
+        return Some(cost);
+    }
+
+    // Unresolved: emit a warning
+    ctx.warnings.borrow_mut().push(CostWarning {
+        function_name: ctx.current_function.unwrap_or("<unknown>").to_string(),
+        kind: CostWarningKind::UnresolvedTraitCall {
+            target_variable: trait_var_name.to_string(),
+            called_function: function_name.to_string(),
+        },
+    });
+
+    None
+}
+
+/// Attempt to resolve the cost of a trait-based `contract-call?` by looking up
+/// the variable's trait type and checking the `trait_implementations` map for
+/// known concrete contracts.
+///
+/// When multiple implementations are registered for a trait, the returned cost
+/// uses the minimum of each implementation's min and the maximum of each
+/// implementation's max — i.e. the widest possible cost envelope.
+fn resolve_trait_call_cost(
+    trait_var_name: &ClarityName,
+    function_name: &ClarityName,
+    user_args: &UserArgumentsContext,
+    ctx: &AnalysisContext,
+    env: &mut ExecutionState,
+) -> Option<StaticCost> {
+    let arg_type = user_args.get_argument_type(trait_var_name)?;
+    let trait_id = match arg_type {
+        TypeSignature::CallableType(clarity_types::types::signatures::CallableSubtype::Trait(
+            trait_id,
+        )) => trait_id,
+        TypeSignature::TraitReferenceType(trait_id) => trait_id,
+        _ => return None,
+    };
+
+    let implementations = ctx.trait_implementations.get(trait_id)?;
+
+    let mut envelope: Option<StaticCost> = None;
+    for impl_contract in implementations {
+        let result = match static_cost(env, ctx.invoke_ctx, impl_contract) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let (cost, _) = match result.costs.get(function_name.as_str()) {
+            Some(entry) => entry,
+            None => continue,
+        };
+        envelope = Some(match envelope {
+            None => cost.clone(),
+            Some(prev) => StaticCost {
+                min: ExecutionCost {
+                    runtime: prev.min.runtime.min(cost.min.runtime),
+                    write_length: prev.min.write_length.min(cost.min.write_length),
+                    write_count: prev.min.write_count.min(cost.min.write_count),
+                    read_length: prev.min.read_length.min(cost.min.read_length),
+                    read_count: prev.min.read_count.min(cost.min.read_count),
+                },
+                max: ExecutionCost {
+                    runtime: prev.max.runtime.max(cost.max.runtime),
+                    write_length: prev.max.write_length.max(cost.max.write_length),
+                    write_count: prev.max.write_count.max(cost.max.write_count),
+                    read_length: prev.max.read_length.max(cost.max.read_length),
+                    read_count: prev.max.read_count.max(cost.max.read_count),
+                },
+            },
+        });
+    }
+
+    envelope
 }
 
 pub fn build_cost_analysis_tree(
@@ -1546,7 +1717,7 @@ fn build_listlike_cost_analysis_tree(
                 // the target contract.
                 if native_function == NativeFunctions::ContractCall {
                     if let Some(called_fn_cost) =
-                        get_contract_call_target_cost(&exprs[1..], env, ctx.invoke_ctx)
+                        get_contract_call_target_cost(&exprs[1..], user_args, ctx, env)
                     {
                         super::saturating_add_cost(&mut cost.min, &called_fn_cost.min);
                         super::saturating_add_cost(&mut cost.max, &called_fn_cost.max);
@@ -1813,6 +1984,9 @@ mod tests {
     ) -> Result<StaticCost, StaticCostError> {
         let cost_map: HashMap<String, Option<StaticCost>> = HashMap::new();
         let function_defs: HashMap<String, &[SymbolicExpression]> = HashMap::new();
+        let trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
+            HashMap::new();
+        let warnings = RefCell::new(Vec::new());
 
         let epoch = StacksEpochId::latest(); // XXX this should be matched with the clarity version
         let ast = make_ast(source, epoch, clarity_version)?;
@@ -1831,6 +2005,9 @@ mod tests {
             clarity_version,
             epoch,
             invoke_ctx: &invoke_ctx,
+            trait_implementations: &trait_impls,
+            warnings: &warnings,
+            current_function: None,
         };
         let (_, cost_analysis_tree) =
             build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0)?;
@@ -1854,8 +2031,10 @@ mod tests {
         let contract_context =
             ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
-        let costs = static_cost_from_ast(&ast, clarity_version, epoch, &mut env, &invoke_ctx)?;
-        Ok(costs
+        let result =
+            static_cost_from_ast(&ast, clarity_version, epoch, None, &mut env, &invoke_ctx)?;
+        Ok(result
+            .costs
             .into_iter()
             .map(|(name, (cost, _trait_count))| (name, cost))
             .collect())
@@ -1906,6 +2085,9 @@ mod tests {
             clarity_version: &ClarityVersion::Clarity3,
             epoch,
             invoke_ctx: &invoke_ctx,
+            trait_implementations: &HashMap::new(),
+            warnings: &RefCell::new(Vec::new()),
+            current_function: None,
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -1968,6 +2150,9 @@ mod tests {
             clarity_version: &ClarityVersion::Clarity3,
             epoch,
             invoke_ctx: &invoke_ctx,
+            trait_implementations: &HashMap::new(),
+            warnings: &RefCell::new(Vec::new()),
+            current_function: None,
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2016,6 +2201,9 @@ mod tests {
             clarity_version: &ClarityVersion::Clarity3,
             epoch,
             invoke_ctx: &invoke_ctx,
+            trait_implementations: &HashMap::new(),
+            warnings: &RefCell::new(Vec::new()),
+            current_function: None,
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2054,6 +2242,9 @@ mod tests {
             clarity_version: &ClarityVersion::Clarity3,
             epoch,
             invoke_ctx: &invoke_ctx,
+            trait_implementations: &HashMap::new(),
+            warnings: &RefCell::new(Vec::new()),
+            current_function: None,
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2317,8 +2508,10 @@ mod tests {
         let contract_context =
             ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
-        let costs = static_cost_from_ast(&ast, clarity_version, epoch, &mut env, &invoke_ctx)?;
-        Ok(costs
+        let result =
+            static_cost_from_ast(&ast, clarity_version, epoch, None, &mut env, &invoke_ctx)?;
+        Ok(result
+            .costs
             .into_iter()
             .map(|(name, (cost, _trait_count))| (name, cost))
             .collect())
