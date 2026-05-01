@@ -534,7 +534,7 @@ fn run_cost_analysis_test(
                 &clarity_version,
                 epoch,
                 Some(&StaticCostConfig {
-                    contract_source: src.to_string(),
+                    contract_size: src.len() as u64,
                     trait_implementations: HashMap::new(),
                 }),
                 env,
@@ -1325,7 +1325,7 @@ fn test_contract_call_includes_callee_cost() {
             &clarity_version,
             epoch,
             Some(&StaticCostConfig {
-                contract_source: caller_src.to_string(),
+                contract_size: caller_src.len() as u64,
                 trait_implementations: HashMap::new(),
             }),
             &mut env,
@@ -2000,7 +2000,7 @@ fn test_trait_resolution_with_implementations() {
             &clarity_version,
             epoch,
             Some(&StaticCostConfig {
-                contract_source: caller_src.to_string(),
+                contract_size: caller_src.len() as u64,
                 trait_implementations: HashMap::new(),
             }),
             &mut env,
@@ -2034,7 +2034,7 @@ fn test_trait_resolution_with_implementations() {
             &clarity_version,
             epoch,
             Some(&StaticCostConfig {
-                contract_source: caller_src.to_string(),
+                contract_size: caller_src.len() as u64,
                 trait_implementations: trait_impls.clone(),
             }),
             &mut env,
@@ -2191,7 +2191,7 @@ fn test_trait_resolution_skips_failing_implementation() {
             &clarity_version,
             epoch,
             Some(&StaticCostConfig {
-                contract_source: caller_src.to_string(),
+                contract_size: caller_src.len() as u64,
                 trait_implementations: trait_impls,
             }),
             &mut env,

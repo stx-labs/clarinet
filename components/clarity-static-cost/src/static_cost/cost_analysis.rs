@@ -30,8 +30,8 @@ use super::{
 /// Configuration for static cost analysis.
 #[derive(Debug, Clone)]
 pub struct StaticCostConfig {
-    /// Original source code of the contract (used to compute contract-size overhead).
-    pub contract_source: String,
+    /// Size of the contract source in bytes, used to compute contract-size overhead.
+    pub contract_size: u64,
     /// Mapping from fully-qualified trait identifiers to concrete contract
     /// implementations. Used to resolve trait-based `contract-call?` targets
     /// during static analysis.
@@ -293,7 +293,7 @@ pub fn static_cost(
         clarity_version,
         epoch,
         Some(&StaticCostConfig {
-            contract_source,
+            contract_size: contract_source.len() as u64,
             trait_implementations: HashMap::new(),
         }),
         env,
@@ -419,7 +419,7 @@ pub fn static_cost_from_ast(
     invoke_ctx: &InvocationContext,
 ) -> Result<StaticCostResult, StaticCostError> {
     let empty_impls = HashMap::new();
-    let contract_size = config.map(|c| c.contract_source.len() as u64);
+    let contract_size = config.map(|c| c.contract_size);
     let trait_implementations = config
         .map(|c| &c.trait_implementations)
         .unwrap_or(&empty_impls);
@@ -671,9 +671,27 @@ fn get_contract_call_target_cost(
     if let Some(contract_id) = contract_id {
         match static_cost(env, ctx.invoke_ctx, &contract_id) {
             Ok(result) => {
+                // Propagate any warnings from the callee analysis so that
+                // incomplete analysis in transitive dependencies is surfaced.
+                ctx.warnings.borrow_mut().extend(result.warnings);
+
                 if let Some((cost, _trait_count)) = result.costs.get(function_name.as_str()) {
                     return Some(cost.clone());
                 }
+                // Contract resolved but the called function was not found in
+                // its cost map — emit a warning rather than silently returning
+                // zero cost.
+                ctx.warnings.borrow_mut().push(CostWarning {
+                    function_name: ctx.current_function.unwrap_or("<unknown>").to_string(),
+                    kind: CostWarningKind::ContractCallCostError {
+                        contract_id: contract_id.to_string(),
+                        called_function: function_name.to_string(),
+                        error: format!(
+                            "function '{}' not found in contract cost map",
+                            function_name
+                        ),
+                    },
+                });
             }
             Err(e) => {
                 ctx.warnings.borrow_mut().push(CostWarning {
