@@ -26,6 +26,17 @@ use super::{
     calculate_total_cost_with_branching, calculate_value_cost, TraitCount, TraitCountCollector,
     TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
+
+/// Configuration for static cost analysis.
+#[derive(Debug, Clone)]
+pub struct StaticCostConfig {
+    /// Original source code of the contract (used to compute contract-size overhead).
+    pub contract_source: String,
+    /// Mapping from fully-qualified trait identifiers to concrete contract
+    /// implementations. Used to resolve trait-based `contract-call?` targets
+    /// during static analysis.
+    pub trait_implementations: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+}
 // TODO:
 // unwrap evaluates both branches (https://github.com/clarity-lang/reference/issues/59)
 
@@ -149,12 +160,10 @@ pub struct AnalysisContext<'a> {
     pub clarity_version: &'a ClarityVersion,
     pub epoch: StacksEpochId,
     pub invoke_ctx: &'a InvocationContext<'a>,
-    /// Mapping from unqualified trait names to concrete contract implementations.
-    /// Used to resolve trait-based `contract-call?` targets during static analysis.
-    /// Note: keys are simple trait names (e.g. `"sip-010-trait"`), not fully-qualified
-    /// identifiers. This is sufficient for in-project analysis where trait names are
-    /// unique, but could collide if multiple traits share the same name.
-    pub trait_implementations: &'a HashMap<String, Vec<QualifiedContractIdentifier>>,
+    /// Mapping from fully-qualified trait identifiers to concrete contract
+    /// implementations. Used to resolve trait-based `contract-call?` targets
+    /// during static analysis.
+    pub trait_implementations: &'a HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
     /// Warnings accumulated during analysis (e.g. unresolved trait calls).
     pub warnings: &'a RefCell<Vec<CostWarning>>,
     /// Name of the function currently being analyzed (for warning context).
@@ -279,11 +288,14 @@ pub fn static_cost(
     let epoch = env.global_context.epoch_id;
     let ast = make_ast(&contract_source, epoch, clarity_version)?;
 
-    static_cost_from_ast_with_source(
+    static_cost_from_ast(
         &ast,
         clarity_version,
         epoch,
-        Some(&contract_source),
+        Some(&StaticCostConfig {
+            contract_source,
+            trait_implementations: HashMap::new(),
+        }),
         env,
         invoke_ctx,
     )
@@ -402,41 +414,15 @@ pub fn static_cost_from_ast(
     contract_ast: &clarity::vm::ast::ContractAST,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
+    config: Option<&StaticCostConfig>,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
 ) -> Result<StaticCostResult, StaticCostError> {
-    static_cost_from_ast_with_source(contract_ast, clarity_version, epoch, None, env, invoke_ctx)
-}
-
-pub fn static_cost_from_ast_with_source(
-    contract_ast: &clarity::vm::ast::ContractAST,
-    clarity_version: &ClarityVersion,
-    epoch: StacksEpochId,
-    contract_source: Option<&str>,
-    env: &mut ExecutionState,
-    invoke_ctx: &InvocationContext,
-) -> Result<StaticCostResult, StaticCostError> {
-    static_cost_from_ast_with_options(
-        contract_ast,
-        clarity_version,
-        epoch,
-        contract_source,
-        &HashMap::new(),
-        env,
-        invoke_ctx,
-    )
-}
-
-pub fn static_cost_from_ast_with_options(
-    contract_ast: &clarity::vm::ast::ContractAST,
-    clarity_version: &ClarityVersion,
-    epoch: StacksEpochId,
-    contract_source: Option<&str>,
-    trait_implementations: &HashMap<String, Vec<QualifiedContractIdentifier>>,
-    env: &mut ExecutionState,
-    invoke_ctx: &InvocationContext,
-) -> Result<StaticCostResult, StaticCostError> {
-    let contract_size = contract_source.map(|s| s.len() as u64);
+    let empty_impls = HashMap::new();
+    let contract_size = config.map(|c| c.contract_source.len() as u64);
+    let trait_implementations = config
+        .map(|c| &c.trait_implementations)
+        .unwrap_or(&empty_impls);
 
     let (cost_trees_with_traits, warnings) = static_cost_tree_from_ast(
         contract_ast,
@@ -485,7 +471,7 @@ pub fn static_cost_tree_from_ast(
     ast: &clarity::vm::ast::ContractAST,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
-    trait_implementations: &HashMap<String, Vec<QualifiedContractIdentifier>>,
+    trait_implementations: &HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
 ) -> Result<
@@ -730,7 +716,7 @@ fn resolve_trait_call_cost(
         _ => return None,
     };
 
-    let implementations = ctx.trait_implementations.get(&trait_id.name.to_string())?;
+    let implementations = ctx.trait_implementations.get(trait_id)?;
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
@@ -1959,7 +1945,8 @@ mod tests {
     ) -> Result<StaticCost, StaticCostError> {
         let cost_map: HashMap<String, Option<StaticCost>> = HashMap::new();
         let function_defs: HashMap<String, &[SymbolicExpression]> = HashMap::new();
-        let trait_impls: HashMap<String, Vec<QualifiedContractIdentifier>> = HashMap::new();
+        let trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
+            HashMap::new();
         let warnings = RefCell::new(Vec::new());
 
         let epoch = StacksEpochId::latest(); // XXX this should be matched with the clarity version
@@ -2005,7 +1992,8 @@ mod tests {
         let contract_context =
             ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
-        let result = static_cost_from_ast(&ast, clarity_version, epoch, &mut env, &invoke_ctx)?;
+        let result =
+            static_cost_from_ast(&ast, clarity_version, epoch, None, &mut env, &invoke_ctx)?;
         Ok(result
             .costs
             .into_iter()
@@ -2481,7 +2469,8 @@ mod tests {
         let contract_context =
             ContractContext::new(QualifiedContractIdentifier::transient(), *clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
-        let result = static_cost_from_ast(&ast, clarity_version, epoch, &mut env, &invoke_ctx)?;
+        let result =
+            static_cost_from_ast(&ast, clarity_version, epoch, None, &mut env, &invoke_ctx)?;
         Ok(result
             .costs
             .into_iter()

@@ -5,16 +5,18 @@ use std::path::Path;
 use clarity::vm::contexts::{ContractContext, ExecutionState, InvocationContext, OwnedEnvironment};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::database::MemoryBackingStore;
+use clarity::vm::representations::ClarityName;
 use clarity::vm::types::{
     ListData, ListTypeData, PrincipalData, QualifiedContractIdentifier, SequenceData,
     StandardPrincipalData, TypeSignature,
 };
 use clarity::vm::{ast, ClarityVersion, ContractName};
 use clarity_static_cost::static_cost::{
-    build_cost_analysis_tree, static_cost_from_ast, static_cost_from_ast_with_options,
-    static_cost_from_ast_with_source, static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode,
-    CostExprNode, CostWarning, CostWarningKind, UserArgumentsContext,
+    build_cost_analysis_tree, static_cost_from_ast, static_cost_tree_from_ast, AnalysisContext,
+    CostAnalysisNode, CostExprNode, CostWarning, CostWarningKind, StaticCostConfig,
+    UserArgumentsContext,
 };
+use clarity_types::types::TraitIdentifier;
 use indoc::indoc;
 #[cfg(test)]
 use rstest::rstest;
@@ -130,7 +132,9 @@ fn test_let_cost() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .unwrap();
     let (let_cost, _) = result.costs.get("let").unwrap();
@@ -173,7 +177,9 @@ fn test_dependent_function_calls() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .unwrap();
 
@@ -267,7 +273,14 @@ fn test_trait_counting() {
         &contract_id,
         ClarityVersion::Clarity3,
         |env, invoke_ctx| {
-            static_cost_from_ast(&ast, &ClarityVersion::Clarity3, epoch, env, invoke_ctx)
+            static_cost_from_ast(
+                &ast,
+                &ClarityVersion::Clarity3,
+                epoch,
+                None,
+                env,
+                invoke_ctx,
+            )
         },
     )
     .unwrap();
@@ -384,7 +397,9 @@ fn test_pox_4_costs() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .unwrap();
 
@@ -514,11 +529,14 @@ fn run_cost_analysis_test(
         &contract_id,
         clarity_version,
         |env, invoke_ctx| {
-            static_cost_from_ast_with_source(
+            static_cost_from_ast(
                 &ast,
                 &clarity_version,
                 epoch,
-                Some(src),
+                Some(&StaticCostConfig {
+                    contract_source: src.to_string(),
+                    trait_implementations: HashMap::new(),
+                }),
                 env,
                 invoke_ctx,
             )
@@ -1302,11 +1320,14 @@ fn test_contract_call_includes_callee_cost() {
     let static_cost_map = {
         let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
-        static_cost_from_ast_with_source(
+        static_cost_from_ast(
             &caller_ast,
             &clarity_version,
             epoch,
-            Some(caller_src),
+            Some(&StaticCostConfig {
+                contract_source: caller_src.to_string(),
+                trait_implementations: HashMap::new(),
+            }),
             &mut env,
             &invoke_ctx,
         )
@@ -1400,7 +1421,9 @@ fn test_trait_counts_simplified() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .expect("Failed to get static cost analysis");
 
@@ -1472,7 +1495,9 @@ fn test_trait_counts_let_bound_variable() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .expect("Failed to get static cost analysis");
 
@@ -1672,7 +1697,9 @@ fn test_trait_counts_for_gl_contract() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .expect("Failed to get static cost analysis");
 
@@ -1731,7 +1758,9 @@ fn test_empty_list_in_expression_does_not_panic() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     );
 
     // Should complete without panicking
@@ -1766,7 +1795,9 @@ fn test_unresolved_trait_call_emits_warning() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .expect("static cost analysis should succeed");
 
@@ -1840,7 +1871,9 @@ fn test_fold_with_trait_call_emits_warning() {
         &mut owned_env,
         &contract_id,
         clarity_version,
-        |env, invoke_ctx| static_cost_from_ast(&ast, &clarity_version, epoch, env, invoke_ctx),
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
     )
     .expect("static cost analysis should succeed");
 
@@ -1962,11 +1995,14 @@ fn test_trait_resolution_with_implementations() {
     let result_no_impls = {
         let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
-        static_cost_from_ast_with_source(
+        static_cost_from_ast(
             &caller_ast,
             &clarity_version,
             epoch,
-            Some(caller_src),
+            Some(&StaticCostConfig {
+                contract_source: caller_src.to_string(),
+                trait_implementations: HashMap::new(),
+            }),
             &mut env,
             &invoke_ctx,
         )
@@ -1980,19 +2016,27 @@ fn test_trait_resolution_with_implementations() {
     );
 
     // Second: analyze WITH trait implementations — should resolve and no warnings
-    let mut trait_impls: HashMap<String, Vec<QualifiedContractIdentifier>> = HashMap::new();
-    trait_impls.insert("pool-trait".to_string(), vec![pool_id.clone()]);
+    let pool_trait_id = TraitIdentifier::new(
+        caller_id.issuer.clone(),
+        caller_id.name.clone(),
+        ClarityName::from_literal("pool-trait"),
+    );
+    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
+        HashMap::new();
+    trait_impls.insert(pool_trait_id, vec![pool_id.clone()]);
 
     owned_env.begin();
     let result_with_impls = {
         let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
-        static_cost_from_ast_with_options(
+        static_cost_from_ast(
             &caller_ast,
             &clarity_version,
             epoch,
-            Some(caller_src),
-            &trait_impls,
+            Some(&StaticCostConfig {
+                contract_source: caller_src.to_string(),
+                trait_implementations: trait_impls.clone(),
+            }),
             &mut env,
             &invoke_ctx,
         )

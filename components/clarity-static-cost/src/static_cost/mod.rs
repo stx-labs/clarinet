@@ -14,9 +14,9 @@ use clarity::vm::representations::ClarityName;
 use clarity::vm::{ClarityVersion, Value};
 use clarity_types::representations::SymbolicExpression;
 pub use cost_analysis::{
-    build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_from_ast_with_options,
-    static_cost_from_ast_with_source, static_cost_tree_from_ast, AnalysisContext, CostAnalysisNode,
-    CostExprNode, StaticCost, StaticCostResult, SummingExecutionCost, UserArgumentsContext,
+    build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_tree_from_ast,
+    AnalysisContext, CostAnalysisNode, CostExprNode, StaticCost, StaticCostConfig,
+    StaticCostResult, SummingExecutionCost, UserArgumentsContext,
 };
 pub use cost_functions::ClarityCostFunctionExt;
 pub use error::{CostWarning, CostWarningKind, StaticCostError};
