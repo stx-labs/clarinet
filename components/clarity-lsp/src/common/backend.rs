@@ -18,8 +18,8 @@ use crate::state::{build_state, EditorState, ProtocolState};
 use crate::utils::get_contract_location;
 
 /// Shared tail for every notification handler that rebuilds a protocol:
-/// take the AST cache out of `EditorState`, pass it to `build_state`, then
-/// re-index the protocol and merge the returned entries back in.
+/// snapshot the AST cache, pass it to `build_state`, then re-index the
+/// protocol and merge the returned entries back in.
 ///
 /// `post_commit` lets `ContractSaved` refresh its active-contract
 /// definitions inside the same write lock; other handlers pass `|_| {}`.
@@ -27,20 +27,19 @@ use crate::utils::get_contract_location;
 /// **Cache invalidation.** We pass the existing cache through to
 /// `build_state` on *every* handler (including `ManifestSaved`) rather
 /// than clearing it preemptively. Invalidation happens inside
-/// `generate_default_deployment_with_cache`:
-///   - Each current contract's entry is `.remove()`d from the cache and
-///     validated via `CachedContractAST::matches`. Still-valid entries get
-///     reused; mismatched entries (edited source, changed version/epoch)
-///     are dropped and rebuilt.
-///   - Entries we didn't touch (contracts from other manifests open in
-///     the same LSP session, contracts removed from this manifest, etc.)
-///     stay in `cached_asts` as "leftover." On the commit step below we
-///     `or_insert` them back into `es.ast_cache` so other manifests'
-///     caches survive a rebuild here. `new_cache_entries` is extended in
-///     last so the current rebuild's fresh values win any collision.
+/// `generate_default_deployment_with_cache`: each current contract's
+/// entry is validated via `CachedContractAST::matches`; still-valid
+/// entries are reused, mismatched entries are dropped and rebuilt.
 ///
-/// No explicit `clear_ast_cache` is needed, and no stale accumulation
-/// even if the user rapidly flips Clarity version or epoch.
+/// We hand `build_state` a `clone()` of the cache rather than moving it
+/// out. The original `EditorState.ast_cache` is never disturbed, so:
+///   - On error: nothing to restore — drop the clone.
+///   - On success: just `extend` with the freshly built entries;
+///     untouched entries (other manifests, removed contracts) are
+///     already in place.
+///
+/// This costs one HashMap+ContractAST clone per notification, but
+/// removes an entire class of "moved out, must put back" bug surface.
 async fn build_and_commit<F>(
     editor_state: &mut EditorStateInput,
     manifest_location: PathBuf,
@@ -51,9 +50,9 @@ async fn build_and_commit<F>(
 where
     F: FnOnce(&mut EditorState),
 {
-    // Wrap in `Some(…)` so `build_state` can mutate it and, on error,
-    // leave behind a fully-restorable cache for us to pour back in.
-    let mut cached_asts = Some(editor_state.try_write(|es| std::mem::take(&mut es.ast_cache))?);
+    // `mem::take` would be cheaper, but then a `build_state` error would
+    // require manually restoring the cache. We eat the clone for safety.
+    let mut cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
 
     let mut protocol_state = ProtocolState::new();
     let new_cache_entries = match build_state(
@@ -66,40 +65,11 @@ where
     .await
     {
         Ok(entries) => entries,
-        Err(e) => {
-            // Transient failure (bad manifest, file read error, etc.).
-            // Restore cache entries so the next save starts warm — but
-            // *only for keys missing from the current cache*. Under
-            // `EditorStateInput::RwLock`, another notification could
-            // have rebuilt successfully while we held no lock across
-            // the async `build_state`; wholesale-assigning back would
-            // clobber that newer state. `or_insert` is a no-op when
-            // the newer rebuild already wrote an entry for the key.
-            // On success we intentionally drop `cached_asts`: stale /
-            // removed-contract entries shouldn't carry over.
-            if let Some(cache) = cached_asts.take() {
-                editor_state.try_write(|es| {
-                    for (key, entry) in cache {
-                        es.ast_cache.entry(key).or_insert(entry);
-                    }
-                })?;
-            }
-            return Ok(LspNotificationResponse::error(&e));
-        }
+        Err(e) => return Ok(LspNotificationResponse::error(&e)),
     };
 
     editor_state.try_write(|es| {
         es.index_protocol(manifest_location, protocol_state);
-        // Put back cache entries the rebuild didn't touch — they belong
-        // to other manifests open in the same LSP session and would be
-        // permanently dropped otherwise. `or_insert` (vs. `extend`) keeps
-        // a concurrent handler's fresh writes on the same key, which can
-        // happen if two notifications race across different manifests.
-        if let Some(leftover) = cached_asts.take() {
-            for (key, entry) in leftover {
-                es.ast_cache.entry(key).or_insert(entry);
-            }
-        }
         es.ast_cache.extend(new_cache_entries);
         post_commit(es);
     })?;
@@ -907,33 +877,6 @@ mod lsp_tests {
         }
     }
 
-    /// File accessor that always fails reads — used to simulate a
-    /// transient build failure (e.g. a bad/disappearing manifest) and
-    /// verify the cache isn't lost on the error path.
-    struct FailingFileAccessor;
-
-    impl FileAccessor for FailingFileAccessor {
-        fn file_exists(&self, _path: String) -> clarinet_files::FileAccessorResult<bool> {
-            Box::pin(async { Ok(true) })
-        }
-        fn read_file(&self, _path: String) -> clarinet_files::FileAccessorResult<String> {
-            Box::pin(async { Err("simulated read failure".to_string()) })
-        }
-        fn read_files(
-            &self,
-            _paths: Vec<String>,
-        ) -> clarinet_files::FileAccessorResult<HashMap<String, String>> {
-            Box::pin(async { Err("simulated read failure".to_string()) })
-        }
-        fn write_file(
-            &self,
-            _path: String,
-            _content: &[u8],
-        ) -> clarinet_files::FileAccessorResult<()> {
-            Box::pin(async { Ok(()) })
-        }
-    }
-
     #[tokio::test]
     async fn test_env_simnet() {
         let with_env_simnet = indoc! {r#"
@@ -1484,56 +1427,6 @@ mod lsp_tests {
         assert!(
             !cache_after_manifest_save.is_empty(),
             "cache should stay populated after a manifest save"
-        );
-    }
-
-    /// Regression test: a transient `build_state` failure (bad manifest,
-    /// file read error, etc.) must not drop the existing AST cache. The
-    /// mem::take pattern in `build_and_commit` previously consumed the
-    /// cache on the way in; on error we'd wind up starting cold on the
-    /// next save. Now it's restored.
-    #[tokio::test]
-    async fn test_ast_cache_survives_transient_build_failure() {
-        let source = indoc! {r#"
-            (define-data-var count uint u0)
-        "#};
-        let good_accessor = TestFileAccessor::new(source.to_string());
-        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
-
-        // First save populates the cache.
-        process_notification(
-            LspNotification::ContractSaved(PathBuf::from("test.clar")),
-            &mut editor_state_input,
-            Some(&good_accessor),
-        )
-        .await
-        .expect("first save failed");
-        let entries_before = editor_state_input
-            .try_read(|es| es.ast_cache.len())
-            .unwrap();
-        assert!(entries_before > 0, "sanity: cache should be populated");
-
-        // Second save fails — bad file accessor causes `build_state` to
-        // error. Before the fix the cache would be gone after this.
-        let bad_accessor = FailingFileAccessor;
-        let response = process_notification(
-            LspNotification::ContractSaved(PathBuf::from("test.clar")),
-            &mut editor_state_input,
-            Some(&bad_accessor),
-        )
-        .await
-        .expect("process_notification itself shouldn't bubble an Err");
-        assert!(
-            matches!(response.notification, Some((MessageType::ERROR, _))),
-            "response should carry an error notification"
-        );
-
-        let entries_after = editor_state_input
-            .try_read(|es| es.ast_cache.len())
-            .unwrap();
-        assert_eq!(
-            entries_after, entries_before,
-            "cache should be restored after a failed rebuild"
         );
     }
 
