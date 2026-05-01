@@ -7,15 +7,18 @@ pub mod onchain;
 pub mod requirements;
 pub mod types;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
+use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
-use clarity::vm::{ContractName, EvaluationResult, ExecutionResult, SymbolicExpression};
+use clarity::vm::{
+    ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
+};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_DEPOSIT_MAINNET_ADDRESS,
@@ -27,6 +30,7 @@ use clarity_repl::repl::{
     SessionSettings,
 };
 use clarity_repl::utils::{remove_env_simnet, Environment};
+pub use types::CachedContractAST;
 use types::{
     ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,
     EpochSpec, RequirementPublishSpecification, StxTransferSpecification, TransactionSpecification,
@@ -103,6 +107,7 @@ pub fn setup_session_with_deployment(
         success,
         session,
         analysis: contracts_analysis,
+        ast_cache_entries: None,
     }
 }
 
@@ -301,6 +306,72 @@ fn handle_emulated_contract_call(
     result
 }
 
+/// Hash contract source for cache validation. SHA-256 is hardware-accelerated
+/// on modern x86 (SHA-NI) and ARMv8 via the `sha2` crate's runtime dispatch.
+pub(crate) fn compute_content_hash(source: &str) -> Sha256Sum {
+    Sha256Sum::from_data(source.as_bytes())
+}
+
+/// RAII guard that keeps AST cache state atomic with respect to function
+/// success: on the happy path, call [`commit`](Self::commit) to hand the
+/// accumulated entries to the caller's artifacts; on any error (including
+/// panic), `Drop` pushes them back into the input cache so a transient
+/// failure doesn't cost the caller a cold rebuild.
+///
+/// Only constructed when the caller actually opted into caching
+/// (wrapped in `Option<Self>` at the call site) — "no cache" and
+/// "no guard" are the same state, and this struct doesn't need to
+/// model the cache-free path.
+struct AstCacheRestoreGuard<'a> {
+    input_cache: &'a mut HashMap<(PathBuf, Environment), CachedContractAST>,
+    pending: HashMap<(PathBuf, Environment), CachedContractAST>,
+    committed: bool,
+}
+
+impl<'a> AstCacheRestoreGuard<'a> {
+    fn new(input_cache: &'a mut HashMap<(PathBuf, Environment), CachedContractAST>) -> Self {
+        Self {
+            input_cache,
+            pending: HashMap::new(),
+            committed: false,
+        }
+    }
+
+    /// Remove a matching cache entry from the input cache, or return
+    /// `None` if missing or mismatched.
+    fn try_reuse(
+        &mut self,
+        key: &(PathBuf, Environment),
+        content_hash: &Sha256Sum,
+        clarity_version: ClarityVersion,
+        epoch: StacksEpochId,
+    ) -> Option<CachedContractAST> {
+        self.input_cache
+            .remove(key)
+            .filter(|entry| entry.matches(content_hash, clarity_version, epoch))
+    }
+
+    /// Accumulate a freshly-built (or verbatim-reused) cache entry.
+    fn insert(&mut self, key: (PathBuf, Environment), entry: CachedContractAST) {
+        self.pending.insert(key, entry);
+    }
+
+    /// Happy path: disarm the guard and take ownership of the entries so
+    /// they can flow into `DeploymentGenerationArtifacts`.
+    fn commit(mut self) -> HashMap<(PathBuf, Environment), CachedContractAST> {
+        self.committed = true;
+        std::mem::take(&mut self.pending)
+    }
+}
+
+impl Drop for AstCacheRestoreGuard<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.input_cache.extend(std::mem::take(&mut self.pending));
+        }
+    }
+}
+
 pub async fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
@@ -308,6 +379,31 @@ pub async fn generate_default_deployment(
     file_accessor: Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
     environment: Environment,
+) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
+    generate_default_deployment_with_cache(
+        manifest,
+        network,
+        no_batch,
+        file_accessor,
+        api_base_url,
+        environment,
+        None,
+    )
+    .await
+}
+
+pub async fn generate_default_deployment_with_cache(
+    manifest: &ProjectManifest,
+    network: &StacksNetwork,
+    no_batch: bool,
+    file_accessor: Option<&dyn FileAccessor>,
+    api_base_url: Option<&str>,
+    environment: Environment,
+    // Taken by `&mut` so hit entries can be *removed* and reused directly in
+    // the returned `ast_cache_entries`, avoiding a per-hit `ContractAST.clone()`.
+    // Leftover entries (misses, hash mismatches, stale contracts) are dropped
+    // by the caller when the HashMap goes out of scope.
+    cached_asts: Option<&mut HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let mut found_env_simnet = false;
     let network_manifest = match file_accessor {
@@ -789,14 +885,17 @@ pub async fn generate_default_deployment(
 
         contracts_sources.insert(
             contract_id.clone(),
-            ClarityContract {
-                code_source: ClarityCodeSource::ContractInMemory(source.clone()),
-                deployer: ContractDeployer::Address(sender.to_address()),
-                name: contract_name.to_string(),
-                clarity_version: contract_config.clarity_version,
-                epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                skip_analysis: false,
-            },
+            (
+                ClarityContract {
+                    code_source: ClarityCodeSource::ContractInMemory(source.clone()),
+                    deployer: ContractDeployer::Address(sender.to_address()),
+                    name: contract_name.to_string(),
+                    clarity_version: contract_config.clarity_version,
+                    epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                    skip_analysis: false,
+                },
+                contract_location.clone(),
+            ),
         );
 
         let contract_spec = if matches!(network, StacksNetwork::Simnet) {
@@ -827,16 +926,81 @@ pub async fn generate_default_deployment(
 
     let session = Session::new(settings);
 
-    let mut contract_asts = BTreeMap::new();
     let mut contract_data = BTreeMap::new();
+    // `Some` iff the caller opted into caching. On any early return /
+    // `?` / panic below, dropping the `Some(guard)` pushes the entries
+    // we've built back into the caller's input cache — so a cycle error
+    // in `order_contracts` or a malformed wallet address can't cost us
+    // a cold rebuild. We call `.commit()` on the happy path.
+    let mut cache_guard = cached_asts.map(AstCacheRestoreGuard::new);
 
-    for (contract_id, contract) in contracts_sources.into_iter() {
-        let (ast, diags, ast_success) = session.interpreter.build_ast(&contract);
-        contract_asts.insert(contract_id.clone(), ast.clone());
-        contract_data.insert(contract_id.clone(), (contract.clarity_version, ast));
-        contract_diags.insert(contract_id.clone(), diags);
-        contract_epochs.insert(contract_id, contract.epoch.resolve());
-        asts_success = asts_success && ast_success;
+    for (contract_id, (contract, contract_location)) in contracts_sources {
+        let resolved_epoch = contract.epoch.resolve();
+        let clarity_version = contract.clarity_version;
+
+        // Two paths: callers that opted into caching (LSP) vs callers
+        // that didn't (CLI, SDK). The cache-free path skips hashing,
+        // `CachedContractAST` construction, cache accumulation, and —
+        // not least — the `ContractAST.clone()` into `contract_data`,
+        // since nothing else needs to own a copy.
+        let ast_for_data = if let Some(guard) = cache_guard.as_mut() {
+            let source = contract.expect_in_memory_code_source();
+            let content_hash = compute_content_hash(source);
+            let cache_key = (contract_location, environment);
+
+            // `try_reuse` removes + validates in one step; a hit transfers
+            // entry ownership straight into the guard (no clone). Anything
+            // left in the caller's input cache after the loop is either a
+            // removed-from-manifest contract or a `(path, env)` key no
+            // longer in use; those drop when the caller releases the map.
+            let cache_entry =
+                match guard.try_reuse(&cache_key, &content_hash, clarity_version, resolved_epoch) {
+                    Some(entry) => {
+                        // Re-emit the cached parser diagnostics + success
+                        // flag so downstream diagnostics and the overall
+                        // `asts_success` match what the first parse produced.
+                        contract_diags.insert(contract_id.clone(), entry.diags.clone());
+                        asts_success = asts_success && entry.ast_success;
+                        entry
+                    }
+                    None => {
+                        let (ast, diags, ast_success_for_contract) =
+                            session.interpreter.build_ast(&contract);
+                        contract_diags.insert(contract_id.clone(), diags.clone());
+                        asts_success = asts_success && ast_success_for_contract;
+                        CachedContractAST::new(
+                            source,
+                            ast,
+                            diags,
+                            ast_success_for_contract,
+                            clarity_version,
+                            resolved_epoch,
+                        )
+                    }
+                };
+
+            // TODO: eliminate this `ContractAST.clone()`. The same AST
+            // ends up owned in both `contract_data` (→ `artifacts.asts`)
+            // and the guard's pending entries, because both are returned
+            // as owned data in `DeploymentGenerationArtifacts`. ~20ms/build
+            // on a 20-contract project. Requires either wrapping the AST
+            // in `Arc`, changing `detect_dependencies` in `clarity-repl`
+            // to accept `&ContractAST`, or collapsing the two output
+            // maps into one — each is its own refactor across crates,
+            // so left for a follow-up PR.
+            let ast_for_data = cache_entry.ast.clone();
+            guard.insert(cache_key, cache_entry);
+            ast_for_data
+        } else {
+            // Cache-free path: move the AST straight into contract_data.
+            let (ast, diags, ast_success_for_contract) = session.interpreter.build_ast(&contract);
+            contract_diags.insert(contract_id.clone(), diags);
+            asts_success = asts_success && ast_success_for_contract;
+            ast
+        };
+
+        contract_data.insert(contract_id.clone(), (clarity_version, ast_for_data));
+        contract_epochs.insert(contract_id, resolved_epoch);
     }
 
     let dependencies =
@@ -851,12 +1015,21 @@ pub async fn generate_default_deployment(
         }
     };
 
+    // `contract_data` is no longer borrowed; consume it for the final
+    // `asts` output so we don't clone each AST a second time.
+    let contract_asts: BTreeMap<_, _> = contract_data
+        .into_iter()
+        .map(|(id, (_version, ast))| (id, ast))
+        .collect();
+
     for contract_id in boot_contracts_ids.into_iter() {
         dependencies.insert(contract_id.clone(), DependencySet::new());
     }
 
     dependencies.extend(requirements_deps);
 
+    // Post-loop errors are safe to `?` through: `cache_guard` is still
+    // live and its `Drop` will restore `pending` into `cached_asts`.
     let ordered_contracts_ids =
         ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs)
             .map_err(|e| e.to_string())?;
@@ -978,6 +1151,12 @@ pub async fn generate_default_deployment(
         }
     }
 
+    // Disarm the guard (if any) — we're committed to returning Ok, so
+    // the accumulated entries belong in the artifacts, not back in the
+    // caller's input cache. `None` carries through for cache-free callers
+    // so they're structurally distinguishable from "opted in, zero hits".
+    let ast_cache_entries = cache_guard.map(AstCacheRestoreGuard::commit);
+
     let artifacts = DeploymentGenerationArtifacts {
         asts: contract_asts,
         deps: dependencies,
@@ -987,6 +1166,7 @@ pub async fn generate_default_deployment(
         results_values: HashMap::new(),
         analysis: HashMap::new(),
         session,
+        ast_cache_entries,
     };
 
     Ok((deployment, artifacts, found_env_simnet))
@@ -1419,5 +1599,75 @@ mod tests {
         let stx_maps = assets_maps.get("STX").unwrap();
         assert_eq!(*stx_maps.get(sender).unwrap(), 999000);
         assert_eq!(*stx_maps.get(receiver).unwrap(), 1000);
+    }
+
+    // -------- AstCacheRestoreGuard unit tests --------
+    //
+    // Cover the two branches directly: an uncommitted `Drop` must push
+    // `pending` back into the input cache, and `commit()` must hand the
+    // entries to the caller while leaving the input cache empty.
+
+    fn fake_cached_ast() -> CachedContractAST {
+        let session = Session::new(SessionSettings::default());
+        let source = "(define-data-var x uint u0)";
+        let contract = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(source.to_string()),
+            deployer: ContractDeployer::Address(DEPLOYER.to_string()),
+            name: "dummy".to_string(),
+            clarity_version: ClarityVersion::Clarity3,
+            epoch: clarity_repl::repl::Epoch::Specific(StacksEpochId::Epoch31),
+            skip_analysis: false,
+        };
+        let (ast, diags, ast_success) = session.interpreter.build_ast(&contract);
+        CachedContractAST::new(
+            source,
+            ast,
+            diags,
+            ast_success,
+            ClarityVersion::Clarity3,
+            StacksEpochId::Epoch31,
+        )
+    }
+
+    #[test]
+    fn ast_cache_restore_guard_drops_pending_into_input_on_uncommitted_drop() {
+        let mut input = HashMap::new();
+        let key = (PathBuf::from("/contracts/test.clar"), Environment::OnChain);
+
+        {
+            let mut guard = AstCacheRestoreGuard::new(&mut input);
+            guard.insert(key.clone(), fake_cached_ast());
+            // Intentionally drop without `.commit()`.
+        }
+
+        assert_eq!(
+            input.len(),
+            1,
+            "Drop without commit should push pending entries back into input"
+        );
+        assert!(input.contains_key(&key));
+    }
+
+    #[test]
+    fn ast_cache_restore_guard_commit_yields_pending_and_leaves_input_empty() {
+        let mut input = HashMap::new();
+        let key = (PathBuf::from("/contracts/test.clar"), Environment::OnChain);
+
+        let committed = {
+            let mut guard = AstCacheRestoreGuard::new(&mut input);
+            guard.insert(key.clone(), fake_cached_ast());
+            guard.commit()
+        };
+
+        assert_eq!(
+            committed.len(),
+            1,
+            "commit() should hand the caller the accumulated entries"
+        );
+        assert!(committed.contains_key(&key));
+        assert!(
+            input.is_empty(),
+            "committed entries must not leak back into the input cache"
+        );
     }
 }
