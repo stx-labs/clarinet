@@ -217,13 +217,14 @@ impl FileAccessor for BenchFileAccessor {
     }
 
     fn read_files(&self, paths: Vec<String>) -> FileAccessorResult<HashMap<String, String>> {
-        let mut out = HashMap::with_capacity(paths.len());
-        for p in paths {
-            if let Some(c) = self.files.get(&p) {
-                out.insert(p, c.clone());
-            }
-        }
-        Box::pin(async move { Ok(out) })
+        let result: Result<HashMap<_, _>, _> = paths
+            .into_iter()
+            .map(|p| match self.files.get(&p) {
+                Some(c) => Ok((p, c.clone())),
+                None => Err(format!("bench fixture missing: {p}")),
+            })
+            .collect();
+        Box::pin(async move { result })
     }
 
     fn write_file(&self, _: String, _: &[u8]) -> FileAccessorResult<()> {
@@ -268,7 +269,7 @@ fn run(
         )
         .await
         .expect("fixture deployment should succeed");
-        artifacts.ast_cache_entries
+        artifacts.ast_cache_entries.unwrap_or_default()
     })
 }
 

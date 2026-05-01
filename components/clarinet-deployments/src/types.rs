@@ -154,6 +154,7 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
 /// otherwise a contract with a syntax error would appear clean on every
 /// rebuild after the first.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct CachedContractAST {
     pub content_hash: Sha256Sum,
     pub ast: ContractAST,
@@ -164,6 +165,28 @@ pub struct CachedContractAST {
 }
 
 impl CachedContractAST {
+    /// Construct an entry from `source` and the parse outputs. The hash
+    /// is computed from `source` here so callers can't accidentally pair
+    /// a hash with an AST built from different bytes — the central cache
+    /// invariant is enforced at the constructor.
+    pub fn new(
+        source: &str,
+        ast: ContractAST,
+        diags: Vec<Diagnostic>,
+        ast_success: bool,
+        clarity_version: ClarityVersion,
+        epoch: StacksEpochId,
+    ) -> Self {
+        Self {
+            content_hash: Sha256Sum::from_data(source.as_bytes()),
+            ast,
+            diags,
+            ast_success,
+            clarity_version,
+            epoch,
+        }
+    }
+
     /// Returns `true` if this cached entry is still valid for a contract
     /// whose source hashes to `content_hash` and that would be parsed at
     /// `clarity_version` / `epoch`. (We deliberately don't derive
@@ -191,11 +214,12 @@ pub struct DeploymentGenerationArtifacts {
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
     pub session: Session,
     pub success: bool,
-    /// Cache entries shaped for direct reuse by the LSP. Populated only
-    /// when the caller passes `Some(...)` for `cached_asts`; empty
+    /// Cache entries shaped for direct reuse by the LSP. `Some(...)` only
+    /// when the caller passes `Some(...)` for `cached_asts`; `None`
     /// otherwise (which is the case for `generate_default_deployment` and
-    /// `setup_session_with_deployment`).
-    pub ast_cache_entries: HashMap<(PathBuf, Environment), CachedContractAST>,
+    /// `setup_session_with_deployment`). The `Option` makes "didn't opt
+    /// in" structurally distinct from "opted in but had zero hits".
+    pub ast_cache_entries: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

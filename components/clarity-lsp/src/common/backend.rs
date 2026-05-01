@@ -52,7 +52,7 @@ where
 {
     // `mem::take` would be cheaper, but then a `build_state` error would
     // require manually restoring the cache. We eat the clone for safety.
-    let mut cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
+    let cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
 
     let mut protocol_state = ProtocolState::new();
     let new_cache_entries = match build_state(
@@ -60,7 +60,7 @@ where
         &mut protocol_state,
         file_accessor,
         static_cost_analysis,
-        &mut cached_asts,
+        cached_asts,
     )
     .await
     {
@@ -1702,6 +1702,66 @@ mod lsp_tests {
         assert_eq!(
             restored_version, original_version,
             "version-mismatched entry should have been rebuilt under the manifest's clarity_version"
+        );
+    }
+
+    /// Regression test: `matches()` must reject a cache entry whose
+    /// `epoch` no longer matches what the current rebuild would produce,
+    /// even when the source and version are unchanged. Poisons a live
+    /// entry's epoch field, saves, and expects the entry to be rebuilt
+    /// under the manifest-resolved epoch.
+    #[tokio::test]
+    async fn test_epoch_mismatch_invalidates_cache() {
+        use clarity::types::StacksEpochId;
+
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+        "#};
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("first save failed");
+        let original_epoch = editor_state_input
+            .try_read(|es| es.ast_cache.values().next().map(|e| e.epoch))
+            .unwrap()
+            .expect("cache should be populated");
+
+        // Pick any epoch distinct from the original. Variants cover
+        // pre-3.0 through 3.x, so flipping by one is always available.
+        let poison_to = if original_epoch == StacksEpochId::Epoch21 {
+            StacksEpochId::Epoch30
+        } else {
+            StacksEpochId::Epoch21
+        };
+        editor_state_input
+            .try_write(|es| {
+                for entry in es.ast_cache.values_mut() {
+                    entry.epoch = poison_to;
+                }
+            })
+            .unwrap();
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("second save failed");
+
+        let restored_epoch = editor_state_input
+            .try_read(|es| es.ast_cache.values().next().map(|e| e.epoch))
+            .unwrap()
+            .expect("cache should still be populated");
+        assert_eq!(
+            restored_epoch, original_epoch,
+            "epoch-mismatched entry should have been rebuilt under the manifest's epoch"
         );
     }
 }

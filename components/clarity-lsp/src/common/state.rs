@@ -870,12 +870,12 @@ pub async fn build_state(
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
     static_cost_analysis: bool,
-    // The caller's snapshot of `EditorState.ast_cache` (a `clone()`).
-    // Per-environment iterations consume hits from this map via
+    // The caller's snapshot of `EditorState.ast_cache` (a `clone()`),
+    // moved in. Per-environment iterations consume hits from this map via
     // `AstCacheRestoreGuard` inside `generate_default_deployment_with_cache`.
     // On any error we just drop it — the caller's original cache is
     // untouched, so no restore step is needed.
-    cached_asts: &mut Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
+    mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -918,7 +918,12 @@ pub async fn build_state(
         global_found_env_simnet |= found_env_simnet;
 
         // Deployments already shaped the cache entries; merge them in.
-        new_cache_entries.extend(artifacts.ast_cache_entries);
+        // `None` here means the cache-free path was taken — shouldn't
+        // happen because `build_state` always opts into caching, but
+        // skipping when absent is the right behavior either way.
+        if let Some(entries) = artifacts.ast_cache_entries {
+            new_cache_entries.extend(entries);
+        }
 
         let mut session = initiate_session_from_manifest(&manifest);
         let contracts =
