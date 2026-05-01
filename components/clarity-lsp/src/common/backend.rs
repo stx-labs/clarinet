@@ -184,9 +184,11 @@ pub async fn process_notification(
 
         LspNotification::ManifestSaved(manifest_location) => {
             // No preemptive `clear_ast_cache` — `build_and_commit` threads
-            // the cache through, entries are validated per-contract
-            // against the new manifest, and removed-contract entries drop
-            // on their own. See `build_and_commit` for the full story.
+            // the cache through and validates entries per-contract against
+            // the new manifest. Entries for contracts removed from the
+            // manifest are not explicitly pruned here; they persist for
+            // the rest of the LSP session. See `build_and_commit` for the
+            // full story.
             build_and_commit(
                 editor_state,
                 manifest_location,
@@ -1481,10 +1483,10 @@ mod lsp_tests {
     }
 
     /// Regression test: in a multi-manifest LSP session, rebuilding one
-    /// manifest must not wipe cache entries that belong to a different
-    /// manifest. `build_and_commit` `mem::take`s the whole cache before
-    /// calling `build_state`; without explicit leftover-restoration the
-    /// other manifest's entries would be dropped.
+    /// manifest must not clear AST cache entries that belong to a
+    /// different manifest. `build_and_commit` clones the cache before
+    /// calling `build_state` and `extend`s only the freshly-built entries
+    /// on success, so entries from other manifests stay put.
     #[tokio::test]
     async fn test_other_manifest_cache_survives_rebuild() {
         let source = indoc! {r#"
@@ -1519,7 +1521,8 @@ mod lsp_tests {
             .unwrap();
 
         // Rebuild test.clar. Before the fix, this would wipe the other
-        // manifest's entry; after the fix, `or_insert` restores leftover.
+        // manifest's entry; after the fix, the rebuild only `extend`s
+        // freshly-built entries and unrelated keys are left untouched.
         process_notification(
             LspNotification::ContractSaved(PathBuf::from("test.clar")),
             &mut editor_state_input,

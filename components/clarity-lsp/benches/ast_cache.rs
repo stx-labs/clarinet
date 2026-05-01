@@ -278,8 +278,8 @@ fn warm_cache(
     accessor: &BenchFileAccessor,
 ) -> HashMap<(PathBuf, Environment), CachedContractAST> {
     // `Some(empty)` opts into cache population even though there's
-    // nothing to reuse. Passing `None` here would short-circuit
-    // cache-entry construction (see the `is_some()` gate in
+    // nothing to reuse. Passing `None` would skip the `AstCacheRestoreGuard`
+    // entirely (see `cached_asts.map(AstCacheRestoreGuard::new)` in
     // `generate_default_deployment_with_cache`), leaving us with an
     // empty warm cache — the `all_hit` / `one_miss` benches would
     // then silently measure cold-cache behavior.
