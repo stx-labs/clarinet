@@ -27,6 +27,7 @@ clarinet-defaults = { workspace = true }
 clarinet-files = { path = "../clarinet-files", default-features = false }
 clarity-repl = { path = "../clarity-repl", default-features = false }
 clarinet-deployments = { path = "../clarinet-deployments", default-features = false }
+getrandom = { workspace = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.0"
@@ -83,4 +84,4 @@ demangle-name-section = true
 dwarf-debug-info = false
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wasm_bindgen_unstable_test_coverage)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wasm_bindgen_unstable_test_coverage)', 'cfg(getrandom_backend, values("wasm_js"))'] }

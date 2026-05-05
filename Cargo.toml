@@ -57,6 +57,7 @@ crossterm = "0.29.0"
 dirs = "6.0.0"
 divan = "0.1"
 futures = "0.3.12"
+getrandom = { version = "0.3", features = ["wasm_js"] }
 indexmap = "2.13.0"
 indoc = "2.0.3"
 js-sys = "0.3.80"
