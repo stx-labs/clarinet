@@ -1023,18 +1023,18 @@ pub async fn build_state(
                 .unwrap_or(DEFAULT_CLARITY_VERSION);
 
             // Run static_cost_tree for this contract
-            if let Some(cost_analysis) =
+            let Some(cost_analysis) =
                 get_cost_analysis(session, contract_id, clarity_version).await
-            {
-                clarity_repl::uprint!(
-                    "[LSP] Cost analysis completed for {}: {} functions analyzed",
-                    contract_id,
-                    cost_analysis.len()
-                );
-                cost_analyses.insert(contract_id.clone(), cost_analysis);
-            } else {
+            else {
                 clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
-            }
+                continue;
+            };
+            clarity_repl::uprint!(
+                "[LSP] Cost analysis completed for {}: {} functions analyzed",
+                contract_id,
+                cost_analysis.len()
+            );
+            cost_analyses.insert(contract_id.clone(), cost_analysis);
         }
     }
 

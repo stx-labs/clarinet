@@ -265,7 +265,6 @@ pub struct StaticCostResult {
 
 /// Static execution cost for functions within Environment.
 /// Returns the static cost for each function in the contract.
-/// {some-function-name: (StaticCost, Some({some-function-name: (1,1)}))}
 pub fn static_cost(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
@@ -753,13 +752,11 @@ fn resolve_trait_call_cost(
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
-        let result = match static_cost(env, ctx.invoke_ctx, impl_contract) {
-            Ok(r) => r,
-            Err(_) => continue,
+        let Ok(result) = static_cost(env, ctx.invoke_ctx, impl_contract) else {
+            continue;
         };
-        let (cost, _) = match result.costs.get(function_name.as_str()) {
-            Some(entry) => entry,
-            None => continue,
+        let Some((cost, _)) = result.costs.get(function_name.as_str()) else {
+            continue;
         };
         envelope = Some(match envelope {
             None => cost.clone(),
