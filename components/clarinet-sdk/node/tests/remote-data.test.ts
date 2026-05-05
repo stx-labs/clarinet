@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, afterEach, afterAll, beforeAll } from
 // makes it simpler to handle wasm build
 import { getSDK, initSimnet } from "..";
 
-const api_url = "https://api.testnet.stg.hiro.so";
+const api_url = "https://api.testnet.hiro.so";
 const counterAddress = "STJCAB2T9TR2EJM7YS4DM2CGBBVTF7BV237Y8KNV.counter";
 const sender = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 

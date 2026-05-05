@@ -647,7 +647,7 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "clarinet-cli"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "chrono",
  "clap",
@@ -688,14 +688,14 @@ dependencies = [
 
 [[package]]
 name = "clarinet-defaults"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clarity",
 ]
 
 [[package]]
 name = "clarinet-deployments"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "base58",
  "base64 0.22.1",
@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-files"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "bitcoin",
  "clarinet-defaults",
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-events"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clap",
  "clarinet-files",
@@ -829,7 +829,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-static-cost"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clarity",
  "clarity-types",
@@ -2866,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "observer"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "axum",
  "base58",
@@ -4269,7 +4269,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-network"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "base58",
  "bitcoincore-rpc",
@@ -4311,7 +4311,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clarinet-utils",
  "clarity",
