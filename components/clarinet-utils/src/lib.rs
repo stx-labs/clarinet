@@ -7,7 +7,6 @@ use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
 use bip39::{Error as MnemonicError, Language, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
-use rand::rngs::OsRng;
 use rand::RngCore;
 
 /// Size of the AES-GCM nonce
@@ -58,7 +57,7 @@ pub fn mnemonic_from_phrase(phrase: &str) -> Result<Mnemonic, String> {
 
 pub fn random_mnemonic() -> Mnemonic {
     let mut entropy = [0u8; 16]; // 16 bytes = 128 bits = 12 words
-    rand::thread_rng().fill_bytes(&mut entropy);
+    rand::rng().fill_bytes(&mut entropy);
     Mnemonic::from_entropy_in(Language::English, &entropy).unwrap()
 }
 
@@ -180,7 +179,7 @@ pub fn encrypt(
     strength: MnemonicEncryptionStrength,
 ) -> Result<Vec<u8>, EncryptionError> {
     let mut key = [0u8; 32];
-    let mut rng = OsRng;
+    let mut rng = rand::rng();
     let mut nonce_bytes = [0u8; AES_GCM_NONCE_SIZE];
 
     let mut bytes = Vec::new();
