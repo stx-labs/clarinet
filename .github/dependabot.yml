@@ -1,0 +1,8 @@
+version: 2
+updates:
+  - package-ecosystem: "nix"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 9 1,15 * *"
+      timezone: "Etc/UTC"

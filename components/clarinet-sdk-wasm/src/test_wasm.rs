@@ -73,7 +73,7 @@ async fn it_can_call_remote_data() {
     let mut sdk = SDK::new(js_noop, None);
     let options = RemoteDataSettings {
         enabled: true,
-        api_url: ApiUrl("https://api.testnet.stg.hiro.so".to_string()),
+        api_url: ApiUrl("https://api.testnet.hiro.so".to_string()),
         initial_height: Some(42000),
         use_mainnet_wallets: false,
     };
