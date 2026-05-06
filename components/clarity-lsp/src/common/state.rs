@@ -1025,7 +1025,7 @@ pub async fn build_state(
             // Run static_cost_tree for this contract
             let Some(cost_result) = get_cost_analysis(session, contract_id, clarity_version).await
             else {
-                clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
+                clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {contract_id}");
                 continue;
             };
             clarity_repl::uprint!(
@@ -1074,9 +1074,7 @@ async fn get_cost_analysis(
     use clarity_static_cost::static_cost::static_cost;
 
     clarity_repl::uprint!(
-        "[LSP] get_cost_analysis called for contract: {} (clarity version: {:?})",
-        contract_id,
-        clarity_version
+        "[LSP] get_cost_analysis called for contract: {contract_id} (clarity version: {clarity_version:?})"
     );
 
     let tx_sender: clarity_types::types::PrincipalData = session.interpreter.get_tx_sender().into();
@@ -1086,7 +1084,7 @@ async fn get_cost_analysis(
         .interpreter
         .get_global_context(epoch, false)
         .map_err(|e| {
-            clarity_repl::uprint!("[LSP] Failed to get global context: {}", e);
+            clarity_repl::uprint!("[LSP] Failed to get global context: {e}");
             e
         })
         .ok()?;
@@ -1110,8 +1108,8 @@ async fn get_cost_analysis(
             };
 
             let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
-                clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
-                let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
+                clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
+                let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
                 VmExecutionError::Internal(VmInternalError::Expect(error_msg))
             })?;
 
@@ -1119,10 +1117,10 @@ async fn get_cost_analysis(
                 .warnings
                 .iter()
                 .map(|w| {
-                    clarity_repl::uprint!("[LSP] Cost warning: {}", w);
+                    clarity_repl::uprint!("[LSP] Cost warning: {w}");
                     ClarityDiagnostic {
                         level: ClarityLevel::Warning,
-                        message: format!("{w}"),
+                        message: w.to_string(),
                         spans: vec![],
                         suggestion: None,
                     }
@@ -1137,7 +1135,7 @@ async fn get_cost_analysis(
 
     cost_result
         .map_err(|e| {
-            clarity_repl::uprint!("[LSP] Cost analysis failed with error: {:?}", e);
+            clarity_repl::uprint!("[LSP] Cost analysis failed with error: {e:?}");
         })
         .ok()
 }

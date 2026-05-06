@@ -685,10 +685,7 @@ fn get_contract_call_target_cost(
                     kind: CostWarningKind::ContractCallCostError {
                         contract_id: contract_id.to_string(),
                         called_function: function_name.to_string(),
-                        error: format!(
-                            "function '{}' not found in contract cost map",
-                            function_name
-                        ),
+                        error: format!("function '{function_name}' not found in contract cost map"),
                     },
                 });
             }
