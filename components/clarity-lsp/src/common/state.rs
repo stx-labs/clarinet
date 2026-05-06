@@ -1023,8 +1023,7 @@ pub async fn build_state(
                 .unwrap_or(DEFAULT_CLARITY_VERSION);
 
             // Run static_cost_tree for this contract
-            let Some(cost_analysis) =
-                get_cost_analysis(session, contract_id, clarity_version).await
+            let Some(cost_result) = get_cost_analysis(session, contract_id, clarity_version).await
             else {
                 clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
                 continue;
@@ -1032,9 +1031,15 @@ pub async fn build_state(
             clarity_repl::uprint!(
                 "[LSP] Cost analysis completed for {}: {} functions analyzed",
                 contract_id,
-                cost_analysis.len()
+                cost_result.costs.len()
             );
-            cost_analyses.insert(contract_id.clone(), cost_analysis);
+            if !cost_result.warnings.is_empty() {
+                diagnostics
+                    .entry(contract_id.clone())
+                    .or_insert_with(Vec::new)
+                    .extend(cost_result.warnings);
+            }
+            cost_analyses.insert(contract_id.clone(), cost_result.costs);
         }
     }
 
@@ -1053,12 +1058,17 @@ pub async fn build_state(
     Ok(())
 }
 
+struct CostAnalysisResult {
+    costs: HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
+    warnings: Vec<ClarityDiagnostic>,
+}
+
 // Helper function to compute cost analysis for a contract
 async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
-) -> Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>> {
+) -> Option<CostAnalysisResult> {
     use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
     use clarity_static_cost::static_cost::static_cost;
@@ -1083,36 +1093,47 @@ async fn get_cost_analysis(
 
     global_context.begin();
 
-    let cost_result: Result<
-        HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
-        clarity::vm::errors::VmExecutionError,
-    > = global_context.execute(|g| {
-        let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
-        let mut call_stack = CallStack::new();
+    let cost_result: Result<CostAnalysisResult, clarity::vm::errors::VmExecutionError> =
+        global_context.execute(|g| {
+            let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
+            let mut call_stack = CallStack::new();
 
-        let invoke_ctx = InvocationContext {
-            contract_context: &contract_context,
-            sender: Some(tx_sender.clone()),
-            caller: Some(tx_sender),
-            sponsor: None,
-        };
-        let mut env = ExecutionState {
-            global_context: g,
-            call_stack: &mut call_stack,
-        };
+            let invoke_ctx = InvocationContext {
+                contract_context: &contract_context,
+                sender: Some(tx_sender.clone()),
+                caller: Some(tx_sender),
+                sponsor: None,
+            };
+            let mut env = ExecutionState {
+                global_context: g,
+                call_stack: &mut call_stack,
+            };
 
-        let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
-            clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
-            let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
-            VmExecutionError::Internal(VmInternalError::Expect(error_msg))
-        })?;
+            let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
+                clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
+                let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
+                VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+            })?;
 
-        for warning in &result.warnings {
-            clarity_repl::uprint!("[LSP] Cost warning: {}", warning);
-        }
+            let warnings = result
+                .warnings
+                .iter()
+                .map(|w| {
+                    clarity_repl::uprint!("[LSP] Cost warning: {}", w);
+                    ClarityDiagnostic {
+                        level: ClarityLevel::Warning,
+                        message: format!("{w}"),
+                        spans: vec![],
+                        suggestion: None,
+                    }
+                })
+                .collect();
 
-        Ok(result.costs)
-    });
+            Ok(CostAnalysisResult {
+                costs: result.costs,
+                warnings,
+            })
+        });
 
     cost_result
         .map_err(|e| {
