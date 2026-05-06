@@ -1008,6 +1008,12 @@ pub async fn build_state(
         let session = final_session
             .as_mut()
             .expect("CHECK_ENVIRONMENTS ran at least once");
+
+        // Collect trait implementations from all deployed contracts' ASTs.
+        // This scans for `impl-trait` declarations so that trait-based
+        // contract-call? costs can be resolved.
+        let trait_implementations = collect_trait_implementations(&asts);
+
         for contract_id in locations.keys() {
             // Skip cost analysis for empty contracts (no expressions to analyze)
             if asts
@@ -1023,7 +1029,13 @@ pub async fn build_state(
                 .unwrap_or(DEFAULT_CLARITY_VERSION);
 
             // Run static_cost_tree for this contract
-            let Some(cost_result) = get_cost_analysis(session, contract_id, clarity_version).await
+            let Some(cost_result) = get_cost_analysis(
+                session,
+                contract_id,
+                clarity_version,
+                &trait_implementations,
+            )
+            .await
             else {
                 clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {contract_id}");
                 continue;
@@ -1063,11 +1075,51 @@ struct CostAnalysisResult {
     warnings: Vec<ClarityDiagnostic>,
 }
 
+/// Scan all contract ASTs for `impl-trait` declarations and build a mapping
+/// from trait identifiers to the contracts that implement them.
+fn collect_trait_implementations(
+    asts: &BTreeMap<QualifiedContractIdentifier, ContractAST>,
+) -> HashMap<clarity_types::types::TraitIdentifier, Vec<QualifiedContractIdentifier>> {
+    use clarity::vm::functions::define::DefineFunctions;
+
+    let mut trait_implementations: HashMap<
+        clarity_types::types::TraitIdentifier,
+        Vec<QualifiedContractIdentifier>,
+    > = HashMap::new();
+
+    for (contract_id, ast) in asts {
+        for expr in &ast.expressions {
+            let Some(list) = expr.match_list() else {
+                continue;
+            };
+            let Some(func_name) = list.first().and_then(|e| e.match_atom()) else {
+                continue;
+            };
+            if DefineFunctions::lookup_by_name(func_name) != Some(DefineFunctions::ImplTrait) {
+                continue;
+            }
+            let Some(trait_id) = list.get(1).and_then(|e| e.match_field()) else {
+                continue;
+            };
+            trait_implementations
+                .entry(trait_id.clone())
+                .or_default()
+                .push(contract_id.clone());
+        }
+    }
+
+    trait_implementations
+}
+
 // Helper function to compute cost analysis for a contract
 async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
+    trait_implementations: &HashMap<
+        clarity_types::types::TraitIdentifier,
+        Vec<QualifiedContractIdentifier>,
+    >,
 ) -> Option<CostAnalysisResult> {
     use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
@@ -1107,11 +1159,12 @@ async fn get_cost_analysis(
                 call_stack: &mut call_stack,
             };
 
-            let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
-                clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
-                let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
-                VmExecutionError::Internal(VmInternalError::Expect(error_msg))
-            })?;
+            let result = static_cost(&mut env, &invoke_ctx, contract_id, trait_implementations)
+                .map_err(|e| {
+                    clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
+                    let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
+                    VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+                })?;
 
             let warnings = result
                 .warnings

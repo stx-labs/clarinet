@@ -269,6 +269,7 @@ pub fn static_cost(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
     contract_identifier: &QualifiedContractIdentifier,
+    trait_implementations: &HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
 ) -> Result<StaticCostResult, StaticCostError> {
     let contract_source = env
         .global_context
@@ -293,7 +294,7 @@ pub fn static_cost(
         epoch,
         Some(&StaticCostConfig {
             contract_size: contract_source.len() as u64,
-            trait_implementations: HashMap::new(),
+            trait_implementations: trait_implementations.clone(),
         }),
         env,
         invoke_ctx,
@@ -668,7 +669,7 @@ fn get_contract_call_target_cost(
     };
 
     if let Some(contract_id) = contract_id {
-        match static_cost(env, ctx.invoke_ctx, &contract_id) {
+        match static_cost(env, ctx.invoke_ctx, &contract_id, &HashMap::new()) {
             Ok(result) => {
                 // Propagate any warnings from the callee analysis so that
                 // incomplete analysis in transitive dependencies is surfaced.
@@ -749,7 +750,7 @@ fn resolve_trait_call_cost(
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
-        let Ok(result) = static_cost(env, ctx.invoke_ctx, impl_contract) else {
+        let Ok(result) = static_cost(env, ctx.invoke_ctx, impl_contract, &HashMap::new()) else {
             continue;
         };
         let Some((cost, _)) = result.costs.get(function_name.as_str()) else {
