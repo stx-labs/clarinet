@@ -325,7 +325,7 @@ async fn run_did_open_and_collect_server_requests(code_lens_refresh: bool) -> Ve
     let collect_requests_fut = async {
         let mut methods = vec![];
         while let Ok(Some(req)) =
-            tokio::time::timeout(Duration::from_secs(10), request_stream.next()).await
+            tokio::time::timeout(Duration::from_secs(1), request_stream.next()).await
         {
             let method = req.method().to_string();
             if let Some(id) = req.id().cloned() {

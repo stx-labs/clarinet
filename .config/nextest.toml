@@ -14,7 +14,7 @@ threads-required = 4
 # Serialize them to avoid concurrent rate-limit pressure, and give a generous
 # timeout since each test makes multiple API calls.
 [[profile.default.overrides]]
-filter = "binary(empty_session_with_mxs)"
+filter = "binary(empty_session_with_mxs) | binary(mxs_project) | test(can_init_console_with_mxs)"
 test-group = "hiro-api"
 slow-timeout = { period = "30s", terminate-after = 4 }
 
