@@ -8,6 +8,6 @@ clarity_version = 3
 
 [repl.remote_data]
 enabled = true
-api_url = 'https://api.stg.hiro.so'
+api_url = 'https://api.hiro.so'
 initial_height = 522000
 use_mainnet_wallets = true

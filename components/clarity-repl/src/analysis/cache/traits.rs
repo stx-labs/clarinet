@@ -62,7 +62,7 @@ pub struct TraitMaps<'a> {
 
 pub struct TraitMapBuilder<'a> {
     clarity_version: ClarityVersion,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     declared: DeclaredTraitMap<'a>,
     imported: ImportedTraitMap<'a>,
 }
@@ -71,7 +71,7 @@ impl<'a> TraitMapBuilder<'a> {
     pub fn build(
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
     ) -> TraitMaps<'a> {
         let mut builder = Self {
             clarity_version,

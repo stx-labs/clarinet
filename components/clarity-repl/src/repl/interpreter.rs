@@ -227,35 +227,26 @@ impl ClarityInterpreter {
         let mut diagnostics = vec![];
         for (n, line) in code_source.lines().enumerate() {
             if let Some(comment) = line.trim().strip_prefix(";;") {
-                if let Some(annotation_string) = comment.trim().strip_prefix("#[") {
+                if comment.trim().starts_with("#[") {
                     let span = Span {
                         start_line: (n + 1) as u32,
                         start_column: (line.find('#').unwrap_or(0) + 1) as u32,
                         end_line: (n + 1) as u32,
                         end_column: line.len() as u32,
                     };
-                    if let Some(annotation_string) = annotation_string.strip_suffix(']') {
-                        let kind: AnnotationKind = match annotation_string.trim().parse() {
-                            Ok(kind) => kind,
-                            Err(e) => {
-                                diagnostics.push(Diagnostic {
-                                    level: Level::Warning,
-                                    message: e.to_string(),
-                                    spans: vec![span.clone()],
-                                    suggestion: None,
-                                });
-                                continue;
-                            }
-                        };
-                        annotations.push(Annotation { kind, span });
-                    } else {
-                        diagnostics.push(Diagnostic {
-                            level: Level::Warning,
-                            message: "malformed annotation".to_string(),
-                            spans: vec![span],
-                            suggestion: None,
-                        });
-                    }
+                    let kind: AnnotationKind = match comment.trim().parse() {
+                        Ok(kind) => kind,
+                        Err(e) => {
+                            diagnostics.push(Diagnostic {
+                                level: Level::Warning,
+                                message: e.to_string(),
+                                spans: vec![span],
+                                suggestion: None,
+                            });
+                            continue;
+                        }
+                    };
+                    annotations.push(Annotation { kind, span });
                 }
             } else if let Some(comment_pos) = line.find(";;") {
                 let comment = &line[comment_pos + 2..];
@@ -283,7 +274,7 @@ impl ClarityInterpreter {
         &mut self,
         contract: &ClarityContract,
         contract_ast: &ContractAST,
-        annotations: &Vec<Annotation>,
+        annotations: &[Annotation],
     ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Diagnostic> {
         let mut analysis_db = AnalysisDatabase::new(&mut self.clarity_datastore);
 
@@ -1050,7 +1041,7 @@ mod tests {
     use clarity::types::chainstate::StacksAddress;
     use clarity::types::Address;
     use clarity::util::hash::hex_bytes;
-    use clarity::vm::{self, ClarityVersion};
+    use clarity::vm::{self, ClarityName, ClarityVersion, ContractName};
     use clarity_types::types::TupleData;
     use indoc::{formatdoc, indoc};
 
@@ -1350,7 +1341,7 @@ mod tests {
             QualifiedContractIdentifier::parse(&contract_identifier_string).unwrap();
         let asset_identifier = AssetIdentifier {
             contract_identifier: contract_identifier.clone(),
-            asset_name: token_name.into(),
+            asset_name: ClarityName::try_from(token_name).unwrap(),
         };
 
         let amount = 1000;
@@ -1517,7 +1508,7 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier {
             issuer: StandardPrincipalData::transient(),
-            name: "contract".into(),
+            name: ContractName::from_literal("contract"),
         };
         let count = interpreter.get_data_var(&contract_id, "count");
 
@@ -1545,7 +1536,7 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier {
             issuer: StandardPrincipalData::transient(),
-            name: "contract".into(),
+            name: ContractName::from_literal("contract"),
         };
         let name = interpreter.get_map_entry(&contract_id, "people", &Value::UInt(0));
         assert_eq!(name, Some("0x0a0d000000077361746f736869".to_owned()));
@@ -1734,7 +1725,11 @@ mod tests {
         assert_execution_result_value(
             result,
             Value::Tuple(
-                TupleData::from_data(vec![("block-height".into(), Value::UInt(0))]).unwrap(),
+                TupleData::from_data(vec![(
+                    ClarityName::from_literal("block-height"),
+                    Value::UInt(0),
+                )])
+                .unwrap(),
             ),
         );
 
@@ -1753,7 +1748,11 @@ mod tests {
         assert_execution_result_value(
             result,
             Value::Tuple(
-                TupleData::from_data(vec![("block-height".into(), Value::UInt(10))]).unwrap(),
+                TupleData::from_data(vec![(
+                    ClarityName::from_literal("block-height"),
+                    Value::UInt(10),
+                )])
+                .unwrap(),
             ),
         );
 
@@ -1805,7 +1804,11 @@ mod tests {
         assert_execution_result_value(
             result,
             Value::Tuple(
-                TupleData::from_data(vec![("block-height".into(), Value::UInt(1))]).unwrap(),
+                TupleData::from_data(vec![(
+                    ClarityName::from_literal("block-height"),
+                    Value::UInt(1),
+                )])
+                .unwrap(),
             ),
         );
 
@@ -1867,8 +1870,11 @@ mod tests {
             result,
             Value::Tuple(
                 TupleData::from_data(vec![
-                    ("stacks-block-height".into(), Value::UInt(1)),
-                    ("tenure-height".into(), Value::UInt(1)),
+                    (
+                        ClarityName::from_literal("stacks-block-height"),
+                        Value::UInt(1),
+                    ),
+                    (ClarityName::from_literal("tenure-height"), Value::UInt(1)),
                 ])
                 .unwrap(),
             ),
@@ -1890,8 +1896,11 @@ mod tests {
             result,
             Value::Tuple(
                 TupleData::from_data(vec![
-                    ("stacks-block-height".into(), Value::UInt(11)),
-                    ("tenure-height".into(), Value::UInt(11)),
+                    (
+                        ClarityName::from_literal("stacks-block-height"),
+                        Value::UInt(11),
+                    ),
+                    (ClarityName::from_literal("tenure-height"), Value::UInt(11)),
                 ])
                 .unwrap(),
             ),
@@ -2096,7 +2105,7 @@ mod tests {
         let result = interpreter.call_contract_fn(
             &QualifiedContractIdentifier {
                 issuer: StandardPrincipalData::transient(),
-                name: "unexisting".into(),
+                name: ContractName::from_literal("unexisting"),
             },
             "undefined-function",
             &[],
@@ -2289,7 +2298,7 @@ mod tests {
             result,
             Value::Principal(PrincipalData::Contract(QualifiedContractIdentifier {
                 issuer: StandardPrincipalData::transient(),
-                name: "my-contract".into(),
+                name: ContractName::from_literal("my-contract"),
             })),
         );
     }
@@ -2322,7 +2331,10 @@ mod tests {
         let (annotations, diagnostics) = interpreter.collect_annotations(source);
         assert!(annotations.is_empty());
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message, "malformed annotation");
+        assert_eq!(
+            diagnostics[0].message,
+            "malformed annotation: expected #[...]"
+        );
     }
 
     #[test]

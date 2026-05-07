@@ -54,7 +54,7 @@ fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
         StacksEpochId::Epoch32 => PEER_VERSION_EPOCH_3_2,
         StacksEpochId::Epoch33 => PEER_VERSION_EPOCH_3_3,
         StacksEpochId::Epoch34 => PEER_VERSION_EPOCH_3_4,
-        StacksEpochId::Epoch35 => PEER_VERSION_EPOCH_3_5,
+        StacksEpochId::Epoch40 => PEER_VERSION_EPOCH_4_0,
     }
 }
 
@@ -1259,10 +1259,6 @@ impl BurnStateDB for Datastore {
         0
     }
 
-    fn get_pox_5_activation_height(&self) -> u32 {
-        0
-    }
-
     fn get_tip_burn_block_height(&self) -> Option<u32> {
         use StacksEpochId::*;
         match self.current_epoch {
@@ -1278,7 +1274,7 @@ impl BurnStateDB for Datastore {
                     .map(|block| block.burn_block_height)
             }
             // Note: at-block removed at 3.4+
-            Epoch30 | Epoch31 | Epoch32 | Epoch33 | Epoch34 | Epoch35 => {
+            Epoch30 | Epoch31 | Epoch32 | Epoch33 | Epoch34 | Epoch40 => {
                 Some(self.burn_chain_height)
             }
         }

@@ -20,7 +20,7 @@ use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::session::AnnotatedExecutionResult;
-use clarity_repl::repl::ContractDeployer;
+use clarity_repl::repl::{ContractDeployer, Session};
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
 use clarity_static_cost::static_cost::StaticCost;
 use ls_types::{
@@ -890,7 +890,9 @@ pub async fn build_state(
     };
 
     let mut global_found_env_simnet = false;
-    let mut session = initiate_session_from_manifest(&manifest);
+    // Populated by the final loop iteration; cost analysis (below) needs the
+    // fully-deployed session but only cares about the last iteration's state.
+    let mut final_session: Option<Session> = None;
     for environment in CHECK_ENVIRONMENTS {
         let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment(
             &manifest,
@@ -903,7 +905,7 @@ pub async fn build_state(
         .await?;
         global_found_env_simnet |= found_env_simnet;
 
-        session = initiate_session_from_manifest(&manifest);
+        let mut session = initiate_session_from_manifest(&manifest);
         let contracts =
             update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
         for (contract_id, mut result) in contracts.into_iter() {
@@ -990,6 +992,7 @@ pub async fn build_state(
             entry.append(diags);
         }
 
+        final_session = Some(session);
         if !global_found_env_simnet {
             break;
         }
@@ -1000,6 +1003,11 @@ pub async fn build_state(
     // static_cost_tree needs the contract to be available in the global context
     let mut cost_analyses = HashMap::new();
     if static_cost_analysis {
+        // `CHECK_ENVIRONMENTS` is a non-empty const array, so the loop above
+        // always runs at least once and populates `final_session`.
+        let session = final_session
+            .as_mut()
+            .expect("CHECK_ENVIRONMENTS ran at least once");
         for contract_id in locations.keys() {
             // Skip cost analysis for empty contracts (no expressions to analyze)
             if asts
@@ -1015,18 +1023,23 @@ pub async fn build_state(
                 .unwrap_or(DEFAULT_CLARITY_VERSION);
 
             // Run static_cost_tree for this contract
-            if let Some(cost_analysis) =
-                get_cost_analysis(&mut session, contract_id, clarity_version).await
-            {
-                clarity_repl::uprint!(
-                    "[LSP] Cost analysis completed for {}: {} functions analyzed",
-                    contract_id,
-                    cost_analysis.len()
-                );
-                cost_analyses.insert(contract_id.clone(), cost_analysis);
-            } else {
-                clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {}", contract_id);
+            let Some(cost_result) = get_cost_analysis(session, contract_id, clarity_version).await
+            else {
+                clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {contract_id}");
+                continue;
+            };
+            clarity_repl::uprint!(
+                "[LSP] Cost analysis completed for {}: {} functions analyzed",
+                contract_id,
+                cost_result.costs.len()
+            );
+            if !cost_result.warnings.is_empty() {
+                diagnostics
+                    .entry(contract_id.clone())
+                    .or_insert_with(Vec::new)
+                    .extend(cost_result.warnings);
             }
+            cost_analyses.insert(contract_id.clone(), cost_result.costs);
         }
     }
 
@@ -1045,20 +1058,23 @@ pub async fn build_state(
     Ok(())
 }
 
+struct CostAnalysisResult {
+    costs: HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
+    warnings: Vec<ClarityDiagnostic>,
+}
+
 // Helper function to compute cost analysis for a contract
 async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
-) -> Option<HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>> {
+) -> Option<CostAnalysisResult> {
     use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
     use clarity_static_cost::static_cost::static_cost;
 
     clarity_repl::uprint!(
-        "[LSP] get_cost_analysis called for contract: {} (clarity version: {:?})",
-        contract_id,
-        clarity_version
+        "[LSP] get_cost_analysis called for contract: {contract_id} (clarity version: {clarity_version:?})"
     );
 
     let tx_sender: clarity_types::types::PrincipalData = session.interpreter.get_tx_sender().into();
@@ -1068,43 +1084,58 @@ async fn get_cost_analysis(
         .interpreter
         .get_global_context(epoch, false)
         .map_err(|e| {
-            clarity_repl::uprint!("[LSP] Failed to get global context: {}", e);
+            clarity_repl::uprint!("[LSP] Failed to get global context: {e}");
             e
         })
         .ok()?;
 
     global_context.begin();
 
-    let cost_result: Result<
-        HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
-        clarity::vm::errors::VmExecutionError,
-    > = global_context.execute(|g| {
-        let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
-        let mut call_stack = CallStack::new();
+    let cost_result: Result<CostAnalysisResult, clarity::vm::errors::VmExecutionError> =
+        global_context.execute(|g| {
+            let contract_context = ContractContext::new(contract_id.clone(), clarity_version);
+            let mut call_stack = CallStack::new();
 
-        let invoke_ctx = InvocationContext {
-            contract_context: &contract_context,
-            sender: Some(tx_sender.clone()),
-            caller: Some(tx_sender),
-            sponsor: None,
-        };
-        let mut env = ExecutionState {
-            global_context: g,
-            call_stack: &mut call_stack,
-        };
+            let invoke_ctx = InvocationContext {
+                contract_context: &contract_context,
+                sender: Some(tx_sender.clone()),
+                caller: Some(tx_sender),
+                sponsor: None,
+            };
+            let mut env = ExecutionState {
+                global_context: g,
+                call_stack: &mut call_stack,
+            };
 
-        // Use static_cost which returns (StaticCost, Option<TraitCount>)
-        // TraitCount is HashMap<String, (u64, u64)>, so we can use it directly
-        static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
-            clarity_repl::uprint!("[LSP] static_cost failed with error: {}", e);
-            let error_msg = format!("Cost analysis failed for contract {}: {}", contract_id, e);
-            VmExecutionError::Internal(VmInternalError::Expect(error_msg))
-        })
-    });
+            let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
+                clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
+                let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
+                VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+            })?;
+
+            let warnings = result
+                .warnings
+                .iter()
+                .map(|w| {
+                    clarity_repl::uprint!("[LSP] Cost warning: {w}");
+                    ClarityDiagnostic {
+                        level: ClarityLevel::Warning,
+                        message: w.to_string(),
+                        spans: vec![],
+                        suggestion: None,
+                    }
+                })
+                .collect();
+
+            Ok(CostAnalysisResult {
+                costs: result.costs,
+                warnings,
+            })
+        });
 
     cost_result
         .map_err(|e| {
-            clarity_repl::uprint!("[LSP] Cost analysis failed with error: {:?}", e);
+            clarity_repl::uprint!("[LSP] Cost analysis failed with error: {e:?}");
         })
         .ok()
 }

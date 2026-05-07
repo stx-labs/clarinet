@@ -54,6 +54,8 @@ pub enum LintName {
     UnnecessaryAsMaxLen,
     /// Find public functions that could be read-only
     UnnecessaryPublic,
+    /// Find unnecessary single-field tuples
+    UnnecessaryTuple,
     /// Find unused variable bindings
     UnusedBinding,
     /// Find unused constants
@@ -125,7 +127,11 @@ impl LintGroup {
 
         match self {
             All => LintName::VARIANTS,
-            Perf => &[LintName::UnnecessaryAsMaxLen, LintName::UnnecessaryPublic],
+            Perf => &[
+                LintName::UnnecessaryAsMaxLen,
+                LintName::UnnecessaryPublic,
+                LintName::UnnecessaryTuple,
+            ],
             Safety => &[
                 LintName::AtBlock,
                 LintName::ErrorConst,
@@ -211,7 +217,7 @@ impl TryFrom<String> for LintGroup {
     }
 }
 
-/// Map user intput to `clarity_types::diagnostic::Level` or ignore
+/// Map user input to `clarity::vm::diagnostic::Level` or ignore
 #[derive(Debug, Default, PartialEq, Copy, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]

@@ -18,7 +18,7 @@ use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 pub struct UnnecessaryAsMaxLen<'a> {
     clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     type_map: Option<&'a TypeMap>,
     level: Level,
     active_annotation: Option<usize>,
@@ -27,7 +27,7 @@ pub struct UnnecessaryAsMaxLen<'a> {
 impl<'a> UnnecessaryAsMaxLen<'a> {
     fn new(
         clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
         type_map: Option<&'a TypeMap>,
         level: Level,
     ) -> Self {

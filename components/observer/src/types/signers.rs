@@ -54,6 +54,12 @@ pub enum BlockValidationFailedCode {
     UnknownParent,
     NonCanonicalTenure,
     NoSuchTenure,
+    InvalidTransactionReplay,
+    InvalidParentBlock,
+    InvalidTimestamp,
+    NetworkChainMismatch,
+    NotFoundError,
+    ProblematicTransaction,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -141,4 +147,111 @@ pub struct StacksStackerDbChunk {
     pub sig: String,
     pub pubkey: String,
     pub message: StacksSignerMessage,
+}
+
+#[cfg(feature = "stacks-signers")]
+mod stacks_signers_conversions {
+    use libsigner::v0::messages::RejectCode;
+    use stackslib::net::api::postblock_proposal::ValidateRejectCode;
+
+    use super::{BlockRejectReasonCode, BlockValidationFailedCode};
+
+    impl From<ValidateRejectCode> for BlockValidationFailedCode {
+        fn from(code: ValidateRejectCode) -> Self {
+            match code {
+                ValidateRejectCode::BadBlockHash => Self::BadBlockHash,
+                ValidateRejectCode::BadTransaction => Self::BadTransaction,
+                ValidateRejectCode::InvalidBlock => Self::InvalidBlock,
+                ValidateRejectCode::ChainstateError => Self::ChainstateError,
+                ValidateRejectCode::UnknownParent => Self::UnknownParent,
+                ValidateRejectCode::NonCanonicalTenure => Self::NonCanonicalTenure,
+                ValidateRejectCode::NoSuchTenure => Self::NoSuchTenure,
+                ValidateRejectCode::InvalidTransactionReplay => Self::InvalidTransactionReplay,
+                ValidateRejectCode::InvalidParentBlock => Self::InvalidParentBlock,
+                ValidateRejectCode::InvalidTimestamp => Self::InvalidTimestamp,
+                ValidateRejectCode::NetworkChainMismatch => Self::NetworkChainMismatch,
+                ValidateRejectCode::NotFoundError => Self::NotFoundError,
+                ValidateRejectCode::ProblematicTransaction => Self::ProblematicTransaction,
+            }
+        }
+    }
+
+    impl From<RejectCode> for BlockRejectReasonCode {
+        fn from(code: RejectCode) -> Self {
+            match code {
+                RejectCode::ValidationFailed(c) => Self::ValidationFailed {
+                    validation_failed: c.into(),
+                },
+                RejectCode::NoSortitionView => Self::NoSortitionView,
+                // The upstream `String` payload is dropped here; downstream consumers
+                // see only the unit variant that the observer's wire format defines.
+                RejectCode::ConnectivityIssues(_) => Self::ConnectivityIssues,
+                RejectCode::RejectedInPriorRound => Self::RejectedInPriorRound,
+                RejectCode::SortitionViewMismatch => Self::SortitionViewMismatch,
+                RejectCode::TestingDirective => Self::TestingDirective,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn validate_reject_code_to_block_validation_failed_code() {
+            // Spot-check old + newly-added variants. The match in the From impl is
+            // exhaustive, so any future upstream variant fails to compile until handled.
+            assert_eq!(
+                BlockValidationFailedCode::from(ValidateRejectCode::BadBlockHash),
+                BlockValidationFailedCode::BadBlockHash
+            );
+            assert_eq!(
+                BlockValidationFailedCode::from(ValidateRejectCode::NoSuchTenure),
+                BlockValidationFailedCode::NoSuchTenure
+            );
+            assert_eq!(
+                BlockValidationFailedCode::from(ValidateRejectCode::InvalidTransactionReplay),
+                BlockValidationFailedCode::InvalidTransactionReplay
+            );
+            assert_eq!(
+                BlockValidationFailedCode::from(ValidateRejectCode::ProblematicTransaction),
+                BlockValidationFailedCode::ProblematicTransaction
+            );
+        }
+
+        #[test]
+        fn reject_code_to_block_reject_reason_code() {
+            assert_eq!(
+                BlockRejectReasonCode::from(RejectCode::ValidationFailed(
+                    ValidateRejectCode::BadBlockHash
+                )),
+                BlockRejectReasonCode::ValidationFailed {
+                    validation_failed: BlockValidationFailedCode::BadBlockHash,
+                }
+            );
+            assert_eq!(
+                BlockRejectReasonCode::from(RejectCode::NoSortitionView),
+                BlockRejectReasonCode::NoSortitionView
+            );
+            // Upstream's `String` payload is dropped on the way to the unit variant.
+            assert_eq!(
+                BlockRejectReasonCode::from(RejectCode::ConnectivityIssues(
+                    "peer unreachable".to_string()
+                )),
+                BlockRejectReasonCode::ConnectivityIssues
+            );
+            assert_eq!(
+                BlockRejectReasonCode::from(RejectCode::RejectedInPriorRound),
+                BlockRejectReasonCode::RejectedInPriorRound
+            );
+            assert_eq!(
+                BlockRejectReasonCode::from(RejectCode::SortitionViewMismatch),
+                BlockRejectReasonCode::SortitionViewMismatch
+            );
+            assert_eq!(
+                BlockRejectReasonCode::from(RejectCode::TestingDirective),
+                BlockRejectReasonCode::TestingDirective
+            );
+        }
+    }
 }

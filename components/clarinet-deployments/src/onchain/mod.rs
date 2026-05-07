@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 
 use bitcoincore_rpc::{Auth, Client};
@@ -18,17 +17,17 @@ use clarity_repl::repl::boot::{
 use clarity_repl::repl::{Session, SessionSettings};
 use libsecp256k1::PublicKey;
 use reqwest::Url;
-use stacks_codec::codec::{
-    SinglesigHashMode, SinglesigSpendingCondition, StacksString, StacksTransaction,
-    StacksTransactionSigner, TokenTransferMemo, TransactionAnchorMode, TransactionAuth,
-    TransactionContractCall, TransactionPayload, TransactionPostConditionMode,
-    TransactionPublicKeyEncoding, TransactionSmartContract, TransactionSpendingCondition,
-    TransactionVersion,
-};
 use stacks_common::address::{
     AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
 use stacks_rpc_client::StacksRpc;
+use stackslib::chainstate::stacks::{
+    SinglesigHashMode, SinglesigSpendingCondition, StacksTransaction, StacksTransactionSigner,
+    TokenTransferMemo, TransactionAnchorMode, TransactionAuth, TransactionContractCall,
+    TransactionPayload, TransactionPostConditionMode, TransactionPublicKeyEncoding,
+    TransactionSmartContract, TransactionSpendingCondition, TransactionVersion,
+};
+use stackslib::util_lib::strings::StacksString;
 
 mod bitcoin_deployment;
 
@@ -738,7 +737,7 @@ pub fn apply_on_chain_deployment(
                 EpochSpec::Epoch3_2 => devnet.epoch_3_2,
                 EpochSpec::Epoch3_3 => devnet.epoch_3_3,
                 EpochSpec::Epoch3_4 => devnet.epoch_3_4,
-                EpochSpec::Epoch3_5 => devnet.epoch_3_5.unwrap_or(u64::MAX),
+                EpochSpec::Epoch4_0 => devnet.epoch_4_0.unwrap_or(u64::MAX),
             };
             let mut epoch_transition_successful =
                 current_bitcoin_block_height > after_bitcoin_block;

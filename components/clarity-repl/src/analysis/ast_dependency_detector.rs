@@ -21,7 +21,8 @@ use clarity_types::types::{
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 
-pub static DEFAULT_NAME: LazyLock<ClarityName> = LazyLock::new(|| ClarityName::from("placeholder"));
+pub static DEFAULT_NAME: LazyLock<ClarityName> =
+    LazyLock::new(|| ClarityName::from_literal("placeholder"));
 
 pub struct ASTDependencyDetector<'a> {
     dependencies: BTreeMap<QualifiedContractIdentifier, DependencySet>,

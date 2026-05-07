@@ -29,40 +29,34 @@ fn complete_input(str: &str) -> Result<Input, (char, char)> {
         }
 
         match character {
-            '\\' => {
-                if in_string {
-                    skip_next = true;
-                }
+            '\\' if in_string => {
+                skip_next = true;
             }
             '"' => in_string = !in_string,
-            '(' | '{' => {
-                if !in_string {
-                    brackets.push(character);
-                    // skip whitespace between the previous form's
-                    // closing paren (if there is one) and the current
-                    // form's opening paren
-                    match (character, paren_count) {
-                        ('(', 0) => {
-                            paren_count += 1;
-                            last_pos = pos
-                        }
-                        ('(', _) => paren_count += 1,
-                        _ => {}
+            '(' | '{' if !in_string => {
+                brackets.push(character);
+                // skip whitespace between the previous form's
+                // closing paren (if there is one) and the current
+                // form's opening paren
+                match (character, paren_count) {
+                    ('(', 0) => {
+                        paren_count += 1;
+                        last_pos = pos
                     }
+                    ('(', _) => paren_count += 1,
+                    _ => {}
                 }
             }
-            ')' | '}' => {
-                if !in_string {
-                    match (brackets.pop(), character) {
-                        (Some('('), '}') => return Err((')', '}')),
-                        (Some('{'), ')') => return Err(('}', ')')),
-                        _ => {}
-                    };
-                    if character == ')' {
-                        paren_count -= 1;
-                        if paren_count == 0 {
-                            forms.push(&str[last_pos..pos + 1]);
-                        }
+            ')' | '}' if !in_string => {
+                match (brackets.pop(), character) {
+                    (Some('('), '}') => return Err((')', '}')),
+                    (Some('{'), ')') => return Err(('}', ')')),
+                    _ => {}
+                };
+                if character == ')' {
+                    paren_count -= 1;
+                    if paren_count == 0 {
+                        forms.push(&str[last_pos..pos + 1]);
                     }
                 }
             }

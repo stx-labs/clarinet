@@ -13,7 +13,6 @@ members = [
     "components/clarity-repl",
     "components/clarity-events",
     "components/hiro-system-kit",
-    "components/stacks-codec",
     "components/observer",
     "components/stacks-network",
     "components/stacks-rpc-client",
@@ -25,16 +24,17 @@ default-members = ["components/clarinet-cli"]
 opt-level = 3
 
 [workspace.package]
-version = "3.16.0"
+version = "3.17.0"
 
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "clarity-types" }
-stacks-common = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "stacks-common", default-features = false }
-pox-locking = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "pox-locking", default-features = false }
-stackslib = { git = "https://github.com/hstove-stacks/stacks-core.git", branch = "feat/epoch-3-5-rc", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", branch = "pox-wf-integration", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", branch = "pox-wf-integration", package = "clarity-types" }
+libsigner = { git = "https://github.com/stacks-network/stacks-core.git", branch = "pox-wf-integration", package = "libsigner", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", branch = "pox-wf-integration", package = "pox-locking", default-features = false }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", branch = "pox-wf-integration", package = "stacks-common", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", branch = "pox-wf-integration", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }
@@ -96,6 +96,7 @@ yaml_serde = "0.10.3"
 # [patch.'https://github.com/stacks-network/stacks-core.git']
 # clarity = { path = "../stacks-core/clarity" }
 # clarity-types = { path = "../stacks-core/clarity-types" }
+# libsigner = { path = "../stacks-core/libsigner" }
 # stacks-common = { path = "../stacks-core/stacks-common" }
 # stackslib = { path = "../stacks-core/stackslib" }
 # pox-locking = { path = "../stacks-core/pox-locking" }

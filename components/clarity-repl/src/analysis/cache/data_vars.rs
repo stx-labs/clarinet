@@ -33,7 +33,7 @@ pub type DataVarMap<'a> = IndexMap<&'a ClarityName, DataVarData<'a>>;
 
 pub struct DataVarMapBuilder<'a> {
     clarity_version: ClarityVersion,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     map: DataVarMap<'a>,
 }
 
@@ -41,7 +41,7 @@ impl<'a> DataVarMapBuilder<'a> {
     pub fn build(
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
     ) -> DataVarMap<'a> {
         let mut builder = Self {
             clarity_version,

@@ -38,7 +38,7 @@ pub fn build_transaction_spec(
     let typical_size = 600;
     let tx_fee = tx_spec.sats_per_byte * typical_size;
     let total_required = tx_spec.sats_amount + tx_fee;
-    utxos.sort_by(|a, b| a.amount.cmp(&b.amount));
+    utxos.sort_by_key(|a| a.amount);
     for (i, utxo) in utxos.iter().enumerate() {
         cumulated_amount += utxo.amount.to_sat();
         selected_utxos_indices.push(i);

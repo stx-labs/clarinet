@@ -8,7 +8,7 @@ use serde::Deserialize;
 #[cfg(any(test, feature = "mock"))]
 use serde::Serialize;
 use serde_json::json;
-use stacks_codec::codec::{StacksTransaction, TransactionPayload};
+use stackslib::chainstate::stacks::{StacksTransaction, TransactionPayload};
 
 #[derive(Clone, Debug)]
 pub enum RpcError {

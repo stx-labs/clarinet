@@ -35,7 +35,7 @@ pub struct TokenMaps<'a> {
 
 pub struct TokenMapBuilder<'a> {
     clarity_version: ClarityVersion,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     pub fts: TokenMap<'a>,
     pub nfts: TokenMap<'a>,
 }
@@ -44,7 +44,7 @@ impl<'a> TokenMapBuilder<'a> {
     pub fn build(
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
     ) -> TokenMaps<'a> {
         let mut builder = Self {
             clarity_version,

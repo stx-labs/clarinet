@@ -13,8 +13,8 @@ libsecp256k1 = { workspace = true }
 
 clarity = { workspace = true, default-features = false }
 stacks-common = { workspace = true, default-features = false }
+stackslib = { workspace = true }
 clarinet-utils = { path = "../clarinet-utils" }
-stacks-codec = { path = "../stacks-codec" }
 
 # enable mock stacks rpc for tests
 mockito = { workspace = true, default-features = false, optional = true }

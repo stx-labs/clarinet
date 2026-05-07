@@ -68,10 +68,8 @@ pub fn get_function_at_position(
     let mut position_in_parameters: i32 = -1;
     for parameter in expressions {
         match position.line.cmp(&parameter.span.end_line) {
-            Ordering::Equal => {
-                if position.character > parameter.span.end_column + 1 {
-                    position_in_parameters += 1
-                }
+            Ordering::Equal if position.character > parameter.span.end_column + 1 => {
+                position_in_parameters += 1
             }
             Ordering::Greater => position_in_parameters += 1,
             _ => {}

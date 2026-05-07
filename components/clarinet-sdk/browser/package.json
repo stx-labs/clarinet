@@ -1,6 +1,6 @@
 {
   "name": "@stacks/clarinet-sdk-browser",
-  "version": "3.16.0",
+  "version": "3.17.0",
   "author": "Stacks Labs",
   "description": "A SDK to interact with Clarity Smart Contracts in the browser",
   "homepage": "https://stackslabs.com/clarinet",

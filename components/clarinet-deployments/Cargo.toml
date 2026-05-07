@@ -32,8 +32,8 @@ bitcoincore-rpc = { workspace= true }
 bitcoincore-rpc-json = { workspace= true }
 base58 = { workspace = true }
 libsecp256k1 = { workspace = true }
+stackslib = { workspace = true }
 clarinet-utils = { path = "../clarinet-utils" }
-stacks-codec = { path = "../stacks-codec" }
 stacks-rpc-client = { path = "../stacks-rpc-client" }
 
 [lib]

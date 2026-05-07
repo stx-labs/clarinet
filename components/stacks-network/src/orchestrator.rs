@@ -2366,9 +2366,9 @@ pub fn get_global_snapshot_dir() -> std::path::PathBuf {
     home_dir.join(".clarinet").join("cache").join("devnet")
 }
 
-/// Returns the epoch 3.5 snapshot directory.
+/// Returns the epoch 4.0 snapshot directory.
 pub fn get_active_snapshot_dir() -> std::path::PathBuf {
-    get_global_snapshot_dir().join("epoch_3_5")
+    get_global_snapshot_dir().join("epoch_4_0")
 }
 
 pub fn get_project_snapshot_dir(devnet_config: &DevnetConfig) -> std::path::PathBuf {

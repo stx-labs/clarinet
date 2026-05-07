@@ -44,7 +44,7 @@ fn can_init_console_with_mxs() {
         &[
             "--enable-remote-data",
             "--remote-data-api-url",
-            "https://api.testnet.stg.hiro.so",
+            "https://api.testnet.hiro.so",
             "--remote-data-initial-height",
             "74380",
         ],
@@ -63,7 +63,7 @@ fn can_init_console_with_mxs() {
         &[
             "--enable-remote-data",
             "--remote-data-api-url",
-            "https://api.stg.hiro.so",
+            "https://api.hiro.so",
             "--remote-data-initial-height",
             "907820",
         ],

@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use ::clarity::types::StacksEpochId;
 use ::clarity::vm::ast::parser;
 use ::clarity::vm::ast::stack_depth_checker::StackDepthLimits;
@@ -104,11 +102,15 @@ pub fn get_env_simnet_spans(source: &str) -> Result<Vec<Span>, String> {
     Ok(spans)
 }
 
-pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
-    let spans = get_env_simnet_spans(&source)?;
+/// Strips `#[env(simnet)]`-annotated code from `source`. Returns `Ok(None)` if
+/// no removable `#[env(simnet)]` blocks are found (the caller should keep the
+/// original `source`), `Ok(Some(stripped))` if annotated code was removed, or
+/// `Err` if `source` could not be parsed.
+pub fn remove_env_simnet(source: &str) -> Result<Option<String>, String> {
+    let spans = get_env_simnet_spans(source)?;
 
     if spans.is_empty() {
-        return Ok((source, false));
+        return Ok(None);
     }
 
     let mut lines = source.lines().map(Some).collect::<Vec<Option<&str>>>();
@@ -126,7 +128,7 @@ pub fn remove_env_simnet(source: String) -> Result<(String, bool), String> {
         result.push('\n');
     }
 
-    Ok((result, true))
+    Ok(Some(result))
 }
 
 fn collect_env_simnet_spans(exprs: &[PreSymbolicExpression], out: &mut Vec<Span>) {
@@ -149,7 +151,7 @@ fn collect_env_simnet_spans(exprs: &[PreSymbolicExpression], out: &mut Vec<Span>
         }
 
         if let Comment(comment) = &expr.pre_expr {
-            if let Ok(AnnotationKind::Env(_)) = AnnotationKind::from_str(comment) {
+            if let Ok(AnnotationKind::Env(_)) = comment.parse() {
                 let annotation_line = expr.span.start_line;
                 let is_eol_comment = exprs[..idx].iter().any(|prev| {
                     prev.span.end_line == annotation_line && !matches!(prev.pre_expr, Comment(_))
@@ -213,16 +215,14 @@ mod tests {
         "#);
 
         // test that we can remove a marked fn
-        let (clean, found) =
-            remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(with_env_simnet)
+            .expect("remove_env_simnet failed")
+            .expect("expected stripped source");
         assert_eq!(clean, without_env_simnet);
-        assert!(found);
 
         // test that nothing is removed if nothing is marked
-        let (clean, found) =
-            remove_env_simnet(without_env_simnet.to_string()).expect("remove_env_simnet failed");
-        assert_eq!(clean, without_env_simnet);
-        assert!(!found);
+        let result = remove_env_simnet(without_env_simnet).expect("remove_env_simnet failed");
+        assert!(result.is_none(), "expected no change");
     }
 
     #[test]
@@ -251,10 +251,10 @@ mod tests {
             )
         "#);
 
-        let (clean, found) =
-            remove_env_simnet(with_env_simnet.to_string()).expect("remove_env_simnet failed");
+        let clean = remove_env_simnet(with_env_simnet)
+            .expect("remove_env_simnet failed")
+            .expect("expected stripped source");
         assert_eq!(clean, without_env_simnet);
-        assert!(found);
     }
 
     #[test]
@@ -269,10 +269,8 @@ mod tests {
             )
         "#);
 
-        let (clean, found) =
-            remove_env_simnet(source.to_string()).expect("remove_env_simnet failed");
-        assert_eq!(clean, source);
-        assert!(!found);
+        let result = remove_env_simnet(source).expect("remove_env_simnet failed");
+        assert!(result.is_none(), "EOL annotation should be ignored");
     }
 
     #[test]
@@ -357,5 +355,53 @@ mod tests {
         assert_eq!(spans[0].end_line, 2);
         assert_eq!(spans[1].start_line, 6);
         assert_eq!(spans[1].end_line, 7);
+    }
+
+    #[test]
+    fn ignores_malformed_env_annotation_missing_hash() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; [env(simnet)]
+            (define-public (set-admin (new-admin principal))
+                (begin
+                    (ok (var-set contract-owner new-admin))
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn ignores_malformed_env_annotation_hash_inside_brackets() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; [#env(simnet)]
+            (define-public (set-admin (new-admin principal))
+                (begin
+                    (ok (var-set contract-owner new-admin))
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn ignores_malformed_env_annotation_trailing_garbage_inside_brackets() {
+        #[rustfmt::skip]
+        let source = indoc!(r#"
+            ;; #[env(simnet) this is not a real annotation]
+            (define-public (set-admin (new-admin principal))
+                (begin
+                    (ok (var-set contract-owner new-admin))
+                )
+            )
+        "#);
+
+        let spans = get_env_simnet_spans(source).unwrap();
+        assert!(spans.is_empty());
     }
 }

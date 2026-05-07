@@ -270,7 +270,7 @@ async fn handle_new_mempool_tx(
     let transactions = match raw_txs
         .iter()
         .map(|tx_data| {
-            indexer::stacks::get_tx_description(tx_data, &vec![]).map(|(tx_description, ..)| {
+            indexer::stacks::get_tx_description(tx_data, &[]).map(|(tx_description, ..)| {
                 MempoolAdmissionData {
                     tx_data: tx_data.clone(),
                     tx_description,

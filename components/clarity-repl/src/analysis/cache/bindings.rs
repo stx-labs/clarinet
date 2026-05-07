@@ -48,7 +48,7 @@ pub type BindingMap<'a> = HashMap<Binding<'a>, BindingData<'a>>;
 
 pub struct BindingMapBuilder<'a> {
     clarity_version: ClarityVersion,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     /// Names of all `let` bindings and function args currently in scope
     active_bindings: HashMap<&'a ClarityName, BindingData<'a>>,
     /// Variables which went out of scope without being referenced
@@ -59,7 +59,7 @@ impl<'a> BindingMapBuilder<'a> {
     pub fn build(
         clarity_version: ClarityVersion,
         contract_analysis: &'a ContractAnalysis,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
     ) -> BindingMap<'a> {
         let mut builder = Self {
             clarity_version,

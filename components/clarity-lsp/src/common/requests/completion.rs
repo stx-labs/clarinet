@@ -26,11 +26,13 @@ const fn version_to_index(version: ClarityVersion) -> usize {
         ClarityVersion::Clarity3 => 2,
         ClarityVersion::Clarity4 => 3,
         ClarityVersion::Clarity5 => 4,
+        ClarityVersion::Clarity6 => 5,
     }
 }
 
 fn get_native_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
+        OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
@@ -511,14 +513,12 @@ pub fn build_completion_item_list(
                     Some(snippet)
                 };
             }
-            Some(CompletionItemKind::TYPE_PARAMETER) => {
-                if should_wrap {
-                    if let "tuple" | "buff" | "string-ascii" | "string-utf8" | "optional" | "list"
-                    | "response" = item.label.as_str()
-                    {
-                        item.insert_text = Some(format!("({} $0)", item.label));
-                        item.insert_text_format = Some(InsertTextFormat::SNIPPET);
-                    }
+            Some(CompletionItemKind::TYPE_PARAMETER) if should_wrap => {
+                if let "tuple" | "buff" | "string-ascii" | "string-utf8" | "optional" | "list"
+                | "response" = item.label.as_str()
+                {
+                    item.insert_text = Some(format!("({} $0)", item.label));
+                    item.insert_text_format = Some(InsertTextFormat::SNIPPET);
                 }
             }
             _ => {}

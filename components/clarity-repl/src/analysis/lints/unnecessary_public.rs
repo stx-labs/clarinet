@@ -30,7 +30,7 @@ use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 pub struct UnnecessaryPublic<'a, 'b, 'c> {
     clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
-    annotations: &'a Vec<Annotation>,
+    annotations: &'a [Annotation],
     analysis_db: &'b mut AnalysisDatabase<'c>,
     epoch: StacksEpochId,
     level: Level,
@@ -50,7 +50,7 @@ pub struct UnnecessaryPublic<'a, 'b, 'c> {
 impl<'a, 'b, 'c> UnnecessaryPublic<'a, 'b, 'c> {
     fn new(
         clarity_version: ClarityVersion,
-        annotations: &'a Vec<Annotation>,
+        annotations: &'a [Annotation],
         analysis_db: &'b mut AnalysisDatabase<'c>,
         epoch: StacksEpochId,
         level: Level,

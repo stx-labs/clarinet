@@ -34,6 +34,7 @@ pub fn clarity_version_to_u8(version: ClarityVersion) -> u8 {
         ClarityVersion::Clarity3 => 3,
         ClarityVersion::Clarity4 => 4,
         ClarityVersion::Clarity5 => 5,
+        ClarityVersion::Clarity6 => 6,
     }
 }
 
@@ -45,6 +46,7 @@ pub fn clarity_version_from_u8(value: u8) -> Option<ClarityVersion> {
         3 => Some(ClarityVersion::Clarity3),
         4 => Some(ClarityVersion::Clarity4),
         5 => Some(ClarityVersion::Clarity5),
+        6 => Some(ClarityVersion::Clarity6),
         _ => None,
     }
 }
@@ -65,7 +67,7 @@ pub fn epoch_from_str(s: &str) -> Option<StacksEpochId> {
         "3.2" => Some(StacksEpochId::Epoch32),
         "3.3" => Some(StacksEpochId::Epoch33),
         "3.4" => Some(StacksEpochId::Epoch34),
-        "3.5" => Some(StacksEpochId::Epoch35),
+        "4" | "4.0" => Some(StacksEpochId::Epoch40),
         _ => None,
     }
 }
@@ -154,7 +156,7 @@ impl<'de> serde::Deserialize<'de> for Epoch {
                     3.2 => StacksEpochId::Epoch32,
                     3.3 => StacksEpochId::Epoch33,
                     3.4 => StacksEpochId::Epoch34,
-                    3.5 => StacksEpochId::Epoch35,
+                    4.0 => StacksEpochId::Epoch40,
                     _ => {
                         return Err(serde::de::Error::custom(format!(
                             "unknown epoch value: {value}"

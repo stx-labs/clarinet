@@ -18,7 +18,7 @@ fn init_testnet_session(initial_heigth: u32) -> Session {
     settings.cache_location = Some(temp_dir.path().to_path_buf());
     settings.repl_settings.remote_data = RemoteDataSettings {
         enabled: true,
-        api_url: ApiUrl("https://api.testnet.stg.hiro.so".to_string()),
+        api_url: ApiUrl("https://api.testnet.hiro.so".to_string()),
         initial_height: Some(initial_heigth),
         use_mainnet_wallets: false,
     };
@@ -31,7 +31,7 @@ fn init_mainnet_session(initial_heigth: u32) -> Session {
     settings.cache_location = Some(temp_dir.path().to_path_buf());
     settings.repl_settings.remote_data = RemoteDataSettings {
         enabled: true,
-        api_url: ApiUrl("https://api.stg.hiro.so".to_string()),
+        api_url: ApiUrl("https://api.hiro.so".to_string()),
         initial_height: Some(initial_heigth),
         use_mainnet_wallets: true,
     };

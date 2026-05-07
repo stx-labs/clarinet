@@ -44,8 +44,8 @@ pub enum EpochSpec {
     Epoch3_3,
     #[serde(rename = "3.4")]
     Epoch3_4,
-    #[serde(rename = "3.5")]
-    Epoch3_5,
+    #[serde(rename = "4.0")]
+    Epoch4_0,
 }
 
 impl From<StacksEpochId> for EpochSpec {
@@ -63,7 +63,7 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch32 => EpochSpec::Epoch3_2,
             StacksEpochId::Epoch33 => EpochSpec::Epoch3_3,
             StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
-            StacksEpochId::Epoch35 => EpochSpec::Epoch3_5,
+            StacksEpochId::Epoch40 => EpochSpec::Epoch4_0,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
         }
     }
@@ -84,7 +84,7 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_2 => StacksEpochId::Epoch32,
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
             EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
-            EpochSpec::Epoch3_5 => StacksEpochId::Epoch35,
+            EpochSpec::Epoch4_0 => StacksEpochId::Epoch40,
         }
     }
 }
@@ -122,7 +122,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
                     EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
                     EpochSpec::Epoch3_4 => Some(config.epoch_3_4),
-                    EpochSpec::Epoch3_5 => config.epoch_3_5,
+                    EpochSpec::Epoch4_0 => config.epoch_4_0,
                 };
                 start_height.map(|start_height| EpochConfig {
                     epoch_name: epoch,
@@ -1126,15 +1126,33 @@ impl DeploymentSpecification {
                                     if matches!(network, StacksNetwork::Mainnet) {
                                         return Err(format!("{} only supports transactions of type 'contract-call' and 'contract-publish", specs.network.to_lowercase()))
                                     }
-                                    let spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
+
+                                    // Devnet/Testnet broadcast RequirementPublish on-chain;
+                                    // strip `#[env(simnet)]` from those sources too.
+                                    if let Some(stripped) = remove_env_simnet(&spec.source).map_err(|e|
+                                        format!("failed to strip #[env(simnet)] code from requirement publish source at {:?}: {e}", spec.location)
+                                    )? {
+                                        spec.source = stripped;
+                                    }
+
                                     TransactionSpecification::RequirementPublish(spec)
                                 }
                                 TransactionSpecificationFile::ContractPublish(spec) => {
-                                    let spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
+
+                                    // Devnet/Testnet/Mainnet are all on-chain; strip
+                                    // `#[env(simnet)]` code from the source that gets broadcast.
+                                    // The YAML never persists `source` for ContractPublish (it
+                                    // only stores `path`), so this fires on every load.
+                                    if let Some(stripped) = remove_env_simnet(&spec.source).map_err(|e|
+                                        format!("failed to strip #[env(simnet)] code from contract publish source at {:?}: {e}", spec.location)
+                                    )? {
+                                        spec.source = stripped;
+                                    }
 
                                     let contract_id = QualifiedContractIdentifier::new(spec.expected_sender.clone(), spec.contract_name.clone());
-                                    let (source, _) = remove_env_simnet(spec.source.clone()).unwrap_or((spec.source.clone(), false));
-                                    contracts.insert(contract_id, (source, spec.location.clone()));
+                                    contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
                                     TransactionSpecification::ContractPublish(spec)
                                 }
                                 TransactionSpecificationFile::BtcTransfer(spec) => {
@@ -1209,7 +1227,7 @@ impl DeploymentSpecification {
     }
 
     pub fn sort_batches_by_epoch(&mut self) {
-        self.plan.batches.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+        self.plan.batches.sort_by_key(|a| a.epoch);
         for (i, batch) in self.plan.batches.iter_mut().enumerate() {
             batch.id = i;
         }
@@ -1268,19 +1286,24 @@ impl DeploymentSpecification {
         let mut global_found_env_simnet = false;
         for batch in self.plan.batches.iter_mut() {
             for transaction in batch.transactions.iter_mut() {
-                if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = transaction
-                {
-                    let (clean, found_env_simnet) = remove_env_simnet(spec.source.to_string())?;
-                    spec.source = clean;
-                    global_found_env_simnet |= found_env_simnet;
+                let source = match transaction {
+                    TransactionSpecification::EmulatedContractPublish(spec) => &mut spec.source,
+                    TransactionSpecification::ContractPublish(spec) => &mut spec.source,
+                    TransactionSpecification::RequirementPublish(spec) => &mut spec.source,
+                    _ => continue,
+                };
+                if let Some(clean) = remove_env_simnet(source)? {
+                    *source = clean;
+                    global_found_env_simnet = true;
                 }
             }
         }
 
-        for (ref mut source, _) in self.contracts.values_mut() {
-            let (clean, found_env_simnet) = remove_env_simnet(source.to_string())?;
-            *source = clean;
-            global_found_env_simnet |= found_env_simnet;
+        for (source, _) in self.contracts.values_mut() {
+            if let Some(clean) = remove_env_simnet(source)? {
+                *source = clean;
+                global_found_env_simnet = true;
+            }
         }
 
         Ok(global_found_env_simnet)
@@ -1614,7 +1637,7 @@ mod tests {
     }
 
     #[test]
-    fn test_epoch_config_with_epoch_3_5() {
+    fn test_epoch_config_with_epoch_4_0() {
         let devnet_config = DevnetConfig {
             epoch_2_0: 1,
             epoch_2_05: 2,
@@ -1628,7 +1651,7 @@ mod tests {
             epoch_3_2: 10,
             epoch_3_3: 11,
             epoch_3_4: 12,
-            epoch_3_5: Some(13),
+            epoch_4_0: Some(13),
             ..Default::default()
         };
 
@@ -1687,7 +1710,7 @@ mod tests {
                 start_height = 12
 
                 [[burnchain.epochs]]
-                epoch_name = "3.5"
+                epoch_name = "4.0"
                 start_height = 13
                 "#
             }

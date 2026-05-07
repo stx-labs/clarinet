@@ -24,7 +24,7 @@ use crate::analysis::annotation::Annotation;
 /// All fields are lazy-initialized, and only created if used in at least one pass
 pub struct AnalysisCache<'a> {
     pub contract_analysis: &'a ContractAnalysis,
-    pub annotations: &'a Vec<Annotation>,
+    pub annotations: &'a [Annotation],
 
     constants: Option<ConstantMap<'a>>,
     bindings: Option<BindingMap<'a>>,
@@ -36,7 +36,7 @@ pub struct AnalysisCache<'a> {
 }
 
 impl<'a> AnalysisCache<'a> {
-    pub fn new(contract_analysis: &'a ContractAnalysis, annotations: &'a Vec<Annotation>) -> Self {
+    pub fn new(contract_analysis: &'a ContractAnalysis, annotations: &'a [Annotation]) -> Self {
         Self {
             contract_analysis,
             annotations,

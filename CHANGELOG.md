@@ -1,3 +1,42 @@
+# [3.17.0](https://github.com/stx-labs/clarinet/compare/v3.16.0...v3.17.0) (2026-04-28)
+
+##### New Features
+
+* **linter:**  Add `unnecessary_tuple` lint (#2356) (2d1e0445)
+
+##### Bug Fixes
+
+*  Strip `#[env(simnet)]` code out of on-chain deployments (#2374) (4d0d1082)
+*  Fix `#[env(simnet)]` annotation dimming (#2369) (b554c001)
+*  Bump `rustls-webpki` version to fix `cargo audit` (#2366) (531edf99)
+*  Exact static costs for deterministic inputs (#2322) (58af0cfa)
+*  Pin new rand and rustls-webpki versions (#2361) (10de774b)
+* **linter:**  Don't warn on private functions in `#[env(simnet)]` blocks (#2358) (6974492a)
+
+##### Performance Improvements
+
+* Remove unnecessary call to `Session::new()`, saving ~70ms per run (#2365) (d2f6e565)
+
+##### Build System / Dependencies
+
+* **clarity-vscode:**
+  - Remove unused dependencies from build (#2350) (87dd963a)
+  - Switch from Webpack to Rspack (#2349) (f75c9d23)
+
+##### Chores
+
+*  Remove regex parsing for annotations (#2371) (f8a81f35)
+*  Use rust-overlay for nix pkg pinning (#2359) (9aaf8d63)
+
+##### Continuous Integration
+
+*  Fix sdk version update (#2354) (64088b53)
+
+##### Refactors
+
+*  Remove `components/stacks-codec` (#2360) (a331befc), (#2370) (b05f5ef6)
+*  Pass borrowed types when possible (#2346) (dc2d6080)
+
 # [3.16.0](https://github.com/stx-labs/clarinet/compare/v3.15.1...v3.16.0) (2026-04-02)
 
 ##### New Features

@@ -442,7 +442,7 @@ impl SDK {
             .boot_contracts
             .clone()
             .into_iter()
-            .chain(executed_contracts.into_iter())
+            .chain(executed_contracts)
         {
             match result {
                 Ok(execution_result) => {

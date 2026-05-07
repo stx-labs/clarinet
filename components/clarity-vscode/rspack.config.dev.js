@@ -2,23 +2,23 @@
 "use-strict";
 
 const path = require("path");
-const webpack = require("webpack");
+const rspack = require("@rspack/core");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
-const configs = require("./webpack.config");
+const configs = require("./rspack.config");
 
 const [clientBrowserConfig, serverBrowserConfig] = configs;
 
 const extensionURL = "http://localhost:3000/static/devextensions/";
 
 clientBrowserConfig.plugins = [
-  new webpack.DefinePlugin({
+  new rspack.DefinePlugin({
     __DEV_MODE__: JSON.stringify(true),
   }),
 ];
 
 serverBrowserConfig.plugins = [
-  new webpack.DefinePlugin({
+  new rspack.DefinePlugin({
     __EXTENSION_URL__: JSON.stringify(extensionURL),
   }),
   new WasmPackPlugin({

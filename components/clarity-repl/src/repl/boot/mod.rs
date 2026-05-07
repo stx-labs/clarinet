@@ -258,7 +258,7 @@ pub fn get_boot_contract_epoch_and_clarity_version(
 ) -> (StacksEpochId, ClarityVersion) {
     let (epoch, clarity_version) = match contract_name {
         "costs-4" => (StacksEpochId::Epoch33, ClarityVersion::Clarity4),
-        "pox-5" => (StacksEpochId::Epoch35, ClarityVersion::Clarity2),
+        "pox-5" => (StacksEpochId::Epoch40, ClarityVersion::Clarity2),
         "pox-4" | "signers" | "signers-voting" => {
             (StacksEpochId::Epoch25, ClarityVersion::Clarity2)
         }

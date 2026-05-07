@@ -1,10 +1,9 @@
 // @ts-check
 "use strict";
-/** @typedef {import('webpack').Configuration} WebpackConfig **/
+/** @typedef {import('@rspack/core').Configuration} RspackConfig **/
 
 const path = require("path");
-const CopyPlugin = require("copy-webpack-plugin");
-const webpack = require("webpack");
+const rspack = require("@rspack/core");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
 const { name, publisher, version } = require("./package.json");
@@ -12,9 +11,9 @@ const { name, publisher, version } = require("./package.json");
 const PRODUCTION = process.env.NODE_ENV === "production";
 const TEST = process.env.NODE_ENV === "test";
 
-/** @type WebpackConfig["mode"] */
+/** @type RspackConfig["mode"] */
 const mode = PRODUCTION ? "production" : "none";
-/** @type WebpackConfig["devtool"] */
+/** @type RspackConfig["devtool"] */
 const devtool = PRODUCTION ? false : "source-map";
 
 let extensionURL = `https://${publisher}.vscode-unpkg.net/${publisher}/${name}/${version}/extension/`;
@@ -23,7 +22,18 @@ if (TEST) extensionURL = "http://localhost:3001/static/devextensions/";
 const swcLoader = {
   test: /\.ts$/,
   exclude: /node_modules/,
-  use: [{ loader: "swc-loader" }],
+  use: [
+    {
+      loader: "builtin:swc-loader",
+      options: {
+        jsc: {
+          parser: {
+            syntax: "typescript",
+          },
+        },
+      },
+    },
+  ],
 };
 
 const browserOutput = {
@@ -37,7 +47,7 @@ const browserResolve = {
   fallback: { path: require.resolve("path-browserify") },
 };
 
-/** @type WebpackConfig */
+/** @type RspackConfig */
 const clientBrowserConfig = {
   context: path.join(__dirname, "client"),
   mode,
@@ -50,7 +60,7 @@ const clientBrowserConfig = {
   output: browserOutput,
   resolve: browserResolve,
   plugins: [
-    new webpack.DefinePlugin({
+    new rspack.DefinePlugin({
       __DEV_MODE__: JSON.stringify(false),
     }),
   ],
@@ -58,7 +68,7 @@ const clientBrowserConfig = {
   externals: { vscode: "commonjs vscode" },
 };
 
-/** @type WebpackConfig */
+/** @type RspackConfig */
 const clientNodeConfig = {
   context: path.join(__dirname, "client"),
   mode,
@@ -68,7 +78,7 @@ const clientNodeConfig = {
   output: browserOutput,
   resolve: browserResolve,
   plugins: [
-    new webpack.DefinePlugin({
+    new rspack.DefinePlugin({
       __DEV_MODE__: JSON.stringify(false),
     }),
   ],
@@ -83,7 +93,7 @@ const serverOutput = {
   library: "serverExportVar",
 };
 
-/** @type WebpackConfig */
+/** @type RspackConfig */
 const serverBrowserConfig = {
   context: path.join(__dirname, "server"),
   mode,
@@ -93,7 +103,7 @@ const serverBrowserConfig = {
   output: serverOutput,
   resolve: { extensions: [".ts", ".js"] },
   plugins: [
-    new webpack.DefinePlugin({
+    new rspack.DefinePlugin({
       __EXTENSION_URL__: JSON.stringify(extensionURL),
     }),
     new WasmPackPlugin({
@@ -109,13 +119,14 @@ const serverBrowserConfig = {
       swcLoader,
       {
         test: /src\/clarity-lsp-browser\/lsp-browser_bg\.wasm$/,
+        type: "asset/resource",
         generator: { filename: "lsp-browser_bg.wasm" },
       },
     ],
   },
 };
 
-/** @type WebpackConfig */
+/** @type RspackConfig */
 const serverNodeConfig = {
   context: path.join(__dirname, "server"),
   mode,
@@ -132,7 +143,7 @@ const serverNodeConfig = {
       outDir: path.resolve(__dirname, "server/src/clarity-lsp-node"),
       outName: "lsp-node",
     }),
-    new CopyPlugin({
+    new rspack.CopyRspackPlugin({
       patterns: [
         {
           from: "./src/clarity-lsp-node/lsp-node_bg.wasm",
@@ -144,7 +155,7 @@ const serverNodeConfig = {
   module: { rules: [swcLoader] },
 };
 
-/** @type WebpackConfig */
+/** @type RspackConfig */
 const dapNodeConfig = {
   context: path.join(__dirname, "debug"),
   mode,

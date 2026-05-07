@@ -156,22 +156,22 @@ async fn do_run_devnet(
     }
     let snapshot_level = if config.no_snapshot || diff.is_err() {
         SnapshotLevel::None
-    } else if SnapshotLevel::Epoch3_5
+    } else if SnapshotLevel::Epoch4_0
         .snapshot_dir()
-        .join(SnapshotLevel::Epoch3_5.marker_name())
+        .join(SnapshotLevel::Epoch4_0.marker_name())
         .exists()
     {
-        let _ = devnet_events_tx.send(DevnetEvent::info("Using epoch 3.5 snapshot".to_string()));
-        SnapshotLevel::Epoch3_5
+        let _ = devnet_events_tx.send(DevnetEvent::info("Using epoch 4.0 snapshot".to_string()));
+        SnapshotLevel::Epoch4_0
     } else {
         // No snapshot on disk — extract the embedded default snapshot
-        let snapshot_dir = SnapshotLevel::Epoch3_5.snapshot_dir();
+        let snapshot_dir = SnapshotLevel::Epoch4_0.snapshot_dir();
         match snapshot_extractor::extract_embedded_snapshot(&snapshot_dir, &devnet_events_tx) {
             Ok(true) => {
                 let _ = devnet_events_tx.send(DevnetEvent::info(
-                    "Using embedded epoch 3.5 snapshot".to_string(),
+                    "Using embedded epoch 4.0 snapshot".to_string(),
                 ));
-                SnapshotLevel::Epoch3_5
+                SnapshotLevel::Epoch4_0
             }
             _ => SnapshotLevel::None,
         }

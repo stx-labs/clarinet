@@ -44,8 +44,8 @@ use stackslib::chainstate::stacks::address::PoxAddress;
 use stackslib::util_lib::signed_structured_data::pox4::{
     make_pox_4_signer_key_signature, Pox4SignatureTopic,
 };
-use stackslib::util_lib::signed_structured_data::pox5::{
-    make_pox_5_signer_grant_signature, make_pox_5_signer_key_signature, Pox5SignatureTopic,
+use stackslib::util_lib::signed_structured_data::{
+    make_structured_data_domain, sign_structured_data,
 };
 
 use super::ChainsCoordinatorCommand;
@@ -56,16 +56,16 @@ use crate::orchestrator::{
     EXCLUDED_STACKS_SNAPSHOT_FILES,
 };
 
-const SNAPSHOT_EPOCH3_5_STACKS_HEIGHT: u64 = 60;
-const SNAPSHOT_EPOCH3_5_BURN_HEIGHT: u64 = 163;
+const SNAPSHOT_EPOCH4_0_STACKS_HEIGHT: u64 = 60;
+const SNAPSHOT_EPOCH4_0_BURN_HEIGHT: u64 = 163;
 
 /// Whether to start from a snapshot or from genesis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapshotLevel {
     /// No snapshot — start from genesis.
     None,
-    /// Snapshot at epoch 3.5 (burn height 163).
-    Epoch3_5,
+    /// Snapshot at epoch 4.0 (burn height 163).
+    Epoch4_0,
 }
 
 #[derive(Deserialize)]
@@ -197,11 +197,11 @@ pub async fn start_chains_coordinator(
     let boot_completed = Arc::new(AtomicBool::new(false));
     let mut last_pox_version: Option<u32> = None;
     let mut current_burn_height = match snapshot_level {
-        SnapshotLevel::Epoch3_5 => SNAPSHOT_EPOCH3_5_BURN_HEIGHT,
+        SnapshotLevel::Epoch4_0 => SNAPSHOT_EPOCH4_0_BURN_HEIGHT,
         SnapshotLevel::None => 0,
     };
     let starting_block_height = match snapshot_level {
-        SnapshotLevel::Epoch3_5 => SNAPSHOT_EPOCH3_5_STACKS_HEIGHT,
+        SnapshotLevel::Epoch4_0 => SNAPSHOT_EPOCH4_0_STACKS_HEIGHT,
         SnapshotLevel::None => 0,
     };
 
@@ -406,16 +406,16 @@ pub async fn start_chains_coordinator(
                         let comment =
                             format!("mining blocks (chain_tip = #{bitcoin_block_height})");
 
-                        // Create snapshot at epoch 3.5 milestone
+                        // Create snapshot at epoch 4.0 milestone
                         if create_new_snapshot {
-                            if let Some(epoch_3_5) = config.devnet_config.epoch_3_5 {
+                            if let Some(epoch_4_0) = config.devnet_config.epoch_4_0 {
                                 // Snapshot a few blocks after the next reward cycle
-                                // boundary following epoch 3.5 activation, so pox-5
+                                // boundary following epoch 4.0 activation, so pox-5
                                 // stacking is confirmed and active.
-                                let epoch_offset = (epoch_3_5 - DEFAULT_FIRST_BURN_HEADER_HEIGHT)
+                                let epoch_offset = (epoch_4_0 - DEFAULT_FIRST_BURN_HEADER_HEIGHT)
                                     % DEFAULT_POX_REWARD_LENGTH;
                                 let next_cycle_start =
-                                    epoch_3_5 + (DEFAULT_POX_REWARD_LENGTH - epoch_offset);
+                                    epoch_4_0 + (DEFAULT_POX_REWARD_LENGTH - epoch_offset);
                                 let snapshot_height = next_cycle_start + 3;
 
                                 if bitcoin_block_height == snapshot_height {
@@ -708,14 +708,14 @@ impl SnapshotLevel {
     /// Returns the marker file name for this snapshot level.
     pub fn marker_name(self) -> &'static str {
         match self {
-            SnapshotLevel::Epoch3_5 => "epoch_3_5_ready",
+            SnapshotLevel::Epoch4_0 => "epoch_4_0_ready",
             SnapshotLevel::None => unreachable!(),
         }
     }
 
     /// Returns the snapshot directory for this level.
     pub fn snapshot_dir(self) -> PathBuf {
-        get_global_snapshot_dir().join("epoch_3_5")
+        get_global_snapshot_dir().join("epoch_4_0")
     }
 
     /// Whether a snapshot is being used.
@@ -725,8 +725,8 @@ impl SnapshotLevel {
 }
 
 fn remove_snapshot(devnet_event_tx: &Sender<DevnetEvent>) -> Result<(), String> {
-    let snapshot_dir = SnapshotLevel::Epoch3_5.snapshot_dir();
-    let marker = snapshot_dir.join(SnapshotLevel::Epoch3_5.marker_name());
+    let snapshot_dir = SnapshotLevel::Epoch4_0.snapshot_dir();
+    let marker = snapshot_dir.join(SnapshotLevel::Epoch4_0.marker_name());
 
     if !marker.exists() {
         return Ok(());
@@ -755,7 +755,7 @@ pub async fn create_snapshot(
 
     let devnet_config = &devnet_event_observer_config.devnet_config;
     let project_snapshot_dir = get_project_snapshot_dir(devnet_config);
-    let snapshot_dir = SnapshotLevel::Epoch3_5.snapshot_dir();
+    let snapshot_dir = SnapshotLevel::Epoch4_0.snapshot_dir();
 
     fs::create_dir_all(&snapshot_dir)
         .unwrap_or_else(|e| panic!("unable to create snapshot directory: {e:?}"));
@@ -822,7 +822,7 @@ pub async fn create_snapshot(
     }
 
     // Write the marker file
-    match std::fs::File::create(snapshot_dir.join(SnapshotLevel::Epoch3_5.marker_name())) {
+    match std::fs::File::create(snapshot_dir.join(SnapshotLevel::Epoch4_0.marker_name())) {
         Ok(_) => {
             let _ = devnet_event_tx.send(DevnetEvent::success(
                 "Snapshot created successfully".to_string(),
@@ -881,7 +881,7 @@ pub async fn publish_stacking_orders(
         .and_then(|version| version.parse().ok())
         .unwrap_or(1); // pox 1 contract is `pox.clar`
 
-    // Detect pox change (pox-4 -> pox-5 after epoch 3.5)
+    // Detect pox change (pox-4 -> pox-5 after epoch 4.0)
     let pox_version_changed = match *last_pox_version {
         Some(prev) => prev != pox_version,
         None => false,
@@ -991,7 +991,7 @@ pub async fn publish_stacking_orders(
                         auth_id,
                     );
 
-                    let grant_tx = stacks_codec::codec::build_contract_call_transaction(
+                    let grant_tx = stacks_rpc_client::crypto::build_contract_call_transaction(
                         pox_contract_id_moved.clone(),
                         "grant-signer-key".to_string(),
                         grant_args,
@@ -1018,7 +1018,7 @@ pub async fn publish_stacking_orders(
                     auth_id,
                 );
 
-                let tx = stacks_codec::codec::build_contract_call_transaction(
+                let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
                     pox_contract_id_moved,
                     method,
                     arguments,
@@ -1257,7 +1257,7 @@ fn fund_genesis_account(
                 burn_height.clone(),
                 sweep_txid,
             ];
-            let tx = stacks_codec::codec::build_contract_call_transaction(
+            let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
                 contract_id.clone(),
                 "complete-deposit-wrapper".to_string(),
                 args,
@@ -1597,12 +1597,12 @@ fn get_pox5_stacking_tx_method_and_args(
     };
 
     let topic = if extend_stacking {
-        Pox5SignatureTopic::StakeExtend
+        Pox4SignatureTopic::StackExtend
     } else {
-        Pox5SignatureTopic::Stake
+        Pox4SignatureTopic::StackStx
     };
 
-    let signature = make_pox_5_signer_key_signature(
+    let signature = make_pox_4_signer_key_signature(
         pox_addr,
         signer_key,
         cycle,
@@ -1612,7 +1612,7 @@ fn get_pox5_stacking_tx_method_and_args(
         stx_amount.into(),
         auth_id,
     )
-    .expect("Unable to make pox 5 signature");
+    .expect("Unable to make pox signer key signature");
 
     let signer_sig = signature.to_rsv();
     let pub_key = StacksPublicKey::from_private(signer_key);
@@ -1649,25 +1649,43 @@ fn get_pox5_grant_signer_key_args(
 ) -> Vec<ClarityValue> {
     let pub_key = StacksPublicKey::from_private(signer_key);
 
-    let grant_sig = make_pox_5_signer_grant_signature(
-        stacker_principal,
-        Some(pox_addr),
-        auth_id,
-        CHAIN_ID_TESTNET,
-        signer_key,
-    )
-    .expect("Unable to make pox 5 grant signature");
-
-    let pox_addr_clarity = pox_addr
+    let pox_addr_tuple: ClarityValue = pox_addr
         .clone()
         .as_clarity_tuple()
         .expect("Invalid pox address")
         .into();
 
+    // Build the structured data for grant-signer-key signing
+    let domain = make_structured_data_domain("pox-4-signer", "1.0.0", CHAIN_ID_TESTNET);
+    let structured_data = ClarityValue::Tuple(
+        clarity::vm::types::TupleData::from_data(vec![
+            (
+                ClarityName::from_literal("topic"),
+                ClarityValue::string_ascii_from_bytes("grant-signer-key".into()).unwrap(),
+            ),
+            (
+                ClarityName::from_literal("staker"),
+                ClarityValue::Principal(stacker_principal.clone()),
+            ),
+            (
+                ClarityName::from_literal("pox-addr"),
+                ClarityValue::some(pox_addr_tuple.clone()).unwrap(),
+            ),
+            (
+                ClarityName::from_literal("auth-id"),
+                ClarityValue::UInt(auth_id),
+            ),
+        ])
+        .unwrap(),
+    );
+
+    let grant_sig = sign_structured_data(structured_data, domain, signer_key)
+        .expect("Unable to make grant signer key signature");
+
     vec![
         ClarityValue::buff_from(pub_key.to_bytes()).unwrap(),
         ClarityValue::Principal(stacker_principal.clone()),
-        ClarityValue::some(pox_addr_clarity).unwrap(),
+        ClarityValue::some(pox_addr_tuple).unwrap(),
         ClarityValue::UInt(auth_id),
         ClarityValue::buff_from(grant_sig.to_rsv()).unwrap(),
     ]
