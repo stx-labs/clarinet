@@ -10,11 +10,11 @@ use clarity_repl::repl::{Session, SessionSettings};
 // calls and rate-limit pressure. nextest runs each test in its own process, so
 // tempdir() would create isolated caches that can't be reused.
 //
-// Namespaced by PID of the parent process (the nextest runner) so that
-// concurrent or repeated runs don't interfere with each other.
+// Namespaced by the nextest run ID (set by nextest) or a fallback timestamp so
+// that concurrent or repeated runs don't interfere with each other.
 fn shared_cache_dir() -> PathBuf {
-    let parent_pid = std::os::unix::process::parent_id();
-    std::env::temp_dir().join(format!("clarinet-test-mxs-cache-{parent_pid}"))
+    let run_id = std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| "default".to_string());
+    std::env::temp_dir().join(format!("clarinet-test-mxs-cache-{run_id}"))
 }
 
 #[track_caller]
