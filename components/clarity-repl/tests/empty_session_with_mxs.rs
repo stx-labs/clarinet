@@ -5,12 +5,16 @@ use clarity::vm::{EvaluationResult, Value};
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings, Settings};
 use clarity_repl::repl::{Session, SessionSettings};
 
-// Use a deterministic shared cache directory so that contract metadata fetched
-// by one test process is reused by subsequent tests, reducing the total number
-// of Hiro API calls and rate-limit pressure. nextest runs each test in its own
-// process, so tempdir() would create isolated caches that can't be reused.
+// Use a shared cache directory so that contract metadata fetched by one test
+// process is reused by subsequent tests, reducing the total number of Hiro API
+// calls and rate-limit pressure. nextest runs each test in its own process, so
+// tempdir() would create isolated caches that can't be reused.
+//
+// Namespaced by PID of the parent process (the nextest runner) so that
+// concurrent or repeated runs don't interfere with each other.
 fn shared_cache_dir() -> PathBuf {
-    std::env::temp_dir().join("clarinet-test-mxs-cache")
+    let parent_pid = std::os::unix::process::parent_id();
+    std::env::temp_dir().join(format!("clarinet-test-mxs-cache-{parent_pid}"))
 }
 
 #[track_caller]
@@ -22,14 +26,14 @@ fn eval_snippet(session: &mut Session, snippet: &str) -> Value {
     }
 }
 
-fn init_testnet_session(initial_heigth: u32) -> Session {
+fn init_testnet_session(initial_height: u32) -> Session {
     let settings = SessionSettings {
         cache_location: Some(shared_cache_dir()),
         repl_settings: Settings {
             remote_data: RemoteDataSettings {
                 enabled: true,
                 api_url: ApiUrl("https://api.testnet.hiro.so".to_string()),
-                initial_height: Some(initial_heigth),
+                initial_height: Some(initial_height),
                 use_mainnet_wallets: false,
             },
             ..Default::default()
@@ -39,14 +43,14 @@ fn init_testnet_session(initial_heigth: u32) -> Session {
     Session::new(settings)
 }
 
-fn init_mainnet_session(initial_heigth: u32) -> Session {
+fn init_mainnet_session(initial_height: u32) -> Session {
     let settings = SessionSettings {
         cache_location: Some(shared_cache_dir()),
         repl_settings: Settings {
             remote_data: RemoteDataSettings {
                 enabled: true,
                 api_url: ApiUrl("https://api.hiro.so".to_string()),
-                initial_height: Some(initial_heigth),
+                initial_height: Some(initial_height),
                 use_mainnet_wallets: true,
             },
             ..Default::default()
