@@ -9,5 +9,17 @@ filter = "test(test_encrypt_mnemonic)"
 test-group = "cpu-heavy"
 threads-required = 4
 
+# Tests hitting external Hiro APIs share a rate limit. Running them in parallel
+# causes 429s with 55-60s retry delays that exceed test timeouts.
+# Serialize them to avoid concurrent rate-limit pressure, and give a generous
+# timeout since each test makes multiple API calls.
+[[profile.default.overrides]]
+filter = "binary(empty_session_with_mxs)"
+test-group = "hiro-api"
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 [test-groups.cpu-heavy]
 max-threads = 4
+
+[test-groups.hiro-api]
+max-threads = 1
