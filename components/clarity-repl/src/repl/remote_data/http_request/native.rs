@@ -60,13 +60,9 @@ pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
             return response.json::<T>().map_err(|e| e.to_string());
         }
 
-        if status != StatusCode::TOO_MANY_REQUESTS {
-            return handle_response(response);
-        }
-
-        let headers = response.headers().clone();
-        let (is_rate_limited, retry_after) = is_rate_limited(&headers);
-        if !is_rate_limited {
+        // Retry on server errors (5xx) and rate limits (429)
+        let is_retryable = status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS;
+        if !is_retryable {
             return handle_response(response);
         }
 
@@ -75,8 +71,18 @@ pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
             return handle_response(response);
         }
 
-        let retry_delay = retry_after.unwrap_or(1);
-        uprint!("Rate limited, retrying after {retry_delay} seconds...\n");
-        std::thread::sleep(Duration::from_secs(retry_delay as u64));
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            let headers = response.headers().clone();
+            let (is_rate_limited, retry_after) = is_rate_limited(&headers);
+            if !is_rate_limited {
+                return handle_response(response);
+            }
+            let retry_delay = retry_after.unwrap_or(1);
+            uprint!("Rate limited, retrying after {retry_delay} seconds...\n");
+            std::thread::sleep(Duration::from_secs(retry_delay as u64));
+        } else {
+            uprint!("Server error ({status}), retrying in 3 seconds...\n");
+            std::thread::sleep(Duration::from_secs(3));
+        }
     }
 }
