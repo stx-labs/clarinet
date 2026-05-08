@@ -532,13 +532,16 @@ impl EditorState {
 
         // Create a CodeLens for each function definition
         for (function_name, saved_range) in &contract_state.definitions {
-            // If the function's range in the live source differs from the saved range,
-            // the function (or something above it) was edited — skip the stale lens.
-            if let Some(ref current) = current_ranges {
-                if current.get(function_name) != Some(saved_range) {
-                    continue;
-                }
-            }
+            // Use the live range so the lens tracks the function's current
+            // position as the user edits.  If we have live ranges but the
+            // function is missing (deleted/renamed), skip it.
+            let display_range = match current_ranges.as_ref() {
+                Some(cr) => match cr.get(function_name) {
+                    Some(range) => range,
+                    None => continue,
+                },
+                None => saved_range,
+            };
 
             let function_name_str = function_name.to_string();
             if let Some((cost_node, _)) = cost_analysis.get(&function_name_str) {
@@ -553,7 +556,7 @@ impl EditorState {
                     self.settings.static_cost_display_format,
                 );
 
-                let code_lens_line = saved_range.start.line;
+                let code_lens_line = display_range.start.line;
                 let code_lens_range = ls_types::Range {
                     start: ls_types::Position {
                         line: code_lens_line,

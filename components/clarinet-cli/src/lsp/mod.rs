@@ -324,9 +324,14 @@ async fn run_did_open_and_collect_server_requests(code_lens_refresh: bool) -> Ve
 
     let collect_requests_fut = async {
         let mut methods = vec![];
+        // Use a longer timeout for the first request (server may need time to
+        // process didOpen under CI load), then a short drain timeout for any
+        // subsequent requests.
+        let mut timeout_secs = 10;
         while let Ok(Some(req)) =
-            tokio::time::timeout(Duration::from_secs(10), request_stream.next()).await
+            tokio::time::timeout(Duration::from_secs(timeout_secs), request_stream.next()).await
         {
+            timeout_secs = 1;
             let method = req.method().to_string();
             if let Some(id) = req.id().cloned() {
                 let _ = response_sink
