@@ -1044,12 +1044,6 @@ pub async fn publish_stacking_orders(
                     let full_key = hex_bytes(&account_secret_key).unwrap();
                     // Strip the trailing 0x01 compression flag appended by compute_addresses
                     let btc_secret_key = &full_key[..32];
-                    let _ = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/pox5-debug.log")
-                        .and_then(|mut f| {
-                            use std::io::Write;
-                            writeln!(f, "pox-5 lockup: stacker={}, btc_addr={}, unlock_height={}, btc_block={}",
-                                stx_address_moved, btc_address_moved, unlock_burn_height, bitcoin_block_height)
-                        });
                     let lockup_txid = send_pox5_bitcoin_lockup(
                         &bitcoin_node_host,
                         &bitcoin_node_username,
@@ -1059,11 +1053,6 @@ pub async fn publish_stacking_orders(
                         btc_secret_key,
                         unlock_burn_height,
                     )?;
-                    let _ = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/pox5-debug.log")
-                        .and_then(|mut f| {
-                            use std::io::Write;
-                            writeln!(f, "pox-5 lockup broadcast: stacker={}, lockup_txid={}", stx_address_moved, lockup_txid)
-                        });
                     lockup_txid_result = lockup_txid;
                 }
 
@@ -1107,50 +1096,6 @@ pub async fn publish_stacking_orders(
         )
         .await;
 
-        // Verify lockup transactions are confirmed
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let bitcoin_rpc_url = format!("http://{}", &services_map_hosts.bitcoin_node_host);
-        let client = reqwest::Client::new();
-        for txid in &lockup_txids {
-            let resp = client
-                .post(&bitcoin_rpc_url)
-                .basic_auth(
-                    &devnet_config.bitcoin_node_username,
-                    Some(&devnet_config.bitcoin_node_password),
-                )
-                .json(&serde_json::json!({
-                    "jsonrpc": "1.0",
-                    "id": "clarinet",
-                    "method": "getrawtransaction",
-                    "params": [txid, true]
-                }))
-                .send()
-                .await
-                .ok();
-            let resp_json = match resp {
-                Some(r) => r.json::<serde_json::Value>().await.ok(),
-                None => None,
-            };
-            let confirmations = resp_json
-                .as_ref()
-                .and_then(|v| v["result"]["confirmations"].as_i64())
-                .unwrap_or(-1);
-            let block_hash = resp_json
-                .as_ref()
-                .and_then(|v| v["result"]["blockhash"].as_str())
-                .unwrap_or("none");
-            let _ = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/pox5-debug.log")
-                .and_then(|mut f| {
-                    use std::io::Write;
-                    writeln!(
-                        f,
-                        "pox-5 post-mine check: txid={txid}, confirmations={confirmations}, blockhash={block_hash}"
-                    )
-                });
-        }
         let _ = devnet_event_tx.send(DevnetEvent::info(format!(
             "Mined Bitcoin block to confirm {} pox-5 lockup transactions",
             lockup_txids.len()
@@ -1567,6 +1512,62 @@ fn get_stacking_tx_method_and_args(
     (method.to_string(), arguments)
 }
 
+/// The SIP018 structured data domain for pox-5 signatures.
+/// Must match the `POX_5_SIGNER_DOMAIN` constant in pox-5.clar.
+fn make_pox5_domain() -> ClarityValue {
+    make_structured_data_domain("pox-5-signer", "1.0.0", CHAIN_ID_TESTNET)
+}
+
+/// Sign a pox-5 signer key authorization message.
+/// The structured data must match `get-signer-key-message-hash` in pox-5.clar:
+///   `{ pox-addr, reward-cycle, topic, period, auth-id, max-amount }`
+fn make_pox5_signer_key_signature(
+    pox_addr: &PoxAddress,
+    signer_key: &StacksPrivateKey,
+    reward_cycle: u128,
+    topic: &str,
+    period: u128,
+    max_amount: u128,
+    auth_id: u128,
+) -> Result<Vec<u8>, String> {
+    let pox_addr_tuple: ClarityValue = pox_addr
+        .clone()
+        .as_clarity_tuple()
+        .expect("Invalid pox address")
+        .into();
+
+    let structured_data = ClarityValue::Tuple(
+        clarity::vm::types::TupleData::from_data(vec![
+            (ClarityName::from_literal("pox-addr"), pox_addr_tuple),
+            (
+                ClarityName::from_literal("reward-cycle"),
+                ClarityValue::UInt(reward_cycle),
+            ),
+            (
+                ClarityName::from_literal("topic"),
+                ClarityValue::string_ascii_from_bytes(topic.into()).unwrap(),
+            ),
+            (
+                ClarityName::from_literal("period"),
+                ClarityValue::UInt(period),
+            ),
+            (
+                ClarityName::from_literal("auth-id"),
+                ClarityValue::UInt(auth_id),
+            ),
+            (
+                ClarityName::from_literal("max-amount"),
+                ClarityValue::UInt(max_amount),
+            ),
+        ])
+        .unwrap(),
+    );
+
+    let sig = sign_structured_data(structured_data, make_pox5_domain(), signer_key)
+        .map_err(|e| e.to_string())?;
+    Ok(sig.to_rsv())
+}
+
 /// Build the method and arguments for a pox-5 `stake` or `stake-extend` call.
 ///
 /// pox-5 `stake` signature:
@@ -1596,25 +1597,17 @@ fn get_pox5_stacking_tx_method_and_args(
         "stake"
     };
 
-    let topic = if extend_stacking {
-        Pox4SignatureTopic::StackExtend
-    } else {
-        Pox4SignatureTopic::StackStx
-    };
-
-    let signature = make_pox_4_signer_key_signature(
+    let signer_sig = make_pox5_signer_key_signature(
         pox_addr,
         signer_key,
         cycle,
-        &topic,
-        CHAIN_ID_TESTNET,
+        method, // topic matches the method name in pox-5
         duration.into(),
         stx_amount.into(),
         auth_id,
     )
-    .expect("Unable to make pox signer key signature");
+    .expect("Unable to make pox-5 signer key signature");
 
-    let signer_sig = signature.to_rsv();
     let pub_key = StacksPublicKey::from_private(signer_key);
     let unlock_bytes = build_unlock_script(btc_address);
 
@@ -1638,7 +1631,10 @@ fn get_pox5_stacking_tx_method_and_args(
 
 /// Build the arguments for a pox-5 `grant-signer-key` call.
 ///
-/// grant-signer-key signature:
+/// The grant signature's structured data must match `get-signer-grant-message-hash`
+/// in pox-5.clar: `{ topic: "grant-authorization", staker, pox-addr, auth-id }`
+///
+/// grant-signer-key arguments:
 ///   (signer-key (buff 33)) (staker principal) (pox-addr (optional tuple))
 ///   (auth-id uint) (signer-sig (buff 65))
 fn get_pox5_grant_signer_key_args(
@@ -1655,13 +1651,13 @@ fn get_pox5_grant_signer_key_args(
         .expect("Invalid pox address")
         .into();
 
-    // Build the structured data for grant-signer-key signing
-    let domain = make_structured_data_domain("pox-4-signer", "1.0.0", CHAIN_ID_TESTNET);
+    // Structured data must match pox-5.clar `get-signer-grant-message-hash`:
+    //   { topic: "grant-authorization", staker: principal, pox-addr: (optional tuple), auth-id: uint }
     let structured_data = ClarityValue::Tuple(
         clarity::vm::types::TupleData::from_data(vec![
             (
                 ClarityName::from_literal("topic"),
-                ClarityValue::string_ascii_from_bytes("grant-signer-key".into()).unwrap(),
+                ClarityValue::string_ascii_from_bytes("grant-authorization".into()).unwrap(),
             ),
             (
                 ClarityName::from_literal("staker"),
@@ -1679,7 +1675,7 @@ fn get_pox5_grant_signer_key_args(
         .unwrap(),
     );
 
-    let grant_sig = sign_structured_data(structured_data, domain, signer_key)
+    let grant_sig = sign_structured_data(structured_data, make_pox5_domain(), signer_key)
         .expect("Unable to make grant signer key signature");
 
     vec![
@@ -1736,42 +1732,14 @@ fn send_pox5_bitcoin_lockup(
         Witness,
     };
 
-    let dbg = |msg: String| {
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/pox5-debug.log")
-            .and_then(|mut f| {
-                use std::io::Write;
-                writeln!(f, "{msg}")
-            });
-    };
-
     let unlock_bytes = build_unlock_script(btc_address);
     let locking_script =
         build_pox5_locking_script(stacker_stx_address, unlock_burn_height, &unlock_bytes);
 
     // Create P2WSH output: the scriptPubKey is OP_0 <32-byte-sha256-of-script>
     let script_buf = ScriptBuf::from(locking_script);
-    dbg(format!(
-        "pox-5 locking_script hex: {}",
-        script_buf
-            .as_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>(),
-    ));
     let script_hash = WScriptHash::hash(script_buf.as_bytes());
-    dbg(format!("pox-5 P2WSH script_hash: {script_hash}"));
     let p2wsh_script = ScriptBuf::new_p2wsh(&script_hash);
-    dbg(format!(
-        "pox-5 P2WSH scriptPubKey hex: {}",
-        p2wsh_script
-            .as_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>(),
-    ));
 
     let bitcoin_rpc_url = format!("http://{bitcoin_node_host}");
     let client = reqwest::blocking::Client::new();
@@ -1814,9 +1782,6 @@ fn send_pox5_bitcoin_lockup(
     let vout = utxo["vout"].as_u64().ok_or("Missing vout in UTXO")? as u32;
     let utxo_amount_btc = utxo["amount"].as_f64().ok_or("Missing amount in UTXO")?;
     let utxo_amount_sats = (utxo_amount_btc * 100_000_000.0) as u64;
-    dbg(format!(
-        "pox-5 lockup UTXO: txid={txid_str}, vout={vout}, amount_sats={utxo_amount_sats}, addr={btc_address}",
-    ));
     let utxo_script_hex = utxo["scriptPubKey"]
         .as_str()
         .ok_or("Missing scriptPubKey in UTXO")?;
@@ -1888,7 +1853,6 @@ fn send_pox5_bitcoin_lockup(
 
     // Broadcast the signed transaction
     let raw_tx_hex = bitcoincore_rpc::bitcoin::consensus::encode::serialize_hex(&raw_tx);
-    dbg(format!("pox-5 lockup raw_tx_hex: {raw_tx_hex}"));
 
     let send_resp = client
         .post(&bitcoin_rpc_url)
@@ -1904,7 +1868,6 @@ fn send_pox5_bitcoin_lockup(
         .json::<serde_json::Value>()
         .map_err(|e| format!("Failed to parse sendrawtransaction response: {e}"))?;
 
-    dbg(format!("pox-5 sendrawtransaction response: {send_resp}"));
     if let Some(error) = send_resp["error"].as_object() {
         return Err(format!(
             "Bitcoin lockup transaction failed: {}",
@@ -1916,30 +1879,6 @@ fn send_pox5_bitcoin_lockup(
         .as_str()
         .unwrap_or("unknown")
         .to_string();
-
-    // Verify the transaction is in the mempool
-    let mempool_resp = client
-        .post(&bitcoin_rpc_url)
-        .basic_auth(bitcoin_node_username, Some(bitcoin_node_password))
-        .json(&serde_json::json!({
-            "jsonrpc": "1.0",
-            "id": "clarinet",
-            "method": "getmempoolentry",
-            "params": [&lockup_txid]
-        }))
-        .send()
-        .ok()
-        .and_then(|r| r.json::<serde_json::Value>().ok());
-    dbg(format!(
-        "pox-5 mempool check for {lockup_txid}: {}",
-        mempool_resp.map_or("request failed".to_string(), |v| {
-            if v["error"].is_null() {
-                "IN MEMPOOL".to_string()
-            } else {
-                format!("NOT IN MEMPOOL: {}", v["error"])
-            }
-        })
-    ));
 
     Ok(lockup_txid)
 }
