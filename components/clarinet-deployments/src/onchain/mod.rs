@@ -738,7 +738,7 @@ pub fn apply_on_chain_deployment(
                 EpochSpec::Epoch3_3 => devnet.epoch_3_3,
                 EpochSpec::Epoch3_4 => devnet.epoch_3_4,
                 // Clarinet always keeps optional support for a future epoch
-                EpochSpec::Epoch3_5 => devnet.epoch_3_5.unwrap_or(u64::MAX),
+                EpochSpec::Epoch4_0 => devnet.epoch_4_0.unwrap_or(u64::MAX),
             };
             let mut epoch_transition_successful =
                 current_bitcoin_block_height > after_bitcoin_block;

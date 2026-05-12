@@ -26,11 +26,13 @@ const fn version_to_index(version: ClarityVersion) -> usize {
         ClarityVersion::Clarity3 => 2,
         ClarityVersion::Clarity4 => 3,
         ClarityVersion::Clarity5 => 4,
+        ClarityVersion::Clarity6 => 5,
     }
 }
 
 fn get_native_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
+        OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
@@ -80,7 +82,8 @@ static ITERATOR_FUNCTIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
 });
 
 fn get_map_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
+        OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
@@ -91,7 +94,8 @@ fn get_map_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionIte
 }
 
 fn get_filter_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
+        OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
@@ -102,7 +106,8 @@ fn get_filter_cb_completions(version: ClarityVersion) -> &'static Vec<Completion
 }
 
 fn get_fold_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 5] = [
+    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
+        OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
