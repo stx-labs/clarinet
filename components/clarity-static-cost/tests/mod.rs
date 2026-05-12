@@ -2354,8 +2354,15 @@ fn test_static_cost_resolves_external_trait_implementations() {
     let _ = owned_env.commit();
 
     assert!(
-        !result_no_impls.warnings.is_empty(),
-        "Expected warnings for unresolved trait call via static_cost"
+        result_no_impls.warnings.iter().any(|w| matches!(
+            &w.kind,
+            CostWarningKind::UnresolvedTraitCall {
+                called_function,
+                ..
+            } if called_function == "get-owner"
+        )),
+        "Expected UnresolvedTraitCall warning for 'get-owner', got: {:?}",
+        result_no_impls.warnings
     );
 
     let (cost_unresolved, _) = result_no_impls

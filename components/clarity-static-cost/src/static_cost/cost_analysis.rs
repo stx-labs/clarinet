@@ -669,7 +669,7 @@ fn get_contract_call_target_cost(
     };
 
     if let Some(contract_id) = contract_id {
-        match static_cost(env, ctx.invoke_ctx, &contract_id, &HashMap::new()) {
+        match static_cost(env, ctx.invoke_ctx, &contract_id, ctx.trait_implementations) {
             Ok(result) => {
                 // Propagate any warnings from the callee analysis so that
                 // incomplete analysis in transitive dependencies is surfaced.
@@ -750,7 +750,12 @@ fn resolve_trait_call_cost(
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
-        let Ok(result) = static_cost(env, ctx.invoke_ctx, impl_contract, &HashMap::new()) else {
+        let Ok(result) = static_cost(
+            env,
+            ctx.invoke_ctx,
+            impl_contract,
+            ctx.trait_implementations,
+        ) else {
             continue;
         };
         let Some((cost, _)) = result.costs.get(function_name.as_str()) else {
