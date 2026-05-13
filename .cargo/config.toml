@@ -6,3 +6,6 @@ cov = "llvm-cov nextest --workspace --locked --exclude clarinet-sdk-wasm --lcov 
 cov-dev = "llvm-cov nextest --workspace --locked --exclude clarinet-sdk-wasm --html"
 fmt-stacks = "fmt --all -- --config group_imports=StdExternalCrate,imports_granularity=Module"
 gen-schema = "test --package clarinet-files --features json_schema generate_schema_file -- --ignored --nocapture"
+
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

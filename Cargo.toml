@@ -57,13 +57,14 @@ crossterm = "0.29.0"
 dirs = "6.0.0"
 divan = "0.1"
 futures = "0.3.12"
+getrandom = { version = "0.3", features = ["wasm_js"] }
 indexmap = "2.13.0"
 indoc = "2.0.3"
 js-sys = "0.3.80"
 libsecp256k1 = "0.7.2"
 mockito = { version = "1.7", default-features = false }
 pretty_assertions = "1.4"
-rand = "0.8.5"
+rand = "0.9.4"
 ratatui = { version = "0.30.0", default-features = false, features = [
     "crossterm",
 ] }
