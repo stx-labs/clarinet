@@ -199,10 +199,7 @@ impl Serialize for ProjectConfig {
         map.serialize_entry("description", &self.description)?;
         map.serialize_entry("authors", &self.authors)?;
         map.serialize_entry("telemetry", &self.telemetry)?;
-        map.serialize_entry(
-            "cache_dir",
-            &self.cache_location.to_string_lossy().to_string(),
-        )?;
+        map.serialize_entry("cache_dir", &self.cache_location.to_string_lossy())?;
         if self.requirements.is_some() {
             map.serialize_entry("requirements", &self.requirements)?;
         }
@@ -224,7 +221,7 @@ impl ProjectManifest {
         file_accessor: &dyn FileAccessor,
     ) -> Result<ProjectManifest, String> {
         let content = file_accessor
-            .read_file(location.to_string_lossy().to_string())
+            .read_file(location.to_string_lossy().into_owned())
             .await?;
 
         let project_manifest_file: ProjectManifestFile = toml::from_slice(content.as_bytes())

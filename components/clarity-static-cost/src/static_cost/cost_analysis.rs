@@ -187,7 +187,7 @@ impl SummingExecutionCost {
     }
 
     pub fn add_summing(&mut self, other: &SummingExecutionCost) {
-        self.costs.extend(other.costs.clone());
+        self.costs.extend(other.costs.iter().cloned());
     }
 
     /// minimum cost across all paths

@@ -1054,7 +1054,7 @@ mod lsp_tests {
                 .expect("Failed to process notification");
 
         let response_json = json!(response);
-        println!("full respeonse: {response_json}");
+        println!("full response: {response_json}");
 
         let aggregated_diagnostics = response_json
             .get("aggregated_diagnostics")

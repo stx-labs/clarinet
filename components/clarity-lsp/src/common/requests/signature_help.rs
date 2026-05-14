@@ -28,7 +28,7 @@ pub fn get_signatures(
         return None;
     }
 
-    let (_, reference) = API_REF.get(&function_name.to_string())?;
+    let (_, reference) = API_REF.get(function_name.as_str())?;
     let FunctionAPI {
         signature,
         output_type,
