@@ -520,12 +520,12 @@ impl SDK {
 
         if self
             .file_accessor
-            .file_exists(deployment_plan_location.to_string_lossy().to_string())
+            .file_exists(deployment_plan_location.to_string_lossy().into_owned())
             .await?
         {
             let spec_file_content = self
                 .file_accessor
-                .read_file(deployment_plan_location.to_string_lossy().to_string())
+                .read_file(deployment_plan_location.to_string_lossy().into_owned())
                 .await?;
 
             let mut spec_file = DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
@@ -596,7 +596,7 @@ impl SDK {
 
         self.file_accessor
             .write_file(
-                deployment_plan_location.to_string_lossy().to_string(),
+                deployment_plan_location.to_string_lossy().into_owned(),
                 &deployment_file,
             )
             .await?;
@@ -1193,7 +1193,7 @@ impl SDK {
         for (contract_id, contract_location) in contracts_locations.iter() {
             contract_paths.insert(
                 contract_id.name.to_string(),
-                contract_location.to_string_lossy().to_string(),
+                contract_location.to_string_lossy().into_owned(),
             );
         }
 

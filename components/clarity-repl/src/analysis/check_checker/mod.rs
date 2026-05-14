@@ -607,7 +607,7 @@ impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
         // tainted.
         for child in list {
             if let Some(tainted) = self.tainted_nodes.get(&Node::Expr(child.id)) {
-                sources.extend(tainted.sources.clone());
+                sources.extend(tainted.sources.iter().copied());
             }
         }
         if !sources.is_empty() {

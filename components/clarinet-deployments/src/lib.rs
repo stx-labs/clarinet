@@ -451,7 +451,7 @@ pub async fn generate_default_deployment(
             }
 
             let resolved_path = manifest.root_dir.join(file_path);
-            let resolved_path_string = resolved_path.to_string_lossy().to_string();
+            let resolved_path_string = resolved_path.to_string_lossy().into_owned();
 
             // Load and validate the custom boot contract
             let custom_source = match file_accessor {
@@ -724,7 +724,7 @@ pub async fn generate_default_deployment(
                 let source = paths::read_content_as_utf8(&contract_location).map_err(|_| {
                     format!("unable to find contract at {}", contract_location.display())
                 })?;
-                sources.insert(contract_location.to_string_lossy().to_string(), source);
+                sources.insert(contract_location.to_string_lossy().into_owned(), source);
             }
             sources
         }
@@ -735,7 +735,7 @@ pub async fn generate_default_deployment(
                 .map(|contract_config| {
                     let contract_location =
                         project_root.join(contract_config.expect_contract_path_as_str());
-                    contract_location.to_string_lossy().to_string()
+                    contract_location.to_string_lossy().into_owned()
                 })
                 .collect();
             file_accessor.read_files(contracts_location).await?
@@ -767,7 +767,7 @@ pub async fn generate_default_deployment(
 
         let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
         let mut source = sources
-            .get(&contract_location.to_string_lossy().to_string())
+            .get(contract_location.to_string_lossy().as_ref())
             .ok_or(format!(
                 "Invalid Clarinet.toml, source file not found for: {}",
                 &name
