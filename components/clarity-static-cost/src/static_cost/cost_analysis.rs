@@ -27,6 +27,9 @@ use super::{
     TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
 
+/// Mapping from fully-qualified trait identifiers to the contracts that implement them.
+pub type TraitImplementations = HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>;
+
 /// Configuration for static cost analysis.
 #[derive(Debug, Clone)]
 pub struct StaticCostConfig {
@@ -35,7 +38,7 @@ pub struct StaticCostConfig {
     /// Mapping from fully-qualified trait identifiers to concrete contract
     /// implementations. Used to resolve trait-based `contract-call?` targets
     /// during static analysis.
-    pub trait_implementations: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    pub trait_implementations: TraitImplementations,
 }
 // TODO:
 // unwrap evaluates both branches (https://github.com/clarity-lang/reference/issues/59)
@@ -163,7 +166,7 @@ pub struct AnalysisContext<'a> {
     /// Mapping from fully-qualified trait identifiers to concrete contract
     /// implementations. Used to resolve trait-based `contract-call?` targets
     /// during static analysis.
-    pub trait_implementations: &'a HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    pub trait_implementations: &'a TraitImplementations,
     /// Warnings accumulated during analysis (e.g. unresolved trait calls).
     pub warnings: &'a RefCell<Vec<CostWarning>>,
     /// Name of the function currently being analyzed (for warning context).
@@ -272,7 +275,7 @@ pub fn static_cost(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
     contract_identifier: &QualifiedContractIdentifier,
-    trait_implementations: &HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    trait_implementations: &TraitImplementations,
 ) -> Result<StaticCostResult, StaticCostError> {
     let visited = RefCell::new(HashSet::new());
     visited.borrow_mut().insert(contract_identifier.clone());
@@ -289,7 +292,7 @@ fn static_cost_inner(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
     contract_identifier: &QualifiedContractIdentifier,
-    trait_implementations: &HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    trait_implementations: &TraitImplementations,
     visited: &RefCell<HashSet<QualifiedContractIdentifier>>,
 ) -> Result<StaticCostResult, StaticCostError> {
     let contract_source = env
@@ -515,7 +518,7 @@ pub fn static_cost_tree_from_ast(
     ast: &clarity::vm::ast::ContractAST,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
-    trait_implementations: &HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    trait_implementations: &TraitImplementations,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
     visited: &RefCell<HashSet<QualifiedContractIdentifier>>,
@@ -2043,8 +2046,7 @@ mod tests {
     ) -> Result<StaticCost, StaticCostError> {
         let cost_map: HashMap<String, Option<StaticCost>> = HashMap::new();
         let function_defs: HashMap<String, &[SymbolicExpression]> = HashMap::new();
-        let trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-            HashMap::new();
+        let trait_impls: TraitImplementations = HashMap::new();
         let warnings = RefCell::new(Vec::new());
 
         let epoch = StacksEpochId::latest(); // XXX this should be matched with the clarity version

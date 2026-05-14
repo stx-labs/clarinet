@@ -23,7 +23,7 @@ use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::session::AnnotatedExecutionResult;
 use clarity_repl::repl::{ContractDeployer, Session};
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
-use clarity_static_cost::static_cost::StaticCost;
+use clarity_static_cost::static_cost::{StaticCost, TraitImplementations};
 use ls_types::{
     CompletionItem, Diagnostic as LspDiagnostic, DiagnosticSeverity, DiagnosticTag, DocumentSymbol,
     Hover, Location, MessageType, Position, Range, SignatureHelp,
@@ -1087,11 +1087,8 @@ struct CostAnalysisResult {
 /// resolved.
 fn collect_trait_implementations(
     asts: &BTreeMap<QualifiedContractIdentifier, ContractAST>,
-) -> HashMap<clarity_types::types::TraitIdentifier, Vec<QualifiedContractIdentifier>> {
-    let mut trait_implementations: HashMap<
-        clarity_types::types::TraitIdentifier,
-        Vec<QualifiedContractIdentifier>,
-    > = HashMap::new();
+) -> TraitImplementations {
+    let mut trait_implementations: TraitImplementations = HashMap::new();
 
     for (contract_id, ast) in asts {
         for expr in &ast.expressions {
@@ -1122,10 +1119,7 @@ async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
-    trait_implementations: &HashMap<
-        clarity_types::types::TraitIdentifier,
-        Vec<QualifiedContractIdentifier>,
-    >,
+    trait_implementations: &TraitImplementations,
 ) -> Option<CostAnalysisResult> {
     use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};

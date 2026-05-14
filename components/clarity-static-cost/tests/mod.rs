@@ -14,7 +14,7 @@ use clarity::vm::{ast, ClarityVersion, ContractName};
 use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_tree_from_ast, AnalysisContext,
     CostAnalysisNode, CostExprNode, CostWarning, CostWarningKind, StaticCostConfig,
-    UserArgumentsContext,
+    TraitImplementations, UserArgumentsContext,
 };
 use clarity_types::types::TraitIdentifier;
 use indoc::indoc;
@@ -2024,8 +2024,7 @@ fn test_trait_resolution_with_implementations() {
         caller_id.name.clone(),
         ClarityName::from_literal("pool-trait"),
     );
-    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-        HashMap::new();
+    let mut trait_impls: TraitImplementations = HashMap::new();
     trait_impls.insert(pool_trait_id, vec![pool_id.clone()]);
 
     owned_env.begin();
@@ -2180,8 +2179,7 @@ fn test_trait_resolution_skips_failing_implementation() {
         caller_id.name.clone(),
         ClarityName::from_literal("pool-trait"),
     );
-    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-        HashMap::new();
+    let mut trait_impls: TraitImplementations = HashMap::new();
     trait_impls.insert(pool_trait_id, vec![pool_id.clone(), ghost_id]);
 
     owned_env.begin();
@@ -2380,8 +2378,7 @@ fn test_static_cost_resolves_external_trait_implementations() {
         trait_contract_id.name.clone(),
         ClarityName::from_literal("nft-trait"),
     );
-    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-        HashMap::new();
+    let mut trait_impls: TraitImplementations = HashMap::new();
     trait_impls.insert(nft_trait_id, vec![impl_contract_id.clone()]);
 
     owned_env.begin();
@@ -2552,8 +2549,7 @@ fn test_static_cost_handles_mutual_trait_impl_cycle() {
         trait_contract_id.name.clone(),
         ClarityName::from_literal("t"),
     );
-    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-        HashMap::new();
+    let mut trait_impls: TraitImplementations = HashMap::new();
     trait_impls.insert(trait_id, vec![a_id.clone(), b_id.clone()]);
 
     // Analyze A. Without cycle protection this never returns.
