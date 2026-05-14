@@ -90,6 +90,7 @@ fn test_build_cost_analysis_tree_function_definition() {
                 trait_implementations: &trait_impls,
                 warnings: &warnings,
                 current_function: None,
+                visited: &RefCell::new(std::collections::HashSet::new()),
             };
             build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)
         },
@@ -225,6 +226,7 @@ fn test_get_trait_count_direct() {
                 &HashMap::new(),
                 env,
                 invoke_ctx,
+                &RefCell::new(std::collections::HashSet::new()),
             )
         },
     )
@@ -566,6 +568,7 @@ fn run_cost_analysis_test(
                 &HashMap::new(),
                 env,
                 invoke_ctx,
+                &RefCell::new(std::collections::HashSet::new()),
             )
         },
     )
@@ -2425,10 +2428,7 @@ fn test_static_cost_resolves_external_trait_implementations() {
 /// only that analysis terminates and yields finite costs — it does not assume
 /// a particular cycle-handling strategy (silent skip, dedicated warning, etc.).
 ///
-/// Currently this stack-overflows rather than failing cleanly, so it is
-/// `#[ignore]`d to keep CI green. Un-ignore once the cycle guard lands.
 #[test]
-#[ignore = "Demonstrates cycle bug in trait resolution: stack-overflows without the cycle guard. Un-ignore once protection is added to static_cost."]
 fn test_static_cost_handles_mutual_trait_impl_cycle() {
     let epoch = StacksEpochId::Epoch33;
     let clarity_version = ClarityVersion::Clarity4;
