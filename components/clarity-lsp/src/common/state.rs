@@ -14,6 +14,7 @@ use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::ast::{build_ast, ContractAST};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
+use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
@@ -1078,13 +1079,15 @@ struct CostAnalysisResult {
     warnings: Vec<ClarityDiagnostic>,
 }
 
-/// Scan all contract ASTs for `impl-trait` declarations and build a mapping
-/// from trait identifiers to the contracts that implement them.
+/// Scan all project-defined contract ASTs for `impl-trait` declarations and
+/// build a mapping from trait identifiers to the contracts that implement them.
+///
+/// Only project-local contracts (those present in `asts`) are considered.
+/// Impls deployed on a network but not pulled into the workspace are not
+/// resolved.
 fn collect_trait_implementations(
     asts: &BTreeMap<QualifiedContractIdentifier, ContractAST>,
 ) -> HashMap<clarity_types::types::TraitIdentifier, Vec<QualifiedContractIdentifier>> {
-    use clarity::vm::functions::define::DefineFunctions;
-
     let mut trait_implementations: HashMap<
         clarity_types::types::TraitIdentifier,
         Vec<QualifiedContractIdentifier>,

@@ -2413,3 +2413,181 @@ fn test_static_cost_resolves_external_trait_implementations() {
         cost_unresolved.max.runtime
     );
 }
+
+/// Mutual-impl trait cycle: two contracts each implement the same trait and
+/// each call through the trait into the other. With both registered as impls,
+/// `resolve_trait_call_cost` recurses into `static_cost` for every impl, which
+/// re-enters analysis of the original contract, ad infinitum.
+///
+/// Expected post-fix behavior: `static_cost` detects the re-entry (e.g. via a
+/// `HashSet<QualifiedContractIdentifier>` of analyses on the stack), breaks the
+/// cycle, and returns a result without stack-overflowing. The test asserts
+/// only that analysis terminates and yields finite costs — it does not assume
+/// a particular cycle-handling strategy (silent skip, dedicated warning, etc.).
+///
+/// Currently this stack-overflows rather than failing cleanly, so it is
+/// `#[ignore]`d to keep CI green. Un-ignore once the cycle guard lands.
+#[test]
+#[ignore = "Demonstrates cycle bug in trait resolution: stack-overflows without the cycle guard. Un-ignore once protection is added to static_cost."]
+fn test_static_cost_handles_mutual_trait_impl_cycle() {
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+
+    let deployer = StandardPrincipalData::transient();
+    let trait_contract_id = QualifiedContractIdentifier::new(
+        deployer.clone(),
+        ContractName::from_literal("cycle-trait"),
+    );
+    let a_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("cycle-a"));
+    let b_id = QualifiedContractIdentifier::new(deployer, ContractName::from_literal("cycle-b"));
+
+    // Trait used by both impl contracts. The trait method takes a `principal`
+    // (not `<t>`) so the trait definition itself does not self-reference —
+    // Clarity rejects self-referential traits as `CircularReference`.
+    let trait_src = indoc! {r#"
+        (define-trait t (
+            (get-id (principal) (response uint uint))
+        ))
+    "#};
+
+    // Each impl contract has two functions:
+    //   * `get-id` satisfies the trait (cheap, no trait calls).
+    //   * `chain` is a separate function that takes a `<t>` parameter and
+    //     calls `get-id` through it — this is the dynamic dispatch site that
+    //     triggers `resolve_trait_call_cost`.
+    //
+    // With both A and B registered as impls of `t`, analyzing A.chain resolves
+    // to {A, B}. Each impl is then statically analyzed via `static_cost`,
+    // which re-enters A.chain → re-resolves to {A, B} → re-enters A.chain → …
+    // The contracts are symmetric; the cycle is closed by A's own membership
+    // in the impl set of the trait that A.chain dispatches through.
+    let a_src = indoc! {r#"
+        (use-trait t .cycle-trait.t)
+        (impl-trait .cycle-trait.t)
+
+        (define-public (get-id (who principal))
+            (ok u0)
+        )
+
+        (define-public (chain (other <t>) (who principal))
+            (contract-call? other get-id who)
+        )
+    "#};
+
+    let b_src = indoc! {r#"
+        (use-trait t .cycle-trait.t)
+        (impl-trait .cycle-trait.t)
+
+        (define-public (get-id (who principal))
+            (ok u1)
+        )
+
+        (define-public (chain (other <t>) (who principal))
+            (contract-call? other get-id who)
+        )
+    "#};
+
+    let mut memory_store = MemoryBackingStore::new();
+    let mut db = memory_store.as_clarity_db();
+    db.begin();
+    db.set_clarity_epoch_version(epoch).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.set_tenure_height(1).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.setup_block_metadata(Some(1)).unwrap();
+    db.commit().unwrap();
+
+    let costs_contract_id = boot_code_id("costs", false);
+    let costs_4_contract_id = boot_code_id("costs-4", false);
+    let cost_voting_contract_id = boot_code_id("cost-voting", false);
+    {
+        let mut temp_env = OwnedEnvironment::new(db, epoch);
+        temp_env
+            .initialize_versioned_contract(
+                costs_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS,
+                None,
+            )
+            .expect("Failed to initialize costs contract");
+        temp_env
+            .initialize_versioned_contract(
+                costs_4_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS_4,
+                None,
+            )
+            .expect("Failed to initialize costs-4 contract");
+        temp_env
+            .initialize_versioned_contract(
+                cost_voting_contract_id,
+                clarity_version,
+                &BOOT_CODE_COST_VOTING_TESTNET.to_string(),
+                None,
+            )
+            .expect("Failed to initialize cost-voting contract");
+        let (extracted_db, _) = temp_env.destruct().unwrap();
+        db = extracted_db;
+    }
+
+    let mut owned_env = OwnedEnvironment::new_max_limit(db, epoch, false);
+
+    owned_env
+        .initialize_versioned_contract(trait_contract_id.clone(), clarity_version, trait_src, None)
+        .expect("Failed to deploy trait contract");
+    owned_env
+        .initialize_versioned_contract(a_id.clone(), clarity_version, a_src, None)
+        .expect("Failed to deploy cycle-a");
+    owned_env
+        .initialize_versioned_contract(b_id.clone(), clarity_version, b_src, None)
+        .expect("Failed to deploy cycle-b");
+
+    // Both A and B implement the trait, mirroring what the LSP would build by
+    // scanning their impl-trait declarations.
+    let trait_id = TraitIdentifier::new(
+        trait_contract_id.issuer.clone(),
+        trait_contract_id.name.clone(),
+        ClarityName::from_literal("t"),
+    );
+    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
+        HashMap::new();
+    trait_impls.insert(trait_id, vec![a_id.clone(), b_id.clone()]);
+
+    // Analyze A. Without cycle protection this never returns.
+    owned_env.begin();
+    let result = {
+        let contract_context = ContractContext::new(a_id.clone(), clarity_version);
+        let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
+        clarity_static_cost::static_cost::static_cost(&mut env, &invoke_ctx, &a_id, &trait_impls)
+    };
+    let _ = owned_env.commit();
+
+    let result = result.expect("static_cost should terminate on mutual-impl cycle");
+
+    // The cycle is broken: analysis returns and each function in A has a
+    // finite cost. The exact strategy used to break the cycle (skip recursive
+    // impl, emit a warning, etc.) is intentionally not asserted here so the
+    // implementer can pick whichever shape fits best.
+    let (get_id_cost, _) = result
+        .costs
+        .get("get-id")
+        .expect("get-id cost should be present");
+    let (chain_cost, _) = result
+        .costs
+        .get("chain")
+        .expect("chain cost should be present");
+
+    assert!(
+        get_id_cost.max.runtime < u64::MAX / 2,
+        "get-id cost should be bounded; got runtime={}",
+        get_id_cost.max.runtime
+    );
+    assert!(
+        chain_cost.max.runtime < u64::MAX / 2,
+        "chain cost should be bounded; got runtime={}",
+        chain_cost.max.runtime
+    );
+}
