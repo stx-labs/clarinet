@@ -161,7 +161,7 @@ pub async fn process_notification(
                     None => paths::read_content_as_utf8(&contract_location),
                     Some(file_accessor) => {
                         file_accessor
-                            .read_file(contract_location.to_string_lossy().to_string())
+                            .read_file(contract_location.to_string_lossy().into_owned())
                             .await
                     }
                 }?;
@@ -1054,7 +1054,7 @@ mod lsp_tests {
                 .expect("Failed to process notification");
 
         let response_json = json!(response);
-        println!("full respeonse: {response_json}");
+        println!("full response: {response_json}");
 
         let aggregated_diagnostics = response_json
             .get("aggregated_diagnostics")

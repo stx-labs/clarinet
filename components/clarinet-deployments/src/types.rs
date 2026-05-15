@@ -973,7 +973,7 @@ pub mod contracts_serde {
             let mut map = BTreeMap::new();
             map.insert("contract_id", contract_id.to_string());
             map.insert("source", encoded);
-            map.insert("path", path.to_string_lossy().to_string());
+            map.insert("path", path.to_string_lossy().into_owned());
             out.serialize_element(&map)?;
         }
         out.end()
@@ -1074,7 +1074,7 @@ impl DeploymentSpecification {
                                     let source = contracts_sources.as_ref().map(|contracts_sources| {
                                         let contract_path = paths::try_parse_path(&spec.path, Some(project_root))
                                             .expect("failed to get contract path");
-                                        let contract_path_str = contract_path.to_string_lossy().to_string();
+                                        let contract_path_str = contract_path.to_string_lossy().into_owned();
                                         contracts_sources
                                             .get(&contract_path_str)
                                             .cloned()
@@ -1332,7 +1332,7 @@ impl DeploymentSpecificationFile {
         file_accesor: &dyn FileAccessor,
     ) -> Result<DeploymentSpecificationFile, String> {
         let spec_file_content = file_accesor
-            .read_file(path.to_string_lossy().to_string())
+            .read_file(path.to_string_lossy().into_owned())
             .await?;
 
         yaml_serde::from_str(&spec_file_content).map_err(|msg| format!("unable to read file {msg}"))

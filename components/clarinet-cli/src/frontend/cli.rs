@@ -1352,7 +1352,7 @@ pub fn main() {
                             let Some((_, path)) = deployment.contracts.get(&contract_id) else {
                                 continue;
                             };
-                            let key = path.to_string_lossy().to_string();
+                            let key = path.to_string_lossy().into_owned();
                             let entry = diagnostics.entry(key).or_default();
                             entry.extend(diags.into_iter().map(LintDiagnostic::from));
                             if let Some(lds) = artifacts.lint_diags.remove(&contract_id) {
@@ -1761,7 +1761,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                     );
                     (
                         deployment,
-                        Some(deployment_location.to_string_lossy().to_string()),
+                        Some(deployment_location.to_string_lossy().into_owned()),
                         artifacts,
                     )
                 })

@@ -48,10 +48,10 @@ pub async fn retrieve_contract(
         ),
         Some(file_accessor) => (
             file_accessor
-                .read_file(contract_location.to_string_lossy().to_string())
+                .read_file(contract_location.to_string_lossy().into_owned())
                 .await,
             file_accessor
-                .read_file(metadata_location.to_string_lossy().to_string())
+                .read_file(metadata_location.to_string_lossy().into_owned())
                 .await,
         ),
     };
@@ -99,13 +99,13 @@ pub async fn retrieve_contract(
         Some(file_accessor) => {
             file_accessor
                 .write_file(
-                    contract_location.to_string_lossy().to_string(),
+                    contract_location.to_string_lossy().into_owned(),
                     contract.source_code.as_bytes(),
                 )
                 .await?;
             file_accessor
                 .write_file(
-                    metadata_location.to_string_lossy().to_string(),
+                    metadata_location.to_string_lossy().into_owned(),
                     serde_json::to_string_pretty(&ContractMetadata {
                         epoch,
                         clarity_version,
