@@ -141,7 +141,10 @@ Wasm target.
 The SDK is divided between the Rust lib compiled to Wasm `./components/clarinet-sdk-wasm` and a TS
 wrapper around it: `./components/clarinet-sdk`.
 
+1. Install dependencies without prepare scripts: `pnpm install --ignore-scripts`
+   (the SDK packages' `prepare` hook needs the wasm build, which doesn't exist yet on a fresh clone)
 1. Compile the Wasm package with `pnpm run build:sdk-wasm`
+1. Install dependencies and run prepare scripts: `pnpm install`
 1. Compile the SDK with `pnpm run build:sdk`
 1. Test with `pnpm test`
 

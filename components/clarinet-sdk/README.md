@@ -37,6 +37,10 @@ To work with these two packages locally, the first one needs to be built with
 wasm-pack (install [wasm-pack](https://wasm-bindgen.github.io/wasm-pack/installer)).
 
 ```sh
+# install dependencies without running prepare scripts
+# (the SDK packages' `prepare` hook depends on the wasm build,
+# which doesn't exist yet on a fresh clone)
+pnpm install --ignore-scripts
 # build the wasm package
 pnpm run build:sdk-wasm
 # install dependencies and build the node package
