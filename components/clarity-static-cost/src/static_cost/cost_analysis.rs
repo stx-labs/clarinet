@@ -171,9 +171,10 @@ pub struct AnalysisContext<'a> {
     pub warnings: &'a RefCell<Vec<CostWarning>>,
     /// Name of the function currently being analyzed (for warning context).
     pub current_function: Option<&'a str>,
-    /// Contracts already being analyzed — used to break cycles in recursive
-    /// `static_cost` calls (e.g. mutual trait implementations).
-    pub visited: &'a RefCell<HashSet<QualifiedContractIdentifier>>,
+    /// Cache of contracts already analyzed or currently being analyzed.
+    /// `None` means analysis is in progress (cycle guard), `Some(result)` means
+    /// the contract was fully analyzed and the result can be reused.
+    pub visited: &'a RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
 }
 
 /// A type to track summed execution costs for different paths
@@ -277,15 +278,21 @@ pub fn static_cost(
     contract_identifier: &QualifiedContractIdentifier,
     trait_implementations: &TraitImplementations,
 ) -> Result<StaticCostResult, StaticCostError> {
-    let visited = RefCell::new(HashSet::new());
-    visited.borrow_mut().insert(contract_identifier.clone());
-    static_cost_inner(
+    let visited = RefCell::new(HashMap::new());
+    visited
+        .borrow_mut()
+        .insert(contract_identifier.clone(), None);
+    let result = static_cost_inner(
         env,
         invoke_ctx,
         contract_identifier,
         trait_implementations,
         &visited,
-    )
+    )?;
+    visited
+        .borrow_mut()
+        .insert(contract_identifier.clone(), Some(result.clone()));
+    Ok(result)
 }
 
 fn static_cost_inner(
@@ -293,7 +300,7 @@ fn static_cost_inner(
     invoke_ctx: &InvocationContext,
     contract_identifier: &QualifiedContractIdentifier,
     trait_implementations: &TraitImplementations,
-    visited: &RefCell<HashSet<QualifiedContractIdentifier>>,
+    visited: &RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
 ) -> Result<StaticCostResult, StaticCostError> {
     let contract_source = env
         .global_context
@@ -443,7 +450,10 @@ pub fn static_cost_from_ast(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
 ) -> Result<StaticCostResult, StaticCostError> {
-    let visited = RefCell::new(HashSet::new());
+    let visited = RefCell::new(HashMap::new());
+    visited
+        .borrow_mut()
+        .insert(contract_ast.contract_identifier.clone(), None);
     static_cost_from_ast_inner(
         contract_ast,
         clarity_version,
@@ -462,7 +472,7 @@ fn static_cost_from_ast_inner(
     config: Option<&StaticCostConfig>,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
-    visited: &RefCell<HashSet<QualifiedContractIdentifier>>,
+    visited: &RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
 ) -> Result<StaticCostResult, StaticCostError> {
     let empty_impls = HashMap::new();
     let contract_size = config.map(|c| c.contract_size);
@@ -521,7 +531,7 @@ pub fn static_cost_tree_from_ast(
     trait_implementations: &TraitImplementations,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
-    visited: &RefCell<HashSet<QualifiedContractIdentifier>>,
+    visited: &RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
 ) -> Result<
     (
         HashMap<String, (CostAnalysisNode, Option<TraitCount>)>,
@@ -718,9 +728,19 @@ fn get_contract_call_target_cost(
     };
 
     if let Some(contract_id) = contract_id {
-        if !ctx.visited.borrow_mut().insert(contract_id.clone()) {
-            return None;
+        // Check the visited cache: None means cycle (in progress), Some means cached.
+        let cached = ctx.visited.borrow().get(&contract_id).cloned();
+        match cached {
+            Some(Some(result)) => {
+                return result
+                    .costs
+                    .get(function_name.as_str())
+                    .map(|(c, _)| c.clone());
+            }
+            Some(None) => return None, // cycle detected
+            None => {}
         }
+        ctx.visited.borrow_mut().insert(contract_id.clone(), None);
         match static_cost_inner(
             env,
             ctx.invoke_ctx,
@@ -729,6 +749,10 @@ fn get_contract_call_target_cost(
             ctx.visited,
         ) {
             Ok(result) => {
+                // Cache the result for future lookups.
+                ctx.visited
+                    .borrow_mut()
+                    .insert(contract_id.clone(), Some(result.clone()));
                 // Propagate any warnings from the callee analysis so that
                 // incomplete analysis in transitive dependencies is surfaced.
                 ctx.warnings.borrow_mut().extend(result.warnings);
@@ -808,17 +832,27 @@ fn resolve_trait_call_cost(
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
-        if !ctx.visited.borrow_mut().insert(impl_contract.clone()) {
-            continue;
-        }
-        let Ok(result) = static_cost_inner(
-            env,
-            ctx.invoke_ctx,
-            impl_contract,
-            ctx.trait_implementations,
-            ctx.visited,
-        ) else {
-            continue;
+        // Check the visited cache: None means cycle (in progress), Some means cached.
+        let cached = ctx.visited.borrow().get(impl_contract).cloned();
+        let result = match cached {
+            Some(Some(result)) => result,
+            Some(None) => continue, // cycle detected
+            None => {
+                ctx.visited.borrow_mut().insert(impl_contract.clone(), None);
+                let Ok(result) = static_cost_inner(
+                    env,
+                    ctx.invoke_ctx,
+                    impl_contract,
+                    ctx.trait_implementations,
+                    ctx.visited,
+                ) else {
+                    continue;
+                };
+                ctx.visited
+                    .borrow_mut()
+                    .insert(impl_contract.clone(), Some(result.clone()));
+                result
+            }
         };
         let Some((cost, _)) = result.costs.get(function_name.as_str()) else {
             continue;
@@ -2069,7 +2103,7 @@ mod tests {
             trait_implementations: &trait_impls,
             warnings: &warnings,
             current_function: None,
-            visited: &RefCell::new(HashSet::new()),
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_analysis_tree) =
             build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0)?;
@@ -2150,7 +2184,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
-            visited: &RefCell::new(HashSet::new()),
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2216,7 +2250,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
-            visited: &RefCell::new(HashSet::new()),
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2268,7 +2302,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
-            visited: &RefCell::new(HashSet::new()),
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2310,7 +2344,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
-            visited: &RefCell::new(HashSet::new()),
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 

@@ -90,7 +90,7 @@ fn test_build_cost_analysis_tree_function_definition() {
                 trait_implementations: &trait_impls,
                 warnings: &warnings,
                 current_function: None,
-                visited: &RefCell::new(std::collections::HashSet::new()),
+                visited: &RefCell::new(std::collections::HashMap::new()),
             };
             build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)
         },
@@ -226,7 +226,7 @@ fn test_get_trait_count_direct() {
                 &HashMap::new(),
                 env,
                 invoke_ctx,
-                &RefCell::new(std::collections::HashSet::new()),
+                &RefCell::new(std::collections::HashMap::new()),
             )
         },
     )
@@ -568,7 +568,7 @@ fn run_cost_analysis_test(
                 &HashMap::new(),
                 env,
                 invoke_ctx,
-                &RefCell::new(std::collections::HashSet::new()),
+                &RefCell::new(std::collections::HashMap::new()),
             )
         },
     )
