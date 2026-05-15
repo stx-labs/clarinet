@@ -537,7 +537,7 @@ fn run_cost_analysis_test(
                 epoch,
                 Some(&StaticCostConfig {
                     contract_size: src.len() as u64,
-                    trait_implementations: HashMap::new(),
+                    trait_implementations: &HashMap::new(),
                 }),
                 env,
                 invoke_ctx,
@@ -1329,7 +1329,7 @@ fn test_contract_call_includes_callee_cost() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: HashMap::new(),
+                trait_implementations: &HashMap::new(),
             }),
             &mut env,
             &invoke_ctx,
@@ -2004,7 +2004,7 @@ fn test_trait_resolution_with_implementations() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: HashMap::new(),
+                trait_implementations: &HashMap::new(),
             }),
             &mut env,
             &invoke_ctx,
@@ -2037,7 +2037,7 @@ fn test_trait_resolution_with_implementations() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: trait_impls.clone(),
+                trait_implementations: &trait_impls,
             }),
             &mut env,
             &invoke_ctx,
@@ -2192,7 +2192,7 @@ fn test_trait_resolution_skips_failing_implementation() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: trait_impls,
+                trait_implementations: &trait_impls,
             }),
             &mut env,
             &invoke_ctx,

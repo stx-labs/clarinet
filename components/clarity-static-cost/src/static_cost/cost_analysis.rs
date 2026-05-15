@@ -31,14 +31,14 @@ use super::{
 pub type TraitImplementations = HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>;
 
 /// Configuration for static cost analysis.
-#[derive(Debug, Clone)]
-pub struct StaticCostConfig {
+#[derive(Debug)]
+pub struct StaticCostConfig<'a> {
     /// Size of the contract source in bytes, used to compute contract-size overhead.
     pub contract_size: u64,
     /// Mapping from fully-qualified trait identifiers to concrete contract
     /// implementations. Used to resolve trait-based `contract-call?` targets
     /// during static analysis.
-    pub trait_implementations: TraitImplementations,
+    pub trait_implementations: &'a TraitImplementations,
 }
 // TODO:
 // unwrap evaluates both branches (https://github.com/clarity-lang/reference/issues/59)
@@ -321,7 +321,7 @@ fn static_cost_inner(
         epoch,
         Some(&StaticCostConfig {
             contract_size: contract_source.len() as u64,
-            trait_implementations: trait_implementations.clone(),
+            trait_implementations,
         }),
         env,
         invoke_ctx,
@@ -473,7 +473,7 @@ fn static_cost_from_ast_inner(
     let empty_impls = HashMap::new();
     let contract_size = config.map(|c| c.contract_size);
     let trait_implementations = config
-        .map(|c| &c.trait_implementations)
+        .map(|c| c.trait_implementations)
         .unwrap_or(&empty_impls);
 
     let (cost_trees_with_traits, warnings) = static_cost_tree_from_ast(
