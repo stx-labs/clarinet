@@ -35,6 +35,11 @@ pub fn generate(
         generated.push(contract_name.as_str());
     }
 
+    // Shared brand symbol — used by every bundled contract const.
+    let brand_path = output_dir.join("brand.ts");
+    fs::write(&brand_path, ts_writer::BRAND_TS)
+        .map_err(|e| format!("failed to write brand.ts: {e}"))?;
+
     // BTreeMap iteration is already sorted, but let's be explicit
     let index_content = ts_writer::generate_index(&generated);
     let index_path = output_dir.join("index.ts");

@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-abi-typegen"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clarity",
  "serde_json",
@@ -921,9 +921,10 @@ dependencies = [
 
 [[package]]
 name = "clarity-ts-typegen"
-version = "3.16.0"
+version = "3.17.0"
 dependencies = [
  "clarity",
+ "serde_json",
 ]
 
 [[package]]
