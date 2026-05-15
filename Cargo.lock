@@ -841,6 +841,7 @@ dependencies = [
  "clarity-static-cost",
  "clarity-types",
  "console_error_panic_hook",
+ "divan",
  "getrandom 0.3.4",
  "indoc",
  "js-sys",
