@@ -154,9 +154,12 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
 /// otherwise a contract with a syntax error would appear clean on every
 /// rebuild after the first.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct CachedContractAST {
-    pub content_hash: Sha256Sum,
+    /// Private: the only writer is `new()`, which derives this from
+    /// `source`. Keeping the field unnameable outside this module makes
+    /// it structurally impossible to pair an AST with a hash of
+    /// different bytes.
+    content_hash: Sha256Sum,
     pub ast: ContractAST,
     pub diags: Vec<Diagnostic>,
     pub ast_success: bool,
@@ -165,10 +168,9 @@ pub struct CachedContractAST {
 }
 
 impl CachedContractAST {
-    /// Construct an entry from `source` and the parse outputs. The hash
-    /// is computed from `source` here so callers can't accidentally pair
-    /// a hash with an AST built from different bytes — the central cache
-    /// invariant is enforced at the constructor.
+    /// Construct an entry from `source` and the parse outputs. The
+    /// `content_hash` is computed from `source` here, so callers can't
+    /// pair a hash with an AST built from different bytes.
     pub fn new(
         source: &str,
         ast: ContractAST,
@@ -185,6 +187,10 @@ impl CachedContractAST {
             clarity_version,
             epoch,
         }
+    }
+
+    pub fn content_hash(&self) -> &Sha256Sum {
+        &self.content_hash
     }
 
     /// Returns `true` if this cached entry is still valid for a contract

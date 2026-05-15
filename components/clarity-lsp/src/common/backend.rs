@@ -1412,7 +1412,7 @@ mod lsp_tests {
             let second = cache_after_second
                 .get(key)
                 .expect("cache entry should persist across saves");
-            assert_eq!(first.content_hash, second.content_hash);
+            assert_eq!(first.content_hash(), second.content_hash());
         }
 
         // ManifestSaved threads the cache through per-entry validation;
@@ -1565,7 +1565,12 @@ mod lsp_tests {
         .await
         .expect("v1 save failed");
         let hash_v1 = editor_state_input
-            .try_read(|es| es.ast_cache.values().next().map(|e| e.content_hash.clone()))
+            .try_read(|es| {
+                es.ast_cache
+                    .values()
+                    .next()
+                    .map(|e| e.content_hash().clone())
+            })
             .unwrap()
             .expect("sanity: cache should have an entry after v1 save");
 
@@ -1579,7 +1584,12 @@ mod lsp_tests {
         .await
         .expect("v2 save failed");
         let hash_v2 = editor_state_input
-            .try_read(|es| es.ast_cache.values().next().map(|e| e.content_hash.clone()))
+            .try_read(|es| {
+                es.ast_cache
+                    .values()
+                    .next()
+                    .map(|e| e.content_hash().clone())
+            })
             .unwrap()
             .expect("cache should still have an entry after v2 save");
 
@@ -1640,7 +1650,8 @@ mod lsp_tests {
         // OnChain source has env_simnet blocks stripped; Simnet source
         // keeps them — so hashes must differ.
         assert_ne!(
-            onchain.1.content_hash, simnet.1.content_hash,
+            onchain.1.content_hash(),
+            simnet.1.content_hash(),
             "OnChain and Simnet should hash different sources (env-strip effect)"
         );
     }
