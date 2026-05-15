@@ -22,6 +22,7 @@ indoc = { workspace = true }
 tokio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }
 clarity = { workspace = true, default-features = false, features = ["wasm-web", "developer-mode"] }
 clarity-types = { workspace = true, features = ["wasm-web", "developer-mode"] }
 console_error_panic_hook = { workspace = true }
