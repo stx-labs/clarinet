@@ -14,6 +14,7 @@ use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::ast::{build_ast, ContractAST};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
+use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
@@ -22,7 +23,7 @@ use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::session::AnnotatedExecutionResult;
 use clarity_repl::repl::{ContractDeployer, Session};
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
-use clarity_static_cost::static_cost::StaticCost;
+use clarity_static_cost::static_cost::{StaticCost, TraitImplementations};
 use ls_types::{
     CompletionItem, Diagnostic as LspDiagnostic, DiagnosticSeverity, DiagnosticTag, DocumentSymbol,
     Hover, Location, MessageType, Position, Range, SignatureHelp,
@@ -1011,6 +1012,12 @@ pub async fn build_state(
         let session = final_session
             .as_mut()
             .expect("CHECK_ENVIRONMENTS ran at least once");
+
+        // Collect trait implementations from all deployed contracts' ASTs.
+        // This scans for `impl-trait` declarations so that trait-based
+        // contract-call? costs can be resolved.
+        let trait_implementations = collect_trait_implementations(&asts);
+
         for contract_id in locations.keys() {
             // Skip cost analysis for empty contracts (no expressions to analyze)
             if asts
@@ -1026,7 +1033,13 @@ pub async fn build_state(
                 .unwrap_or(DEFAULT_CLARITY_VERSION);
 
             // Run static_cost_tree for this contract
-            let Some(cost_result) = get_cost_analysis(session, contract_id, clarity_version).await
+            let Some(cost_result) = get_cost_analysis(
+                session,
+                contract_id,
+                clarity_version,
+                &trait_implementations,
+            )
+            .await
             else {
                 clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {contract_id}");
                 continue;
@@ -1066,11 +1079,47 @@ struct CostAnalysisResult {
     warnings: Vec<ClarityDiagnostic>,
 }
 
+/// Scan all project-defined contract ASTs for `impl-trait` declarations and
+/// build a mapping from trait identifiers to the contracts that implement them.
+///
+/// Only project-local contracts (those present in `asts`) are considered.
+/// Impls deployed on a network but not pulled into the workspace are not
+/// resolved.
+fn collect_trait_implementations(
+    asts: &BTreeMap<QualifiedContractIdentifier, ContractAST>,
+) -> TraitImplementations {
+    let mut trait_implementations: TraitImplementations = HashMap::new();
+
+    for (contract_id, ast) in asts {
+        for expr in &ast.expressions {
+            let Some(list) = expr.match_list() else {
+                continue;
+            };
+            let Some(func_name) = list.first().and_then(|e| e.match_atom()) else {
+                continue;
+            };
+            if DefineFunctions::lookup_by_name(func_name) != Some(DefineFunctions::ImplTrait) {
+                continue;
+            }
+            let Some(trait_id) = list.get(1).and_then(|e| e.match_field()) else {
+                continue;
+            };
+            trait_implementations
+                .entry(trait_id.clone())
+                .or_default()
+                .push(contract_id.clone());
+        }
+    }
+
+    trait_implementations
+}
+
 // Helper function to compute cost analysis for a contract
 async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
+    trait_implementations: &TraitImplementations,
 ) -> Option<CostAnalysisResult> {
     use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
@@ -1110,11 +1159,12 @@ async fn get_cost_analysis(
                 call_stack: &mut call_stack,
             };
 
-            let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
-                clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
-                let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
-                VmExecutionError::Internal(VmInternalError::Expect(error_msg))
-            })?;
+            let result = static_cost(&mut env, &invoke_ctx, contract_id, trait_implementations)
+                .map_err(|e| {
+                    clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
+                    let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
+                    VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+                })?;
 
             let warnings = result
                 .warnings

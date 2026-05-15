@@ -27,15 +27,18 @@ use super::{
     TraitCountContext, TraitCountPropagator, TraitCountVisitor,
 };
 
+/// Mapping from fully-qualified trait identifiers to the contracts that implement them.
+pub type TraitImplementations = HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>;
+
 /// Configuration for static cost analysis.
-#[derive(Debug, Clone)]
-pub struct StaticCostConfig {
+#[derive(Debug)]
+pub struct StaticCostConfig<'a> {
     /// Size of the contract source in bytes, used to compute contract-size overhead.
     pub contract_size: u64,
     /// Mapping from fully-qualified trait identifiers to concrete contract
     /// implementations. Used to resolve trait-based `contract-call?` targets
     /// during static analysis.
-    pub trait_implementations: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    pub trait_implementations: &'a TraitImplementations,
 }
 // TODO:
 // unwrap evaluates both branches (https://github.com/clarity-lang/reference/issues/59)
@@ -163,11 +166,15 @@ pub struct AnalysisContext<'a> {
     /// Mapping from fully-qualified trait identifiers to concrete contract
     /// implementations. Used to resolve trait-based `contract-call?` targets
     /// during static analysis.
-    pub trait_implementations: &'a HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    pub trait_implementations: &'a TraitImplementations,
     /// Warnings accumulated during analysis (e.g. unresolved trait calls).
     pub warnings: &'a RefCell<Vec<CostWarning>>,
     /// Name of the function currently being analyzed (for warning context).
     pub current_function: Option<&'a str>,
+    /// Cache of contracts already analyzed or currently being analyzed.
+    /// `None` means analysis is in progress (cycle guard), `Some(result)` means
+    /// the contract was fully analyzed and the result can be reused.
+    pub visited: &'a RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
 }
 
 /// A type to track summed execution costs for different paths
@@ -269,6 +276,27 @@ pub fn static_cost(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
     contract_identifier: &QualifiedContractIdentifier,
+    trait_implementations: &TraitImplementations,
+) -> Result<StaticCostResult, StaticCostError> {
+    let visited = RefCell::new(HashMap::new());
+    visited
+        .borrow_mut()
+        .insert(contract_identifier.clone(), None);
+    static_cost_inner(
+        env,
+        invoke_ctx,
+        contract_identifier,
+        trait_implementations,
+        &visited,
+    )
+}
+
+fn static_cost_inner(
+    env: &mut ExecutionState,
+    invoke_ctx: &InvocationContext,
+    contract_identifier: &QualifiedContractIdentifier,
+    trait_implementations: &TraitImplementations,
+    visited: &RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
 ) -> Result<StaticCostResult, StaticCostError> {
     let contract_source = env
         .global_context
@@ -287,16 +315,17 @@ pub fn static_cost(
     let epoch = env.global_context.epoch_id;
     let ast = make_ast(&contract_source, epoch, clarity_version)?;
 
-    static_cost_from_ast(
+    static_cost_from_ast_inner(
         &ast,
         clarity_version,
         epoch,
         Some(&StaticCostConfig {
             contract_size: contract_source.len() as u64,
-            trait_implementations: HashMap::new(),
+            trait_implementations,
         }),
         env,
         invoke_ctx,
+        visited,
     )
 }
 
@@ -417,10 +446,34 @@ pub fn static_cost_from_ast(
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
 ) -> Result<StaticCostResult, StaticCostError> {
+    let visited = RefCell::new(HashMap::new());
+    visited
+        .borrow_mut()
+        .insert(contract_ast.contract_identifier.clone(), None);
+    static_cost_from_ast_inner(
+        contract_ast,
+        clarity_version,
+        epoch,
+        config,
+        env,
+        invoke_ctx,
+        &visited,
+    )
+}
+
+fn static_cost_from_ast_inner(
+    contract_ast: &clarity::vm::ast::ContractAST,
+    clarity_version: &ClarityVersion,
+    epoch: StacksEpochId,
+    config: Option<&StaticCostConfig>,
+    env: &mut ExecutionState,
+    invoke_ctx: &InvocationContext,
+    visited: &RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
+) -> Result<StaticCostResult, StaticCostError> {
     let empty_impls = HashMap::new();
     let contract_size = config.map(|c| c.contract_size);
     let trait_implementations = config
-        .map(|c| &c.trait_implementations)
+        .map(|c| c.trait_implementations)
         .unwrap_or(&empty_impls);
 
     let (cost_trees_with_traits, warnings) = static_cost_tree_from_ast(
@@ -430,6 +483,7 @@ pub fn static_cost_from_ast(
         trait_implementations,
         env,
         invoke_ctx,
+        visited,
     )?;
 
     let trait_count = cost_trees_with_traits
@@ -470,9 +524,10 @@ pub fn static_cost_tree_from_ast(
     ast: &clarity::vm::ast::ContractAST,
     clarity_version: &ClarityVersion,
     epoch: StacksEpochId,
-    trait_implementations: &HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>>,
+    trait_implementations: &TraitImplementations,
     env: &mut ExecutionState,
     invoke_ctx: &InvocationContext,
+    visited: &RefCell<HashMap<QualifiedContractIdentifier, Option<StaticCostResult>>>,
 ) -> Result<
     (
         HashMap<String, (CostAnalysisNode, Option<TraitCount>)>,
@@ -544,6 +599,7 @@ pub fn static_cost_tree_from_ast(
                 trait_implementations,
                 warnings: &warnings,
                 current_function: Some(&function_name),
+                visited,
             };
             let (_, cost_analysis_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)?;
             // Compute static cost for this function so subsequent calls can look it up.
@@ -668,8 +724,31 @@ fn get_contract_call_target_cost(
     };
 
     if let Some(contract_id) = contract_id {
-        match static_cost(env, ctx.invoke_ctx, &contract_id) {
+        // Check the visited cache: None means cycle (in progress), Some means cached.
+        let cached = ctx.visited.borrow().get(&contract_id).cloned();
+        match cached {
+            Some(Some(result)) => {
+                return result
+                    .costs
+                    .get(function_name.as_str())
+                    .map(|(c, _)| c.clone());
+            }
+            Some(None) => return None, // cycle detected
+            None => {}
+        }
+        ctx.visited.borrow_mut().insert(contract_id.clone(), None);
+        match static_cost_inner(
+            env,
+            ctx.invoke_ctx,
+            &contract_id,
+            ctx.trait_implementations,
+            ctx.visited,
+        ) {
             Ok(result) => {
+                // Cache the result for future lookups.
+                ctx.visited
+                    .borrow_mut()
+                    .insert(contract_id.clone(), Some(result.clone()));
                 // Propagate any warnings from the callee analysis so that
                 // incomplete analysis in transitive dependencies is surfaced.
                 ctx.warnings.borrow_mut().extend(result.warnings);
@@ -749,8 +828,27 @@ fn resolve_trait_call_cost(
 
     let mut envelope: Option<StaticCost> = None;
     for impl_contract in implementations {
-        let Ok(result) = static_cost(env, ctx.invoke_ctx, impl_contract) else {
-            continue;
+        // Check the visited cache: None means cycle (in progress), Some means cached.
+        let cached = ctx.visited.borrow().get(impl_contract).cloned();
+        let result = match cached {
+            Some(Some(result)) => result,
+            Some(None) => continue, // cycle detected
+            None => {
+                ctx.visited.borrow_mut().insert(impl_contract.clone(), None);
+                let Ok(result) = static_cost_inner(
+                    env,
+                    ctx.invoke_ctx,
+                    impl_contract,
+                    ctx.trait_implementations,
+                    ctx.visited,
+                ) else {
+                    continue;
+                };
+                ctx.visited
+                    .borrow_mut()
+                    .insert(impl_contract.clone(), Some(result.clone()));
+                result
+            }
         };
         let Some((cost, _)) = result.costs.get(function_name.as_str()) else {
             continue;
@@ -1978,8 +2076,7 @@ mod tests {
     ) -> Result<StaticCost, StaticCostError> {
         let cost_map: HashMap<String, Option<StaticCost>> = HashMap::new();
         let function_defs: HashMap<String, &[SymbolicExpression]> = HashMap::new();
-        let trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-            HashMap::new();
+        let trait_impls: TraitImplementations = HashMap::new();
         let warnings = RefCell::new(Vec::new());
 
         let epoch = StacksEpochId::latest(); // XXX this should be matched with the clarity version
@@ -2002,6 +2099,7 @@ mod tests {
             trait_implementations: &trait_impls,
             warnings: &warnings,
             current_function: None,
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_analysis_tree) =
             build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0)?;
@@ -2082,6 +2180,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2147,6 +2246,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2198,6 +2298,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
@@ -2239,6 +2340,7 @@ mod tests {
             trait_implementations: &HashMap::new(),
             warnings: &RefCell::new(Vec::new()),
             current_function: None,
+            visited: &RefCell::new(HashMap::new()),
         };
         let (_, cost_tree) = build_cost_analysis_tree(expr, &user_args, &ctx, &mut env, 0).unwrap();
 
