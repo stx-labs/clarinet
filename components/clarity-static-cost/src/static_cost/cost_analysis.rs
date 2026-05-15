@@ -282,17 +282,13 @@ pub fn static_cost(
     visited
         .borrow_mut()
         .insert(contract_identifier.clone(), None);
-    let result = static_cost_inner(
+    static_cost_inner(
         env,
         invoke_ctx,
         contract_identifier,
         trait_implementations,
         &visited,
-    )?;
-    visited
-        .borrow_mut()
-        .insert(contract_identifier.clone(), Some(result.clone()));
-    Ok(result)
+    )
 }
 
 fn static_cost_inner(
