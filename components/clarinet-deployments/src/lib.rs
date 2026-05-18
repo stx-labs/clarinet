@@ -751,6 +751,51 @@ async fn validate_custom_boot_contracts(
     Ok(failures)
 }
 
+/// Topologically order the project contracts by dependency and emit
+/// each as a publish transaction in the correct epoch bucket. Skips
+/// requirements (their transactions were already emitted by
+/// `resolve_requirements`). Populates `contracts_map` with the
+/// per-contract (source, location) pair the deployment needs.
+fn order_and_schedule_project_contracts(
+    dependencies: &BTreeMap<QualifiedContractIdentifier, DependencySet>,
+    contract_epochs: &HashMap<QualifiedContractIdentifier, StacksEpochId>,
+    requirements_data: &BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
+    contracts: &mut HashMap<QualifiedContractIdentifier, TransactionSpecification>,
+    transactions: &mut BTreeMap<EpochSpec, Vec<TransactionSpecification>>,
+    contracts_map: &mut BTreeMap<QualifiedContractIdentifier, (String, PathBuf)>,
+) -> Result<(), String> {
+    let ordered_contracts_ids =
+        ASTDependencyDetector::order_contracts(dependencies, contract_epochs)
+            .map_err(|e| e.to_string())?;
+
+    for contract_id in ordered_contracts_ids.into_iter() {
+        if requirements_data.contains_key(contract_id) {
+            continue;
+        }
+        let tx = contracts
+            .remove(contract_id)
+            .expect("unable to retrieve contract");
+
+        // Both publish variants carry an equivalent (source, location)
+        // pair; pull whichever applies for the deployment manifest.
+        let (source, location) = match &tx {
+            TransactionSpecification::EmulatedContractPublish(data) => {
+                (data.source.clone(), data.location.clone())
+            }
+            TransactionSpecification::ContractPublish(data) => {
+                (data.source.clone(), data.location.clone())
+            }
+            _ => unreachable!(),
+        };
+        contracts_map.insert(contract_id.clone(), (source, location));
+        transactions
+            .entry(contract_epochs[contract_id].into())
+            .or_default()
+            .push(tx);
+    }
+    Ok(())
+}
+
 /// Load the network manifest via the accessor when one was supplied
 /// (LSP, SDK) and from the local filesystem otherwise (CLI).
 async fn load_network_manifest(
@@ -1220,40 +1265,14 @@ pub async fn generate_default_deployment_with_cache(
 
     // Post-loop errors are safe to `?` through: `cache_guard` is still
     // live and its `Drop` will restore `pending` into `cached_asts`.
-    let ordered_contracts_ids =
-        ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs)
-            .map_err(|e| e.to_string())?;
-
-    // Track the latest epoch that a contract is deployed in, so that we can
-    // ensure that all contracts are deployed after their dependencies.
-    for contract_id in ordered_contracts_ids.into_iter() {
-        if requirements_data.contains_key(contract_id) {
-            continue;
-        }
-        let tx = contracts
-            .remove(contract_id)
-            .expect("unable to retrieve contract");
-
-        match tx {
-            TransactionSpecification::EmulatedContractPublish(ref data) => {
-                contracts_map.insert(
-                    contract_id.clone(),
-                    (data.source.clone(), data.location.clone()),
-                );
-            }
-            TransactionSpecification::ContractPublish(ref data) => {
-                contracts_map.insert(
-                    contract_id.clone(),
-                    (data.source.clone(), data.location.clone()),
-                );
-            }
-            _ => unreachable!(),
-        }
-        transactions
-            .entry(contract_epochs[contract_id].into())
-            .or_default()
-            .push(tx);
-    }
+    order_and_schedule_project_contracts(
+        &dependencies,
+        &contract_epochs,
+        &requirements_data,
+        &mut contracts,
+        &mut transactions,
+        &mut contracts_map,
+    )?;
 
     let batches = chunk_transactions_into_batches(transactions, batching);
 
