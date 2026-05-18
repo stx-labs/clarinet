@@ -483,7 +483,7 @@ pub async fn generate_default_deployment_with_cache(
         ));
     };
 
-    let mut transactions = BTreeMap::new();
+    let mut transactions: BTreeMap<EpochSpec, Vec<TransactionSpecification>> = BTreeMap::new();
     let mut contracts_map = BTreeMap::new();
     let mut requirements_data = BTreeMap::new();
     let mut requirements_deps = BTreeMap::new();
@@ -785,11 +785,10 @@ pub async fn generate_default_deployment_with_cache(
                         .remove(contract_id)
                         .unwrap_or_else(|| panic!("unable to retrieve contract: {contract_id}"));
                     let tx = TransactionSpecification::EmulatedContractPublish(data);
-                    add_transaction_to_epoch(
-                        &mut transactions,
-                        tx,
-                        &contract_epochs[contract_id].into(),
-                    );
+                    transactions
+                        .entry(contract_epochs[contract_id].into())
+                        .or_default()
+                        .push(tx);
                 }
             } else if matches!(network, StacksNetwork::Devnet | StacksNetwork::Testnet) {
                 for contract_id in ordered_contracts_ids.iter() {
@@ -797,11 +796,10 @@ pub async fn generate_default_deployment_with_cache(
                         .remove(contract_id)
                         .unwrap_or_else(|| panic!("unable to retrieve contract: {contract_id}"));
                     let tx = TransactionSpecification::RequirementPublish(data);
-                    add_transaction_to_epoch(
-                        &mut transactions,
-                        tx,
-                        &contract_epochs[contract_id].into(),
-                    );
+                    transactions
+                        .entry(contract_epochs[contract_id].into())
+                        .or_default()
+                        .push(tx);
                 }
             }
         }
@@ -1059,7 +1057,10 @@ pub async fn generate_default_deployment_with_cache(
             }
             _ => unreachable!(),
         }
-        add_transaction_to_epoch(&mut transactions, tx, &contract_epochs[contract_id].into());
+        transactions
+            .entry(contract_epochs[contract_id].into())
+            .or_default()
+            .push(tx);
     }
 
     let tx_chain_limit = match no_batch {
@@ -1170,21 +1171,6 @@ pub async fn generate_default_deployment_with_cache(
     };
 
     Ok((deployment, artifacts, found_env_simnet))
-}
-
-fn add_transaction_to_epoch(
-    transactions: &mut BTreeMap<EpochSpec, Vec<TransactionSpecification>>,
-    transaction: TransactionSpecification,
-    epoch: &EpochSpec,
-) {
-    let epoch_transactions = match transactions.get_mut(epoch) {
-        Some(v) => v,
-        None => {
-            transactions.insert(*epoch, vec![]);
-            transactions.get_mut(epoch).unwrap()
-        }
-    };
-    epoch_transactions.push(transaction);
 }
 
 pub fn get_default_deployment_path(network: &StacksNetwork) -> &'static str {
