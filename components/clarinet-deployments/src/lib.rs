@@ -391,6 +391,27 @@ impl BatchingMode {
     }
 }
 
+/// Flatten the per-epoch transaction map into a list of batches,
+/// chunking each epoch's transactions by `batching.chain_limit()`.
+/// Batch ids are assigned in iteration order across epochs.
+fn chunk_transactions_into_batches(
+    transactions: BTreeMap<EpochSpec, Vec<TransactionSpecification>>,
+    batching: BatchingMode,
+) -> Vec<TransactionsBatchSpecification> {
+    let chain_limit = batching.chain_limit();
+    let mut batches = Vec::new();
+    for (epoch, epoch_transactions) in transactions {
+        for txs in epoch_transactions.chunks(chain_limit) {
+            batches.push(TransactionsBatchSpecification {
+                id: batches.len(),
+                transactions: txs.to_vec(),
+                epoch: Some(epoch),
+            });
+        }
+    }
+    batches
+}
+
 /// Pick the (stacks-node, bitcoin-node) RPC URLs for `network`, using
 /// values from the network manifest when set and falling back to the
 /// public endpoints (or devnet localhost) otherwise. Simnet has no
@@ -1109,22 +1130,7 @@ pub async fn generate_default_deployment_with_cache(
             .push(tx);
     }
 
-    let tx_chain_limit = batching.chain_limit();
-
-    let mut batches = vec![];
-    let mut batch_count = 0;
-    for (epoch, epoch_transactions) in transactions {
-        for txs in epoch_transactions.chunks(tx_chain_limit) {
-            if !txs.is_empty() {
-                batches.push(TransactionsBatchSpecification {
-                    id: batch_count,
-                    transactions: txs.to_vec(),
-                    epoch: Some(epoch),
-                });
-                batch_count += 1;
-            }
-        }
-    }
+    let batches = chunk_transactions_into_batches(transactions, batching);
 
     let mut wallets = vec![];
     if matches!(network, StacksNetwork::Simnet) {
