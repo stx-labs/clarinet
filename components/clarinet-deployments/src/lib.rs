@@ -751,6 +751,33 @@ async fn validate_custom_boot_contracts(
     Ok(failures)
 }
 
+/// Load the network manifest via the accessor when one was supplied
+/// (LSP, SDK) and from the local filesystem otherwise (CLI).
+async fn load_network_manifest(
+    manifest: &ProjectManifest,
+    network: &StacksNetwork,
+    file_accessor: Option<&dyn FileAccessor>,
+) -> Result<NetworkManifest, String> {
+    match file_accessor {
+        None => NetworkManifest::from_project_root(
+            &manifest.root_dir,
+            &network.get_networks(),
+            manifest.use_mainnet_wallets(),
+            Some(&manifest.project.cache_location),
+            None,
+        ),
+        Some(accessor) => {
+            NetworkManifest::from_project_root_using_file_accessor(
+                &manifest.root_dir,
+                &network.get_networks(),
+                manifest.use_mainnet_wallets(),
+                accessor,
+            )
+            .await
+        }
+    }
+}
+
 /// For each contract in the manifest, build (a) the `ClarityContract` /
 /// location pair that the AST-cache loop consumes, and (b) the publish
 /// `TransactionSpecification` that ends up in the deployment plan.
@@ -1016,24 +1043,7 @@ pub async fn generate_default_deployment_with_cache(
     cached_asts: Option<&mut HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let mut found_env_simnet = false;
-    let network_manifest = match file_accessor {
-        None => NetworkManifest::from_project_root(
-            &manifest.root_dir,
-            &network.get_networks(),
-            manifest.use_mainnet_wallets(),
-            Some(&manifest.project.cache_location),
-            None,
-        )?,
-        Some(file_accessor) => {
-            NetworkManifest::from_project_root_using_file_accessor(
-                &manifest.root_dir,
-                &network.get_networks(),
-                manifest.use_mainnet_wallets(),
-                file_accessor,
-            )
-            .await?
-        }
-    };
+    let network_manifest = load_network_manifest(manifest, network, file_accessor).await?;
 
     let (stacks_node, bitcoin_node) = resolve_node_endpoints(network, &network_manifest);
 
