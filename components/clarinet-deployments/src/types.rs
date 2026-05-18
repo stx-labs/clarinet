@@ -44,8 +44,8 @@ pub enum EpochSpec {
     Epoch3_3,
     #[serde(rename = "3.4")]
     Epoch3_4,
-    #[serde(rename = "3.5")]
-    Epoch3_5,
+    #[serde(rename = "4.0")]
+    Epoch4_0,
 }
 
 impl From<StacksEpochId> for EpochSpec {
@@ -63,6 +63,7 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch32 => EpochSpec::Epoch3_2,
             StacksEpochId::Epoch33 => EpochSpec::Epoch3_3,
             StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
+            StacksEpochId::Epoch40 => EpochSpec::Epoch4_0,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
         }
     }
@@ -83,7 +84,7 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_2 => StacksEpochId::Epoch32,
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
             EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
-            EpochSpec::Epoch3_5 => unreachable!(),
+            EpochSpec::Epoch4_0 => StacksEpochId::Epoch40,
         }
     }
 }
@@ -121,7 +122,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
                     EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
                     EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
                     EpochSpec::Epoch3_4 => Some(config.epoch_3_4),
-                    EpochSpec::Epoch3_5 => config.epoch_3_5,
+                    EpochSpec::Epoch4_0 => config.epoch_4_0,
                 };
                 start_height.map(|start_height| EpochConfig {
                     epoch_name: epoch,
@@ -1717,7 +1718,7 @@ mod tests {
             epoch_3_2: 10,
             epoch_3_3: 11,
             epoch_3_4: 12,
-            epoch_3_5: Some(13),
+            epoch_4_0: Some(13),
             ..Default::default()
         };
 
@@ -1776,7 +1777,7 @@ mod tests {
                 start_height = 12
 
                 [[burnchain.epochs]]
-                epoch_name = "3.5"
+                epoch_name = "4.0"
                 start_height = 13
                 "#
             }

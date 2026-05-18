@@ -23,7 +23,8 @@ fn format_removed_in(max_version: Option<ClarityVersion>) -> String {
                     ClarityVersion::Clarity2 => ClarityVersion::Clarity3,
                     ClarityVersion::Clarity3 => ClarityVersion::Clarity4,
                     ClarityVersion::Clarity4 => ClarityVersion::Clarity5,
-                    ClarityVersion::Clarity5 => unreachable!(),
+                    ClarityVersion::Clarity5 => ClarityVersion::Clarity6,
+                    ClarityVersion::Clarity6 => unreachable!(),
                 }
             )
         })
