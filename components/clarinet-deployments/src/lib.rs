@@ -1122,36 +1122,6 @@ pub async fn generate_default_deployment_with_cache(
         contracts: contracts_map,
     };
 
-    // Check for custom boot contract validation errors and return error if any
-    if !asts_success && matches!(network, StacksNetwork::Simnet) {
-        let mut error_messages = Vec::new();
-        for (contract_id, diagnostics) in &contract_diags {
-            if !diagnostics.is_empty() {
-                let contract_name = contract_id.name.to_string();
-                let error_details: Vec<String> = diagnostics
-                    .iter()
-                    .map(|d| format!("  - {}", d.message))
-                    .collect();
-                if manifest
-                    .project
-                    .override_boot_contracts_source
-                    .contains_key(&contract_name)
-                {
-                    error_messages.push(format!(
-                        "Custom boot contract validation failed:\n{}",
-                        error_messages.join("\n\n")
-                    ));
-                } else {
-                    error_messages.push(format!(
-                        "'{}' has validation errors:\n{}",
-                        contract_name,
-                        error_details.join("\n")
-                    ));
-                }
-            }
-        }
-    }
-
     // Disarm the guard (if any) — we're committed to returning Ok, so
     // the accumulated entries belong in the artifacts, not back in the
     // caller's input cache. `None` carries through for cache-free callers
