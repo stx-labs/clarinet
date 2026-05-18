@@ -372,10 +372,29 @@ impl Drop for AstCacheRestoreGuard<'_> {
     }
 }
 
+/// Whether to chunk publish transactions into 25-tx batches (the
+/// chained-transaction limit per anchor) or pack them into a single
+/// batch. `Chunked` is the default; `Single` is for diffing against
+/// an on-disk plan where consumers want one canonical block per epoch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchingMode {
+    Chunked,
+    Single,
+}
+
+impl BatchingMode {
+    fn chain_limit(self) -> usize {
+        match self {
+            BatchingMode::Chunked => 25,
+            BatchingMode::Single => 100_000,
+        }
+    }
+}
+
 pub async fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
-    no_batch: bool,
+    batching: BatchingMode,
     file_accessor: Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
     environment: Environment,
@@ -383,7 +402,7 @@ pub async fn generate_default_deployment(
     generate_default_deployment_with_cache(
         manifest,
         network,
-        no_batch,
+        batching,
         file_accessor,
         api_base_url,
         environment,
@@ -395,7 +414,7 @@ pub async fn generate_default_deployment(
 pub async fn generate_default_deployment_with_cache(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
-    no_batch: bool,
+    batching: BatchingMode,
     file_accessor: Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
     environment: Environment,
@@ -1063,10 +1082,7 @@ pub async fn generate_default_deployment_with_cache(
             .push(tx);
     }
 
-    let tx_chain_limit = match no_batch {
-        true => 100_000,
-        false => 25,
-    };
+    let tx_chain_limit = batching.chain_limit();
 
     let mut batches = vec![];
     let mut batch_count = 0;

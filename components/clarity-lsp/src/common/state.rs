@@ -7,7 +7,7 @@ use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 pub use clarinet_deployments::CachedContractAST;
 use clarinet_deployments::{
     generate_default_deployment_with_cache, initiate_session_from_manifest,
-    update_session_with_deployment_plan,
+    update_session_with_deployment_plan, BatchingMode,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
@@ -912,7 +912,7 @@ pub async fn build_state(
         let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment_with_cache(
             &manifest,
             &StacksNetwork::Simnet,
-            false,
+            BatchingMode::Chunked,
             file_accessor,
             None,
             environment,
