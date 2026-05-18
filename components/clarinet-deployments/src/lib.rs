@@ -391,6 +391,38 @@ impl BatchingMode {
     }
 }
 
+/// Load every contract source listed in the manifest, keyed by
+/// absolute path (as a string). Uses the file accessor when supplied
+/// (LSP, SDK) and the local filesystem otherwise (CLI).
+async fn load_project_contract_sources(
+    manifest: &ProjectManifest,
+    file_accessor: Option<&dyn FileAccessor>,
+) -> Result<HashMap<String, String>, String> {
+    let project_root = &manifest.root_dir;
+    let contract_paths: Vec<String> = manifest
+        .contracts
+        .values()
+        .map(|cfg| {
+            project_root
+                .join(cfg.expect_contract_path_as_str())
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+
+    match file_accessor {
+        Some(accessor) => accessor.read_files(contract_paths).await,
+        None => contract_paths
+            .into_iter()
+            .map(|path| {
+                let source = paths::read_content_as_utf8(Path::new(&path))
+                    .map_err(|_| format!("unable to find contract at {path}"))?;
+                Ok((path, source))
+            })
+            .collect(),
+    }
+}
+
 /// Flatten the per-epoch transaction map into a list of batches,
 /// chunking each epoch's transactions by `batching.chain_limit()`.
 /// Batch ids are assigned in iteration order across epochs.
@@ -876,32 +908,7 @@ pub async fn generate_default_deployment_with_cache(
     let mut contracts_sources = HashMap::new();
 
     let project_root = &manifest.root_dir;
-    let sources: HashMap<String, String> = match file_accessor {
-        None => {
-            let mut sources = HashMap::new();
-            for (_, contract_config) in manifest.contracts.iter() {
-                let contract_location =
-                    project_root.join(contract_config.expect_contract_path_as_str());
-                let source = paths::read_content_as_utf8(&contract_location).map_err(|_| {
-                    format!("unable to find contract at {}", contract_location.display())
-                })?;
-                sources.insert(contract_location.to_string_lossy().into_owned(), source);
-            }
-            sources
-        }
-        Some(file_accessor) => {
-            let contracts_location = manifest
-                .contracts
-                .values()
-                .map(|contract_config| {
-                    let contract_location =
-                        project_root.join(contract_config.expect_contract_path_as_str());
-                    contract_location.to_string_lossy().into_owned()
-                })
-                .collect();
-            file_accessor.read_files(contracts_location).await?
-        }
-    };
+    let sources = load_project_contract_sources(manifest, file_accessor).await?;
 
     for (name, contract_config) in manifest.contracts.iter() {
         let Ok(contract_name) = ContractName::try_from(name.to_string()) else {
