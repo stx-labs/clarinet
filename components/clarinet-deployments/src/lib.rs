@@ -10,7 +10,9 @@ pub mod types;
 use std::path::{Path, PathBuf};
 
 use clarinet_defaults::DEFAULT_EPOCH;
-use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
+use clarinet_files::{
+    paths, AccountConfig, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork,
+};
 use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
@@ -749,6 +751,115 @@ async fn validate_custom_boot_contracts(
     Ok(failures)
 }
 
+/// For each contract in the manifest, build (a) the `ClarityContract` /
+/// location pair that the AST-cache loop consumes, and (b) the publish
+/// `TransactionSpecification` that ends up in the deployment plan.
+/// Returns both maps plus a flag indicating whether `#[env(simnet)]`
+/// markers were stripped from any source (OnChain environment only).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn build_project_contract_specs(
+    manifest: &ProjectManifest,
+    network: &StacksNetwork,
+    environment: Environment,
+    network_manifest: &NetworkManifest,
+    default_deployer: &AccountConfig,
+    deployment_fee_rate: u64,
+    sources: &HashMap<String, String>,
+) -> Result<
+    (
+        HashMap<QualifiedContractIdentifier, (ClarityContract, PathBuf)>,
+        HashMap<QualifiedContractIdentifier, TransactionSpecification>,
+        bool,
+    ),
+    String,
+> {
+    let project_root = &manifest.root_dir;
+    let mut contracts_sources = HashMap::new();
+    let mut contracts = HashMap::new();
+    let mut env_simnet_stripped = false;
+
+    for (name, contract_config) in manifest.contracts.iter() {
+        let Ok(contract_name) = ContractName::try_from(name.to_string()) else {
+            return Err(format!("unable to use {name} as a valid contract name"));
+        };
+
+        let deployer = match &contract_config.deployer {
+            ContractDeployer::DefaultDeployer => default_deployer,
+            ContractDeployer::LabeledDeployer(deployer) => network_manifest
+                .accounts
+                .get(deployer)
+                .ok_or_else(|| format!("unable to retrieve account '{deployer}'"))?,
+            _ => unreachable!(),
+        };
+
+        let Ok(sender) = PrincipalData::parse_standard_principal(&deployer.stx_address) else {
+            return Err(format!(
+                "unable to turn emulated_sender {} as a valid Stacks address",
+                deployer.stx_address
+            ));
+        };
+
+        let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
+        let mut source = sources
+            .get(contract_location.to_string_lossy().as_ref())
+            .ok_or_else(|| format!("Invalid Clarinet.toml, source file not found for: {name}"))?
+            .clone();
+
+        if environment == Environment::OnChain {
+            // Best effort: if the source can't be parsed, fall through to the
+            // analysis pass below which will surface the parse error.
+            if let Ok(Some(clean)) = remove_env_simnet(&source) {
+                source = clean;
+                env_simnet_stripped = true;
+            }
+        }
+
+        let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
+        let epoch = contract_config.epoch.resolve();
+
+        contracts_sources.insert(
+            contract_id.clone(),
+            (
+                ClarityContract {
+                    code_source: ClarityCodeSource::ContractInMemory(source.clone()),
+                    deployer: ContractDeployer::Address(sender.to_address()),
+                    name: contract_name.to_string(),
+                    clarity_version: contract_config.clarity_version,
+                    epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                    skip_analysis: false,
+                },
+                contract_location.clone(),
+            ),
+        );
+
+        let contract_spec = if matches!(network, StacksNetwork::Simnet) {
+            TransactionSpecification::EmulatedContractPublish(
+                EmulatedContractPublishSpecification {
+                    contract_name,
+                    emulated_sender: sender,
+                    source,
+                    location: contract_location,
+                    clarity_version: contract_config.clarity_version,
+                    skip_analysis: false,
+                },
+            )
+        } else {
+            TransactionSpecification::ContractPublish(ContractPublishSpecification {
+                contract_name,
+                expected_sender: sender,
+                location: contract_location,
+                cost: deployment_fee_rate.saturating_mul(source.len().try_into().unwrap()),
+                source,
+                anchor_block_only: true,
+                clarity_version: contract_config.clarity_version,
+            })
+        };
+        contracts.insert(contract_id, contract_spec);
+    }
+
+    Ok((contracts_sources, contracts, env_simnet_stripped))
+}
+
 /// Load every contract source listed in the manifest, keyed by
 /// absolute path (as a string). Uses the file accessor when supplied
 /// (LSP, SDK) and the local filesystem otherwise (CLI).
@@ -1032,97 +1143,17 @@ pub async fn generate_default_deployment_with_cache(
         .await?;
     }
 
-    let mut contracts = HashMap::new();
-    let mut contracts_sources = HashMap::new();
-
-    let project_root = &manifest.root_dir;
     let sources = load_project_contract_sources(manifest, file_accessor).await?;
-
-    for (name, contract_config) in manifest.contracts.iter() {
-        let Ok(contract_name) = ContractName::try_from(name.to_string()) else {
-            return Err(format!("unable to use {name} as a valid contract name"));
-        };
-
-        let deployer = match &contract_config.deployer {
-            ContractDeployer::DefaultDeployer => default_deployer,
-            ContractDeployer::LabeledDeployer(deployer) => {
-                let Some(deployer) = network_manifest.accounts.get(deployer) else {
-                    return Err(format!("unable to retrieve account '{deployer}'"));
-                };
-                deployer
-            }
-            _ => unreachable!(),
-        };
-
-        let Ok(sender) = PrincipalData::parse_standard_principal(&deployer.stx_address) else {
-            return Err(format!(
-                "unable to turn emulated_sender {} as a valid Stacks address",
-                deployer.stx_address
-            ));
-        };
-
-        let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
-        let mut source = sources
-            .get(contract_location.to_string_lossy().as_ref())
-            .ok_or(format!(
-                "Invalid Clarinet.toml, source file not found for: {}",
-                &name
-            ))?
-            .clone();
-
-        if environment == Environment::OnChain {
-            // Best effort: if the source can't be parsed, fall through to the
-            // analysis pass below which will surface the parse error.
-            if let Ok(Some(clean)) = remove_env_simnet(&source) {
-                source = clean;
-                found_env_simnet = true;
-            }
-        }
-
-        let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
-
-        let epoch = contract_config.epoch.resolve();
-
-        contracts_sources.insert(
-            contract_id.clone(),
-            (
-                ClarityContract {
-                    code_source: ClarityCodeSource::ContractInMemory(source.clone()),
-                    deployer: ContractDeployer::Address(sender.to_address()),
-                    name: contract_name.to_string(),
-                    clarity_version: contract_config.clarity_version,
-                    epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                    skip_analysis: false,
-                },
-                contract_location.clone(),
-            ),
-        );
-
-        let contract_spec = if matches!(network, StacksNetwork::Simnet) {
-            TransactionSpecification::EmulatedContractPublish(
-                EmulatedContractPublishSpecification {
-                    contract_name,
-                    emulated_sender: sender,
-                    source,
-                    location: contract_location,
-                    clarity_version: contract_config.clarity_version,
-                    skip_analysis: false,
-                },
-            )
-        } else {
-            TransactionSpecification::ContractPublish(ContractPublishSpecification {
-                contract_name,
-                expected_sender: sender,
-                location: contract_location,
-                cost: deployment_fee_rate.saturating_mul(source.len().try_into().unwrap()),
-                source,
-                anchor_block_only: true,
-                clarity_version: contract_config.clarity_version,
-            })
-        };
-
-        contracts.insert(contract_id, contract_spec);
-    }
+    let (contracts_sources, mut contracts, env_simnet_stripped) = build_project_contract_specs(
+        manifest,
+        network,
+        environment,
+        &network_manifest,
+        default_deployer,
+        deployment_fee_rate,
+        &sources,
+    )?;
+    found_env_simnet |= env_simnet_stripped;
 
     let session = Session::new(settings);
 
