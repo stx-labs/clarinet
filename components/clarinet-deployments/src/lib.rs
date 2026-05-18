@@ -751,6 +751,60 @@ async fn validate_custom_boot_contracts(
     Ok(failures)
 }
 
+/// Build the `SessionSettings` for the ephemeral interpreter. Disables
+/// remote-data on the repl settings and filters
+/// `override_boot_contracts_source` to simnet (with a warning
+/// otherwise — custom boot contracts only work on simnet).
+fn build_session_settings(manifest: &ProjectManifest, network: &StacksNetwork) -> SessionSettings {
+    let mut repl_settings = manifest.repl_settings.clone();
+    repl_settings.remote_data.enabled = false;
+
+    let override_boot_contracts_source = if matches!(network, StacksNetwork::Simnet) {
+        manifest.project.override_boot_contracts_source.clone()
+    } else {
+        if !manifest.project.override_boot_contracts_source.is_empty() {
+            eprintln!("Warning: Custom boot contracts are only supported on simnet. Ignoring override_boot_contracts_source configuration for {network:?} network.");
+        }
+        BTreeMap::new()
+    };
+
+    SessionSettings {
+        repl_settings,
+        override_boot_contracts_source,
+        ..Default::default()
+    }
+}
+
+/// Seed `requirements_data` with the boot-contract ASTs so they can
+/// satisfy dependency lookups, and return the set of boot contract
+/// ids so the caller can filter them out where appropriate. Skipped
+/// entirely when simnet uses remote data (the remote node already
+/// has them).
+fn load_boot_contracts(
+    settings: &SessionSettings,
+    simnet_remote_data: bool,
+    requirements_data: &mut BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
+) -> BTreeSet<QualifiedContractIdentifier> {
+    if simnet_remote_data {
+        return BTreeSet::new();
+    }
+
+    let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
+        BOOT_CONTRACTS_DATA.clone()
+    } else {
+        clarity_repl::repl::boot::get_boot_contracts_data_with_overrides(
+            &settings.override_boot_contracts_source,
+        )
+    };
+
+    let mut boot_contracts_ids = BTreeSet::new();
+    for (id, (contract, ast)) in boot_contracts_data {
+        boot_contracts_ids.insert(id.clone());
+        requirements_data.insert(id, (contract.clarity_version, ast));
+    }
+    boot_contracts_ids
+}
+
 /// Topologically order the project contracts by dependency and emit
 /// each as a publish transaction in the correct epoch bucket. Skips
 /// requirements (their transactions were already emitted by
@@ -1111,44 +1165,11 @@ pub async fn generate_default_deployment_with_cache(
     let mut requirements_data = BTreeMap::new();
     let mut requirements_deps = BTreeMap::new();
 
-    let mut repl_settings = manifest.repl_settings.clone();
-    repl_settings.remote_data.enabled = false;
-
-    let override_boot_contracts_source = if matches!(network, StacksNetwork::Simnet) {
-        manifest.project.override_boot_contracts_source.clone()
-    } else {
-        if !manifest.project.override_boot_contracts_source.is_empty() {
-            eprintln!("Warning: Custom boot contracts are only supported on simnet. Ignoring override_boot_contracts_source configuration for {network:?} network.");
-        }
-        BTreeMap::new()
-    };
-
-    let settings = SessionSettings {
-        repl_settings,
-        override_boot_contracts_source,
-        ..Default::default()
-    };
-
+    let settings = build_session_settings(manifest, network);
     let simnet_remote_data =
         matches!(network, StacksNetwork::Simnet) && manifest.repl_settings.remote_data.enabled;
-
-    let mut boot_contracts_ids = BTreeSet::new();
-
-    if !simnet_remote_data {
-        let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
-            BOOT_CONTRACTS_DATA.clone()
-        } else {
-            clarity_repl::repl::boot::get_boot_contracts_data_with_overrides(
-                &settings.override_boot_contracts_source,
-            )
-        };
-        let mut boot_contracts_asts = BTreeMap::new();
-        for (id, (contract, ast)) in boot_contracts_data {
-            boot_contracts_ids.insert(id.clone());
-            boot_contracts_asts.insert(id, (contract.clarity_version, ast));
-        }
-        requirements_data.append(&mut boot_contracts_asts);
-    }
+    let boot_contracts_ids =
+        load_boot_contracts(&settings, simnet_remote_data, &mut requirements_data);
 
     // this ephemeral interpreter is used to parse code and build ASTs
     let interpreter = ClarityInterpreter::new(
