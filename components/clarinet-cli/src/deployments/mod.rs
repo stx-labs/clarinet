@@ -5,6 +5,7 @@ use std::fs::{self};
 use std::path::{Path, PathBuf};
 
 use clarinet_deployments::types::{DeploymentGenerationArtifacts, DeploymentSpecification};
+pub use clarinet_deployments::BatchingMode;
 use clarinet_files::{paths, ProjectManifest, StacksNetwork};
 use clarity_repl::utils::Environment;
 pub use ui::start_ui;
@@ -12,13 +13,13 @@ pub use ui::start_ui;
 pub fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
-    _no_batch: bool,
+    batching: BatchingMode,
     environment: Environment,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let future = clarinet_deployments::generate_default_deployment(
         manifest,
         network,
-        false,
+        batching,
         None,
         None,
         environment,
@@ -31,7 +32,12 @@ pub fn generate_devnet_deployment(
     manifest: &ProjectManifest,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let network = StacksNetwork::Devnet;
-    generate_default_deployment(manifest, &network, false, network.deployment_environment())
+    generate_default_deployment(
+        manifest,
+        &network,
+        BatchingMode::Chunked,
+        network.deployment_environment(),
+    )
 }
 
 pub fn check_deployments(project_root: &Path) -> Result<(), String> {

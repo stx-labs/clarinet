@@ -7,7 +7,7 @@ use clarity_repl::utils::Environment;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
-use crate::deployments::generate_default_deployment;
+use crate::deployments::{generate_default_deployment, BatchingMode};
 
 pub fn run_dap() -> Result<(), String> {
     let mut dap = DAPDebugger::new();
@@ -18,7 +18,7 @@ pub fn run_dap() -> Result<(), String> {
             let (mut deployment, artifacts, _) = generate_default_deployment(
                 &project_manifest,
                 &StacksNetwork::Simnet,
-                false,
+                BatchingMode::Chunked,
                 Environment::Simnet,
             )?;
             let mut session = setup_session_with_deployment(

@@ -53,7 +53,7 @@ use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
 use crate::deployments::{
     self, check_deployments, generate_default_deployment, generate_devnet_deployment,
-    write_deployment,
+    write_deployment, BatchingMode,
 };
 use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
@@ -772,10 +772,15 @@ pub fn main() {
                     StacksNetwork::Simnet
                 };
 
+                let batching = if cmd.no_batch {
+                    BatchingMode::Single
+                } else {
+                    BatchingMode::Chunked
+                };
                 let (mut deployment, _, _) = match generate_default_deployment(
                     &manifest,
                     &network,
-                    cmd.no_batch,
+                    batching,
                     network.deployment_environment(),
                 ) {
                     Ok(result) => result,
@@ -887,7 +892,7 @@ pub fn main() {
                             None => {
                                 let default_deployment_path = project_root.join(get_default_deployment_path(network));
                                 let (deployment, _, _) =
-                                    generate_default_deployment(&manifest, network, false, network.deployment_environment())
+                                    generate_default_deployment(&manifest, network, BatchingMode::Chunked, network.deployment_environment())
                                         .unwrap_or_else(|message| {
                                             eprintln!("{}", red!(message));
                                             std::process::exit(1);
@@ -1720,7 +1725,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                         generate_default_deployment(
                             manifest,
                             &StacksNetwork::Simnet,
-                            false,
+                            BatchingMode::Chunked,
                             environment,
                         )?;
                     found_env_simnet |= gen_found_env_simnet;
@@ -1836,8 +1841,12 @@ fn load_deployment_if_exists(
     }
 
     if !force_on_disk {
-        match generate_default_deployment(manifest, network, true, network.deployment_environment())
-        {
+        match generate_default_deployment(
+            manifest,
+            network,
+            BatchingMode::Single,
+            network.deployment_environment(),
+        ) {
             Ok((deployment, _, _)) => {
                 use similar::{ChangeTag, TextDiff};
 

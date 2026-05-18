@@ -9,7 +9,7 @@ use clarinet_deployments::types::{
 };
 use clarinet_deployments::{
     generate_default_deployment, get_default_deployment_path, initiate_session_from_manifest,
-    update_session_with_deployment_plan,
+    update_session_with_deployment_plan, BatchingMode,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
 use clarity::types::chainstate::StacksAddress;
@@ -503,7 +503,7 @@ impl SDK {
         let (mut deployment, artifacts, _) = generate_default_deployment(
             &manifest,
             &StacksNetwork::Simnet,
-            false,
+            BatchingMode::Chunked,
             Some(&*self.file_accessor),
             self.api_base_url.as_deref(),
             Environment::Simnet,

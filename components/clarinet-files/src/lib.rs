@@ -18,8 +18,8 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 pub use network_manifest::{
-    compute_addresses, AccountConfig, DevnetConfig, DevnetConfigFile, NetworkManifest,
-    NetworkManifestFile, PoxStackingOrder, DEFAULT_BITCOIN_EXPLORER_IMAGE,
+    compute_addresses, AccountConfig, DevnetConfig, DevnetConfigFile, NetworkConfig,
+    NetworkManifest, NetworkManifestFile, PoxStackingOrder, DEFAULT_BITCOIN_EXPLORER_IMAGE,
     DEFAULT_BITCOIN_NODE_IMAGE, DEFAULT_DERIVATION_PATH, DEFAULT_DOCKER_PLATFORM,
     DEFAULT_EPOCH_2_0, DEFAULT_EPOCH_2_05, DEFAULT_EPOCH_2_1, DEFAULT_EPOCH_2_2, DEFAULT_EPOCH_2_3,
     DEFAULT_EPOCH_2_4, DEFAULT_EPOCH_2_5, DEFAULT_EPOCH_3_0, DEFAULT_EPOCH_3_1, DEFAULT_EPOCH_3_2,
