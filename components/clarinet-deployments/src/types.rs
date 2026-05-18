@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
 use clarity::types::StacksEpochId;
-use clarity::util::hash::{hex_bytes, to_hex};
+use clarity::util::hash::{hex_bytes, to_hex, Sha256Sum};
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
@@ -13,7 +13,7 @@ use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
-use clarity_repl::utils::remove_env_simnet;
+use clarity_repl::utils::{remove_env_simnet, Environment};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 use yaml_serde;
@@ -146,6 +146,71 @@ fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, 
     }
 }
 
+/// A parsed AST plus the inputs that validate it — used by the LSP as a
+/// re-usable cache of parsed contracts. The hash + version + epoch triple is
+/// what gates a cache hit; `ast` is the payload we'd otherwise recompute.
+///
+/// `diags` and `ast_success` are also cached so that a subsequent save
+/// reproduces the same parser diagnostics the user saw on the first save —
+/// otherwise a contract with a syntax error would appear clean on every
+/// rebuild after the first.
+#[derive(Clone, Debug)]
+pub struct CachedContractAST {
+    /// Private: the only writer is `new()`, which derives this from
+    /// `source`. Keeping the field unnameable outside this module makes
+    /// it structurally impossible to pair an AST with a hash of
+    /// different bytes.
+    content_hash: Sha256Sum,
+    pub ast: ContractAST,
+    pub diags: Vec<Diagnostic>,
+    pub ast_success: bool,
+    pub clarity_version: ClarityVersion,
+    pub epoch: StacksEpochId,
+}
+
+impl CachedContractAST {
+    /// Construct an entry from `source` and the parse outputs. The
+    /// `content_hash` is computed from `source` here, so callers can't
+    /// pair a hash with an AST built from different bytes.
+    pub fn new(
+        source: &str,
+        ast: ContractAST,
+        diags: Vec<Diagnostic>,
+        ast_success: bool,
+        clarity_version: ClarityVersion,
+        epoch: StacksEpochId,
+    ) -> Self {
+        Self {
+            content_hash: Sha256Sum::from_data(source.as_bytes()),
+            ast,
+            diags,
+            ast_success,
+            clarity_version,
+            epoch,
+        }
+    }
+
+    pub fn content_hash(&self) -> &Sha256Sum {
+        &self.content_hash
+    }
+
+    /// Returns `true` if this cached entry is still valid for a contract
+    /// whose source hashes to `content_hash` and that would be parsed at
+    /// `clarity_version` / `epoch`. (We deliberately don't derive
+    /// `PartialEq` because it would include the `ast` field — expensive to
+    /// compare and not what cache validation is asking.)
+    pub fn matches(
+        &self,
+        content_hash: &Sha256Sum,
+        clarity_version: ClarityVersion,
+        epoch: StacksEpochId,
+    ) -> bool {
+        &self.content_hash == content_hash
+            && self.clarity_version == clarity_version
+            && self.epoch == epoch
+    }
+}
+
 #[derive(Clone)]
 pub struct DeploymentGenerationArtifacts {
     pub asts: BTreeMap<QualifiedContractIdentifier, ContractAST>,
@@ -156,6 +221,12 @@ pub struct DeploymentGenerationArtifacts {
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
     pub session: Session,
     pub success: bool,
+    /// Cache entries shaped for direct reuse by the LSP. `Some(...)` only
+    /// when the caller passes `Some(...)` for `cached_asts`; `None`
+    /// otherwise (which is the case for `generate_default_deployment` and
+    /// `setup_session_with_deployment`). The `Option` makes "didn't opt
+    /// in" structurally distinct from "opted in but had zero hits".
+    pub ast_cache_entries: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -974,7 +1045,7 @@ pub mod contracts_serde {
             let mut map = BTreeMap::new();
             map.insert("contract_id", contract_id.to_string());
             map.insert("source", encoded);
-            map.insert("path", path.to_string_lossy().to_string());
+            map.insert("path", path.to_string_lossy().into_owned());
             out.serialize_element(&map)?;
         }
         out.end()
@@ -1075,7 +1146,7 @@ impl DeploymentSpecification {
                                     let source = contracts_sources.as_ref().map(|contracts_sources| {
                                         let contract_path = paths::try_parse_path(&spec.path, Some(project_root))
                                             .expect("failed to get contract path");
-                                        let contract_path_str = contract_path.to_string_lossy().to_string();
+                                        let contract_path_str = contract_path.to_string_lossy().into_owned();
                                         contracts_sources
                                             .get(&contract_path_str)
                                             .cloned()
@@ -1333,7 +1404,7 @@ impl DeploymentSpecificationFile {
         file_accesor: &dyn FileAccessor,
     ) -> Result<DeploymentSpecificationFile, String> {
         let spec_file_content = file_accesor
-            .read_file(path.to_string_lossy().to_string())
+            .read_file(path.to_string_lossy().into_owned())
             .await?;
 
         yaml_serde::from_str(&spec_file_content).map_err(|msg| format!("unable to read file {msg}"))

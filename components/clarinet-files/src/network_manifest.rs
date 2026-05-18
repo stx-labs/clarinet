@@ -399,7 +399,7 @@ impl NetworkManifest {
     ) -> Result<NetworkManifest, String> {
         let network_manifest_location = project_root.join("settings/Devnet.toml");
         let content = file_accessor
-            .read_file(network_manifest_location.to_string_lossy().to_string())
+            .read_file(network_manifest_location.to_string_lossy().into_owned())
             .await?;
 
         let mut network_manifest_file: NetworkManifestFile =

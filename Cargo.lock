@@ -711,7 +711,7 @@ dependencies = [
  "libsecp256k1",
  "mockito",
  "pretty_assertions",
- "rand 0.8.5",
+ "rand 0.9.4",
  "reqwest",
  "serde",
  "serde_json",
@@ -771,6 +771,7 @@ dependencies = [
  "clarity",
  "clarity-repl",
  "console_error_panic_hook",
+ "getrandom 0.3.4",
  "gloo-utils",
  "js-sys",
  "serde",
@@ -792,7 +793,7 @@ dependencies = [
  "bip39",
  "bs58",
  "libsecp256k1",
- "rand 0.8.5",
+ "rand 0.9.4",
 ]
 
 [[package]]
@@ -840,6 +841,8 @@ dependencies = [
  "clarity-static-cost",
  "clarity-types",
  "console_error_panic_hook",
+ "divan",
+ "getrandom 0.3.4",
  "indoc",
  "js-sys",
  "ls-types",
@@ -4290,7 +4293,7 @@ dependencies = [
  "indoc",
  "libc",
  "observer",
- "rand 0.8.5",
+ "rand 0.9.4",
  "ratatui",
  "reqwest",
  "serde",

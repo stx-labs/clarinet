@@ -14,7 +14,7 @@ use clarity::vm::{ast, ClarityVersion, ContractName};
 use clarity_static_cost::static_cost::{
     build_cost_analysis_tree, static_cost_from_ast, static_cost_tree_from_ast, AnalysisContext,
     CostAnalysisNode, CostExprNode, CostWarning, CostWarningKind, StaticCostConfig,
-    UserArgumentsContext,
+    TraitImplementations, UserArgumentsContext,
 };
 use clarity_types::types::TraitIdentifier;
 use indoc::indoc;
@@ -90,6 +90,7 @@ fn test_build_cost_analysis_tree_function_definition() {
                 trait_implementations: &trait_impls,
                 warnings: &warnings,
                 current_function: None,
+                visited: &RefCell::new(std::collections::HashMap::new()),
             };
             build_cost_analysis_tree(expr, &user_args, &ctx, env, 0)
         },
@@ -225,6 +226,7 @@ fn test_get_trait_count_direct() {
                 &HashMap::new(),
                 env,
                 invoke_ctx,
+                &RefCell::new(std::collections::HashMap::new()),
             )
         },
     )
@@ -535,7 +537,7 @@ fn run_cost_analysis_test(
                 epoch,
                 Some(&StaticCostConfig {
                     contract_size: src.len() as u64,
-                    trait_implementations: HashMap::new(),
+                    trait_implementations: &HashMap::new(),
                 }),
                 env,
                 invoke_ctx,
@@ -566,6 +568,7 @@ fn run_cost_analysis_test(
                 &HashMap::new(),
                 env,
                 invoke_ctx,
+                &RefCell::new(std::collections::HashMap::new()),
             )
         },
     )
@@ -1326,7 +1329,7 @@ fn test_contract_call_includes_callee_cost() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: HashMap::new(),
+                trait_implementations: &HashMap::new(),
             }),
             &mut env,
             &invoke_ctx,
@@ -2001,7 +2004,7 @@ fn test_trait_resolution_with_implementations() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: HashMap::new(),
+                trait_implementations: &HashMap::new(),
             }),
             &mut env,
             &invoke_ctx,
@@ -2021,8 +2024,7 @@ fn test_trait_resolution_with_implementations() {
         caller_id.name.clone(),
         ClarityName::from_literal("pool-trait"),
     );
-    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-        HashMap::new();
+    let mut trait_impls: TraitImplementations = HashMap::new();
     trait_impls.insert(pool_trait_id, vec![pool_id.clone()]);
 
     owned_env.begin();
@@ -2035,7 +2037,7 @@ fn test_trait_resolution_with_implementations() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: trait_impls.clone(),
+                trait_implementations: &trait_impls,
             }),
             &mut env,
             &invoke_ctx,
@@ -2113,7 +2115,6 @@ fn test_trait_resolution_skips_failing_implementation() {
         QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("caller"));
     // A contract that is NOT deployed
     let ghost_id = QualifiedContractIdentifier::new(deployer, ContractName::from_literal("ghost"));
-
     let mut memory_store = MemoryBackingStore::new();
     let mut db = memory_store.as_clarity_db();
     db.begin();
@@ -2178,8 +2179,7 @@ fn test_trait_resolution_skips_failing_implementation() {
         caller_id.name.clone(),
         ClarityName::from_literal("pool-trait"),
     );
-    let mut trait_impls: HashMap<TraitIdentifier, Vec<QualifiedContractIdentifier>> =
-        HashMap::new();
+    let mut trait_impls: TraitImplementations = HashMap::new();
     trait_impls.insert(pool_trait_id, vec![pool_id.clone(), ghost_id]);
 
     owned_env.begin();
@@ -2192,7 +2192,7 @@ fn test_trait_resolution_skips_failing_implementation() {
             epoch,
             Some(&StaticCostConfig {
                 contract_size: caller_src.len() as u64,
-                trait_implementations: trait_impls,
+                trait_implementations: &trait_impls,
             }),
             &mut env,
             &invoke_ctx,
@@ -2222,5 +2222,368 @@ fn test_trait_resolution_skips_failing_implementation() {
     assert!(
         cost.max.runtime > 0,
         "Resolved cost should be non-zero when valid implementation exists"
+    );
+}
+
+/// Test that `static_cost` resolves trait-based contract-call costs for external traits.
+///
+/// Simulates the real-world scenario where:
+/// - An external contract defines a trait (like SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait)
+/// - Another external contract implements that trait (like a DEX pool)
+/// - A project contract imports the trait via `use-trait` and calls through it
+///
+/// Without the trait_implementations map, the call cost is unresolved (warning emitted).
+/// With the map (as would be built by scanning deployed contracts' impl-trait declarations),
+/// the cost is resolved.
+#[test]
+fn test_static_cost_resolves_external_trait_implementations() {
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+
+    let deployer = StandardPrincipalData::transient();
+    let trait_contract_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("nft-trait"));
+    let impl_contract_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("my-nft"));
+    let project_contract_id =
+        QualifiedContractIdentifier::new(deployer, ContractName::from_literal("nft-marketplace"));
+
+    // External contract that defines a trait (like a SIP trait)
+    let trait_src = indoc! {r#"
+        (define-trait nft-trait (
+            (get-owner (uint) (response (optional principal) uint))
+        ))
+    "#};
+
+    // External contract that implements the trait
+    let impl_src = indoc! {r#"
+        (impl-trait .nft-trait.nft-trait)
+
+        (define-map owners uint principal)
+
+        (define-read-only (get-owner (id uint))
+            (ok (map-get? owners id))
+        )
+    "#};
+
+    // Project contract that uses the external trait
+    let project_src = indoc! {r#"
+        (use-trait nft-trait .nft-trait.nft-trait)
+
+        (define-public (check-owner (nft <nft-trait>) (id uint))
+            (contract-call? nft get-owner id)
+        )
+    "#};
+
+    // Set up environment
+    let mut memory_store = MemoryBackingStore::new();
+    let mut db = memory_store.as_clarity_db();
+    db.begin();
+    db.set_clarity_epoch_version(epoch).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.set_tenure_height(1).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.setup_block_metadata(Some(1)).unwrap();
+    db.commit().unwrap();
+
+    let costs_contract_id = boot_code_id("costs", false);
+    let costs_4_contract_id = boot_code_id("costs-4", false);
+    let cost_voting_contract_id = boot_code_id("cost-voting", false);
+    {
+        let mut temp_env = OwnedEnvironment::new(db, epoch);
+        temp_env
+            .initialize_versioned_contract(
+                costs_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS,
+                None,
+            )
+            .expect("Failed to initialize costs contract");
+        temp_env
+            .initialize_versioned_contract(
+                costs_4_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS_4,
+                None,
+            )
+            .expect("Failed to initialize costs-4 contract");
+        temp_env
+            .initialize_versioned_contract(
+                cost_voting_contract_id,
+                clarity_version,
+                &BOOT_CODE_COST_VOTING_TESTNET.to_string(),
+                None,
+            )
+            .expect("Failed to initialize cost-voting contract");
+        let (extracted_db, _) = temp_env.destruct().unwrap();
+        db = extracted_db;
+    }
+
+    let mut owned_env = OwnedEnvironment::new_max_limit(db, epoch, false);
+
+    // Deploy in dependency order: trait first, then implementation, then project
+    owned_env
+        .initialize_versioned_contract(trait_contract_id.clone(), clarity_version, trait_src, None)
+        .expect("Failed to deploy trait contract");
+    owned_env
+        .initialize_versioned_contract(impl_contract_id.clone(), clarity_version, impl_src, None)
+        .expect("Failed to deploy implementation contract");
+    owned_env
+        .initialize_versioned_contract(
+            project_contract_id.clone(),
+            clarity_version,
+            project_src,
+            None,
+        )
+        .expect("Failed to deploy project contract");
+
+    // First: static_cost WITHOUT trait implementations — trait call is unresolved
+    owned_env.begin();
+    let result_no_impls = {
+        let contract_context = ContractContext::new(project_contract_id.clone(), clarity_version);
+        let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
+        clarity_static_cost::static_cost::static_cost(
+            &mut env,
+            &invoke_ctx,
+            &project_contract_id,
+            &HashMap::new(),
+        )
+        .expect("static_cost should succeed")
+    };
+    let _ = owned_env.commit();
+
+    assert!(
+        result_no_impls.warnings.iter().any(|w| matches!(
+            &w.kind,
+            CostWarningKind::UnresolvedTraitCall {
+                called_function,
+                ..
+            } if called_function == "get-owner"
+        )),
+        "Expected UnresolvedTraitCall warning for 'get-owner', got: {:?}",
+        result_no_impls.warnings
+    );
+
+    let (cost_unresolved, _) = result_no_impls
+        .costs
+        .get("check-owner")
+        .expect("check-owner not found");
+
+    // Second: static_cost WITH trait implementations (as would be built by
+    // scanning impl-trait declarations from all deployed contract ASTs)
+    let nft_trait_id = TraitIdentifier::new(
+        trait_contract_id.issuer.clone(),
+        trait_contract_id.name.clone(),
+        ClarityName::from_literal("nft-trait"),
+    );
+    let mut trait_impls: TraitImplementations = HashMap::new();
+    trait_impls.insert(nft_trait_id, vec![impl_contract_id.clone()]);
+
+    owned_env.begin();
+    let result_with_impls = {
+        let contract_context = ContractContext::new(project_contract_id.clone(), clarity_version);
+        let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
+        clarity_static_cost::static_cost::static_cost(
+            &mut env,
+            &invoke_ctx,
+            &project_contract_id,
+            &trait_impls,
+        )
+        .expect("static_cost should succeed")
+    };
+    let _ = owned_env.commit();
+
+    assert!(
+        result_with_impls.warnings.is_empty(),
+        "Expected no warnings with trait implementations, got: {:?}",
+        result_with_impls.warnings
+    );
+
+    let (cost_resolved, _) = result_with_impls
+        .costs
+        .get("check-owner")
+        .expect("check-owner not found");
+
+    assert!(
+        cost_resolved.max.runtime > cost_unresolved.max.runtime,
+        "Resolved runtime ({}) should exceed unresolved ({}) due to callee cost",
+        cost_resolved.max.runtime,
+        cost_unresolved.max.runtime
+    );
+}
+
+/// Mutual-impl trait cycle: two contracts each implement the same trait and
+/// each call through the trait into the other. With both registered as impls,
+/// `resolve_trait_call_cost` recurses into `static_cost` for every impl, which
+/// re-enters analysis of the original contract, ad infinitum.
+///
+/// Expected post-fix behavior: `static_cost` detects the re-entry (e.g. via a
+/// `HashSet<QualifiedContractIdentifier>` of analyses on the stack), breaks the
+/// cycle, and returns a result without stack-overflowing. The test asserts
+/// only that analysis terminates and yields finite costs — it does not assume
+/// a particular cycle-handling strategy (silent skip, dedicated warning, etc.).
+///
+#[test]
+fn test_static_cost_handles_mutual_trait_impl_cycle() {
+    let epoch = StacksEpochId::Epoch33;
+    let clarity_version = ClarityVersion::Clarity4;
+
+    let deployer = StandardPrincipalData::transient();
+    let trait_contract_id = QualifiedContractIdentifier::new(
+        deployer.clone(),
+        ContractName::from_literal("cycle-trait"),
+    );
+    let a_id =
+        QualifiedContractIdentifier::new(deployer.clone(), ContractName::from_literal("cycle-a"));
+    let b_id = QualifiedContractIdentifier::new(deployer, ContractName::from_literal("cycle-b"));
+
+    // Trait used by both impl contracts. The trait method takes a `principal`
+    // (not `<t>`) so the trait definition itself does not self-reference —
+    // Clarity rejects self-referential traits as `CircularReference`.
+    let trait_src = indoc! {r#"
+        (define-trait t (
+            (get-id (principal) (response uint uint))
+        ))
+    "#};
+
+    // Each impl contract has two functions:
+    //   * `get-id` satisfies the trait (cheap, no trait calls).
+    //   * `chain` is a separate function that takes a `<t>` parameter and
+    //     calls `get-id` through it — this is the dynamic dispatch site that
+    //     triggers `resolve_trait_call_cost`.
+    //
+    // With both A and B registered as impls of `t`, analyzing A.chain resolves
+    // to {A, B}. Each impl is then statically analyzed via `static_cost`,
+    // which re-enters A.chain → re-resolves to {A, B} → re-enters A.chain → …
+    // The contracts are symmetric; the cycle is closed by A's own membership
+    // in the impl set of the trait that A.chain dispatches through.
+    let a_src = indoc! {r#"
+        (use-trait t .cycle-trait.t)
+        (impl-trait .cycle-trait.t)
+
+        (define-public (get-id (who principal))
+            (ok u0)
+        )
+
+        (define-public (chain (other <t>) (who principal))
+            (contract-call? other get-id who)
+        )
+    "#};
+
+    let b_src = indoc! {r#"
+        (use-trait t .cycle-trait.t)
+        (impl-trait .cycle-trait.t)
+
+        (define-public (get-id (who principal))
+            (ok u1)
+        )
+
+        (define-public (chain (other <t>) (who principal))
+            (contract-call? other get-id who)
+        )
+    "#};
+
+    let mut memory_store = MemoryBackingStore::new();
+    let mut db = memory_store.as_clarity_db();
+    db.begin();
+    db.set_clarity_epoch_version(epoch).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.set_tenure_height(1).unwrap();
+    db.commit().unwrap();
+    db.begin();
+    db.setup_block_metadata(Some(1)).unwrap();
+    db.commit().unwrap();
+
+    let costs_contract_id = boot_code_id("costs", false);
+    let costs_4_contract_id = boot_code_id("costs-4", false);
+    let cost_voting_contract_id = boot_code_id("cost-voting", false);
+    {
+        let mut temp_env = OwnedEnvironment::new(db, epoch);
+        temp_env
+            .initialize_versioned_contract(
+                costs_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS,
+                None,
+            )
+            .expect("Failed to initialize costs contract");
+        temp_env
+            .initialize_versioned_contract(
+                costs_4_contract_id,
+                clarity_version,
+                BOOT_CODE_COSTS_4,
+                None,
+            )
+            .expect("Failed to initialize costs-4 contract");
+        temp_env
+            .initialize_versioned_contract(
+                cost_voting_contract_id,
+                clarity_version,
+                &BOOT_CODE_COST_VOTING_TESTNET.to_string(),
+                None,
+            )
+            .expect("Failed to initialize cost-voting contract");
+        let (extracted_db, _) = temp_env.destruct().unwrap();
+        db = extracted_db;
+    }
+
+    let mut owned_env = OwnedEnvironment::new_max_limit(db, epoch, false);
+
+    owned_env
+        .initialize_versioned_contract(trait_contract_id.clone(), clarity_version, trait_src, None)
+        .expect("Failed to deploy trait contract");
+    owned_env
+        .initialize_versioned_contract(a_id.clone(), clarity_version, a_src, None)
+        .expect("Failed to deploy cycle-a");
+    owned_env
+        .initialize_versioned_contract(b_id.clone(), clarity_version, b_src, None)
+        .expect("Failed to deploy cycle-b");
+
+    // Both A and B implement the trait, mirroring what the LSP would build by
+    // scanning their impl-trait declarations.
+    let trait_id = TraitIdentifier::new(
+        trait_contract_id.issuer.clone(),
+        trait_contract_id.name.clone(),
+        ClarityName::from_literal("t"),
+    );
+    let mut trait_impls: TraitImplementations = HashMap::new();
+    trait_impls.insert(trait_id, vec![a_id.clone(), b_id.clone()]);
+
+    // Analyze A. Without cycle protection this never returns.
+    owned_env.begin();
+    let result = {
+        let contract_context = ContractContext::new(a_id.clone(), clarity_version);
+        let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
+        clarity_static_cost::static_cost::static_cost(&mut env, &invoke_ctx, &a_id, &trait_impls)
+    };
+    let _ = owned_env.commit();
+
+    let result = result.expect("static_cost should terminate on mutual-impl cycle");
+
+    // The cycle is broken: analysis returns and each function in A has a
+    // finite cost. The exact strategy used to break the cycle (skip recursive
+    // impl, emit a warning, etc.) is intentionally not asserted here so the
+    // implementer can pick whichever shape fits best.
+    let (get_id_cost, _) = result
+        .costs
+        .get("get-id")
+        .expect("get-id cost should be present");
+    let (chain_cost, _) = result
+        .costs
+        .get("chain")
+        .expect("chain cost should be present");
+
+    assert!(
+        get_id_cost.max.runtime < u64::MAX / 2,
+        "get-id cost should be bounded; got runtime={}",
+        get_id_cost.max.runtime
+    );
+    assert!(
+        chain_cost.max.runtime < u64::MAX / 2,
+        "chain cost should be bounded; got runtime={}",
+        chain_cost.max.runtime
     );
 }

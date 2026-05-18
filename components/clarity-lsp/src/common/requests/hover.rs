@@ -11,6 +11,6 @@ pub fn get_expression_documentation(
     let expression_name = get_expression_name_at_position(position, expressions)?;
 
     API_REF
-        .get(&expression_name.to_string())
+        .get(expression_name.as_str())
         .map(|(documentation, _)| documentation.to_owned())
 }

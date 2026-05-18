@@ -43,7 +43,7 @@ impl GetChangesForRmContract {
         }
         let change = FileDeletion {
             comment: format!("{} tests/{}", red!("Deleted file"), name),
-            path: f.to_string_lossy().to_string(),
+            path: f.to_string_lossy().into_owned(),
         };
         self.changes.push(Changes::RemoveFile(change));
         Ok(())
@@ -57,7 +57,7 @@ impl GetChangesForRmContract {
         }
         let change = FileDeletion {
             comment: format!("{} contracts/{}", red!("Deleted file"), name),
-            path: f.to_string_lossy().to_string(),
+            path: f.to_string_lossy().into_owned(),
         };
         self.changes.push(Changes::RemoveFile(change));
         Ok(())
@@ -146,7 +146,7 @@ impl GetChangesForNewContract {
         let change = FileCreation {
             comment: format!("{} contracts/{}", green!("Created file"), name),
             content,
-            path: new_file.to_string_lossy().to_string(),
+            path: new_file.to_string_lossy().into_owned(),
         };
         self.changes.push(Changes::AddFile(change));
         Ok(())
@@ -186,7 +186,7 @@ impl GetChangesForNewContract {
         let change = FileCreation {
             comment: format!("{} tests/{}", green!("Created file"), name),
             content,
-            path: new_file.to_string_lossy().to_string(),
+            path: new_file.to_string_lossy().into_owned(),
         };
         self.changes.push(Changes::AddFile(change));
         Ok(())

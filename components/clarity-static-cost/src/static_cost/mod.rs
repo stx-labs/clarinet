@@ -16,7 +16,7 @@ use clarity_types::representations::SymbolicExpression;
 pub use cost_analysis::{
     build_cost_analysis_tree, static_cost, static_cost_from_ast, static_cost_tree_from_ast,
     AnalysisContext, CostAnalysisNode, CostExprNode, StaticCost, StaticCostConfig,
-    StaticCostResult, SummingExecutionCost, UserArgumentsContext,
+    StaticCostResult, SummingExecutionCost, TraitImplementations, UserArgumentsContext,
 };
 pub use cost_functions::ClarityCostFunctionExt;
 pub use error::{CostWarning, CostWarningKind, StaticCostError};

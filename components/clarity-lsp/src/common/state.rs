@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::vec;
 
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
+pub use clarinet_deployments::CachedContractAST;
 use clarinet_deployments::{
-    generate_default_deployment, initiate_session_from_manifest,
+    generate_default_deployment_with_cache, initiate_session_from_manifest,
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
@@ -14,6 +15,7 @@ use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::ast::{build_ast, ContractAST};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
+use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
@@ -21,8 +23,9 @@ use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::interpreter::BLOCK_LIMIT_MAINNET;
 use clarity_repl::repl::session::AnnotatedExecutionResult;
 use clarity_repl::repl::{ContractDeployer, Session};
+pub use clarity_repl::utils::Environment;
 use clarity_repl::utils::{get_env_simnet_spans, CHECK_ENVIRONMENTS};
-use clarity_static_cost::static_cost::StaticCost;
+use clarity_static_cost::static_cost::{StaticCost, TraitImplementations};
 use ls_types::{
     CompletionItem, Diagnostic as LspDiagnostic, DiagnosticSeverity, DiagnosticTag, DocumentSymbol,
     Hover, Location, MessageType, Position, Range, SignatureHelp,
@@ -264,6 +267,9 @@ pub struct EditorState {
     pub contracts_lookup: HashMap<PathBuf, ContractMetadata>,
     pub active_contracts: HashMap<PathBuf, ActiveContractData>,
     pub settings: InitializationOptions,
+    /// Parsed ASTs keyed by (contract path, environment). Reused by
+    /// `build_state` to skip re-parsing files whose source hasn't changed.
+    pub ast_cache: HashMap<(PathBuf, Environment), CachedContractAST>,
 }
 
 impl EditorState {
@@ -273,6 +279,7 @@ impl EditorState {
             contracts_lookup: HashMap::new(),
             active_contracts: HashMap::new(),
             settings: InitializationOptions::default(),
+            ast_cache: HashMap::new(),
         }
     }
 
@@ -838,8 +845,6 @@ impl ProtocolState {
     }
 }
 
-pub use clarity_repl::utils::Environment;
-
 fn tag_diagnostics(
     environment: Environment,
     found_env_simnet: bool,
@@ -869,7 +874,13 @@ pub async fn build_state(
     protocol_state: &mut ProtocolState,
     file_accessor: Option<&dyn FileAccessor>,
     static_cost_analysis: bool,
-) -> Result<(), String> {
+    // The caller's snapshot of `EditorState.ast_cache` (a `clone()`),
+    // moved in. Per-environment iterations consume hits from this map via
+    // `AstCacheRestoreGuard` inside `generate_default_deployment_with_cache`.
+    // On any error we just drop it — the caller's original cache is
+    // untouched, so no restore step is needed.
+    mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
+) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
     let mut deps = BTreeMap::new();
@@ -892,21 +903,31 @@ pub async fn build_state(
         }
     };
 
+    let mut new_cache_entries: HashMap<(PathBuf, Environment), CachedContractAST> = HashMap::new();
     let mut global_found_env_simnet = false;
     // Populated by the final loop iteration; cost analysis (below) needs the
     // fully-deployed session but only cares about the last iteration's state.
     let mut final_session: Option<Session> = None;
     for environment in CHECK_ENVIRONMENTS {
-        let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment(
+        let (deployment, mut artifacts, found_env_simnet) = generate_default_deployment_with_cache(
             &manifest,
             &StacksNetwork::Simnet,
             false,
             file_accessor,
             None,
             environment,
+            cached_asts.as_mut(),
         )
         .await?;
         global_found_env_simnet |= found_env_simnet;
+
+        // Deployments already shaped the cache entries; merge them in.
+        // `None` here means the cache-free path was taken — shouldn't
+        // happen because `build_state` always opts into caching, but
+        // skipping when absent is the right behavior either way.
+        if let Some(entries) = artifacts.ast_cache_entries {
+            new_cache_entries.extend(entries);
+        }
 
         let mut session = initiate_session_from_manifest(&manifest);
         let contracts =
@@ -945,6 +966,11 @@ pub async fn build_state(
                         lint_diagnostics: mut contract_lint_diags,
                     } = annotated;
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
+                        // Only execution diagnostics get env-tagged. Parser
+                        // diagnostics are already env-segregated upstream:
+                        // cache entries are keyed `(path, env)` and the
+                        // env-stripped source hashes differently per env,
+                        // so each env has its own parser-diag stream.
                         tag_diagnostics(
                             environment,
                             global_found_env_simnet,
@@ -1011,6 +1037,12 @@ pub async fn build_state(
         let session = final_session
             .as_mut()
             .expect("CHECK_ENVIRONMENTS ran at least once");
+
+        // Collect trait implementations from all deployed contracts' ASTs.
+        // This scans for `impl-trait` declarations so that trait-based
+        // contract-call? costs can be resolved.
+        let trait_implementations = collect_trait_implementations(&asts);
+
         for contract_id in locations.keys() {
             // Skip cost analysis for empty contracts (no expressions to analyze)
             if asts
@@ -1026,7 +1058,13 @@ pub async fn build_state(
                 .unwrap_or(DEFAULT_CLARITY_VERSION);
 
             // Run static_cost_tree for this contract
-            let Some(cost_result) = get_cost_analysis(session, contract_id, clarity_version).await
+            let Some(cost_result) = get_cost_analysis(
+                session,
+                contract_id,
+                clarity_version,
+                &trait_implementations,
+            )
+            .await
             else {
                 clarity_repl::uprint!("[LSP] Cost analysis failed for contract: {contract_id}");
                 continue;
@@ -1058,7 +1096,7 @@ pub async fn build_state(
         &mut cost_analyses,
     );
 
-    Ok(())
+    Ok(new_cache_entries)
 }
 
 struct CostAnalysisResult {
@@ -1066,11 +1104,47 @@ struct CostAnalysisResult {
     warnings: Vec<ClarityDiagnostic>,
 }
 
+/// Scan all project-defined contract ASTs for `impl-trait` declarations and
+/// build a mapping from trait identifiers to the contracts that implement them.
+///
+/// Only project-local contracts (those present in `asts`) are considered.
+/// Impls deployed on a network but not pulled into the workspace are not
+/// resolved.
+fn collect_trait_implementations(
+    asts: &BTreeMap<QualifiedContractIdentifier, ContractAST>,
+) -> TraitImplementations {
+    let mut trait_implementations: TraitImplementations = HashMap::new();
+
+    for (contract_id, ast) in asts {
+        for expr in &ast.expressions {
+            let Some(list) = expr.match_list() else {
+                continue;
+            };
+            let Some(func_name) = list.first().and_then(|e| e.match_atom()) else {
+                continue;
+            };
+            if DefineFunctions::lookup_by_name(func_name) != Some(DefineFunctions::ImplTrait) {
+                continue;
+            }
+            let Some(trait_id) = list.get(1).and_then(|e| e.match_field()) else {
+                continue;
+            };
+            trait_implementations
+                .entry(trait_id.clone())
+                .or_default()
+                .push(contract_id.clone());
+        }
+    }
+
+    trait_implementations
+}
+
 // Helper function to compute cost analysis for a contract
 async fn get_cost_analysis(
     session: &mut clarity_repl::repl::Session,
     contract_id: &QualifiedContractIdentifier,
     clarity_version: ClarityVersion,
+    trait_implementations: &TraitImplementations,
 ) -> Option<CostAnalysisResult> {
     use clarity::vm::contexts::{CallStack, ContractContext, ExecutionState, InvocationContext};
     use clarity::vm::errors::{VmExecutionError, VmInternalError};
@@ -1110,11 +1184,12 @@ async fn get_cost_analysis(
                 call_stack: &mut call_stack,
             };
 
-            let result = static_cost(&mut env, &invoke_ctx, contract_id).map_err(|e| {
-                clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
-                let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
-                VmExecutionError::Internal(VmInternalError::Expect(error_msg))
-            })?;
+            let result = static_cost(&mut env, &invoke_ctx, contract_id, trait_implementations)
+                .map_err(|e| {
+                    clarity_repl::uprint!("[LSP] static_cost failed with error: {e}");
+                    let error_msg = format!("Cost analysis failed for contract {contract_id}: {e}");
+                    VmExecutionError::Internal(VmInternalError::Expect(error_msg))
+                })?;
 
             let warnings = result
                 .warnings

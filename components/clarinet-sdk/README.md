@@ -34,9 +34,13 @@ The SDK mainly relies on two components:
 - the TS component: `components/clarinet-sdk`
 
 To work with these two packages locally, the first one needs to be built with
-wasm-pack (install [wasm-pack](https://drager.github.io/wasm-pack/installer)).
+wasm-pack (install [wasm-pack](https://wasm-bindgen.github.io/wasm-pack/installer)).
 
 ```sh
+# install dependencies without running prepare scripts
+# (the SDK packages' `prepare` hook depends on the wasm build,
+# which doesn't exist yet on a fresh clone)
+pnpm install --ignore-scripts
 # build the wasm package
 pnpm run build:sdk-wasm
 # install dependencies and build the node package

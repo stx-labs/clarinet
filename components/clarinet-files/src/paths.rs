@@ -95,7 +95,7 @@ pub async fn find_manifest_location_async(
     while let Some(ref dir) = current {
         let candidate = dir.join("Clarinet.toml");
         if let Ok(true) = file_accessor
-            .file_exists(candidate.to_string_lossy().to_string())
+            .file_exists(candidate.to_string_lossy().into_owned())
             .await
         {
             return Ok(candidate);

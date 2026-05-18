@@ -45,7 +45,7 @@ impl DiagnosticsDigest {
             }
 
             let formatted_lines: Vec<String> = source.lines().map(|l| l.to_string()).collect();
-            let contract_path = contract_location.to_string_lossy().to_string();
+            let contract_path = contract_location.to_string_lossy().into_owned();
 
             for ld in diags
                 .iter()
