@@ -391,6 +391,75 @@ impl BatchingMode {
     }
 }
 
+/// Pick the (stacks-node, bitcoin-node) RPC URLs for `network`, using
+/// values from the network manifest when set and falling back to the
+/// public endpoints (or devnet localhost) otherwise. Simnet has no
+/// nodes, so both come back `None`.
+fn resolve_node_endpoints(
+    network: &StacksNetwork,
+    network_manifest: &NetworkManifest,
+) -> (Option<String>, Option<String>) {
+    match network {
+        StacksNetwork::Simnet => (None, None),
+        StacksNetwork::Devnet => {
+            let (stacks_node, bitcoin_node) = match &network_manifest.devnet {
+                Some(devnet) => (
+                    format!("http://localhost:{}", devnet.stacks_node_rpc_port),
+                    format!(
+                        "http://{}:{}@localhost:{}",
+                        devnet.bitcoin_node_username,
+                        devnet.bitcoin_node_password,
+                        devnet.bitcoin_node_rpc_port
+                    ),
+                ),
+                None => (
+                    "http://localhost:20443".to_string(),
+                    "http://devnet:devnet@localhost:18443".to_string(),
+                ),
+            };
+            (Some(stacks_node), Some(bitcoin_node))
+        }
+        StacksNetwork::Testnet => (
+            Some(
+                network_manifest
+                    .network
+                    .stacks_node_rpc_address
+                    .clone()
+                    .unwrap_or_else(|| "https://api.testnet.hiro.so".to_string()),
+            ),
+            Some(
+                network_manifest
+                    .network
+                    .bitcoin_node_rpc_address
+                    .clone()
+                    .unwrap_or_else(|| {
+                        "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332"
+                            .to_string()
+                    }),
+            ),
+        ),
+        StacksNetwork::Mainnet => (
+            Some(
+                network_manifest
+                    .network
+                    .stacks_node_rpc_address
+                    .clone()
+                    .unwrap_or_else(|| "https://api.hiro.so".to_string()),
+            ),
+            Some(
+                network_manifest
+                    .network
+                    .bitcoin_node_rpc_address
+                    .clone()
+                    .unwrap_or_else(|| {
+                        "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332"
+                            .to_string()
+                    }),
+            ),
+        ),
+    }
+}
+
 pub async fn generate_default_deployment(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
@@ -444,49 +513,7 @@ pub async fn generate_default_deployment_with_cache(
         }
     };
 
-    let (stacks_node, bitcoin_node) = match network {
-        StacksNetwork::Simnet => (None, None),
-        StacksNetwork::Devnet => {
-            let (stacks_node, bitcoin_node) = match network_manifest.devnet {
-                Some(ref devnet) => {
-                    let stacks_node = format!("http://localhost:{}", devnet.stacks_node_rpc_port);
-                    let bitcoin_node = format!(
-                        "http://{}:{}@localhost:{}",
-                        devnet.bitcoin_node_username,
-                        devnet.bitcoin_node_password,
-                        devnet.bitcoin_node_rpc_port
-                    );
-                    (stacks_node, bitcoin_node)
-                }
-                None => {
-                    let stacks_node = "http://localhost:20443".to_string();
-                    let bitcoin_node = "http://devnet:devnet@localhost:18443".to_string();
-                    (stacks_node, bitcoin_node)
-                }
-            };
-            (Some(stacks_node), Some(bitcoin_node))
-        }
-        StacksNetwork::Testnet => {
-            let stacks_node = network_manifest
-                .network
-                .stacks_node_rpc_address
-                .unwrap_or("https://api.testnet.hiro.so".to_string());
-            let bitcoin_node = network_manifest.network.bitcoin_node_rpc_address.unwrap_or(
-                "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332".to_string(),
-            );
-            (Some(stacks_node), Some(bitcoin_node))
-        }
-        StacksNetwork::Mainnet => {
-            let stacks_node = network_manifest
-                .network
-                .stacks_node_rpc_address
-                .unwrap_or("https://api.hiro.so".to_string());
-            let bitcoin_node = network_manifest.network.bitcoin_node_rpc_address.unwrap_or(
-                "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332".to_string(),
-            );
-            (Some(stacks_node), Some(bitcoin_node))
-        }
-    };
+    let (stacks_node, bitcoin_node) = resolve_node_endpoints(network, &network_manifest);
 
     let deployment_fee_rate = network_manifest.network.deployment_fee_rate;
 
