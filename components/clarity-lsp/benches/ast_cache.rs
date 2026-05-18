@@ -18,7 +18,9 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::path::PathBuf;
 
-use clarinet_deployments::{generate_default_deployment_with_cache, BatchingMode, CachedContractAST};
+use clarinet_deployments::{
+    generate_default_deployment_with_cache, BatchingMode, CachedContractAST,
+};
 use clarinet_files::{FileAccessor, FileAccessorResult, ProjectManifest, StacksNetwork};
 use clarity_repl::utils::Environment;
 use divan::Bencher;

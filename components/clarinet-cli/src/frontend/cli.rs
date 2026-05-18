@@ -1841,8 +1841,12 @@ fn load_deployment_if_exists(
     }
 
     if !force_on_disk {
-        match generate_default_deployment(manifest, network, BatchingMode::Single, network.deployment_environment())
-        {
+        match generate_default_deployment(
+            manifest,
+            network,
+            BatchingMode::Single,
+            network.deployment_environment(),
+        ) {
             Ok((deployment, _, _)) => {
                 use similar::{ChangeTag, TextDiff};
 

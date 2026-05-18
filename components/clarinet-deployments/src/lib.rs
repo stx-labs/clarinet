@@ -374,18 +374,9 @@ impl Drop for AstCacheRestoreGuard<'_> {
     }
 }
 
-/// Build (or reuse from the cache) the AST for one project contract.
-/// Two paths: callers that opted into caching (LSP) vs callers that
-/// didn't (CLI, SDK). The cache-free path skips hashing, the
-/// `CachedContractAST` construction, and the entry insertion.
-///
-/// TODO: eliminate the `ContractAST.clone()` in the caching path. The
-/// same AST ends up owned in both the returned tuple (→ `artifacts.asts`)
-/// and the guard's pending entry, because both are returned as owned
-/// data in `DeploymentGenerationArtifacts`. ~20ms/build on a 20-contract
-/// project. Requires either wrapping the AST in `Arc`, changing
-/// `detect_dependencies` to accept `&ContractAST`, or collapsing the
-/// two output maps into one — each its own refactor across crates.
+/// Build the AST for one project contract, reusing a cached entry
+/// when present. Returns the same (ast, diags, success) shape on
+/// either path so the caller doesn't have to branch.
 #[allow(clippy::too_many_arguments)]
 fn build_or_reuse_project_ast(
     contract: &ClarityContract,
@@ -404,26 +395,12 @@ fn build_or_reuse_project_ast(
     let content_hash = compute_content_hash(source);
     let cache_key = (contract_location, environment);
 
-    // `try_reuse` removes + validates in one step; a hit transfers
-    // entry ownership straight into the guard (no clone). Anything
-    // left in the caller's input cache after the loop is either a
-    // removed-from-manifest contract or a `(path, env)` key no longer
-    // in use; those drop when the caller releases the map.
-    let cache_entry =
-        match guard.try_reuse(&cache_key, &content_hash, clarity_version, resolved_epoch) {
-            Some(entry) => entry,
-            None => {
-                let (ast, diags, ok) = interpreter.build_ast(contract);
-                CachedContractAST::new(
-                    source,
-                    ast,
-                    diags,
-                    ok,
-                    clarity_version,
-                    resolved_epoch,
-                )
-            }
-        };
+    let cache_entry = guard
+        .try_reuse(&cache_key, &content_hash, clarity_version, resolved_epoch)
+        .unwrap_or_else(|| {
+            let (ast, diags, ok) = interpreter.build_ast(contract);
+            CachedContractAST::new(source, ast, diags, ok, clarity_version, resolved_epoch)
+        });
 
     let ast = cache_entry.ast.clone();
     let diags = cache_entry.diags.clone();
@@ -432,13 +409,12 @@ fn build_or_reuse_project_ast(
     (ast, diags, ok)
 }
 
-/// Whether to chunk publish transactions into 25-tx batches (the
-/// chained-transaction limit per anchor) or pack them into a single
-/// batch. `Chunked` is the default; `Single` is for diffing against
-/// an on-disk plan where consumers want one canonical block per epoch.
+/// How to group publish transactions into batches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BatchingMode {
+    /// 25-tx chunks (the chained-transaction limit per anchor).
     Chunked,
+    /// One batch per epoch — used for diffing against on-disk plans.
     Single,
 }
 
@@ -451,12 +427,9 @@ impl BatchingMode {
     }
 }
 
-/// Walk every requirement, pull its source (cached locally or fetched
-/// over HTTP), build the AST, infer transitive dependencies, and append
-/// publish transactions in dependency order. Mutates the four output
-/// collections in-place; `requirements_data` is expected to come in
-/// pre-populated with boot-contract ASTs so dependency detection can
-/// resolve references to them.
+/// Fetch + parse requirements, infer dependencies, and append publish
+/// transactions in dependency order. `requirements_data` must come in
+/// pre-seeded with boot-contract ASTs.
 #[allow(clippy::too_many_arguments)]
 async fn resolve_requirements(
     manifest: &ProjectManifest,
@@ -506,8 +479,7 @@ async fn resolve_requirements(
             continue;
         }
 
-        // If a prior cycle already parsed (or pre-loaded) this contract,
-        // we reuse the AST instead of re-fetching/re-parsing.
+        // Reuse a pre-loaded or prior-cycle AST instead of re-fetching.
         let (clarity_version, ast) = match requirements_data.remove(&contract_id) {
             Some(requirement_data) => requirement_data,
             None => {
@@ -555,9 +527,7 @@ async fn resolve_requirements(
                         );
                     }
                     StacksNetwork::Testnet => {
-                        // sBTC ships under a mainnet address; remap it to the
-                        // testnet principal so requirements that reference
-                        // sBTC resolve on testnet.
+                        // sBTC ships under a mainnet address; remap to testnet.
                         let (remap_sender, issuer_target) =
                             if contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS {
                                 (
@@ -601,8 +571,7 @@ async fn resolve_requirements(
             }
         };
 
-        // Detect dependencies for this AST. `detect_dependencies` takes
-        // a map; we feed it a one-element map and reclaim the AST after.
+        // `detect_dependencies` takes a map; wrap-then-unwrap our one AST.
         let mut contract_data = BTreeMap::new();
         contract_data.insert(contract_id.clone(), (clarity_version, ast));
         let dependencies =
@@ -627,9 +596,8 @@ async fn resolve_requirements(
                 }
             }
             Err((inferable_dependencies, non_inferable_dependencies)) => {
-                // Unknown deps: re-enqueue the current contract behind its
-                // unresolved deps and keep the source in memory to avoid
-                // re-downloading on the retry.
+                // Re-enqueue current contract behind its unresolved deps,
+                // keep source in memory to avoid re-downloading.
                 for (_, dependencies) in inferable_dependencies.iter() {
                     for dependency in dependencies.iter() {
                         queue.push_back(dependency.contract_id.clone());
@@ -645,8 +613,7 @@ async fn resolve_requirements(
         };
     }
 
-    // Mainnet doesn't list requirements as deployment transactions —
-    // they're already published. Same for simnet-with-remote-data.
+    // Mainnet and simnet-with-remote-data: requirements are already on-chain.
     if matches!(network, StacksNetwork::Mainnet) || simnet_remote_data {
         return Ok(());
     }
@@ -685,12 +652,9 @@ async fn resolve_requirements(
     Ok(())
 }
 
-/// Parse each custom boot-contract override and collect any parse-time
-/// diagnostics keyed by contract id. Non-boot names in
-/// `override_boot_contracts_source` are skipped silently — the override
-/// table can contain both replacements and additions, and only
-/// replacements need validation here. Successful parses produce no
-/// entries; an empty return is the success indicator.
+/// Parse custom boot-contract overrides; return per-id diagnostics for
+/// any that failed. Non-boot names in the override table are skipped
+/// (the table can also contain additions, which don't need validation).
 async fn validate_custom_boot_contracts(
     override_boot_contracts_source: &BTreeMap<String, String>,
     manifest: &ProjectManifest,
@@ -718,10 +682,9 @@ async fn validate_custom_boot_contracts(
                     .map_err(|e| {
                         format!("Failed to read boot contract file {resolved_path_string}: {e}")
                     })?;
-                sources
-                    .get(&resolved_path_string)
-                    .cloned()
-                    .ok_or_else(|| format!("Unable to read custom boot contract: {contract_name}"))?
+                sources.get(&resolved_path_string).cloned().ok_or_else(|| {
+                    format!("Unable to read custom boot contract: {contract_name}")
+                })?
             }
         };
 
@@ -771,10 +734,8 @@ fn build_simnet_wallets(
         .collect()
 }
 
-/// Build the `SessionSettings` for the ephemeral interpreter. Disables
-/// remote-data on the repl settings and filters
-/// `override_boot_contracts_source` to simnet (with a warning
-/// otherwise — custom boot contracts only work on simnet).
+/// `SessionSettings` for the ephemeral interpreter. Custom boot
+/// contracts only apply on simnet; warned-and-ignored otherwise.
 fn build_session_settings(manifest: &ProjectManifest, network: &StacksNetwork) -> SessionSettings {
     let mut repl_settings = manifest.repl_settings.clone();
     repl_settings.remote_data.enabled = false;
@@ -795,11 +756,8 @@ fn build_session_settings(manifest: &ProjectManifest, network: &StacksNetwork) -
     }
 }
 
-/// Seed `requirements_data` with the boot-contract ASTs so they can
-/// satisfy dependency lookups, and return the set of boot contract
-/// ids so the caller can filter them out where appropriate. Skipped
-/// entirely when simnet uses remote data (the remote node already
-/// has them).
+/// Seed `requirements_data` with boot-contract ASTs and return their
+/// id set. No-op under simnet-with-remote-data (the node has them).
 fn load_boot_contracts(
     settings: &SessionSettings,
     simnet_remote_data: bool,
@@ -825,11 +783,9 @@ fn load_boot_contracts(
     boot_contracts_ids
 }
 
-/// Topologically order the project contracts by dependency and emit
-/// each as a publish transaction in the correct epoch bucket. Skips
-/// requirements (their transactions were already emitted by
-/// `resolve_requirements`). Populates `contracts_map` with the
-/// per-contract (source, location) pair the deployment needs.
+/// Topologically order project contracts and emit each as a publish
+/// transaction in its epoch bucket. Requirements are skipped (already
+/// emitted by `resolve_requirements`).
 fn order_and_schedule_project_contracts(
     dependencies: &BTreeMap<QualifiedContractIdentifier, DependencySet>,
     contract_epochs: &HashMap<QualifiedContractIdentifier, StacksEpochId>,
@@ -850,8 +806,6 @@ fn order_and_schedule_project_contracts(
             .remove(contract_id)
             .expect("unable to retrieve contract");
 
-        // Both publish variants carry an equivalent (source, location)
-        // pair; pull whichever applies for the deployment manifest.
         let (source, location) = match &tx {
             TransactionSpecification::EmulatedContractPublish(data) => {
                 (data.source.clone(), data.location.clone())
@@ -897,12 +851,17 @@ async fn load_network_manifest(
     }
 }
 
-/// For each contract in the manifest, build (a) the `ClarityContract` /
-/// location pair that the AST-cache loop consumes, and (b) the publish
-/// `TransactionSpecification` that ends up in the deployment plan.
-/// Returns both maps plus a flag indicating whether `#[env(simnet)]`
-/// markers were stripped from any source (OnChain environment only).
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+struct ProjectContractSpecs {
+    /// Per-id (contract, path) pair consumed by the AST-cache loop.
+    contracts_sources: HashMap<QualifiedContractIdentifier, (ClarityContract, PathBuf)>,
+    /// Publish transactions that end up in the deployment plan.
+    contracts: HashMap<QualifiedContractIdentifier, TransactionSpecification>,
+    /// True if `#[env(simnet)]` markers were stripped from any source.
+    env_simnet_stripped: bool,
+}
+
+/// Builds the per-contract specs the AST-cache loop and deployment plan
+/// both consume.
 fn build_project_contract_specs(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
@@ -911,14 +870,7 @@ fn build_project_contract_specs(
     default_deployer: &AccountConfig,
     deployment_fee_rate: u64,
     sources: &HashMap<String, String>,
-) -> Result<
-    (
-        HashMap<QualifiedContractIdentifier, (ClarityContract, PathBuf)>,
-        HashMap<QualifiedContractIdentifier, TransactionSpecification>,
-        bool,
-    ),
-    String,
-> {
+) -> Result<ProjectContractSpecs, String> {
     let project_root = &manifest.root_dir;
     let mut contracts_sources = HashMap::new();
     let mut contracts = HashMap::new();
@@ -1003,7 +955,11 @@ fn build_project_contract_specs(
         contracts.insert(contract_id, contract_spec);
     }
 
-    Ok((contracts_sources, contracts, env_simnet_stripped))
+    Ok(ProjectContractSpecs {
+        contracts_sources,
+        contracts,
+        env_simnet_stripped,
+    })
 }
 
 /// Load every contract source listed in the manifest, keyed by
@@ -1059,25 +1015,21 @@ fn chunk_transactions_into_batches(
     batches
 }
 
-/// Pick the (stacks-node, bitcoin-node) RPC URLs for `network`, using
-/// values from the network manifest when set and falling back to the
-/// public endpoints (or devnet localhost) otherwise. Simnet has no
-/// nodes, so both come back `None`.
+/// (stacks-node, bitcoin-node) RPC URLs for `network`. `(None, None)`
+/// for simnet; otherwise the manifest value or a well-known default.
 fn resolve_node_endpoints(
     network: &StacksNetwork,
-    network_manifest: &NetworkManifest,
+    network_manifest: &mut NetworkManifest,
 ) -> (Option<String>, Option<String>) {
-    match network {
-        StacksNetwork::Simnet => (None, None),
+    let (stacks_default, bitcoin_default) = match network {
+        StacksNetwork::Simnet => return (None, None),
         StacksNetwork::Devnet => {
-            let (stacks_node, bitcoin_node) = match &network_manifest.devnet {
-                Some(devnet) => (
-                    format!("http://localhost:{}", devnet.stacks_node_rpc_port),
+            let (stacks, bitcoin) = match &network_manifest.devnet {
+                Some(d) => (
+                    format!("http://localhost:{}", d.stacks_node_rpc_port),
                     format!(
                         "http://{}:{}@localhost:{}",
-                        devnet.bitcoin_node_username,
-                        devnet.bitcoin_node_password,
-                        devnet.bitcoin_node_rpc_port
+                        d.bitcoin_node_username, d.bitcoin_node_password, d.bitcoin_node_rpc_port
                     ),
                 ),
                 None => (
@@ -1085,47 +1037,30 @@ fn resolve_node_endpoints(
                     "http://devnet:devnet@localhost:18443".to_string(),
                 ),
             };
-            (Some(stacks_node), Some(bitcoin_node))
+            return (Some(stacks), Some(bitcoin));
         }
         StacksNetwork::Testnet => (
-            Some(
-                network_manifest
-                    .network
-                    .stacks_node_rpc_address
-                    .clone()
-                    .unwrap_or_else(|| "https://api.testnet.hiro.so".to_string()),
-            ),
-            Some(
-                network_manifest
-                    .network
-                    .bitcoin_node_rpc_address
-                    .clone()
-                    .unwrap_or_else(|| {
-                        "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332"
-                            .to_string()
-                    }),
-            ),
+            "https://api.testnet.hiro.so",
+            "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332",
         ),
         StacksNetwork::Mainnet => (
-            Some(
-                network_manifest
-                    .network
-                    .stacks_node_rpc_address
-                    .clone()
-                    .unwrap_or_else(|| "https://api.hiro.so".to_string()),
-            ),
-            Some(
-                network_manifest
-                    .network
-                    .bitcoin_node_rpc_address
-                    .clone()
-                    .unwrap_or_else(|| {
-                        "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332"
-                            .to_string()
-                    }),
-            ),
+            "https://api.hiro.so",
+            "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332",
         ),
-    }
+    };
+    let net = &mut network_manifest.network;
+    (
+        Some(
+            net.stacks_node_rpc_address
+                .take()
+                .unwrap_or_else(|| stacks_default.to_string()),
+        ),
+        Some(
+            net.bitcoin_node_rpc_address
+                .take()
+                .unwrap_or_else(|| bitcoin_default.to_string()),
+        ),
+    )
 }
 
 pub async fn generate_default_deployment(
@@ -1162,9 +1097,9 @@ pub async fn generate_default_deployment_with_cache(
     cached_asts: Option<&mut HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let mut found_env_simnet = false;
-    let network_manifest = load_network_manifest(manifest, network, file_accessor).await?;
+    let mut network_manifest = load_network_manifest(manifest, network, file_accessor).await?;
 
-    let (stacks_node, bitcoin_node) = resolve_node_endpoints(network, &network_manifest);
+    let (stacks_node, bitcoin_node) = resolve_node_endpoints(network, &mut network_manifest);
 
     let deployment_fee_rate = network_manifest.network.deployment_fee_rate;
 
@@ -1219,7 +1154,6 @@ pub async fn generate_default_deployment_with_cache(
 
     let mut contract_epochs = HashMap::new();
 
-    // Build the ASTs / DependencySet for requirements (Simnet/Devnet/Testnet/Mainnet)
     if manifest.project.requirements.is_some() {
         resolve_requirements(
             manifest,
@@ -1240,7 +1174,11 @@ pub async fn generate_default_deployment_with_cache(
     }
 
     let sources = load_project_contract_sources(manifest, file_accessor).await?;
-    let (contracts_sources, mut contracts, env_simnet_stripped) = build_project_contract_specs(
+    let ProjectContractSpecs {
+        contracts_sources,
+        mut contracts,
+        env_simnet_stripped,
+    } = build_project_contract_specs(
         manifest,
         network,
         environment,
@@ -1292,11 +1230,9 @@ pub async fn generate_default_deployment_with_cache(
         .map(|(id, (_version, ast))| (id, ast))
         .collect();
 
-    dependencies.extend(
-        boot_contracts_ids
-            .into_iter()
-            .map(|id| (id, DependencySet::new())),
-    );
+    for contract_id in boot_contracts_ids {
+        dependencies.insert(contract_id, DependencySet::new());
+    }
     dependencies.extend(requirements_deps);
 
     // Post-loop errors are safe to `?` through: `cache_guard` is still
