@@ -751,6 +751,26 @@ async fn validate_custom_boot_contracts(
     Ok(failures)
 }
 
+/// Turn the network-manifest accounts into wallet specs for the simnet
+/// genesis block.
+fn build_simnet_wallets(
+    accounts: BTreeMap<String, AccountConfig>,
+) -> Result<Vec<WalletSpecification>, String> {
+    accounts
+        .into_iter()
+        .map(|(name, account)| {
+            let address = PrincipalData::parse_standard_principal(&account.stx_address)
+                .map_err(|_| format!("unable to parse address {}", account.stx_address))?;
+            Ok(WalletSpecification {
+                name,
+                address,
+                balance: account.balance.into(),
+                sbtc_balance: account.sbtc_balance.into(),
+            })
+        })
+        .collect()
+}
+
 /// Build the `SessionSettings` for the ephemeral interpreter. Disables
 /// remote-data on the repl settings and filters
 /// `override_boot_contracts_source` to simnet (with a warning
@@ -1297,19 +1317,11 @@ pub async fn generate_default_deployment_with_cache(
 
     let batches = chunk_transactions_into_batches(transactions, batching);
 
-    let mut wallets = vec![];
-    if matches!(network, StacksNetwork::Simnet) {
-        for (name, account) in network_manifest.accounts {
-            let address = PrincipalData::parse_standard_principal(&account.stx_address)
-                .map_err(|_| format!("unable to parse address {}", account.stx_address))?;
-            wallets.push(WalletSpecification {
-                name,
-                address,
-                balance: account.balance.into(),
-                sbtc_balance: account.sbtc_balance.into(),
-            });
-        }
-    }
+    let wallets = if matches!(network, StacksNetwork::Simnet) {
+        build_simnet_wallets(network_manifest.accounts)?
+    } else {
+        Vec::new()
+    };
 
     let name = match network {
         StacksNetwork::Simnet => "Simulated deployment, used as a default for `clarinet console`, `clarinet test` and `clarinet check`".to_string(),
