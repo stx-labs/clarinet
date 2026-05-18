@@ -424,10 +424,12 @@ pub enum BatchingMode {
 }
 
 impl BatchingMode {
-    fn chain_limit(self) -> usize {
+    fn chunks<T>(self, items: &[T]) -> std::slice::Chunks<'_, T> {
         match self {
-            BatchingMode::Chunked => 25,
-            BatchingMode::Single => 100_000,
+            BatchingMode::Chunked => items.chunks(25),
+            // `.max(1)` avoids the `chunks(0)` panic on empty epochs;
+            // for non-empty input `chunks(len)` yields one chunk.
+            BatchingMode::Single => items.chunks(items.len().max(1)),
         }
     }
 }
@@ -975,17 +977,15 @@ async fn load_project_contract_sources(
     }
 }
 
-/// Flatten the per-epoch transaction map into a list of batches,
-/// chunking each epoch's transactions by `batching.chain_limit()`.
+/// Flatten the per-epoch transaction map into a list of batches.
 /// Batch ids are assigned in iteration order across epochs.
 fn chunk_transactions_into_batches(
     transactions: BTreeMap<EpochSpec, Vec<TransactionSpecification>>,
     batching: BatchingMode,
 ) -> Vec<TransactionsBatchSpecification> {
-    let chain_limit = batching.chain_limit();
     let mut batches = Vec::new();
     for (epoch, epoch_transactions) in transactions {
-        for txs in epoch_transactions.chunks(chain_limit) {
+        for txs in batching.chunks(&epoch_transactions) {
             batches.push(TransactionsBatchSpecification {
                 id: batches.len(),
                 transactions: txs.to_vec(),
