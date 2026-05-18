@@ -378,13 +378,10 @@ impl Drop for AstCacheRestoreGuard<'_> {
 /// Build the AST for one project contract, reusing a cached entry
 /// when present. Returns the same (ast, diags, success) shape on
 /// either path so the caller doesn't have to branch.
-#[allow(clippy::too_many_arguments)]
 fn build_or_reuse_project_ast(
     contract: &ClarityContract,
     contract_location: PathBuf,
     environment: Environment,
-    clarity_version: ClarityVersion,
-    resolved_epoch: StacksEpochId,
     interpreter: &ClarityInterpreter,
     cache_guard: Option<&mut AstCacheRestoreGuard<'_>>,
 ) -> (ContractAST, Vec<Diagnostic>, bool) {
@@ -392,6 +389,8 @@ fn build_or_reuse_project_ast(
         return interpreter.build_ast(contract);
     };
 
+    let clarity_version = contract.clarity_version;
+    let resolved_epoch = contract.epoch.resolve();
     let source = contract.expect_in_memory_code_source();
     let content_hash = compute_content_hash(source);
     let cache_key = (contract_location, environment);
@@ -403,6 +402,11 @@ fn build_or_reuse_project_ast(
             CachedContractAST::new(source, ast, diags, ok, clarity_version, resolved_epoch)
         });
 
+    // TODO: drop these clones. The AST + diags end up owned in both the
+    // returned tuple and the guard's pending entry (~20ms/build on a
+    // 20-contract project). Needs `Arc<ContractAST>`, `&ContractAST` in
+    // `detect_dependencies`, or merging the two output maps — each a
+    // cross-crate refactor.
     let ast = cache_entry.ast.clone();
     let diags = cache_entry.diags.clone();
     let ok = cache_entry.ast_success;
@@ -509,45 +513,22 @@ async fn resolve_requirements(
                             },
                         );
                     }
-                    StacksNetwork::Devnet => {
-                        let remap_principals = BTreeMap::from([(
-                            contract_id.issuer.clone(),
-                            default_deployer_address.clone(),
-                        )]);
-                        requirements_publish.insert(
-                            contract_id.clone(),
-                            RequirementPublishSpecification {
-                                contract_id: contract_id.clone(),
-                                remap_sender: default_deployer_address.clone(),
-                                source: source.clone(),
-                                location: contract_location,
-                                cost: deployment_fee_rate * source.len() as u64,
-                                remap_principals,
-                                clarity_version,
-                            },
-                        );
-                    }
-                    StacksNetwork::Testnet => {
-                        // sBTC ships under a mainnet address; remap to testnet.
-                        let (remap_sender, issuer_target) =
-                            if contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS {
-                                (
-                                    SBTC_TESTNET_ADDRESS_PRINCIPAL.clone(),
-                                    SBTC_TESTNET_ADDRESS_PRINCIPAL.clone(),
-                                )
-                            } else {
-                                (
-                                    default_deployer_address.clone(),
-                                    default_deployer_address.clone(),
-                                )
-                            };
+                    StacksNetwork::Devnet | StacksNetwork::Testnet => {
+                        // sBTC ships under a mainnet address; remap to testnet on testnet.
+                        let remap_target = if matches!(network, StacksNetwork::Testnet)
+                            && contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS
+                        {
+                            SBTC_TESTNET_ADDRESS_PRINCIPAL.clone()
+                        } else {
+                            default_deployer_address.clone()
+                        };
                         let remap_principals =
-                            BTreeMap::from([(contract_id.issuer.clone(), issuer_target)]);
+                            BTreeMap::from([(contract_id.issuer.clone(), remap_target.clone())]);
                         requirements_publish.insert(
                             contract_id.clone(),
                             RequirementPublishSpecification {
                                 contract_id: contract_id.clone(),
-                                remap_sender,
+                                remap_sender: remap_target,
                                 source: source.clone(),
                                 location: contract_location,
                                 cost: deployment_fee_rate * source.len() as u64,
@@ -904,8 +885,8 @@ fn build_project_contract_specs(
             .clone();
 
         if environment == Environment::OnChain {
-            // Best effort: if the source can't be parsed, fall through to the
-            // analysis pass below which will surface the parse error.
+            // Best effort: parse errors fall through to the later AST
+            // build, which surfaces them with proper location info.
             if let Ok(Some(clean)) = remove_env_simnet(&source) {
                 source = clean;
                 env_simnet_stripped = true;
@@ -1201,14 +1182,12 @@ pub async fn generate_default_deployment_with_cache(
     let mut cache_guard = cached_asts.map(AstCacheRestoreGuard::new);
 
     for (contract_id, (contract, contract_location)) in contracts_sources {
-        let resolved_epoch = contract.epoch.resolve();
         let clarity_version = contract.clarity_version;
+        let resolved_epoch = contract.epoch.resolve();
         let (ast, diags, ok) = build_or_reuse_project_ast(
             &contract,
             contract_location,
             environment,
-            clarity_version,
-            resolved_epoch,
             &session.interpreter,
             cache_guard.as_mut(),
         );
