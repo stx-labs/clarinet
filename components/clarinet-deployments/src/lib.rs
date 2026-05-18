@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{
-    paths, AccountConfig, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork,
+    paths, AccountConfig, DevnetConfig, FileAccessor, NetworkConfig, NetworkManifest,
+    ProjectManifest, StacksNetwork,
 };
 use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha256Sum;
@@ -866,7 +867,7 @@ fn build_project_contract_specs(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
     environment: Environment,
-    network_manifest: &NetworkManifest,
+    accounts: &BTreeMap<String, AccountConfig>,
     default_deployer: &AccountConfig,
     deployment_fee_rate: u64,
     sources: &HashMap<String, String>,
@@ -883,8 +884,7 @@ fn build_project_contract_specs(
 
         let deployer = match &contract_config.deployer {
             ContractDeployer::DefaultDeployer => default_deployer,
-            ContractDeployer::LabeledDeployer(deployer) => network_manifest
-                .accounts
+            ContractDeployer::LabeledDeployer(deployer) => accounts
                 .get(deployer)
                 .ok_or_else(|| format!("unable to retrieve account '{deployer}'"))?,
             _ => unreachable!(),
@@ -1019,12 +1019,13 @@ fn chunk_transactions_into_batches(
 /// for simnet; otherwise the manifest value or a well-known default.
 fn resolve_node_endpoints(
     network: &StacksNetwork,
-    network_manifest: &mut NetworkManifest,
+    devnet: Option<&DevnetConfig>,
+    net: NetworkConfig,
 ) -> (Option<String>, Option<String>) {
     let (stacks_default, bitcoin_default) = match network {
         StacksNetwork::Simnet => return (None, None),
         StacksNetwork::Devnet => {
-            let (stacks, bitcoin) = match &network_manifest.devnet {
+            let (stacks, bitcoin) = match devnet {
                 Some(d) => (
                     format!("http://localhost:{}", d.stacks_node_rpc_port),
                     format!(
@@ -1048,16 +1049,13 @@ fn resolve_node_endpoints(
             "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332",
         ),
     };
-    let net = &mut network_manifest.network;
     (
         Some(
             net.stacks_node_rpc_address
-                .take()
                 .unwrap_or_else(|| stacks_default.to_string()),
         ),
         Some(
             net.bitcoin_node_rpc_address
-                .take()
                 .unwrap_or_else(|| bitcoin_default.to_string()),
         ),
     )
@@ -1097,13 +1095,16 @@ pub async fn generate_default_deployment_with_cache(
     cached_asts: Option<&mut HashMap<(PathBuf, Environment), CachedContractAST>>,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
     let mut found_env_simnet = false;
-    let mut network_manifest = load_network_manifest(manifest, network, file_accessor).await?;
+    let NetworkManifest {
+        network: net,
+        accounts,
+        devnet,
+    } = load_network_manifest(manifest, network, file_accessor).await?;
 
-    let (stacks_node, bitcoin_node) = resolve_node_endpoints(network, &mut network_manifest);
+    let deployment_fee_rate = net.deployment_fee_rate;
+    let (stacks_node, bitcoin_node) = resolve_node_endpoints(network, devnet.as_ref(), net);
 
-    let deployment_fee_rate = network_manifest.network.deployment_fee_rate;
-
-    let Some(default_deployer) = network_manifest.accounts.get("deployer") else {
+    let Some(default_deployer) = accounts.get("deployer") else {
         return Err("unable to retrieve default deployer account".to_string());
     };
     let Ok(default_deployer_address) =
@@ -1182,7 +1183,7 @@ pub async fn generate_default_deployment_with_cache(
         manifest,
         network,
         environment,
-        &network_manifest,
+        &accounts,
         default_deployer,
         deployment_fee_rate,
         &sources,
@@ -1249,7 +1250,7 @@ pub async fn generate_default_deployment_with_cache(
     let batches = chunk_transactions_into_batches(transactions, batching);
 
     let wallets = if matches!(network, StacksNetwork::Simnet) {
-        build_simnet_wallets(network_manifest.accounts)?
+        build_simnet_wallets(accounts)?
     } else {
         Vec::new()
     };
