@@ -15,7 +15,7 @@ use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
-use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{
     ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
 };
@@ -391,6 +391,72 @@ impl BatchingMode {
     }
 }
 
+/// Parse each custom boot-contract override and collect any parse-time
+/// diagnostics keyed by contract id. Non-boot names in
+/// `override_boot_contracts_source` are skipped silently — the override
+/// table can contain both replacements and additions, and only
+/// replacements need validation here. Successful parses produce no
+/// entries; an empty return is the success indicator.
+async fn validate_custom_boot_contracts(
+    override_boot_contracts_source: &BTreeMap<String, String>,
+    manifest: &ProjectManifest,
+    file_accessor: Option<&dyn FileAccessor>,
+    interpreter: &ClarityInterpreter,
+    default_deployer_address: &StandardPrincipalData,
+) -> Result<HashMap<QualifiedContractIdentifier, Vec<Diagnostic>>, String> {
+    let mut failures = HashMap::new();
+    for (contract_name, file_path) in override_boot_contracts_source {
+        if !clarity_repl::repl::boot::BOOT_CONTRACTS_NAMES.contains(&contract_name.as_str()) {
+            continue;
+        }
+
+        let resolved_path = manifest.root_dir.join(file_path);
+        let resolved_path_string = resolved_path.to_string_lossy().into_owned();
+
+        let custom_source = match file_accessor {
+            None => std::fs::read_to_string(&resolved_path_string).map_err(|e| {
+                format!("Failed to read boot contract file {resolved_path_string}: {e}")
+            })?,
+            Some(file_accessor) => {
+                let sources = file_accessor
+                    .read_files(vec![resolved_path_string.clone()])
+                    .await
+                    .map_err(|e| {
+                        format!("Failed to read boot contract file {resolved_path_string}: {e}")
+                    })?;
+                sources
+                    .get(&resolved_path_string)
+                    .cloned()
+                    .ok_or_else(|| format!("Unable to read custom boot contract: {contract_name}"))?
+            }
+        };
+
+        let (epoch, clarity_version) =
+            get_boot_contract_epoch_and_clarity_version(contract_name.as_str());
+
+        let temp_contract = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(custom_source),
+            deployer: ContractDeployer::Address(default_deployer_address.to_address()),
+            name: contract_name.clone(),
+            clarity_version,
+            epoch: clarity_repl::repl::Epoch::Specific(epoch),
+            skip_analysis: false,
+        };
+
+        let (_, diagnostics, ast_success) = interpreter.build_ast(&temp_contract);
+
+        if !ast_success {
+            let contract_id = QualifiedContractIdentifier::new(
+                default_deployer_address.clone(),
+                ContractName::try_from(contract_name.clone())
+                    .unwrap_or_else(|_| ContractName::from_literal("unknown")),
+            );
+            failures.insert(contract_id, diagnostics);
+        }
+    }
+    Ok(failures)
+}
+
 /// Load every contract source listed in the manifest, keyed by
 /// absolute path (as a string). Uses the file accessor when supplied
 /// (LSP, SDK) and the local filesystem otherwise (CLI).
@@ -637,66 +703,18 @@ pub async fn generate_default_deployment_with_cache(
     let mut contract_diags: HashMap<QualifiedContractIdentifier, Vec<Diagnostic>> = HashMap::new();
     let mut asts_success = true;
 
-    // Validate custom boot contracts from override_boot_contracts_source
     if !settings.override_boot_contracts_source.is_empty() && !simnet_remote_data {
-        for (contract_name, file_path) in &settings.override_boot_contracts_source {
-            // Only validate existing boot contracts that are being overridden
-            if !clarity_repl::repl::boot::BOOT_CONTRACTS_NAMES.contains(&contract_name.as_str()) {
-                continue;
-            }
-
-            let resolved_path = manifest.root_dir.join(file_path);
-            let resolved_path_string = resolved_path.to_string_lossy().into_owned();
-
-            // Load and validate the custom boot contract
-            let custom_source = match file_accessor {
-                None => {
-                    // Fallback to file system when no file_accessor is provided
-                    std::fs::read_to_string(&resolved_path_string).map_err(|e| {
-                        format!("Failed to read boot contract file {resolved_path_string}: {e}")
-                    })
-                }
-                Some(file_accessor) => {
-                    let sources = file_accessor
-                        .read_files(vec![resolved_path_string.clone()])
-                        .await
-                        .map_err(|e| {
-                            format!("Failed to read boot contract file {resolved_path_string}: {e}")
-                        })?;
-                    sources
-                        .get(&resolved_path_string)
-                        .ok_or_else(|| {
-                            format!("Unable to read custom boot contract: {contract_name}")
-                        })
-                        .cloned()
-                }
-            }?;
-
-            let (epoch, clarity_version) =
-                get_boot_contract_epoch_and_clarity_version(contract_name.as_str());
-
-            let temp_contract = ClarityContract {
-                code_source: ClarityCodeSource::ContractInMemory(custom_source),
-                deployer: ContractDeployer::Address(default_deployer_address.to_address()),
-                name: contract_name.clone(),
-                clarity_version,
-                epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                skip_analysis: false,
-            };
-
-            let (_, diagnostics, ast_success) = interpreter.build_ast(&temp_contract);
-
-            if !ast_success {
-                contract_diags.insert(
-                    QualifiedContractIdentifier::new(
-                        default_deployer_address.clone(),
-                        ContractName::try_from(contract_name.clone())
-                            .unwrap_or_else(|_| ContractName::from_literal("unknown")),
-                    ),
-                    diagnostics,
-                );
-                asts_success = false;
-            }
+        let failures = validate_custom_boot_contracts(
+            &settings.override_boot_contracts_source,
+            manifest,
+            file_accessor,
+            &interpreter,
+            &default_deployer_address,
+        )
+        .await?;
+        if !failures.is_empty() {
+            asts_success = false;
+            contract_diags.extend(failures);
         }
     }
 
