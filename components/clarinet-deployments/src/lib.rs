@@ -1279,17 +1279,11 @@ pub async fn generate_default_deployment_with_cache(
         contract_epochs.insert(contract_id, resolved_epoch);
     }
 
-    let dependencies =
-        ASTDependencyDetector::detect_dependencies(&contract_data, &requirements_data);
-
-    let mut dependencies = match dependencies {
-        Ok(dependencies) => dependencies,
-        Err((dependencies, _)) => {
-            // No need to report an error here, it will be caught and reported
-            // with proper location information by the later analyses.
-            dependencies
-        }
-    };
+    // Failures are intentionally not reported here — later analyses
+    // surface them with proper location information.
+    let mut dependencies =
+        ASTDependencyDetector::detect_dependencies(&contract_data, &requirements_data)
+            .unwrap_or_else(|(deps, _)| deps);
 
     // `contract_data` is no longer borrowed; consume it for the final
     // `asts` output so we don't clone each AST a second time.
@@ -1298,10 +1292,11 @@ pub async fn generate_default_deployment_with_cache(
         .map(|(id, (_version, ast))| (id, ast))
         .collect();
 
-    for contract_id in boot_contracts_ids.into_iter() {
-        dependencies.insert(contract_id.clone(), DependencySet::new());
-    }
-
+    dependencies.extend(
+        boot_contracts_ids
+            .into_iter()
+            .map(|id| (id, DependencySet::new())),
+    );
     dependencies.extend(requirements_deps);
 
     // Post-loop errors are safe to `?` through: `cache_guard` is still
