@@ -2,8 +2,7 @@
 
 ##### New Features
 
-* Upgrade clarity vm (#2397) (e296a43c)
-* Use codelens live-range to avoid flashing (#2385) (5057c617)
+* Upgrade clarity vm (Clarity 6 preview) (#2397) (e296a43c)
 * **static-cost:**
   * Add external trait resolution (#2384) (cbe36702)
   * Add warnings and resolving for local traits (#2375) (dc655d0e)
@@ -13,6 +12,10 @@
 * **vscode-ext:**  Upgrade pnpm and dependencies (#2398) (e61872f9)
 * Use epoch4 built-ins via pox-wf-integration (#2389) (176d53d6)
 * Bump rng, nixpkgs, rust-overlay (#2383) (079db313)
+
+##### Bug fixes
+
+* Use codelens live-range to avoid flashing (#2385) (5057c617)
 
 ##### Continuous Integration
 
