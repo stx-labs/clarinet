@@ -41,6 +41,9 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack
 
+      - name: Install dependencies (skip prepare scripts)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
       - name: Build Wasm packages
         run: pnpm run build:sdk-wasm
 
