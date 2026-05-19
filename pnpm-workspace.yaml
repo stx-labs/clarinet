@@ -8,4 +8,4 @@ packages:
 allowBuilds:
   esbuild: true
 
-minimumReleaseAge: 7200 # 5 days in seconds
+minimumReleaseAge: 7200 # 5 days in minutes
