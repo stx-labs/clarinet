@@ -163,5 +163,7 @@ pub fn from_native_function(native_function: NativeFunctions) -> ClarityCostFunc
         NativeFunctions::AllowanceWithNft => ClarityCostFunction::Unimplemented,
         NativeFunctions::AllowanceWithStacking => ClarityCostFunction::Unimplemented,
         NativeFunctions::AllowanceAll => ClarityCostFunction::Unimplemented,
+        NativeFunctions::VerifyMerkleProof => ClarityCostFunction::VerifyMerkleProof,
+        NativeFunctions::GetBitcoinTxOutput => ClarityCostFunction::GetBitcoinTxOutput,
     }
 }

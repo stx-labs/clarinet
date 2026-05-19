@@ -713,6 +713,19 @@ pub trait ASTVisitor<'a> {
                         | AllowanceAll => {
                             self.traverse_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
+                        VerifyMerkleProof => self.traverse_verify_merkle_proof(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                            args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            args.get(2).unwrap_or(&DEFAULT_EXPR),
+                            args.get(3).unwrap_or(&DEFAULT_EXPR),
+                            args.get(4).unwrap_or(&DEFAULT_EXPR),
+                        ),
+                        GetBitcoinTxOutput => self.traverse_get_bitcoin_tx_output(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                            args.get(1).unwrap_or(&DEFAULT_EXPR),
+                        ),
                     };
                 } else {
                     rv = self.traverse_call_user_defined(expr, function_name, args);
@@ -2722,6 +2735,62 @@ pub trait ASTVisitor<'a> {
         message_hash: &'a SymbolicExpression,
         signature: &'a SymbolicExpression,
         public_key: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_verify_merkle_proof(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        leaf_hash: &'a SymbolicExpression,
+        root_hash: &'a SymbolicExpression,
+        tx_index: &'a SymbolicExpression,
+        tx_count: &'a SymbolicExpression,
+        sibling_hashes: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(leaf_hash)
+            && self.traverse_expr(root_hash)
+            && self.traverse_expr(tx_index)
+            && self.traverse_expr(tx_count)
+            && self.traverse_expr(sibling_hashes)
+            && self.visit_verify_merkle_proof(
+                expr,
+                leaf_hash,
+                root_hash,
+                tx_index,
+                tx_count,
+                sibling_hashes,
+            )
+    }
+
+    fn visit_verify_merkle_proof(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        leaf_hash: &'a SymbolicExpression,
+        root_hash: &'a SymbolicExpression,
+        tx_index: &'a SymbolicExpression,
+        tx_count: &'a SymbolicExpression,
+        sibling_hashes: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_get_bitcoin_tx_output(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        tx_bytes: &'a SymbolicExpression,
+        vout: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(tx_bytes)
+            && self.traverse_expr(vout)
+            && self.visit_get_bitcoin_tx_output(expr, tx_bytes, vout)
+    }
+
+    fn visit_get_bitcoin_tx_output(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        tx_bytes: &'a SymbolicExpression,
+        vout: &'a SymbolicExpression,
     ) -> bool {
         true
     }
