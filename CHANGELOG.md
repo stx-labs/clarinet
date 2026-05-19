@@ -1,3 +1,9 @@
+# [3.18.1](https://github.com/stx-labs/clarinet/compare/v3.18.0...v3.18.1) (2026-05-19)
+
+##### Continuous Integration
+
+*  Fix sdk release (#2402) (1928e7ab)
+
 # [3.18.0](https://github.com/stx-labs/clarinet/compare/v3.17.0...v3.18.0) (2026-05-19)
 
 ##### New Features
