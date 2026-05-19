@@ -1,3 +1,35 @@
+# [3.18.0](https://github.com/stx-labs/clarinet/compare/v3.17.0...v3.18.0) (2026-05-19)
+
+##### New Features
+
+* Upgrade clarity vm (Clarity 6 preview) (#2397) (e296a43c)
+* **static-cost:**
+  * Add external trait resolution (#2384) (cbe36702)
+  * Add warnings and resolving for local traits (#2375) (dc655d0e)
+
+##### Chores
+
+* **vscode-ext:**  Upgrade pnpm and dependencies (#2398) (e61872f9)
+* Use epoch4 built-ins via pox-wf-integration (#2389) (176d53d6)
+* Bump rng, nixpkgs, rust-overlay (#2383) (079db313)
+
+##### Bug fixes
+
+* Use codelens live-range to avoid flashing (#2385) (5057c617)
+
+##### Continuous Integration
+
+* Fix docker image release (#2388) (67be209a)
+
+##### Other Changes
+
+* Reduce calls to Hiro API and improve retry logic (#2386) (966e855f)
+
+##### Performance Improvements
+
+*  Cache contract ASTs and only re-parse files which have changed (#2174) (6bdcab55)
+*  Remove temp allocations and double conversions (#2390) (6080ab46)
+
 # [3.17.0](https://github.com/stx-labs/clarinet/compare/v3.16.0...v3.17.0) (2026-04-28)
 
 ##### New Features
