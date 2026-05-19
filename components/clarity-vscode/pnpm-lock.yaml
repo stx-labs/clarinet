@@ -54,8 +54,8 @@ importers:
         specifier: 1.0.1
         version: 1.0.1
       playwright:
-        specifier: 1.60.0
-        version: 1.60.0
+        specifier: 1.58.2
+        version: 1.58.2
       regenerator-runtime:
         specifier: 0.14.1
         version: 0.14.1
@@ -2447,11 +2447,6 @@ packages:
 
   playwright@1.58.2:
     resolution: {integrity: sha512-vA30H8Nvkq/cPBnNw4Q8TWz1EJyqgpuinBcHET0YVJVFldr8JDNiU9LaWAE1KqSkRYazuaBhTpB5ZzShOezQ6A==}
-    engines: {node: '>=18'}
-    hasBin: true
-
-  playwright@1.60.0:
-    resolution: {integrity: sha512-hheHdokM8cdqCb0lcE3s+zT4t4W+vvjpGxsZlDnikarzx8tSzMebh3UiFtgqwFwnTnjYQcsyMF8ei2mCO/tpeA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -5563,12 +5558,6 @@ snapshots:
   playwright@1.58.2:
     dependencies:
       playwright-core: 1.58.2
-    optionalDependencies:
-      fsevents: 2.3.2
-
-  playwright@1.60.0:
-    dependencies:
-      playwright-core: 1.60.0
     optionalDependencies:
       fsevents: 2.3.2
 
