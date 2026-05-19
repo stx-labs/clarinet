@@ -39,7 +39,7 @@ const swcLoader = {
 const browserOutput = {
   filename: "[name].js",
   path: path.join(__dirname, "client", "dist"),
-  libraryTarget: "commonjs",
+  library: { type: "commonjs" },
 };
 
 const browserResolve = {
@@ -89,8 +89,7 @@ const clientNodeConfig = {
 const serverOutput = {
   filename: "[name].js",
   path: path.join(__dirname, "server", "dist"),
-  libraryTarget: "var",
-  library: "serverExportVar",
+  library: { type: "var", name: "serverExportVar" },
 };
 
 /** @type RspackConfig */
@@ -165,8 +164,7 @@ const dapNodeConfig = {
   output: {
     filename: "[name].js",
     path: path.join(__dirname, "debug", "dist"),
-    libraryTarget: "var",
-    library: "serverExportVar",
+    library: { type: "var", name: "serverExportVar" },
   },
   module: { rules: [swcLoader] },
 };

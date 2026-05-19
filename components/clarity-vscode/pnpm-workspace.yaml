@@ -3,4 +3,10 @@ packages:
   - "server"
   - "debug"
 
-minimumReleaseAge: 1440 # 24 hours
+allowBuilds:
+  '@playwright/browser-chromium': true
+  '@swc/core': true
+  '@vscode/vsce-sign': true
+  keytar: true
+
+minimumReleaseAge: 7200 # 5 days in minutes
