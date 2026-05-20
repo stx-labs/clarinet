@@ -11,7 +11,7 @@ use tikv_jemallocator::Jemalloc;
 ///  - MSVC compiler: Not supported by `jemalloc`
 ///  - MacOS: System allocator already based on jemalloc
 ///  - aarch64-musl: `jemalloc` upstream has no atomics implementation for this
-///    target combo, alls back to musl's system allocator.
+///    target combo, falls back to musl's system allocator.
 #[cfg(not(any(
     target_env = "msvc",
     target_os = "macos",
