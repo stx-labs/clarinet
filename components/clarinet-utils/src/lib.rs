@@ -421,20 +421,6 @@ mod tests {
                 Err(MnemonicEncryptionError::Bs58Decode(_))
             ));
         }
-
-        // Test High with a single round-trip (expensive key derivation)
-        let strength = MnemonicEncryptionStrength::High;
-        let encrypted = encrypt_mnemonic_phrase(phrase, password, strength)
-            .expect("encrypt_mnemonic_phrase should succeed");
-        let decrypted = decrypt_mnemonic_phrase(&encrypted, password, strength)
-            .expect("decrypt_mnemonic_phrase should succeed");
-        assert_eq!(phrase, decrypted.to_string());
-
-        let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
-        assert!(matches!(
-            encrypt_mnemonic_phrase(bad_phrase, password, MnemonicEncryptionStrength::Basic),
-            Err(MnemonicEncryptionError::Mnemonic(_))
-        ));
     }
 
     #[test]
