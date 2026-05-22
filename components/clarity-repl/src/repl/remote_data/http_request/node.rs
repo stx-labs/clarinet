@@ -1,61 +1,96 @@
-use std::sync::LazyLock;
+use std::collections::HashMap;
 
 use js_sys::Reflect;
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen(module = "child_process")]
+use super::retry::{self, Response, TransportError};
+
+#[wasm_bindgen(module = "/src/repl/remote_data/http_request/sync_http.cjs")]
 extern "C" {
-    #[wasm_bindgen(js_name = execSync)]
-    fn exec_sync(command: &str) -> Vec<u8>;
+    #[wasm_bindgen(js_name = syncHttpRequest, catch)]
+    fn js_sync_http_request(url: &str, headers_json: &str) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(js_name = syncSleep)]
+    fn js_sync_sleep(ms: u32);
 }
 
-// access process.env
-#[wasm_bindgen(module = "process")]
-extern "C" {
-    #[wasm_bindgen(thread_local_v2, js_name = "env")]
-    pub static ENV: JsValue;
-}
-
-fn get_env() -> JsValue {
-    ENV.with(JsValue::clone)
-}
-
-static CURL_COMMAND: LazyLock<String> = LazyLock::new(|| {
-    if !cfg!(windows) {
-        return "curl".to_string();
-    }
-    match std::panic::catch_unwind(|| exec_sync("where curl.exe")) {
-        Ok(output) if !output.is_empty() => "curl.exe".to_string(),
-        _ => "curl".to_string(),
-    }
-});
-
-static HIRO_API_KEY: LazyLock<Option<String>> = LazyLock::new(|| {
-    let env = get_env();
-    Reflect::get(&env, &JsValue::from_str("HIRO_API_KEY"))
+fn js_string_field(obj: &JsValue, key: &str) -> Option<String> {
+    Reflect::get(obj, &JsValue::from_str(key))
         .ok()
-        .and_then(|key| key.as_string())
-});
+        .and_then(|v| v.as_string())
+}
+
+fn js_number_field(obj: &JsValue, key: &str) -> Option<f64> {
+    Reflect::get(obj, &JsValue::from_str(key))
+        .ok()
+        .and_then(|v| v.as_f64())
+}
+
+fn js_headers_to_map(obj: &JsValue, key: &str) -> HashMap<String, String> {
+    let headers_value = match Reflect::get(obj, &JsValue::from_str(key)) {
+        Ok(v) if !v.is_undefined() && !v.is_null() => v,
+        _ => return HashMap::new(),
+    };
+    let headers_obj: &js_sys::Object = headers_value.unchecked_ref();
+    let keys = js_sys::Object::keys(headers_obj);
+    let mut map = HashMap::with_capacity(keys.length() as usize);
+    for k in keys.iter() {
+        let key_str = match k.as_string() {
+            Some(s) => s,
+            None => continue,
+        };
+        let value = match Reflect::get(&headers_value, &k) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(value_str) = value.as_string() {
+            map.insert(key_str, value_str);
+        }
+    }
+    map
+}
+
+fn js_error_to_string(err: JsValue) -> String {
+    if let Some(s) = err.as_string() {
+        return s;
+    }
+    if let Some(s) = js_string_field(&err, "message") {
+        return s;
+    }
+    format!("{err:?}")
+}
 
 pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
-    let mut curl_command = vec![format!("{} -s -X GET", *CURL_COMMAND)];
+    let transport = || -> Result<Response, TransportError> {
+        // Rust-side headers; the JS glue additionally injects HIRO_API_KEY as x-api-key.
+        let headers_json =
+            r#"{"Accept":"application/json","x-hiro-product":"clarinet-sdk"}"#.to_string();
 
-    curl_command.push("-H \"Accept: application/json\"".to_string());
-    curl_command.push("-H \"x-hiro-product: clarinet-sdk\"".to_string());
-    if let Some(api_key) = &*HIRO_API_KEY {
-        curl_command.push(format!("-H \"x-api-key: {api_key}\""));
-    }
-    curl_command.push(format!("\"{url}\""));
-    let command = curl_command.join(" ");
+        let response_obj = js_sync_http_request(url, &headers_json)
+            .map_err(|e| TransportError::Network(js_error_to_string(e)))?;
 
-    let result = std::panic::catch_unwind(|| {
-        let output = exec_sync(&command);
-        let body = String::from_utf8_lossy(&output).into_owned();
-        serde_json::from_str(&body).map_err(|_| body)
-    });
+        let status = js_number_field(&response_obj, "status")
+            .map(|n| n as i32)
+            .unwrap_or(0);
+        if status < 0 {
+            let body = js_string_field(&response_obj, "body").unwrap_or_default();
+            return Err(TransportError::Network(body));
+        }
+        let status = status as u16;
+        let status_text = js_string_field(&response_obj, "statusText").unwrap_or_default();
+        let headers = js_headers_to_map(&response_obj, "headers");
+        let body = js_string_field(&response_obj, "body").unwrap_or_default();
 
-    result
-        .map_err(|_| "Request failed".to_string())?
-        .map_err(|e| e.to_string())
+        Ok(Response {
+            status,
+            status_text,
+            headers,
+            body,
+        })
+    };
+
+    let sleep = |ms: u32| js_sync_sleep(ms);
+
+    retry::run_with_retry(transport, sleep)
 }

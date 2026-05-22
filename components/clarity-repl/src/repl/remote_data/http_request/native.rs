@@ -1,49 +1,29 @@
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
-use reqwest::header::HeaderMap;
-use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
+
+use super::retry::{self, Response, TransportError};
 
 static API_KEY: LazyLock<Option<String>> = LazyLock::new(|| std::env::var("HIRO_API_KEY").ok());
 
-const MAX_RETRY_ATTEMPTS: u32 = 3;
-
-fn get_uint_header_value(headers: &HeaderMap, header_name: &str) -> Option<u32> {
+fn collect_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
     headers
-        .get(header_name)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.parse().ok())
-}
-
-fn handle_response<T: DeserializeOwned>(
-    response: reqwest::blocking::Response,
-) -> Result<T, String> {
-    let status = response.status();
-
-    if status.is_success() {
-        return response.json::<T>().map_err(|e| e.to_string());
-    }
-
-    let msg = response
-        .text()
-        .unwrap_or("Unable to read response body".to_string());
-    Err(format!("http error - status: {status} - message: {msg}"))
-}
-
-fn is_rate_limited(headers: &HeaderMap) -> (bool, Option<u32>) {
-    let remaining = get_uint_header_value(headers, "ratelimit-remaining");
-    // make sure the retry_after is at most 60 seconds
-    let retry_after = get_uint_header_value(headers, "retry-after").map(|v| v.min(60));
-    (matches!(remaining, Some(0)), retry_after)
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), s.to_string()))
+        })
+        .collect()
 }
 
 pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
     let client = Client::new();
 
-    let mut attempts = 0;
-    loop {
+    let transport = || -> Result<Response, TransportError> {
         let mut request = client
             .get(url)
             .header("x-hiro-product", "clarinet-cli")
@@ -53,36 +33,26 @@ pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
             request = request.header("x-api-key", api_key);
         }
 
-        let response = request.send().map_err(|e| e.to_string())?;
+        let response = request
+            .send()
+            .map_err(|e| TransportError::Network(e.to_string()))?;
+
         let status = response.status();
+        let status_text = status.canonical_reason().unwrap_or("").to_string();
+        let headers = collect_headers(response.headers());
+        let body = response
+            .text()
+            .unwrap_or_else(|_| "Unable to read response body".to_string());
 
-        if status.is_success() {
-            return response.json::<T>().map_err(|e| e.to_string());
-        }
+        Ok(Response {
+            status: status.as_u16(),
+            status_text,
+            headers,
+            body,
+        })
+    };
 
-        // Retry on server errors (5xx) and rate limits (429)
-        let is_retryable = status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS;
-        if !is_retryable {
-            return handle_response(response);
-        }
+    let sleep = |ms: u32| std::thread::sleep(Duration::from_millis(ms as u64));
 
-        attempts += 1;
-        if attempts >= MAX_RETRY_ATTEMPTS {
-            return handle_response(response);
-        }
-
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            let headers = response.headers().clone();
-            let (is_rate_limited, retry_after) = is_rate_limited(&headers);
-            if !is_rate_limited {
-                return handle_response(response);
-            }
-            let retry_delay = retry_after.unwrap_or(1);
-            uprint!("Rate limited, retrying after {retry_delay} seconds...\n");
-            std::thread::sleep(Duration::from_secs(retry_delay as u64));
-        } else {
-            uprint!("Server error ({status}), retrying in 3 seconds...\n");
-            std::thread::sleep(Duration::from_secs(3));
-        }
-    }
+    retry::run_with_retry(transport, sleep)
 }

@@ -1,3 +1,6 @@
+#[cfg(not(all(target_arch = "wasm32", feature = "web")))]
+mod retry;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]

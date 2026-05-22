@@ -46,6 +46,55 @@ async function build_wasm_sdk() {
   ]);
 
   await updatePackageName();
+  await includeNodeSnippets();
+}
+
+/**
+ * The wasm-bindgen output places JS shims used by `#[wasm_bindgen(module = "...")]`
+ * snippets under `pkg-node/snippets/`. wasm-pack does not list that directory in
+ * the generated package.json, so it would be stripped on publish. Patch the files
+ * list to include it and verify the snippet our Node sync-HTTP shim relies on is
+ * present.
+ */
+async function includeNodeSnippets() {
+  const pkgJsonPath = path.join(rootDir, "pkg-node/package.json");
+  const pkgRaw = await fs.readFile(pkgJsonPath, "utf-8");
+  const pkg = JSON.parse(pkgRaw);
+  pkg.files = pkg.files ?? [];
+  if (!pkg.files.includes("snippets")) {
+    pkg.files.push("snippets");
+  }
+  await fs.writeFile(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+  console.log("✅ pkg-node/package.json files list patched to include snippets");
+
+  // sync_http.cjs is referenced from Rust via `#[wasm_bindgen(module = ...)]`
+  // and is copied into pkg-node/snippets/... automatically. The worker file
+  // sync_http_worker.cjs is loaded at runtime via `new Worker(path)`, so
+  // wasm-bindgen doesn't know about it — we copy it ourselves into the same
+  // snippets directory so `path.join(__dirname, 'sync_http_worker.cjs')`
+  // resolves at runtime.
+  const snippetsDir = path.join(rootDir, "pkg-node/snippets");
+  let syncHttpPath = null;
+  try {
+    const entries = await fs.readdir(snippetsDir, { recursive: true });
+    const match = entries.find((e) => e.endsWith("sync_http.cjs"));
+    if (match) syncHttpPath = path.join(snippetsDir, match);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+  if (!syncHttpPath) {
+    throw new Error(
+      "sync_http.cjs not found under pkg-node/snippets/; wasm-bindgen module path may be wrong",
+    );
+  }
+
+  const workerSrc = path.join(
+    rootDir,
+    "../clarity-repl/src/repl/remote_data/http_request/sync_http_worker.cjs",
+  );
+  const workerDest = path.join(path.dirname(syncHttpPath), "sync_http_worker.cjs");
+  await fs.copyFile(workerSrc, workerDest);
+  console.log("✅ pkg-node/snippets/.../sync_http.cjs + sync_http_worker.cjs in place");
 }
 
 /**
