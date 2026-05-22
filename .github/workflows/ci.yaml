@@ -115,6 +115,11 @@ jobs:
             platform: darwin
             target: aarch64-apple-darwin
             architecture: arm64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            target: aarch64-unknown-linux-musl
+            architecture: arm64
+            libc: musl
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -139,13 +144,19 @@ jobs:
         with:
           tool: cargo-llvm-cov,nextest
 
+      - name: Install musl-gcc
+        if: endsWith(matrix.target, 'unknown-linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
       - name: Run unit test
         if: matrix.target != 'x86_64-unknown-linux-gnu'
         env:
           HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
           CARGO_INCREMENTAL: 0
           RUSTFLAGS: "-C debuginfo=0"
-        run: cargo tst
+        run: cargo tst ${{ endsWith(matrix.target, 'unknown-linux-musl') && format('--target {0}', matrix.target) || '' }}
 
       - name: Install llvm-cov
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -176,6 +187,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -201,6 +213,16 @@ jobs:
             platform: linux
             target: x86_64-unknown-linux-musl
             architecture: x64
+            libc: musl
+          - os: ubuntu-24.04-arm
+            platform: linux
+            target: aarch64-unknown-linux-gnu
+            architecture: arm64
+            libc: glibc
+          - os: ubuntu-24.04-arm
+            platform: linux
+            target: aarch64-unknown-linux-musl
+            architecture: arm64
             libc: musl
 
     steps:
@@ -253,7 +275,7 @@ jobs:
           echo "PRE_GYP_TARGET_NAME=${PLATFORM}-${ARCHITECTURE}-unknown" >> $GITHUB_ENV
 
       - name: Install musl-gcc
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+        if: endsWith(matrix.target, 'unknown-linux-musl')
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
@@ -291,6 +313,12 @@ jobs:
         run: |
           Compress-Archive -Path "./signed/clarinet.exe" -DestinationPath "clarinet-$env:SHORT_TARGET_NAME.zip"
 
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != ''
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: clarinet-${{ env.SHORT_TARGET_NAME }}.*
+
       - name: Upload cargo artifacts (Linux and macOS)
         if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -325,6 +353,15 @@ jobs:
 
       - name: Download pre-built dists
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums.txt
+        working-directory: dist
+        run: |
+          sha256sum clarinet-*.tar.gz clarinet-*.zip > checksums.txt
+          cat checksums.txt
 
       - name: Tag and Release
         uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2.4.1
@@ -338,8 +375,9 @@ jobs:
           target_commitish: ${{ env.GITHUB_SHA }}
           generate_release_notes: false
           files: |
-            **/*.tar.gz
-            **/*.zip
+            dist/clarinet-*.tar.gz
+            dist/clarinet-*.zip
+            dist/checksums.txt
 
       - name: Trigger pkg-version-bump workflow
         uses: peter-evans/repository-dispatch@ce5485de42c9b2622d2ed064be479e8ed65e76f4 # v1
