@@ -82,6 +82,44 @@ clarinet console
 (contract-call? .counter get-count tx-sender)
 ```
 
+### Example: On-chain game scoring contract
+
+Clarinet makes it easy to build and test game mechanics using Clarity.
+Here's a minimal example of a score-submission contract with a fee:
+
+```clarity
+;; game-score.clar
+(define-constant CONTRACT-OWNER tx-sender)
+(define-constant SUBMIT-FEE u5000)
+(define-constant ERR-INVALID-SCORE (err u100))
+
+(define-map high-scores principal uint)
+
+(define-public (submit-score (score uint))
+  (begin
+    (asserts! (> score u0) ERR-INVALID-SCORE)
+    (try! (stx-transfer? SUBMIT-FEE tx-sender CONTRACT-OWNER))
+    (map-set high-scores tx-sender score)
+    (print { event: "score-submitted", player: tx-sender, score: score })
+    (ok score)))
+
+(define-read-only (get-score (player principal))
+  (map-get? high-scores player))
+```
+
+Test it with Clarinet:
+
+```bash
+clarinet check         # validate syntax
+clarinet test          # run unit tests
+clarinet console       # interactive REPL
+```
+
+This pattern is used in production by [StacksHurry](https://stackshurry.vercel.app),
+a rocket shooter game on Stacks mainnet with on-chain leaderboards.
+
+---
+
 ## Contributing
 
 Contributions are welcome and appreciated. The following sections provide information on how you can
