@@ -310,7 +310,7 @@ fn static_cost_inner(
         .get_contract(contract_identifier)
         .map_err(|e| StaticCostError::ContractLoad(format!("{e:?}")))?;
 
-    let clarity_version = contract.contract_context.get_clarity_version();
+    let clarity_version = contract.get_clarity_version();
 
     let epoch = env.global_context.epoch_id;
     let ast = make_ast(&contract_source, epoch, clarity_version)?;

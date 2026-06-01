@@ -662,7 +662,7 @@ impl DAPDebugger {
                     self.default_sender.as_ref(),
                 ) {
                     Ok((contract, name)) => {
-                        let contract_id = &contract.contract_context.contract_identifier;
+                        let contract_id = &contract.contract_identifier;
                         // Add the watchpoint (if one isn't already there)
                         let exists = if let Some(set) = self
                             .get_state()
@@ -678,8 +678,7 @@ impl DAPDebugger {
                                 .add_watchpoint(contract_id, name, AccessType::Write);
                         }
 
-                        if let Some(data_types) = contract.contract_context.meta_data_var.get(name)
-                        {
+                        if let Some(data_types) = contract.meta_data_var.get(name) {
                             let value = env
                                 .global_context
                                 .database
@@ -706,9 +705,7 @@ impl DAPDebugger {
                                     memory_reference: None,
                                 })),
                             }
-                        } else if let Some(data_types) =
-                            contract.contract_context.meta_data_map.get(name)
-                        {
+                        } else if let Some(data_types) = contract.meta_data_map.get(name) {
                             let map_type =
                                 format!("{{{}: {}}}", data_types.key_type, data_types.value_type);
                             Response {

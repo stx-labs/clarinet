@@ -12,7 +12,6 @@ use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::build_ast;
-use clarity::vm::contracts::Contract as ContractContextResponse;
 use clarity::vm::database::clarity_db::ContractDataVarName;
 use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
@@ -409,11 +408,10 @@ impl ClarityDatastore {
                 "No contract context found for contract: {contract_id}",
             )))
             .and_then(|s| {
-                serde_json::from_str::<ContractContextResponse>(&s).map_err(|e| {
+                serde_json::from_str::<ContractContext>(&s).map_err(|e| {
                     VmInternalError::Expect(format!("Failed to parse contract context: {e}"))
                 })
-            })?
-            .contract_context;
+            })?;
         contract_context.functions.clear();
 
         let analysis = self
@@ -481,12 +479,9 @@ impl ClarityDatastore {
             // the AST doesn't contain the spans, which are useful for most debugging purposes.
             // The solution is to fetch the source code of the contract, and parse it locally,
             let contract_context = self.populate_context_functions(contract_id, raw_response)?;
-            let contract_context_response = ContractContextResponse { contract_context };
-            Some(
-                serde_json::to_string(&contract_context_response).map_err(|e| {
-                    VmInternalError::Expect(format!("Failed to serialize contract context: {e}"))
-                })?,
-            )
+            Some(serde_json::to_string(&contract_context).map_err(|e| {
+                VmInternalError::Expect(format!("Failed to serialize contract context: {e}"))
+            })?)
         } else {
             raw_response
         };

@@ -561,7 +561,7 @@ impl ClarityInterpreter {
                 .database
                 .insert_contract_hash(&contract_id, snippet)
                 .unwrap();
-            let contract = Contract { contract_context };
+            let contract = Contract::from(contract_context);
             global_context
                 .database
                 .insert_contract(&contract_id, contract)
