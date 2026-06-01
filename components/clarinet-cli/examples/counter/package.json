@@ -15,7 +15,7 @@
     "@hirosystems/clarinet-sdk": "3.8.1",
     "@stacks/transactions": "7.2.0",
     "chokidar-cli": "3.0.0",
-    "vitest": "4.0.1",
+    "vitest": "4.1.0",
     "vitest-environment-clarinet": "2.6.0"
   }
 }
