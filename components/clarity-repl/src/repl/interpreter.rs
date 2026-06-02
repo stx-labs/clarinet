@@ -277,10 +277,11 @@ impl ClarityInterpreter {
         annotations: &[Annotation],
     ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Diagnostic> {
         let mut analysis_db = AnalysisDatabase::new(&mut self.clarity_datastore);
+        let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
 
         // Run standard clarity analyses
         let mut contract_analysis = clarity::vm::analysis::run_analysis(
-            &contract.expect_resolved_contract_identifier(Some(&self.tx_sender)),
+            &contract_id,
             &contract_ast.expressions,
             &mut analysis_db,
             false,

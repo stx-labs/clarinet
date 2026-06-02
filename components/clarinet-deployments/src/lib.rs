@@ -224,6 +224,14 @@ pub fn update_session_with_deployment_plan(
                     if !should_mint_sbtc && contract_id == *SBTC_DEPOSIT_MAINNET_ADDRESS {
                         should_mint_sbtc = true;
                     }
+
+                    // Skip deploying contracts that were already deployed as boot
+                    // contracts (e.g. sbtc-token is deployed during boot so pox-5
+                    // can resolve its references).
+                    if session.boot_contracts.contains_key(&contract_id) {
+                        continue;
+                    }
+
                     let contract_ast = contracts_asts.as_ref().and_then(|m| m.get(&contract_id));
                     let result = handle_emulated_contract_publish(session, tx, contract_ast, epoch);
                     contracts.insert(contract_id, result);
