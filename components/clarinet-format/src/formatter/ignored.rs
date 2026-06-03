@@ -71,15 +71,3 @@ pub fn extract_source_range(
 
     result
 }
-
-pub fn ignored_exprs(exprs: &[PreSymbolicExpression], source: &str) -> String {
-    let start = exprs.first().unwrap().span();
-    let end = exprs.last().unwrap().span();
-    extract_source_range(
-        source,
-        start.start_line,
-        start.start_column,
-        end.end_line,
-        end.end_column,
-    )
-}
