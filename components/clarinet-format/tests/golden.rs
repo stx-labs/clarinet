@@ -118,7 +118,8 @@ fn test_idempotency() {
             let reformatted = formatter.format_file(&intended, None);
 
             pretty_assertions::assert_eq!(
-                reformatted, intended,
+                reformatted,
+                intended,
                 "Idempotency failure in file: {:?} — formatting the output again changed it",
                 file_name
             );
