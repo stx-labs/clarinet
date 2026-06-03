@@ -1171,7 +1171,7 @@ impl<'a> Aggregator<'a> {
         width
     }
 
-    /// Format the size value for a list type signature, keeping it on the same line as "list"
+    /// Format `(list ...)` expressions with greedy line-wrapping.
     fn format_list(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
         let mut start_index = 0;
