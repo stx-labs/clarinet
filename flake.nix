@@ -37,7 +37,7 @@
 
         # Hash for clarity git dependency - update this when Cargo.lock changes
         # Run `nix run .#check-git-dependencies-hash` to verify or get the new hash
-        clarityHash = "sha256-DYO6tR+sPcdEpgR9/FGvEdiCCWxZixPhh8hfkAJLpc4=";
+        clarityHash = "sha256-REL0zC8OmtLmtzwGkDRsxVr9rAai8hjqD4IpBZnBmYI=";
 
         clarinet = rustPlatform.buildRustPackage {
           inherit pname version;
@@ -91,11 +91,7 @@
             pkgs.nix-prefetch-git
             pkgs.jq
           ];
-          text =
-            let
-              gitRepo = "https://github.com/stacks-network/stacks-core.git";
-            in
-            ''
+          text = ''
               if [ ! -f "Cargo.lock" ]; then
                 echo "Error: Cargo.lock not found in current directory" >&2
                 exit 1
@@ -104,7 +100,17 @@
               current_hash="${clarityHash}"
               echo "Current hash in flake.nix: $current_hash"
 
-              source_line=$(grep -A2 'name = "clarity"' Cargo.lock | grep 'source = "git+${gitRepo}' || true)
+              source_line=$(grep -A2 'name = "clarity"' Cargo.lock | grep 'source = "git+' || true)
+
+              # Extract the git URL (between git+ and ?)
+              git_url=$(echo "$source_line" | sed -n 's/.*git+\([^?]*\)?.*/\1/p')
+
+              if [ -z "$git_url" ]; then
+                echo "Error: Could not extract clarity git URL from Cargo.lock" >&2
+                exit 1
+              fi
+
+              echo "Clarity git URL: $git_url"
 
               # Extract the commit hash (after the #)
               commit=$(echo "$source_line" | sed -n 's/.*#\([a-f0-9]*\)".*/\1/p')
@@ -117,7 +123,7 @@
               echo "Fetching Nix hash for clarity commit: $commit"
 
               # Get the hash
-              sha256=$(nix-prefetch-git --url ${gitRepo} --rev "$commit" --quiet | jq -r '.sha256')
+              sha256=$(nix-prefetch-git --url "$git_url" --rev "$commit" --quiet | jq -r '.sha256')
               expected_hash=$(nix hash convert --hash-algo sha256 --to sri "$sha256")
               echo "Expected hash from Cargo.lock: $expected_hash"
 
