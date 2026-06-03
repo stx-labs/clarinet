@@ -1,3 +1,4 @@
+pub mod doc;
 pub mod helpers;
 pub mod ignored;
 
@@ -731,8 +732,21 @@ impl<'a> Aggregator<'a> {
         let func_type = self.display_pse(exprs.first().unwrap(), indent);
         let mut acc = format!("({func_type}");
         let nested = indent.indented(&self.indentation_str);
-        let break_up =
-            without_comments_len(&exprs[1..]) > BOOLEAN_BREAK_LIMIT || differing_lines(exprs);
+        // Estimate whether the expression fits on a single line
+        let mut flat_width: usize = indent.len() + 1 + func_type.len() + 1; // "(or " + ")"
+        let mut has_multiline_arg = false;
+        for e in exprs[1..].iter().filter(|e| !is_comment(e)) {
+            let formatted = self.format_source_exprs(slice::from_ref(e), indent);
+            if formatted.contains('\n') {
+                has_multiline_arg = true;
+                break;
+            }
+            flat_width += formatted.len() + 1; // " arg"
+        }
+        let break_up = without_comments_len(&exprs[1..]) > BOOLEAN_BREAK_LIMIT
+            || contains_comments(&exprs[1..])
+            || has_multiline_arg
+            || flat_width > self.settings.max_line_length;
         let mut iter = exprs.get(1..).unwrap_or_default().iter().peekable();
         let mut prev_end_line = None;
 
@@ -947,15 +961,20 @@ impl<'a> Aggregator<'a> {
         acc
     }
 
-    // strictly used for display_pse. Sort of a dumbed down version of format_list
+    /// Format a list of expressions as `(item1 item2 ...)`.
+    /// Breaks to multi-line if any item has a trailing comment or
+    /// the first-line width exceeds `max_line_length`.
     fn display_list(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
         let mut acc = "(".to_string();
 
-        if differing_lines(exprs) {
-            acc.push('\n');
+        // Format each item and collect with optional trailing comments
+        struct Item {
+            text: String,
+            has_comment: bool,
         }
-        let mut iter = exprs[0..].iter().peekable();
+        let mut items: Vec<Item> = Vec::new();
+        let mut iter = exprs.iter().peekable();
         while let Some(item) = iter.next() {
             let trailing = get_trailing_comment(item, &mut iter);
             self.check_and_cache_ignored_expression(
@@ -964,31 +983,45 @@ impl<'a> Aggregator<'a> {
                 self.source,
                 indent,
             );
-            if differing_lines(exprs) {
-                acc.push_str(&nested)
-            }
-            let value = self.format_source_exprs(slice::from_ref(item), indent);
-            let start_line = item.span().start_line;
-            acc.push_str(&value);
+            let mut text = self.format_source_exprs(slice::from_ref(item), indent);
+            let has_comment = trailing.is_some();
             if let Some(comment) = trailing {
                 let count = comment
                     .span()
                     .start_column
                     .saturating_sub(item.span().end_column + 1);
-                push_spaces(&mut acc, count);
-                acc.push_str(&self.display_pse(comment, indent));
+                push_spaces(&mut text, count);
+                text.push_str(&self.display_pse(comment, indent));
             }
-            if let Some(next) = iter.peek() {
-                if start_line != next.span().start_line {
-                    acc.push('\n')
-                } else {
-                    acc.push(' ')
+            items.push(Item { text, has_comment });
+        }
+
+        // Decide whether to break: comments force break, otherwise check width
+        let has_any_comment = items.iter().any(|it| it.has_comment);
+        let first_line_width = indent.len()
+            + 1 // opening paren
+            + items.iter().map(|it| first_line_len(&it.text)).sum::<usize>()
+            + items.len().saturating_sub(1); // spaces between items
+        let should_break = has_any_comment || first_line_width + 1 > self.settings.max_line_length;
+
+        if should_break {
+            acc.push('\n');
+            for (i, item) in items.iter().enumerate() {
+                acc.push_str(&nested);
+                acc.push_str(&item.text);
+                if i + 1 < items.len() {
+                    acc.push('\n');
                 }
             }
-        }
-        if differing_lines(exprs) {
             acc.push('\n');
             acc.push_str(indent);
+        } else {
+            for (i, item) in items.iter().enumerate() {
+                acc.push_str(&item.text);
+                if i + 1 < items.len() {
+                    acc.push(' ');
+                }
+            }
         }
         acc.push(')');
         acc
@@ -1092,6 +1125,28 @@ impl<'a> Aggregator<'a> {
             estimated_len += display.len() + 1; // display + space
         }
         estimated_len + 1 // closing paren
+    }
+
+    /// Estimate the width of key-value sugar `{ k1: v1, k2: v2 }` on a single line.
+    fn estimate_kv_width(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> usize {
+        let empty = Indent::empty();
+        // "{ " + entries + " }"
+        let mut width = indent.len() + 4;
+        for (i, expr) in exprs.iter().enumerate() {
+            if is_comment(expr) {
+                // Comments always force multiline
+                return usize::MAX;
+            }
+            let display = self.display_pse(expr, &empty);
+            if i % 2 == 0 {
+                // key
+                width += display.len() + 2; // "key: "
+            } else {
+                // value
+                width += display.len() + 2; // "value, "
+            }
+        }
+        width
     }
 
     /// Format the size value for a list type signature, keeping it on the same line as "list"
@@ -1263,9 +1318,9 @@ impl<'a> Aggregator<'a> {
         let over_2_kvs = without_comments_len(exprs) > 2;
         let mut acc = "{".to_string();
 
-        // differing_lines breaks determinism but is a good way to break up
-        // complex values in maps
-        if over_2_kvs || differing_lines(exprs) {
+        // Use width estimation to break up complex values in maps
+        let estimated_width = self.estimate_kv_width(exprs, indent);
+        if over_2_kvs || estimated_width > self.settings.max_line_length {
             acc.push('\n');
             let mut iter = exprs.iter().peekable();
             while let Some(key) = iter.next() {
@@ -1358,8 +1413,7 @@ impl<'a> Aggregator<'a> {
     fn format_key_value(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
 
-        let mut acc = String::with_capacity(indent.len() + 64);
-        acc.push_str(indent);
+        let mut acc = String::with_capacity(64);
         acc.push('{');
 
         // for cases where we keep it on the same line with 1 k/v pair
@@ -1373,20 +1427,20 @@ impl<'a> Aggregator<'a> {
                     arg,
                     iter.peek().copied(),
                     self.source,
-                    indent,
+                    &nested,
                 );
                 let (key, value) = arg
                     .match_list()
                     .and_then(|list| list.split_first())
                     .unwrap();
-                let fkey = self.display_pse(key, indent);
+                let fkey = self.display_pse(key, &nested);
 
                 acc.push_str(&nested);
                 acc.push_str(&fkey);
                 acc.push_str(": ");
-                acc.push_str(&self.format_source_exprs(value, indent));
+                acc.push_str(&self.format_source_exprs(value, &nested));
                 acc.push(',');
-                self.append_trailing_comment(&mut acc, trailing, indent);
+                self.append_trailing_comment(&mut acc, trailing, &nested);
                 acc.push('\n');
             }
             acc.push_str(indent);
@@ -1576,9 +1630,9 @@ impl<'a> Aggregator<'a> {
         acc
     }
 
-    // This code handles the line width wrapping and happens near the bottom of the
-    // traversal
-    // TODO: Fix this horrible abomination
+    /// Format a generic function call as `(fn-name arg1 arg2 ...)`.
+    /// Items are placed on the current line if they fit, wrapped to the next
+    /// line (with increased indentation) otherwise.
     fn to_inner_content(&self, list: &[PreSymbolicExpression], indent: &Indent) -> String {
         let mut result = String::new();
         let mut current_line_width = indent.len();
@@ -1586,57 +1640,42 @@ impl<'a> Aggregator<'a> {
         let mut broken_up = false;
         let base_indent = indent.indented(&self.indentation_str);
 
-        // Check if this is a simple wrapper expression
-        let is_simple_wrapper = list.len() == 2 && list[0].match_atom().is_some();
-
-        // Special handling for simple wrappers to avoid unnecessary line breaks
-        if is_simple_wrapper {
+        // Simple wrappers like (ok expr) are always kept on one line
+        if list.len() == 2 && list[0].match_atom().is_some() {
             let atom_name = list[0].match_atom().unwrap();
-            let is_special_format = if let Some(native) = NativeFunctions::lookup_by_name(atom_name)
-            {
-                matches!(
-                    native,
-                    NativeFunctions::Let
-                        | NativeFunctions::Begin
-                        | NativeFunctions::Match
-                        | NativeFunctions::TupleCons
-                        | NativeFunctions::If
-                )
-            } else {
-                false
-            };
+            let is_special_format =
+                NativeFunctions::lookup_by_name(atom_name).is_some_and(|native| {
+                    matches!(
+                        native,
+                        NativeFunctions::Let
+                            | NativeFunctions::Begin
+                            | NativeFunctions::Match
+                            | NativeFunctions::TupleCons
+                            | NativeFunctions::If
+                    )
+                });
 
             if !is_special_format {
-                // For simple wrappers like (ok ...), format compactly
                 let fn_name = self.format_source_exprs(slice::from_ref(&list[0]), indent);
                 let arg = self.format_source_exprs(slice::from_ref(&list[1]), indent);
-
                 return format!("({} {})", fn_name.trim(), arg.trim());
             }
         }
-        // TODO: this should ignore comment length
+
         for (i, expr) in list.iter().enumerate() {
             let indented = if first_on_line { &base_indent } else { indent };
             self.check_and_cache_ignored_expression(expr, list.get(i + 1), self.source, indented);
             let formatted = self.format_source_exprs(slice::from_ref(expr), indented);
             let trimmed = t(&formatted);
-
             let expr_width = trimmed.len();
 
             if !first_on_line {
-                // Don't break before an opening brace of a map
-                let is_map_opening = trimmed.starts_with("{");
-
-                // Check if we need a line break to preserve comment/expr line positions:
-                // - current expr is a comment on a different line than previous
-                // - previous expr is a comment on a different line than current (comment stays alone)
+                let is_map_opening = trimmed.starts_with('{');
                 let prev = &list[i - 1];
                 let on_different_line_in_source = (is_comment(expr)
                     && prev.span().start_line != expr.span().start_line)
                     || (is_comment(prev) && prev.span().start_line != expr.span().start_line);
 
-                // Add line break if comment/expr was on different lines in source
-                // or if the line would be too long
                 if on_different_line_in_source
                     || (!is_map_opening
                         && (current_line_width + expr_width + 1 > self.settings.max_line_length))
@@ -1652,7 +1691,6 @@ impl<'a> Aggregator<'a> {
             }
 
             if broken_up {
-                // reformat with increased indent in the case we broke up the code on max width
                 let formatted = self.format_source_exprs(slice::from_ref(expr), &base_indent);
                 let trimmed = t(&formatted);
                 result.push_str(trimmed);
@@ -1668,7 +1706,6 @@ impl<'a> Aggregator<'a> {
         let break_lines = if !result.contains('\n') {
             false
         } else {
-            // Find the last line without collecting all lines into a vector
             let last_line = result
                 .rfind('\n')
                 .map(|pos| &result[pos + 1..])
@@ -1695,11 +1732,9 @@ fn is_comment(pse: &PreSymbolicExpression) -> bool {
 fn without_comments_len(exprs: &[PreSymbolicExpression]) -> usize {
     exprs.iter().filter(|expr| !is_comment(expr)).count()
 }
-// if the exprs are already broken onto different lines, return true
-fn differing_lines(exprs: &[PreSymbolicExpression]) -> bool {
-    !exprs
-        .windows(2)
-        .all(|window| window[0].span().start_line == window[1].span().start_line)
+/// Length of the first line of a (possibly multi-line) string.
+fn first_line_len(s: &str) -> usize {
+    s.find('\n').unwrap_or(s.len())
 }
 
 fn is_same_line(expr1: &PreSymbolicExpression, expr2: &PreSymbolicExpression) -> bool {
