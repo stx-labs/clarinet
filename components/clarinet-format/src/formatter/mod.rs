@@ -660,10 +660,7 @@ impl<'a> Aggregator<'a> {
             if iter.peek().is_some() {
                 acc.push(' ');
             }
-            if let Some(comment) = trailing {
-                acc.push(' ');
-                acc.push_str(&self.display_pse(comment, indent));
-            }
+            self.append_trailing_comment(&mut acc, trailing, indent);
         }
         acc.push(')');
         acc
@@ -687,10 +684,7 @@ impl<'a> Aggregator<'a> {
             acc.push('\n');
             acc.push_str(&nested);
             acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-            if let Some(comment) = trailing {
-                acc.push(' ');
-                acc.push_str(&self.display_pse(comment, indent));
-            }
+            self.append_trailing_comment(&mut acc, trailing, indent);
         }
         acc.push('\n');
         acc.push_str(indent);
@@ -723,10 +717,7 @@ impl<'a> Aggregator<'a> {
             acc.push('\n');
             acc.push_str(&nested);
             acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-            if let Some(comment) = trailing {
-                acc.push(' ');
-                acc.push_str(&self.display_pse(comment, indent));
-            }
+            self.append_trailing_comment(&mut acc, trailing, indent);
 
             prev_end_line = Some(expr.span().end_line);
         }
@@ -763,10 +754,7 @@ impl<'a> Aggregator<'a> {
                 acc.push('\n');
                 acc.push_str(&nested);
                 acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-                if let Some(comment) = trailing {
-                    acc.push(' ');
-                    acc.push_str(&self.display_pse(comment, indent));
-                }
+                self.append_trailing_comment(&mut acc, trailing, indent);
 
                 prev_end_line = Some(expr.span().end_line);
             }
@@ -824,10 +812,7 @@ impl<'a> Aggregator<'a> {
                 acc.push_str(&nested);
             }
             acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-            if let Some(comment) = trailing {
-                acc.push(' ');
-                acc.push_str(&self.display_pse(comment, indent));
-            }
+            self.append_trailing_comment(&mut acc, trailing, indent);
 
             index += 1;
             prev_end_line = Some(expr.span().end_line);
@@ -861,10 +846,7 @@ impl<'a> Aggregator<'a> {
                     acc.push('\n');
                     acc.push_str(&double_indent);
                     acc.push_str(&self.format_source_exprs(slice::from_ref(arg), &double_indent));
-                    if let Some(comment) = trailing {
-                        acc.push(' ');
-                        acc.push_str(&self.display_pse(comment, indent));
-                    }
+                    self.append_trailing_comment(&mut acc, trailing, indent);
                 }
                 // close the args paren
                 acc.push('\n');
@@ -922,16 +904,10 @@ impl<'a> Aggregator<'a> {
                     let expr_trailing = get_trailing_comment(expr_part, &mut iter);
                     acc.push(' ');
                     acc.push_str(&self.format_source_exprs(slice::from_ref(expr_part), &nested));
-                    if let Some(comment) = expr_trailing {
-                        acc.push(' ');
-                        acc.push_str(&self.display_pse(comment, indent));
-                    }
+                    self.append_trailing_comment(&mut acc, expr_trailing, indent);
                 }
             }
-            if let Some(comment) = trailing {
-                acc.push(' ');
-                acc.push_str(&self.display_pse(comment, indent));
-            }
+            self.append_trailing_comment(&mut acc, trailing, indent);
 
             if iter.peek().is_some() {
                 acc.push('\n');
@@ -965,10 +941,7 @@ impl<'a> Aggregator<'a> {
             acc.push('\n');
             acc.push_str(&nested);
             acc.push_str(&self.format_source_exprs(slice::from_ref(branch), &nested));
-            if let Some(comment) = trailing {
-                acc.push(' ');
-                acc.push_str(&self.display_pse(comment, indent));
-            }
+            self.append_trailing_comment(&mut acc, trailing, indent);
         }
         acc.push('\n');
         acc.push_str(indent);
@@ -1058,10 +1031,7 @@ impl<'a> Aggregator<'a> {
                         acc.push_str(
                             &self.format_source_exprs(slice::from_ref(allowance), &double_indent),
                         );
-                        if let Some(comment) = trailing {
-                            acc.push(' ');
-                            acc.push_str(&self.display_pse(comment, indent));
-                        }
+                        self.append_trailing_comment(&mut acc, trailing, indent);
                     }
                     acc.push('\n');
                     acc.push_str(&nested);
@@ -1341,10 +1311,7 @@ impl<'a> Aggregator<'a> {
                             acc.push(',');
 
                             // Add trailing comment if present
-                            if let Some(comment) = trailing {
-                                acc.push(' ');
-                                acc.push_str(&self.display_pse(comment, &nested));
-                            }
+                            self.append_trailing_comment(&mut acc, trailing, &nested);
                         }
                     } else {
                         let trailing = get_trailing_comment(value, &mut iter);
@@ -1366,10 +1333,7 @@ impl<'a> Aggregator<'a> {
                         acc.push_str(&value_str);
                         acc.push(',');
 
-                        if let Some(comment) = trailing {
-                            acc.push(' ');
-                            acc.push_str(&self.display_pse(comment, indent));
-                        }
+                        self.append_trailing_comment(&mut acc, trailing, indent);
                     }
                     acc.push('\n');
                 }
@@ -1424,10 +1388,7 @@ impl<'a> Aggregator<'a> {
                 acc.push_str(": ");
                 acc.push_str(&self.format_source_exprs(value, indent));
                 acc.push(',');
-                if let Some(comment) = trailing {
-                    acc.push(' ');
-                    acc.push_str(&self.display_pse(comment, indent));
-                }
+                self.append_trailing_comment(&mut acc, trailing, indent);
                 acc.push('\n');
             }
             acc.push_str(indent);
