@@ -381,12 +381,13 @@ impl<'a> Aggregator<'a> {
                         match native {
                             NativeFunctions::Let => self.format_let(list, previous_indentation),
                             NativeFunctions::Begin => self.format_begin(list, previous_indentation),
-                            NativeFunctions::Match =>
-                              if contains_comments(list) {
-                                self.match_with_comments(list, previous_indentation)
-                              } else {
-                                self.format_match(list, previous_indentation)
-                              },
+                            NativeFunctions::Match => {
+                                if contains_comments(list) {
+                                    self.match_with_comments(list, previous_indentation)
+                                } else {
+                                    self.format_match(list, previous_indentation)
+                                }
+                            }
                             NativeFunctions::TupleCons => {
                                 // if the kv map is defined with (tuple (c 1)) then we strip the
                                 // ClarityName("tuple") out first and convert it to key/value syntax
@@ -396,124 +397,13 @@ impl<'a> Aggregator<'a> {
                             NativeFunctions::And | NativeFunctions::Or => {
                                 self.format_booleans(list, previous_indentation)
                             }
-
-                            NativeFunctions::ListCons => self.format_list(list, previous_indentation),
-
-                            | NativeFunctions::RestrictAssets => self.format_restrict_assets(list, previous_indentation),
-                            // everything else that's not special cased
-                            NativeFunctions::Add
-                            | NativeFunctions::Subtract
-                            | NativeFunctions::Multiply
-                            | NativeFunctions::Divide
-                            | NativeFunctions::CmpGeq
-                            | NativeFunctions::CmpLeq
-                            | NativeFunctions::CmpLess
-                            | NativeFunctions::CmpGreater
-                            | NativeFunctions::ToInt
-                            | NativeFunctions::ToUInt
-                            | NativeFunctions::Modulo
-                            | NativeFunctions::Power
-                            | NativeFunctions::Sqrti
-                            | NativeFunctions::Log2
-                            | NativeFunctions::BitwiseXor
-                            | NativeFunctions::Not
-                            | NativeFunctions::Equals
-                            | NativeFunctions::Map
-                            | NativeFunctions::Fold
-                            | NativeFunctions::Append
-                            | NativeFunctions::Concat
-                            | NativeFunctions::AsMaxLen
-                            | NativeFunctions::Len
-                            | NativeFunctions::ElementAt
-                            | NativeFunctions::ElementAtAlias
-                            | NativeFunctions::IndexOf
-                            | NativeFunctions::IndexOfAlias
-                            | NativeFunctions::BuffToIntLe
-                            | NativeFunctions::BuffToUIntLe
-                            | NativeFunctions::BuffToIntBe
-                            | NativeFunctions::BuffToUIntBe
-                            | NativeFunctions::IsStandard
-                            | NativeFunctions::PrincipalDestruct
-                            | NativeFunctions::PrincipalConstruct
-                            | NativeFunctions::StringToInt
-                            | NativeFunctions::StringToUInt
-                            | NativeFunctions::IntToAscii
-                            | NativeFunctions::IntToUtf8
-                            | NativeFunctions::FetchVar
-                            | NativeFunctions::FetchEntry // map-get?
-                            | NativeFunctions::SetEntry // map-set?
-                            | NativeFunctions::SetVar
-                            | NativeFunctions::InsertEntry
-                            | NativeFunctions::DeleteEntry
-                            | NativeFunctions::TupleGet
-                            | NativeFunctions::TupleMerge
-                            | NativeFunctions::Hash160
-                            | NativeFunctions::Sha256
-                            | NativeFunctions::Sha512
-                            | NativeFunctions::Sha512Trunc256
-                            | NativeFunctions::Keccak256
-                            | NativeFunctions::Secp256k1Recover
-                            | NativeFunctions::Secp256k1Verify
-                            | NativeFunctions::Print
-                            | NativeFunctions::ContractCall
-                            | NativeFunctions::AsContract
-                            | NativeFunctions::ContractOf
-                            | NativeFunctions::PrincipalOf
-                            | NativeFunctions::AtBlock
-                            | NativeFunctions::GetBlockInfo
-                            | NativeFunctions::GetBurnBlockInfo
-                            | NativeFunctions::ConsError
-                            | NativeFunctions::ConsOkay
-                            | NativeFunctions::ConsSome
-                            | NativeFunctions::DefaultTo
-                            | NativeFunctions::Asserts
-                            | NativeFunctions::UnwrapRet
-                            | NativeFunctions::UnwrapErrRet
-                            | NativeFunctions::Unwrap
-                            | NativeFunctions::UnwrapErr
-                            | NativeFunctions::TryRet
-                            | NativeFunctions::IsOkay
-                            | NativeFunctions::IsNone
-                            | NativeFunctions::IsErr
-                            | NativeFunctions::IsSome
-                            | NativeFunctions::Filter
-                            | NativeFunctions::GetTokenBalance
-                            | NativeFunctions::GetAssetOwner
-                            | NativeFunctions::TransferToken
-                            | NativeFunctions::TransferAsset
-                            | NativeFunctions::MintAsset
-                            | NativeFunctions::MintToken
-                            | NativeFunctions::GetTokenSupply
-                            | NativeFunctions::BurnToken
-                            | NativeFunctions::BurnAsset
-                            | NativeFunctions::GetStxBalance
-                            | NativeFunctions::StxTransfer
-                            | NativeFunctions::StxTransferMemo
-                            | NativeFunctions::StxBurn
-                            | NativeFunctions::StxGetAccount
-                            | NativeFunctions::BitwiseAnd
-                            | NativeFunctions::BitwiseOr
-                            | NativeFunctions::BitwiseNot
-                            | NativeFunctions::BitwiseLShift
-                            | NativeFunctions::BitwiseRShift
-                            | NativeFunctions::BitwiseXor2
-                            | NativeFunctions::Slice
-                            | NativeFunctions::ToConsensusBuff
-                            | NativeFunctions::FromConsensusBuff
-                            | NativeFunctions::ReplaceAt
-                            | NativeFunctions::GetStacksBlockInfo
-                            | NativeFunctions::GetTenureInfo
-                            | NativeFunctions::AsContractSafe
-                            | NativeFunctions::AllowanceAll
-                            | NativeFunctions::AllowanceWithStacking
-                            | NativeFunctions::AllowanceWithStx
-                            | NativeFunctions::AllowanceWithFt
-                            | NativeFunctions::AllowanceWithNft
-                            | NativeFunctions::Secp256r1Verify
-                            | NativeFunctions::ContractHash
-                            | NativeFunctions::ToAscii
-                            | NativeFunctions::VerifyMerkleProof
-                            | NativeFunctions::GetBitcoinTxOutput => {
+                            NativeFunctions::ListCons => {
+                                self.format_list(list, previous_indentation)
+                            }
+                            NativeFunctions::RestrictAssets => {
+                                self.format_restrict_assets(list, previous_indentation)
+                            }
+                            _ => {
                                 let inner_content =
                                     self.to_inner_content(list, previous_indentation);
 
