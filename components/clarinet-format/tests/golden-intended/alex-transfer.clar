@@ -59,12 +59,20 @@
                 )
                 (var-set sender-temp sender)
                 (var-set recipient-temp (as-contract tx-sender))
-                (and (> no-to-treasury u0) (try! (fold check-err (map nft-transfer-iter ids-to-treasury) (ok true))))
+                (and
+                    (> no-to-treasury u0)
+                    (try! (fold check-err (map nft-transfer-iter ids-to-treasury)
+                        (ok true)
+                    ))
+                )
                 (var-set sender-temp (as-contract tx-sender))
                 (var-set recipient-temp recipient)
-                (and (> no-to-recipient u0) (try! (fold check-err (map nft-transfer-iter ids-to-recipient)
-                    (ok true)
-                )))
+                (and
+                    (> no-to-recipient u0)
+                    (try! (fold check-err (map nft-transfer-iter ids-to-recipient)
+                        (ok true)
+                    ))
+                )
                 (map-set owned sender
                     (if (is-eq no-to-treasury u0)
                         owned-by-sender

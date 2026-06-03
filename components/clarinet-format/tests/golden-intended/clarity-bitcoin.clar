@@ -554,7 +554,10 @@
       (parsed-locktime (try! (read-uint32 (get ctx parsed-witnesses))))
     )
     (asserts!
-      (and (is-eq (get uint8 parsed-segwit-marker) u0) (is-eq (get uint8 parsed-segwit-version) u1))
+      (and
+        (is-eq (get uint8 parsed-segwit-marker) u0)
+        (is-eq (get uint8 parsed-segwit-version) u1)
+      )
       (err ERR-NOT-SEGWIT-TRANSACTION)
     )
     (asserts! (is-eq (len tx) (get index (get ctx parsed-locktime)))
