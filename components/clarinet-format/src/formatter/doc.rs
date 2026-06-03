@@ -28,6 +28,13 @@ pub enum Doc {
     /// otherwise wrapped to a new line. Each item is a `Doc`.
     /// Separators between items are `Line` (space flat, newline broken).
     Fill(Vec<Doc>),
+    /// Raw text emitted exactly as-is. The printer does NOT add indentation
+    /// after embedded newlines. Used for `@format-ignore` blocks and as a
+    /// bridge for pre-formatted string content during incremental migration.
+    Verbatim(String),
+    /// Two consecutive newlines (one blank line) + current indent.
+    /// Used to preserve at most one blank line between expressions.
+    BlankLine,
 }
 
 impl Doc {
@@ -47,22 +54,8 @@ impl Doc {
         Doc::Group(Box::new(doc))
     }
 
-    /// Build a Doc from a pre-formatted string that may contain newlines.
-    /// Newlines become `Hardline` so the printer handles indentation correctly
-    /// and `fits` checks reject multi-line content in flat mode.
-    pub fn from_formatted(s: &str) -> Self {
-        let mut lines = s.split('\n');
-        let first = lines.next().unwrap_or("");
-        let mut parts = vec![Doc::text(first)];
-        for line in lines {
-            parts.push(Doc::Hardline);
-            parts.push(Doc::text(line));
-        }
-        if parts.len() == 1 {
-            parts.remove(0)
-        } else {
-            Doc::concat(parts)
-        }
+    pub fn verbatim(s: impl Into<String>) -> Self {
+        Doc::Verbatim(s.into())
     }
 }
 
@@ -144,6 +137,19 @@ impl<'a> Printer<'a> {
                     self.print(item, indent_str, mode);
                 }
             }
+            Doc::Verbatim(s) => {
+                self.output.push_str(s);
+                // Update column to reflect the last line of the verbatim text
+                if let Some(last_nl) = s.rfind('\n') {
+                    self.column = s.len() - last_nl - 1;
+                } else {
+                    self.column += s.len();
+                }
+            }
+            Doc::BlankLine => {
+                self.output.push('\n');
+                self.emit_newline(indent_str);
+            }
         }
     }
 
@@ -175,7 +181,14 @@ impl<'a> Printer<'a> {
                 Doc::Indent(inner) | Doc::Group(inner) => stack.push(inner),
                 Doc::Line => remaining -= 1,
                 Doc::Softline => {}
-                Doc::Hardline => return false,
+                Doc::Hardline | Doc::BlankLine => return false,
+                Doc::Verbatim(s) => {
+                    // Verbatim with newlines can't fit flat
+                    if s.contains('\n') {
+                        return false;
+                    }
+                    remaining -= s.len() as isize;
+                }
                 Doc::Fill(items) => {
                     for (i, item) in items.iter().enumerate().rev() {
                         if i > 0 {
@@ -257,10 +270,54 @@ mod tests {
     }
 
     #[test]
-    fn from_formatted_multiline() {
-        let doc = Doc::from_formatted("line1\n  line2\n  line3");
-        let result = Printer::new("  ", 80, 0).render(&doc, "");
-        // from_formatted preserves exact content including indentation in text nodes
-        assert_eq!(result, "line1\n  line2\n  line3");
+    fn verbatim_single_line() {
+        let doc = Doc::concat(vec![
+            Doc::text("before "),
+            Doc::verbatim("raw text"),
+            Doc::text(" after"),
+        ]);
+        assert_eq!(print(&doc, 80), "before raw text after");
+    }
+
+    #[test]
+    fn verbatim_multiline_no_indent() {
+        // Verbatim content should NOT get indented by the printer
+        let doc = Doc::indent(Doc::concat(vec![
+            Doc::Hardline,
+            Doc::text("normal"),
+            Doc::Hardline,
+            Doc::verbatim("line1\n  line2\nline3"),
+        ]));
+        // "normal" gets indented, but verbatim is emitted as-is
+        assert_eq!(print(&doc, 80), "\n  normal\n  line1\n  line2\nline3");
+    }
+
+    #[test]
+    fn verbatim_rejects_flat() {
+        // A Group containing multiline Verbatim should break
+        let doc = Doc::group(Doc::concat(vec![
+            Doc::text("("),
+            Doc::verbatim("a\nb"),
+            Doc::text(")"),
+        ]));
+        // measure_flat returns false for multiline verbatim, so group breaks
+        assert_eq!(print(&doc, 80), "(a\nb)");
+    }
+
+    #[test]
+    fn blank_line_between_exprs() {
+        let doc = Doc::concat(vec![Doc::text("a"), Doc::BlankLine, Doc::text("b")]);
+        assert_eq!(print(&doc, 80), "a\n\nb");
+    }
+
+    #[test]
+    fn blank_line_with_indent() {
+        let doc = Doc::indent(Doc::concat(vec![
+            Doc::Hardline,
+            Doc::text("a"),
+            Doc::BlankLine,
+            Doc::text("b"),
+        ]));
+        assert_eq!(print(&doc, 80), "\n  a\n\n  b");
     }
 }

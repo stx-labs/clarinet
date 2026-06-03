@@ -2,7 +2,6 @@ pub mod doc;
 pub mod helpers;
 pub mod ignored;
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::ops::Deref;
@@ -14,8 +13,9 @@ use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType};
+use doc::{Doc, Printer};
 use helpers::t;
-use ignored::{extract_expr_source, extract_source_range, ignored_exprs};
+use ignored::{extract_expr_source, extract_source_range};
 
 pub enum Indentation {
     Space(usize),
@@ -121,7 +121,7 @@ impl ClarityFormatter {
             StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
         )
         .unwrap();
-        let agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
+        let mut agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
         let result = agg.generate();
 
         // make sure the file ends with a newline
@@ -129,7 +129,7 @@ impl ClarityFormatter {
     }
     /// formatting an AST without a source file
     pub fn format_ast(&self, pse: &[PreSymbolicExpression]) -> String {
-        let agg = Aggregator::new(&self.settings, pse, None);
+        let mut agg = Aggregator::new(&self.settings, pse, None);
         agg.generate()
     }
     /// Alias `format_file` to `format`
@@ -153,7 +153,7 @@ impl ClarityFormatter {
         // `previous_indentation` for format_source_exprs
         let indentation_level = source.chars().take_while(|c| c.is_whitespace()).count();
         let leading_spaces = &source[..indentation_level];
-        let agg = Aggregator::new(&self.settings, &pse, Some(source));
+        let mut agg = Aggregator::new(&self.settings, &pse, Some(source));
 
         let result = agg.generate();
         Ok(if leading_spaces.is_empty() {
@@ -172,8 +172,8 @@ pub struct Aggregator<'a> {
     source: Option<&'a str>,
     indentation_str: String,
 
-    cache: RefCell<HashMap<(usize, String), String>>,
-    ignored_exprs: RefCell<HashMap<(u32, u32, u32, u32), String>>, // Cache for ignored expressions by span
+    cache: HashMap<(usize, String), String>,
+    ignored_exprs: HashMap<(u32, u32, u32, u32), String>,
 }
 
 impl<'a> Aggregator<'a> {
@@ -188,13 +188,24 @@ impl<'a> Aggregator<'a> {
             pse,
             source,
             indentation_str,
-            cache: RefCell::new(HashMap::new()),
-            ignored_exprs: RefCell::new(HashMap::new()),
+            cache: HashMap::new(),
+            ignored_exprs: HashMap::new(),
         }
     }
-    pub fn generate(&self) -> String {
-        self.cache.borrow_mut().clear();
-        self.ignored_exprs.borrow_mut().clear();
+
+    /// Render a Doc tree to a String using the current settings.
+    fn render_doc(&self, doc: &Doc, indent: &Indent) -> String {
+        Printer::new(
+            &self.indentation_str,
+            self.settings.max_line_length,
+            indent.len(),
+        )
+        .render(doc, indent)
+    }
+
+    pub fn generate(&mut self) -> String {
+        self.cache.clear();
+        self.ignored_exprs.clear();
         // this handles if we're formatting a section of code rather than the whole file
         let indent = match self.source {
             Some(source) => {
@@ -225,7 +236,7 @@ impl<'a> Aggregator<'a> {
     }
 
     // when format_source_exprs is called on one of these cached expressions the source will be returned as is
-    fn cache_ignored_expression(&self, next_expr: &PreSymbolicExpression, source: &str) {
+    fn cache_ignored_expression(&mut self, next_expr: &PreSymbolicExpression, source: &str) {
         let next_expr_span = next_expr.span();
         let next_expr_key = (
             next_expr_span.start_line,
@@ -251,63 +262,89 @@ impl<'a> Aggregator<'a> {
         );
 
         self.ignored_exprs
-            .borrow_mut()
             .insert(next_expr_key, next_expr_extracted);
     }
 
-    /// Append a trailing comment (space-separated) to the accumulator.
-    fn append_trailing_comment(
-        &self,
-        acc: &mut String,
-        comment: Option<&PreSymbolicExpression>,
+    /// Handle a `@format-ignore` comment: extract the comment and the following
+    /// expression as raw source text, cache the expression, and append to `result`.
+    /// Returns the `end_line` of the last processed expression (for blank-line tracking).
+    fn emit_format_ignored<'b>(
+        &mut self,
+        comment_expr: &'a PreSymbolicExpression,
+        iter: &mut Peekable<impl Iterator<Item = &'b PreSymbolicExpression>>,
+        result: &mut String,
         indent: &Indent,
-    ) {
-        if let Some(comment) = comment {
-            acc.push(' ');
-            acc.push_str(&self.display_pse(comment, indent));
-        }
-    }
-
-    /// Check if an expression is a comment with @format-ignore and cache the next expression if so.
-    fn check_and_cache_ignored_expression(
-        &self,
-        expr: &PreSymbolicExpression,
-        next_expr: Option<&PreSymbolicExpression>,
-        source: Option<&str>,
-        indent: &Indent,
-    ) {
-        if !is_comment(expr) {
-            return;
-        }
-
-        let formatted_comment = self.display_pse(expr, indent);
-        // in the case of 2 lines of @format-ignore
-        // ;; @format-ignore
-        // ;; @format-ignore
-        if !formatted_comment.contains(FORMAT_IGNORE_SYNTAX) {
-            return;
-        }
-
-        // if @format-ignore is placed on the last line of an expression
-        let Some(next) = next_expr else {
-            return;
+    ) -> u32
+    where
+        'a: 'b,
+    {
+        let Some(source) = self.source else {
+            // No source — just emit the comment text
+            result.push_str(&self.display_pse(comment_expr, indent));
+            return comment_expr.span().end_line;
         };
 
+        // Check if the next expression is a list (the thing being ignored)
+        let next_is_list = iter.peek().is_some_and(|next| next.match_list().is_some());
+        if !next_is_list {
+            // Next expression is not a list (or there is none) — just extract the comment
+            result.push_str(&extract_expr_source(comment_expr, source));
+            return comment_expr.span().end_line;
+        }
+
+        let next_expr = iter.next().unwrap();
+        let end_line = next_expr.span().end_line;
+
+        // Extend the end column to the end of the line so we capture trailing content
+        let lines: Vec<&str> = source.lines().collect();
+        let end_line_usize = usize::try_from(end_line).unwrap_or(0);
+        let end_col = if end_line_usize > 0 && end_line_usize <= lines.len() {
+            (lines[end_line_usize - 1].len() + 1) as u32
+        } else {
+            next_expr.span().end_column
+        };
+
+        // Extract comment + expression together from source
+        let extracted = extract_source_range(
+            source,
+            comment_expr.span().start_line,
+            comment_expr.span().start_column,
+            end_line,
+            end_col,
+        );
+
+        // Cache so other formatters return this expression verbatim
+        self.cache_ignored_expression(next_expr, source);
+
+        result.push_str(&extracted);
+        if iter.peek().is_some() {
+            result.push('\n');
+        }
+
+        end_line
+    }
+
+    /// If `expr` is a `@format-ignore` comment and `next_expr` is a list,
+    /// cache the next expression so it's returned verbatim by `format_source_exprs`.
+    fn check_and_cache_ignored(
+        &mut self,
+        expr: &PreSymbolicExpression,
+        next_expr: Option<&PreSymbolicExpression>,
+    ) {
+        if !is_format_ignore(expr) {
+            return;
+        }
+        let Some(next) = next_expr else { return };
         if next.match_list().is_none() {
             return;
         }
-
-        // if we couldn't extract the source, exit
-        let Some(src) = source else {
-            return;
-        };
-
+        let Some(src) = self.source else { return };
         self.cache_ignored_expression(next, src);
     }
 
     fn format_source_exprs(
-        &self,
-        expressions: &[PreSymbolicExpression],
+        &mut self,
+        expressions: &'a [PreSymbolicExpression],
         indent: &Indent,
     ) -> String {
         // if this expression was marked as ignored, return the cached source
@@ -319,8 +356,7 @@ impl<'a> Aggregator<'a> {
                 expr.span().end_line,
                 expr.span().end_column,
             );
-            let ignored_cache_ref = self.ignored_exprs.borrow();
-            if let Some(ignored_source) = ignored_cache_ref.get(&span_key) {
+            if let Some(ignored_source) = self.ignored_exprs.get(&span_key) {
                 return ignored_source.clone();
             }
         }
@@ -328,13 +364,8 @@ impl<'a> Aggregator<'a> {
         // Create a key based on the slice pointer and length for the whole array
         let key = (expressions.as_ptr() as usize, indent.to_string());
 
-        // Check if we have a cached result
-        let cached_result = {
-            let cache_ref = self.cache.borrow();
-            cache_ref.get(&key).cloned()
-        };
-        if let Some(result) = cached_result {
-            return result;
+        if let Some(result) = self.cache.get(&key) {
+            return result.clone();
         }
         // Track the end line of the previous expression
         let mut prev_end_line = 0;
@@ -345,76 +376,10 @@ impl<'a> Aggregator<'a> {
 
         while let Some(expr) = iter.next() {
             let trailing_comment = get_trailing_comment(expr, &mut iter);
-            let cur = self.display_pse(expr, indent);
 
-            // Only check for @format-ignore in comments, not in the entire formatted output
-            // This prevents re-processing when extracted blocks contain @format-ignore
-            let should_ignore = is_comment(expr) && cur.contains(FORMAT_IGNORE_SYNTAX);
-
-            if should_ignore {
-                if let Some(source) = self.source {
-                    if let Some(next) = iter.peek() {
-                        if next.match_list().is_some() {
-                            let next_expr = iter.next().unwrap();
-
-                            let end_line = next_expr.span().end_line;
-
-                            let lines: Vec<&str> = source.lines().collect();
-                            let end_line_usize = usize::try_from(end_line).unwrap_or(0);
-                            let end_col = if end_line_usize > 0 && end_line_usize <= lines.len() {
-                                (lines[end_line_usize - 1].len() + 1) as u32
-                            } else {
-                                next_expr.span().end_column
-                            };
-
-                            // Extract the comment and expression together for output
-                            let extracted = extract_source_range(
-                                source,
-                                expr.span().start_line,
-                                expr.span().start_column,
-                                end_line,
-                                end_col,
-                            );
-
-                            // cache the next expression so that when format_source_exprs is called on it
-                            // (by format_begin or other format functions), we return the original source
-                            // instead of formatting it
-                            self.cache_ignored_expression(next_expr, source);
-
-                            result.push_str(&extracted);
-
-                            // If there's another expression after the ignored one, we need to add a newline
-                            // since extract_source_range doesn't include the newline after the last line
-                            if iter.peek().is_some() {
-                                result.push('\n');
-                            }
-
-                            prev_end_line = next_expr.span().end_line;
-                        } else {
-                            // Next expression is not a list, just extract the comment
-                            result.push_str(&extract_expr_source(expr, source));
-                        }
-                    } else {
-                        // No next expression, just extract the comment
-                        result.push_str(&extract_expr_source(expr, source));
-                    }
-                } else {
-                    // Fallback if no source available
-                    result.push_str(&cur);
-                    if let Some(next) = iter.peek() {
-                        if next.match_list().is_some() {
-                            let next_expr = iter.next().unwrap();
-                            result.push('\n');
-                            result.push_str(&ignored_exprs(
-                                std::slice::from_ref(next_expr),
-                                self.source.unwrap_or_default(),
-                            ));
-                            result.push('\n');
-                            prev_end_line = next_expr.span().end_line; // keep going after the ignored one
-                        }
-                    }
-                }
-                continue; // keep going after the ignored one
+            if is_format_ignore(expr) {
+                prev_end_line = self.emit_format_ignored(expr, &mut iter, &mut result, indent);
+                continue;
             }
 
             if prev_end_line > 0
@@ -427,111 +392,121 @@ impl<'a> Aggregator<'a> {
                     result.push('\n');
                 }
             }
-            if let Some(list) = expr.match_list() {
+            let (formatted, is_define) = if let Some(list) = expr.match_list() {
                 if let Some(atom_name) = list.split_first().and_then(|(f, _)| f.match_atom()) {
-                    let formatted = if let Some(native) = NativeFunctions::lookup_by_name(atom_name)
-                    {
-                        match native {
-                            NativeFunctions::Let => self.format_let(list, indent),
-                            NativeFunctions::Begin => self.format_begin(list, indent),
-                            NativeFunctions::Match => {
-                                if contains_comments(list) {
-                                    self.match_with_comments(list, indent)
-                                } else {
-                                    self.format_match(list, indent)
-                                }
-                            }
-                            NativeFunctions::TupleCons => {
-                                // if the kv map is defined with (tuple (c 1)) then we strip the
-                                // ClarityName("tuple") out first and convert it to key/value syntax
-                                self.format_key_value(&list[1..], indent)
-                            }
-                            NativeFunctions::If => self.format_if(list, indent),
-                            NativeFunctions::And | NativeFunctions::Or => {
-                                self.format_booleans(list, indent)
-                            }
-                            NativeFunctions::ListCons => self.format_list(list, indent),
-                            NativeFunctions::RestrictAssets => {
-                                self.format_restrict_assets(list, indent)
-                            }
-                            _ => {
-                                let inner_content = self.to_inner_content(list, indent);
+                    (
+                        self.format_list_call(atom_name, list, indent),
+                        is_define_fn(atom_name),
+                    )
+                } else {
+                    // list without a leading atom
+                    (self.display_pse(expr, indent), false)
+                }
+            } else {
+                (self.display_pse(expr, indent), false)
+            };
 
-                                let mut out = inner_content;
-                                if let Some(comment) = trailing_comment {
-                                    out.push(' ');
-                                    out.push_str(&self.display_pse(comment, indent));
-                                    out.push('\n');
-                                } else if let Some(next) = iter.peek() {
-                                    if list[0].span().end_line != next.span().end_line {
-                                        out.push('\n');
-                                    } else {
-                                        out.push(' ');
-                                    }
-                                }
-                                out
-                            }
-                        }
-                    } else if let Some(define) = DefineFunctions::lookup_by_name(atom_name) {
-                        let formatted = match define {
-                            DefineFunctions::PublicFunction
-                            | DefineFunctions::ReadOnlyFunction
-                            | DefineFunctions::PrivateFunction => self.function(list),
-                            DefineFunctions::Constant
-                            | DefineFunctions::PersistedVariable
-                            | DefineFunctions::FungibleToken
-                            | DefineFunctions::ImplTrait
-                            | DefineFunctions::UseTrait
-                            | DefineFunctions::NonFungibleToken => {
-                                self.format_constant(list, indent)
-                            }
-                            DefineFunctions::Map => self.format_map(list, indent),
-                            DefineFunctions::Trait => self.define_trait(list, indent),
-                        };
-                        if let Some(comment) = trailing_comment {
-                            let mut out = formatted;
-                            out.push(' ');
-                            out.push_str(&self.display_pse(comment, indent));
-                            out.push('\n');
-                            out
-                        } else if formatted.ends_with('\n') {
-                            formatted
-                        } else {
-                            let mut out = formatted;
-                            out.push('\n');
-                            out
-                        }
-                    } else {
-                        self.to_inner_content(list, indent)
-                    };
-                    // if it's a top level expression, newline it
-                    if indent.is_empty() && (result.ends_with(")")) {
+            // Trailing comment handling (unified for all expression types)
+            if let Some(comment) = trailing_comment {
+                // if it's a top level expression, newline it
+                if indent.is_empty() && result.ends_with(')') {
+                    result.push('\n');
+                }
+                result.push_str(&formatted);
+                result.push(' ');
+                result.push_str(&self.display_pse(comment, indent));
+                result.push('\n');
+            } else if is_define {
+                // Define-level expressions always get a trailing newline
+                if indent.is_empty() && result.ends_with(')') {
+                    result.push('\n');
+                }
+                result.push_str(&formatted);
+                if !formatted.ends_with('\n') {
+                    result.push('\n');
+                }
+            } else if let Some(list) = expr.match_list() {
+                if list
+                    .split_first()
+                    .and_then(|(f, _)| f.match_atom())
+                    .is_some()
+                {
+                    // Known or unknown function call — newline between top-level exprs
+                    if indent.is_empty() && result.ends_with(')') {
                         result.push('\n');
                     }
                     result.push_str(&formatted);
-                    prev_end_line = expr.span().end_line;
-                    continue;
-                }
-            }
-            let current = self.display_pse(expr, indent);
-            let mut between = " ";
-            if let Some(next) = iter.peek() {
-                if !is_same_line(expr, next) || is_comment(expr) {
-                    between = "\n";
+                    if let Some(next) = iter.peek() {
+                        if !is_same_line(expr, next) {
+                            result.push('\n');
+                        } else {
+                            result.push(' ');
+                        }
+                    }
+                } else {
+                    result.push_str(&formatted);
                 }
             } else {
-                // no next expression to space out
-                between = "";
+                // Non-list expressions (atoms, values, etc.)
+                result.push_str(&formatted);
+                if let Some(next) = iter.peek() {
+                    if !is_same_line(expr, next) || is_comment(expr) {
+                        result.push('\n');
+                    } else {
+                        result.push(' ');
+                    }
+                }
             }
 
             prev_end_line = expr.span().end_line;
-
-            result.push_str(&current);
-            result.push_str(between);
         }
         // Cache the result
-        self.cache.borrow_mut().insert(key, result.clone());
+        self.cache.insert(key, result.clone());
         result
+    }
+
+    /// Dispatch a list expression `(fn-name ...)` to the appropriate formatter.
+    fn format_list_call(
+        &mut self,
+        atom_name: &str,
+        list: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
+        if let Some(native) = NativeFunctions::lookup_by_name(atom_name) {
+            match native {
+                NativeFunctions::Let => self.format_let(list, indent),
+                NativeFunctions::Begin => self.format_begin(list, indent),
+                NativeFunctions::Match => {
+                    if contains_comments(list) {
+                        self.match_with_comments(list, indent)
+                    } else {
+                        self.format_match(list, indent)
+                    }
+                }
+                NativeFunctions::TupleCons => self.format_key_value(&list[1..], indent),
+                NativeFunctions::If => self.format_if(list, indent),
+                NativeFunctions::And | NativeFunctions::Or => self.format_booleans(list, indent),
+                NativeFunctions::ListCons => self.format_list(list, indent),
+                NativeFunctions::RestrictAssets => self.format_restrict_assets(list, indent),
+                _ => self.format_inner_content(list, indent),
+            }
+        } else if let Some(define) = DefineFunctions::lookup_by_name(atom_name) {
+            match define {
+                DefineFunctions::PublicFunction
+                | DefineFunctions::ReadOnlyFunction
+                | DefineFunctions::PrivateFunction => self.function(list),
+                DefineFunctions::Constant
+                | DefineFunctions::PersistedVariable
+                | DefineFunctions::FungibleToken
+                | DefineFunctions::ImplTrait
+                | DefineFunctions::UseTrait
+                | DefineFunctions::NonFungibleToken => self.format_constant(list, indent),
+                DefineFunctions::Map => self.format_map(list, indent),
+                DefineFunctions::Trait => self.define_trait(list, indent),
+            }
+        } else {
+            self.format_inner_content(list, indent)
+        }
     }
 
     // (define-trait trait-name (
@@ -541,160 +516,166 @@ impl<'a> Aggregator<'a> {
     //   )
     //   (func2-name (arg1-type arg2-type ...) (return-type))
     // )
-    fn define_trait(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
-        let mut acc = "(define-trait ".to_string();
+    fn define_trait(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
-
-        // name
-        acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), indent));
-
-        // methods
+        let name = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
         let methods = exprs[2].match_list().unwrap();
 
         if methods.is_empty() {
             let is_multiline = exprs[1].span().end_line != exprs[2].span().start_line;
-
             if is_multiline {
-                // Preserve multiline format with potential trailing comments
-                acc.push('\n');
-                acc.push_str(&nested);
-                acc.push_str(&self.display_pse(&exprs[2], &nested));
-
-                // Check for trailing comments after the empty methods list
+                let mut parts: Vec<Doc> = vec![Doc::text("(define-trait "), Doc::verbatim(name)];
+                parts.push(Doc::indent(Doc::concat(vec![
+                    Doc::Hardline,
+                    Doc::verbatim(self.display_pse(&exprs[2], &nested)),
+                ])));
                 if exprs.len() > 3 && is_comment(&exprs[3]) {
-                    acc.push(' ');
-                    acc.push_str(&self.display_pse(&exprs[3], indent));
+                    parts.push(Doc::text(" "));
+                    parts.push(Doc::verbatim(self.display_pse(&exprs[3], indent)));
                 }
-
-                acc.push('\n');
+                parts.push(Doc::Hardline);
+                parts.push(Doc::text(")"));
+                return self.render_doc(&Doc::concat(parts), indent);
             } else {
-                acc.push_str(" ()");
+                return self.render_doc(
+                    &Doc::concat(vec![
+                        Doc::text("(define-trait "),
+                        Doc::verbatim(name),
+                        Doc::text(" ())"),
+                    ]),
+                    indent,
+                );
             }
-
-            acc.push(')');
-            return acc;
         }
 
-        acc.push_str(" (");
-        acc.push('\n');
-        acc.push_str(&nested);
+        let double_indent = nested.indented(&self.indentation_str);
+        let mut method_parts: Vec<Doc> = Vec::new();
 
         let mut iter = methods.iter().peekable();
         while let Some(expr) = iter.next() {
             let trailing = get_trailing_comment(expr, &mut iter);
 
             if let Some(method_list) = expr.match_list() {
-                acc.push('(');
+                let mut method_doc: Vec<Doc> = vec![Doc::text("(")];
 
-                // method name
                 if let Some(method_name) = method_list.first() {
-                    acc.push_str(&self.display_pse(method_name, indent));
+                    method_doc.push(Doc::verbatim(self.display_pse(method_name, indent)));
                 }
 
-                let double_indent = nested.indented(&self.indentation_str);
-
                 let mut items_iter = method_list.iter().skip(1).peekable();
-
                 while let Some(arg) = items_iter.next() {
                     if let Some(element_list) = arg.match_list() {
-                        // Found either args or return type
-                        acc.push('\n');
-                        acc.push_str(&double_indent);
-                        acc.push_str(&self.display_list(element_list, &double_indent));
+                        method_doc.push(Doc::Hardline);
+                        method_doc.push(Doc::verbatim(
+                            self.display_list(element_list, &double_indent),
+                        ));
 
                         if let Some(next_item) = items_iter.peek() {
                             if is_comment(next_item) {
                                 let count =
                                     next_item.span().start_column - arg.span().end_column - 1;
-                                push_spaces(&mut acc, count);
-                                acc.push_str(&self.display_pse(next_item, indent));
+                                let mut comment_text = String::new();
+                                push_spaces(&mut comment_text, count);
+                                comment_text.push_str(&self.display_pse(next_item, indent));
+                                method_doc.push(Doc::verbatim(comment_text));
                                 items_iter.next();
                             }
                         }
                     } else if is_comment(arg) {
-                        // standalone comments
-                        acc.push('\n');
-                        acc.push_str(&double_indent);
-                        acc.push_str(&self.display_pse(arg, indent));
+                        method_doc.push(Doc::Hardline);
+                        method_doc.push(Doc::verbatim(self.display_pse(arg, indent)));
                     }
                 }
 
                 if let Some(comment) = trailing {
                     if let Some(last_item) = method_list.last() {
                         let count = comment.span().start_column - last_item.span().end_column - 1;
-                        push_spaces(&mut acc, count);
-                        acc.push_str(&self.display_pse(comment, indent));
+                        let mut comment_text = String::new();
+                        push_spaces(&mut comment_text, count);
+                        comment_text.push_str(&self.display_pse(comment, indent));
+                        method_doc.push(Doc::verbatim(comment_text));
                     }
                 }
 
-                acc.push('\n');
-                acc.push_str(&nested);
-                acc.push(')');
+                // method_doc items are at double_indent level; wrap in indent(indent(...))
+                method_parts.push(Doc::indent(Doc::concat(method_doc)));
+                method_parts.push(Doc::Hardline);
+                method_parts.push(Doc::text(")"));
 
                 if iter.peek().is_some() {
-                    acc.push('\n');
-                    acc.push_str(&nested);
+                    method_parts.push(Doc::Hardline);
                 }
             }
         }
 
-        acc.push('\n');
-        acc.push_str("))");
-        acc
+        let doc = Doc::concat(vec![
+            Doc::text("(define-trait "),
+            Doc::verbatim(name),
+            Doc::text(" ("),
+            Doc::indent(Doc::concat(vec![Doc::Hardline, Doc::concat(method_parts)])),
+            Doc::Hardline,
+            Doc::text("))"),
+        ]);
+        self.render_doc(&doc, indent)
     }
 
-    fn format_constant(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_constant(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let func_type = self.display_pse(exprs.first().unwrap(), &Indent::empty());
-        let mut acc = format!("({func_type} ");
+        let mut parts: Vec<Doc> = vec![Doc::text(format!("({func_type} "))];
         let mut iter = exprs[1..].iter().peekable();
         while let Some(expr) = iter.next() {
             let trailing = get_trailing_comment(expr, &mut iter);
-            self.check_and_cache_ignored_expression(
-                expr,
-                iter.peek().copied(),
-                self.source,
-                indent,
-            );
-            acc.push_str(&self.format_source_exprs(slice::from_ref(expr), indent));
+            self.check_and_cache_ignored(expr, iter.peek().copied());
+            parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(expr), indent),
+            ));
             if iter.peek().is_some() {
-                acc.push(' ');
+                parts.push(Doc::text(" "));
             }
-            self.append_trailing_comment(&mut acc, trailing, indent);
+            if let Some(comment) = trailing {
+                parts.push(Doc::text(" "));
+                parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+            }
         }
-        acc.push(')');
-        acc
+        parts.push(Doc::text(")"));
+        self.render_doc(&Doc::concat(parts), indent)
     }
 
-    fn format_map(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_map(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let func_type = self.display_pse(exprs.first().unwrap(), &Indent::empty());
-        let mut acc = format!("({func_type} ");
         let nested = indent.indented(&self.indentation_str);
-        acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), indent));
+        let name = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
+
+        let mut body_parts: Vec<Doc> = Vec::new();
         let mut iter = exprs[2..].iter().peekable();
         while let Some(expr) = iter.next() {
             let trailing = get_trailing_comment(expr, &mut iter);
-            self.check_and_cache_ignored_expression(
-                expr,
-                iter.peek().copied(),
-                self.source,
-                &nested,
-            );
+            self.check_and_cache_ignored(expr, iter.peek().copied());
 
-            acc.push('\n');
-            acc.push_str(&nested);
-            acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-            self.append_trailing_comment(&mut acc, trailing, indent);
+            body_parts.push(Doc::Hardline);
+            body_parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(expr), &nested),
+            ));
+            if let Some(comment) = trailing {
+                body_parts.push(Doc::text(" "));
+                body_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+            }
         }
-        acc.push('\n');
-        acc.push_str(indent);
-        acc.push(')');
-        acc
+
+        let doc = Doc::concat(vec![
+            Doc::text(format!("({func_type} ")),
+            Doc::verbatim(name),
+            Doc::indent(Doc::concat(body_parts)),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
+        self.render_doc(&doc, indent)
     }
 
     // *begin* never on one line
-    fn format_begin(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
-        let mut acc = "(begin".to_string();
+    fn format_begin(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
+        let mut body_parts: Vec<Doc> = Vec::new();
 
         let mut iter = exprs.get(1..).unwrap_or_default().iter().peekable();
         let mut prev_end_line = None;
@@ -702,35 +683,39 @@ impl<'a> Aggregator<'a> {
         while let Some(expr) = iter.next() {
             let trailing = get_trailing_comment(expr, &mut iter);
 
-            // Add extra newlines based on original blank lines (limit to 1 consecutive blank lines)
-            push_blank_lines(&mut acc, prev_end_line, expr.span().start_line);
+            // Preserve at most one blank line between expressions
+            if has_blank_line(prev_end_line, expr.span().start_line) {
+                body_parts.push(Doc::BlankLine);
+            } else {
+                body_parts.push(Doc::Hardline);
+            }
 
-            self.check_and_cache_ignored_expression(
-                expr,
-                iter.peek().copied(),
-                self.source,
-                &nested,
-            );
+            self.check_and_cache_ignored(expr, iter.peek().copied());
 
-            // begin body
-            acc.push('\n');
-            acc.push_str(&nested);
-            acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-            self.append_trailing_comment(&mut acc, trailing, indent);
+            let formatted = self.format_source_exprs(slice::from_ref(expr), &nested);
+            body_parts.push(Doc::verbatim(formatted));
+
+            if let Some(comment) = trailing {
+                body_parts.push(Doc::text(" "));
+                body_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+            }
 
             prev_end_line = Some(expr.span().end_line);
         }
-        acc.push('\n');
-        acc.push_str(indent);
-        acc.push(')');
-        acc
+
+        let doc = Doc::concat(vec![
+            Doc::text("(begin"),
+            Doc::indent(Doc::concat(body_parts)),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
+        self.render_doc(&doc, indent)
     }
 
     // formats (and ..) and (or ...)
     // if given more than BOOLEAN_BREAK_LIMIT expressions it will break it onto new lines
-    fn format_booleans(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_booleans(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let func_type = self.display_pse(exprs.first().unwrap(), indent);
-        let mut acc = format!("({func_type}");
         let nested = indent.indented(&self.indentation_str);
         // Estimate whether the expression fits on a single line
         let mut flat_width: usize = indent.len() + 1 + func_type.len() + 1; // "(or " + ")"
@@ -747,228 +732,257 @@ impl<'a> Aggregator<'a> {
             || contains_comments(&exprs[1..])
             || has_multiline_arg
             || flat_width > self.settings.max_line_length;
+
         let mut iter = exprs.get(1..).unwrap_or_default().iter().peekable();
         let mut prev_end_line = None;
+        let mut body_parts: Vec<Doc> = Vec::new();
 
         if break_up {
             while let Some(expr) = iter.next() {
                 let trailing = get_trailing_comment(expr, &mut iter);
-                self.check_and_cache_ignored_expression(
-                    expr,
-                    iter.peek().copied(),
-                    self.source,
-                    &nested,
-                );
+                self.check_and_cache_ignored(expr, iter.peek().copied());
 
-                // Add extra newlines based on original blank lines (limit to 1 consecutive blank lines)
-                push_blank_lines(&mut acc, prev_end_line, expr.span().start_line);
-
-                acc.push('\n');
-                acc.push_str(&nested);
-                acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-                self.append_trailing_comment(&mut acc, trailing, indent);
-
+                if has_blank_line(prev_end_line, expr.span().start_line) {
+                    body_parts.push(Doc::BlankLine);
+                } else {
+                    body_parts.push(Doc::Hardline);
+                }
+                body_parts.push(Doc::verbatim(
+                    self.format_source_exprs(slice::from_ref(expr), &nested),
+                ));
+                if let Some(comment) = trailing {
+                    body_parts.push(Doc::text(" "));
+                    body_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+                }
                 prev_end_line = Some(expr.span().end_line);
             }
+
+            let doc = Doc::concat(vec![
+                Doc::text(format!("({func_type}")),
+                Doc::indent(Doc::concat(body_parts)),
+                Doc::Hardline,
+                Doc::text(")"),
+            ]);
+            self.render_doc(&doc, indent)
         } else {
             while let Some(expr) = iter.next() {
                 let trailing = get_trailing_comment(expr, &mut iter);
-                self.check_and_cache_ignored_expression(
-                    expr,
-                    iter.peek().copied(),
-                    self.source,
-                    indent,
-                );
-                acc.push(' ');
-                acc.push_str(&self.format_source_exprs(slice::from_ref(expr), indent));
+                self.check_and_cache_ignored(expr, iter.peek().copied());
+                body_parts.push(Doc::text(" "));
+                body_parts.push(Doc::verbatim(
+                    self.format_source_exprs(slice::from_ref(expr), indent),
+                ));
                 if let Some(comment) = trailing {
-                    acc.push(' ');
-                    acc.push_str(&self.display_pse(comment, indent));
-                    acc.push('\n');
-                    acc.push_str(&nested)
+                    body_parts.push(Doc::text(" "));
+                    body_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+                    body_parts.push(Doc::Hardline);
                 }
             }
+
+            let doc = Doc::concat(vec![
+                Doc::text(format!("({func_type}")),
+                Doc::concat(body_parts),
+                Doc::text(")"),
+            ]);
+            self.render_doc(&doc, indent)
         }
-        if break_up {
-            acc.push('\n');
-            acc.push_str(indent);
-        }
-        acc.push(')');
-        acc
     }
 
-    fn format_if(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_if(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let opening = exprs.first().unwrap();
         let func_type = self.display_pse(opening, indent);
         let nested = indent.indented(&self.indentation_str);
 
-        let mut acc = format!("({func_type} ");
+        let mut body_parts: Vec<Doc> = Vec::new();
         let mut iter = exprs[1..].iter().peekable();
         let mut index = 0;
         let mut prev_end_line = None;
 
         while let Some(expr) = iter.next() {
             let trailing = get_trailing_comment(expr, &mut iter);
-            self.check_and_cache_ignored_expression(
-                expr,
-                iter.peek().copied(),
-                self.source,
-                &nested,
-            );
+            self.check_and_cache_ignored(expr, iter.peek().copied());
 
-            // Add extra newlines based on original blank lines (limit to 1 consecutive blank lines)
-            push_blank_lines(&mut acc, prev_end_line, expr.span().start_line);
-
-            if index > 0 {
-                acc.push('\n');
-                acc.push_str(&nested);
+            if index == 0 {
+                // Condition goes on the same line as (if
+                body_parts.push(Doc::text(" "));
+            } else if has_blank_line(prev_end_line, expr.span().start_line) {
+                body_parts.push(Doc::BlankLine);
+            } else {
+                body_parts.push(Doc::Hardline);
             }
-            acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &nested));
-            self.append_trailing_comment(&mut acc, trailing, indent);
+
+            body_parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(expr), &nested),
+            ));
+
+            if let Some(comment) = trailing {
+                body_parts.push(Doc::text(" "));
+                body_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+            }
 
             index += 1;
             prev_end_line = Some(expr.span().end_line);
         }
-        acc.push('\n');
-        acc.push_str(indent);
-        acc.push(')');
 
-        acc
+        let doc = Doc::concat(vec![
+            Doc::text(format!("({func_type}")),
+            Doc::indent(Doc::concat(body_parts)),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
+        self.render_doc(&doc, indent)
     }
 
-    fn format_let(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
-        let mut acc = "(let (".to_string();
+    fn format_let(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
+        let mut parts: Vec<Doc> = vec![Doc::text("(let (")];
 
         if let Some(args) = exprs[1].match_list() {
             if args.len() == 1 {
-                acc.push_str(&self.format_source_exprs(slice::from_ref(&args[0]), &nested));
-                acc.push(')');
+                parts.push(Doc::verbatim(
+                    self.format_source_exprs(slice::from_ref(&args[0]), &nested),
+                ));
+                parts.push(Doc::text(")"));
             } else {
                 let double_indent = nested.indented(&self.indentation_str);
+                let mut binding_parts: Vec<Doc> = Vec::new();
                 let mut iter = args.iter().peekable();
                 while let Some(arg) = iter.next() {
                     let trailing = get_trailing_comment(arg, &mut iter);
-                    self.check_and_cache_ignored_expression(
-                        arg,
-                        iter.peek().copied(),
-                        self.source,
-                        &nested,
-                    );
-                    acc.push('\n');
-                    acc.push_str(&double_indent);
-                    acc.push_str(&self.format_source_exprs(slice::from_ref(arg), &double_indent));
-                    self.append_trailing_comment(&mut acc, trailing, indent);
+                    self.check_and_cache_ignored(arg, iter.peek().copied());
+                    binding_parts.push(Doc::Hardline);
+                    binding_parts.push(Doc::verbatim(
+                        self.format_source_exprs(slice::from_ref(arg), &double_indent),
+                    ));
+                    if let Some(comment) = trailing {
+                        binding_parts.push(Doc::text(" "));
+                        binding_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+                    }
                 }
-                // close the args paren
-                acc.push('\n');
-                acc.push_str(indent);
-                acc.push_str(&self.indentation_str);
-                acc.push(')');
+                // Double-indent for bindings, close paren at single-indent
+                parts.push(Doc::indent(Doc::concat(vec![
+                    Doc::indent(Doc::concat(binding_parts)),
+                    Doc::Hardline,
+                    Doc::text(")"),
+                ])));
             }
         }
-        // start the let body
+
+        // let body
+        let mut body_parts: Vec<Doc> = Vec::new();
         let mut prev_end_line = None;
         let body_exprs = exprs.get(2..).unwrap_or_default();
         for (i, e) in body_exprs.iter().enumerate() {
-            // Add extra newlines based on original blank lines (limit to 1 consecutive blank lines)
-            push_blank_lines(&mut acc, prev_end_line, e.span().start_line);
-            self.check_and_cache_ignored_expression(e, body_exprs.get(i + 1), self.source, &nested);
-
-            acc.push('\n');
-            acc.push_str(&nested);
-            acc.push_str(&self.format_source_exprs(slice::from_ref(e), &nested));
-
+            if has_blank_line(prev_end_line, e.span().start_line) {
+                body_parts.push(Doc::BlankLine);
+            } else {
+                body_parts.push(Doc::Hardline);
+            }
+            self.check_and_cache_ignored(e, body_exprs.get(i + 1));
+            body_parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(e), &nested),
+            ));
             prev_end_line = Some(e.span().end_line);
         }
-        acc.push('\n');
-        acc.push_str(indent);
-        acc.push(')');
-        acc
+        parts.push(Doc::indent(Doc::concat(body_parts)));
+        parts.push(Doc::Hardline);
+        parts.push(Doc::text(")"));
+
+        let doc = Doc::concat(parts);
+        self.render_doc(&doc, indent)
     }
 
     // * match *
     // always multiple lines
-    fn format_match(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
-        let mut acc = "(match ".to_string();
+    fn format_match(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
 
         // value to match on
-        acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), indent));
-        acc.push('\n');
+        let match_value = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
 
+        let mut branch_parts: Vec<Doc> = Vec::new();
         let mut iter = exprs[2..].iter().peekable();
         while let Some(branch) = iter.next() {
             let trailing = get_trailing_comment(branch, &mut iter);
-            self.check_and_cache_ignored_expression(
-                branch,
-                iter.peek().copied(),
-                self.source,
-                &nested,
-            );
+            self.check_and_cache_ignored(branch, iter.peek().copied());
             let is_binding = branch.match_list().is_none() && iter.peek().is_some();
-            acc.push_str(&nested);
-            acc.push_str(&self.format_source_exprs(slice::from_ref(branch), &nested));
+
+            branch_parts.push(Doc::Hardline);
+            branch_parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(branch), &nested),
+            ));
 
             // If this is a binding pattern, add the next expression on the same line
             if is_binding {
                 if let Some(expr_part) = iter.next() {
                     let expr_trailing = get_trailing_comment(expr_part, &mut iter);
-                    acc.push(' ');
-                    acc.push_str(&self.format_source_exprs(slice::from_ref(expr_part), &nested));
-                    self.append_trailing_comment(&mut acc, expr_trailing, indent);
+                    branch_parts.push(Doc::text(" "));
+                    branch_parts.push(Doc::verbatim(
+                        self.format_source_exprs(slice::from_ref(expr_part), &nested),
+                    ));
+                    if let Some(comment) = expr_trailing {
+                        branch_parts.push(Doc::text(" "));
+                        branch_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+                    }
                 }
             }
-            self.append_trailing_comment(&mut acc, trailing, indent);
-
-            if iter.peek().is_some() {
-                acc.push('\n');
+            if let Some(comment) = trailing {
+                branch_parts.push(Doc::text(" "));
+                branch_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
             }
         }
-        acc.push('\n');
-        acc.push_str(indent);
-        acc.push(')');
-        acc
+
+        let doc = Doc::concat(vec![
+            Doc::text("(match "),
+            Doc::verbatim(match_value),
+            Doc::indent(Doc::concat(branch_parts)),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
+        self.render_doc(&doc, indent)
     }
 
     /// Special case for match with comments in line.
     /// aligns all bindings and values
-    fn match_with_comments(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
-        let mut acc = "(match ".to_string();
+    fn match_with_comments(
+        &mut self,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
         let nested = indent.indented(&self.indentation_str);
 
         // value to match on
-        acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), indent));
-        // branches evenly spaced
+        let match_value = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
 
+        let mut branch_parts: Vec<Doc> = Vec::new();
         let mut iter = exprs[2..].iter().peekable();
         while let Some(branch) = iter.next() {
             let trailing = get_trailing_comment(branch, &mut iter);
-            self.check_and_cache_ignored_expression(
-                branch,
-                iter.peek().copied(),
-                self.source,
-                &nested,
-            );
-            acc.push('\n');
-            acc.push_str(&nested);
-            acc.push_str(&self.format_source_exprs(slice::from_ref(branch), &nested));
-            self.append_trailing_comment(&mut acc, trailing, indent);
+            self.check_and_cache_ignored(branch, iter.peek().copied());
+            branch_parts.push(Doc::Hardline);
+            branch_parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(branch), &nested),
+            ));
+            if let Some(comment) = trailing {
+                branch_parts.push(Doc::text(" "));
+                branch_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+            }
         }
-        acc.push('\n');
-        acc.push_str(indent);
-        acc.push(')');
-        acc
+
+        let doc = Doc::concat(vec![
+            Doc::text("(match "),
+            Doc::verbatim(match_value),
+            Doc::indent(Doc::concat(branch_parts)),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
+        self.render_doc(&doc, indent)
     }
 
     /// Format a list of expressions as `(item1 item2 ...)`.
     /// Breaks to multi-line if any item has a trailing comment or
     /// the first-line width exceeds `max_line_length`.
-    fn display_list(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
-        let nested = indent.indented(&self.indentation_str);
-        let mut acc = "(".to_string();
-
-        // Format each item and collect with optional trailing comments
+    fn display_list(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         struct Item {
             text: String,
             has_comment: bool,
@@ -977,12 +991,7 @@ impl<'a> Aggregator<'a> {
         let mut iter = exprs.iter().peekable();
         while let Some(item) = iter.next() {
             let trailing = get_trailing_comment(item, &mut iter);
-            self.check_and_cache_ignored_expression(
-                item,
-                iter.peek().copied(),
-                self.source,
-                indent,
-            );
+            self.check_and_cache_ignored(item, iter.peek().copied());
             let mut text = self.format_source_exprs(slice::from_ref(item), indent);
             let has_comment = trailing.is_some();
             if let Some(comment) = trailing {
@@ -1004,96 +1013,109 @@ impl<'a> Aggregator<'a> {
             + items.len().saturating_sub(1); // spaces between items
         let should_break = has_any_comment || first_line_width + 1 > self.settings.max_line_length;
 
-        if should_break {
-            acc.push('\n');
-            for (i, item) in items.iter().enumerate() {
-                acc.push_str(&nested);
-                acc.push_str(&item.text);
-                if i + 1 < items.len() {
-                    acc.push('\n');
+        let doc = if should_break {
+            let mut inner_parts: Vec<Doc> = Vec::new();
+            for (i, item) in items.into_iter().enumerate() {
+                if i > 0 {
+                    inner_parts.push(Doc::Hardline);
                 }
+                inner_parts.push(Doc::verbatim(item.text));
             }
-            acc.push('\n');
-            acc.push_str(indent);
+            Doc::concat(vec![
+                Doc::text("("),
+                Doc::indent(Doc::concat(vec![Doc::Hardline, Doc::concat(inner_parts)])),
+                Doc::Hardline,
+                Doc::text(")"),
+            ])
         } else {
-            for (i, item) in items.iter().enumerate() {
-                acc.push_str(&item.text);
-                if i + 1 < items.len() {
-                    acc.push(' ');
+            let mut inner_parts: Vec<Doc> = Vec::new();
+            for (i, item) in items.into_iter().enumerate() {
+                if i > 0 {
+                    inner_parts.push(Doc::text(" "));
                 }
+                inner_parts.push(Doc::verbatim(item.text));
             }
-        }
-        acc.push(')');
-        acc
+            Doc::concat(vec![
+                Doc::text("("),
+                Doc::concat(inner_parts),
+                Doc::text(")"),
+            ])
+        };
+        self.render_doc(&doc, indent)
     }
 
-    fn format_restrict_assets(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
-        let mut acc = "(restrict-assets? ".to_string();
+    fn format_restrict_assets(
+        &mut self,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
         let nested = indent.indented(&self.indentation_str);
+        let owner = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
 
-        // asset-owner
-        acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), indent));
+        let mut parts: Vec<Doc> = vec![Doc::text("(restrict-assets? "), Doc::verbatim(owner)];
 
         // allowances
         if let Some(allowances_list) = exprs.get(2) {
             if let Some(allowances) = allowances_list.match_list() {
                 if allowances.len() == 1 {
-                    // Single allowance, format on single line
-                    acc.push(' ');
-                    acc.push_str(
-                        &self.format_source_exprs(slice::from_ref(allowances_list), indent),
-                    );
+                    parts.push(Doc::text(" "));
+                    parts.push(Doc::verbatim(
+                        self.format_source_exprs(slice::from_ref(allowances_list), indent),
+                    ));
                 } else {
-                    // Multiple allowances, format like let bind
-                    acc.push(' ');
-                    acc.push('(');
                     let double_indent = nested.indented(&self.indentation_str);
+                    let mut allowance_parts: Vec<Doc> = Vec::new();
                     let mut iter = allowances.iter().peekable();
                     while let Some(allowance) = iter.next() {
                         let trailing = get_trailing_comment(allowance, &mut iter);
-                        self.check_and_cache_ignored_expression(
-                            allowance,
-                            iter.peek().copied(),
-                            self.source,
-                            &nested,
-                        );
-                        acc.push('\n');
-                        acc.push_str(&double_indent);
-                        acc.push_str(
-                            &self.format_source_exprs(slice::from_ref(allowance), &double_indent),
-                        );
-                        self.append_trailing_comment(&mut acc, trailing, indent);
+                        self.check_and_cache_ignored(allowance, iter.peek().copied());
+                        allowance_parts.push(Doc::Hardline);
+                        allowance_parts.push(Doc::verbatim(
+                            self.format_source_exprs(slice::from_ref(allowance), &double_indent),
+                        ));
+                        if let Some(comment) = trailing {
+                            allowance_parts.push(Doc::text(" "));
+                            allowance_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+                        }
                     }
-                    acc.push('\n');
-                    acc.push_str(&nested);
-                    acc.push(')');
+                    parts.push(Doc::text(" ("));
+                    parts.push(Doc::indent(Doc::concat(vec![
+                        Doc::indent(Doc::concat(allowance_parts)),
+                        Doc::Hardline,
+                        Doc::text(")"),
+                    ])));
                 }
             }
         }
 
         // body expressions
+        let mut body_parts: Vec<Doc> = Vec::new();
         let mut prev_end_line = None;
         let body_exprs = exprs.get(3..).unwrap_or_default();
         for (i, e) in body_exprs.iter().enumerate() {
-            push_blank_lines(&mut acc, prev_end_line, e.span().start_line);
-            self.check_and_cache_ignored_expression(e, body_exprs.get(i + 1), self.source, &nested);
-
-            acc.push('\n');
-            acc.push_str(&nested);
-            acc.push_str(&self.format_source_exprs(slice::from_ref(e), &nested));
-
+            if has_blank_line(prev_end_line, e.span().start_line) {
+                body_parts.push(Doc::BlankLine);
+            } else {
+                body_parts.push(Doc::Hardline);
+            }
+            self.check_and_cache_ignored(e, body_exprs.get(i + 1));
+            body_parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(e), &nested),
+            ));
             prev_end_line = Some(e.span().end_line);
         }
-        acc.push('\n');
-        acc.push_str(indent);
-        acc.push(')');
-        acc
+        parts.push(Doc::indent(Doc::concat(body_parts)));
+        parts.push(Doc::Hardline);
+        parts.push(Doc::text(")"));
+
+        let doc = Doc::concat(parts);
+        self.render_doc(&doc, indent)
     }
 
     /// Check if an expression represents a signed integer (for list type size detection)
     /// Only signed integers are valid for list type signatures: (list 10 <type>)
     /// Unsigned integers like u10 would be list elements, not type signatures
-    fn is_integer_expr(&self, expr: &PreSymbolicExpression) -> bool {
+    fn is_integer_expr(&mut self, expr: &PreSymbolicExpression) -> bool {
         match &expr.pre_expr {
             PreSymbolicExpressionType::AtomValue(ref value) => {
                 matches!(value, clarity::vm::types::Value::Int(_))
@@ -1103,7 +1125,7 @@ impl<'a> Aggregator<'a> {
     }
 
     /// Detect if this is a list type signature: (list <integer> <type>)
-    fn is_list_type_signature(&self, exprs: &[PreSymbolicExpression]) -> bool {
+    fn is_list_type_signature(&mut self, exprs: &[PreSymbolicExpression]) -> bool {
         // the 1st item is a different type than the 2nd
         exprs.len() >= 3
             && exprs[0].match_atom() == Some(&clarity::vm::ClarityName::from_literal("list"))
@@ -1113,8 +1135,8 @@ impl<'a> Aggregator<'a> {
 
     /// Estimate the length of a list if formatted on a single line
     fn estimate_list_length(
-        &self,
-        exprs: &[PreSymbolicExpression],
+        &mut self,
+        exprs: &'a [PreSymbolicExpression],
         start_index: usize,
         prefix_len: usize,
     ) -> usize {
@@ -1128,7 +1150,7 @@ impl<'a> Aggregator<'a> {
     }
 
     /// Estimate the width of key-value sugar `{ k1: v1, k2: v2 }` on a single line.
-    fn estimate_kv_width(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> usize {
+    fn estimate_kv_width(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> usize {
         let empty = Indent::empty();
         // "{ " + entries + " }"
         let mut width = indent.len() + 4;
@@ -1150,76 +1172,13 @@ impl<'a> Aggregator<'a> {
     }
 
     /// Format the size value for a list type signature, keeping it on the same line as "list"
-    fn format_list_type_size(
-        &self,
-        size_expr: &PreSymbolicExpression,
-        acc: &mut String,
-        indent: &Indent,
-        trailing_comment: Option<&PreSymbolicExpression>,
-    ) {
-        // Use display_pse directly to avoid preserving source line breaks
-        let size_value = self.display_pse(size_expr, indent);
-        // Ensure no newlines in the size value (defensive, but display_pse should be clean)
-        let size_value_clean = size_value.trim().replace('\n', " ").replace('\r', "");
-        acc.push_str(&size_value_clean);
-
-        // Handle trailing comment
-        if let Some(comment) = trailing_comment {
-            let count = comment
-                .span()
-                .start_column
-                .saturating_sub(size_expr.span().end_column + 1);
-            push_spaces(acc, count);
-            acc.push_str(&self.display_pse(comment, indent));
-        }
-    }
-
-    /// Helper to wrap an item to a new line if needed
-    fn maybe_wrap_item(
-        &self,
-        item: &PreSymbolicExpression,
-        iter: &mut Peekable<slice::Iter<'a, PreSymbolicExpression>>,
-        acc: &mut String,
-        space: &str,
-    ) {
-        let current_line_len = chars_since_last_newline(acc);
-        let empty = Indent::empty();
-        let item_display = self.display_pse(item, &empty);
-        let item_len = item_display.len();
-
-        // Check if adding this item and the next would exceed max_line_length
-        if let Some(next) = iter.peek() {
-            let next_display = self.display_pse(next, &empty);
-            let next_len = next_display.len();
-            // current line + space + this item + space + next item
-            let would_exceed =
-                (current_line_len + 1 + item_len + 1 + next_len) > self.settings.max_line_length;
-            if would_exceed {
-                acc.push('\n');
-                acc.push_str(space);
-            } else {
-                acc.push(' ');
-            }
-        } else {
-            // Last item, see if it fits
-            if (current_line_len + 1 + item_len) > self.settings.max_line_length {
-                acc.push('\n');
-                acc.push_str(space);
-            } else {
-                acc.push(' ');
-            }
-        }
-    }
-
-    fn format_list(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_list(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
         let mut start_index = 0;
-        let mut acc = "(".to_string();
 
         let is_list_cons = self.display_pse(&exprs[0], indent) == "list";
         if is_list_cons {
             start_index = 1;
-            acc.push_str("list");
         }
 
         let is_list_type_sig = self.is_list_type_signature(exprs);
@@ -1233,248 +1192,312 @@ impl<'a> Aggregator<'a> {
             indent.len() + estimated_len > self.settings.max_line_length
         };
 
-        // Add space or newline after "list" or opening paren
-        if is_multiline && !is_list_type_sig {
-            // For regular multiline lists, break after "list"
-            acc.push('\n');
-        } else if is_list_cons && exprs.len() > 1 {
-            // For single-line or type signatures, add space after "list"
-            acc.push(' ');
+        let spacing = if is_multiline { &nested } else { indent };
+
+        // Collect formatted items with optional trailing comments
+        struct ListItem {
+            text: String,
+            comment: Option<String>,
         }
+        let mut items: Vec<ListItem> = Vec::new();
+        let mut type_sig_size: Option<String> = None;
 
         let mut iter = exprs[start_index..].iter().peekable();
         let mut is_first_item = true;
-
-        // Normal handling for all other items
-        let spacing = if is_multiline { &nested } else { indent };
-
         while let Some(item) = iter.next() {
             let trailing = get_trailing_comment(item, &mut iter);
-            self.check_and_cache_ignored_expression(
-                item,
-                iter.peek().copied(),
-                self.source,
-                spacing,
-            );
-            // Special handling for first item in type signatures: keep "list" and size together
+            self.check_and_cache_ignored(item, iter.peek().copied());
+
+            // Special handling for first item in type signatures
             if is_multiline && is_first_item && is_list_type_sig {
-                // We already added a space after "list", so just add the size value directly
-                self.format_list_type_size(item, &mut acc, indent, trailing);
+                let size_value = self.display_pse(item, indent);
+                let size_clean = size_value.trim().replace('\n', " ").replace('\r', "");
+                let mut size_text = size_clean;
+                if let Some(comment) = trailing {
+                    let count = comment
+                        .span()
+                        .start_column
+                        .saturating_sub(item.span().end_column + 1);
+                    push_spaces(&mut size_text, count);
+                    size_text.push_str(&self.display_pse(comment, indent));
+                }
+                type_sig_size = Some(size_text);
                 is_first_item = false;
                 continue;
             }
-            let value = self.format_source_exprs(slice::from_ref(item), spacing);
 
-            // In multiline mode, check if we need to wrap to a new line before this item
-            if is_multiline {
-                if is_first_item {
-                    // We already added newline after "list", just add spacing
-                    acc.push_str(&nested);
-                } else {
-                    // For type signatures, always break before the type
-                    if is_list_type_sig {
-                        acc.push('\n');
-                        acc.push_str(&nested);
-                    } else {
-                        // Check if we need to wrap before this item
-                        self.maybe_wrap_item(item, &mut iter, &mut acc, &nested);
-                    }
-                }
-            } else if !is_first_item {
-                // Single-line
-                acc.push(' ');
-            }
-
-            acc.push_str(&value);
-            is_first_item = false;
-
-            if let Some(comment) = trailing {
-                let count = comment
+            let text = self.format_source_exprs(slice::from_ref(item), spacing);
+            let comment = trailing.map(|c| {
+                let count = c
                     .span()
                     .start_column
                     .saturating_sub(item.span().end_column + 1);
-                push_spaces(&mut acc, count);
-                acc.push_str(&self.display_pse(comment, indent));
-            }
+                let mut s = String::new();
+                push_spaces(&mut s, count);
+                s.push_str(&self.display_pse(c, indent));
+                s
+            });
+            items.push(ListItem { text, comment });
+            is_first_item = false;
         }
 
-        if is_multiline {
-            acc.push('\n');
-            acc.push_str(indent);
+        if !is_multiline {
+            // Single line
+            let mut parts: Vec<Doc> = Vec::new();
+            if is_list_cons {
+                parts.push(Doc::text("(list"));
+                if !items.is_empty() {
+                    parts.push(Doc::text(" "));
+                }
+            } else {
+                parts.push(Doc::text("("));
+            }
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    parts.push(Doc::text(" "));
+                }
+                parts.push(Doc::verbatim(&item.text));
+                if let Some(ref c) = item.comment {
+                    parts.push(Doc::verbatim(c));
+                }
+            }
+            parts.push(Doc::text(")"));
+            let result = self.render_doc(&Doc::concat(parts), indent);
+            let trimmed = t(&result);
+            if trimmed.len() == result.len() {
+                return result;
+            }
+            return trimmed.to_string();
         }
-        acc.push(')');
-        let trimmed = t(&acc);
-        if trimmed.len() == acc.len() {
-            acc
+
+        // Multiline
+        let mut parts: Vec<Doc> = Vec::new();
+        if is_list_cons {
+            parts.push(Doc::text("(list"));
+        } else {
+            parts.push(Doc::text("("));
+        }
+
+        if is_list_type_sig {
+            // Type sig: (list <size>\n  <type>\n)
+            if let Some(size_text) = type_sig_size {
+                parts.push(Doc::text(" "));
+                parts.push(Doc::verbatim(size_text));
+            }
+            let mut body: Vec<Doc> = Vec::new();
+            for item in &items {
+                body.push(Doc::Hardline);
+                body.push(Doc::verbatim(&item.text));
+                if let Some(ref c) = item.comment {
+                    body.push(Doc::verbatim(c));
+                }
+            }
+            parts.push(Doc::indent(Doc::concat(body)));
+        } else {
+            // Greedy wrapping with lookahead (matches old maybe_wrap_item behavior)
+            let mut body: Vec<Doc> = vec![Doc::Hardline];
+            let mut col = nested.len(); // column after first hardline + indent
+
+            for (i, item) in items.iter().enumerate() {
+                let item_doc = if let Some(ref c) = item.comment {
+                    Doc::concat(vec![Doc::verbatim(&item.text), Doc::verbatim(c)])
+                } else {
+                    Doc::verbatim(&item.text)
+                };
+
+                let is_multiline_item = item.text.contains('\n');
+
+                if i == 0 {
+                    body.push(item_doc);
+                    col = last_line_len(&item.text, col);
+                    if let Some(ref c) = item.comment {
+                        col += c.len();
+                    }
+                } else if is_multiline_item {
+                    // Multiline items always get their own line
+                    body.push(Doc::Hardline);
+                    body.push(item_doc);
+                    col = last_line_len(&item.text, nested.len());
+                    if let Some(ref c) = item.comment {
+                        col += c.len();
+                    }
+                } else {
+                    // Lookahead: check if this + next item fit on current line
+                    // Use full text length for next item (matches old maybe_wrap_item behavior)
+                    let item_len = item.text.len();
+                    let next_len = items.get(i + 1).map(|n| n.text.len());
+
+                    let would_exceed = if let Some(nl) = next_len {
+                        col + 1 + item_len + 1 + nl > self.settings.max_line_length
+                    } else {
+                        col + 1 + item_len > self.settings.max_line_length
+                    };
+
+                    if would_exceed {
+                        body.push(Doc::Hardline);
+                        col = nested.len();
+                    } else {
+                        body.push(Doc::text(" "));
+                        col += 1;
+                    }
+                    body.push(item_doc);
+                    col += item_len;
+                    if let Some(ref c) = item.comment {
+                        col += c.len();
+                    }
+                }
+            }
+            parts.push(Doc::indent(Doc::concat(body)));
+        }
+
+        parts.push(Doc::Hardline);
+        parts.push(Doc::text(")"));
+        let result = self.render_doc(&Doc::concat(parts), indent);
+        let trimmed = t(&result);
+        if trimmed.len() == result.len() {
+            result
         } else {
             trimmed.to_string()
         }
     }
 
     // used for { n1: 1 } syntax
-    fn format_key_value_sugar(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_key_value_sugar(
+        &mut self,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
         let nested = indent.indented(&self.indentation_str);
         let double_indent = nested.indented(&self.indentation_str);
         let over_2_kvs = without_comments_len(exprs) > 2;
-        let mut acc = "{".to_string();
 
-        // Use width estimation to break up complex values in maps
         let estimated_width = self.estimate_kv_width(exprs, indent);
         if over_2_kvs || estimated_width > self.settings.max_line_length {
-            acc.push('\n');
+            let mut entry_parts: Vec<Doc> = Vec::new();
             let mut iter = exprs.iter().peekable();
             while let Some(key) = iter.next() {
                 if is_comment(key) {
-                    acc.push_str(&nested);
-                    acc.push_str(&self.display_pse(key, indent));
-                    acc.push('\n');
+                    entry_parts.push(Doc::Hardline);
+                    entry_parts.push(Doc::verbatim(self.display_pse(key, indent)));
                     continue;
                 }
-                self.check_and_cache_ignored_expression(
-                    key,
-                    iter.peek().copied(),
-                    self.source,
-                    &nested,
-                );
+                self.check_and_cache_ignored(key, iter.peek().copied());
                 let key_str = self.format_source_exprs(slice::from_ref(key), &nested);
-                acc.push_str(&nested);
-                acc.push_str(&key_str);
-                acc.push(':');
                 if let Some(value) = iter.next() {
+                    entry_parts.push(Doc::Hardline);
                     if is_comment(value) {
-                        acc.push('\n');
-                        acc.push_str(&nested);
-                        acc.push_str(&self.indentation_str);
-                        acc.push_str(&self.display_pse(value, &nested));
-                        acc.push('\n');
-                        // Try to get the actual value after the comment
+                        entry_parts.push(Doc::verbatim(format!("{key_str}:")));
+                        // Comment between key and value
+                        entry_parts.push(Doc::indent(Doc::concat(vec![
+                            Doc::Hardline,
+                            Doc::verbatim(self.display_pse(value, &nested)),
+                        ])));
                         if let Some(actual_value) = iter.next() {
-                            // comment implies next indent level which we don't
-                            // want if this is a normal value
-                            let value_indent = if is_comment(value) {
-                                &double_indent
-                            } else {
-                                &nested
-                            };
                             let trailing = get_trailing_comment(actual_value, &mut iter);
                             let value_str = self
-                                .format_source_exprs(slice::from_ref(actual_value), value_indent);
-                            acc.push_str(value_indent);
-                            acc.push_str(&value_str);
-                            acc.push(',');
-
-                            // Add trailing comment if present
-                            self.append_trailing_comment(&mut acc, trailing, &nested);
+                                .format_source_exprs(slice::from_ref(actual_value), &double_indent);
+                            entry_parts.push(Doc::indent(Doc::concat(vec![
+                                Doc::Hardline,
+                                Doc::verbatim(format!("{value_str},")),
+                            ])));
+                            if let Some(comment) = trailing {
+                                entry_parts.push(Doc::text(" "));
+                                entry_parts.push(Doc::verbatim(self.display_pse(comment, &nested)));
+                            }
                         }
                     } else {
                         let trailing = get_trailing_comment(value, &mut iter);
-                        let value_indent = if is_comment(value) {
-                            &double_indent
-                        } else {
-                            &nested
-                        };
-                        self.check_and_cache_ignored_expression(
-                            value,
-                            iter.peek().copied(),
-                            self.source,
-                            value_indent,
-                        );
-                        // Pass the current indentation level to nested formatting
-                        let value_str =
-                            self.format_source_exprs(slice::from_ref(value), value_indent);
-                        acc.push(' ');
-                        acc.push_str(&value_str);
-                        acc.push(',');
-
-                        self.append_trailing_comment(&mut acc, trailing, indent);
+                        self.check_and_cache_ignored(value, iter.peek().copied());
+                        let value_str = self.format_source_exprs(slice::from_ref(value), &nested);
+                        entry_parts.push(Doc::verbatim(format!("{key_str}: {value_str},")));
+                        if let Some(comment) = trailing {
+                            entry_parts.push(Doc::text(" "));
+                            entry_parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+                        }
                     }
-                    acc.push('\n');
                 }
             }
-            acc.push_str(indent);
-        } else {
-            // for cases where we keep it on the same line with 1 k/v pair
-            let fkey = self.display_pse(&exprs[0], indent);
-            acc.push(' ');
-            acc.push_str(&fkey);
-            acc.push_str(": ");
-            acc.push_str(&self.format_source_exprs(slice::from_ref(&exprs[1]), indent));
-            acc.push(' ');
-        }
 
-        acc.push('}');
-        acc
+            let doc = Doc::concat(vec![
+                Doc::text("{"),
+                Doc::indent(Doc::concat(entry_parts)),
+                Doc::Hardline,
+                Doc::text("}"),
+            ]);
+            self.render_doc(&doc, indent)
+        } else {
+            let fkey = self.display_pse(&exprs[0], indent);
+            let fvalue = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
+            let doc = Doc::concat(vec![
+                Doc::text("{ "),
+                Doc::verbatim(fkey),
+                Doc::text(": "),
+                Doc::verbatim(fvalue),
+                Doc::text(" }"),
+            ]);
+            self.render_doc(&doc, indent)
+        }
     }
 
     // used for (tuple (n1  1)) syntax
     // Note: Converted to a { a: 1 } style map
-    // TODO: This should be rolled into format_key_value_sugar, but the PSE
-    // structure is different so it would take some finagling
-    fn format_key_value(&self, exprs: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_key_value(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let nested = indent.indented(&self.indentation_str);
-
-        let mut acc = String::with_capacity(64);
-        acc.push('{');
-
-        // for cases where we keep it on the same line with 1 k/v pair
         let multiline = exprs.len() > 1;
+
         if multiline {
-            acc.push('\n');
+            let mut entry_parts: Vec<Doc> = Vec::new();
             let mut iter = exprs.iter().peekable();
             while let Some(arg) = iter.next() {
                 let trailing = get_trailing_comment(arg, &mut iter);
-                self.check_and_cache_ignored_expression(
-                    arg,
-                    iter.peek().copied(),
-                    self.source,
-                    &nested,
-                );
+                self.check_and_cache_ignored(arg, iter.peek().copied());
                 let (key, value) = arg
                     .match_list()
                     .and_then(|list| list.split_first())
                     .unwrap();
                 let fkey = self.display_pse(key, &nested);
-
-                acc.push_str(&nested);
-                acc.push_str(&fkey);
-                acc.push_str(": ");
-                acc.push_str(&self.format_source_exprs(value, &nested));
-                acc.push(',');
-                self.append_trailing_comment(&mut acc, trailing, &nested);
-                acc.push('\n');
+                let fvalue = self.format_source_exprs(value, &nested);
+                entry_parts.push(Doc::Hardline);
+                entry_parts.push(Doc::verbatim(format!("{fkey}: {fvalue},")));
+                if let Some(comment) = trailing {
+                    entry_parts.push(Doc::text(" "));
+                    entry_parts.push(Doc::verbatim(self.display_pse(comment, &nested)));
+                }
             }
-            acc.push_str(indent);
+            let doc = Doc::concat(vec![
+                Doc::text("{"),
+                Doc::indent(Doc::concat(entry_parts)),
+                Doc::Hardline,
+                Doc::text("}"),
+            ]);
+            self.render_doc(&doc, indent)
         } else {
-            // for cases where we keep it on the same line with 1 k/v pair
             let (key, value) = exprs[0]
                 .match_list()
                 .and_then(|list| list.split_first())
                 .unwrap();
             let fkey = self.display_pse(key, indent);
-            acc.push(' ');
-            acc.push_str(&fkey);
-            acc.push_str(": ");
-            acc.push_str(&self.format_source_exprs(value, indent));
-            acc.push(' ');
+            let fvalue = self.format_source_exprs(value, indent);
+            let doc = Doc::concat(vec![
+                Doc::text("{ "),
+                Doc::verbatim(fkey),
+                Doc::text(": "),
+                Doc::verbatim(fvalue),
+                Doc::text(" }"),
+            ]);
+            self.render_doc(&doc, indent)
         }
-
-        acc.push('}');
-        acc
     }
 
     // This prints leaves of the PSE tree
-    fn display_pse(&self, pse: &PreSymbolicExpression, indent: &Indent) -> String {
+    fn display_pse(&mut self, pse: &'a PreSymbolicExpression, indent: &Indent) -> String {
         let key = (
             pse as *const PreSymbolicExpression as usize,
             indent.to_string(),
         );
 
-        let cached_result = {
-            let cache_ref = self.cache.borrow();
-            cache_ref.get(&key).cloned()
-        };
-        if let Some(result) = cached_result {
-            return result;
+        if let Some(result) = self.cache.get(&key) {
+            return result.clone();
         }
         let result = match pse.pre_expr {
             PreSymbolicExpressionType::Atom(ref value) => t(value.as_str()).to_string(),
@@ -1532,108 +1555,98 @@ impl<'a> Aggregator<'a> {
                 placeholder.to_string() // Placeholder is for if parsing fails
             }
         };
-        self.cache.borrow_mut().insert(key, result.clone());
+        self.cache.insert(key, result.clone());
 
         result
     }
 
-    // * functions
-
     // Top level define-<function> should have a line break above and after (except on first line)
-    // options always on new lines
-    // Functions Always on multiple lines, even if short
-    fn function(&self, exprs: &[PreSymbolicExpression]) -> String {
+    // Functions always on multiple lines, even if short
+    fn function(&mut self, exprs: &'a [PreSymbolicExpression]) -> String {
         let empty = Indent::empty();
         let func_type = self.display_pse(exprs.first().unwrap(), &empty);
-        let indentation = &self.indentation_str;
-        let one_indent = empty.indented(indentation);
+        let indentation = self.indentation_str.clone();
+        let one_indent = empty.indented(&indentation);
+        let args_indent = one_indent.indented(&indentation);
 
-        let mut acc = format!("({func_type} (");
+        let mut parts: Vec<Doc> = vec![Doc::text(format!("({func_type} ("))];
 
         // function name and arguments
         if let Some(def) = exprs.get(1).and_then(|f| f.match_list()) {
             if let Some((name, args)) = def.split_first() {
-                acc.push_str(&self.display_pse(name, &empty));
+                parts.push(Doc::verbatim(self.display_pse(name, &empty)));
 
-                let args_indent = one_indent.indented(indentation);
-
-                // Keep everything on one line if there's only one argument
                 if args.len() == 1 {
-                    acc.push(' ');
-                    acc.push_str(&self.format_source_exprs(slice::from_ref(&args[0]), &empty));
-                    acc.push(')');
+                    parts.push(Doc::text(" "));
+                    parts.push(Doc::verbatim(
+                        self.format_source_exprs(slice::from_ref(&args[0]), &empty),
+                    ));
+                    parts.push(Doc::text(")"));
                 } else {
+                    let mut arg_parts: Vec<Doc> = Vec::new();
                     let mut iter = args.iter().peekable();
                     let mut prev_end_line = 0u32;
                     while let Some(arg) = iter.next() {
                         let trailing = get_trailing_comment(arg, &mut iter);
-                        self.check_and_cache_ignored_expression(
-                            arg,
-                            iter.peek().copied(),
-                            self.source,
-                            &args_indent,
-                        );
-                        // Preserve comment line positions: add newline before arg when it's on a
-                        // different line than the previous (comments must never be moved), or when
-                        // it's a list arg (each gets own line), or when it's the first arg
+                        self.check_and_cache_ignored(arg, iter.peek().copied());
                         let need_newline = prev_end_line == 0
                             || arg.match_list().is_some()
                             || arg.span().start_line > prev_end_line;
                         if need_newline {
-                            acc.push('\n');
-                            acc.push_str(&args_indent);
+                            arg_parts.push(Doc::Hardline);
                         }
-                        if arg.match_list().is_some() {
-                            // expr args
-                            acc.push_str(
-                                &self.format_source_exprs(slice::from_ref(arg), &args_indent),
-                            )
-                        } else {
-                            // atom args (includes standalone comments)
-                            acc.push_str(
-                                &self.format_source_exprs(slice::from_ref(arg), &args_indent),
-                            )
-                        }
+                        arg_parts.push(Doc::verbatim(
+                            self.format_source_exprs(slice::from_ref(arg), &args_indent),
+                        ));
                         if let Some(comment) = trailing {
-                            acc.push(' ');
-                            acc.push_str(&self.display_pse(comment, &empty));
+                            arg_parts.push(Doc::text(" "));
+                            arg_parts.push(Doc::verbatim(self.display_pse(comment, &empty)));
                             prev_end_line = comment.span().end_line;
                         } else {
                             prev_end_line = arg.span().end_line;
                         }
                     }
-                    if args.is_empty() {
-                        acc.push(')');
+                    // Args at double indent
+                    parts.push(Doc::indent(Doc::indent(Doc::concat(arg_parts))));
+                    if !args.is_empty() {
+                        // Close args paren at single indent
+                        parts.push(Doc::indent(Doc::concat(vec![
+                            Doc::Hardline,
+                            Doc::text(")"),
+                        ])));
                     } else {
-                        acc.push('\n');
-                        acc.push_str(&one_indent);
-                        acc.push(')');
+                        parts.push(Doc::text(")"));
                     }
                 }
             }
         }
 
         // function body expressions
+        let mut body_parts: Vec<Doc> = Vec::new();
         let body_exprs = exprs.get(2..).unwrap_or_default();
         for (i, expr) in body_exprs.iter().enumerate() {
-            self.check_and_cache_ignored_expression(
-                expr,
-                body_exprs.get(i + 1),
-                self.source,
-                &one_indent,
-            );
-            acc.push('\n');
-            acc.push_str(&one_indent);
-            acc.push_str(&self.format_source_exprs(slice::from_ref(expr), &one_indent))
+            self.check_and_cache_ignored(expr, body_exprs.get(i + 1));
+            body_parts.push(Doc::Hardline);
+            body_parts.push(Doc::verbatim(
+                self.format_source_exprs(slice::from_ref(expr), &one_indent),
+            ));
         }
-        acc.push_str("\n)\n");
-        acc
+        parts.push(Doc::indent(Doc::concat(body_parts)));
+        parts.push(Doc::Hardline);
+        parts.push(Doc::text(")"));
+        parts.push(Doc::Hardline);
+
+        self.render_doc(&Doc::concat(parts), &empty)
     }
 
     /// Format a generic function call as `(fn-name arg1 arg2 ...)`.
     /// Items are placed on the current line if they fit, wrapped to the next
     /// line (with increased indentation) otherwise.
-    fn to_inner_content(&self, list: &[PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_inner_content(
+        &mut self,
+        list: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
         let mut result = String::new();
         let mut current_line_width = indent.len();
         let mut first_on_line = true;
@@ -1664,7 +1677,7 @@ impl<'a> Aggregator<'a> {
 
         for (i, expr) in list.iter().enumerate() {
             let indented = if first_on_line { &base_indent } else { indent };
-            self.check_and_cache_ignored_expression(expr, list.get(i + 1), self.source, indented);
+            self.check_and_cache_ignored(expr, list.get(i + 1));
             let formatted = self.format_source_exprs(slice::from_ref(expr), indented);
             let trimmed = t(&formatted);
             let expr_width = trimmed.len();
@@ -1725,6 +1738,10 @@ impl<'a> Aggregator<'a> {
     }
 }
 
+fn is_format_ignore(pse: &PreSymbolicExpression) -> bool {
+    matches!(&pse.pre_expr, PreSymbolicExpressionType::Comment(text) if text.contains(FORMAT_IGNORE_SYNTAX))
+}
+
 fn is_comment(pse: &PreSymbolicExpression) -> bool {
     matches!(pse.pre_expr, PreSymbolicExpressionType::Comment(_))
 }
@@ -1735,6 +1752,20 @@ fn without_comments_len(exprs: &[PreSymbolicExpression]) -> usize {
 /// Length of the first line of a (possibly multi-line) string.
 fn first_line_len(s: &str) -> usize {
     s.find('\n').unwrap_or(s.len())
+}
+
+/// After appending `s` to output at column `col`, return the new column.
+/// If `s` contains newlines, returns length of last line; otherwise `col + s.len()`.
+fn last_line_len(s: &str, col: usize) -> usize {
+    if let Some(pos) = s.rfind('\n') {
+        s.len() - pos - 1
+    } else {
+        col + s.len()
+    }
+}
+
+fn is_define_fn(atom_name: &str) -> bool {
+    DefineFunctions::lookup_by_name(atom_name).is_some()
 }
 
 fn is_same_line(expr1: &PreSymbolicExpression, expr2: &PreSymbolicExpression) -> bool {
@@ -1795,25 +1826,10 @@ fn comment_piece(text: &str, pse: &PreSymbolicExpression) -> String {
     }
 }
 
-fn chars_since_last_newline(acc: &str) -> usize {
-    if let Some(last_newline_pos) = acc.rfind('\n') {
-        acc.len() - last_newline_pos - 1
-    } else {
-        acc.len()
-    }
-}
-
-// Helper to insert at most one blank line if there are blank lines between two expressions
-fn push_blank_lines(acc: &mut String, prev_end_line: Option<u32>, curr_start_line: u32) {
-    if let Some(prev_end) = prev_end_line {
-        if curr_start_line > prev_end {
-            let blank_lines = curr_start_line.saturating_sub(prev_end + 1);
-            let extra_newlines = std::cmp::min(blank_lines, 1);
-            for _ in 0..extra_newlines {
-                acc.push('\n');
-            }
-        }
-    }
+/// Returns true if there's at least one blank line between the previous expression's
+/// end line and the current expression's start line.
+fn has_blank_line(prev_end_line: Option<u32>, curr_start_line: u32) -> bool {
+    prev_end_line.is_some_and(|prev_end| curr_start_line > prev_end + 1)
 }
 
 #[cfg(test)]
@@ -2822,7 +2838,7 @@ mod tests_formatter {
                 StackDepthLimits::for_epoch(DEFAULT_EPOCH),
             )
             .unwrap();
-            let aggregator = Aggregator::new(&settings, &exprs, Some(src));
+            let mut aggregator = Aggregator::new(&settings, &exprs, Some(src));
             let list_exprs = exprs[0].match_list().unwrap();
             assert_eq!(aggregator.is_list_type_signature(list_exprs), expected);
         }
