@@ -366,29 +366,25 @@ impl ProjectManifest {
         let cache_location = paths::try_parse_path(&cache_dir, Some(root_path))
             .ok_or_else(|| format!("unable to parse path {cache_dir}"))?;
 
-        let mut override_boot_contracts_source = BTreeMap::new();
-        if let Some(overrides) = project_manifest_file.project.override_boot_contracts_source {
-            for (contract_name, contract_path) in overrides.iter() {
-                override_boot_contracts_source.insert(contract_name.clone(), contract_path.clone());
-            }
-        }
-
         let boot_contracts = BOOT_CONTRACTS_NAMES
             .iter()
             .map(|n| n.to_string())
             .collect::<Vec<_>>();
 
-        // if an override doesn't correspond with one of the boot contracts, we warn and discard that override
-        let mut valid_override_boot_contracts_source = BTreeMap::new();
-        for (contract_name, contract_path) in override_boot_contracts_source.iter() {
-            if !boot_contracts.contains(contract_name) {
-                eprintln!("Warning: {contract_name} custom boot contract was not included because it's not part of the set of default boot contracts");
-                eprintln!("Available boot contracts: {boot_contracts:?}");
-            } else {
-                valid_override_boot_contracts_source
-                    .insert(contract_name.clone(), contract_path.clone());
-            }
-        }
+        let override_boot_contracts_source = project_manifest_file
+            .project
+            .override_boot_contracts_source
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, path)| {
+                if !boot_contracts.contains(&name) {
+                    return Err(format!(
+                        "'{name}' is not a valid boot contract. Available boot contracts: {boot_contracts:?}"
+                    ));
+                }
+                Ok((name, path))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
 
         let project = ProjectConfig {
             name: project_name,
@@ -401,7 +397,7 @@ impl ProjectManifest {
             telemetry: project_manifest_file.project.telemetry.unwrap_or(false),
             cache_location,
             boot_contracts,
-            override_boot_contracts_source: valid_override_boot_contracts_source,
+            override_boot_contracts_source,
         };
 
         let mut config = ProjectManifest {
@@ -693,28 +689,13 @@ mod tests {
         let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
         let location = PathBuf::from("/tmp/clarinet.toml");
 
-        let manifest =
-            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
-
-        // Only valid contracts should be included
-        assert_eq!(manifest.project.override_boot_contracts_source.len(), 2);
-        assert_eq!(
-            manifest.project.override_boot_contracts_source.get("pox-4"),
-            Some(&"./custom-boot-contracts/pox-4.clar".to_string())
-        );
-        assert_eq!(
-            manifest.project.override_boot_contracts_source.get("costs"),
-            Some(&"./custom-boot-contracts/costs.clar".to_string())
-        );
-        // Invalid contract should not be included
-        assert_eq!(
-            manifest.project.override_boot_contracts_source.get("pox-x"),
-            None
-        );
+        let err = ProjectManifest::from_project_manifest_file(manifest_file, &location, false)
+            .expect_err("unknown boot contract names must fail loudly");
+        assert!(err.contains("pox-x"), "error mentions the bad name: {err}");
     }
 
     #[test]
-    fn test_warning_message_for_invalid_boot_contract() {
+    fn test_error_for_invalid_boot_contract() {
         let manifest_toml = toml! {
             [project]
             name = "test-project"
@@ -725,14 +706,8 @@ mod tests {
         let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
         let location = PathBuf::from("/tmp/clarinet.toml");
 
-        let manifest =
-            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
-
-        // Verify that the invalid contract was filtered out
-        assert_eq!(manifest.project.override_boot_contracts_source.len(), 0);
-        assert_eq!(
-            manifest.project.override_boot_contracts_source.get("pox-x"),
-            None
-        );
+        let err = ProjectManifest::from_project_manifest_file(manifest_file, &location, false)
+            .expect_err("unknown boot contract names must fail loudly");
+        assert!(err.contains("pox-x"), "error mentions the bad name: {err}");
     }
 }
