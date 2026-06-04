@@ -250,24 +250,26 @@ impl ProjectManifest {
             allow_remote_data_fetching,
         )?;
 
-        let paths: Vec<String> = manifest
+        let resolved_paths: BTreeMap<String, String> = manifest
             .project
             .override_boot_contracts_source
-            .values()
-            .map(|entry| {
-                entry
-                    .resolve_path(&manifest.root_dir)
-                    .to_string_lossy()
-                    .into_owned()
+            .iter()
+            .map(|(name, entry)| {
+                (
+                    name.clone(),
+                    entry
+                        .resolve_path(&manifest.root_dir)
+                        .to_string_lossy()
+                        .into_owned(),
+                )
             })
             .collect();
-        let sources = file_accessor.read_files(paths).await?;
+        let sources = file_accessor
+            .read_files(resolved_paths.values().cloned().collect())
+            .await?;
         for (name, entry) in manifest.project.override_boot_contracts_source.iter_mut() {
-            let path = entry
-                .resolve_path(&manifest.root_dir)
-                .to_string_lossy()
-                .into_owned();
-            entry.source = sources.get(&path).cloned().ok_or_else(|| {
+            let path = &resolved_paths[name];
+            entry.source = sources.get(path).cloned().ok_or_else(|| {
                 format!("Unable to read override boot contract '{name}' at {path}")
             })?;
         }
