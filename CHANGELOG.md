@@ -1,3 +1,19 @@
+# [3.19.0](https://github.com/stx-labs/clarinet/compare/v3.18.1...v3.19.0) (2026-06-04)
+
+##### New Features
+
+*  POX-5 optionally available in simnet (#2416) (03912bbb)
+
+##### Continuous Integration
+
+*  Build for linux arm64 and generate checksum (#2407) (c8603b93)
+
+##### Bug Fixes
+
+*  Support override_boot_contract in sdk (#2418) (f2af758e)
+*  Playwright version fix (#2419) (a4f08c92)
+*  Replace broken VSCode badge in README with Open VSX badge (#2405) (9b3d7fa2)
+
 # [3.18.1](https://github.com/stx-labs/clarinet/compare/v3.18.0...v3.18.1) (2026-05-19)
 
 ##### Continuous Integration
