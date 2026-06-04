@@ -525,7 +525,7 @@ fn get_epoch_and_clarity_version(
         Some("latest") => clarity_repl::repl::Epoch::Latest,
         Some(epoch) => {
             let stacks_epoch = clarity_repl::repl::epoch_from_str(epoch).ok_or(
-                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2, 3.3, 3.4, latest)",
+                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2, 3.3, 3.4, 4.0, latest)",
                 )?;
             clarity_repl::repl::Epoch::Specific(stacks_epoch)
         }

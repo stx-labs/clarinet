@@ -165,5 +165,7 @@ pub fn from_native_function(native_function: NativeFunctions) -> ClarityCostFunc
         NativeFunctions::AllowanceAll => ClarityCostFunction::Unimplemented,
         NativeFunctions::VerifyMerkleProof => ClarityCostFunction::VerifyMerkleProof,
         NativeFunctions::GetBitcoinTxOutput => ClarityCostFunction::GetBitcoinTxOutput,
+        NativeFunctions::Ed25519Verify => ClarityCostFunction::Ed25519verify,
+        NativeFunctions::Secp256k1Decompress => ClarityCostFunction::Secp256k1decompress,
     }
 }

@@ -413,7 +413,7 @@ impl CLIDebugger {
                             return;
                         }
                     };
-                    let function = match contract.contract_context.lookup_function(function_name) {
+                    let function = match contract.lookup_function(function_name) {
                         None => {
                             println!("{}", format_err!("no such function"));
                             return;
@@ -485,11 +485,10 @@ impl CLIDebugger {
                 }
 
                 match extract_watch_variable(env, invoke_ctx, args, None) {
-                    Ok((contract, name)) => self.state.add_watchpoint(
-                        &contract.contract_context.contract_identifier,
-                        name,
-                        access_type,
-                    ),
+                    Ok((contract, name)) => {
+                        self.state
+                            .add_watchpoint(&contract.contract_identifier, name, access_type)
+                    }
                     Err(e) => {
                         println!("{}", format_err!(e));
                         print_help_watchpoint();

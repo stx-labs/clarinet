@@ -726,6 +726,16 @@ pub trait ASTVisitor<'a> {
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
                             args.get(1).unwrap_or(&DEFAULT_EXPR),
                         ),
+                        Ed25519Verify => self.traverse_ed25519_verify(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                            args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            args.get(2).unwrap_or(&DEFAULT_EXPR),
+                        ),
+                        Secp256k1Decompress => self.traverse_secp256k1_decompress(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                        ),
                     };
                 } else {
                     rv = self.traverse_call_user_defined(expr, function_name, args);
@@ -2837,6 +2847,45 @@ pub trait ASTVisitor<'a> {
         &mut self,
         expr: &'a SymbolicExpression,
         amount: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_ed25519_verify(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        message: &'a SymbolicExpression,
+        signature: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(message)
+            && self.traverse_expr(signature)
+            && self.traverse_expr(public_key)
+            && self.visit_ed25519_verify(expr, message, signature, public_key)
+    }
+
+    fn visit_ed25519_verify(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        message: &'a SymbolicExpression,
+        signature: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_secp256k1_decompress(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(public_key) && self.visit_secp256k1_decompress(expr, public_key)
+    }
+
+    fn visit_secp256k1_decompress(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
     ) -> bool {
         true
     }

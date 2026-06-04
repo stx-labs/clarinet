@@ -513,7 +513,9 @@ impl<'a> Aggregator<'a> {
                             | NativeFunctions::ContractHash
                             | NativeFunctions::ToAscii
                             | NativeFunctions::VerifyMerkleProof
-                            | NativeFunctions::GetBitcoinTxOutput => {
+                            | NativeFunctions::GetBitcoinTxOutput
+                            | NativeFunctions::Ed25519Verify
+                            | NativeFunctions::Secp256k1Decompress => {
                                 let inner_content =
                                     self.to_inner_content(list, previous_indentation);
 
