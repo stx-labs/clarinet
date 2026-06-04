@@ -176,6 +176,21 @@ where
 }
 
 #[derive(Deserialize, Debug, Clone)]
+pub struct OverrideBootContract {
+    /// Path as written in `Clarinet.toml`, relative to the manifest root.
+    pub path: String,
+    /// Pre-loaded Clarity source. Populated by `from_location` / `from_file_accessor`
+    /// so consumers don't need filesystem access.
+    pub source: String,
+}
+
+impl OverrideBootContract {
+    pub fn resolve_path(&self, root: &Path) -> PathBuf {
+        root.join(&self.path)
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct ProjectConfig {
     pub name: String,
     pub authors: Vec<String>,
@@ -186,9 +201,7 @@ pub struct ProjectConfig {
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
     pub boot_contracts: Vec<String>,
-    /// Boot contract name → Clarity source code. Pre-loaded by `from_location` /
-    /// `from_file_accessor` so consumers don't need filesystem access.
-    pub override_boot_contracts_source: BTreeMap<String, String>,
+    pub override_boot_contracts_source: BTreeMap<String, OverrideBootContract>,
 }
 
 impl Serialize for ProjectConfig {
@@ -235,31 +248,27 @@ impl ProjectManifest {
             allow_remote_data_fetching,
         )?;
 
-        let resolved: Vec<(String, String)> = manifest
+        let paths: Vec<String> = manifest
             .project
             .override_boot_contracts_source
-            .iter()
-            .map(|(name, rel_path)| {
-                let path = manifest
-                    .root_dir
-                    .join(rel_path)
+            .values()
+            .map(|entry| {
+                entry
+                    .resolve_path(&manifest.root_dir)
                     .to_string_lossy()
-                    .into_owned();
-                (name.clone(), path)
+                    .into_owned()
             })
             .collect();
-        let sources = file_accessor
-            .read_files(resolved.iter().map(|(_, p)| p.clone()).collect())
-            .await?;
-        manifest.project.override_boot_contracts_source = resolved
-            .into_iter()
-            .map(|(name, path)| {
-                let source = sources.get(&path).cloned().ok_or_else(|| {
-                    format!("Unable to read override boot contract '{name}' at {path}")
-                })?;
-                Ok((name, source))
-            })
-            .collect::<Result<_, String>>()?;
+        let sources = file_accessor.read_files(paths).await?;
+        for (name, entry) in manifest.project.override_boot_contracts_source.iter_mut() {
+            let path = entry
+                .resolve_path(&manifest.root_dir)
+                .to_string_lossy()
+                .into_owned();
+            entry.source = sources.get(&path).cloned().ok_or_else(|| {
+                format!("Unable to read override boot contract '{name}' at {path}")
+            })?;
+        }
 
         Ok(manifest)
     }
@@ -279,15 +288,9 @@ impl ProjectManifest {
             allow_remote_data_fetching,
         )?;
 
-        manifest.project.override_boot_contracts_source = manifest
-            .project
-            .override_boot_contracts_source
-            .iter()
-            .map(|(name, rel_path)| {
-                let path = manifest.root_dir.join(rel_path);
-                Ok((name.clone(), paths::read_content_as_utf8(&path)?))
-            })
-            .collect::<Result<_, String>>()?;
+        for entry in manifest.project.override_boot_contracts_source.values_mut() {
+            entry.source = paths::read_content_as_utf8(&entry.resolve_path(&manifest.root_dir))?;
+        }
 
         Ok(manifest)
     }
@@ -370,27 +373,28 @@ impl ProjectManifest {
         let cache_location = paths::try_parse_path(&cache_dir, Some(root_path))
             .ok_or_else(|| format!("unable to parse path {cache_dir}"))?;
 
-        let mut override_boot_contracts_source = BTreeMap::new();
-        if let Some(overrides) = project_manifest_file.project.override_boot_contracts_source {
-            for (contract_name, contract_path) in overrides.iter() {
-                override_boot_contracts_source.insert(contract_name.clone(), contract_path.clone());
-            }
-        }
-
         let boot_contracts = BOOT_CONTRACTS_NAMES
             .iter()
             .map(|n| n.to_string())
             .collect::<Vec<_>>();
 
         // if an override doesn't correspond with one of the boot contracts, we warn and discard that override
-        let mut valid_override_boot_contracts_source = BTreeMap::new();
-        for (contract_name, contract_path) in override_boot_contracts_source.iter() {
-            if !boot_contracts.contains(contract_name) {
-                eprintln!("Warning: {contract_name} custom boot contract was not included because it's not part of the set of default boot contracts");
-                eprintln!("Available boot contracts: {boot_contracts:?}");
-            } else {
-                valid_override_boot_contracts_source
-                    .insert(contract_name.clone(), contract_path.clone());
+        let mut override_boot_contracts_source: BTreeMap<String, OverrideBootContract> =
+            BTreeMap::new();
+        if let Some(overrides) = project_manifest_file.project.override_boot_contracts_source {
+            for (contract_name, contract_path) in overrides {
+                if !boot_contracts.contains(&contract_name) {
+                    eprintln!("Warning: {contract_name} custom boot contract was not included because it's not part of the set of default boot contracts");
+                    eprintln!("Available boot contracts: {boot_contracts:?}");
+                    continue;
+                }
+                override_boot_contracts_source.insert(
+                    contract_name,
+                    OverrideBootContract {
+                        path: contract_path,
+                        source: String::new(),
+                    },
+                );
             }
         }
 
@@ -405,7 +409,7 @@ impl ProjectManifest {
             telemetry: project_manifest_file.project.telemetry.unwrap_or(false),
             cache_location,
             boot_contracts,
-            override_boot_contracts_source: valid_override_boot_contracts_source,
+            override_boot_contracts_source,
         };
 
         let mut config = ProjectManifest {
@@ -674,12 +678,20 @@ mod tests {
 
         assert_eq!(manifest.project.override_boot_contracts_source.len(), 2);
         assert_eq!(
-            manifest.project.override_boot_contracts_source.get("pox-4"),
-            Some(&"./custom-boot-contracts/pox-4.clar".to_string())
+            manifest
+                .project
+                .override_boot_contracts_source
+                .get("pox-4")
+                .map(|e| e.path.as_str()),
+            Some("./custom-boot-contracts/pox-4.clar")
         );
         assert_eq!(
-            manifest.project.override_boot_contracts_source.get("costs"),
-            Some(&"./custom-boot-contracts/costs.clar".to_string())
+            manifest
+                .project
+                .override_boot_contracts_source
+                .get("costs")
+                .map(|e| e.path.as_str()),
+            Some("./custom-boot-contracts/costs.clar")
         );
     }
 
@@ -703,18 +715,26 @@ mod tests {
         // Only valid contracts should be included
         assert_eq!(manifest.project.override_boot_contracts_source.len(), 2);
         assert_eq!(
-            manifest.project.override_boot_contracts_source.get("pox-4"),
-            Some(&"./custom-boot-contracts/pox-4.clar".to_string())
+            manifest
+                .project
+                .override_boot_contracts_source
+                .get("pox-4")
+                .map(|e| e.path.as_str()),
+            Some("./custom-boot-contracts/pox-4.clar")
         );
         assert_eq!(
-            manifest.project.override_boot_contracts_source.get("costs"),
-            Some(&"./custom-boot-contracts/costs.clar".to_string())
+            manifest
+                .project
+                .override_boot_contracts_source
+                .get("costs")
+                .map(|e| e.path.as_str()),
+            Some("./custom-boot-contracts/costs.clar")
         );
         // Invalid contract should not be included
-        assert_eq!(
-            manifest.project.override_boot_contracts_source.get("pox-x"),
-            None
-        );
+        assert!(!manifest
+            .project
+            .override_boot_contracts_source
+            .contains_key("pox-x"));
     }
 
     #[test]
@@ -734,9 +754,9 @@ mod tests {
 
         // Verify that the invalid contract was filtered out
         assert_eq!(manifest.project.override_boot_contracts_source.len(), 0);
-        assert_eq!(
-            manifest.project.override_boot_contracts_source.get("pox-x"),
-            None
-        );
+        assert!(!manifest
+            .project
+            .override_boot_contracts_source
+            .contains_key("pox-x"));
     }
 }

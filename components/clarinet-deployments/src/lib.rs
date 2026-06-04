@@ -116,7 +116,12 @@ pub fn initiate_session_from_manifest(manifest: &ProjectManifest) -> Session {
         repl_settings: manifest.repl_settings.clone(),
         disk_cache_enabled: true,
         cache_location: Some(manifest.project.cache_location.clone()),
-        override_boot_contracts_source: manifest.project.override_boot_contracts_source.clone(),
+        override_boot_contracts_source: manifest
+            .project
+            .override_boot_contracts_source
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.source.clone()))
+            .collect(),
         ..Default::default()
     };
     Session::new(settings)
@@ -492,7 +497,12 @@ pub async fn generate_default_deployment_with_cache(
     repl_settings.remote_data.enabled = false;
 
     let override_boot_contracts_source = if matches!(network, StacksNetwork::Simnet) {
-        manifest.project.override_boot_contracts_source.clone()
+        manifest
+            .project
+            .override_boot_contracts_source
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.source.clone()))
+            .collect()
     } else {
         if !manifest.project.override_boot_contracts_source.is_empty() {
             eprintln!("Warning: Custom boot contracts are only supported on simnet. Ignoring override_boot_contracts_source configuration for {network:?} network.");
