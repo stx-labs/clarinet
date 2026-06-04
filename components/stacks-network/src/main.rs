@@ -33,11 +33,8 @@ fn main() {
     let network_manifest_path = get_config_location_from_path_or_exit(&args.network_manifest_path);
     let deployment_location = get_config_location_from_path_or_exit(&args.deployment_plan_path);
 
-    let project_manifest_file_content = paths::read_content(&manifest_location)
-        .unwrap_or_else(|e| panic!("failed to read manifest data {e:?}"));
-
-    let manifest: ProjectManifest = yaml_serde::from_slice(&project_manifest_file_content[..])
-        .unwrap_or_else(|e| panic!("Clarinet.toml file malformatted {e:?}"));
+    let manifest = ProjectManifest::from_location(&manifest_location, false)
+        .unwrap_or_else(|e| panic!("failed to load Clarinet.toml: {e}"));
 
     let network_manifest_file_content = paths::read_content(&network_manifest_path)
         .unwrap_or_else(|e| panic!("failed to read network manifest data {e:?}"));

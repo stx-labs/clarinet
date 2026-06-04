@@ -244,11 +244,10 @@ pub async fn process_notification(
                             // boot contracts path checking
                             let mut found_boot_contract = None;
 
-                            for (contract_name, contract_path) in
+                            for (contract_name, entry) in
                                 &manifest.project.override_boot_contracts_source
                             {
-                                let resolved_path = manifest.root_dir.join(contract_path);
-                                if resolved_path == contract_location {
+                                if entry.resolve_path(&manifest.root_dir) == contract_location {
                                     found_boot_contract = Some(contract_name);
                                     break;
                                 }

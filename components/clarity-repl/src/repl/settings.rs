@@ -55,6 +55,8 @@ pub struct SessionSettings {
     pub repl_settings: Settings,
     pub cache_location: Option<PathBuf>,
     pub epoch_id: Option<StacksEpochId>,
+    /// Boot contract name → Clarity source code. Loaded upstream so this crate
+    /// stays runtime-agnostic (`wasm32-unknown-unknown` has no `std::fs`).
     pub override_boot_contracts_source: BTreeMap<String, String>,
 }
 
