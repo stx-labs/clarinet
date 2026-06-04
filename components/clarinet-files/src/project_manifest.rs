@@ -240,7 +240,11 @@ impl ProjectManifest {
             .override_boot_contracts_source
             .iter()
             .map(|(name, rel_path)| {
-                let path = manifest.root_dir.join(rel_path).to_string_lossy().into_owned();
+                let path = manifest
+                    .root_dir
+                    .join(rel_path)
+                    .to_string_lossy()
+                    .into_owned();
                 (name.clone(), path)
             })
             .collect();
