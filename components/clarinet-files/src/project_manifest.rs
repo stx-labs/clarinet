@@ -181,6 +181,7 @@ pub struct OverrideBootContract {
     pub path: String,
     /// Pre-loaded Clarity source. Populated by `from_location` / `from_file_accessor`
     /// so consumers don't need filesystem access.
+    #[serde(skip_deserializing)]
     pub source: String,
 }
 
@@ -201,6 +202,7 @@ pub struct ProjectConfig {
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
     pub boot_contracts: Vec<String>,
+    #[serde(default)]
     pub override_boot_contracts_source: BTreeMap<String, OverrideBootContract>,
 }
 
