@@ -106,8 +106,8 @@ fn deploy_boot_contracts(
     let mut boot_contracts = BTreeMap::new();
 
     // Deploy sbtc-token first so that pox-5 can resolve
-    for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.clone() {
-        let result = interpreter.run(&contract, Some(&ast), false, None);
+    for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
+        let result = interpreter.run(contract, Some(ast), false, None);
         if let Err(errs) = &result {
             for e in errs {
                 ueprint!(
@@ -116,7 +116,7 @@ fn deploy_boot_contracts(
                 );
             }
         }
-        boot_contracts.insert(contract_id, result);
+        boot_contracts.insert(contract_id.clone(), result);
     }
 
     // Load boot contracts (with custom overrides if specified)
