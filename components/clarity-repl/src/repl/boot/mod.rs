@@ -58,7 +58,6 @@ pub static SBTC_TOKEN_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
     });
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::sync::LazyLock;
 
 use clarity::types::StacksEpochId;
@@ -195,11 +194,9 @@ pub static BOOT_CONTRACTS_DATA: LazyLock<
     result
 });
 
-pub fn load_custom_boot_contract(path: &str) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| format!("Failed to read boot contract file {path}: {e}"))
-}
-
-/// Get boot contracts data with optional overrides (only existing boot contracts can be overridden)
+/// `overrides` maps boot contract name → Clarity source code. File I/O is the
+/// caller's responsibility so this stays runtime-agnostic — `wasm32-unknown-unknown`
+/// has no working `std::fs`.
 pub fn get_boot_contracts_data_with_overrides(
     overrides: &BTreeMap<String, String>,
 ) -> BTreeMap<QualifiedContractIdentifier, (ClarityContract, ContractAST)> {
@@ -211,21 +208,12 @@ pub fn get_boot_contracts_data_with_overrides(
         None,
     );
 
-    for (contract_name, file_path) in overrides {
+    for (contract_name, custom_source) in overrides {
         if !BOOT_CONTRACTS_NAMES.contains(&contract_name.as_str()) {
             eprintln!("Warning: Skipping custom boot contract '{contract_name}' - only existing boot contracts can be overridden. Valid boot contracts are: {BOOT_CONTRACTS_NAMES:?}");
             continue;
         }
 
-        let custom_source = match load_custom_boot_contract(file_path) {
-            Ok(source) => source,
-            Err(e) => {
-                eprintln!("Warning: Failed to load custom boot contract {contract_name}: {e}");
-                continue;
-            }
-        };
-
-        // Use standard epoch/version mapping for known boot contracts
         let (epoch, clarity_version) =
             get_boot_contract_epoch_and_clarity_version(contract_name.as_str());
 
@@ -241,8 +229,6 @@ pub fn get_boot_contracts_data_with_overrides(
 
             let (ast, _, _) = interpreter.build_ast(&boot_contract);
             let contract_id = boot_contract.expect_resolved_contract_identifier(None);
-
-            // Insert the contract (this will replace the existing boot contract)
             result.insert(contract_id, (boot_contract, ast));
         }
     }

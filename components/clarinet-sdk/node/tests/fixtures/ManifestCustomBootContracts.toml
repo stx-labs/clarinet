@@ -1,0 +1,9 @@
+[project]
+name = 'custom-boot-contracts-fixture'
+description = 'fixture to verify override_boot_contracts_source works under the wasm SDK'
+telemetry = false
+cache_dir = './.cache'
+requirements = []
+
+[project.override_boot_contracts_source]
+pox-4 = './custom-boot-contracts/pox-4-override.clar'
