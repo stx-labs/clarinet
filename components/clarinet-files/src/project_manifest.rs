@@ -202,7 +202,11 @@ pub struct ProjectConfig {
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
     pub boot_contracts: Vec<String>,
-    #[serde(default)]
+    // Populated by `from_location` / `from_file_accessor`. The custom `Serialize`
+    // impl emits paths as a `BTreeMap<String, String>` for inspection, which is
+    // shape-incompatible with the in-memory struct — so JSON unpack ignores it
+    // and the manifest is always reloaded from disk.
+    #[serde(skip_deserializing)]
     pub override_boot_contracts_source: BTreeMap<String, OverrideBootContract>,
 }
 
@@ -219,6 +223,14 @@ impl Serialize for ProjectConfig {
         map.serialize_entry("cache_dir", &self.cache_location.to_string_lossy())?;
         if self.requirements.is_some() {
             map.serialize_entry("requirements", &self.requirements)?;
+        }
+        if !self.override_boot_contracts_source.is_empty() {
+            let paths: BTreeMap<&str, &str> = self
+                .override_boot_contracts_source
+                .iter()
+                .map(|(name, entry)| (name.as_str(), entry.path.as_str()))
+                .collect();
+            map.serialize_entry("override_boot_contracts_source", &paths)?;
         }
         map.end()
     }
