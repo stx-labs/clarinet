@@ -76,6 +76,19 @@ fn test_irl_contracts() {
             // Apply formatting and compare
             let result = format_file_with_metadata(&src);
             pretty_assertions::assert_eq!(result, intended, "Mismatch in file: {:?}", file_name);
+
+            // Format the intended output again with the same settings
+            let (settings, _) = settings_from_source(&src);
+            let formatter = ClarityFormatter::new(settings);
+            let reformatted = formatter.format_file(&result, None);
+
+            pretty_assertions::assert_eq!(
+                reformatted,
+                intended,
+                "Idempotency failure in file: {:?} — formatting the output again changed it",
+                file_name
+            );
+
             // parse resulting contract
             let (_statements, diagnostics, success) =
                 clarity::vm::ast::parser::v2::parse_collect_diagnostics(
@@ -88,41 +101,6 @@ fn test_irl_contracts() {
                 println!("Message: {:?}", diagnostics[0].message);
             }
             assert!(success);
-        }
-    }
-}
-
-#[test]
-fn test_idempotency() {
-    let golden_dir = "./tests/golden";
-    let intended_dir = "./tests/golden-intended";
-
-    for entry in fs::read_dir(golden_dir).expect("Failed to read golden directory") {
-        let entry = entry.expect("Failed to read directory entry");
-        let path = entry.path();
-
-        if path.is_file() {
-            let src = fs::read_to_string(&path).expect("Failed to read source file");
-            let file_name = path.file_name().expect("Failed to get file name");
-
-            // Get the settings from the source file's metadata line
-            let (settings, _) = settings_from_source(&src);
-
-            // Read the intended (already-formatted) output
-            let intended_path = Path::new(intended_dir).join(file_name);
-            let intended =
-                fs::read_to_string(&intended_path).expect("Failed to read intended file");
-
-            // Format the intended output again with the same settings
-            let formatter = ClarityFormatter::new(settings);
-            let reformatted = formatter.format_file(&intended, None);
-
-            pretty_assertions::assert_eq!(
-                reformatted,
-                intended,
-                "Idempotency failure in file: {:?} — formatting the output again changed it",
-                file_name
-            );
         }
     }
 }
