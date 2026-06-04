@@ -186,6 +186,8 @@ pub struct ProjectConfig {
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
     pub boot_contracts: Vec<String>,
+    /// Boot contract name → Clarity source code. Pre-loaded by `from_location` /
+    /// `from_file_accessor` so consumers don't need filesystem access.
     pub override_boot_contracts_source: BTreeMap<String, String>,
 }
 
@@ -227,11 +229,35 @@ impl ProjectManifest {
         let project_manifest_file: ProjectManifestFile = toml::from_slice(content.as_bytes())
             .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
 
-        ProjectManifest::from_project_manifest_file(
+        let mut manifest = ProjectManifest::from_project_manifest_file(
             project_manifest_file,
             location,
             allow_remote_data_fetching,
-        )
+        )?;
+
+        let resolved: Vec<(String, String)> = manifest
+            .project
+            .override_boot_contracts_source
+            .iter()
+            .map(|(name, rel_path)| {
+                let path = manifest.root_dir.join(rel_path).to_string_lossy().into_owned();
+                (name.clone(), path)
+            })
+            .collect();
+        let sources = file_accessor
+            .read_files(resolved.iter().map(|(_, p)| p.clone()).collect())
+            .await?;
+        manifest.project.override_boot_contracts_source = resolved
+            .into_iter()
+            .map(|(name, path)| {
+                let source = sources.get(&path).cloned().ok_or_else(|| {
+                    format!("Unable to read override boot contract '{name}' at {path}")
+                })?;
+                Ok((name, source))
+            })
+            .collect::<Result<_, String>>()?;
+
+        Ok(manifest)
     }
 
     pub fn from_location(
@@ -243,11 +269,23 @@ impl ProjectManifest {
             toml::from_slice(&project_manifest_file_content[..])
                 .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
 
-        ProjectManifest::from_project_manifest_file(
+        let mut manifest = ProjectManifest::from_project_manifest_file(
             project_manifest_file,
             location,
             allow_remote_data_fetching,
-        )
+        )?;
+
+        manifest.project.override_boot_contracts_source = manifest
+            .project
+            .override_boot_contracts_source
+            .iter()
+            .map(|(name, rel_path)| {
+                let path = manifest.root_dir.join(rel_path);
+                Ok((name.clone(), paths::read_content_as_utf8(&path)?))
+            })
+            .collect::<Result<_, String>>()?;
+
+        Ok(manifest)
     }
 
     // process a contract and add it to the configuration
