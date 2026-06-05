@@ -1,10 +1,12 @@
-import crypto from "crypto";
+import crypto from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
 
 import { Pox4SignatureTopic, StackingClient, poxAddressToTuple } from "@stacks/stacking";
 import { STACKS_DEVNET } from "@stacks/network";
 import { getPublicKeyFromPrivate, publicKeyToBtcAddress } from "@stacks/encryption";
 import { Cl, ClarityType, getAddressFromPrivateKey } from "@stacks/transactions";
+
+Error.stackTraceLimit = 200;
 
 // test the built package and not the source code
 // makes it simpler to handle wasm build

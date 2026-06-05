@@ -11,6 +11,10 @@ const rootDir = new URL(".", import.meta.url).pathname;
  * build clarinet-sdk-wasm
  */
 async function build_wasm_sdk() {
+  const isDev = process.argv.includes("--dev");
+  const profileFlag = isDev ? "--dev" : "--release";
+  console.log(`Building wasm SDK (${profileFlag})`);
+
   console.log("Deleting pkg-node");
   await rmIfExists(path.join(rootDir, "pkg-node"));
   console.log("Deleting pkg-browser");
@@ -19,7 +23,7 @@ async function build_wasm_sdk() {
   await Promise.all([
     execCommand("wasm-pack", [
       "build",
-      "--release",
+      profileFlag,
       "--scope",
       "stacks",
       "--out-dir",
@@ -29,7 +33,7 @@ async function build_wasm_sdk() {
     ]),
     execCommand("wasm-pack", [
       "build",
-      "--release",
+      profileFlag,
       "--scope",
       "stacks",
       "--out-dir",

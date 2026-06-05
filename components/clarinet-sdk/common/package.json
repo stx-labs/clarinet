@@ -1,6 +1,6 @@
 {
   "name": "@stacks/clarinet-sdk-common",
-  "description": "Common helpers used in the Clarinet SDK for the node.js and the browser version",
+  "description": "Shared helpers used by @stacks/clarinet-sdk and @stacks/clarinet-sdk-browser. Not published; consumed via relative imports.",
   "private": true,
   "author": "Stacks Labs",
   "license": "GPL-3.0",

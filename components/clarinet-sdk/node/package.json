@@ -9,7 +9,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   },
   "files": [
     "dist",
@@ -33,10 +33,6 @@
       "import": {
         "types": "./dist/esm/node/src/vitest/index.d.ts",
         "default": "./dist/esm/node/src/vitest/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/node/src/vitest/index.d.ts",
-        "default": "./dist/cjs/node/src/vitest/index.js"
       }
     }
   },
@@ -44,11 +40,10 @@
     "clean": "rimraf dist",
     "compile": "tsc -b ./tsconfig.json ./tsconfig.cjs.json",
     "build": "pnpm run clean && pnpm run compile && node ./scripts/prepare-esm-package.js",
-    "prepare": "pnpm run build",
     "pretest": "tsc -b ./tsconfig.json",
     "test": "vitest run",
     "test:no-mxs": "vitest run --exclude=tests/remote-data.test.ts",
-    "prepublishOnly": "node ../../../scripts/require-pnpm.mjs"
+    "prepublishOnly": "node ../../../scripts/require-pnpm.mjs && pnpm run build"
   },
   "keywords": [
     "stacks",
@@ -69,6 +64,9 @@
     "@stacks/encryption": "7.4.0",
     "@stacks/network": "7.3.1",
     "@stacks/stacking": "7.4.0",
+    "@types/node": "24.0.14",
+    "@types/prompts": "2.4.9",
+    "@types/yargs": "17.0.35",
     "vitest": "4.0.8"
   }
 }
