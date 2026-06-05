@@ -40,10 +40,10 @@ web = [
 
 # DEV
 [profile.dev]
-opt-level = 3
-debug = false
-debug-assertions = false
-incremental = false
+opt-level = 0
+debug = true
+debug-assertions = true
+incremental = true
 codegen-units = 256
 
 [package.metadata.wasm-pack.profile.dev]
