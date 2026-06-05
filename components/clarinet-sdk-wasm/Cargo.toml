@@ -40,6 +40,7 @@ web = [
 
 # DEV
 [profile.dev]
+# switch to 1 if it's too slow
 opt-level = 0
 debug = true
 debug-assertions = true
@@ -50,9 +51,9 @@ codegen-units = 256
 wasm-opt = false
 
 [package.metadata.wasm-pack.profile.dev.wasm-bindgen]
-debug-js-glue = false
+debug-js-glue = true
 demangle-name-section = true
-dwarf-debug-info = false
+dwarf-debug-info = true
 
 # RELEASE
 [profile.release]

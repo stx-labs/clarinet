@@ -6,6 +6,8 @@ import { STACKS_DEVNET } from "@stacks/network";
 import { getPublicKeyFromPrivate, publicKeyToBtcAddress } from "@stacks/encryption";
 import { Cl, ClarityType, getAddressFromPrivateKey } from "@stacks/transactions";
 
+Error.stackTraceLimit = 200;
+
 // test the built package and not the source code
 // makes it simpler to handle wasm build
 import { Simnet, initSimnet } from "..";
@@ -219,6 +221,62 @@ describe("test pox-4", () => {
         (max-amount uint)
         (auth-id uint))
     */
+
+    const stackStxArgs = [
+      Cl.uint(ustxAmount),
+      poxAddressToTuple(account.btcAddr),
+      Cl.uint(burnBlockHeight),
+      Cl.uint(period),
+      Cl.some(Cl.bufferFromHex(signerSignature)),
+      Cl.bufferFromHex(account.signerPubKey),
+      Cl.uint(maxAmount),
+      Cl.uint(authId),
+    ];
+
+    const stackStx = simnet.callPublicFn(poxContract, "stack-stx", stackStxArgs, address1);
+
+    expect(stackStx.result).toStrictEqual(
+      Cl.ok(
+        Cl.tuple({
+          "lock-amount": Cl.uint(75000000000),
+          "signer-key": Cl.bufferFromHex(account.signerPubKey),
+          stacker: Cl.principal(address1),
+          "unlock-burn-height": Cl.uint(2100),
+        }),
+      ),
+    );
+
+    const stxAccount = simnet.execute(`(stx-account '${address1})`);
+    expect(stxAccount.result).toStrictEqual(
+      Cl.tuple({
+        locked: Cl.uint(ustxAmount),
+        unlocked: Cl.uint(initialSTXBalance - ustxAmount),
+        "unlock-height": Cl.uint(2100),
+      }),
+    );
+  });
+
+  it.only("can call get-pox-info", () => {
+    const account = accounts[0];
+    const rewardCycle = 0;
+    const burnBlockHeight = 0;
+    const period = 1;
+    const authId = randInt();
+
+    const sigArgs = {
+      authId,
+      maxAmount,
+      rewardCycle,
+      period,
+      topic: Pox4SignatureTopic.StackStx,
+      poxAddress: account.btcAddr,
+      signerPrivateKey: account.signerPrivKey,
+    };
+    const signerSignature = account.client.signPoxSignature(sigArgs);
+    const ustxAmount = Math.floor(stackingThreshold * 1.5);
+
+    // @ts-ignore
+    simnet.setEpoch("4.0");
 
     const stackStxArgs = [
       Cl.uint(ustxAmount),

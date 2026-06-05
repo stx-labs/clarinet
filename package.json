@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build:sdk-wasm": "node components/clarinet-sdk-wasm/build.mjs",
+    "build:sdk-wasm:dev": "node components/clarinet-sdk-wasm/build.mjs --dev",
     "build:sdk": "pnpm --filter ./components/clarinet-sdk/node --filter ./components/clarinet-sdk/browser run build",
     "test": "pnpm -r --if-present run test",
     "publish:sdk-wasm": "pnpm --filter ./components/clarinet-sdk-wasm/pkg-node --filter ./components/clarinet-sdk-wasm/pkg-browser publish --tag beta",
