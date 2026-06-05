@@ -34,6 +34,12 @@ importers:
         specifier: 7.4.0
         version: 7.4.0
 
+  components/clarinet-sdk/common:
+    dependencies:
+      '@stacks/transactions':
+        specifier: 7.4.0
+        version: 7.4.0
+
   components/clarinet-sdk/node:
     dependencies:
       '@stacks/clarinet-sdk-wasm':

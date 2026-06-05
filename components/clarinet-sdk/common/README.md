@@ -4,15 +4,17 @@ Shared TypeScript helpers used by both `@stacks/clarinet-sdk` (node) and `@stack
 
 ## Setup
 
-This directory is **not** a published or workspace package — it has no `package.json`. It's a plain shared folder, consumed by relative imports:
+This directory is a private workspace package (`@stacks/clarinet-sdk-common`, `private: true`) but **is never imported by name and never published**. Consumers reach into it with relative imports:
 
 ```ts
 import { ... } from "../../common/src/sdkProxyHelpers.js";
 ```
 
-Each consumer's `tsconfig` pulls `common/src` into its compilation via `include: ["./src", "../common/src"]`, and emits the common files alongside its own output (`dist/{esm,cjs}/common/src/...`). Runtime dependencies used by common (`@stacks/transactions`) are declared by each consumer.
+Each consumer's `tsconfig` pulls `common/src` into its compilation via `include: ["./src", "../common/src"]`, and emits the common files alongside its own output (`dist/{esm,cjs}/common/src/...`).
 
-The `tsconfig.json` in this directory exists for IDE clarity only — it enables consistent type-checking when opening files here directly. It does not participate in the build.
+The `package.json` exists for one reason: to declare common's runtime dependencies (currently `@stacks/transactions`) so pnpm installs them into `common/node_modules`. TypeScript resolves modules from the importing file's directory upward, so when `common/src/sdkProxyHelpers.ts` does `import { Cl } from "@stacks/transactions"`, the dep has to be reachable from `common/`. Without the `package.json` + workspace entry, pnpm wouldn't install it there and `tsc` fails — CI caught exactly this.
+
+The `tsconfig.json` here is IDE-only — `noEmit: true`, so it doesn't participate in the build. The actual compilation happens through the node and browser configs that include `../common/src`.
 
 ## Trade-offs
 
@@ -24,6 +26,7 @@ The `tsconfig.json` in this directory exists for IDE clarity only — it enables
 - Published `dist` paths include the cross-directory layout (e.g. `dist/cjs/node/src/index.js` rather than `dist/index.js`). Cosmetic — consumers see the `exports` map, not the raw paths.
 - `rootDir` in each consumer's tsconfig has to span its own directory and `common/`, which is a mild quirk.
 - The common code is duplicated across the node and browser dist outputs (once per consumer). At ~one file, this is negligible.
+- `common/` looks like a publishable workspace package at first glance but isn't — the `private: true` flag and this README are the only signals. The bundler-based promotion described below resolves this ambiguity.
 
 ## Potential future improvement
 
