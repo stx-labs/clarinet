@@ -3,11 +3,9 @@
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "Bundler",
-    "outDir": "dist/esm",
     "target": "esnext",
-
-    "lib": ["es2022", "dom"],
-    "types": []
+    "noEmit": true,
+    "rootDir": "."
   },
-  "include": ["./src", "../common/src"]
+  "include": ["./**/*"]
 }

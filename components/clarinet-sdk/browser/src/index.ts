@@ -27,5 +27,5 @@ globalThis.vfs = defaultVfs;
 export const initSimnet = async (virtualFileSystem?: Function) => {
   await init();
   const vfs = virtualFileSystem ? virtualFileSystem : defaultVfs;
-  return new Proxy(new SDK(vfs), getSessionProxy()) as unknown as Simnet;
+  return new Proxy(new SDK(vfs), getSessionProxy() as ProxyHandler<SDK>) as unknown as Simnet;
 };

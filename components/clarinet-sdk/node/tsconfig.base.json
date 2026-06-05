@@ -1,24 +1,8 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    // outdir, module and target are defined in esm and cjs configs
-
     "lib": ["es2022"],
-    "types": ["node"],
-
-    "rootDir": "../",
-    "resolveJsonModule": false,
-    "allowJs": false,
-
-    "declaration": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "sourceMap": true,
-
-    /* Type Checking */
-    "strict": true,
-    "noImplicitAny": true,
-    "skipLibCheck": true
+    "types": ["node"]
   },
-  "include": ["./src", "../common/src"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["./src", "../common/src"]
 }

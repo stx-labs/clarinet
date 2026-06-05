@@ -6,7 +6,7 @@
   "license": "GPL-3.0",
   "packageManager": "pnpm@11.1.3",
   "engines": {
-    "node": ">=24"
+    "node": ">=20"
   },
   "scripts": {
     "build:sdk-wasm": "node components/clarinet-sdk-wasm/build.mjs",
