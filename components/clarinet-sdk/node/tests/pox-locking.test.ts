@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import crypto from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
 
 import { Pox4SignatureTopic, StackingClient, poxAddressToTuple } from "@stacks/stacking";

@@ -69,6 +69,9 @@
     "@stacks/encryption": "7.4.0",
     "@stacks/network": "7.3.1",
     "@stacks/stacking": "7.4.0",
+    "@types/node": "24.0.14",
+    "@types/prompts": "2.4.9",
+    "@types/yargs": "17.0.35",
     "vitest": "4.0.8"
   }
 }

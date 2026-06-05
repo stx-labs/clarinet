@@ -3,8 +3,8 @@
     // outdir, module and target are defined in esm and cjs configs
 
     "lib": ["es2022"],
+    "types": ["node"],
 
-    "moduleResolution": "Node",
     "rootDir": "../",
     "resolveJsonModule": false,
     "allowJs": false,

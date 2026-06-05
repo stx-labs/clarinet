@@ -6,7 +6,7 @@
 
     "lib": ["es2022"],
 
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "rootDir": "../",
     "resolveJsonModule": false,
     "allowJs": false,
