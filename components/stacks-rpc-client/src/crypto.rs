@@ -224,3 +224,56 @@ pub fn build_contract_call_transaction(
 
     tx_signer.get_tx().unwrap()
 }
+
+pub fn build_contract_publish_transaction(
+    contract_name: &str,
+    source: &str,
+    clarity_version: Option<ClarityVersion>,
+    nonce: u64,
+    fee: u64,
+    sender_secret_key: &[u8],
+) -> StacksTransaction {
+    let payload = TransactionSmartContract {
+        name: ContractName::try_from(contract_name.to_string()).unwrap(),
+        code_body: StacksString::from_str(source).unwrap(),
+    };
+
+    let secret_key = Secp256k1PrivateKey::from_slice(sender_secret_key).unwrap();
+    let mut public_key = Secp256k1PublicKey::from_private(&secret_key);
+    public_key.set_compressed(true);
+
+    let anchor_mode = TransactionAnchorMode::Any;
+    let signer_addr =
+        StacksAddress::from_public_keys(0, &AddressHashMode::SerializeP2PKH, 1, &vec![public_key])
+            .unwrap();
+
+    let spending_condition = TransactionSpendingCondition::Singlesig(SinglesigSpendingCondition {
+        signer: signer_addr.bytes().clone(),
+        nonce,
+        tx_fee: fee,
+        hash_mode: SinglesigHashMode::P2PKH,
+        key_encoding: TransactionPublicKeyEncoding::Compressed,
+        signature: MessageSignature::empty(),
+    });
+
+    let auth = TransactionAuth::Standard(spending_condition);
+    let unsigned_tx = StacksTransaction {
+        version: TransactionVersion::Testnet,
+        chain_id: 0x80000000,
+        auth,
+        anchor_mode,
+        post_condition_mode: TransactionPostConditionMode::Allow,
+        post_conditions: vec![],
+        payload: TransactionPayload::SmartContract(payload, clarity_version),
+    };
+
+    let mut unsigned_tx_bytes = vec![];
+    unsigned_tx
+        .consensus_serialize(&mut unsigned_tx_bytes)
+        .expect("FATAL: invalid transaction");
+
+    let mut tx_signer = StacksTransactionSigner::new(&unsigned_tx);
+    tx_signer.sign_origin(&secret_key).unwrap();
+
+    tx_signer.get_tx().unwrap()
+}

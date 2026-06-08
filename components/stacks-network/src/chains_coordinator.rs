@@ -43,6 +43,7 @@ use stackslib::chainstate::stacks::address::PoxAddress;
 use stackslib::util_lib::signed_structured_data::pox4::{
     make_pox_4_signer_key_signature, Pox4SignatureTopic,
 };
+use stackslib::util_lib::signed_structured_data::pox5::make_pox_5_signer_grant_signature;
 
 use super::ChainsCoordinatorCommand;
 use crate::command::run_docker_command;
@@ -872,11 +873,14 @@ pub async fn publish_stacking_orders(
         let signer_key =
             devnet_config.stacks_signers_keys[i % devnet_config.stacks_signers_keys.len()].clone();
 
+        let stacking_order_index = i;
         let stacking_result =
             hiro_system_kit::thread_named("Stacking orders handler").spawn(move || {
                 let default_fee = fee_rate * 1000;
                 let stacks_rpc = StacksRpc::new(&node_rpc_url_moved);
-                let nonce = stacks_rpc.get_nonce(&account.stx_address)?;
+                let nonce = stacks_rpc
+                    .get_nonce(&account.stx_address)
+                    .map_err(|e| format!("{e}"))?;
 
                 let (_, _, account_secret_key) = clarinet_files::compute_addresses(
                     &account.mnemonic,
@@ -884,28 +888,50 @@ pub async fn publish_stacking_orders(
                     &StacksNetwork::Devnet.get_networks(),
                 );
 
-                let (method, arguments) = get_stacking_tx_method_and_args(
-                    pox_version,
-                    bitcoin_block_height,
-                    current_cycle.into(),
-                    &signer_key,
-                    extend_stacking,
-                    &btc_address_moved,
-                    stx_amount,
-                    duration,
-                    i.try_into().unwrap(),
-                );
+                let secret_key_bytes = hex_bytes(&account_secret_key).unwrap();
 
-                let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
-                    pox_contract_id_moved,
-                    method,
-                    arguments,
-                    nonce,
-                    default_fee,
-                    &hex_bytes(&account_secret_key).unwrap(),
-                );
+                if pox_version >= 5 {
+                    publish_pox5_stacking_transactions(
+                        &stacks_rpc,
+                        &pox_contract_id_moved,
+                        &secret_key_bytes,
+                        &signer_key,
+                        nonce,
+                        default_fee,
+                        stacking_order_index,
+                        extend_stacking,
+                        stx_amount,
+                        duration,
+                        bitcoin_block_height,
+                        &account.stx_address,
+                    )
+                } else {
+                    let (method, arguments) = get_stacking_tx_method_and_args(
+                        pox_version,
+                        bitcoin_block_height,
+                        current_cycle.into(),
+                        &signer_key,
+                        extend_stacking,
+                        &btc_address_moved,
+                        stx_amount,
+                        duration,
+                        stacking_order_index.try_into().unwrap(),
+                    );
 
-                stacks_rpc.post_transaction(&tx)
+                    let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+                        pox_contract_id_moved,
+                        method,
+                        arguments,
+                        nonce,
+                        default_fee,
+                        &secret_key_bytes,
+                    );
+
+                    stacks_rpc
+                        .post_transaction(&tx)
+                        .map(|_| ())
+                        .map_err(|e| format!("{e}"))
+                }
             });
 
         match stacking_result {
@@ -1162,6 +1188,183 @@ async fn handle_bitcoin_mining(
         }
     }
 }
+
+/// Publishes the pox-5 stacking transactions for a single stacking order.
+///
+/// For the initial stake (not extending), this submits three sequential transactions:
+/// 1. Deploy the signer-manager contract
+/// 2. Call `register-self` on the signer-manager (grants signer key + registers)
+/// 3. Call `pox-5.stake`
+///
+/// For extensions (`stake-update`), only one transaction is submitted.
+///
+/// All transactions use sequential nonces so the stacks node processes them in order.
+#[allow(clippy::too_many_arguments)]
+fn publish_pox5_stacking_transactions(
+    stacks_rpc: &StacksRpc,
+    pox_contract_id: &str,
+    secret_key_bytes: &[u8],
+    signer_key: &StacksPrivateKey,
+    mut nonce: u64,
+    fee: u64,
+    stacking_order_index: usize,
+    extend_stacking: bool,
+    stx_amount: u64,
+    duration: u32,
+    bitcoin_block_height: u32,
+    stx_address: &str,
+) -> Result<(), String> {
+    let signer_pub_key = StacksPublicKey::from_private(signer_key);
+    let contract_name = pox5_signer_manager_name(stacking_order_index);
+    let signer_manager_principal = PrincipalData::parse(&format!("{stx_address}.{contract_name}"))
+        .expect("Invalid signer-manager principal");
+    let signer_manager_cv = ClarityValue::Principal(signer_manager_principal.clone());
+
+    if extend_stacking {
+        // For extensions, submit a single stake-update transaction.
+        // Uses the same signer-manager for both old and new.
+        let arguments = vec![
+            signer_manager_cv.clone(),           // signer-manager
+            signer_manager_cv,                   // old-signer-manager
+            ClarityValue::UInt(duration.into()), // cycles-to-extend
+            ClarityValue::UInt(0),               // amount-increase (keep same amount)
+            ClarityValue::none(),                // signer-calldata
+        ];
+        let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+            pox_contract_id.to_string(),
+            "stake-update".to_string(),
+            arguments,
+            nonce,
+            fee,
+            secret_key_bytes,
+        );
+        stacks_rpc
+            .post_transaction(&tx)
+            .map_err(|e| format!("{e}"))?;
+        return Ok(());
+    }
+
+    // Initial stake: deploy signer-manager, register, then stake.
+
+    // Step 1: Deploy the signer-manager contract
+    let deploy_tx = stacks_rpc_client::crypto::build_contract_publish_transaction(
+        &contract_name,
+        POX5_SIGNER_MANAGER_SOURCE,
+        Some(clarity::vm::ClarityVersion::Clarity6),
+        nonce,
+        fee,
+        secret_key_bytes,
+    );
+    stacks_rpc
+        .post_transaction(&deploy_tx)
+        .map_err(|e| format!("{e}"))?;
+    nonce += 1;
+
+    // Step 2: Call register-self on the signer-manager contract.
+    // This grants the signer key and registers the signer in pox-5.
+    let auth_id: u128 = stacking_order_index.try_into().unwrap();
+    let grant_sig = make_pox_5_signer_grant_signature(
+        &signer_manager_principal,
+        auth_id,
+        CHAIN_ID_TESTNET,
+        signer_key,
+    )
+    .expect("Unable to make pox-5 signer grant signature");
+
+    let register_args = vec![
+        signer_manager_cv.clone(), // signer-manager (self)
+        ClarityValue::buff_from(signer_pub_key.to_bytes()).unwrap(), // signer-key
+        ClarityValue::UInt(auth_id), // auth-id
+        ClarityValue::buff_from(grant_sig.to_rsv()).unwrap(), // signer-sig
+    ];
+    let register_tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+        format!("{stx_address}.{contract_name}"),
+        "register-self".to_string(),
+        register_args,
+        nonce,
+        fee,
+        secret_key_bytes,
+    );
+    stacks_rpc
+        .post_transaction(&register_tx)
+        .map_err(|e| format!("{e}"))?;
+    nonce += 1;
+
+    // Step 3: Call pox-5.stake
+    let burn_block_height: u128 = (bitcoin_block_height - 1).into();
+    let stake_args = vec![
+        signer_manager_cv,                     // signer-manager
+        ClarityValue::UInt(stx_amount.into()), // amount-ustx
+        ClarityValue::UInt(duration.into()),   // num-cycles
+        ClarityValue::UInt(burn_block_height), // start-burn-ht
+        ClarityValue::none(),                  // signer-calldata
+    ];
+    let stake_tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+        pox_contract_id.to_string(),
+        "stake".to_string(),
+        stake_args,
+        nonce,
+        fee,
+        secret_key_bytes,
+    );
+    stacks_rpc
+        .post_transaction(&stake_tx)
+        .map_err(|e| format!("{e}"))?;
+    Ok(())
+}
+
+/// Contract name for the per-stacker signer-manager deployed during pox-5 stacking.
+fn pox5_signer_manager_name(stacking_order_index: usize) -> String {
+    format!("pox5-signer-{stacking_order_index}")
+}
+
+/// Minimal signer-manager contract implementing pox-5's signer-manager-trait.
+///
+/// This is a copy of `pox5_signer_manager_source()` from stacks-core
+/// (`stacks-node/src/tests/signer/v0/mod.rs`). That function is `pub(crate)`
+/// so we cannot import it directly. If the trait definition in pox-5.clar
+/// changes, this source must be updated to match.
+const POX5_SIGNER_MANAGER_SOURCE: &str = r#"
+(impl-trait 'ST000000000000000000002AMW42H.pox-5.signer-manager-trait)
+(use-trait signer-manager-trait 'ST000000000000000000002AMW42H.pox-5.signer-manager-trait)
+
+(define-public (validate-stake!
+        (staker principal)
+        (first-index uint)
+        (num-indexes uint)
+        (amount-ustx uint)
+        (amount-sats uint)
+        (is-bond bool)
+        (signer-calldata (optional (buff 500)))
+    )
+    (ok true)
+)
+
+(define-public (checkpoint-staker
+        (staker principal)
+        (first-index uint)
+        (num-indexes uint)
+        (is-bond bool)
+    )
+    (ok true)
+)
+
+(define-public (register-self
+        (signer-manager <signer-manager-trait>)
+        (signer-key (buff 33))
+        (auth-id uint)
+        (signer-sig (buff 65))
+    )
+    (as-contract? ()
+        (try! (contract-call? 'ST000000000000000000002AMW42H.pox-5 grant-signer-key
+            signer-key current-contract auth-id signer-sig
+        ))
+        (try! (contract-call? 'ST000000000000000000002AMW42H.pox-5 register-signer
+            signer-manager signer-key
+        ))
+    )
+)
+"#;
 
 fn get_stacking_tx_method_and_args(
     pox_version: u32,
