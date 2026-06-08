@@ -3,6 +3,7 @@ use std::fmt;
 use std::fmt::Write as _;
 use std::num::ParseIntError;
 
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
@@ -1091,7 +1092,7 @@ impl Session {
         let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
             Some(epoch) => epoch,
             None => {
-                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4"
+                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0"
                     .red()
                     .to_string()
             }
@@ -1101,6 +1102,13 @@ impl Session {
     }
 
     pub fn update_epoch(&mut self, epoch: StacksEpochId) {
+        if self.interpreter.repl_settings.remote_data.enabled && epoch > DEFAULT_EPOCH {
+            ueprint!(
+                "warning: epoch {epoch} is not yet active on the remote network. \
+                 Boot contracts for this epoch are likely not \
+                 available when remote data is enabled. Certain contracts may fail ."
+            );
+        }
         self.interpreter.set_current_epoch(epoch);
         if epoch >= StacksEpochId::Epoch30 {
             self.interpreter.set_tenure_height();
@@ -1453,7 +1461,6 @@ fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
-    use clarinet_defaults::DEFAULT_EPOCH;
     use clarity::util::hash::hex_bytes;
     use clarity_types::types::TupleData;
     use indoc::{formatdoc, indoc};
