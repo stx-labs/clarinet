@@ -21,8 +21,9 @@ use clarity::vm::{
 };
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
-    get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_DEPOSIT_MAINNET_ADDRESS,
-    SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_MAINNET_ADDRESS,
+    get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_BOOT_CONTRACTS,
+    SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
+    SBTC_TOKEN_MAINNET_ADDRESS,
 };
 use clarity_repl::repl::session::{AnnotatedExecutionResult, ExecutionResultMap};
 use clarity_repl::repl::{
@@ -543,6 +544,12 @@ pub async fn generate_default_deployment_with_cache(
             boot_contracts_asts.insert(id, (contract.clarity_version, ast));
         }
         requirements_data.append(&mut boot_contracts_asts);
+
+        // Add sbtc contract ASTs so they're available without API fetch.
+        // pox-5 (deployed at epoch 4.0) depends on sbtc-token.
+        for (id, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
+            requirements_data.insert(id.clone(), (contract.clarity_version, ast.clone()));
+        }
     }
 
     // this ephemeral interpreter is used to parse code and build ASTs
@@ -795,6 +802,68 @@ pub async fn generate_default_deployment_with_cache(
                     );
                 }
             }
+        }
+    }
+
+    // When epoch 4.0 is configured for devnet, auto-deploy sbtc-registry and
+    // sbtc-token so that the pox-5 boot contract can resolve its references.
+    let has_epoch_4_0 = network_manifest
+        .devnet
+        .as_ref()
+        .is_some_and(|d| d.epoch_4_0.is_some());
+    if matches!(network, StacksNetwork::Devnet) && has_epoch_4_0 {
+        let sbtc_mainnet_principal =
+            PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
+        let mut remap_principals = BTreeMap::new();
+        remap_principals.insert(
+            sbtc_mainnet_principal.clone(),
+            default_deployer_address.clone(),
+        );
+
+        // Deploy sbtc-registry before sbtc-token (order matters).
+        for name in ["sbtc-registry", "sbtc-token"] {
+            let contract_id = QualifiedContractIdentifier::new(
+                sbtc_mainnet_principal.clone(),
+                ContractName::try_from(name).unwrap(),
+            );
+
+            // Skip if already added as an explicit requirement
+            if transactions.values().any(|txs| {
+                txs.iter().any(|tx| match tx {
+                    TransactionSpecification::RequirementPublish(r) => r.contract_id == contract_id,
+                    _ => false,
+                })
+            }) {
+                continue;
+            }
+
+            let source = SBTC_BOOT_CONTRACTS
+                .iter()
+                .find(|(id, _)| id.name.as_str() == name && id.issuer == sbtc_mainnet_principal)
+                .map(|(_, (contract, _))| match &contract.code_source {
+                    ClarityCodeSource::ContractInMemory(s) => s.clone(),
+                    _ => unreachable!("sbtc boot contracts are always in-memory"),
+                })
+                .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
+
+            // Write source to requirements cache so the deployment plan can
+            // reload it from disk after serialization round-trip.
+            let requirements_dir = manifest.project.cache_location.join("requirements");
+            let _ = std::fs::create_dir_all(&requirements_dir);
+            let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
+            let _ = std::fs::write(&location, &source);
+
+            let tx =
+                TransactionSpecification::RequirementPublish(RequirementPublishSpecification {
+                    contract_id,
+                    remap_sender: default_deployer_address.clone(),
+                    remap_principals: remap_principals.clone(),
+                    source: source.clone(),
+                    clarity_version: ClarityVersion::Clarity3,
+                    cost: deployment_fee_rate * source.len() as u64,
+                    location,
+                });
+            add_transaction_to_epoch(&mut transactions, tx, &EpochSpec::Epoch3_0);
         }
     }
 
