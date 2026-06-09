@@ -979,17 +979,15 @@ impl NetworkManifest {
                     .stacks_signer_image_url
                     .take()
                     .unwrap_or(DEFAULT_STACKS_SIGNER_IMAGE.to_string()),
-                stacks_api_image_url: devnet_config
-                    .stacks_api_image_url
-                    .take()
-                    .unwrap_or_else(|| {
+                stacks_api_image_url: devnet_config.stacks_api_image_url.take().unwrap_or_else(
+                    || {
                         if devnet_config.epoch_4_0.is_some() {
-                            DEFAULT_STACKS_API_IMAGE_EPOCH_4_0
+                            DEFAULT_STACKS_API_IMAGE_EPOCH_4_0.to_string()
                         } else {
-                            DEFAULT_STACKS_API_IMAGE
+                            DEFAULT_STACKS_API_IMAGE.to_string()
                         }
-                        .to_string()
-                    }),
+                    },
+                ),
                 postgres_image_url: devnet_config
                     .postgres_image_url
                     .take()

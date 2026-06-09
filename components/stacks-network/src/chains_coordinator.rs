@@ -322,6 +322,7 @@ pub async fn start_chains_coordinator(
     let observer_event_oper = sel.recv(&observer_event_rx);
 
     let stacks_signers_keys = config.devnet_config.stacks_signers_keys.clone();
+    let mut last_pox_contract = String::new();
 
     loop {
         let oper = sel.select();
@@ -400,6 +401,7 @@ pub async fn start_chains_coordinator(
                                 &config.services_map_hosts,
                                 config.deployment_fee_rate,
                                 bitcoin_block_height as u32,
+                                &mut last_pox_contract,
                             )
                             .await;
                             if let Some(tx_count) = res {
@@ -803,6 +805,7 @@ pub async fn publish_stacking_orders(
     services_map_hosts: &ServicesMapHosts,
     fee_rate: u64,
     bitcoin_block_height: u32,
+    last_pox_contract: &mut String,
 ) -> Option<usize> {
     let node_rpc_url = format!("http://{}", &services_map_hosts.stacks_node_host);
     let pox_info: PoxInfo = match reqwest::get(format!("{node_rpc_url}/v2/pox")).await {
@@ -830,11 +833,24 @@ pub async fn publish_stacking_orders(
     let pox_cycle_length = pox_info.reward_cycle_length;
     let pox_cycle_position = effective_height % pox_cycle_length;
 
-    if pox_cycle_position != 10 {
+    let pox_contract_id = pox_info.contract_id;
+
+    // Detect pox contract transition (e.g. pox-4 → pox-5). When the active
+    // contract changes, stacking state resets and we must re-stack immediately
+    // rather than waiting for the normal cycle-position trigger.
+    let pox_transitioned = !last_pox_contract.is_empty() && *last_pox_contract != pox_contract_id;
+    if pox_transitioned {
+        let _ = devnet_event_tx.send(DevnetEvent::info(format!(
+            "PoX contract changed from {} to {}, re-submitting stacking orders",
+            last_pox_contract, pox_contract_id
+        )));
+    }
+    *last_pox_contract = pox_contract_id.clone();
+
+    if !pox_transitioned && pox_cycle_position != 10 {
         return None;
     }
 
-    let pox_contract_id = pox_info.contract_id;
     let pox_version = pox_contract_id
         .rsplit('-')
         .next()
@@ -843,12 +859,17 @@ pub async fn publish_stacking_orders(
 
     let mut transactions = 0;
     for (i, pox_stacking_order) in devnet_config.pox_stacking_orders.iter().enumerate() {
-        if !should_publish_stacking_orders(&current_cycle, pox_stacking_order) {
+        // On pox transition, re-stack all active orders as new stacks (not extends).
+        // The new pox contract has no prior stacking state.
+        if !pox_transitioned && !should_publish_stacking_orders(&current_cycle, pox_stacking_order)
+        {
             continue;
         }
 
-        // if the is not the first cycle of this stacker, then stacking order will be extended
-        let extend_stacking = current_cycle != pox_stacking_order.start_at_cycle - 1;
+        // On pox transition, treat as initial stacking (not extend) since the
+        // new contract has no prior state. Otherwise use the normal logic.
+        let extend_stacking =
+            !pox_transitioned && current_cycle != pox_stacking_order.start_at_cycle - 1;
         if extend_stacking && !pox_stacking_order.auto_extend.unwrap_or_default() {
             continue;
         }
