@@ -658,8 +658,10 @@ dependencies = [
  "clarinet-format",
  "clarinet-utils",
  "clarity",
+ "clarity-abi-typegen",
  "clarity-lsp",
  "clarity-repl",
+ "clarity-ts-typegen",
  "colored",
  "crossbeam-channel",
  "crossterm",
@@ -817,6 +819,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarity-abi-typegen"
+version = "3.17.0"
+dependencies = [
+ "clarity",
+ "serde_json",
+]
+
+[[package]]
 name = "clarity-events"
 version = "3.19.0"
 dependencies = [
@@ -910,6 +920,14 @@ dependencies = [
  "stacks-common",
  "stackslib",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "clarity-ts-typegen"
+version = "3.17.0"
+dependencies = [
+ "clarity",
+ "serde_json",
 ]
 
 [[package]]
