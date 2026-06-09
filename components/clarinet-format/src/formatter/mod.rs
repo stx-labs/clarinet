@@ -3021,6 +3021,20 @@ mod tests_formatter {
     }
 
     #[test]
+    fn test_nested_concat() {
+        let src = "(concat \"hello\" (concat \"world\" \"!\"))";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_variadic_concat() {
+        let src = "(concat \"hello\" \"world\" \"!\")";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
     fn test_inline_comment_try() {
         let src = indoc!(
             r#"

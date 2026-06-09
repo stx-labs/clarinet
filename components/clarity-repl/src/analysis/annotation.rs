@@ -106,6 +106,7 @@ pub enum WarningKind {
     CaseToken,
     CaseTrait,
     ErrorConst,
+    FlattenNestedVariadic,
     Noop,
     Panic,
     UnnecessaryAsMaxLen,
