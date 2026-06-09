@@ -439,7 +439,7 @@ impl GetChangesForNewProject {
                 "@stacks/transactions": "^7.2.0",
                 "@types/node": "^24.4.0",
                 "chokidar-cli": "^3.0.0",
-                "vitest": "^4.0.7",
+                "vitest": "^4.1.8",
                 "vitest-environment-clarinet": "^3.0.0"
               }}
             }}
