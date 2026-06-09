@@ -102,31 +102,22 @@ impl<'a> ASTVisitor<'a> for FlattenNestedVariadic<'a> {
         func: NativeFunctions,
         operands: &'a [SymbolicExpression],
     ) -> bool {
-        let func_name = func.get_name();
-        self.check_operands(expr, &func_name, operands);
+        // Only lint associative operators where flattening preserves semantics.
+        // e.g. (- a (- b c)) != (- a b c), so we skip Subtract, Divide, etc.
+        if matches!(func, NativeFunctions::Add | NativeFunctions::Multiply) {
+            let func_name = func.get_name();
+            self.check_operands(expr, &func_name, operands);
+        }
         true
     }
 
     fn visit_concat(
         &mut self,
         expr: &'a SymbolicExpression,
-        lhs: &'a SymbolicExpression,
-        rhs: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
     ) -> bool {
         if self.clarity_version >= ClarityVersion::Clarity6 {
-            self.set_active_annotation(&expr.span);
-            if !self.allow()
-                && (Self::is_nested_call(lhs, "concat") || Self::is_nested_call(rhs, "concat"))
-            {
-                self.diagnostics.push(Diagnostic {
-                    level: self.level.clone(),
-                    message: "nested `concat` can be flattened into a single call".to_owned(),
-                    spans: vec![expr.span.clone()],
-                    suggestion: Some(
-                        "Merge the inner `concat` arguments into the outer call".to_owned(),
-                    ),
-                });
-            }
+            self.check_operands(expr, "concat", operands);
         }
         true
     }
@@ -243,6 +234,21 @@ mod tests {
             "
             (define-private (test)
                 (+ u1 u2 u3)
+            )
+        "
+        )
+        .to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_nested_subtract() {
+        let snippet = indoc!(
+            "
+            (define-private (test)
+                (- u10 (- u5 u2))
             )
         "
         )
