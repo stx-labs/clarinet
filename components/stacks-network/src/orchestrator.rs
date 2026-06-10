@@ -1329,6 +1329,7 @@ impl DevnetOrchestrator {
             format!("STACKS_CHAIN_ID=2147483648"),
             format!("V2_POX_MIN_AMOUNT_USTX=90000000260"),
             format!("FAUCET_PRIVATE_KEY={}", devnet_config.faucet_secret_key_hex),
+            "PG_SCHEMA=public".to_string(),
             "NODE_ENV=development".to_string(),
         ];
         env.append(&mut devnet_config.stacks_api_env_vars.clone());
@@ -1526,82 +1527,17 @@ impl DevnetOrchestrator {
         Ok(())
     }
 
-    pub async fn boot_postgres_container(&self, ctx: &Context) -> Result<(), String> {
+    pub async fn boot_postgres_container(&self, _ctx: &Context) -> Result<(), String> {
         let container = self
             .postgres_container_id
             .as_ref()
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
 
         docker
             .start_container::<String>(container, None)
             .await
             .map_err(|e| formatted_docker_error("unable to start postgres container", e))?;
-
-        // The stacks-blockchain-api pox5 image requires the
-        // `stacks_blockchain_api` schema to exist in postgres.
-        if devnet_config.epoch_4_0.is_some() {
-            let db = devnet_config.stacks_api_postgres_database.clone();
-            let user = devnet_config.postgres_username.clone();
-
-            // Retry the schema creation until postgres is ready.
-            let mut created = false;
-            for _ in 0..30 {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-
-                let exec_config = bollard::exec::CreateExecOptions {
-                    cmd: Some(vec![
-                        "psql",
-                        "-U",
-                        user.as_str(),
-                        "-d",
-                        db.as_str(),
-                        "-c",
-                        "CREATE SCHEMA IF NOT EXISTS stacks_blockchain_api",
-                    ]),
-                    attach_stdout: Some(true),
-                    attach_stderr: Some(true),
-                    ..Default::default()
-                };
-
-                let Ok(exec) = docker.create_exec(container, exec_config).await else {
-                    continue;
-                };
-
-                match docker.start_exec(&exec.id, None).await {
-                    Ok(bollard::exec::StartExecResults::Attached { mut output, .. }) => {
-                        use futures::StreamExt;
-                        let mut success = false;
-                        while let Some(Ok(msg)) = output.next().await {
-                            let text = msg.to_string();
-                            if text.contains("CREATE SCHEMA") {
-                                success = true;
-                            }
-                        }
-                        if success {
-                            created = true;
-                            break;
-                        }
-                    }
-                    Ok(bollard::exec::StartExecResults::Detached) => {}
-                    Err(_) => {}
-                }
-            }
-
-            if created {
-                ctx.try_log(|logger| {
-                    slog::info!(logger, "Created stacks_blockchain_api schema in postgres")
-                });
-            } else {
-                ctx.try_log(|logger| {
-                    slog::warn!(
-                        logger,
-                        "Failed to create stacks_blockchain_api schema in postgres"
-                    )
-                });
-            }
-        }
 
         Ok(())
     }
