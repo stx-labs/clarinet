@@ -27,8 +27,10 @@ pub struct NewBlock {
     pub burn_block_hash: String,
     pub parent_block_hash: String,
     pub parent_index_block_hash: String,
-    pub parent_microblock: String,
-    pub parent_microblock_sequence: u64,
+    #[serde(default)]
+    pub parent_microblock: Option<String>,
+    #[serde(default)]
+    pub parent_microblock_sequence: Option<u64>,
     pub parent_burn_block_hash: String,
     pub parent_burn_block_height: u64,
     pub parent_burn_block_timestamp: i64,
@@ -60,7 +62,8 @@ pub struct NewBlock {
 
 #[derive(Deserialize, Serialize)]
 pub struct RewardSet {
-    pub pox_ustx_threshold: String,
+    #[serde(default)]
+    pub pox_ustx_threshold: Option<String>,
     pub rewarded_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signers: Option<Vec<RewardSetSigner>>,
@@ -466,15 +469,16 @@ pub fn standardize_stacks_block(
         });
     }
 
-    let confirm_microblock_identifier = if block.parent_microblock
-        == "0x0000000000000000000000000000000000000000000000000000000000000000"
-    {
-        None
-    } else {
-        Some(BlockIdentifier {
-            index: block.parent_microblock_sequence,
-            hash: block.parent_microblock.clone(),
-        })
+    let confirm_microblock_identifier = match (&block.parent_microblock, block.parent_microblock_sequence) {
+        (Some(hash), Some(seq))
+            if hash != "0x0000000000000000000000000000000000000000000000000000000000000000" =>
+        {
+            Some(BlockIdentifier {
+                index: seq,
+                hash: hash.clone(),
+            })
+        }
+        _ => None,
     };
 
     let signer_sig_hash = block

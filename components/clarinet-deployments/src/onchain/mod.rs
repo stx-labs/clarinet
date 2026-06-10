@@ -722,12 +722,7 @@ pub fn apply_on_chain_deployment(
     let mut current_bitcoin_block_height = 0;
     for (epoch, batch) in batches.into_iter() {
         if network == StacksNetwork::Devnet {
-            // Devnet only: ensure we've reached the appropriate epoch for this batch.
-            // Reset the stacks block height tracker so we only require one new stacks
-            // block to confirm the chain is alive. This prevents getting stuck when the
-            // stacks chain resets or stalls across epoch transitions (e.g. Nakamoto).
-            current_block_height = 0;
-
+            // Devnet only: ensure we've reached the appropriate epoch for this batch
             let devnet = network_manifest.devnet.as_ref().unwrap();
             let after_bitcoin_block = match epoch {
                 EpochSpec::Epoch2_0 => devnet.epoch_2_0,

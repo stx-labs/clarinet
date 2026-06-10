@@ -80,7 +80,7 @@ pub fn generate_test_stacks_block(
             signer_public_keys: Some(vec!["12".to_owned(), "23".to_owned()]),
             cycle_number: Some(1),
             reward_set: Some(StacksBlockMetadataRewardSet {
-                pox_ustx_threshold: "50000".to_owned(),
+                pox_ustx_threshold: Some("50000".to_owned()),
                 rewarded_addresses: vec![],
                 signers: Some(vec![
                     StacksBlockMetadataRewardSetSigner {

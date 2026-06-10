@@ -27,7 +27,7 @@ use crate::indexer::bitcoin::{
 };
 use crate::indexer::{self, Indexer};
 use crate::utils::Context;
-use crate::{try_error, try_info};
+use crate::{try_error, try_info, try_warn};
 
 fn success_response() -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {
     Ok(Json(json!({
@@ -131,9 +131,13 @@ async fn handle_new_stacks_block(
     let (_pox_config, chain_event, _new_tip) = match indexer_rw_lock.write() {
         Ok(mut indexer) => {
             let pox_config = indexer.get_pox_config();
-            let block = match indexer.standardize_stacks_marshalled_block(marshalled_block, &ctx) {
+            let block = match indexer.standardize_stacks_marshalled_block(marshalled_block.clone(), &ctx) {
                 Ok(block) => block,
                 Err(e) => {
+                    let _ = std::fs::write(
+                        "/tmp/failed_new_block_payload.json",
+                        serde_json::to_string_pretty(&marshalled_block).unwrap_or_default(),
+                    );
                     return error_response(format!("Unable to standardize stacks block {e}"), &ctx);
                 }
             };

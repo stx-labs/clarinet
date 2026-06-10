@@ -133,7 +133,8 @@ pub struct StacksBlockMetadata {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct StacksBlockMetadataRewardSet {
-    pub pox_ustx_threshold: String,
+    #[serde(default)]
+    pub pox_ustx_threshold: Option<String>,
     pub rewarded_addresses: Vec<String>,
     pub signers: Option<Vec<StacksBlockMetadataRewardSetSigner>>,
 }
