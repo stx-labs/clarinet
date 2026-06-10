@@ -869,9 +869,11 @@ pub async fn generate_default_deployment_with_cache(
             // Write source to requirements cache so the deployment plan can
             // reload it from disk after serialization round-trip.
             let requirements_dir = manifest.project.cache_location.join("requirements");
-            let _ = std::fs::create_dir_all(&requirements_dir);
+            std::fs::create_dir_all(&requirements_dir)
+                .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
             let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
-            let _ = std::fs::write(&location, &source);
+            std::fs::write(&location, &source)
+                .map_err(|e| format!("unable to write {name} to requirements cache: {e}"))?;
 
             let tx =
                 TransactionSpecification::RequirementPublish(RequirementPublishSpecification {

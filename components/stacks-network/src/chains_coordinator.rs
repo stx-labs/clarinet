@@ -1319,13 +1319,20 @@ fn publish_pox5_stacking_transactions(
         "{}/v2/contracts/source/{stx_address}/{contract_name}",
         stacks_rpc.url
     );
+    let mut contract_deployed = false;
     for _ in 0..60 {
         std::thread::sleep(std::time::Duration::from_secs(2));
         if let Ok(resp) = reqwest::blocking::get(&contract_url) {
             if resp.status().is_success() {
+                contract_deployed = true;
                 break;
             }
         }
+    }
+    if !contract_deployed {
+        return Err(format!(
+            "Timed out waiting for signer-manager contract {stx_address}.{contract_name} to be mined"
+        ));
     }
 
     // Step 2: Call register-self on the signer-manager contract.

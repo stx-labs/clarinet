@@ -469,17 +469,18 @@ pub fn standardize_stacks_block(
         });
     }
 
-    let confirm_microblock_identifier = match (&block.parent_microblock, block.parent_microblock_sequence) {
-        (Some(hash), Some(seq))
-            if hash != "0x0000000000000000000000000000000000000000000000000000000000000000" =>
-        {
-            Some(BlockIdentifier {
-                index: seq,
-                hash: hash.clone(),
-            })
-        }
-        _ => None,
-    };
+    let confirm_microblock_identifier =
+        match (&block.parent_microblock, block.parent_microblock_sequence) {
+            (Some(hash), Some(seq))
+                if hash != "0x0000000000000000000000000000000000000000000000000000000000000000" =>
+            {
+                Some(BlockIdentifier {
+                    index: seq,
+                    hash: hash.clone(),
+                })
+            }
+            _ => None,
+        };
 
     let signer_sig_hash = block
         .signer_signature_hash
