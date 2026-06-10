@@ -837,7 +837,7 @@ pub async fn generate_default_deployment_with_cache(
                 continue;
             }
 
-            let source = SBTC_BOOT_CONTRACTS
+            let mut source = SBTC_BOOT_CONTRACTS
                 .iter()
                 .find(|(id, _)| id.name.as_str() == name && id.issuer == sbtc_mainnet_principal)
                 .map(|(_, (contract, _))| match &contract.code_source {
@@ -845,6 +845,26 @@ pub async fn generate_default_deployment_with_cache(
                     _ => unreachable!("sbtc boot contracts are always in-memory"),
                 })
                 .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
+
+            // The sbtc-registry contract defaults current-aggregate-pubkey to 0x00
+            // (1 byte). The stacks-node expects a 33-byte compressed secp256k1
+            // pubkey when mining in the prepare phase. Patch the default value with
+            // the first signer's public key so mining doesn't stall.
+            if name == "sbtc-registry" {
+                if let Some(ref devnet) = network_manifest.devnet {
+                    if let Some(first_signer_key) = devnet.stacks_signers_keys.first() {
+                        use stacks_common::types::chainstate::StacksPublicKey;
+                        let pub_key = StacksPublicKey::from_private(first_signer_key);
+                        let pub_key_hex = pub_key.to_hex();
+                        source = source.replace(
+                            "(define-data-var current-aggregate-pubkey (buff 33) 0x00)",
+                            &format!(
+                                "(define-data-var current-aggregate-pubkey (buff 33) 0x{pub_key_hex})"
+                            ),
+                        );
+                    }
+                }
+            }
 
             // Write source to requirements cache so the deployment plan can
             // reload it from disk after serialization round-trip.

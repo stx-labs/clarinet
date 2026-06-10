@@ -21,7 +21,7 @@ pub const DEFAULT_STACKS_SIGNER_IMAGE: &str =
     "ghcr.io/stacks-network/stacks-signer:3.4.0.0.0.0-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 pub const DEFAULT_STACKS_API_IMAGE_EPOCH_4_0: &str =
-    "hirosystems/stacks-blockchain-api:9.0.0-pox5.5";
+    "hirosystems/stacks-blockchain-api:9.0.0-pox5.6";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
 

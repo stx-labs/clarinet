@@ -895,6 +895,12 @@ pub async fn publish_stacking_orders(
             devnet_config.stacks_signers_keys[i % devnet_config.stacks_signers_keys.len()].clone();
 
         let stacking_order_index = i;
+        // pox-5 initial staking requires deploying a contract and waiting for
+        // it to be mined before submitting follow-up transactions. We must not
+        // block the coordinator loop (which drives block production), so pox-5
+        // stacking threads run detached.
+        let needs_deploy_wait = pox_version >= 5 && !extend_stacking;
+        let devnet_event_tx_moved = devnet_event_tx.clone();
         let stacking_result =
             hiro_system_kit::thread_named("Stacking orders handler").spawn(move || {
                 let default_fee = fee_rate * 1000;
@@ -955,24 +961,49 @@ pub async fn publish_stacking_orders(
                 }
             });
 
-        match stacking_result {
-            Ok(result) => {
-                if let Ok(result) = result.join() {
-                    match result {
-                        Ok(_) => {
-                            let _ = devnet_event_tx.send(DevnetEvent::success(format!(
+        if needs_deploy_wait {
+            // Don't block the coordinator — let the thread report its own result.
+            if let Ok(handle) = stacking_result {
+                let _ = hiro_system_kit::thread_named("Stacking orders monitor").spawn(move || {
+                    match handle.join() {
+                        Ok(Ok(_)) => {
+                            let _ = devnet_event_tx_moved.send(DevnetEvent::success(format!(
                                 "Stacking order for {stx_amount} STX submitted"
                             )));
                         }
-                        Err(e) => {
-                            let _ = devnet_event_tx
+                        Ok(Err(e)) => {
+                            let _ = devnet_event_tx_moved
                                 .send(DevnetEvent::error(format!("Unable to stack: {e}")));
                         }
+                        Err(_) => {
+                            let _ = devnet_event_tx_moved.send(DevnetEvent::error(
+                                "Stacking order thread panicked".to_string(),
+                            ));
+                        }
                     }
-                };
+                });
             }
-            Err(e) => {
-                let _ = devnet_event_tx.send(DevnetEvent::error(format!("Unable to stack: {e}")));
+        } else {
+            match stacking_result {
+                Ok(result) => {
+                    if let Ok(result) = result.join() {
+                        match result {
+                            Ok(_) => {
+                                let _ = devnet_event_tx.send(DevnetEvent::success(format!(
+                                    "Stacking order for {stx_amount} STX submitted"
+                                )));
+                            }
+                            Err(e) => {
+                                let _ = devnet_event_tx
+                                    .send(DevnetEvent::error(format!("Unable to stack: {e}")));
+                            }
+                        }
+                    };
+                }
+                Err(e) => {
+                    let _ =
+                        devnet_event_tx.send(DevnetEvent::error(format!("Unable to stack: {e}")));
+                }
             }
         }
     }
@@ -1280,6 +1311,22 @@ fn publish_pox5_stacking_transactions(
         .post_transaction(&deploy_tx)
         .map_err(|e| format!("{e}"))?;
     nonce += 1;
+
+    // Wait for the signer-manager contract to be deployed on-chain.
+    // The node rejects contract-call transactions if the target contract
+    // is only in the mempool and not yet mined.
+    let contract_url = format!(
+        "{}/v2/contracts/source/{stx_address}/{contract_name}",
+        stacks_rpc.url
+    );
+    for _ in 0..60 {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if let Ok(resp) = reqwest::blocking::get(&contract_url) {
+            if resp.status().is_success() {
+                break;
+            }
+        }
+    }
 
     // Step 2: Call register-self on the signer-manager contract.
     // This grants the signer key and registers the signer in pox-5.
