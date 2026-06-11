@@ -112,8 +112,6 @@ describe("simnet remote interactions", { retry: 2 }, async () => {
       api_url,
       initial_height: 56230,
     });
-    // trigger the remote contract to be fetched
-    simnet.callReadOnlyFn(counterAddress, "get-count", [], sender);
     const source = simnet.getContractSource(counterAddress);
     expect(source).toBeDefined();
     expect(source).toContain("define-data-var");
@@ -125,8 +123,6 @@ describe("simnet remote interactions", { retry: 2 }, async () => {
       api_url,
       initial_height: 56230,
     });
-    // trigger the remote contract to be fetched
-    simnet.callReadOnlyFn(counterAddress, "get-count", [], sender);
     const ast = simnet.getContractAST(counterAddress);
     expect(ast).toBeDefined();
     expect(ast.expressions).toBeDefined();
@@ -173,5 +169,19 @@ describe("repl settings", { retry: 2 }, async () => {
     expect(simnet.deployer).toBe("SP1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRCBGD7R");
     const interfaces = simnet.getContractsInterfaces();
     expect([...interfaces.keys()].every((v) => v.startsWith(simnet.deployer))).toBe(true);
+  });
+
+  it("can get local and remote contract sources", async () => {
+    const simnet = await initSimnet("tests/fixtures/ManifestWithMXS.toml", false);
+
+    const localContractSource = simnet.getContractSource(`${simnet.deployer}.counter`);
+    expect(localContractSource).toBeDefined();
+    expect(localContractSource).toContain("define-data-var");
+
+    const remoteContractSource = simnet.getContractSource(
+      "SP1H1733V5MZ3SZ9XRW9FKYGEZT0JDGEB8Y634C7R.miamicoin-token-v2",
+    );
+    expect(remoteContractSource).toBeDefined();
+    expect(remoteContractSource).toContain("define-data-var");
   });
 });
