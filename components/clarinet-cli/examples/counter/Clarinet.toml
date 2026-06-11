@@ -13,3 +13,13 @@ epoch = "2.0"
 path = "contracts/counter-v2.clar"
 clarity_version = 2
 epoch = "2.4"
+
+[repl.analysis]
+passes = ["check_checker"]
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = true
+trusted_caller = false
+callee_filter = false
+
