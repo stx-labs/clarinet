@@ -78,12 +78,14 @@ impl<'a> FlattenNestedVariadic<'a> {
 
         for operand in operands {
             if Self::is_nested_call(operand, func_name) {
-                let mut suggestion =
-                    format!("Merge the inner `{func_name}` arguments into the outer call");
-                if let Some(note) = note {
-                    suggestion.push_str(". Note: ");
-                    suggestion.push_str(note);
-                }
+                let suggestion = if let Some(note) = note {
+                    let styled_note = yellow!("Note: {note}");
+                    format!(
+                        "Merge the inner `{func_name}` arguments into the outer call\n{styled_note}"
+                    )
+                } else {
+                    format!("Merge the inner `{func_name}` arguments into the outer call")
+                };
                 self.diagnostics.push(Diagnostic {
                     level: self.level.clone(),
                     message: format!("nested `{func_name}` can be flattened into a single call"),
@@ -115,7 +117,7 @@ impl<'a> ASTVisitor<'a> for FlattenNestedVariadic<'a> {
                 expr,
                 &func_name,
                 operands,
-                Some("flattening may cause overflow if ordering is significant"),
+                Some("overflow behavior may be altered by flattening"),
             );
         }
         true
@@ -267,7 +269,7 @@ mod tests {
             .suggestion
             .as_ref()
             .unwrap();
-        assert!(suggestion.contains("overflow"));
+        assert!(suggestion.contains("overflow behavior may be altered by flattening"));
     }
 
     #[test]
