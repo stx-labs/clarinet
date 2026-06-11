@@ -2,6 +2,10 @@
   "name": "@stacks/clarinet-examples",
   "private": true,
   "description": "Basic workspace to easily manage the example dependencies",
+  "packageManager": "pnpm@11.1.3",
+  "engines": {
+    "node": ">=20"
+  },
   "author": "Stacks Labs",
   "license": "GPL-3.0",
   "scripts": {
