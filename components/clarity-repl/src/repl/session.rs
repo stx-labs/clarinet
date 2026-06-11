@@ -1067,6 +1067,42 @@ impl Session {
         self.interpreter.get_assets_maps()
     }
 
+    pub fn get_contract_source(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Option<String> {
+        if let Some(contract) = self.contracts.get(contract_id) {
+            return Some(contract.code.clone());
+        }
+        self.interpreter.get_contract_source(contract_id)
+    }
+
+    pub fn get_contract_ast(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Result<ContractAST, String> {
+        if let Some(contract) = self.contracts.get(contract_id) {
+            return Ok(contract.ast.clone());
+        }
+
+        let source = self
+            .interpreter
+            .get_contract_source(contract_id)
+            .ok_or_else(|| format!("contract {contract_id} not found"))?;
+        let analysis = self
+            .interpreter
+            .get_contract_analysis(contract_id)
+            .ok_or_else(|| format!("contract analysis for {contract_id} not found"))?;
+        clarity::vm::ast::build_ast(
+            contract_id,
+            &source,
+            &mut (),
+            analysis.clarity_version,
+            analysis.epoch,
+        )
+        .map_err(|e| e.to_string())
+    }
+
     pub fn toggle_costs(&mut self) -> String {
         self.show_costs = !self.show_costs;
         format!("Always show costs: {}", self.show_costs)

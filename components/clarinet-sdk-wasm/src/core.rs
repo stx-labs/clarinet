@@ -668,41 +668,17 @@ impl SDK {
     #[wasm_bindgen(js_name=getContractSource)]
     pub fn get_contract_source(&mut self, contract: &str) -> Option<String> {
         let contract_id = Session::desugar_contract_id(&self.deployer, contract).ok()?;
-        let session = self.get_session_mut();
-        if let Some(contract) = session.contracts.get(&contract_id) {
-            return Some(contract.code.clone());
-        }
-        session.interpreter.get_contract_source(&contract_id)
+        self.get_session_mut().get_contract_source(&contract_id)
     }
 
     #[wasm_bindgen(js_name=getContractAST)]
     pub fn get_contract_ast(&mut self, contract: &str) -> Result<IContractAST, JsError> {
         let contract_id =
             Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
-        let session = self.get_session_mut();
-        if let Some(contract) = session.contracts.get(&contract_id) {
-            return Ok(encode_to_js(&contract.ast)?.unchecked_into::<IContractAST>());
-        }
-
-        let source = session
-            .interpreter
-            .get_contract_source(&contract_id)
-            .ok_or_else(|| JsError::new(&format!("contract {contract_id} not found")))?;
-        let analysis = session
-            .interpreter
-            .get_contract_analysis(&contract_id)
-            .ok_or_else(|| {
-                JsError::new(&format!("contract analysis for {contract_id} not found"))
-            })?;
-        let ast = clarity::vm::ast::build_ast(
-            &contract_id,
-            &source,
-            &mut (),
-            analysis.clarity_version,
-            analysis.epoch,
-        )
-        .map_err(|e| JsError::new(&e.to_string()))?;
-
+        let ast = self
+            .get_session_mut()
+            .get_contract_ast(&contract_id)
+            .map_err(|e| JsError::new(&e))?;
         Ok(encode_to_js(&ast)?.unchecked_into::<IContractAST>())
     }
 
