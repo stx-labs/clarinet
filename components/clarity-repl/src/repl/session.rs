@@ -1067,24 +1067,10 @@ impl Session {
         self.interpreter.get_assets_maps()
     }
 
-    pub fn get_contract_source(
-        &mut self,
-        contract_id: &QualifiedContractIdentifier,
-    ) -> Result<Option<String>, String> {
-        if let Some(contract) = self.contracts.get(contract_id) {
-            return Ok(Some(contract.code.clone()));
-        }
-        self.interpreter.get_contract_source(contract_id)
-    }
-
     pub fn get_contract_ast(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
     ) -> Result<ContractAST, String> {
-        if let Some(contract) = self.contracts.get(contract_id) {
-            return Ok(contract.ast.clone());
-        }
-
         let source = self
             .interpreter
             .get_contract_source(contract_id)?

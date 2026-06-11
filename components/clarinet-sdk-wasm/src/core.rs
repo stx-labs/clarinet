@@ -670,6 +670,7 @@ impl SDK {
         let contract_id =
             Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
         self.get_session_mut()
+            .interpreter
             .get_contract_source(&contract_id)
             .map_err(|e| JsError::new(&e))
     }
