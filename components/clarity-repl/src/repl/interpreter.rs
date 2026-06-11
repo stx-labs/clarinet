@@ -355,27 +355,30 @@ impl ClarityInterpreter {
     pub fn get_contract_source(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
-    ) -> Option<String> {
+    ) -> Result<Option<String>, String> {
         let key = ClarityDatabase::make_metadata_key(
             StoreType::Contract,
             ContractDataVarName::ContractSrc.as_str(),
         );
         self.clarity_datastore
             .get_metadata(contract_id, &key)
-            .ok()
-            .flatten()
+            .map_err(|e| format!("failed to fetch contract source for {contract_id}: {e}"))
     }
 
     pub fn get_contract_analysis(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
-    ) -> Option<ContractAnalysis> {
+    ) -> Result<Option<ContractAnalysis>, String> {
         let key = AnalysisDatabase::storage_key();
-        self.clarity_datastore
+        let raw = self
+            .clarity_datastore
             .get_metadata(contract_id, key)
-            .ok()
-            .flatten()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .map_err(|e| format!("failed to fetch contract analysis for {contract_id}: {e}"))?;
+        raw.map(|s| {
+            serde_json::from_str(&s)
+                .map_err(|e| format!("failed to parse contract analysis for {contract_id}: {e}"))
+        })
+        .transpose()
     }
 
     pub fn get_global_context(

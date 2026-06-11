@@ -666,9 +666,12 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=getContractSource)]
-    pub fn get_contract_source(&mut self, contract: &str) -> Option<String> {
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract).ok()?;
-        self.get_session_mut().get_contract_source(&contract_id)
+    pub fn get_contract_source(&mut self, contract: &str) -> Result<Option<String>, JsError> {
+        let contract_id =
+            Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
+        self.get_session_mut()
+            .get_contract_source(&contract_id)
+            .map_err(|e| JsError::new(&e))
     }
 
     #[wasm_bindgen(js_name=getContractAST)]

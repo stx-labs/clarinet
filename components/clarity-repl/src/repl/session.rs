@@ -1070,9 +1070,9 @@ impl Session {
     pub fn get_contract_source(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
-    ) -> Option<String> {
+    ) -> Result<Option<String>, String> {
         if let Some(contract) = self.contracts.get(contract_id) {
-            return Some(contract.code.clone());
+            return Ok(Some(contract.code.clone()));
         }
         self.interpreter.get_contract_source(contract_id)
     }
@@ -1087,12 +1087,12 @@ impl Session {
 
         let source = self
             .interpreter
-            .get_contract_source(contract_id)
-            .ok_or_else(|| format!("contract {contract_id} not found"))?;
+            .get_contract_source(contract_id)?
+            .ok_or_else(|| format!("contract source not found for {contract_id}"))?;
         let analysis = self
             .interpreter
-            .get_contract_analysis(contract_id)
-            .ok_or_else(|| format!("contract analysis for {contract_id} not found"))?;
+            .get_contract_analysis(contract_id)?
+            .ok_or_else(|| format!("contract analysis not found for {contract_id}"))?;
         clarity::vm::ast::build_ast(
             contract_id,
             &source,
