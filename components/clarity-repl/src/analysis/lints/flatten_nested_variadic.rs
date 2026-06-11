@@ -69,6 +69,7 @@ impl<'a> FlattenNestedVariadic<'a> {
         expr: &'a SymbolicExpression,
         func_name: &str,
         operands: &'a [SymbolicExpression],
+        note: Option<&str>,
     ) {
         self.set_active_annotation(&expr.span);
         if self.allow() {
@@ -77,13 +78,17 @@ impl<'a> FlattenNestedVariadic<'a> {
 
         for operand in operands {
             if Self::is_nested_call(operand, func_name) {
+                let mut suggestion =
+                    format!("Merge the inner `{func_name}` arguments into the outer call");
+                if let Some(note) = note {
+                    suggestion.push_str(". Note: ");
+                    suggestion.push_str(note);
+                }
                 self.diagnostics.push(Diagnostic {
                     level: self.level.clone(),
                     message: format!("nested `{func_name}` can be flattened into a single call"),
                     spans: vec![expr.span.clone()],
-                    suggestion: Some(format!(
-                        "Merge the inner `{func_name}` arguments into the outer call"
-                    )),
+                    suggestion: Some(suggestion),
                 });
                 return;
             }
@@ -106,8 +111,47 @@ impl<'a> ASTVisitor<'a> for FlattenNestedVariadic<'a> {
         // e.g. (- a (- b c)) != (- a b c), so we skip Subtract, Divide, etc.
         if matches!(func, NativeFunctions::Add | NativeFunctions::Multiply) {
             let func_name = func.get_name();
-            self.check_operands(expr, &func_name, operands);
+            self.check_operands(
+                expr,
+                &func_name,
+                operands,
+                Some("flattening may cause overflow if ordering is significant"),
+            );
         }
+        true
+    }
+
+    fn visit_lazy_logical(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        func: NativeFunctions,
+        operands: &'a [SymbolicExpression],
+    ) -> bool {
+        let func_name = func.get_name();
+        self.check_operands(expr, &func_name, operands, None);
+        true
+    }
+
+    fn visit_bitwise(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        func: NativeFunctions,
+        operands: &'a [SymbolicExpression],
+    ) -> bool {
+        // BitwiseNot is unary, skip it.
+        if !matches!(func, NativeFunctions::BitwiseNot) {
+            let func_name = func.get_name();
+            self.check_operands(expr, &func_name, operands, None);
+        }
+        true
+    }
+
+    fn visit_begin(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        statements: &'a [SymbolicExpression],
+    ) -> bool {
+        self.check_operands(expr, "begin", statements, None);
         true
     }
 
@@ -117,7 +161,7 @@ impl<'a> ASTVisitor<'a> for FlattenNestedVariadic<'a> {
         operands: &'a [SymbolicExpression],
     ) -> bool {
         if self.clarity_version >= ClarityVersion::Clarity6 {
-            self.check_operands(expr, "concat", operands);
+            self.check_operands(expr, "concat", operands, None);
         }
         true
     }
@@ -192,14 +236,12 @@ mod tests {
 
     #[test]
     fn warn_nested_add() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-private (test)
                 (+ u1 (+ u2 u3))
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 1);
@@ -210,15 +252,32 @@ mod tests {
     }
 
     #[test]
+    fn warn_nested_add_overflow_note() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (+ u1 (+ u2 u3))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        let suggestion = result.lint_diagnostics[0]
+            .diagnostic
+            .suggestion
+            .as_ref()
+            .unwrap();
+        assert!(suggestion.contains("overflow"));
+    }
+
+    #[test]
     fn warn_nested_multiply() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-private (test)
                 (* u2 (* u3 u4))
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 1);
@@ -230,14 +289,12 @@ mod tests {
 
     #[test]
     fn no_warn_flat_add() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-private (test)
                 (+ u1 u2 u3)
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -245,14 +302,12 @@ mod tests {
 
     #[test]
     fn no_warn_nested_subtract() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-private (test)
                 (- u10 (- u5 u2))
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -260,14 +315,12 @@ mod tests {
 
     #[test]
     fn no_warn_different_functions() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-private (test)
                 (+ u1 (* u2 u3))
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -275,14 +328,12 @@ mod tests {
 
     #[test]
     fn warn_nested_concat_clarity6() {
-        let snippet = indoc!(
-            r#"
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
             (define-private (test)
                 (concat "hello" (concat "world" "!"))
             )
-        "#
-        )
-        .to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet_epoch40(snippet);
         assert_eq!(result.lint_diagnostics.len(), 1);
@@ -294,14 +345,12 @@ mod tests {
 
     #[test]
     fn no_warn_nested_concat_pre_clarity6() {
-        let snippet = indoc!(
-            r#"
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
             (define-private (test)
                 (concat "hello" (concat "world" "!"))
             )
-        "#
-        )
-        .to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -309,14 +358,12 @@ mod tests {
 
     #[test]
     fn no_warn_flat_concat_clarity6() {
-        let snippet = indoc!(
-            r#"
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
             (define-private (test)
                 (concat "hello" "world" "!")
             )
-        "#
-        )
-        .to_string();
+        "#).to_string();
 
         let (_, result) = run_snippet_epoch40(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
@@ -324,17 +371,156 @@ mod tests {
 
     #[test]
     fn allow_with_annotation() {
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-private (test)
                 ;; #[allow(flatten_nested_variadic)]
                 (+ u1 (+ u2 u3))
             )
-        "
-        )
-        .to_string();
+        ").to_string();
 
         let (_, result) = run_snippet(snippet);
         assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_nested_and() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (and true (and false true))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains("nested `and`"));
+    }
+
+    #[test]
+    fn warn_nested_or() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (or false (or true false))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains("nested `or`"));
+    }
+
+    #[test]
+    fn warn_nested_bit_and() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (bit-and u7 (bit-and u3 u1))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet_epoch40(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains("nested `bit-and`"));
+    }
+
+    #[test]
+    fn warn_nested_bit_or() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (bit-or u1 (bit-or u2 u4))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet_epoch40(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains("nested `bit-or`"));
+    }
+
+    #[test]
+    fn warn_nested_bit_xor() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (bit-xor u1 (bit-xor u2 u4))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet_epoch40(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains("nested `bit-xor`"));
+    }
+
+    #[test]
+    fn warn_nested_begin() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (begin
+                    (+ u1 u2)
+                    (begin
+                        (+ u3 u4)
+                    )
+                )
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains("nested `begin`"));
+    }
+
+    #[test]
+    fn warn_deep_nesting_add() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (+ u1 (+ u2 (+ u3 (+ u4 u5))))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        // Each level of nesting produces a warning at the outer call.
+        assert!(!result.lint_diagnostics.is_empty());
+        for diag in &result.lint_diagnostics {
+            assert!(diag.diagnostic.message.contains("nested `+`"));
+        }
+    }
+
+    #[test]
+    fn warn_variadic_with_nested_operand() {
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-private (test)
+                (+ u1 u2 u3 u4 (+ u5 u6 u7))
+            )
+        ").to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains("nested `+`"));
     }
 }
