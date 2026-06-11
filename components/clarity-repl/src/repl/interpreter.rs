@@ -12,6 +12,7 @@ use clarity::vm::contexts::{
 };
 use clarity::vm::contracts::Contract;
 use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
+use clarity::vm::database::clarity_db::ContractDataVarName;
 use clarity::vm::database::{ClarityBackingStore, ClarityDatabase, StoreType};
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::events::*;
@@ -349,6 +350,35 @@ impl ClarityInterpreter {
             .get_data(&key)
             .expect("failed to get map entry from datastore")?;
         Some(format!("0x{value_hex}"))
+    }
+
+    pub fn get_contract_source(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Result<Option<String>, String> {
+        let key = ClarityDatabase::make_metadata_key(
+            StoreType::Contract,
+            ContractDataVarName::ContractSrc.as_str(),
+        );
+        self.clarity_datastore
+            .get_metadata(contract_id, &key)
+            .map_err(|e| format!("failed to fetch contract source for {contract_id}: {e}"))
+    }
+
+    pub fn get_contract_analysis(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Result<Option<ContractAnalysis>, String> {
+        let key = AnalysisDatabase::storage_key();
+        let raw = self
+            .clarity_datastore
+            .get_metadata(contract_id, key)
+            .map_err(|e| format!("failed to fetch contract analysis for {contract_id}: {e}"))?;
+        raw.map(|s| {
+            serde_json::from_str(&s)
+                .map_err(|e| format!("failed to parse contract analysis for {contract_id}: {e}"))
+        })
+        .transpose()
     }
 
     pub fn get_global_context(
