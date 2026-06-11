@@ -16,7 +16,7 @@ use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-pub struct FlattenNestedVariadic<'a> {
+pub struct FlattenVariadic<'a> {
     clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
     annotations: &'a [Annotation],
@@ -24,7 +24,7 @@ pub struct FlattenNestedVariadic<'a> {
     active_annotation: Option<usize>,
 }
 
-impl<'a> FlattenNestedVariadic<'a> {
+impl<'a> FlattenVariadic<'a> {
     fn new(clarity_version: ClarityVersion, annotations: &'a [Annotation], level: Level) -> Self {
         Self {
             clarity_version,
@@ -98,7 +98,7 @@ impl<'a> FlattenNestedVariadic<'a> {
     }
 }
 
-impl<'a> ASTVisitor<'a> for FlattenNestedVariadic<'a> {
+impl<'a> ASTVisitor<'a> for FlattenVariadic<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
     }
@@ -169,14 +169,14 @@ impl<'a> ASTVisitor<'a> for FlattenNestedVariadic<'a> {
     }
 }
 
-impl AnalysisPass for FlattenNestedVariadic<'_> {
+impl AnalysisPass for FlattenVariadic<'_> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let checker = FlattenNestedVariadic::new(
+        let checker = FlattenVariadic::new(
             analysis_cache.contract_analysis.clarity_version,
             analysis_cache.annotations,
             level,
@@ -185,14 +185,14 @@ impl AnalysisPass for FlattenNestedVariadic<'_> {
     }
 }
 
-impl Lint for FlattenNestedVariadic<'_> {
+impl Lint for FlattenVariadic<'_> {
     fn get_name() -> LintName {
-        LintName::FlattenNestedVariadic
+        LintName::FlattenVariadic
     }
     fn match_allow_annotation(annotation: &Annotation) -> bool {
         match &annotation.kind {
             AnnotationKind::Allow(warning_kinds) => {
-                warning_kinds.contains(&WarningKind::FlattenNestedVariadic)
+                warning_kinds.contains(&WarningKind::FlattenVariadic)
             }
             _ => false,
         }
@@ -205,7 +205,7 @@ mod tests {
     use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
-    use super::FlattenNestedVariadic;
+    use super::FlattenVariadic;
     use crate::analysis::linter::Lint;
     use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
@@ -215,7 +215,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(FlattenNestedVariadic::get_name(), Level::Warning);
+            .enable_lint(FlattenVariadic::get_name(), Level::Warning);
 
         Session::new_without_boot_contracts(settings)
             .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
@@ -227,7 +227,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(FlattenNestedVariadic::get_name(), Level::Warning);
+            .enable_lint(FlattenVariadic::get_name(), Level::Warning);
 
         let mut session = Session::new_without_boot_contracts(settings);
         session.update_epoch(StacksEpochId::Epoch40);
@@ -376,7 +376,7 @@ mod tests {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (test)
-                ;; #[allow(flatten_nested_variadic)]
+                ;; #[allow(flatten_variadic)]
                 (+ u1 (+ u2 u3))
             )
         ").to_string();

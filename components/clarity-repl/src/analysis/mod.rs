@@ -86,7 +86,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::CaseToken => lints::CaseToken::run_pass,
             LintName::CaseTrait => lints::CaseTrait::run_pass,
             LintName::ErrorConst => lints::ErrorConst::run_pass,
-            LintName::FlattenNestedVariadic => lints::FlattenNestedVariadic::run_pass,
+            LintName::FlattenVariadic => lints::FlattenVariadic::run_pass,
             LintName::Noop => lints::NoopChecker::run_pass,
             LintName::Panic => lints::PanicChecker::run_pass,
             LintName::UnnecessaryAsMaxLen => lints::UnnecessaryAsMaxLen::run_pass,
