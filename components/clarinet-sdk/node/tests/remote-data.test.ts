@@ -106,6 +106,33 @@ describe("simnet remote interactions", { retry: 2 }, async () => {
     );
   });
 
+  it("can get remote contract source", async () => {
+    await simnet.initEmptySession({
+      enabled: true,
+      api_url,
+      initial_height: 56230,
+    });
+    // trigger the remote contract to be fetched
+    simnet.callReadOnlyFn(counterAddress, "get-count", [], sender);
+    const source = simnet.getContractSource(counterAddress);
+    expect(source).toBeDefined();
+    expect(source).toContain("define-data-var");
+  });
+
+  it("can get remote contract AST", async () => {
+    await simnet.initEmptySession({
+      enabled: true,
+      api_url,
+      initial_height: 56230,
+    });
+    // trigger the remote contract to be fetched
+    simnet.callReadOnlyFn(counterAddress, "get-count", [], sender);
+    const ast = simnet.getContractAST(counterAddress);
+    expect(ast).toBeDefined();
+    expect(ast.expressions).toBeDefined();
+    expect(ast.expressions.length).toBeGreaterThan(0);
+  });
+
   it("throws an error if the contract is not available at a given block height", async () => {
     await simnet.initEmptySession({
       enabled: true,

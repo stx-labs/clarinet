@@ -12,6 +12,7 @@ use clarity::vm::contexts::{
 };
 use clarity::vm::contracts::Contract;
 use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
+use clarity::vm::database::clarity_db::ContractDataVarName;
 use clarity::vm::database::{ClarityBackingStore, ClarityDatabase, StoreType};
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::events::*;
@@ -349,6 +350,32 @@ impl ClarityInterpreter {
             .get_data(&key)
             .expect("failed to get map entry from datastore")?;
         Some(format!("0x{value_hex}"))
+    }
+
+    pub fn get_contract_source(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Option<String> {
+        let key = ClarityDatabase::make_metadata_key(
+            StoreType::Contract,
+            ContractDataVarName::ContractSrc.as_str(),
+        );
+        self.clarity_datastore
+            .get_metadata(contract_id, &key)
+            .ok()
+            .flatten()
+    }
+
+    pub fn get_contract_analysis(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Option<ContractAnalysis> {
+        let key = AnalysisDatabase::storage_key();
+        self.clarity_datastore
+            .get_metadata(contract_id, key)
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
     }
 
     pub fn get_global_context(

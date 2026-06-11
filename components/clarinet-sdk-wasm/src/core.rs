@@ -666,20 +666,43 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=getContractSource)]
-    pub fn get_contract_source(&self, contract: &str) -> Option<String> {
-        let session = self.get_session();
+    pub fn get_contract_source(&mut self, contract: &str) -> Option<String> {
         let contract_id = Session::desugar_contract_id(&self.deployer, contract).ok()?;
-        let contract = session.contracts.get(&contract_id)?;
-        Some(contract.code.clone())
+        let session = self.get_session_mut();
+        if let Some(contract) = session.contracts.get(&contract_id) {
+            return Some(contract.code.clone());
+        }
+        session.interpreter.get_contract_source(&contract_id)
     }
 
     #[wasm_bindgen(js_name=getContractAST)]
-    pub fn get_contract_ast(&self, contract: &str) -> Result<IContractAST, String> {
-        let session = self.get_session();
+    pub fn get_contract_ast(&mut self, contract: &str) -> Result<IContractAST, String> {
         let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
-        let contract = session.contracts.get(&contract_id).ok_or("err")?;
+        let session = self.get_session_mut();
+        if let Some(contract) = session.contracts.get(&contract_id) {
+            return Ok(encode_to_js(&contract.ast)
+                .map_err(|e| e.to_string())?
+                .unchecked_into::<IContractAST>());
+        }
 
-        Ok(encode_to_js(&contract.ast)
+        let source = session
+            .interpreter
+            .get_contract_source(&contract_id)
+            .ok_or_else(|| format!("contract {contract_id} not found"))?;
+        let analysis = session
+            .interpreter
+            .get_contract_analysis(&contract_id)
+            .ok_or_else(|| format!("contract analysis for {contract_id} not found"))?;
+        let ast = clarity::vm::ast::build_ast(
+            &contract_id,
+            &source,
+            &mut (),
+            analysis.clarity_version,
+            analysis.epoch,
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(encode_to_js(&ast)
             .map_err(|e| e.to_string())?
             .unchecked_into::<IContractAST>())
     }
