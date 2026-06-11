@@ -674,14 +674,16 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=getContractAST)]
-    pub fn get_contract_ast(&self, contract: &str) -> Result<IContractAST, String> {
+    pub fn get_contract_ast(&self, contract: &str) -> Result<IContractAST, JsError> {
         let session = self.get_session();
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
-        let contract = session.contracts.get(&contract_id).ok_or("err")?;
+        let contract_id = Session::desugar_contract_id(&self.deployer, contract)
+            .map_err(|e| JsError::new(e.as_str()))?;
+        let contract = session
+            .contracts
+            .get(&contract_id)
+            .ok_or_else(|| JsError::new(&format!("contract {contract_id} not found")))?;
 
-        Ok(encode_to_js(&contract.ast)
-            .map_err(|e| e.to_string())?
-            .unchecked_into::<IContractAST>())
+        Ok(encode_to_js(&contract.ast)?.unchecked_into::<IContractAST>())
     }
 
     #[wasm_bindgen(js_name=getAssetsMap)]
