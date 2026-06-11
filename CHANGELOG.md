@@ -1,3 +1,21 @@
+# [3.20.0](https://github.com/stx-labs/clarinet/compare/v3.19.0...v3.20.0) (2026-06-11)
+
+##### New Features
+
+* **linter:**  Flatten variadic functions (#2426) (c3dc1c71)
+
+##### Bug Fixes
+
+*  Remote_data fetch getContractAST (#2431) (ec353a0e)
+*  Surface getContractAST errors as JsError with descriptive messages (#2429) (ecfebc1b)
+*  New epoch and clarity types (#2425) (afc08794)
+
+##### Chores
+
+*  Rename `flatten_nested_variadic` to `flatten_variadic` (#2432) (c479ce13)
+*  Update `vitest` (#2427) (531034e2)
+*  Use TS 6 in sdk (#2423) (2afc6515)
+
 # [3.19.0](https://github.com/stx-labs/clarinet/compare/v3.18.1...v3.19.0) (2026-06-04)
 
 ##### New Features
