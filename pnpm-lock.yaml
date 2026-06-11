@@ -39,6 +39,10 @@ importers:
       '@stacks/transactions':
         specifier: 7.4.0
         version: 7.4.0
+    devDependencies:
+      '@types/node':
+        specifier: 24.0.14
+        version: 24.0.14
 
   components/clarinet-sdk/node:
     dependencies:

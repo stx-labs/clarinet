@@ -6,5 +6,8 @@
   "license": "GPL-3.0",
   "dependencies": {
     "@stacks/transactions": "7.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.14"
   }
 }
