@@ -1,6 +1,5 @@
 [project]
 name = "billboard"
-requirements = []
 
 [contracts.billboard]
 path = "contracts/billboard.clar"

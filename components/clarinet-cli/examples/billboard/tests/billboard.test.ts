@@ -1,4 +1,4 @@
-import { tx } from "@hirosystems/clarinet-sdk";
+import { tx } from "@stacks/clarinet-sdk";
 import { Cl } from "@stacks/transactions";
 import { describe, expect, it } from "vitest";
 
@@ -7,7 +7,12 @@ const address1 = accounts.get("wallet_1")!;
 
 describe("The billboard works as expected", () => {
   it("can get message", () => {
-    const { result } = simnet.callReadOnlyFn("billboard", "get-message", [], address1);
+    const { result } = simnet.callReadOnlyFn(
+      "billboard",
+      "get-message",
+      [],
+      address1,
+    );
     expect(result).toBeUtf8("Hello World!");
   });
 
@@ -16,7 +21,7 @@ describe("The billboard works as expected", () => {
       "billboard",
       "set-message",
       [Cl.stringUtf8("New message")],
-      address1
+      address1,
     );
     // check that block height is increased, for demo purpose
     expect(simnet.blockHeight).toBe(2);
@@ -32,7 +37,7 @@ describe("The billboard works as expected", () => {
       "billboard",
       "set-message",
       [Cl.stringUtf8("testing")],
-      address1
+      address1,
     );
 
     expect(events).toHaveLength(1);
@@ -48,9 +53,24 @@ describe("The billboard works as expected", () => {
 
   it("increases the set message cost each time it's called", () => {
     const block = simnet.mineBlock([
-      tx.callPublicFn("billboard", "set-message", [Cl.stringUtf8("Message 1")], address1),
-      tx.callPublicFn("billboard", "set-message", [Cl.stringUtf8("Message 2")], address1),
-      tx.callPublicFn("billboard", "set-message", [Cl.stringUtf8("Message 3")], address1),
+      tx.callPublicFn(
+        "billboard",
+        "set-message",
+        [Cl.stringUtf8("Message 1")],
+        address1,
+      ),
+      tx.callPublicFn(
+        "billboard",
+        "set-message",
+        [Cl.stringUtf8("Message 2")],
+        address1,
+      ),
+      tx.callPublicFn(
+        "billboard",
+        "set-message",
+        [Cl.stringUtf8("Message 3")],
+        address1,
+      ),
     ]);
 
     expect(block).toHaveLength(3);
@@ -65,11 +85,18 @@ describe("The billboard works as expected", () => {
   it("update stx balances", () => {
     const initialSTXBalances = simnet.getAssetsMap().get("STX");
 
-    simnet.callPublicFn("billboard", "set-message", [Cl.stringUtf8("New message")], address1);
+    simnet.callPublicFn(
+      "billboard",
+      "set-message",
+      [Cl.stringUtf8("New message")],
+      address1,
+    );
 
     const newSTXBalances = simnet.getAssetsMap().get("STX");
     expect(newSTXBalances?.get(address1)).toBeDefined();
-    expect(newSTXBalances?.get(address1)).toBe(initialSTXBalances?.get(address1)! - 100n);
+    expect(newSTXBalances?.get(address1)).toBe(
+      initialSTXBalances?.get(address1)! - 100n,
+    );
     expect(newSTXBalances?.get(`${simnet.deployer}.billboard`)).toBe(100n);
   });
 });

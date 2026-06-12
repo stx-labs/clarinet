@@ -3,3 +3,11 @@ packages:
   - "counter"
   - "simple-nft"
   - "swappool"
+
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAge: 4320
+
+publicHoistPattern:
+  - '@stacks/clarinet-sdk-wasm'
