@@ -189,7 +189,7 @@ describe("simnet can call contracts function", () => {
     expect(res).toHaveProperty("costs");
     expect(res.costs).not.toBeNull();
     // Verify that runtime cost is reported (should be > 0 for a deployment)
-    expect(res.costs.total.runtime).toEqual(224);
+    expect(res.costs!.total.runtime).toEqual(224);
   });
 
   it("can call public functions with arguments", () => {

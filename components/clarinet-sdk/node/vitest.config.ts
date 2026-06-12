@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    setupFiles: ["./vitest-helpers/setup.ts"],
     silent: "passed-only",
     pool: "forks",
     maxWorkers: 1,

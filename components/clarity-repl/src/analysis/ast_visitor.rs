@@ -239,11 +239,7 @@ pub trait ASTVisitor<'a> {
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
                             args.get(1).unwrap_or(&DEFAULT_EXPR),
                         ),
-                        Concat => self.traverse_concat(
-                            expr,
-                            args.get(0).unwrap_or(&DEFAULT_EXPR),
-                            args.get(1).unwrap_or(&DEFAULT_EXPR),
-                        ),
+                        Concat => self.traverse_concat(expr, args),
                         AsMaxLen => {
                             match args.get(1).unwrap_or(&DEFAULT_EXPR).match_literal_value() {
                                 Some(Value::UInt(length)) => self.traverse_as_max_len(
@@ -2297,17 +2293,20 @@ pub trait ASTVisitor<'a> {
     fn traverse_concat(
         &mut self,
         expr: &'a SymbolicExpression,
-        lhs: &'a SymbolicExpression,
-        rhs: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
     ) -> bool {
-        self.traverse_expr(lhs) && self.traverse_expr(rhs) && self.visit_concat(expr, lhs, rhs)
+        for operand in operands {
+            if !self.traverse_expr(operand) {
+                return false;
+            }
+        }
+        self.visit_concat(expr, operands)
     }
 
     fn visit_concat(
         &mut self,
         expr: &'a SymbolicExpression,
-        lhs: &'a SymbolicExpression,
-        rhs: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
     ) -> bool {
         true
     }
