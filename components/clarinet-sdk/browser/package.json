@@ -1,6 +1,6 @@
 {
   "name": "@stacks/clarinet-sdk-browser",
-  "version": "3.18.1",
+  "version": "3.20.0",
   "author": "Stacks Labs",
   "description": "A SDK to interact with Clarity Smart Contracts in the browser",
   "homepage": "https://stackslabs.com/clarinet",
@@ -17,8 +17,7 @@
     "clean": "rimraf dist",
     "compile": "tsc -b ./tsconfig.json",
     "build": "pnpm run clean && pnpm run compile",
-    "prepare": "pnpm run build",
-    "prepublishOnly": "node ../../../scripts/require-pnpm.mjs"
+    "prepublishOnly": "node ../../../scripts/require-pnpm.mjs && pnpm run build"
   },
   "keywords": [
     "stacks",

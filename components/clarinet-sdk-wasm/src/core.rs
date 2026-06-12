@@ -666,22 +666,24 @@ impl SDK {
     }
 
     #[wasm_bindgen(js_name=getContractSource)]
-    pub fn get_contract_source(&self, contract: &str) -> Option<String> {
-        let session = self.get_session();
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract).ok()?;
-        let contract = session.contracts.get(&contract_id)?;
-        Some(contract.code.clone())
+    pub fn get_contract_source(&mut self, contract: &str) -> Result<Option<String>, JsError> {
+        let contract_id =
+            Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
+        self.get_session_mut()
+            .interpreter
+            .get_contract_source(&contract_id)
+            .map_err(|e| JsError::new(&e))
     }
 
     #[wasm_bindgen(js_name=getContractAST)]
-    pub fn get_contract_ast(&self, contract: &str) -> Result<IContractAST, String> {
-        let session = self.get_session();
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
-        let contract = session.contracts.get(&contract_id).ok_or("err")?;
-
-        Ok(encode_to_js(&contract.ast)
-            .map_err(|e| e.to_string())?
-            .unchecked_into::<IContractAST>())
+    pub fn get_contract_ast(&mut self, contract: &str) -> Result<IContractAST, JsError> {
+        let contract_id =
+            Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
+        let ast = self
+            .get_session_mut()
+            .get_contract_ast(&contract_id)
+            .map_err(|e| JsError::new(&e))?;
+        Ok(encode_to_js(&ast)?.unchecked_into::<IContractAST>())
     }
 
     #[wasm_bindgen(js_name=getAssetsMap)]

@@ -239,11 +239,7 @@ pub trait ASTVisitor<'a> {
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
                             args.get(1).unwrap_or(&DEFAULT_EXPR),
                         ),
-                        Concat => self.traverse_concat(
-                            expr,
-                            args.get(0).unwrap_or(&DEFAULT_EXPR),
-                            args.get(1).unwrap_or(&DEFAULT_EXPR),
-                        ),
+                        Concat => self.traverse_concat(expr, args),
                         AsMaxLen => {
                             match args.get(1).unwrap_or(&DEFAULT_EXPR).match_literal_value() {
                                 Some(Value::UInt(length)) => self.traverse_as_max_len(
@@ -725,6 +721,16 @@ pub trait ASTVisitor<'a> {
                             expr,
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
                             args.get(1).unwrap_or(&DEFAULT_EXPR),
+                        ),
+                        Ed25519Verify => self.traverse_ed25519_verify(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
+                            args.get(1).unwrap_or(&DEFAULT_EXPR),
+                            args.get(2).unwrap_or(&DEFAULT_EXPR),
+                        ),
+                        Secp256k1Decompress => self.traverse_secp256k1_decompress(
+                            expr,
+                            args.get(0).unwrap_or(&DEFAULT_EXPR),
                         ),
                     };
                 } else {
@@ -2287,17 +2293,20 @@ pub trait ASTVisitor<'a> {
     fn traverse_concat(
         &mut self,
         expr: &'a SymbolicExpression,
-        lhs: &'a SymbolicExpression,
-        rhs: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
     ) -> bool {
-        self.traverse_expr(lhs) && self.traverse_expr(rhs) && self.visit_concat(expr, lhs, rhs)
+        for operand in operands {
+            if !self.traverse_expr(operand) {
+                return false;
+            }
+        }
+        self.visit_concat(expr, operands)
     }
 
     fn visit_concat(
         &mut self,
         expr: &'a SymbolicExpression,
-        lhs: &'a SymbolicExpression,
-        rhs: &'a SymbolicExpression,
+        operands: &'a [SymbolicExpression],
     ) -> bool {
         true
     }
@@ -2837,6 +2846,45 @@ pub trait ASTVisitor<'a> {
         &mut self,
         expr: &'a SymbolicExpression,
         amount: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_ed25519_verify(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        message: &'a SymbolicExpression,
+        signature: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(message)
+            && self.traverse_expr(signature)
+            && self.traverse_expr(public_key)
+            && self.visit_ed25519_verify(expr, message, signature, public_key)
+    }
+
+    fn visit_ed25519_verify(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        message: &'a SymbolicExpression,
+        signature: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        true
+    }
+
+    fn traverse_secp256k1_decompress(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
+    ) -> bool {
+        self.traverse_expr(public_key) && self.visit_secp256k1_decompress(expr, public_key)
+    }
+
+    fn visit_secp256k1_decompress(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        public_key: &'a SymbolicExpression,
     ) -> bool {
         true
     }

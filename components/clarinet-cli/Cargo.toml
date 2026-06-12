@@ -51,7 +51,7 @@ segment = { version = "0.2.4", optional = true }
 mac_address = { version = "1.1.8", optional = true }
 
 # Must match condition in bin.rs EXACTLY
-[target.'cfg(not(any(target_env = "msvc", target_os = "macos")))'.dependencies]
+[target.'cfg(not(any(target_env = "msvc", target_os = "macos", all(target_arch = "aarch64", target_env = "musl"))))'.dependencies]
 tikv-jemallocator = { workspace = true }
 
 [dev-dependencies]

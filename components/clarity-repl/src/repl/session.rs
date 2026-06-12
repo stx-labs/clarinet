@@ -105,6 +105,20 @@ fn deploy_boot_contracts(
     }
     let mut boot_contracts = BTreeMap::new();
 
+    // Deploy sbtc-token first so that pox-5 can resolve
+    for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
+        let result = interpreter.run(contract, Some(ast), false, None);
+        if let Err(errs) = &result {
+            for e in errs {
+                ueprint!(
+                    "Error deploying sbtc boot contract {contract_id}: {}",
+                    e.message
+                );
+            }
+        }
+        boot_contracts.insert(contract_id.clone(), result);
+    }
+
     // Load boot contracts (with custom overrides if specified)
     let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
         boot::BOOT_CONTRACTS_DATA.clone()
@@ -1053,6 +1067,28 @@ impl Session {
         self.interpreter.get_assets_maps()
     }
 
+    pub fn get_contract_ast(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Result<ContractAST, String> {
+        let source = self
+            .interpreter
+            .get_contract_source(contract_id)?
+            .ok_or_else(|| format!("contract source not found for {contract_id}"))?;
+        let analysis = self
+            .interpreter
+            .get_contract_analysis(contract_id)?
+            .ok_or_else(|| format!("contract analysis not found for {contract_id}"))?;
+        clarity::vm::ast::build_ast(
+            contract_id,
+            &source,
+            &mut (),
+            analysis.clarity_version,
+            analysis.epoch,
+        )
+        .map_err(|e| e.to_string())
+    }
+
     pub fn toggle_costs(&mut self) -> String {
         self.show_costs = !self.show_costs;
         format!("Always show costs: {}", self.show_costs)
@@ -1901,6 +1937,65 @@ mod tests {
             ))
             .unwrap(),
         );
+    }
+
+    #[test]
+    fn pox_5_deploys_and_is_callable_in_epoch_40() {
+        use crate::repl::boot::BOOT_MAINNET_ADDRESS;
+
+        // Session::new deploys sbtc-token stubs + boot contracts (including pox-5)
+        let mut session = Session::new(SessionSettings::default());
+
+        // Advance through epochs to reach Epoch 4.0
+        for epoch in [
+            StacksEpochId::Epoch25,
+            StacksEpochId::Epoch30,
+            StacksEpochId::Epoch34,
+            StacksEpochId::Epoch40,
+        ] {
+            session.update_epoch(epoch);
+            session.advance_burn_chain_tip(10);
+        }
+
+        // Initialize pox-5 burnchain parameters (mimics stacks-core's
+        // initialize_epoch_4_0)
+        let args = [
+            SymbolicExpression::atom_value(Value::UInt(0)), // first-burn-height
+            SymbolicExpression::atom_value(Value::UInt(10)), // prepare-cycle-length
+            SymbolicExpression::atom_value(Value::UInt(100)), // reward-cycle-length
+            SymbolicExpression::atom_value(Value::UInt(1)), // begin-pox5-reward-cycle
+        ];
+        let result = session.call_contract_fn(
+            &format!("{BOOT_MAINNET_ADDRESS}.pox-5"),
+            "set-burnchain-parameters",
+            &args,
+            BOOT_MAINNET_ADDRESS,
+            false,
+            false,
+        );
+        assert_execution_result_value(&result, Value::okay(Value::Bool(true)).unwrap());
+
+        // Verify pox-5 is callable: read the first reward cycle
+        let result = session.call_contract_fn(
+            &format!("{BOOT_MAINNET_ADDRESS}.pox-5"),
+            "get-first-pox-5-reward-cycle",
+            &[],
+            BOOT_MAINNET_ADDRESS,
+            false,
+            false,
+        );
+        assert_execution_result_value(&result, Value::UInt(1));
+
+        // Verify pox-5 is callable: read the current reward cycle
+        let result = session.call_contract_fn(
+            &format!("{BOOT_MAINNET_ADDRESS}.pox-5"),
+            "current-pox-reward-cycle",
+            &[],
+            BOOT_MAINNET_ADDRESS,
+            false,
+            false,
+        );
+        assert!(result.is_ok());
     }
 
     #[test]

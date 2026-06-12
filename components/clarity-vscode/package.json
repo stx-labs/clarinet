@@ -12,7 +12,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "license": "GPL-3.0-only",
-  "version": "3.18.1",
+  "version": "3.20.0",
   "private": true,
   "scripts": {
     "clean": "rimraf .vscode-test-web ./debug/dist ./client/dist ./server/dist ./server/src/clarity-lsp-*",
@@ -257,7 +257,7 @@
     "concurrently": "9.2.1",
     "eslint": "10.1.0",
     "ovsx": "0.10.12",
-    "playwright": "1.58.2",
+    "playwright": "1.60.0",
     "path-browserify": "1.0.1",
     "regenerator-runtime": "0.14.1",
     "rimraf": "6.1.3",

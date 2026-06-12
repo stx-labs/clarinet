@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Cl } from "@stacks/transactions";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 // test the built package and not the source code

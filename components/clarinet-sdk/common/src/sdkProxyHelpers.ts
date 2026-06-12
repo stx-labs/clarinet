@@ -1,4 +1,4 @@
-import { Cl, ClarityValue } from "@stacks/transactions";
+import { Cl, ClarityValue, ClarityVersion } from "@stacks/transactions";
 
 export type ClarityEvent = {
   event: string;
@@ -35,7 +35,7 @@ export type CallFn = (
 ) => ParsedTransactionResult;
 
 export type DeployContractOptions = {
-  clarityVersion: 1 | 2 | 3 | 4;
+  clarityVersion: ClarityVersion;
 };
 export type DeployContract = (
   name: string,
