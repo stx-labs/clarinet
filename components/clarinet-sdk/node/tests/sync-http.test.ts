@@ -126,8 +126,8 @@ describe("sync_http glue", () => {
   });
 
   it("forwards HIRO_API_KEY as x-api-key", () => {
-    // The env var is read at module load time, so we spawn a fresh Node to load
-    // sync_http.cjs with the env applied.
+    // HIRO_API_KEY is read per-request; we spawn a fresh Node process here so the env
+    // doesn't leak into other tests running in the same vitest worker.
     try {
       fs.unlinkSync(RECORDED_HEADERS_PATH);
     } catch {}
