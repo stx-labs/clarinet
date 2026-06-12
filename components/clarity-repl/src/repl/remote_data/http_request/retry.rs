@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Response {
@@ -110,5 +110,168 @@ where
             3000
         };
         sleep(delay_ms);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+
+    use super::*;
+
+    fn response(status: u16, headers: &[(&str, &str)], body: &str) -> Response {
+        Response {
+            status,
+            status_text: String::new(),
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            body: body.to_string(),
+        }
+    }
+
+    /// Feeds `run_with_retry` a scripted sequence of transport results and
+    /// records how many attempts were made and which sleeps were requested.
+    fn run_scripted(
+        script: Vec<Result<Response, String>>,
+    ) -> (Result<serde_json::Value, String>, usize, Vec<u32>) {
+        let script = RefCell::new(script);
+        let calls = Cell::new(0);
+        let sleeps = RefCell::new(Vec::new());
+        let result = run_with_retry(
+            || {
+                calls.set(calls.get() + 1);
+                script.borrow_mut().remove(0)
+            },
+            |ms| sleeps.borrow_mut().push(ms),
+        );
+        (result, calls.get(), sleeps.into_inner())
+    }
+
+    #[test]
+    fn success_returns_parsed_json() {
+        let (result, calls, sleeps) = run_scripted(vec![Ok(response(200, &[], r#"{"ok":true}"#))]);
+        assert_eq!(result.unwrap(), serde_json::json!({"ok": true}));
+        assert_eq!(calls, 1);
+        assert!(sleeps.is_empty());
+    }
+
+    #[test]
+    fn server_error_retries_up_to_three_attempts() {
+        let (result, calls, sleeps) = run_scripted(vec![
+            Ok(response(500, &[], "boom")),
+            Ok(response(502, &[], "boom")),
+            Ok(response(503, &[], "boom")),
+        ]);
+        assert_eq!(
+            result.unwrap_err(),
+            "http error - status: 503 - message: boom"
+        );
+        assert_eq!(calls, 3);
+        assert_eq!(sleeps, vec![3000, 3000]);
+    }
+
+    #[test]
+    fn recovers_after_transient_server_error() {
+        let (result, calls, sleeps) = run_scripted(vec![
+            Ok(response(500, &[], "boom")),
+            Ok(response(200, &[], r#"{"ok":true}"#)),
+        ]);
+        assert!(result.is_ok());
+        assert_eq!(calls, 2);
+        assert_eq!(sleeps, vec![3000]);
+    }
+
+    #[test]
+    fn rate_limit_honors_retry_after() {
+        let (result, calls, sleeps) = run_scripted(vec![
+            Ok(response(
+                429,
+                &[("ratelimit-remaining", "0"), ("retry-after", "2")],
+                "",
+            )),
+            Ok(response(200, &[], r#"{"ok":true}"#)),
+        ]);
+        assert!(result.is_ok());
+        assert_eq!(calls, 2);
+        assert_eq!(sleeps, vec![2000]);
+    }
+
+    #[test]
+    fn rate_limit_retry_after_is_capped_at_60s() {
+        let (_, _, sleeps) = run_scripted(vec![
+            Ok(response(
+                429,
+                &[("ratelimit-remaining", "0"), ("retry-after", "120")],
+                "",
+            )),
+            Ok(response(200, &[], r#"{"ok":true}"#)),
+        ]);
+        assert_eq!(sleeps, vec![60_000]);
+    }
+
+    #[test]
+    fn rate_limit_defaults_to_1s_without_retry_after() {
+        let (_, _, sleeps) = run_scripted(vec![
+            Ok(response(429, &[("ratelimit-remaining", "0")], "")),
+            Ok(response(200, &[], r#"{"ok":true}"#)),
+        ]);
+        assert_eq!(sleeps, vec![1000]);
+    }
+
+    #[test]
+    fn rate_limit_headers_are_matched_case_insensitively() {
+        let (result, calls, _) = run_scripted(vec![
+            Ok(response(
+                429,
+                &[("RateLimit-Remaining", "0"), ("Retry-After", "1")],
+                "",
+            )),
+            Ok(response(200, &[], r#"{"ok":true}"#)),
+        ]);
+        assert!(result.is_ok());
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn rate_limit_without_remaining_zero_is_not_retried() {
+        let (result, calls, sleeps) = run_scripted(vec![Ok(response(429, &[], "slow down"))]);
+        assert_eq!(
+            result.unwrap_err(),
+            "http error - status: 429 - message: slow down"
+        );
+        assert_eq!(calls, 1);
+        assert!(sleeps.is_empty());
+    }
+
+    #[test]
+    fn non_retryable_status_returns_formatted_error() {
+        let mut response = response(404, &[], "nope");
+        response.status_text = "Not Found".to_string();
+        let (result, calls, _) = run_scripted(vec![Ok(response)]);
+        assert_eq!(
+            result.unwrap_err(),
+            "http error - status: 404 Not Found - message: nope"
+        );
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn transport_error_propagates_without_retry() {
+        let (result, calls, sleeps) = run_scripted(vec![Err("connection refused".to_string())]);
+        assert_eq!(result.unwrap_err(), "connection refused");
+        assert_eq!(calls, 1);
+        assert!(sleeps.is_empty());
+    }
+
+    #[test]
+    fn json_parse_failure_truncates_body_preview() {
+        let body = "é".repeat(600);
+        let (result, _, _) = run_scripted(vec![Ok(response(200, &[], &body))]);
+        let err = result.unwrap_err();
+        assert!(err.starts_with("failed to parse JSON response:"));
+        // 512 chars + ellipsis, cut on a char boundary despite multi-byte input
+        assert!(err.ends_with(&format!("{}…", "é".repeat(512))));
     }
 }

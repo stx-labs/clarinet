@@ -196,8 +196,9 @@ describe("sync_http glue", () => {
   // success" hanging on the third call. The first two calls always completed;
   // the third blocked forever in Atomics.wait because the worker had died on
   // the fetch-fail path and main couldn't run worker.on('error')/'exit' from
-  // inside an unbounded synchronous wait. Without the bounded-wait main-side
-  // heartbeat AND the worker-side unhandledRejection net, this test deadlocks.
+  // inside a synchronous wait. The worker-side unhandledRejection net keeps the
+  // worker alive through that path; if it ever regresses, the liveness check
+  // turns the hang into an error instead of a deadlock.
   it("handles success → transport error → success in sequence (no deadlock)", () => {
     const { syncHttpRequest } = loadSyncHttp();
 
@@ -222,4 +223,37 @@ describe("sync_http glue", () => {
     expect(r3.statusText).toBe("OK");
     expect(JSON.parse(r3.body)).toEqual({ ok: true, n: 42 });
   });
+
+  // Regression: a worker that never starts (e.g. a bundler that didn't copy
+  // sync_http_worker.cjs — it's only referenced via `new Worker(path)`, so
+  // bundlers can't see it) must surface as an error, not an infinite hang.
+  // worker.on('error') can't fire while main is blocked in Atomics.wait, so
+  // detection relies on the worker's SAB liveness counter staying frozen.
+  it("throws instead of hanging when the worker file is missing", () => {
+    const glueDir = path.dirname(SYNC_HTTP_PATH);
+    const brokenDir = fs.mkdtempSync(path.join(TMP_DIR, "no-worker-"));
+    for (const name of ["sync_http.cjs", "sync_http_layout.cjs"]) {
+      fs.copyFileSync(path.join(glueDir, name), path.join(brokenDir, name));
+    }
+
+    const out = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        `const { syncHttpRequest } = require(${JSON.stringify(path.join(brokenDir, "sync_http.cjs"))});
+         try {
+           syncHttpRequest(${JSON.stringify(mockBaseUrl + "/marker")}, "{}");
+           console.error("expected throw");
+           process.exit(2);
+         } catch (e) {
+           process.stdout.write(e.message);
+         }`,
+      ],
+      // Death is declared after MAX_STALE_HEARTBEATS × WORKER_HEARTBEAT_MS
+      // (~5s); the spawnSync timeout is the deadlock backstop.
+      { timeout: 25_000 },
+    );
+    expect(out.status, out.stderr.toString()).toBe(0);
+    expect(out.stdout.toString()).toMatch(/worker died during request: worker unresponsive/);
+  }, 30_000);
 });

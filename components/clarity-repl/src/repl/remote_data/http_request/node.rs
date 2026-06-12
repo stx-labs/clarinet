@@ -32,8 +32,7 @@ pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
 
         // The JS glue throws on transport failure (the body_len < 0 path in
         // sync_http.cjs), so anything returned here is a real HTTP response.
-        let response_value =
-            js_sync_http_request(url, headers_json).map_err(js_error_to_string)?;
+        let response_value = js_sync_http_request(url, headers_json).map_err(js_error_to_string)?;
 
         serde_wasm_bindgen::from_value::<Response>(response_value)
             .map_err(|e| format!("malformed worker response: {e}"))

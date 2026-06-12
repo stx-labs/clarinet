@@ -11,6 +11,8 @@
 //  16  Int32  body_len         response body byte length; negative means error
 //  20  Int32  url_len          request URL byte length
 //  24  Int32  req_hdrs_len     request headers JSON byte length
+//  28  Int32  liveness         counter the worker bumps on a timer; main reads
+//                              it to tell a slow response from a dead worker
 
 module.exports = {
   HEADER_BYTES: 1024,
@@ -20,6 +22,12 @@ module.exports = {
   OFFSET_BODY_LEN: 16,
   OFFSET_URL_LEN: 20,
   OFFSET_REQ_HDRS_LEN: 24,
+  OFFSET_LIVENESS: 28,
+  // How often the worker bumps the liveness counter. Its event loop is free
+  // while a fetch is in flight (and while idle it parks in Atomics.wait, but
+  // main only checks liveness while a request is pending), so a live worker
+  // always bumps at least once per main-side heartbeat.
+  LIVENESS_INTERVAL_MS: 250,
   // The signal alternates between RESPONSE_DONE (worker idle, main may issue
   // next request) and REQUEST_PENDING (worker is processing). A three-state
   // scheme races: by the time the worker loops back to wait, main may already

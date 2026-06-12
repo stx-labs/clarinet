@@ -12,9 +12,11 @@ const {
   OFFSET_BODY_LEN,
   OFFSET_URL_LEN,
   OFFSET_REQ_HDRS_LEN,
+  OFFSET_LIVENESS,
   SIGNAL_RESPONSE_DONE,
   SIGNAL_REQUEST_PENDING,
   FETCH_TIMEOUT_MS,
+  LIVENESS_INTERVAL_MS,
 } = require("./sync_http_layout.cjs");
 
 const sab = workerData.sab;
@@ -24,6 +26,13 @@ const header = new Int32Array(sab, 0, HEADER_BYTES / 4);
 const data = new Uint8Array(sab, HEADER_BYTES, dataCapacity);
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
+
+// Liveness beacon for the blocked main thread (its event loop can't pump, so
+// it can't observe worker 'error'/'exit' — see WORKER_HEARTBEAT_MS in
+// sync_http.cjs). If this thread dies, the counter freezes and main bails out.
+setInterval(() => {
+  Atomics.add(header, OFFSET_LIVENESS / 4, 1);
+}, LIVENESS_INTERVAL_MS).unref();
 
 function readUrl() {
   const len = Atomics.load(header, OFFSET_URL_LEN / 4);
@@ -39,7 +48,12 @@ function readRequestHeaders() {
 
 function writeError(message) {
   const encoded = encoder.encode(message);
-  const len = Math.min(encoded.length, dataCapacity);
+  let len = Math.min(encoded.length, dataCapacity);
+  // Don't cut a multi-byte UTF-8 sequence in half: back off past any
+  // continuation bytes (0b10xxxxxx) so the truncated message decodes cleanly.
+  if (len < encoded.length) {
+    while (len > 0 && (encoded[len] & 0xc0) === 0x80) len -= 1;
+  }
   data.set(encoded.subarray(0, len), 0);
   Atomics.store(header, OFFSET_STATUS / 4, -1);
   Atomics.store(header, OFFSET_STATUS_TEXT_LEN / 4, 0);
@@ -79,14 +93,22 @@ function errMessage(e) {
 // rejection (e.g. an orphan AbortController abort from a prior request) must
 // NOT overwrite the SAB while main is blocked waiting on a different request
 // or hasn't yet issued one.
+//
+// `generation` guards the other direction: when failRequest answers an
+// in-flight request early, the still-pending fetch in handleOneRequest must
+// not write its eventual result over the SAB — main may already have issued
+// the NEXT request into the same buffer. failRequest bumps the generation;
+// handleOneRequest only writes/signals if its generation is still current.
 let requestActive = false;
+let generation = 0;
 
 function failRequest(prefix, err) {
   if (!requestActive) return;
+  requestActive = false;
+  generation += 1;
   try {
     writeError(prefix + ": " + errMessage(err));
     signalDone();
-    requestActive = false;
   } catch (_) {}
 }
 
@@ -96,7 +118,7 @@ function failRequest(prefix, err) {
 process.on("unhandledRejection", (err) => failRequest("worker unhandledRejection", err));
 process.on("uncaughtException", (err) => failRequest("worker uncaughtException", err));
 
-async function handleOneRequest() {
+async function handleOneRequest(gen) {
   let url, headers;
   try {
     url = readUrl();
@@ -113,12 +135,14 @@ async function handleOneRequest() {
   try {
     const res = await fetch(url, { headers, signal: controller.signal });
     const buf = new Uint8Array(await res.arrayBuffer());
+    if (gen !== generation) return;
     const hdrObj = {};
     res.headers.forEach((v, k) => {
       hdrObj[k] = v;
     });
     writeResponse(res.status, res.statusText || "", hdrObj, buf);
   } catch (e) {
+    if (gen !== generation) return;
     writeError(errMessage(e));
   } finally {
     clearTimeout(timer);
@@ -140,7 +164,11 @@ async function handleOneRequest() {
       // and avoids attributing the orphan error to a fresh in-flight request.
       await new Promise((r) => setImmediate(r));
       requestActive = true;
-      await handleOneRequest();
+      const gen = generation;
+      await handleOneRequest(gen);
+      // failRequest may have answered (and invalidated) this request already;
+      // signalling again here would ack a request we never handled.
+      if (gen !== generation) continue;
       signalDone();
       requestActive = false;
     } catch (loopErr) {

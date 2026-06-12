@@ -21,6 +21,7 @@ const {
   OFFSET_BODY_LEN,
   OFFSET_URL_LEN,
   OFFSET_REQ_HDRS_LEN,
+  OFFSET_LIVENESS,
   SIGNAL_RESPONSE_DONE,
   SIGNAL_REQUEST_PENDING,
 } = LAYOUT;
@@ -46,11 +47,16 @@ function parseSabSize() {
 const SAB_SIZE = parseSabSize();
 const DATA_CAPACITY = SAB_SIZE - HEADER_BYTES;
 
-// Main-thread Atomics.wait heartbeat (ms). Without it, the JS event loop never
-// pumps while main is blocked, so worker.on('error')/'exit') can't flip
-// state.dead if the worker thread dies (terminate, OOM, native crash) — main
-// would block in the kernel futex forever.
+// Main-thread Atomics.wait heartbeat (ms). While main is blocked, its event
+// loop never pumps, so worker.on('error')/'exit') CANNOT fire — JS callbacks
+// only run when the stack empties. Death detection therefore can't rely on
+// state.dead; instead the worker bumps a liveness counter in the SAB from a
+// timer (see LIVENESS_INTERVAL_MS), and main samples it on each heartbeat
+// timeout. A counter frozen for MAX_STALE_HEARTBEATS consecutive heartbeats
+// means the worker thread is gone (failed to start, terminated, OOM, native
+// crash) and main throws instead of blocking forever.
 const WORKER_HEARTBEAT_MS = 1000;
+const MAX_STALE_HEARTBEATS = 5;
 
 let workerState = null;
 
@@ -141,12 +147,27 @@ function syncHttpRequest(url, headersJson) {
   Atomics.notify(state.signal, 0, 1);
 
   // Block until the worker flips signal back to RESPONSE_DONE. The heartbeat
-  // bound is required so a dead worker doesn't deadlock main — see comment on
-  // WORKER_HEARTBEAT_MS.
+  // bound lets us sample the worker's liveness counter so a dead worker
+  // doesn't deadlock main — see comment on WORKER_HEARTBEAT_MS.
+  let lastBeat = Atomics.load(state.header, OFFSET_LIVENESS / 4);
+  let staleHeartbeats = 0;
   for (;;) {
     const r = Atomics.wait(state.signal, 0, SIGNAL_REQUEST_PENDING, WORKER_HEARTBEAT_MS);
     if (r === "not-equal" || r === "ok") break;
-    if (state.dead) break;
+    const beat = Atomics.load(state.header, OFFSET_LIVENESS / 4);
+    if (beat !== lastBeat) {
+      lastBeat = beat;
+      staleHeartbeats = 0;
+      continue;
+    }
+    staleHeartbeats += 1;
+    if (staleHeartbeats >= MAX_STALE_HEARTBEATS) {
+      state.dead = true;
+      state.cause ??= new Error(
+        `worker unresponsive for ${staleHeartbeats * WORKER_HEARTBEAT_MS}ms (thread died or failed to start)`,
+      );
+      break;
+    }
   }
 
   if (state.dead) {
