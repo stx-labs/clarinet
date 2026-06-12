@@ -409,9 +409,7 @@ mod tests {
                 MnemonicEncryptionStrength::Medium,
             ] {
                 if other != strength {
-                    assert!(
-                        decrypt_mnemonic_phrase(&encrypted, TEST_PASSWORD, other).is_err()
-                    );
+                    assert!(decrypt_mnemonic_phrase(&encrypted, TEST_PASSWORD, other).is_err());
                 }
             }
 
