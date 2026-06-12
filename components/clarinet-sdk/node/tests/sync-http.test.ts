@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync, ChildProcess } from "node:child_process";
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
@@ -35,7 +36,11 @@ const loadSyncHttp = (): SyncHttpModule => require(SYNC_HTTP_PATH);
 // host the mock HTTP server in the same Node process — its event loop would be
 // frozen while we wait. Run the server in a detached child instead, and route
 // per-test behaviour via the request URL.
-const RECORDED_HEADERS_PATH = path.join(process.cwd(), `.sync-http-recorded.json`);
+// Use os.tmpdir() so a crashed test never leaves an untracked file in the repo;
+// mkdtempSync gives a unique directory per process so parallel vitest runs
+// don't fight over the same path.
+const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "clarinet-sync-http-"));
+const RECORDED_HEADERS_PATH = path.join(TMP_DIR, "recorded-headers.json");
 let mockChild: ChildProcess;
 let mockBaseUrl: string;
 
@@ -103,7 +108,7 @@ afterAll(() => {
   } catch {}
   mockChild.kill();
   try {
-    fs.unlinkSync(RECORDED_HEADERS_PATH);
+    fs.rmSync(TMP_DIR, { recursive: true, force: true });
   } catch {}
 });
 

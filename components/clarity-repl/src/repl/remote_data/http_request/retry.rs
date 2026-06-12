@@ -1,77 +1,87 @@
 use std::collections::HashMap;
 
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
+#[derive(Deserialize)]
 pub struct Response {
     pub status: u16,
+    #[serde(rename = "statusText", default)]
     pub status_text: String,
+    #[serde(default)]
     pub headers: HashMap<String, String>,
+    #[serde(default)]
     pub body: String,
-}
-
-pub enum TransportError {
-    Network(String),
 }
 
 const MAX_RETRY_ATTEMPTS: u32 = 3;
 
-fn get_header_ci<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
+fn get_uint_header_ci(headers: &HashMap<String, String>, name: &str) -> Option<u32> {
     headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case(name))
-        .map(|(_, v)| v.as_str())
+        .and_then(|(_, v)| v.parse().ok())
 }
 
-fn get_uint_header(headers: &HashMap<String, String>, name: &str) -> Option<u32> {
-    get_header_ci(headers, name).and_then(|v| v.parse().ok())
-}
-
-fn is_rate_limited(headers: &HashMap<String, String>) -> (bool, Option<u32>) {
-    let remaining = get_uint_header(headers, "ratelimit-remaining");
-    // cap retry_after at 60 seconds
-    let retry_after = get_uint_header(headers, "retry-after").map(|v| v.min(60));
-    (matches!(remaining, Some(0)), retry_after)
+fn status_line(status: u16, status_text: &str) -> String {
+    if status_text.is_empty() {
+        status.to_string()
+    } else {
+        format!("{status} {status_text}")
+    }
 }
 
 fn format_http_error(response: &Response) -> String {
-    let status_line = if response.status_text.is_empty() {
-        response.status.to_string()
-    } else {
-        format!("{} {}", response.status, response.status_text)
-    };
+    let line = status_line(response.status, &response.status_text);
     let msg = if response.body.is_empty() {
-        "Unable to read response body".to_string()
+        "Unable to read response body"
     } else {
-        response.body.clone()
+        &response.body
     };
-    format!("http error - status: {status_line} - message: {msg}")
+    format!("http error - status: {line} - message: {msg}")
 }
 
-/// Shared retry loop. `transport` performs a single HTTP GET. `sleep` blocks for the
-/// given number of milliseconds (must work in the current thread, including wasm).
+fn truncate_body(body: &str) -> String {
+    let cut = body
+        .char_indices()
+        .nth(512)
+        .map(|(i, _)| i)
+        .unwrap_or(body.len());
+    if cut < body.len() {
+        format!("{}…", &body[..cut])
+    } else {
+        body.to_string()
+    }
+}
+
+/// Shared retry loop. `transport` performs a single HTTP GET; transport errors
+/// (DNS, connection refused, per-attempt timeout, malformed response) are
+/// returned as-is and not retried — the caller's first attempt is the only
+/// attempt. `sleep` blocks for the given number of milliseconds (must work in
+/// the current thread, including wasm).
 ///
-/// Retry policy (mirrors the original native.rs behaviour):
-/// - Up to 3 attempts total.
+/// Retry policy:
+/// - Up to 3 attempts total for retryable HTTP statuses.
 /// - 5xx → sleep 3s and retry.
-/// - 429 → respect retry-after header (capped at 60s); fall back to 1s only when
-///   ratelimit-remaining == 0, otherwise treat as non-retryable.
+/// - 429 → only retry when ratelimit-remaining == 0; sleep retry-after seconds
+///   (capped at 60), defaulting to 1s if the header is absent.
 /// - Everything else non-2xx → non-retryable, formatted error returned.
 pub fn run_with_retry<T, F, S>(transport: F, mut sleep: S) -> Result<T, String>
 where
     T: DeserializeOwned,
-    F: Fn() -> Result<Response, TransportError>,
+    F: Fn() -> Result<Response, String>,
     S: FnMut(u32),
 {
     let mut attempts: u32 = 0;
     loop {
-        let response = match transport() {
-            Ok(r) => r,
-            Err(TransportError::Network(e)) => return Err(e),
-        };
+        let response = transport()?;
         let status = response.status;
 
         if (200..300).contains(&status) {
-            return serde_json::from_str(&response.body).map_err(|e| e.to_string());
+            return serde_json::from_str(&response.body).map_err(|e| {
+                let preview = truncate_body(&response.body);
+                format!("failed to parse JSON response: {e} — body: {preview}")
+            });
         }
 
         let is_retryable = (500..600).contains(&status) || status == 429;
@@ -84,22 +94,21 @@ where
             return Err(format_http_error(&response));
         }
 
-        if status == 429 {
-            let (rate_limited, retry_after) = is_rate_limited(&response.headers);
-            if !rate_limited {
+        let delay_ms = if status == 429 {
+            let remaining = get_uint_header_ci(&response.headers, "ratelimit-remaining");
+            if !matches!(remaining, Some(0)) {
                 return Err(format_http_error(&response));
             }
-            let retry_delay = retry_after.unwrap_or(1);
-            uprint!("Rate limited, retrying after {retry_delay} seconds...\n");
-            sleep(retry_delay.saturating_mul(1000));
+            let retry_after = get_uint_header_ci(&response.headers, "retry-after")
+                .map(|v| v.min(60))
+                .unwrap_or(1);
+            uprint!("Rate limited, retrying after {retry_after} seconds...\n");
+            retry_after.saturating_mul(1000)
         } else {
-            let status_line = if response.status_text.is_empty() {
-                status.to_string()
-            } else {
-                format!("{status} {}", response.status_text)
-            };
-            uprint!("Server error ({status_line}), retrying in 3 seconds...\n");
-            sleep(3000);
-        }
+            let line = status_line(status, &response.status_text);
+            uprint!("Server error ({line}), retrying in 3 seconds...\n");
+            3000
+        };
+        sleep(delay_ms);
     }
 }

@@ -11,36 +11,23 @@
 
 const { Worker } = require("node:worker_threads");
 const path = require("node:path");
+const LAYOUT = require("./sync_http_layout.cjs");
 
-// The worker source lives next to this file. wasm-bindgen copies sync_http.cjs
-// into pkg-node/snippets/.../ automatically because Rust imports from it;
-// build.mjs copies sync_http_worker.cjs into the same directory as a post-
-// build step.
+const {
+  HEADER_BYTES,
+  OFFSET_STATUS,
+  OFFSET_STATUS_TEXT_LEN,
+  OFFSET_HEADERS_LEN,
+  OFFSET_BODY_LEN,
+  OFFSET_URL_LEN,
+  OFFSET_REQ_HDRS_LEN,
+  SIGNAL_RESPONSE_DONE,
+  SIGNAL_REQUEST_PENDING,
+} = LAYOUT;
+
+// The worker source lives next to this file. build.mjs copies it into
+// pkg-node/snippets/.../ alongside the wasm-bindgen-generated shim.
 const WORKER_FILE = path.join(__dirname, "sync_http_worker.cjs");
-
-// ---- SAB layout (header at offset 0, data area at offset HEADER_BYTES) ----
-//   0  Int32  signal           0=response_done (worker idle), 1=request_pending
-//   4  Int32  status_code      HTTP status, or -1 for transport error
-//   8  Int32  status_text_len  response status text (HTTP reason phrase) byte length
-//  12  Int32  headers_len      response headers JSON byte length
-//  16  Int32  body_len         response body byte length; negative means error
-//  20  Int32  url_len          request URL byte length
-//  24  Int32  req_hdrs_len     request headers JSON byte length
-const HEADER_BYTES = 1024;
-const OFFSET_STATUS = 4;
-const OFFSET_STATUS_TEXT_LEN = 8;
-const OFFSET_HEADERS_LEN = 12;
-const OFFSET_BODY_LEN = 16;
-const OFFSET_URL_LEN = 20;
-const OFFSET_REQ_HDRS_LEN = 24;
-
-// The signal alternates between RESPONSE_DONE (worker idle, main may issue
-// next request) and REQUEST_PENDING (worker is processing). Three-state
-// schemes race: by the time the worker loops back to wait, the main thread
-// may already have reset the signal, and the worker would re-enter with
-// stale request data.
-const SIGNAL_RESPONSE_DONE = 0;
-const SIGNAL_REQUEST_PENDING = 1;
 
 const MIN_SAB_SIZE = 64 * 1024;
 const MAX_SAB_SIZE = 256 * 1024 * 1024;
@@ -58,25 +45,24 @@ function parseSabSize() {
 
 const SAB_SIZE = parseSabSize();
 const DATA_CAPACITY = SAB_SIZE - HEADER_BYTES;
-const API_KEY = process.env.HIRO_API_KEY || null;
 
-// Main-thread Atomics.wait heartbeat (ms). Each tick returns briefly to JS so
-// worker.on('error') / 'exit' callbacks can run and flip state.dead, which is
-// the only signal main has if the worker thread dies mid-request.
+// Main-thread Atomics.wait heartbeat (ms). Without it, the JS event loop never
+// pumps while main is blocked, so worker.on('error')/'exit') can't flip
+// state.dead if the worker thread dies (terminate, OOM, native crash) — main
+// would block in the kernel futex forever.
 const WORKER_HEARTBEAT_MS = 1000;
 
-// Worker polling interval. We do not use Atomics.waitAsync because in Node 24
-// on macOS the worker's event loop stops scheduling the waitAsync resolution
-// after a few successful iterations (reproduced reliably with 3+ sequential
-// requests). setTimeout-based polling goes through libuv's timer subsystem,
-// which is reliable. 1 ms polling adds <1 ms of latency per request and is
-// effectively idle CPU while the worker is waiting.
-const WORKER_POLL_MS = 1;
-
-// Upper bound for a single fetch call, enforced inside the worker.
-const FETCH_TIMEOUT_MS = 30_000;
-
 let workerState = null;
+
+// Registered once at module load — references whichever worker is current via
+// the workerState closure, so respawns don't accumulate listeners.
+process.on("beforeExit", () => {
+  const w = workerState?.worker;
+  if (!w) return;
+  try {
+    w.terminate();
+  } catch (_) {}
+});
 
 function ensureWorker() {
   if (workerState && !workerState.dead) return workerState;
@@ -85,28 +71,8 @@ function ensureWorker() {
   const header = new Int32Array(sab, 0, HEADER_BYTES / 4);
   const data = new Uint8Array(sab, HEADER_BYTES, DATA_CAPACITY);
   const signal = new Int32Array(sab, 0, 1);
-  const worker = new Worker(WORKER_FILE, {
-    workerData: {
-      sab,
-      headerBytes: HEADER_BYTES,
-      offsetStatus: OFFSET_STATUS,
-      offsetStatusTextLen: OFFSET_STATUS_TEXT_LEN,
-      offsetHeadersLen: OFFSET_HEADERS_LEN,
-      offsetBodyLen: OFFSET_BODY_LEN,
-      offsetUrlLen: OFFSET_URL_LEN,
-      offsetReqHdrsLen: OFFSET_REQ_HDRS_LEN,
-      signalResponseDone: SIGNAL_RESPONSE_DONE,
-      signalRequestPending: SIGNAL_REQUEST_PENDING,
-      pollMs: WORKER_POLL_MS,
-      fetchTimeoutMs: FETCH_TIMEOUT_MS,
-    },
-  });
+  const worker = new Worker(WORKER_FILE, { workerData: { sab } });
   worker.unref();
-  process.on("beforeExit", () => {
-    try {
-      worker.terminate();
-    } catch (_) {}
-  });
 
   const state = { worker, sab, header, data, signal, dead: false, cause: null };
 
@@ -134,29 +100,28 @@ function ensureWorker() {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+function workerCause(state) {
+  if (!state.cause) return "unknown error";
+  return state.cause.message || String(state.cause);
+}
+
 function syncHttpRequest(url, headersJson) {
   const state = ensureWorker();
   if (state.dead) {
-    throw new Error(
-      "sync_http worker is not running: " +
-        (state.cause ? state.cause.message || String(state.cause) : "unknown error"),
-    );
+    throw new Error("sync_http worker is not running: " + workerCause(state));
   }
 
-  // Build request headers: caller-provided + API key injection.
-  let baseHeaders;
-  try {
-    baseHeaders = headersJson ? JSON.parse(headersJson) : {};
-  } catch {
-    baseHeaders = {};
+  // Read HIRO_API_KEY per-request so callers can set it after module load
+  // (e.g. dotenv.config() / beforeEach()). JSON.parse is intentionally not
+  // wrapped — malformed input is a caller bug, not something to silently drop.
+  const baseHeaders = headersJson ? JSON.parse(headersJson) : {};
+  const apiKey = process.env.HIRO_API_KEY;
+  if (apiKey && baseHeaders["x-api-key"] === undefined) {
+    baseHeaders["x-api-key"] = apiKey;
   }
-  if (API_KEY && baseHeaders["x-api-key"] === undefined) {
-    baseHeaders["x-api-key"] = API_KEY;
-  }
-  const finalHeadersJson = JSON.stringify(baseHeaders);
 
   const urlBytes = encoder.encode(url);
-  const hdrBytes = encoder.encode(finalHeadersJson);
+  const hdrBytes = encoder.encode(JSON.stringify(baseHeaders));
   if (urlBytes.length + hdrBytes.length > DATA_CAPACITY) {
     throw new Error(
       `request too large: ${urlBytes.length + hdrBytes.length} bytes, capacity ${DATA_CAPACITY}`,
@@ -175,30 +140,17 @@ function syncHttpRequest(url, headersJson) {
   Atomics.store(state.signal, 0, SIGNAL_REQUEST_PENDING);
   Atomics.notify(state.signal, 0, 1);
 
-  // Block until the worker flips signal back to RESPONSE_DONE — but with a
-  // heartbeat, so even if the worker dies (e.g. uncaught async error inside
-  // the worker thread, OOM, manual kill) we don't deadlock forever. Without
-  // the heartbeat the JS event loop never runs, so worker.on('error') /
-  // worker.on('exit') can't fire to flip state.dead, and we'd block in the
-  // kernel futex with no way out.
+  // Block until the worker flips signal back to RESPONSE_DONE. The heartbeat
+  // bound is required so a dead worker doesn't deadlock main — see comment on
+  // WORKER_HEARTBEAT_MS.
   for (;;) {
-    const r = Atomics.wait(
-      state.signal,
-      0,
-      SIGNAL_REQUEST_PENDING,
-      WORKER_HEARTBEAT_MS,
-    );
+    const r = Atomics.wait(state.signal, 0, SIGNAL_REQUEST_PENDING, WORKER_HEARTBEAT_MS);
     if (r === "not-equal" || r === "ok") break;
-    // r === "timed-out". The brief return to JS gives queued worker error/exit
-    // callbacks a chance to run; if the worker is gone, state.dead is now set.
     if (state.dead) break;
   }
 
   if (state.dead) {
-    throw new Error(
-      "sync_http worker died during request: " +
-        (state.cause ? state.cause.message || String(state.cause) : "unknown error"),
-    );
+    throw new Error("sync_http worker died during request: " + workerCause(state));
   }
 
   const status = Atomics.load(state.header, OFFSET_STATUS / 4);
@@ -207,15 +159,14 @@ function syncHttpRequest(url, headersJson) {
   const bodyLen = Atomics.load(state.header, OFFSET_BODY_LEN / 4);
 
   if (bodyLen < 0) {
-    const msg = decoder.decode(state.data.subarray(0, -bodyLen));
-    throw new Error(msg);
+    throw new Error(decoder.decode(state.data.subarray(0, -bodyLen)));
   }
 
   // Layout: [statusText][headers][body]
-  const statusText =
-    statusTextLen > 0 ? decoder.decode(state.data.subarray(0, statusTextLen)) : "";
   const headersStart = statusTextLen;
   const bodyStart = headersStart + headersLen;
+  const statusText =
+    statusTextLen > 0 ? decoder.decode(state.data.subarray(0, statusTextLen)) : "";
   const headers =
     headersLen > 0
       ? JSON.parse(decoder.decode(state.data.subarray(headersStart, bodyStart)))
@@ -225,9 +176,8 @@ function syncHttpRequest(url, headersJson) {
   return { status, statusText, headers, body };
 }
 
-// Block the current thread for `ms` milliseconds using Atomics.wait on a
-// dedicated, never-notified SAB. Required because std::thread::sleep is a
-// no-op on wasm32.
+// Block the current thread for `ms` ms via Atomics.wait on a never-notified
+// SAB. Required because std::thread::sleep is a no-op on wasm32.
 const sleepSab = new SharedArrayBuffer(4);
 const sleepView = new Int32Array(sleepSab);
 
@@ -236,8 +186,7 @@ function syncSleep(ms) {
   Atomics.wait(sleepView, 0, 0, ms);
 }
 
-// Terminate the worker eagerly. Intended for tests and graceful shutdown. The
-// next syncHttpRequest call will lazily start a fresh worker.
+// For tests and graceful shutdown. Next syncHttpRequest lazily starts a fresh worker.
 function closeWorker() {
   if (!workerState) return;
   const w = workerState.worker;

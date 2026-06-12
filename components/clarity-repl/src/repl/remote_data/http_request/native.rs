@@ -1,13 +1,14 @@
 use std::collections::HashMap;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
 use serde::de::DeserializeOwned;
 
-use super::retry::{self, Response, TransportError};
+use super::retry::{self, Response};
 
-static API_KEY: LazyLock<Option<String>> = LazyLock::new(|| std::env::var("HIRO_API_KEY").ok());
+// Matches FETCH_TIMEOUT_MS on the Node-WASM side so the two paths can't
+// silently diverge on hang behaviour.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn collect_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
     headers
@@ -21,21 +22,24 @@ fn collect_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, Stri
 }
 
 pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|e| e.to_string())?;
 
-    let transport = || -> Result<Response, TransportError> {
+    let transport = || -> Result<Response, String> {
         let mut request = client
             .get(url)
             .header("x-hiro-product", "clarinet-cli")
             .header("Accept", "application/json");
 
-        if let Some(api_key) = API_KEY.as_ref() {
+        // Read per-request so callers can set HIRO_API_KEY after first use
+        // (matches the Node-WASM glue's behaviour).
+        if let Ok(api_key) = std::env::var("HIRO_API_KEY") {
             request = request.header("x-api-key", api_key);
         }
 
-        let response = request
-            .send()
-            .map_err(|e| TransportError::Network(e.to_string()))?;
+        let response = request.send().map_err(|e| e.to_string())?;
 
         let status = response.status();
         let status_text = status.canonical_reason().unwrap_or("").to_string();
