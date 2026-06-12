@@ -274,7 +274,7 @@ const SAB_SIZE = parseSabSize();
 const DATA_CAPACITY = SAB_SIZE - HEADER_BYTES;
 
 // Main-thread Atomics.wait heartbeat (ms). While main is blocked, its event
-// loop never pumps, so worker.on('error')/'exit') CANNOT fire — JS callbacks
+// loop never pumps, so worker.on('error')/'exit' CANNOT fire — JS callbacks
 // only run when the stack empties. Death detection therefore can't rely on
 // state.dead; instead the worker bumps a liveness counter in the SAB from a
 // timer (see LIVENESS_INTERVAL_MS), and main samples it on each heartbeat
