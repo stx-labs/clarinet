@@ -1,71 +1,72 @@
----
 id: 0
-name: "Simulated deployment, used as a default for `clarinet console`, `clarinet test` and `clarinet check`"
+name: Simulated deployment, used as a default for `clarinet console`, `clarinet test` and `clarinet check`
 network: simnet
 genesis:
   wallets:
-    - name: deployer
-      address: ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_1
-      address: ST1J4G6RR643BCG8G8SR6M2D9Z9KXT2NJDRK3FBTK
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_2
-      address: ST20ATRN26N9P05V2F1RHFRV24X8C8M3W54E427B2
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_3
-      address: ST21HMSJATHZ888PD0S0SSTWP4J61TCRJYEVQ0STB
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_4
-      address: ST2QXSK64YQX3CQPC530K79XWQ98XFAM9W3XKEH3N
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_5
-      address: ST3DG3R65C9TTEEW5BC5XTSY0M1JM7NBE7GVWKTVJ
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_6
-      address: ST3R3B1WVY7RK5D3SV5YTH01XSX1S4NN5B3QK2X0W
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_7
-      address: ST3ZG8F9X4VKVTVQB2APF4NEYEE1HQHC2EDBF09JN
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_8
-      address: STEB8ZW46YZJ40E3P7A287RBJFWPHYNQ2AB5ECT8
-      balance: "1000000"
-      sbtc-balance: "1000000000"
-    - name: wallet_9
-      address: STFCVYY1RJDNJHST7RRTPACYHVJQDJ7R1DWTQHQA
-      balance: "1000000"
-      sbtc-balance: "1000000000"
+  - name: deployer
+    address: ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_1
+    address: ST1J4G6RR643BCG8G8SR6M2D9Z9KXT2NJDRK3FBTK
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_2
+    address: ST20ATRN26N9P05V2F1RHFRV24X8C8M3W54E427B2
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_3
+    address: ST21HMSJATHZ888PD0S0SSTWP4J61TCRJYEVQ0STB
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_4
+    address: ST2QXSK64YQX3CQPC530K79XWQ98XFAM9W3XKEH3N
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_5
+    address: ST3DG3R65C9TTEEW5BC5XTSY0M1JM7NBE7GVWKTVJ
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_6
+    address: ST3R3B1WVY7RK5D3SV5YTH01XSX1S4NN5B3QK2X0W
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_7
+    address: ST3ZG8F9X4VKVTVQB2APF4NEYEE1HQHC2EDBF09JN
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_8
+    address: STEB8ZW46YZJ40E3P7A287RBJFWPHYNQ2AB5ECT8
+    balance: '1000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_9
+    address: STFCVYY1RJDNJHST7RRTPACYHVJQDJ7R1DWTQHQA
+    balance: '1000000'
+    sbtc-balance: '1000000000'
   contracts:
-    - genesis
-    - lockup
-    - bns
-    - cost-voting
-    - costs
-    - pox
-    - costs-2
-    - pox-2
-    - costs-3
-    - pox-3
-    - pox-4
-    - signers
-    - signers-voting
-    - costs-4
+  - genesis
+  - lockup
+  - bns
+  - cost-voting
+  - costs
+  - pox
+  - costs-2
+  - pox-2
+  - costs-3
+  - pox-3
+  - pox-4
+  - signers
+  - signers-voting
+  - costs-4
+  - costs-5
+  - pox-5
 plan:
   batches:
-    - id: 0
-      transactions:
-        - transaction-type: emulated-contract-publish
-          contract-name: billboard
-          emulated-sender: ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE
-          path: contracts/billboard.clar
-          clarity-version: 2
-      epoch: "2.4"
+  - id: 0
+    transactions:
+    - transaction-type: emulated-contract-publish
+      contract-name: billboard
+      emulated-sender: ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE
+      path: contracts/billboard.clar
+      clarity-version: 2
+    epoch: '2.4'
