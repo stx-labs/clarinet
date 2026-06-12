@@ -1,3 +1,75 @@
+# [3.20.0](https://github.com/stx-labs/clarinet/compare/v3.19.0...v3.20.0) (2026-06-11)
+
+##### New Features
+
+* **linter:**  Flatten variadic functions (#2426) (c3dc1c71)
+
+##### Bug Fixes
+
+*  Remote_data fetch getContractAST (#2431) (ec353a0e)
+*  Surface getContractAST errors as JsError with descriptive messages (#2429) (ecfebc1b)
+*  New epoch and clarity types (#2425) (afc08794)
+
+##### Chores
+
+*  Rename `flatten_nested_variadic` to `flatten_variadic` (#2432) (c479ce13)
+*  Update `vitest` (#2427) (531034e2)
+*  Use TS 6 in sdk (#2423) (2afc6515)
+
+# [3.19.0](https://github.com/stx-labs/clarinet/compare/v3.18.1...v3.19.0) (2026-06-04)
+
+##### New Features
+
+*  POX-5 optionally available in simnet (#2416) (03912bbb)
+
+##### Continuous Integration
+
+*  Build for linux arm64 and generate checksum (#2407) (c8603b93)
+
+##### Bug Fixes
+
+*  Support override_boot_contract in sdk (#2418) (f2af758e)
+*  Playwright version fix (#2419) (a4f08c92)
+*  Replace broken VSCode badge in README with Open VSX badge (#2405) (9b3d7fa2)
+
+# [3.18.1](https://github.com/stx-labs/clarinet/compare/v3.18.0...v3.18.1) (2026-05-19)
+
+##### Continuous Integration
+
+*  Fix sdk release (#2402) (1928e7ab)
+
+# [3.18.0](https://github.com/stx-labs/clarinet/compare/v3.17.0...v3.18.0) (2026-05-19)
+
+##### New Features
+
+* Upgrade clarity vm (Clarity 6 preview) (#2397) (e296a43c)
+* **static-cost:**
+  * Add external trait resolution (#2384) (cbe36702)
+  * Add warnings and resolving for local traits (#2375) (dc655d0e)
+
+##### Chores
+
+* **vscode-ext:**  Upgrade pnpm and dependencies (#2398) (e61872f9)
+* Use epoch4 built-ins via pox-wf-integration (#2389) (176d53d6)
+* Bump rng, nixpkgs, rust-overlay (#2383) (079db313)
+
+##### Bug fixes
+
+* Use codelens live-range to avoid flashing (#2385) (5057c617)
+
+##### Continuous Integration
+
+* Fix docker image release (#2388) (67be209a)
+
+##### Other Changes
+
+* Reduce calls to Hiro API and improve retry logic (#2386) (966e855f)
+
+##### Performance Improvements
+
+*  Cache contract ASTs and only re-parse files which have changed (#2174) (6bdcab55)
+*  Remove temp allocations and double conversions (#2390) (6080ab46)
+
 # [3.17.0](https://github.com/stx-labs/clarinet/compare/v3.16.0...v3.17.0) (2026-04-28)
 
 ##### New Features

@@ -13,7 +13,7 @@ const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
 let simnet: Simnet;
 
-const nbOfBootContracts = 26;
+const nbOfBootContracts = 34;
 const latestEpochStr = "3.4";
 
 const deploymentPlanPath = path.join(
@@ -189,7 +189,7 @@ describe("simnet can call contracts function", () => {
     expect(res).toHaveProperty("costs");
     expect(res.costs).not.toBeNull();
     // Verify that runtime cost is reported (should be > 0 for a deployment)
-    expect(res.costs.total.runtime).toEqual(224);
+    expect(res.costs!.total.runtime).toEqual(224);
   });
 
   it("can call public functions with arguments", () => {

@@ -7,6 +7,8 @@ export {
   type TransferSTX,
 } from "../../common/src/sdkProxyHelpers.js";
 
+import type { SDK } from "@stacks/clarinet-sdk-wasm";
+
 import { vfs } from "./vfs.js";
 import { Simnet, getSessionProxy } from "./sdkProxy.js";
 
@@ -34,7 +36,10 @@ export async function getSDK(options?: Options): Promise<Simnet> {
     !!options?.trackPerformance,
   );
 
-  const simnet = new Proxy(new module.SDK(vfs, sdkOptions), getSessionProxy()) as unknown as Simnet;
+  const simnet = new Proxy(
+    new module.SDK(vfs, sdkOptions),
+    getSessionProxy() as ProxyHandler<SDK>,
+  ) as unknown as Simnet;
   return simnet;
 }
 

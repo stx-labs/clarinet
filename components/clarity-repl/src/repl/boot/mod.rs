@@ -33,9 +33,18 @@ const POX_BODY: &str = std::include_str!("pox.clar");
 const POX_2_BODY: &str = std::include_str!("pox-2.clar");
 const POX_3_BODY: &str = std::include_str!("pox-3.clar");
 const POX_4_BODY: &str = std::include_str!("pox-4.clar");
+const POX_5_BODY: &str = std::include_str!("pox-5.clar");
 
+const BOOT_CODE_COSTS_5: &str = std::include_str!("costs-5.clar");
 const BOOT_CODE_SIGNERS: &str = std::include_str!("signers.clar");
 const BOOT_CODE_SIGNERS_VOTING: &str = std::include_str!("signers-voting.clar");
+
+/// mainnet sbtc-registry and sbtc-token contract sources
+/// (from SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4).
+/// Deployed as boot dependencies so pox-5 can resolve its `contract-call?`
+/// and `with-ft` references to sbtc-token.
+const SBTC_REGISTRY_SOURCE: &str = std::include_str!("sbtc-registry.clar");
+const SBTC_TOKEN_SOURCE: &str = std::include_str!("sbtc-token.clar");
 
 // sBTC contracts are not boot contracts
 // but we want to handle a similar behavior for contract addresses mapping
@@ -58,7 +67,6 @@ pub static SBTC_TOKEN_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
     });
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::sync::LazyLock;
 
 use clarity::types::StacksEpochId;
@@ -98,7 +106,24 @@ static BOOT_CODE_POX_3_TESTNET: LazyLock<String> =
     LazyLock::new(|| format!("{POX_TESTNET}\n{POX_3_BODY}"));
 static BOOT_CODE_COST_VOTING_TESTNET: LazyLock<String> = LazyLock::new(make_testnet_cost_voting);
 
-pub static BOOT_CODE_MAINNET: LazyLock<[(&'static str, &'static str); 14]> = LazyLock::new(|| {
+/// mainnet sBTC token contract principal baked into pox-5 source.
+const SBTC_TOKEN_MAINNET_CONTRACT: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token";
+
+/// mainnet bond-admin principal baked into pox-5 source.
+const POX_5_BOND_ADMIN_MAINNET: &str = "SP000000000000000000002Q6VF78";
+
+/// Build the testnet pox-5 body by rewriting the mainnet sBTC contract
+/// reference and bond-admin to the simnet/testnet equivalents.
+fn make_pox_5_testnet() -> String {
+    let sbtc_testnet = format!("{SBTC_TESTNET_ADDRESS}.sbtc-token");
+    POX_5_BODY
+        .replace(SBTC_TOKEN_MAINNET_CONTRACT, &sbtc_testnet)
+        .replace(POX_5_BOND_ADMIN_MAINNET, BOOT_TESTNET_ADDRESS)
+}
+
+static BOOT_CODE_POX_5_TESTNET: LazyLock<String> = LazyLock::new(make_pox_5_testnet);
+
+pub static BOOT_CODE_MAINNET: LazyLock<[(&'static str, &'static str); 16]> = LazyLock::new(|| {
     [
         ("pox", &BOOT_CODE_POX_MAINNET),
         ("lockup", BOOT_CODE_LOCKUP),
@@ -114,10 +139,12 @@ pub static BOOT_CODE_MAINNET: LazyLock<[(&'static str, &'static str); 14]> = Laz
         ("signers", BOOT_CODE_SIGNERS),
         ("signers-voting", BOOT_CODE_SIGNERS_VOTING),
         ("costs-4", BOOT_CODE_COSTS_4),
+        ("costs-5", BOOT_CODE_COSTS_5),
+        ("pox-5", POX_5_BODY),
     ]
 });
 
-pub static BOOT_CODE_TESTNET: LazyLock<[(&'static str, &'static str); 14]> = LazyLock::new(|| {
+pub static BOOT_CODE_TESTNET: LazyLock<[(&'static str, &'static str); 16]> = LazyLock::new(|| {
     [
         ("pox", &BOOT_CODE_POX_TESTNET),
         ("lockup", BOOT_CODE_LOCKUP),
@@ -133,6 +160,8 @@ pub static BOOT_CODE_TESTNET: LazyLock<[(&'static str, &'static str); 14]> = Laz
         ("signers", BOOT_CODE_SIGNERS),
         ("signers-voting", BOOT_CODE_SIGNERS_VOTING),
         ("costs-4", BOOT_CODE_COSTS_4),
+        ("costs-5", BOOT_CODE_COSTS_5),
+        ("pox-5", &BOOT_CODE_POX_5_TESTNET),
     ]
 });
 
@@ -154,6 +183,8 @@ pub const BOOT_CONTRACTS_NAMES: &[&str] = &[
     "signers",
     "signers-voting",
     "costs-4",
+    "costs-5",
+    "pox-5",
 ];
 
 pub static BOOT_TESTNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
@@ -164,7 +195,7 @@ pub static BOOT_CONTRACTS_DATA: LazyLock<
     BTreeMap<QualifiedContractIdentifier, (ClarityContract, ContractAST)>,
 > = LazyLock::new(|| {
     let mut result = BTreeMap::new();
-    let deploy: [(&StandardPrincipalData, [(&str, &str); 14]); 2] = [
+    let deploy: [(&StandardPrincipalData, [(&str, &str); 16]); 2] = [
         (&*BOOT_TESTNET_PRINCIPAL, *BOOT_CODE_TESTNET),
         (&*BOOT_MAINNET_PRINCIPAL, *BOOT_CODE_MAINNET),
     ];
@@ -195,11 +226,9 @@ pub static BOOT_CONTRACTS_DATA: LazyLock<
     result
 });
 
-pub fn load_custom_boot_contract(path: &str) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| format!("Failed to read boot contract file {path}: {e}"))
-}
-
-/// Get boot contracts data with optional overrides (only existing boot contracts can be overridden)
+/// `overrides` maps boot contract name → Clarity source code. File I/O is the
+/// caller's responsibility so this stays runtime-agnostic — `wasm32-unknown-unknown`
+/// has no working `std::fs`.
 pub fn get_boot_contracts_data_with_overrides(
     overrides: &BTreeMap<String, String>,
 ) -> BTreeMap<QualifiedContractIdentifier, (ClarityContract, ContractAST)> {
@@ -211,21 +240,12 @@ pub fn get_boot_contracts_data_with_overrides(
         None,
     );
 
-    for (contract_name, file_path) in overrides {
+    for (contract_name, custom_source) in overrides {
         if !BOOT_CONTRACTS_NAMES.contains(&contract_name.as_str()) {
             eprintln!("Warning: Skipping custom boot contract '{contract_name}' - only existing boot contracts can be overridden. Valid boot contracts are: {BOOT_CONTRACTS_NAMES:?}");
             continue;
         }
 
-        let custom_source = match load_custom_boot_contract(file_path) {
-            Ok(source) => source,
-            Err(e) => {
-                eprintln!("Warning: Failed to load custom boot contract {contract_name}: {e}");
-                continue;
-            }
-        };
-
-        // Use standard epoch/version mapping for known boot contracts
         let (epoch, clarity_version) =
             get_boot_contract_epoch_and_clarity_version(contract_name.as_str());
 
@@ -241,18 +261,65 @@ pub fn get_boot_contracts_data_with_overrides(
 
             let (ast, _, _) = interpreter.build_ast(&boot_contract);
             let contract_id = boot_contract.expect_resolved_contract_identifier(None);
-
-            // Insert the contract (this will replace the existing boot contract)
             result.insert(contract_id, (boot_contract, ast));
         }
     }
     result
 }
 
+pub static SBTC_MAINNET_ADDRESS_PRINCIPAL: LazyLock<StandardPrincipalData> =
+    LazyLock::new(|| PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap());
+
+/// Pre-parsed sbtc-registry and sbtc-token contracts deployed at both the
+/// testnet and mainnet sBTC addresses.
+/// - sbtc-registry deployed first (required by sbtc-token)
+/// - sbtc-token next before the regular boot contracts (required by pox-5)
+///
+/// The Vec preserves deployment order: sbtc-registry before sbtc-token
+pub static SBTC_BOOT_CONTRACTS: LazyLock<
+    Vec<(QualifiedContractIdentifier, (ClarityContract, ContractAST))>,
+> = LazyLock::new(|| {
+    let mut result = Vec::new();
+    let interpreter = ClarityInterpreter::new(
+        StandardPrincipalData::transient(),
+        Settings::default(),
+        None,
+    );
+
+    // Deployed at the sBTC address with Clarity3 to match the on-chain deployment.
+    let epoch = StacksEpochId::Epoch30;
+    let clarity_version = ClarityVersion::Clarity3;
+
+    let contracts: [(&str, &str); 2] = [
+        ("sbtc-registry", SBTC_REGISTRY_SOURCE),
+        ("sbtc-token", SBTC_TOKEN_SOURCE),
+    ];
+
+    for address in [SBTC_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS] {
+        for (name, source) in &contracts {
+            let contract = ClarityContract {
+                code_source: ClarityCodeSource::ContractInMemory(source.to_string()),
+                deployer: ContractDeployer::Address(address.to_string()),
+                name: name.to_string(),
+                epoch: Epoch::Specific(epoch),
+                clarity_version,
+                skip_analysis: true,
+            };
+            let (ast, _, _) = interpreter.build_ast(&contract);
+            let contract_id = contract.expect_resolved_contract_identifier(None);
+            result.push((contract_id, (contract, ast)));
+        }
+    }
+
+    result
+});
+
 pub fn get_boot_contract_epoch_and_clarity_version(
     contract_name: &str,
 ) -> (StacksEpochId, ClarityVersion) {
     let (epoch, clarity_version) = match contract_name {
+        "pox-5" => (StacksEpochId::Epoch40, ClarityVersion::Clarity6),
+        "costs-5" => (StacksEpochId::Epoch40, ClarityVersion::Clarity6),
         "costs-4" => (StacksEpochId::Epoch33, ClarityVersion::Clarity4),
         "pox-4" | "signers" | "signers-voting" => {
             (StacksEpochId::Epoch25, ClarityVersion::Clarity2)

@@ -599,9 +599,7 @@ pub fn extract_watch_variable<'a>(
         return Err(format!("{contract_id} does not exist"));
     };
 
-    if !contract.contract_context.meta_data_var.contains_key(name)
-        && !contract.contract_context.meta_data_map.contains_key(name)
-    {
+    if !contract.meta_data_var.contains_key(name) && !contract.meta_data_map.contains_key(name) {
         return Err(format!("no such variable: {contract_id}.{name}"));
     }
 

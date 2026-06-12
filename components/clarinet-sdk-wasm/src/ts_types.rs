@@ -14,7 +14,8 @@ const EPOCH_STRING: &'static str = r#"export type EpochString =
   | "3.1"
   | "3.2"
   | "3.3"
-  | "3.4";
+  | "3.4"
+  | "4.0";
 "#;
 
 // CONTRACT AST
