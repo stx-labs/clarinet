@@ -34,7 +34,7 @@ const loadSyncHttp = (): SyncHttpModule => require(SYNC_HTTP_PATH);
 
 // syncHttpRequest blocks the calling thread via Atomics.wait. We therefore can't
 // host the mock HTTP server in the same Node process — its event loop would be
-// frozen while we wait. Run the server in a detached child instead, and route
+// frozen while we wait. Run the server in a separate child process instead, and route
 // per-test behaviour via the request URL.
 // Use os.tmpdir() so a crashed test never leaves an untracked file in the repo;
 // mkdtempSync gives a unique directory per process so parallel vitest runs
