@@ -50,8 +50,7 @@ async function build_wasm_sdk() {
 }
 
 // wasm-pack omits `snippets/` from the generated package.json `files` list, so
-// it would be stripped on publish. Patch it back in and place the worker file
-// next to the wasm-bindgen-emitted shim.
+// it would be stripped on publish. Patch it back in.
 async function includeNodeSnippets() {
   const pkgJsonPath = path.join(rootDir, "pkg-node/package.json");
   const pkgRaw = await fs.readFile(pkgJsonPath, "utf-8");
@@ -63,38 +62,17 @@ async function includeNodeSnippets() {
   await fs.writeFile(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
   console.log("✅ pkg-node/package.json files list patched to include snippets");
 
-  // wasm-bindgen copies sync_http.cjs automatically (Rust imports from it);
-  // the worker and the shared layout module are loaded at runtime via
-  // require() / new Worker(path), so wasm-bindgen can't see them — copy them
-  // alongside the shim ourselves.
+  // Sanity check: sync_http.cjs is self-contained (worker + layout inlined)
+  // precisely so that nothing else needs to be copied here — wasm-bindgen
+  // emits it as the lone snippet because Rust imports from it.
   const snippetsDir = path.join(rootDir, "pkg-node/snippets");
-  let syncHttpPath = null;
-  try {
-    const entries = await fs.readdir(snippetsDir, { recursive: true });
-    const match = entries.find((e) => e.endsWith("sync_http.cjs"));
-    if (match) syncHttpPath = path.join(snippetsDir, match);
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-  }
-  if (!syncHttpPath) {
+  const entries = await fs.readdir(snippetsDir, { recursive: true });
+  if (!entries.some((e) => e.endsWith("sync_http.cjs"))) {
     throw new Error(
       "sync_http.cjs not found under pkg-node/snippets/; wasm-bindgen module path may be wrong",
     );
   }
-
-  const srcDir = path.join(rootDir, "../clarity-repl/src/repl/remote_data/http_request");
-  const destDir = path.dirname(syncHttpPath);
-  for (const name of ["sync_http_worker.cjs", "sync_http_layout.cjs"]) {
-    const src = path.join(srcDir, name);
-    // Stat the SOURCE before copying — an empty source would deadlock the
-    // main thread at runtime, and copyFile would silently write zero bytes.
-    const stats = await fs.stat(src);
-    if (stats.size === 0) {
-      throw new Error(`source ${src} is empty; refusing to copy`);
-    }
-    await fs.copyFile(src, path.join(destDir, name));
-  }
-  console.log("✅ pkg-node/snippets/.../ sync_http* files in place");
+  console.log("✅ pkg-node/snippets/.../sync_http.cjs in place");
 }
 
 /**

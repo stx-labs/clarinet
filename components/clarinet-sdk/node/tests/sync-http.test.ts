@@ -224,23 +224,18 @@ describe("sync_http glue", () => {
     expect(JSON.parse(r3.body)).toEqual({ ok: true, n: 42 });
   });
 
-  // Regression: a worker that never starts (e.g. a bundler that didn't copy
-  // sync_http_worker.cjs — it's only referenced via `new Worker(path)`, so
-  // bundlers can't see it) must surface as an error, not an infinite hang.
-  // worker.on('error') can't fire while main is blocked in Atomics.wait, so
-  // detection relies on the worker's SAB liveness counter staying frozen.
-  it("throws instead of hanging when the worker file is missing", () => {
-    const glueDir = path.dirname(SYNC_HTTP_PATH);
-    const brokenDir = fs.mkdtempSync(path.join(TMP_DIR, "no-worker-"));
-    for (const name of ["sync_http.cjs", "sync_http_layout.cjs"]) {
-      fs.copyFileSync(path.join(glueDir, name), path.join(brokenDir, name));
-    }
-
+  // Regression: a worker that boots but never serves (thread died, failed to
+  // start, OOM, native crash) must surface as an error, not an infinite hang.
+  // worker.on('error')/'exit' can't fire while main is blocked in Atomics.wait,
+  // so detection relies on the worker's SAB liveness counter staying frozen.
+  // The STALL_WORKER env hook makes the worker return before serving or
+  // starting its liveness beacon — exactly the frozen-counter shape.
+  it("throws instead of hanging when the worker is dead", () => {
     const out = spawnSync(
       process.execPath,
       [
         "-e",
-        `const { syncHttpRequest } = require(${JSON.stringify(path.join(brokenDir, "sync_http.cjs"))});
+        `const { syncHttpRequest } = require(${JSON.stringify(SYNC_HTTP_PATH)});
          try {
            syncHttpRequest(${JSON.stringify(mockBaseUrl + "/marker")}, "{}");
            console.error("expected throw");
@@ -251,7 +246,10 @@ describe("sync_http glue", () => {
       ],
       // Death is declared after MAX_STALE_HEARTBEATS × WORKER_HEARTBEAT_MS
       // (~5s); the spawnSync timeout is the deadlock backstop.
-      { timeout: 25_000 },
+      {
+        env: { ...process.env, CLARINET_SDK_TEST_SYNC_HTTP_STALL_WORKER: "1" },
+        timeout: 25_000,
+      },
     );
     expect(out.status, out.stderr.toString()).toBe(0);
     expect(out.stdout.toString()).toMatch(/worker died during request: worker unresponsive/);
