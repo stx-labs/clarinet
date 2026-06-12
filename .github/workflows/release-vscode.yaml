@@ -1,5 +1,5 @@
-# The vscode extension is published to npm when a release is created.
-# It's built with vsce and published to both the vscode marketplace and open vsx.
+# The vscode extension is built with vsce and published to both
+# the VSCode Marketplace and Open VSX when a release is created.
 
 name: Publish VSCode Extension
 on:
@@ -8,6 +8,10 @@ on:
   workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -26,11 +30,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: '24.x'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Rust
         run: |
@@ -41,7 +47,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build vsix
-        run: vsce package --out clarity.vsix
+        run: pnpm exec vsce package --out clarity.vsix
 
       - name: Upload vsix artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -55,6 +61,7 @@ jobs:
     name: Publish to VSCode Marketplace
     runs-on: ubuntu-latest
     needs: build
+    if: github.event_name == 'release'
     environment: release-vscode-extension
 
     permissions:
@@ -72,15 +79,15 @@ jobs:
           path: ./components/clarity-vscode
 
       - name: Publish to VSCode Marketplace
-        if: github.event_name == 'release'
         env:
           VSCE_PAT: ${{ secrets.VSCE_TOKEN }}
-        run: pnpm dlx @vscode/vsce@3.9.1 publish --packagePath clarity.vsix --pat "$VSCE_PAT"
+        run: npx -y @vscode/vsce@3.9.1 publish --packagePath clarity.vsix --pat "$VSCE_PAT"
 
   publish-open-vsx:
     name: Publish to Open VSX
     runs-on: ubuntu-latest
     needs: build
+    if: github.event_name == 'release'
     environment: release-vscode-extension
 
     permissions:
@@ -98,7 +105,6 @@ jobs:
           path: ./components/clarity-vscode
 
       - name: Publish to Open VSX
-        if: github.event_name == 'release'
         env:
           OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
-        run: pnpm dlx ovsx@0.10.12 publish --packagePath clarity.vsix --pat "$OVSX_PAT"
+        run: npx -y ovsx@0.10.12 publish --packagePath clarity.vsix --pat "$OVSX_PAT"
