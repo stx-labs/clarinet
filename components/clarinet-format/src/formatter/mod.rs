@@ -1944,6 +1944,7 @@ mod tests_formatter {
     use std::assert_eq;
 
     use clarinet_defaults::DEFAULT_EPOCH;
+    use clarity::types::StacksEpochId;
     use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
     use indoc::indoc;
 
@@ -1959,6 +1960,11 @@ mod tests_formatter {
     fn format_with_default(source: &str) -> String {
         let formatter = ClarityFormatter::new(Settings::default());
         formatter.format_section(source, None).unwrap()
+    }
+
+    fn format_with_epoch(source: &str, epoch: StacksEpochId) -> String {
+        let formatter = ClarityFormatter::new(Settings::default());
+        formatter.format_section(source, Some(epoch)).unwrap()
     }
 
     fn format_with(source: &str, settings: Settings) -> String {
@@ -3017,6 +3023,20 @@ mod tests_formatter {
             "#
         );
         let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_nested_concat() {
+        let src = "(concat \"hello\" (concat \"world\" \"!\"))";
+        let result = format_with_default(src);
+        assert_eq!(src, result);
+    }
+
+    #[test]
+    fn test_variadic_concat() {
+        let src = "(concat \"hello\" \"world\" \"!\")";
+        let result = format_with_epoch(src, StacksEpochId::Epoch40);
         assert_eq!(src, result);
     }
 

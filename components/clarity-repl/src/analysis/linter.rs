@@ -46,6 +46,8 @@ pub enum LintName {
     CaseTrait,
     /// Check that ERR_ constants are unique and use `(err ...)` values
     ErrorConst,
+    /// Suggest flattening nested calls to variadic functions
+    FlattenVariadic,
     /// Find expressions that have no effect
     Noop,
     /// Warn about `unwrap-panic` and `unwrap-err-panic`
@@ -128,6 +130,7 @@ impl LintGroup {
         match self {
             All => LintName::VARIANTS,
             Perf => &[
+                LintName::FlattenVariadic,
                 LintName::UnnecessaryAsMaxLen,
                 LintName::UnnecessaryPublic,
                 LintName::UnnecessaryTuple,

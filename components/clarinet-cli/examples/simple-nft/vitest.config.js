@@ -1,15 +1,22 @@
 /// <reference types="vitest" />
 
-import { defineConfig } from "vite";
-import { vitestSetupFilePath, getClarinetVitestsArgv } from "@hirosystems/clarinet-sdk/vitest";
+import { defineConfig } from "vitest/config";
+import {
+  vitestSetupFilePath,
+  getClarinetVitestsArgv,
+} from "@stacks/clarinet-sdk/vitest";
 
 export default defineConfig({
   test: {
     environment: "clarinet",
-    singleThread: true,
+    pool: "forks",
+    isolate: false,
+    maxWorkers: 1,
     setupFiles: [vitestSetupFilePath],
     environmentOptions: {
-      clarinet: getClarinetVitestsArgv(),
+      clarinet: {
+        ...getClarinetVitestsArgv(),
+      },
     },
   },
 });
