@@ -302,7 +302,7 @@ fn simple_asserts_branching() {
     ]
     .join("\n");
 
-    // no hit on (err u1)
+    // asserts! succeeds: condition hit, error value not hit
     let snippets: Vec<String> = vec!["(contract-call? .contract-0 is-one 1)".into()];
     let cov = get_coverage_report(&contract, snippets);
 
@@ -313,16 +313,17 @@ fn simple_asserts_branching() {
             "FNF:1",
             "FNH:1",
             "DA:1,1",
-            "DA:2,1",
-            "BRF:1",
-            "BRH:0",
-            "BRDA:2,10,0,0",
+            "DA:2,2", // asserts! keyword + condition
+            "BRF:2",
+            "BRH:1",
+            "BRDA:2,10,0,1", // condition hit
+            "BRDA:2,10,1,0", // error value not hit
         ]
         .join("\n"),
     );
     assert_eq!(cov, expect);
 
-    // hit on (err u1)
+    // asserts! fails: both condition and error value hit
     let snippets: Vec<String> = vec!["(contract-call? .contract-0 is-one 2)".into()];
     let cov = get_coverage_report(&contract, snippets);
 
@@ -333,10 +334,11 @@ fn simple_asserts_branching() {
             "FNF:1",
             "FNH:1",
             "DA:1,1",
-            "DA:2,1",
-            "BRF:1",
-            "BRH:1",
-            "BRDA:2,10,0,1",
+            "DA:2,2", // asserts! keyword + condition (err keyword not counted in line coverage)
+            "BRF:2",
+            "BRH:2",
+            "BRDA:2,10,0,1", // condition hit
+            "BRDA:2,10,1,1", // error value hit
         ]
         .join("\n"),
     );

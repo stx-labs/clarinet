@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use clarity::vm::ast::ContractAST;
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::functions::define::DefineFunctionsParsed;
-use clarity::vm::functions::NativeFunctions::{self, Filter, Fold, Map};
+use clarity::vm::functions::NativeFunctions;
 use clarity::vm::{EvalHook, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::{Deserialize, Serialize};
@@ -218,11 +218,32 @@ impl EvalHook for CoverageHook {
     fn did_finish_eval<'a>(
         &mut self,
         _env: &mut clarity::vm::contexts::ExecutionState,
-        _invoke_ctx: &'a clarity::vm::contexts::InvocationContext,
+        invoke_ctx: &'a clarity::vm::contexts::InvocationContext,
         _context: &'a clarity::vm::LocalContext,
-        _expr: &SymbolicExpression,
-        _res: &Result<clarity::vm::ValueRef<'a>, VmExecutionError>,
+        expr: &SymbolicExpression,
+        res: &Result<clarity::vm::ValueRef<'a>, VmExecutionError>,
     ) {
+        // Record the error value's ID when asserts! fails (result is Err).
+        // This gives branch 1 (error) its hit count.
+        if res.is_err() {
+            if let Some(children) = expr.match_list() {
+                if let Some((func, args)) = try_parse_native_func(children) {
+                    if matches!(func, NativeFunctions::Asserts) {
+                        if let Some(error_value) = args.get(1) {
+                            let contract = &invoke_ctx.contract_context.contract_identifier;
+                            let mut contract_report =
+                                self.contracts_coverage.remove(contract).unwrap_or_default();
+                            // Record the error value's own ID for branch 1 tracking
+                            let count = contract_report.entry(error_value.id).or_insert(0);
+                            *count += 1;
+                            // Also recurse to count leaf expressions (like err keyword)
+                            report_eval(&mut contract_report, error_value);
+                            self.contracts_coverage.insert(contract.clone(), contract_report);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn did_complete(&mut self, _result: Result<&mut clarity::vm::ExecutionResult, String>) {
@@ -290,7 +311,7 @@ fn retrieve_executable_lines_and_branches(
                     // handle codes branches
                     // (if, asserts!, and, or, match)
                     match func {
-                        NativeFunctions::If | NativeFunctions::Asserts => {
+                        NativeFunctions::If => {
                             let (_cond, args) = args.split_first().unwrap();
                             branches.insert(
                                 cur_expr.id,
@@ -301,6 +322,26 @@ fn retrieve_executable_lines_and_branches(
                                     })
                                     .collect(),
                             );
+                        }
+                        NativeFunctions::Asserts => {
+                            // asserts!(condition, error-value)
+                            // Branch 0 (success/continue): the condition expression
+                            // Branch 1 (error): the error value expression
+                            let (Some(cond), Some(error_value)) =
+                                (args.first(), args.get(1))
+                            else {
+                                continue;
+                            };
+                            branches.insert(
+                                cur_expr.id,
+                                vec![
+                                    (cond.span.start_line, cond.id),
+                                    (error_value.span.start_line, error_value.id),
+                                ],
+                            );
+                            // Add condition and error value to frontier so they are tracked
+                            // in executable_lines, enabling their hit counts to be looked up
+                            frontier.extend_from_slice(&[cond, error_value]);
                         }
                         NativeFunctions::And | NativeFunctions::Or => {
                             branches.insert(
@@ -368,11 +409,30 @@ fn try_parse_native_func(
 fn report_eval(expr_coverage: &mut ExprCoverage, expr: &SymbolicExpression) {
     if let Some(children) = expr.match_list() {
         if let Some((func, args)) = try_parse_native_func(children) {
-            if matches!(func, Fold | Map | Filter) {
-                if let Some(iterator_func) = args.first() {
-                    report_eval(expr_coverage, iterator_func);
-                }
+            // All native function calls recurse on the function name expression
+            // to ensure it gets recorded in coverage
+            if let Some(func_expr) = children.first() {
+                report_eval(expr_coverage, func_expr);
             }
+
+            match func {
+                NativeFunctions::Fold | NativeFunctions::Map | NativeFunctions::Filter => {
+                    if let Some(iterator_func) = args.first() {
+                        report_eval(expr_coverage, iterator_func);
+                    }
+                }
+                NativeFunctions::Asserts => {
+                    // Record the condition expression's ID so branch 0 (success) gets a hit.
+                    // The condition is always evaluated, regardless of outcome.
+                    if let Some(cond) = args.first() {
+                        let count = expr_coverage.entry(cond.id).or_insert(0);
+                        *count += 1;
+                        report_eval(expr_coverage, cond);
+                    }
+                }
+                _ => {}
+            }
+            return;
         }
         if let Some(func_expr) = children.first() {
             report_eval(expr_coverage, func_expr);
