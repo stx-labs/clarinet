@@ -35,7 +35,7 @@ pub struct CoverageHook {
 // DA: line data: line number, hit count
 // BRF: number branches found
 // BRH: number branches hit
-// BRDA: branch data: line number, expr_id, branch_nb, hit count
+// BRDA: branch data: line number, block number, branch_nb, hit count
 
 impl CoverageHook {
     pub fn new() -> Self {
@@ -182,12 +182,26 @@ impl CoverageHook {
                     file_content.push_str(&format!("BRF:{}\n", branches.len()));
                     file_content.push_str(&format!("BRH:{}\n", branches_hits.len()));
 
-                    for ((line, block_id, branch_nb), count) in branch_execution_counts.iter() {
+                    // Renumber block IDs to be sequential per line (LCOV 2.x requirement)
+                    let mut current_line = 0u32;
+                    let mut current_expr_id = 0u64;
+                    let mut block_counter = 0usize;
+                    for ((line, expr_id, branch_nb), count) in branch_execution_counts.iter() {
                         // the ast can contain elements with a span starting at line 0 that we want to ignore
-                        if line > &&0 {
-                            file_content
-                                .push_str(&format!("BRDA:{line},{block_id},{branch_nb},{count}\n"));
+                        if line <= &&0 {
+                            continue;
                         }
+                        if **line != current_line {
+                            current_line = **line;
+                            current_expr_id = **expr_id;
+                            block_counter = 0;
+                        } else if **expr_id != current_expr_id {
+                            current_expr_id = **expr_id;
+                            block_counter += 1;
+                        }
+                        file_content.push_str(&format!(
+                            "BRDA:{line},{block_counter},{branch_nb},{count}\n"
+                        ));
                     }
                 }
                 file_content.push_str("end_of_record\n");
@@ -218,32 +232,11 @@ impl EvalHook for CoverageHook {
     fn did_finish_eval<'a>(
         &mut self,
         _env: &mut clarity::vm::contexts::ExecutionState,
-        invoke_ctx: &'a clarity::vm::contexts::InvocationContext,
+        _invoke_ctx: &'a clarity::vm::contexts::InvocationContext,
         _context: &'a clarity::vm::LocalContext,
-        expr: &SymbolicExpression,
-        res: &Result<clarity::vm::ValueRef<'a>, VmExecutionError>,
+        _expr: &SymbolicExpression,
+        _res: &Result<clarity::vm::ValueRef<'a>, VmExecutionError>,
     ) {
-        // Record the error value's ID when asserts! fails (result is Err).
-        // This gives branch 1 (error) its hit count.
-        if res.is_err() {
-            if let Some(children) = expr.match_list() {
-                if let Some((func, args)) = try_parse_native_func(children) {
-                    if matches!(func, NativeFunctions::Asserts) {
-                        if let Some(error_value) = args.get(1) {
-                            let contract = &invoke_ctx.contract_context.contract_identifier;
-                            let mut contract_report =
-                                self.contracts_coverage.remove(contract).unwrap_or_default();
-                            // Record the error value's own ID for branch 1 tracking
-                            let count = contract_report.entry(error_value.id).or_insert(0);
-                            *count += 1;
-                            // Also recurse to count leaf expressions (like err keyword)
-                            report_eval(&mut contract_report, error_value);
-                            self.contracts_coverage.insert(contract.clone(), contract_report);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     fn did_complete(&mut self, _result: Result<&mut clarity::vm::ExecutionResult, String>) {
@@ -327,21 +320,19 @@ fn retrieve_executable_lines_and_branches(
                             // asserts!(condition, error-value)
                             // Branch 0 (success/continue): the condition expression
                             // Branch 1 (error): the error value expression
-                            let (Some(cond), Some(error_value)) =
-                                (args.first(), args.get(1))
+                            let (Some(cond), Some(error_value)) = (args.first(), args.get(1))
                             else {
                                 continue;
                             };
+                            let cond_expr = extract_expr_from_list(cond);
+                            let error_expr = extract_expr_from_list(error_value);
                             branches.insert(
                                 cur_expr.id,
                                 vec![
-                                    (cond.span.start_line, cond.id),
-                                    (error_value.span.start_line, error_value.id),
+                                    (cond_expr.span.start_line, cond_expr.id),
+                                    (error_expr.span.start_line, error_expr.id),
                                 ],
                             );
-                            // Add condition and error value to frontier so they are tracked
-                            // in executable_lines, enabling their hit counts to be looked up
-                            frontier.extend_from_slice(&[cond, error_value]);
                         }
                         NativeFunctions::And | NativeFunctions::Or => {
                             branches.insert(
@@ -419,15 +410,6 @@ fn report_eval(expr_coverage: &mut ExprCoverage, expr: &SymbolicExpression) {
                 NativeFunctions::Fold | NativeFunctions::Map | NativeFunctions::Filter => {
                     if let Some(iterator_func) = args.first() {
                         report_eval(expr_coverage, iterator_func);
-                    }
-                }
-                NativeFunctions::Asserts => {
-                    // Record the condition expression's ID so branch 0 (success) gets a hit.
-                    // The condition is always evaluated, regardless of outcome.
-                    if let Some(cond) = args.first() {
-                        let count = expr_coverage.entry(cond.id).or_insert(0);
-                        *count += 1;
-                        report_eval(expr_coverage, cond);
                     }
                 }
                 _ => {}
