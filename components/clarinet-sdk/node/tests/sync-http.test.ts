@@ -44,45 +44,12 @@ const RECORDED_HEADERS_PATH = path.join(TMP_DIR, "recorded-headers.json");
 let mockChild: ChildProcess;
 let mockBaseUrl: string;
 
+const MOCK_SERVER_PATH = path.join(__dirname, "fixtures/mock-http-server.cjs");
+
 function spawnMockServer(): Promise<{ url: string; child: ChildProcess }> {
-  const child = spawn(
-    process.execPath,
-    [
-      "-e",
-      `
-      const http = require('node:http');
-      const fs = require('node:fs');
-      const RECORD = ${JSON.stringify(RECORDED_HEADERS_PATH)};
-      const big = 'x'.repeat(200 * 1024);
-      const server = http.createServer((req, res) => {
-        const path = req.url || '/';
-        if (path.startsWith('/record')) {
-          try { fs.writeFileSync(RECORD, JSON.stringify(req.headers)); } catch (_) {}
-          res.writeHead(200, 'OK', { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: true }));
-          return;
-        }
-        if (path.startsWith('/big')) {
-          res.writeHead(200, 'OK', { 'content-type': 'text/plain' });
-          res.end(big);
-          return;
-        }
-        if (path.startsWith('/marker')) {
-          res.writeHead(200, 'OK', { 'content-type': 'application/json', 'x-marker': 'hello' });
-          res.end(JSON.stringify({ ok: true, n: 42 }));
-          return;
-        }
-        res.writeHead(200, 'OK', { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      });
-      server.listen(0, '127.0.0.1', () => {
-        const addr = server.address();
-        process.stdout.write('READY:http://127.0.0.1:' + addr.port + '\\n');
-      });
-      `,
-    ],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
+  const child = spawn(process.execPath, [MOCK_SERVER_PATH, RECORDED_HEADERS_PATH], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 
   return new Promise((resolve) => {
     let buf = "";
