@@ -918,20 +918,20 @@ pub async fn publish_stacking_orders(
                 let secret_key_bytes = hex_bytes(&account_secret_key).unwrap();
 
                 if pox_version >= 5 {
-                    publish_pox5_stacking_transactions(
-                        &stacks_rpc,
-                        &pox_contract_id_moved,
-                        &secret_key_bytes,
-                        &signer_key,
+                    publish_pox5_stacking_transactions(Pox5StackingTxns {
+                        stacks_rpc: &stacks_rpc,
+                        pox_contract_id: &pox_contract_id_moved,
+                        secret_key_bytes: &secret_key_bytes,
+                        signer_key: &signer_key,
                         nonce,
-                        default_fee,
+                        fee: default_fee,
                         stacking_order_index,
                         extend_stacking,
                         stx_amount,
                         duration,
                         bitcoin_block_height,
-                        &account.stx_address,
-                    )
+                        stx_address: &account.stx_address,
+                    })
                 } else {
                     let (method, arguments) = get_stacking_tx_method_and_args(
                         pox_version,
@@ -1241,6 +1241,20 @@ async fn handle_bitcoin_mining(
     }
 }
 
+struct Pox5StackingTxns<'a> {
+    stacks_rpc: &'a StacksRpc,
+    pox_contract_id: &'a str,
+    secret_key_bytes: &'a [u8],
+    signer_key: &'a StacksPrivateKey,
+    nonce: u64,
+    fee: u64,
+    stacking_order_index: usize,
+    extend_stacking: bool,
+    stx_amount: u64,
+    duration: u32,
+    bitcoin_block_height: u32,
+    stx_address: &'a str,
+}
 /// Publishes the pox-5 stacking transactions for a single stacking order.
 ///
 /// For the initial stake (not extending), this submits three sequential transactions:
@@ -1251,20 +1265,21 @@ async fn handle_bitcoin_mining(
 /// For extensions (`stake-update`), only one transaction is submitted.
 ///
 /// All transactions use sequential nonces so the stacks node processes them in order.
-#[allow(clippy::too_many_arguments)]
 fn publish_pox5_stacking_transactions(
-    stacks_rpc: &StacksRpc,
-    pox_contract_id: &str,
-    secret_key_bytes: &[u8],
-    signer_key: &StacksPrivateKey,
-    mut nonce: u64,
-    fee: u64,
-    stacking_order_index: usize,
-    extend_stacking: bool,
-    stx_amount: u64,
-    duration: u32,
-    bitcoin_block_height: u32,
-    stx_address: &str,
+    Pox5StackingTxns {
+        stacks_rpc,
+        pox_contract_id,
+        secret_key_bytes,
+        signer_key,
+        mut nonce,
+        fee,
+        stacking_order_index,
+        extend_stacking,
+        stx_amount,
+        duration,
+        bitcoin_block_height,
+        stx_address,
+    }: Pox5StackingTxns,
 ) -> Result<(), String> {
     let signer_pub_key = StacksPublicKey::from_private(signer_key);
     let contract_name = pox5_signer_manager_name(stacking_order_index);
