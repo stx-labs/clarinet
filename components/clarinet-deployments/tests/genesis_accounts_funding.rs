@@ -39,7 +39,7 @@ fn build_test_deployement_plan(
 }
 
 #[test]
-fn fund_geneis_account_with_stx() {
+fn fund_genesis_account_with_stx() {
     let mut session = Session::new(SessionSettings::default());
     let genesis = GenesisSpecification {
         contracts: vec![],

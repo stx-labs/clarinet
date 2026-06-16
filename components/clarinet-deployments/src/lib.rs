@@ -547,7 +547,11 @@ pub async fn generate_default_deployment_with_cache(
 
         // Add sbtc contract ASTs so they're available without API fetch.
         // pox-5 (deployed at epoch 4.0) depends on sbtc-token.
+        // These are treated as boot contracts (added to boot_contracts_ids)
+        // because they are deployed during session boot, so the deployment
+        // plan should not attempt to emit them as emulated publishes.
         for (id, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
+            boot_contracts_ids.insert(id.clone());
             requirements_data.insert(id.clone(), (contract.clarity_version, ast.clone()));
         }
     }
