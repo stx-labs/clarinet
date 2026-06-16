@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -9,6 +10,14 @@ use super::retry::{self, Response};
 // Matches FETCH_TIMEOUT_MS on the Node-WASM side so the two paths can't
 // silently diverge on hang behaviour.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+// Reused across calls so the connection pool and TLS sessions can be kept warm.
+static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+    Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .expect("failed to build HTTP client")
+});
 
 fn collect_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
     headers
@@ -22,13 +31,8 @@ fn collect_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, Stri
 }
 
 pub fn http_request<T: DeserializeOwned>(url: &str) -> Result<T, String> {
-    let client = Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|e| e.to_string())?;
-
     let transport = || -> Result<Response, String> {
-        let mut request = client
+        let mut request = CLIENT
             .get(url)
             .header("x-hiro-product", "clarinet-cli")
             .header("Accept", "application/json");
