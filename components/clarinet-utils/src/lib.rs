@@ -285,9 +285,6 @@ pub fn decrypt_mnemonic_phrase(
 mod tests {
     use super::*;
 
-    const TEST_PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
-    const TEST_PASSWORD: &str = "foo";
-
     #[test]
     fn test_mnemonic_from_phrase_12() {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -393,6 +390,8 @@ mod tests {
 
     #[test]
     fn test_encrypt_mnemonic() {
+        const TEST_PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
+        const TEST_PASSWORD: &str = "foo";
         for strength in [
             MnemonicEncryptionStrength::Basic,
             MnemonicEncryptionStrength::Medium,
@@ -423,18 +422,9 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypt_mnemonic_high() {
-        let strength = MnemonicEncryptionStrength::High;
-        let encrypted = encrypt_mnemonic_phrase(TEST_PHRASE, TEST_PASSWORD, strength)
-            .expect("encrypt_mnemonic_phrase should succeed");
-        let decrypted = decrypt_mnemonic_phrase(&encrypted, TEST_PASSWORD, strength)
-            .expect("decrypt_mnemonic_phrase should succeed");
-        assert_eq!(TEST_PHRASE, decrypted.to_string());
-    }
-
-    #[test]
     fn test_encrypt_mnemonic_invalid_phrase() {
         let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
+        const TEST_PASSWORD: &str = "foo";
         assert!(matches!(
             encrypt_mnemonic_phrase(bad_phrase, TEST_PASSWORD, MnemonicEncryptionStrength::Basic),
             Err(MnemonicEncryptionError::Mnemonic(_))
