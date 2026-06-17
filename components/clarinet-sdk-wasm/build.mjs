@@ -46,6 +46,33 @@ async function build_wasm_sdk() {
   ]);
 
   await updatePackageName();
+  await includeNodeSnippets();
+}
+
+// wasm-pack omits `snippets/` from the generated package.json `files` list, so
+// it would be stripped on publish. Patch it back in.
+async function includeNodeSnippets() {
+  const pkgJsonPath = path.join(rootDir, "pkg-node/package.json");
+  const pkgRaw = await fs.readFile(pkgJsonPath, "utf-8");
+  const pkg = JSON.parse(pkgRaw);
+  pkg.files = pkg.files ?? [];
+  if (!pkg.files.includes("snippets")) {
+    pkg.files.push("snippets");
+  }
+  await fs.writeFile(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+  console.log("✅ pkg-node/package.json files list patched to include snippets");
+
+  // Sanity check: sync_http.cjs is self-contained (worker + layout inlined)
+  // precisely so that nothing else needs to be copied here — wasm-bindgen
+  // emits it as the lone snippet because Rust imports from it.
+  const snippetsDir = path.join(rootDir, "pkg-node/snippets");
+  const entries = await fs.readdir(snippetsDir, { recursive: true });
+  if (!entries.some((e) => e.endsWith("sync_http.cjs"))) {
+    throw new Error(
+      "sync_http.cjs not found under pkg-node/snippets/; wasm-bindgen module path may be wrong",
+    );
+  }
+  console.log("✅ pkg-node/snippets/.../sync_http.cjs in place");
 }
 
 /**

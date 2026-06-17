@@ -1,3 +1,9 @@
+// TODO: the browser (`web`) path has its own fetch-based implementation and
+// does not share this retry policy yet — the native/Node parity guarantee
+// doesn't extend to it.
+#[cfg(not(all(target_arch = "wasm32", feature = "web")))]
+mod retry;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
