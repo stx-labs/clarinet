@@ -26,6 +26,7 @@ type Options = {
   trackCosts: boolean;
   trackCoverage: boolean;
   trackPerformance?: boolean;
+  logPrintEvents?: "all" | "project-only" | "none";
 };
 
 export async function getSDK(options?: Options): Promise<Simnet> {
@@ -34,6 +35,7 @@ export async function getSDK(options?: Options): Promise<Simnet> {
     !!options?.trackCosts,
     !!options?.trackCoverage,
     !!options?.trackPerformance,
+    options?.logPrintEvents,
   );
 
   const simnet = new Proxy(
@@ -69,6 +71,7 @@ function memoizedInit() {
       trackPerformance?: boolean;
       performanceCostField?: string;
       apiUrl?: string;
+      logPrintEvents?: "all" | "project-only" | "none";
     },
   ) => {
     if (noCache || !simnet) {
