@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { initSimnet, generateDeployement } from "..";
 import { Cl } from "@stacks/transactions";
 
-const nbOfBootContracts = 34;
+const nbOfBootContracts = 32;
 
 const deploymentPlanPath = path.join(
   process.cwd(),
