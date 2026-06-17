@@ -809,13 +809,10 @@ pub async fn generate_default_deployment_with_cache(
         }
     }
 
-    // When epoch 4.0 is configured for devnet, auto-deploy sbtc-registry and
-    // sbtc-token so that the pox-5 boot contract can resolve its references.
-    let has_epoch_4_0 = network_manifest
-        .devnet
-        .as_ref()
-        .is_some_and(|d| d.epoch_4_0.is_some());
-    if matches!(network, StacksNetwork::Devnet) && has_epoch_4_0 {
+    // Auto-deploy sbtc-registry and sbtc-token on devnet as boot contracts.
+    // They are no longer gated behind epoch 4.0 / pox-5: sBTC contracts are
+    // mandatory boot dependencies for every devnet.
+    if matches!(network, StacksNetwork::Devnet) {
         let sbtc_mainnet_principal =
             PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
         let mut remap_principals = BTreeMap::new();

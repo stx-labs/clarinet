@@ -46,8 +46,8 @@ const BOOT_CODE_SIGNERS_VOTING: &str = std::include_str!("signers-voting.clar");
 const SBTC_REGISTRY_SOURCE: &str = std::include_str!("sbtc-registry.clar");
 const SBTC_TOKEN_SOURCE: &str = std::include_str!("sbtc-token.clar");
 
-// sBTC contracts are not boot contracts
-// but we want to handle a similar behavior for contract addresses mapping
+// sbtc-registry and sbtc-token are deployed as boot contracts. sbtc-deposit is
+// not a boot contract, but we include it here for contract-address mapping.
 pub const SBTC_CONTRACTS_NAMES: &[&str] = &["sbtc-registry", "sbtc-token", "sbtc-deposit"];
 
 pub const SBTC_TESTNET_ADDRESS: &str = "ST1F7QA2MDF17S807EPA36TSS8AMEFY4KA9TVGWXT";
