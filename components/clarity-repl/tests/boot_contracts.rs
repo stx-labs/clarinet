@@ -76,8 +76,5 @@ fn pox_5_testnet_keeps_mainnet_sbtc_address() {
     let (_, (contract, _)) = entry;
     let code = contract.expect_in_memory_code_source();
 
-    assert!(
-        code.contains("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4"),
-        "testnet pox-5 should reference mainnet sBTC address"
-    );
+    assert!(code.contains("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4"));
 }

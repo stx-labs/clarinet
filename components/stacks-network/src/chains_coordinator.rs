@@ -866,8 +866,7 @@ pub async fn publish_stacking_orders(
             continue;
         }
 
-        // On pox transition, treat as initial stacking (not extend) since the
-        // new contract has no prior state. Otherwise use the normal logic.
+        // if the is not the first cycle of this stacker, then stacking order will be extended
         let extend_stacking =
             !pox_transitioned && current_cycle != pox_stacking_order.start_at_cycle - 1;
         if extend_stacking && !pox_stacking_order.auto_extend.unwrap_or_default() {
@@ -895,10 +894,7 @@ pub async fn publish_stacking_orders(
             devnet_config.stacks_signers_keys[i % devnet_config.stacks_signers_keys.len()].clone();
 
         let stacking_order_index = i;
-        // pox-5 initial staking requires deploying a contract and waiting for
-        // it to be mined before submitting follow-up transactions. We must not
-        // block the coordinator loop (which drives block production), so pox-5
-        // stacking threads run detached.
+        // pox-5 initial staking requires a bit of a wait for the mined txn
         let needs_deploy_wait = pox_version >= 5 && !extend_stacking;
         let devnet_event_tx_moved = devnet_event_tx.clone();
         let stacking_result =
@@ -1263,8 +1259,6 @@ struct Pox5StackingTxns<'a> {
 /// 3. Call `pox-5.stake`
 ///
 /// For extensions (`stake-update`), only one transaction is submitted.
-///
-/// All transactions use sequential nonces so the stacks node processes them in order.
 fn publish_pox5_stacking_transactions(
     Pox5StackingTxns {
         stacks_rpc,

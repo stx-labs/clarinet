@@ -531,29 +531,28 @@ pub async fn generate_default_deployment_with_cache(
     let mut boot_contracts_ids = BTreeSet::new();
 
     if !simnet_remote_data {
-        let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
+        let mut boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
             BOOT_CONTRACTS_DATA.clone()
         } else {
             clarity_repl::repl::boot::get_boot_contracts_data_with_overrides(
                 &settings.override_boot_contracts_source,
             )
         };
+
+        // sbtc-registry and sbtc-token are deployed during session boot
+        // (pox-5 depends on sbtc-token). They live at a non-boot address
+        // (SM3VDX...) so they're in a separate static, but they receive the
+        // same treatment as regular boot contracts here.
+        for (id, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
+            boot_contracts_data.insert(id.clone(), (contract.clone(), ast.clone()));
+        }
+
         let mut boot_contracts_asts = BTreeMap::new();
         for (id, (contract, ast)) in boot_contracts_data {
             boot_contracts_ids.insert(id.clone());
             boot_contracts_asts.insert(id, (contract.clarity_version, ast));
         }
         requirements_data.append(&mut boot_contracts_asts);
-
-        // Add sbtc contract ASTs so they're available without API fetch.
-        // pox-5 (deployed at epoch 4.0) depends on sbtc-token.
-        // These are treated as boot contracts (added to boot_contracts_ids)
-        // because they are deployed during session boot, so the deployment
-        // plan should not attempt to emit them as emulated publishes.
-        for (id, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
-            boot_contracts_ids.insert(id.clone());
-            requirements_data.insert(id.clone(), (contract.clarity_version, ast.clone()));
-        }
     }
 
     // this ephemeral interpreter is used to parse code and build ASTs
@@ -810,8 +809,6 @@ pub async fn generate_default_deployment_with_cache(
     }
 
     // Auto-deploy sbtc-registry and sbtc-token on devnet as boot contracts.
-    // They are no longer gated behind epoch 4.0 / pox-5: sBTC contracts are
-    // mandatory boot dependencies for every devnet.
     if matches!(network, StacksNetwork::Devnet) {
         let sbtc_mainnet_principal =
             PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
