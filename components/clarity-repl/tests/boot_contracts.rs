@@ -66,7 +66,7 @@ fn pox_5_in_boot_contracts_data() {
 }
 
 #[test]
-fn pox_5_testnet_has_substituted_sbtc_address() {
+fn pox_5_testnet_keeps_mainnet_sbtc_address() {
     let pox_5_testnet = format!("{BOOT_TESTNET_ADDRESS}.pox-5");
     let entry = BOOT_CONTRACTS_DATA
         .iter()
@@ -76,9 +76,8 @@ fn pox_5_testnet_has_substituted_sbtc_address() {
     let (_, (contract, _)) = entry;
     let code = contract.expect_in_memory_code_source();
 
-    // Testnet pox-5 should NOT contain the mainnet sBTC address
     assert!(
-        !code.contains("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4"),
-        "testnet pox-5 should have mainnet sBTC address substituted"
+        code.contains("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4"),
+        "testnet pox-5 should reference mainnet sBTC address"
     );
 }
