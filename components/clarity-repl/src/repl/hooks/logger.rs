@@ -41,10 +41,6 @@ impl EvalHook for LoggerHook {
         expr: &SymbolicExpression,
         res: &Result<ValueRef<'a>, VmExecutionError>,
     ) {
-        if self.mode == LogPrintEvents::None {
-            return;
-        }
-
         let SymbolicExpressionType::List(list) = &expr.expr else {
             return;
         };

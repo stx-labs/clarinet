@@ -30,7 +30,7 @@ use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
 use crate::repl::hooks::tracer::TracerHook;
-use crate::repl::settings::Account;
+use crate::repl::settings::{Account, LogPrintEvents};
 use crate::utils::serialize_event;
 
 /// Wraps an `ExecutionResult` with structured lint diagnostics.
@@ -202,9 +202,10 @@ impl Session {
     }
 
     pub fn enable_logger_hook(&mut self) {
-        self.logger_hook = Some(LoggerHook::new(
-            self.settings.repl_settings.log_print_events,
-        ));
+        let mode = self.settings.repl_settings.log_print_events;
+        if mode != LogPrintEvents::None {
+            self.logger_hook = Some(LoggerHook::new(mode));
+        }
     }
 
     pub fn enable_performance(&mut self, cost_field: CostField) {
