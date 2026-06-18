@@ -1193,6 +1193,7 @@ mod tests {
             analysis: AnalysisSettings::default(),
             remote_data: RemoteDataSettings::default(),
             show_timings: false,
+            ..Default::default()
         };
         let mut interpreter = get_interpreter(Some(wasm_settings));
         interpreter.set_current_epoch(StacksEpochId::Epoch30);

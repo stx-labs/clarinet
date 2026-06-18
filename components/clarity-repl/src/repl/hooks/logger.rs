@@ -6,17 +6,11 @@ use clarity::vm::{
 };
 
 use crate::repl::boot::{
-    BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
+    BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL, SBTC_MAINNET_ADDRESS_PRINCIPAL,
+    SBTC_TESTNET_ADDRESS_PRINCIPAL,
 };
 use crate::repl::clarity_values::value_to_string;
-
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub enum LogPrintEvents {
-    All,
-    #[default]
-    ProjectOnly,
-    None,
-}
+use crate::repl::settings::LogPrintEvents;
 
 #[derive(Clone)]
 pub struct LoggerHook {
@@ -65,11 +59,11 @@ impl EvalHook for LoggerHook {
             let contract_id = &invoke_ctx.contract_context.contract_identifier;
 
             if self.mode == LogPrintEvents::ProjectOnly {
-                let issuer = contract_id.issuer.to_string();
-                if issuer == BOOT_TESTNET_ADDRESS
-                    || issuer == BOOT_MAINNET_ADDRESS
-                    || issuer == SBTC_TESTNET_ADDRESS
-                    || issuer == SBTC_MAINNET_ADDRESS
+                let issuer = &contract_id.issuer;
+                if issuer == &*BOOT_TESTNET_PRINCIPAL
+                    || issuer == &*BOOT_MAINNET_PRINCIPAL
+                    || issuer == &*SBTC_TESTNET_ADDRESS_PRINCIPAL
+                    || issuer == &*SBTC_MAINNET_ADDRESS_PRINCIPAL
                 {
                     return;
                 }

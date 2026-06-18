@@ -20,7 +20,6 @@ use clarity::vm::analysis::contract_interface_builder::{
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
-use clarity_repl::repl::hooks::logger::LogPrintEvents;
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::session::CostsReport;
 use clarity_repl::repl::settings::RemoteDataSettings;
@@ -272,31 +271,16 @@ pub struct SDKOptions {
     pub track_coverage: bool,
     #[wasm_bindgen(js_name = trackPerformance)]
     pub track_performance: bool,
-    log_print_events: LogPrintEvents,
-}
-
-fn parse_log_print_events(value: Option<String>) -> LogPrintEvents {
-    match value.as_deref() {
-        Some("all") => LogPrintEvents::All,
-        Some("none") => LogPrintEvents::None,
-        _ => LogPrintEvents::ProjectOnly,
-    }
 }
 
 #[wasm_bindgen]
 impl SDKOptions {
     #[wasm_bindgen(constructor)]
-    pub fn new(
-        track_costs: bool,
-        track_coverage: bool,
-        track_performance: Option<bool>,
-        log_print_events: Option<String>,
-    ) -> Self {
+    pub fn new(track_costs: bool, track_coverage: bool, track_performance: Option<bool>) -> Self {
         Self {
             track_costs,
             track_coverage,
             track_performance: track_performance.unwrap_or(false),
-            log_print_events: parse_log_print_events(log_print_events),
         }
     }
 }
@@ -328,9 +312,6 @@ impl SDK {
         let track_coverage = options.as_ref().is_some_and(|o| o.track_coverage);
         let track_costs = options.as_ref().is_some_and(|o| o.track_costs);
         let track_performance = options.as_ref().is_some_and(|o| o.track_performance);
-        let log_print_events = options
-            .as_ref()
-            .map_or(LogPrintEvents::default(), |o| o.log_print_events);
 
         Self {
             deployer: String::new(),
@@ -344,7 +325,6 @@ impl SDK {
                 track_coverage,
                 track_costs,
                 track_performance,
-                log_print_events,
             },
             current_test_name: String::new(),
             costs_reports: vec![],
@@ -442,7 +422,7 @@ impl SDK {
         if self.options.track_coverage {
             session.enable_coverage_hook();
         }
-        session.enable_logger_hook(self.options.log_print_events);
+        session.enable_logger_hook();
         let executed_contracts =
             update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
 

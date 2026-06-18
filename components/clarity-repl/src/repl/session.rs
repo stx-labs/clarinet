@@ -18,7 +18,7 @@ use comfy_table::Table;
 use serde::Serialize;
 
 use super::diagnostic::output_diagnostic;
-use super::hooks::logger::{LogPrintEvents, LoggerHook};
+use super::hooks::logger::LoggerHook;
 use super::hooks::perf::{CostField, PerfHook};
 use super::interpreter::ContractCallError;
 use super::{
@@ -201,8 +201,10 @@ impl Session {
         self.coverage_hook = Some(CoverageHook::new());
     }
 
-    pub fn enable_logger_hook(&mut self, mode: LogPrintEvents) {
-        self.logger_hook = Some(LoggerHook::new(mode));
+    pub fn enable_logger_hook(&mut self) {
+        self.logger_hook = Some(LoggerHook::new(
+            self.settings.repl_settings.log_print_events,
+        ));
     }
 
     pub fn enable_performance(&mut self, cost_field: CostField) {
