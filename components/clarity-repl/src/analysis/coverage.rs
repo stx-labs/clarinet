@@ -318,8 +318,8 @@ fn retrieve_executable_lines_and_branches(
                         }
                         NativeFunctions::Asserts => {
                             // asserts!(condition, error-value)
-                            // Branch 0 (success/continue): the condition expression
-                            // Branch 1 (error): the error value expression
+                            // Branch 0 (condition evaluated): the condition expression (always evaluated)
+                            // Branch 1 (error path): the error value expression (evaluated when condition is false)
                             let (Some(cond), Some(error_value)) = (args.first(), args.get(1))
                             else {
                                 continue;
