@@ -2685,7 +2685,7 @@ fn test_deeply_nested_asserts_no_capacity_overflow() {
         let (cost, _) = result
             .costs
             .get(fn_name)
-            .expect(&format!("{} should exist", fn_name));
+            .unwrap_or_else(|| panic!("{fn_name} should exist"));
         assert!(cost.max.runtime >= cost.min.runtime);
     }
 }
