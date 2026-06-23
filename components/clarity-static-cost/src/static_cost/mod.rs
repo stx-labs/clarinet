@@ -173,34 +173,39 @@ pub(crate) fn calculate_total_cost_with_branching(node: &CostAnalysisNode) -> Su
                         calculate_total_cost_with_branching(&node.children[0]);
                     let condition_static: StaticCost = condition_branching.into();
 
-                    // Add the root cost + condition's worst-case cost to each branch.
+                    // Build separate min/max bases: root cost + condition cost.
                     // Each branch is mutually exclusive, so we add root+condition to each.
-                    let mut root_and_condition = node.cost.min.clone();
-                    saturating_add_cost(&mut root_and_condition, &condition_static.max);
+                    let mut root_and_condition_min = node.cost.min.clone();
+                    saturating_add_cost(&mut root_and_condition_min, &condition_static.min);
+                    let mut root_and_condition_max = node.cost.max.clone();
+                    saturating_add_cost(&mut root_and_condition_max, &condition_static.max);
 
                     for child_cost_node in node.children.iter().skip(1) {
                         // Use _branching to avoid cartesian product explosion.
                         let branch_cost = calculate_total_cost_with_branching(child_cost_node);
                         let branch_static: StaticCost = branch_cost.into();
                         // Add min path for this branch
-                        let mut min_path = root_and_condition.clone();
+                        let mut min_path = root_and_condition_min.clone();
                         saturating_add_cost(&mut min_path, &branch_static.min);
                         summing_cost.add_cost(min_path);
                         // Add max path for this branch
-                        let mut max_path = root_and_condition.clone();
+                        let mut max_path = root_and_condition_max.clone();
                         saturating_add_cost(&mut max_path, &branch_static.max);
                         summing_cost.add_cost(max_path);
                     }
                 }
             }
             _ => {
-                let mut total_cost = node.cost.min.clone();
+                let mut total_cost_min = node.cost.min.clone();
+                let mut total_cost_max = node.cost.max.clone();
                 for child_cost_node in &node.children {
                     let child_branching = calculate_total_cost_with_branching(child_cost_node);
                     let child_static: StaticCost = child_branching.into();
-                    saturating_add_cost(&mut total_cost, &child_static.max);
+                    saturating_add_cost(&mut total_cost_min, &child_static.min);
+                    saturating_add_cost(&mut total_cost_max, &child_static.max);
                 }
-                summing_cost.add_cost(total_cost);
+                summing_cost.add_cost(total_cost_min);
+                summing_cost.add_cost(total_cost_max);
             }
         }
     } else {
