@@ -529,6 +529,7 @@ pub async fn generate_default_deployment_with_cache(
         matches!(network, StacksNetwork::Simnet) && manifest.repl_settings.remote_data.enabled;
 
     let mut boot_contracts_ids = BTreeSet::new();
+    let mut sbtc_sources: HashMap<String, String> = HashMap::new();
 
     if !simnet_remote_data {
         let mut boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
@@ -539,10 +540,10 @@ pub async fn generate_default_deployment_with_cache(
             )
         };
 
-        // sbtc-registry and sbtc-token are deployed during session boot
-        // (pox-5 depends on sbtc-token). They live at a non-boot address
-        // (SM3VDX...) so they're in a separate static, but they receive the
-        // same treatment as regular boot contracts here.
+        // sbtc-registry and sbtc-token live at a non-boot address (SM3VDX...)
+        // but pox-5 depends on sbtc-token, so they must be available in the
+        // interpreter for AST resolution. On simnet they're emulated as boot
+        // contracts; on devnet they need real RequirementPublish transactions.
         for (id, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
             let mut contract = contract.clone();
 
@@ -569,12 +570,22 @@ pub async fn generate_default_deployment_with_cache(
                 }
             }
 
+            if let ClarityCodeSource::ContractInMemory(ref source) = contract.code_source {
+                sbtc_sources.insert(id.name.to_string(), source.clone());
+            }
+
             boot_contracts_data.insert(id.clone(), (contract, ast.clone()));
         }
 
         let mut boot_contracts_asts = BTreeMap::new();
         for (id, (contract, ast)) in boot_contracts_data {
-            boot_contracts_ids.insert(id.clone());
+            // On devnet, sbtc contracts must be deployed as real transactions
+            // (RequirementPublish) so the stacks-node can find them during the
+            // epoch 4.0 transition. Only treat them as boot contracts on simnet.
+            let is_sbtc = SBTC_BOOT_CONTRACTS.iter().any(|(sbtc_id, _)| sbtc_id == &id);
+            if !is_sbtc || matches!(network, StacksNetwork::Simnet) {
+                boot_contracts_ids.insert(id.clone());
+            }
             boot_contracts_asts.insert(id, (contract.clarity_version, ast));
         }
         requirements_data.append(&mut boot_contracts_asts);
@@ -830,6 +841,50 @@ pub async fn generate_default_deployment_with_cache(
                     );
                 }
             }
+        }
+    }
+
+    // Deploy sbtc-registry and sbtc-token as RequirementPublish on devnet so
+    // the stacks-node has them on-chain before the epoch 4.0 transition.
+    if matches!(network, StacksNetwork::Devnet) {
+        let sbtc_mainnet_principal =
+            PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
+        let mut remap_principals = BTreeMap::new();
+        remap_principals.insert(
+            sbtc_mainnet_principal.clone(),
+            default_deployer_address.clone(),
+        );
+
+        for name in ["sbtc-registry", "sbtc-token"] {
+            let contract_id = QualifiedContractIdentifier::new(
+                sbtc_mainnet_principal.clone(),
+                ContractName::try_from(name).unwrap(),
+            );
+
+            let source = sbtc_sources
+                .remove(name)
+                .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
+
+            // Write source to requirements cache so the deployment plan can
+            // reload it from disk after serialization round-trip.
+            let requirements_dir = manifest.project.cache_location.join("requirements");
+            std::fs::create_dir_all(&requirements_dir)
+                .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
+            let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
+            std::fs::write(&location, &source)
+                .map_err(|e| format!("unable to write {name} to requirements cache: {e}"))?;
+
+            let tx =
+                TransactionSpecification::RequirementPublish(RequirementPublishSpecification {
+                    contract_id,
+                    remap_sender: default_deployer_address.clone(),
+                    remap_principals: remap_principals.clone(),
+                    source: source.clone(),
+                    clarity_version: ClarityVersion::Clarity3,
+                    cost: deployment_fee_rate * source.len() as u64,
+                    location,
+                });
+            add_transaction_to_epoch(&mut transactions, tx, &EpochSpec::Epoch3_0);
         }
     }
 
