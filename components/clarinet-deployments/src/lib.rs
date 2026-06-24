@@ -582,7 +582,9 @@ pub async fn generate_default_deployment_with_cache(
             // On devnet, sbtc contracts must be deployed as real transactions
             // (RequirementPublish) so the stacks-node can find them during the
             // epoch 4.0 transition. Only treat them as boot contracts on simnet.
-            let is_sbtc = SBTC_BOOT_CONTRACTS.iter().any(|(sbtc_id, _)| sbtc_id == &id);
+            let is_sbtc = SBTC_BOOT_CONTRACTS
+                .iter()
+                .any(|(sbtc_id, _)| sbtc_id == &id);
             if !is_sbtc || matches!(network, StacksNetwork::Simnet) {
                 boot_contracts_ids.insert(id.clone());
             }
@@ -860,6 +862,16 @@ pub async fn generate_default_deployment_with_cache(
                 sbtc_mainnet_principal.clone(),
                 ContractName::try_from(name).unwrap(),
             );
+
+            // Skip if already scheduled as an explicit requirement.
+            if transactions.values().any(|txs| {
+                txs.iter().any(|tx| matches!(
+                    tx,
+                    TransactionSpecification::RequirementPublish(r) if r.contract_id == contract_id
+                ))
+            }) {
+                continue;
+            }
 
             let source = sbtc_sources
                 .remove(name)

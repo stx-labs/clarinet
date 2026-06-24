@@ -879,7 +879,7 @@ impl DevnetOrchestrator {
         );
 
         // pox-5 needs sbtc-token and sbtc-registry contracts to be resolvable.
-        // sBTC contracts are now always deployed as boot dependencies, so always
+        // sBTC contracts are always deployed as boot dependencies, so always
         // tell the stacks-node where they'll be deployed.
         if let Some(deployer) = network_config
             .accounts

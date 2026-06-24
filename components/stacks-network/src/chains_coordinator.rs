@@ -959,25 +959,33 @@ pub async fn publish_stacking_orders(
 
         if needs_deploy_wait {
             // Don't block the coordinator — let the thread report its own result.
-            if let Ok(handle) = stacking_result {
-                let _ = hiro_system_kit::thread_named("Stacking orders monitor").spawn(move || {
-                    match handle.join() {
-                        Ok(Ok(_)) => {
-                            let _ = devnet_event_tx_moved.send(DevnetEvent::success(format!(
-                                "Stacking order for {stx_amount} STX submitted"
-                            )));
-                        }
-                        Ok(Err(e)) => {
-                            let _ = devnet_event_tx_moved
-                                .send(DevnetEvent::error(format!("Unable to stack: {e}")));
-                        }
-                        Err(_) => {
-                            let _ = devnet_event_tx_moved.send(DevnetEvent::error(
-                                "Stacking order thread panicked".to_string(),
-                            ));
-                        }
-                    }
-                });
+            match stacking_result {
+                Ok(handle) => {
+                    let _ =
+                        hiro_system_kit::thread_named("Stacking orders monitor").spawn(move || {
+                            match handle.join() {
+                                Ok(Ok(_)) => {
+                                    let _ = devnet_event_tx_moved.send(DevnetEvent::success(
+                                        format!("Stacking order for {stx_amount} STX submitted"),
+                                    ));
+                                }
+                                Ok(Err(e)) => {
+                                    let _ = devnet_event_tx_moved
+                                        .send(DevnetEvent::error(format!("Unable to stack: {e}")));
+                                }
+                                Err(_) => {
+                                    let _ = devnet_event_tx_moved.send(DevnetEvent::error(
+                                        "Stacking order thread panicked".to_string(),
+                                    ));
+                                }
+                            }
+                        });
+                }
+                Err(e) => {
+                    let _ = devnet_event_tx.send(DevnetEvent::error(format!(
+                        "Unable to spawn stacking thread: {e}"
+                    )));
+                }
             }
         } else {
             match stacking_result {
