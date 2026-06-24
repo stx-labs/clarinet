@@ -2644,8 +2644,8 @@ fn test_deeply_nested_asserts_no_capacity_overflow() {
     "#};
 
     let contract_id = QualifiedContractIdentifier::transient();
-    let epoch = StacksEpochId::Epoch2_05;
-    let clarity_version = ClarityVersion::Clarity5;
+    let epoch = StacksEpochId::Epoch32;
+    let clarity_version = ClarityVersion::Clarity3;
     let ast = clarity::vm::ast::build_ast(&contract_id, src, &mut (), clarity_version, epoch)
         .expect("Failed to build AST");
 
