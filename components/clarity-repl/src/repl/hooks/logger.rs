@@ -5,14 +5,21 @@ use clarity::vm::{
     EvalHook, ExecutionResult, SymbolicExpression, SymbolicExpressionType, ValueRef,
 };
 
+use crate::repl::boot::{
+    BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL, SBTC_MAINNET_ADDRESS_PRINCIPAL,
+    SBTC_TESTNET_ADDRESS_PRINCIPAL,
+};
 use crate::repl::clarity_values::value_to_string;
+use crate::repl::settings::LogPrintEvents;
 
-#[derive(Default, Clone)]
-pub struct LoggerHook;
+#[derive(PartialEq, Debug, Clone)]
+pub struct LoggerHook {
+    pub mode: LogPrintEvents,
+}
 
 impl LoggerHook {
-    pub fn new() -> Self {
-        Self
+    pub fn new(mode: LogPrintEvents) -> Self {
+        Self { mode }
     }
 }
 
@@ -45,7 +52,20 @@ impl EvalHook for LoggerHook {
         };
 
         if let Some(NativeFunctions::Print) = NativeFunctions::lookup_by_name(function_name) {
-            let contract_name = &invoke_ctx.contract_context.contract_identifier.name;
+            let contract_id = &invoke_ctx.contract_context.contract_identifier;
+
+            if self.mode == LogPrintEvents::ProjectOnly {
+                let issuer = &contract_id.issuer;
+                if issuer == &*BOOT_TESTNET_PRINCIPAL
+                    || issuer == &*BOOT_MAINNET_PRINCIPAL
+                    || issuer == &*SBTC_TESTNET_ADDRESS_PRINCIPAL
+                    || issuer == &*SBTC_MAINNET_ADDRESS_PRINCIPAL
+                {
+                    return;
+                }
+            }
+
+            let contract_name = &contract_id.name;
             let span = &expr.span;
             let line_annotation = format!("({}:{})", contract_name, span.start_line);
 

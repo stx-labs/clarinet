@@ -94,10 +94,21 @@ impl fmt::Display for ApiUrl {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LogPrintEvents {
+    All,
+    #[default]
+    ProjectOnly,
+    None,
+}
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct Settings {
     pub analysis: analysis::Settings,
     pub remote_data: RemoteDataSettings,
+    #[serde(default)]
+    pub log_print_events: LogPrintEvents,
     #[serde(skip_serializing, skip_deserializing)]
     pub show_timings: bool,
 }
@@ -107,6 +118,7 @@ pub struct Settings {
 pub struct SettingsFile {
     analysis: Option<analysis::SettingsFile>,
     remote_data: Option<RemoteDataSettingsFile>,
+    log_print_events: Option<LogPrintEvents>,
 }
 
 impl From<SettingsFile> for Settings {
@@ -124,6 +136,7 @@ impl From<SettingsFile> for Settings {
         Self {
             analysis,
             remote_data,
+            log_print_events: file.log_print_events.unwrap_or_default(),
             show_timings: false,
         }
     }

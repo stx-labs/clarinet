@@ -30,7 +30,7 @@ use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
 use crate::repl::hooks::tracer::TracerHook;
-use crate::repl::settings::Account;
+use crate::repl::settings::{Account, LogPrintEvents};
 use crate::utils::serialize_event;
 
 /// Wraps an `ExecutionResult` with structured lint diagnostics.
@@ -202,7 +202,10 @@ impl Session {
     }
 
     pub fn enable_logger_hook(&mut self) {
-        self.logger_hook = Some(LoggerHook::new());
+        let mode = self.settings.repl_settings.log_print_events;
+        if mode != LogPrintEvents::None {
+            self.logger_hook = Some(LoggerHook::new(mode));
+        }
     }
 
     pub fn enable_performance(&mut self, cost_field: CostField) {
@@ -2377,5 +2380,19 @@ mod tests {
             .interpreter
             .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared());
         assert_eq!(balance, 11100);
+    }
+
+    #[test]
+    fn enable_logger_hook_all_sets_hook() {
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.log_print_events = LogPrintEvents::All;
+        let mut session = Session::new_without_boot_contracts(settings);
+
+        session.enable_logger_hook();
+        if let Some(hook) = &session.logger_hook {
+            assert_eq!(hook.mode, LogPrintEvents::All);
+        } else {
+            panic!("logger_hook is None");
+        }
     }
 }
