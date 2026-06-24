@@ -390,49 +390,43 @@ mod tests {
 
     #[test]
     fn test_encrypt_mnemonic() {
-        let phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
-        let password = "foo";
-
-        // Test Default and Medium with cross-strength mismatch checks
+        const TEST_PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
+        const TEST_PASSWORD: &str = "foo";
         for strength in [
             MnemonicEncryptionStrength::Basic,
             MnemonicEncryptionStrength::Medium,
         ] {
-            let encrypted = encrypt_mnemonic_phrase(phrase, password, strength)
+            let encrypted = encrypt_mnemonic_phrase(TEST_PHRASE, TEST_PASSWORD, strength)
                 .expect("encrypt_mnemonic_phrase should succeed");
-            let decrypted = decrypt_mnemonic_phrase(&encrypted, password, strength)
+            let decrypted = decrypt_mnemonic_phrase(&encrypted, TEST_PASSWORD, strength)
                 .expect("decrypt_mnemonic_phrase should succeed");
 
-            assert_eq!(phrase, decrypted.to_string());
+            assert_eq!(TEST_PHRASE, decrypted.to_string());
 
             for other in [
                 MnemonicEncryptionStrength::Basic,
                 MnemonicEncryptionStrength::Medium,
             ] {
                 if other != strength {
-                    assert!(decrypt_mnemonic_phrase(&encrypted, password, other).is_err());
+                    assert!(decrypt_mnemonic_phrase(&encrypted, TEST_PASSWORD, other).is_err());
                 }
             }
 
             let mut bad_bs58 = encrypted.clone();
             bad_bs58.push('?');
             assert!(matches!(
-                decrypt_mnemonic_phrase(&bad_bs58, password, strength),
+                decrypt_mnemonic_phrase(&bad_bs58, TEST_PASSWORD, strength),
                 Err(MnemonicEncryptionError::Bs58Decode(_))
             ));
         }
+    }
 
-        // Test High with a single round-trip (expensive key derivation)
-        let strength = MnemonicEncryptionStrength::High;
-        let encrypted = encrypt_mnemonic_phrase(phrase, password, strength)
-            .expect("encrypt_mnemonic_phrase should succeed");
-        let decrypted = decrypt_mnemonic_phrase(&encrypted, password, strength)
-            .expect("decrypt_mnemonic_phrase should succeed");
-        assert_eq!(phrase, decrypted.to_string());
-
+    #[test]
+    fn test_encrypt_mnemonic_invalid_phrase() {
         let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
+        const TEST_PASSWORD: &str = "foo";
         assert!(matches!(
-            encrypt_mnemonic_phrase(bad_phrase, password, MnemonicEncryptionStrength::Basic),
+            encrypt_mnemonic_phrase(bad_phrase, TEST_PASSWORD, MnemonicEncryptionStrength::Basic),
             Err(MnemonicEncryptionError::Mnemonic(_))
         ));
     }

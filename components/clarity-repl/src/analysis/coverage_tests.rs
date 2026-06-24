@@ -209,7 +209,7 @@ fn simple_if_branching() {
     let cov = get_coverage_report(contract.as_str(), vec![snippet.into()]);
 
     let expect = get_expected_report(
-        [&expect_base[..], &["BRDA:2,8,0,1", "BRDA:2,8,1,0"]]
+        [&expect_base[..], &["BRDA:2,0,0,1", "BRDA:2,0,1,0"]]
             .concat()
             .join("\n"),
     );
@@ -220,7 +220,7 @@ fn simple_if_branching() {
     let cov = get_coverage_report(contract.as_str(), vec![snippet.into()]);
 
     let expect = get_expected_report(
-        [&expect_base[..], &["BRDA:2,8,0,0", "BRDA:2,8,1,1"]]
+        [&expect_base[..], &["BRDA:2,0,0,0", "BRDA:2,0,1,1"]]
             .concat()
             .join("\n"),
     );
@@ -248,8 +248,8 @@ fn simple_if_branches_with_exprs() {
             "DA:2,1",
             "BRF:2",
             "BRH:1",
-            "BRDA:2,8,0,1",
-            "BRDA:2,8,1,0",
+            "BRDA:2,0,0,1",
+            "BRDA:2,0,1,0",
         ]
         .join("\n"),
     );
@@ -285,8 +285,8 @@ fn hit_all_if_branches() {
             "DA:2,5",
             "BRF:2",
             "BRH:2",
-            "BRDA:2,8,0,3",
-            "BRDA:2,8,1,2",
+            "BRDA:2,0,0,3",
+            "BRDA:2,0,1,2",
         ]
         .join("\n"),
     );
@@ -302,7 +302,7 @@ fn simple_asserts_branching() {
     ]
     .join("\n");
 
-    // no hit on (err u1)
+    // asserts! succeeds: condition hit, error value not hit
     let snippets: Vec<String> = vec!["(contract-call? .contract-0 is-one 1)".into()];
     let cov = get_coverage_report(&contract, snippets);
 
@@ -314,15 +314,16 @@ fn simple_asserts_branching() {
             "FNH:1",
             "DA:1,1",
             "DA:2,1",
-            "BRF:1",
-            "BRH:0",
-            "BRDA:2,10,0,0",
+            "BRF:2",
+            "BRH:1",
+            "BRDA:2,0,0,1", // condition hit (success path)
+            "BRDA:2,0,1,0", // error value not hit
         ]
         .join("\n"),
     );
     assert_eq!(cov, expect);
 
-    // hit on (err u1)
+    // asserts! fails: both condition and error value hit
     let snippets: Vec<String> = vec!["(contract-call? .contract-0 is-one 2)".into()];
     let cov = get_coverage_report(&contract, snippets);
 
@@ -334,9 +335,142 @@ fn simple_asserts_branching() {
             "FNH:1",
             "DA:1,1",
             "DA:2,1",
-            "BRF:1",
+            "BRF:2",
+            "BRH:2",
+            "BRDA:2,0,0,1", // condition hit
+            "BRDA:2,0,1,1", // error value hit
+        ]
+        .join("\n"),
+    );
+    assert_eq!(cov, expect);
+}
+
+#[test]
+fn asserts_both_paths_hit() {
+    let contract = [
+        "(define-read-only (is-one (v int))",
+        "  (ok (asserts! (is-eq v 1) (err u1)))",
+        ")",
+    ]
+    .join("\n");
+
+    // hit success 2 times and error 1 time
+    let snippets: Vec<String> = vec![
+        "(contract-call? .contract-0 is-one 1)".into(),
+        "(contract-call? .contract-0 is-one 1)".into(),
+        "(contract-call? .contract-0 is-one 2)".into(),
+    ];
+    let cov = get_coverage_report(&contract, snippets);
+
+    let expect = get_expected_report(
+        [
+            "FN:1,is-one",
+            "FNDA:3,is-one",
+            "FNF:1",
+            "FNH:1",
+            "DA:1,1",
+            "DA:2,3",
+            "BRF:2",
+            "BRH:2",
+            "BRDA:2,0,0,3", // condition hit 3 times (always evaluated)
+            "BRDA:2,0,1,1", // error value hit 1 time
+        ]
+        .join("\n"),
+    );
+    assert_eq!(cov, expect);
+}
+
+#[test]
+fn asserts_multiline() {
+    let contract = [
+        "(define-read-only (is-one (v int))",
+        "  (ok (asserts!",
+        "    (is-eq v 1)",
+        "    (err u1)",
+        "  ))",
+        ")",
+    ]
+    .join("\n");
+
+    // success path
+    let snippets: Vec<String> = vec!["(contract-call? .contract-0 is-one 1)".into()];
+    let cov = get_coverage_report(&contract, snippets);
+
+    let expect = get_expected_report(
+        [
+            "FN:1,is-one",
+            "FNDA:1,is-one",
+            "FNF:1",
+            "FNH:1",
+            "DA:1,1",
+            "DA:2,1",
+            "DA:3,1",
+            "DA:4,0", // error value not evaluated
+            "BRF:2",
             "BRH:1",
-            "BRDA:2,10,0,1",
+            "BRDA:3,0,0,1", // condition hit
+            "BRDA:4,0,1,0", // error value not hit
+        ]
+        .join("\n"),
+    );
+    assert_eq!(cov, expect);
+
+    // failure path
+    let snippets: Vec<String> = vec!["(contract-call? .contract-0 is-one 2)".into()];
+    let cov = get_coverage_report(&contract, snippets);
+
+    let expect = get_expected_report(
+        [
+            "FN:1,is-one",
+            "FNDA:1,is-one",
+            "FNF:1",
+            "FNH:1",
+            "DA:1,1",
+            "DA:2,1",
+            "DA:3,1",
+            "DA:4,1", // error value evaluated
+            "BRF:2",
+            "BRH:2",
+            "BRDA:3,0,0,1", // condition hit
+            "BRDA:4,0,1,1", // error value hit
+        ]
+        .join("\n"),
+    );
+    assert_eq!(cov, expect);
+}
+
+// Reproduces the exact scenario from issue #2437:
+// asserts! in a begin block inside define-public
+#[test]
+fn asserts_in_begin_block() {
+    let contract = [
+        "(define-public (check (n uint))",
+        "  (begin",
+        "    (asserts! (> n u1) (err u501))",
+        "    (ok true)",
+        "  )",
+        ")",
+    ]
+    .join("\n");
+
+    // only success path hit — this was the failing case in the issue
+    let snippets: Vec<String> = vec!["(contract-call? .contract-0 check u10)".into()];
+    let cov = get_coverage_report(&contract, snippets);
+
+    let expect = get_expected_report(
+        [
+            "FN:1,check",
+            "FNDA:1,check",
+            "FNF:1",
+            "FNH:1",
+            "DA:1,1",
+            "DA:2,1",
+            "DA:3,1",
+            "DA:4,1",
+            "BRF:2",
+            "BRH:1",
+            "BRDA:3,0,0,1", // condition hit (success)
+            "BRDA:3,0,1,0", // error value not hit
         ]
         .join("\n"),
     );
@@ -370,12 +504,12 @@ fn branch_if_plus_and() {
             "DA:4,1", // right if path
             "BRF:6",
             "BRH:4",
-            "BRDA:2,10,0,1",
-            "BRDA:2,10,1,1",
-            "BRDA:2,10,2,1",
-            "BRDA:2,10,3,0", // (> v 3) not hit
-            "BRDA:3,8,0,0",  // left if path not hit
-            "BRDA:4,8,1,1",
+            "BRDA:2,0,0,1",
+            "BRDA:2,0,1,1",
+            "BRDA:2,0,2,1",
+            "BRDA:2,0,3,0", // (> v 3) not hit
+            "BRDA:3,0,0,0", // left if path not hit
+            "BRDA:4,0,1,1",
         ]
         .join("\n"),
     );
@@ -409,12 +543,12 @@ fn branch_if_plus_or() {
             "DA:4,0", // right if path
             "BRF:6",
             "BRH:3",
-            "BRDA:2,10,0,1",
-            "BRDA:2,10,1,1", // stop
-            "BRDA:2,10,2,0",
-            "BRDA:2,10,3,0",
-            "BRDA:3,8,0,1",
-            "BRDA:4,8,1,0",
+            "BRDA:2,0,0,1",
+            "BRDA:2,0,1,1", // stop
+            "BRDA:2,0,2,0",
+            "BRDA:2,0,3,0",
+            "BRDA:3,0,0,1",
+            "BRDA:4,0,1,0",
         ]
         .join("\n"),
     );
@@ -446,7 +580,7 @@ fn match_opt_oneline() {
     let cov = get_coverage_report(&contract, snippets);
 
     let expect = get_expected_report(
-        [&expect_base[..], &["BRDA:2,10,0,1", "BRDA:2,10,1,0"]]
+        [&expect_base[..], &["BRDA:2,0,0,1", "BRDA:2,0,1,0"]]
             .concat()
             .join("\n"),
     );
@@ -457,7 +591,7 @@ fn match_opt_oneline() {
     let cov = get_coverage_report(&contract, snippets);
 
     let expect = get_expected_report(
-        [&expect_base[..], &["BRDA:2,10,0,0", "BRDA:2,10,1,1"]]
+        [&expect_base[..], &["BRDA:2,0,0,0", "BRDA:2,0,1,1"]]
             .concat()
             .join("\n"),
     );
@@ -498,8 +632,8 @@ fn match_opt_multiline() {
                 "DA:5,0",
                 "BRF:2",
                 "BRH:1",
-                "BRDA:4,10,0,1",
-                "BRDA:5,10,1,0",
+                "BRDA:4,0,0,1",
+                "BRDA:5,0,1,0",
             ],
         ]
         .concat()
@@ -519,8 +653,8 @@ fn match_opt_multiline() {
                 "DA:5,1",
                 "BRF:2",
                 "BRH:1",
-                "BRDA:4,10,0,0",
-                "BRDA:5,10,1,1",
+                "BRDA:4,0,0,0",
+                "BRDA:5,0,1,1",
             ],
         ]
         .concat()
@@ -558,8 +692,8 @@ fn match_res_oneline() {
             "DA:2,3",
             "BRF:2",
             "BRH:2",
-            "BRDA:2,11,0,2",
-            "BRDA:2,11,1,1",
+            "BRDA:2,0,0,2",
+            "BRDA:2,0,1,1",
         ]
         .join("\n"),
     );

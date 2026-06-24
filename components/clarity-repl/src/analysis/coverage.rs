@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use clarity::vm::ast::ContractAST;
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::functions::define::DefineFunctionsParsed;
-use clarity::vm::functions::NativeFunctions::{self, Filter, Fold, Map};
+use clarity::vm::functions::NativeFunctions;
 use clarity::vm::{EvalHook, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,7 @@ pub struct CoverageHook {
 // DA: line data: line number, hit count
 // BRF: number branches found
 // BRH: number branches hit
-// BRDA: branch data: line number, expr_id, branch_nb, hit count
+// BRDA: branch data: line number, block number, branch_nb, hit count
 
 impl CoverageHook {
     pub fn new() -> Self {
@@ -182,12 +182,26 @@ impl CoverageHook {
                     file_content.push_str(&format!("BRF:{}\n", branches.len()));
                     file_content.push_str(&format!("BRH:{}\n", branches_hits.len()));
 
-                    for ((line, block_id, branch_nb), count) in branch_execution_counts.iter() {
+                    // Renumber block IDs to be sequential per line (LCOV 2.x requirement)
+                    let mut current_line = 0u32;
+                    let mut current_expr_id = 0u64;
+                    let mut block_counter = 0usize;
+                    for ((line, expr_id, branch_nb), count) in branch_execution_counts.iter() {
                         // the ast can contain elements with a span starting at line 0 that we want to ignore
-                        if line > &&0 {
-                            file_content
-                                .push_str(&format!("BRDA:{line},{block_id},{branch_nb},{count}\n"));
+                        if line <= &&0 {
+                            continue;
                         }
+                        if **line != current_line {
+                            current_line = **line;
+                            current_expr_id = **expr_id;
+                            block_counter = 0;
+                        } else if **expr_id != current_expr_id {
+                            current_expr_id = **expr_id;
+                            block_counter += 1;
+                        }
+                        file_content.push_str(&format!(
+                            "BRDA:{line},{block_counter},{branch_nb},{count}\n"
+                        ));
                     }
                 }
                 file_content.push_str("end_of_record\n");
@@ -290,7 +304,7 @@ fn retrieve_executable_lines_and_branches(
                     // handle codes branches
                     // (if, asserts!, and, or, match)
                     match func {
-                        NativeFunctions::If | NativeFunctions::Asserts => {
+                        NativeFunctions::If => {
                             let (_cond, args) = args.split_first().unwrap();
                             branches.insert(
                                 cur_expr.id,
@@ -300,6 +314,24 @@ fn retrieve_executable_lines_and_branches(
                                         (expr.span.start_line, expr.id)
                                     })
                                     .collect(),
+                            );
+                        }
+                        NativeFunctions::Asserts => {
+                            // asserts!(condition, error-value)
+                            // Branch 0 (condition evaluated): the condition expression (always evaluated)
+                            // Branch 1 (error path): the error value expression (evaluated when condition is false)
+                            let (Some(cond), Some(error_value)) = (args.first(), args.get(1))
+                            else {
+                                continue;
+                            };
+                            let cond_expr = extract_expr_from_list(cond);
+                            let error_expr = extract_expr_from_list(error_value);
+                            branches.insert(
+                                cur_expr.id,
+                                vec![
+                                    (cond_expr.span.start_line, cond_expr.id),
+                                    (error_expr.span.start_line, error_expr.id),
+                                ],
                             );
                         }
                         NativeFunctions::And | NativeFunctions::Or => {
@@ -368,11 +400,21 @@ fn try_parse_native_func(
 fn report_eval(expr_coverage: &mut ExprCoverage, expr: &SymbolicExpression) {
     if let Some(children) = expr.match_list() {
         if let Some((func, args)) = try_parse_native_func(children) {
-            if matches!(func, Fold | Map | Filter) {
-                if let Some(iterator_func) = args.first() {
-                    report_eval(expr_coverage, iterator_func);
-                }
+            // All native function calls recurse on the function name expression
+            // to ensure it gets recorded in coverage
+            if let Some(func_expr) = children.first() {
+                report_eval(expr_coverage, func_expr);
             }
+
+            match func {
+                NativeFunctions::Fold | NativeFunctions::Map | NativeFunctions::Filter => {
+                    if let Some(iterator_func) = args.first() {
+                        report_eval(expr_coverage, iterator_func);
+                    }
+                }
+                _ => {}
+            }
+            return;
         }
         if let Some(func_expr) = children.first() {
             report_eval(expr_coverage, func_expr);
