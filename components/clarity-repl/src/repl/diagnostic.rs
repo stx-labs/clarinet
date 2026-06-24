@@ -57,10 +57,26 @@ pub fn output_diagnostic(
     output.append(&mut output_code(diagnostic, lines));
 
     if let Some(ref suggestion) = diagnostic.suggestion {
-        output.push(suggestion.to_string());
+        output.push(colorize_suggestion(suggestion));
     }
 
     output
+}
+
+/// Apply terminal colors to a suggestion string.
+/// Lines starting with "Note:" are highlighted in yellow.
+fn colorize_suggestion(suggestion: &str) -> String {
+    suggestion
+        .lines()
+        .map(|line| {
+            if let Some(rest) = line.strip_prefix("Note:") {
+                yellow!("Note:{rest}").to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn output_code(diagnostic: &Diagnostic, lines: &[String]) -> Vec<String> {

@@ -2,13 +2,6 @@
 # Warn about slow tests (helps identify regressions)
 slow-timeout = { period = "10s", terminate-after = 4 }
 
-# The argon2-based encryption test is CPU-intensive and can starve parallel tests.
-# Run it in a dedicated group with limited concurrency.
-[[profile.default.overrides]]
-filter = "test(test_encrypt_mnemonic)"
-test-group = "cpu-heavy"
-threads-required = 4
-
 # Tests hitting external Hiro APIs share a rate limit. Running them in parallel
 # causes 429s with 55-60s retry delays that exceed test timeouts.
 # Serialize them to avoid concurrent rate-limit pressure, and give a generous

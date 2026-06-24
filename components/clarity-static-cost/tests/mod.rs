@@ -2587,3 +2587,105 @@ fn test_static_cost_handles_mutual_trait_impl_cycle() {
         chain_cost.max.runtime
     );
 }
+
+/// Regression test for "capacity overflow" panic in static cost analysis.
+/// Checks that deeply nested clarity doesn't cause Vec capacity overflow.
+/// code adapted from pyth-lazer-decoder contract
+#[test]
+fn test_deeply_nested_asserts_no_capacity_overflow() {
+    let src = indoc! {r#"
+        (define-constant ERR_SHORT (err u2101))
+        (define-constant ERR_MAGIC (err u2102))
+        (define-constant EVM_MAGIC u706910618)
+        (define-constant SIG_OFFSET u4)
+        (define-constant LEN_OFFSET u69)
+        (define-constant PAYLOAD_OFFSET u71)
+        (define-constant FORMAT_MAGIC u2479346549)
+        (define-constant FEEDS_OFFSET u14)
+        (define-constant MAX_FEEDS u16)
+
+        (define-private (read-uint-be? (bytes (buff 8192)) (pos uint) (size uint))
+            (match (slice? bytes pos (+ pos size))
+                b (some (buff-to-uint-be (unwrap-panic (as-max-len? b u16))))
+                none))
+
+        (define-read-only (recover-signer (update (buff 8192)))
+            (let ((update-len (len update)))
+                (asserts! (>= update-len PAYLOAD_OFFSET) ERR_SHORT)
+                (asserts! (is-eq (unwrap! (read-uint-be? update u0 u4) ERR_SHORT) EVM_MAGIC) ERR_MAGIC)
+                (let ((signature-bytes (unwrap! (slice? update SIG_OFFSET LEN_OFFSET) ERR_SHORT))
+                        (signature (unwrap! (as-max-len? signature-bytes u65) ERR_SHORT))
+                        (payload-len (unwrap! (read-uint-be? update LEN_OFFSET u2) ERR_SHORT))
+                        (payload-end (+ PAYLOAD_OFFSET payload-len))
+                        (payload (unwrap! (slice? update PAYLOAD_OFFSET payload-end) ERR_SHORT)))
+                    (asserts! (is-eq update-len payload-end) ERR_SHORT)
+                    (ok {
+                        signer: (some 0x0102030405060708091011121314151617181920212223242526272829303132ff),
+                        payload: payload
+                    }))))
+
+        (define-read-only (decode-payload (payload (buff 8192)))
+            (begin
+                (asserts! (>= (len payload) FEEDS_OFFSET) ERR_SHORT)
+                (asserts! (is-eq (unwrap! (read-uint-be? payload u0 u4) ERR_SHORT) FORMAT_MAGIC) ERR_MAGIC)
+                (let ((timestamp (unwrap! (read-uint-be? payload u4 u8) ERR_SHORT))
+                        (channel (unwrap! (read-uint-be? payload u12 u1) ERR_SHORT))
+                        (feeds-len (unwrap! (read-uint-be? payload u13 u1) ERR_SHORT)))
+                    (asserts! (<= feeds-len MAX_FEEDS) ERR_SHORT)
+                    (ok {
+                        timestamp: timestamp,
+                        channel: channel,
+                        price-feeds: (list)
+                    }))))
+
+        (define-public (decode-and-verify-price-feeds (update (buff 8192)))
+            (let ((verified (try! (recover-signer update))))
+                (decode-payload (get payload verified))))
+    "#};
+
+    let contract_id = QualifiedContractIdentifier::transient();
+    let epoch = StacksEpochId::Epoch32;
+    let clarity_version = ClarityVersion::Clarity3;
+    let ast = clarity::vm::ast::build_ast(&contract_id, src, &mut (), clarity_version, epoch)
+        .expect("Failed to build AST");
+
+    let mut memory_store = MemoryBackingStore::new();
+    let db = memory_store.as_clarity_db();
+    let mut owned_env = OwnedEnvironment::new(db, epoch);
+
+    // This must NOT panic with "capacity overflow"
+    let result = with_cost_analysis_environment(
+        &mut owned_env,
+        &contract_id,
+        clarity_version,
+        |env, invoke_ctx| {
+            static_cost_from_ast(&ast, &clarity_version, epoch, None, env, invoke_ctx)
+        },
+    )
+    .expect("static_cost must not panic with capacity overflow");
+
+    // Verify the costs don't blow up
+    let (decode_cost, _) = result
+        .costs
+        .get("decode-and-verify-price-feeds")
+        .expect("decode-and-verify-price-feeds should be in cost map");
+
+    assert!(
+        decode_cost.max.runtime < u64::MAX / 2,
+        "Cost should be bounded; got runtime={}",
+        decode_cost.max.runtime
+    );
+
+    // pick 3 random fns. If it doesn't blow up with "capacity overflow", the cost is fine
+    for fn_name in [
+        "recover-signer",
+        "decode-payload",
+        "decode-and-verify-price-feeds",
+    ] {
+        let (cost, _) = result
+            .costs
+            .get(fn_name)
+            .unwrap_or_else(|| panic!("{fn_name} should exist"));
+        assert!(cost.max.runtime >= cost.min.runtime);
+    }
+}
