@@ -78,13 +78,13 @@ impl<'a> FlattenVariadic<'a> {
 
         for operand in operands {
             if Self::is_nested_call(operand, func_name) {
-                let suggestion = if let Some(note) = note {
-                    let styled_note = yellow!("Note: {note}");
-                    format!(
-                        "Merge the inner `{func_name}` arguments into the outer call\n{styled_note}"
-                    )
-                } else {
-                    format!("Merge the inner `{func_name}` arguments into the outer call")
+                let suggestion = match note {
+                    Some(note) => format!(
+                        "Merge the inner `{func_name}` arguments into the outer call\nNote: {note}"
+                    ),
+                    None => {
+                        format!("Merge the inner `{func_name}` arguments into the outer call")
+                    }
                 };
                 self.diagnostics.push(Diagnostic {
                     level: self.level.clone(),
