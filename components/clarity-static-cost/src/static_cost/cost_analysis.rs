@@ -193,10 +193,6 @@ impl SummingExecutionCost {
         self.costs.push(cost);
     }
 
-    pub fn add_summing(&mut self, other: &SummingExecutionCost) {
-        self.costs.extend(other.costs.iter().cloned());
-    }
-
     /// minimum cost across all paths
     pub fn min(&self) -> ExecutionCost {
         self.costs
@@ -225,15 +221,6 @@ impl SummingExecutionCost {
                 read_count: acc.read_count.max(cost.read_count),
             })
             .unwrap_or(ExecutionCost::ZERO)
-    }
-
-    pub fn add_all(&self) -> ExecutionCost {
-        self.costs
-            .iter()
-            .fold(ExecutionCost::ZERO, |mut acc, cost| {
-                saturating_add_cost(&mut acc, cost);
-                acc
-            })
     }
 }
 
