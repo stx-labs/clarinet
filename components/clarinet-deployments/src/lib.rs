@@ -815,8 +815,22 @@ pub async fn generate_default_deployment_with_cache(
                 ASTDependencyDetector::order_contracts(&requirements_deps, &contract_epochs)
                     .map_err(|e| format!("unable to order requirements {e}"))?;
 
-            // Filter out boot contracts from requirement dependencies
-            ordered_contracts_ids.retain(|contract_id| !boot_contracts_ids.contains(contract_id));
+            // Filter out boot contracts from requirement dependencies.
+            // On devnet, also filter sbtc boot contracts — they are deployed
+            // separately as RequirementPublish below
+            ordered_contracts_ids.retain(|contract_id| {
+                if boot_contracts_ids.contains(contract_id) {
+                    return false;
+                }
+                if matches!(network, StacksNetwork::Devnet)
+                    && SBTC_BOOT_CONTRACTS
+                        .iter()
+                        .any(|(sbtc_id, _)| sbtc_id == *contract_id)
+                {
+                    return false;
+                }
+                true
+            });
 
             if matches!(network, StacksNetwork::Simnet) {
                 for contract_id in ordered_contracts_ids.iter() {
