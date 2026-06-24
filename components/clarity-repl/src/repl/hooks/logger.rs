@@ -12,9 +12,9 @@ use crate::repl::boot::{
 use crate::repl::clarity_values::value_to_string;
 use crate::repl::settings::LogPrintEvents;
 
-#[derive(Clone)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct LoggerHook {
-    mode: LogPrintEvents,
+    pub mode: LogPrintEvents,
 }
 
 impl LoggerHook {

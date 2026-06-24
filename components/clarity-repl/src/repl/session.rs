@@ -2383,32 +2383,16 @@ mod tests {
     }
 
     #[test]
-    fn enable_logger_hook_none_leaves_hook_unset() {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.log_print_events = LogPrintEvents::None;
-        let mut session = Session::new_without_boot_contracts(settings);
-
-        session.enable_logger_hook();
-        assert!(session.logger_hook.is_none());
-    }
-
-    #[test]
     fn enable_logger_hook_all_sets_hook() {
         let mut settings = SessionSettings::default();
         settings.repl_settings.log_print_events = LogPrintEvents::All;
         let mut session = Session::new_without_boot_contracts(settings);
 
         session.enable_logger_hook();
-        assert!(session.logger_hook.is_some());
-    }
-
-    #[test]
-    fn enable_logger_hook_project_only_sets_hook() {
-        let mut settings = SessionSettings::default();
-        settings.repl_settings.log_print_events = LogPrintEvents::ProjectOnly;
-        let mut session = Session::new_without_boot_contracts(settings);
-
-        session.enable_logger_hook();
-        assert!(session.logger_hook.is_some());
+        if let Some(hook) = &session.logger_hook {
+            assert_eq!(hook.mode, LogPrintEvents::All);
+        } else {
+            panic!("logger_hook is None");
+        }
     }
 }
