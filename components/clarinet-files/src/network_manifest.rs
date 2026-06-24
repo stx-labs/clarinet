@@ -20,8 +20,6 @@ pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:
 pub const DEFAULT_STACKS_SIGNER_IMAGE: &str =
     "ghcr.io/stacks-network/stacks-signer:3.4.0.0.0.0-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
-pub const DEFAULT_STACKS_API_IMAGE_EPOCH_4_0: &str =
-    "hirosystems/stacks-blockchain-api:9.0.0-pox5.8";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
 
@@ -979,15 +977,10 @@ impl NetworkManifest {
                     .stacks_signer_image_url
                     .take()
                     .unwrap_or(DEFAULT_STACKS_SIGNER_IMAGE.to_string()),
-                stacks_api_image_url: devnet_config.stacks_api_image_url.take().unwrap_or_else(
-                    || {
-                        if devnet_config.epoch_4_0.is_some() {
-                            DEFAULT_STACKS_API_IMAGE_EPOCH_4_0.to_string()
-                        } else {
-                            DEFAULT_STACKS_API_IMAGE.to_string()
-                        }
-                    },
-                ),
+                stacks_api_image_url: devnet_config
+                    .stacks_api_image_url
+                    .take()
+                    .unwrap_or(DEFAULT_STACKS_API_IMAGE.to_string()),
                 postgres_image_url: devnet_config
                     .postgres_image_url
                     .take()

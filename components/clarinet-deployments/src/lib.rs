@@ -544,7 +544,32 @@ pub async fn generate_default_deployment_with_cache(
         // (SM3VDX...) so they're in a separate static, but they receive the
         // same treatment as regular boot contracts here.
         for (id, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
-            boot_contracts_data.insert(id.clone(), (contract.clone(), ast.clone()));
+            let mut contract = contract.clone();
+
+            // Patch sbtc-registry current-aggregate-pubkey for devnet.
+            // The contract defaults to 0x00 (1 byte), but stacks-node expects
+            // a 33-byte compressed secp256k1 pubkey during pox-5 prepare phase.
+            if id.name.as_str() == "sbtc-registry" && matches!(network, StacksNetwork::Devnet) {
+                if let Some(ref devnet) = network_manifest.devnet {
+                    if let Some(first_signer_key) = devnet.stacks_signers_keys.first() {
+                        use stacks_common::types::chainstate::StacksPublicKey;
+                        let pub_key = StacksPublicKey::from_private(first_signer_key);
+                        let pub_key_hex = pub_key.to_hex();
+                        if let ClarityCodeSource::ContractInMemory(ref mut source) =
+                            contract.code_source
+                        {
+                            *source = source.replace(
+                                "(define-data-var current-aggregate-pubkey (buff 33) 0x00)",
+                                &format!(
+                                    "(define-data-var current-aggregate-pubkey (buff 33) 0x{pub_key_hex})"
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+
+            boot_contracts_data.insert(id.clone(), (contract, ast.clone()));
         }
 
         let mut boot_contracts_asts = BTreeMap::new();
@@ -825,13 +850,17 @@ pub async fn generate_default_deployment_with_cache(
                 ContractName::try_from(name).unwrap(),
             );
 
-            // Skip if already added as an explicit requirement
-            if transactions.values().any(|txs| {
-                txs.iter().any(|tx| match tx {
-                    TransactionSpecification::RequirementPublish(r) => r.contract_id == contract_id,
-                    _ => false,
+            // Skip if already deployed as a boot contract or explicit requirement
+            if boot_contracts_ids.contains(&contract_id)
+                || transactions.values().any(|txs| {
+                    txs.iter().any(|tx| match tx {
+                        TransactionSpecification::RequirementPublish(r) => {
+                            r.contract_id == contract_id
+                        }
+                        _ => false,
+                    })
                 })
-            }) {
+            {
                 continue;
             }
 
