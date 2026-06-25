@@ -1,3 +1,21 @@
+# [3.21.0](https://github.com/stx-labs/clarinet/compare/v3.20.0...v3.21.0) (2026-06-25)
+
+##### New Features
+
+*  Pox-5 devnet capabilities (#2428) (23473c07)
+*  Add logger hook filters (all, project-only, none) (#2442) (3a3e35ab)
+*  Replace curl shellout with worker-thread sync HTTP in Node WASM (#2408) (eebe5bba)
+
+##### Bug Fixes
+
+*  Include suggestion text in lsp diagnostics (#2440) (39d26190)
+*  Avoid capacity overflow bug in static cost (#2445) (c673a831)
+*  LCOV asserts and BRDA numbering (#2439) (c4f19dc3)
+
+##### Chores
+
+*  Update syntax with new clarity 6 functions (#2443) (98ac956b)
+
 # [3.20.0](https://github.com/stx-labs/clarinet/compare/v3.19.0...v3.20.0) (2026-06-11)
 
 ##### New Features
