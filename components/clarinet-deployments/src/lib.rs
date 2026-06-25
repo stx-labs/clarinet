@@ -21,8 +21,9 @@ use clarity::vm::{
 };
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
-    get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_DEPOSIT_MAINNET_ADDRESS,
-    SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_MAINNET_ADDRESS,
+    get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_BOOT_CONTRACTS,
+    SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
+    SBTC_TOKEN_MAINNET_ADDRESS,
 };
 use clarity_repl::repl::session::{AnnotatedExecutionResult, ExecutionResultMap};
 use clarity_repl::repl::{
@@ -528,18 +529,65 @@ pub async fn generate_default_deployment_with_cache(
         matches!(network, StacksNetwork::Simnet) && manifest.repl_settings.remote_data.enabled;
 
     let mut boot_contracts_ids = BTreeSet::new();
+    let mut sbtc_sources: HashMap<String, String> = HashMap::new();
 
     if !simnet_remote_data {
-        let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
+        let mut boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
             BOOT_CONTRACTS_DATA.clone()
         } else {
             clarity_repl::repl::boot::get_boot_contracts_data_with_overrides(
                 &settings.override_boot_contracts_source,
             )
         };
+
+        // sbtc-registry and sbtc-token live at a non-boot address (SM3VDX...)
+        // but pox-5 depends on sbtc-token, so they must be available in the
+        // interpreter for AST resolution. On simnet they're emulated as boot
+        // contracts; on devnet they need real RequirementPublish transactions.
+        for (id, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
+            let mut contract = contract.clone();
+
+            // Patch sbtc-registry current-aggregate-pubkey for devnet.
+            // The contract defaults to 0x00 (1 byte), but stacks-node expects
+            // a 33-byte compressed secp256k1 pubkey during pox-5 prepare phase.
+            if id.name.as_str() == "sbtc-registry" && matches!(network, StacksNetwork::Devnet) {
+                if let Some(ref devnet) = network_manifest.devnet {
+                    if let Some(first_signer_key) = devnet.stacks_signers_keys.first() {
+                        use stacks_common::types::chainstate::StacksPublicKey;
+                        let pub_key = StacksPublicKey::from_private(first_signer_key);
+                        let pub_key_hex = pub_key.to_hex();
+                        if let ClarityCodeSource::ContractInMemory(ref mut source) =
+                            contract.code_source
+                        {
+                            *source = source.replace(
+                                "(define-data-var current-aggregate-pubkey (buff 33) 0x00)",
+                                &format!(
+                                    "(define-data-var current-aggregate-pubkey (buff 33) 0x{pub_key_hex})"
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+
+            if let ClarityCodeSource::ContractInMemory(ref source) = contract.code_source {
+                sbtc_sources.insert(id.name.to_string(), source.clone());
+            }
+
+            boot_contracts_data.insert(id.clone(), (contract, ast.clone()));
+        }
+
         let mut boot_contracts_asts = BTreeMap::new();
         for (id, (contract, ast)) in boot_contracts_data {
-            boot_contracts_ids.insert(id.clone());
+            // On devnet, sbtc contracts must be deployed as real transactions
+            // (RequirementPublish) so the stacks-node can find them during the
+            // epoch 4.0 transition. Only treat them as boot contracts on simnet.
+            let is_sbtc = SBTC_BOOT_CONTRACTS
+                .iter()
+                .any(|(sbtc_id, _)| sbtc_id == &id);
+            if !is_sbtc || matches!(network, StacksNetwork::Simnet) {
+                boot_contracts_ids.insert(id.clone());
+            }
             boot_contracts_asts.insert(id, (contract.clarity_version, ast));
         }
         requirements_data.append(&mut boot_contracts_asts);
@@ -767,8 +815,22 @@ pub async fn generate_default_deployment_with_cache(
                 ASTDependencyDetector::order_contracts(&requirements_deps, &contract_epochs)
                     .map_err(|e| format!("unable to order requirements {e}"))?;
 
-            // Filter out boot contracts from requirement dependencies
-            ordered_contracts_ids.retain(|contract_id| !boot_contracts_ids.contains(contract_id));
+            // Filter out boot contracts from requirement dependencies.
+            // On devnet, also filter sbtc boot contracts — they are deployed
+            // separately as RequirementPublish below
+            ordered_contracts_ids.retain(|contract_id| {
+                if boot_contracts_ids.contains(contract_id) {
+                    return false;
+                }
+                if matches!(network, StacksNetwork::Devnet)
+                    && SBTC_BOOT_CONTRACTS
+                        .iter()
+                        .any(|(sbtc_id, _)| sbtc_id == *contract_id)
+                {
+                    return false;
+                }
+                true
+            });
 
             if matches!(network, StacksNetwork::Simnet) {
                 for contract_id in ordered_contracts_ids.iter() {
@@ -795,6 +857,60 @@ pub async fn generate_default_deployment_with_cache(
                     );
                 }
             }
+        }
+    }
+
+    // Deploy sbtc-registry and sbtc-token as RequirementPublish on devnet so
+    // the stacks-node has them on-chain before the epoch 4.0 transition.
+    if matches!(network, StacksNetwork::Devnet) {
+        let sbtc_mainnet_principal =
+            PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
+        let mut remap_principals = BTreeMap::new();
+        remap_principals.insert(
+            sbtc_mainnet_principal.clone(),
+            default_deployer_address.clone(),
+        );
+
+        for name in ["sbtc-registry", "sbtc-token"] {
+            let contract_id = QualifiedContractIdentifier::new(
+                sbtc_mainnet_principal.clone(),
+                ContractName::try_from(name).unwrap(),
+            );
+
+            // Skip if already scheduled as an explicit requirement.
+            if transactions.values().any(|txs| {
+                txs.iter().any(|tx| matches!(
+                    tx,
+                    TransactionSpecification::RequirementPublish(r) if r.contract_id == contract_id
+                ))
+            }) {
+                continue;
+            }
+
+            let source = sbtc_sources
+                .remove(name)
+                .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
+
+            // Write source to requirements cache so the deployment plan can
+            // reload it from disk after serialization round-trip.
+            let requirements_dir = manifest.project.cache_location.join("requirements");
+            std::fs::create_dir_all(&requirements_dir)
+                .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
+            let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
+            std::fs::write(&location, &source)
+                .map_err(|e| format!("unable to write {name} to requirements cache: {e}"))?;
+
+            let tx =
+                TransactionSpecification::RequirementPublish(RequirementPublishSpecification {
+                    contract_id,
+                    remap_sender: default_deployer_address.clone(),
+                    remap_principals: remap_principals.clone(),
+                    source: source.clone(),
+                    clarity_version: ClarityVersion::Clarity3,
+                    cost: deployment_fee_rate * source.len() as u64,
+                    location,
+                });
+            add_transaction_to_epoch(&mut transactions, tx, &EpochSpec::Epoch3_0);
         }
     }
 

@@ -515,7 +515,9 @@ impl<'a> Aggregator<'a> {
                             | NativeFunctions::VerifyMerkleProof
                             | NativeFunctions::GetBitcoinTxOutput
                             | NativeFunctions::Ed25519Verify
-                            | NativeFunctions::Secp256k1Decompress => {
+                            | NativeFunctions::Secp256k1Decompress
+                            | NativeFunctions::AllowanceWithStaking
+                            | NativeFunctions::AllowanceWithPox => {
                                 let inner_content =
                                     self.to_inner_content(list, previous_indentation);
 

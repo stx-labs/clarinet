@@ -46,8 +46,8 @@ const BOOT_CODE_SIGNERS_VOTING: &str = std::include_str!("signers-voting.clar");
 const SBTC_REGISTRY_SOURCE: &str = std::include_str!("sbtc-registry.clar");
 const SBTC_TOKEN_SOURCE: &str = std::include_str!("sbtc-token.clar");
 
-// sBTC contracts are not boot contracts
-// but we want to handle a similar behavior for contract addresses mapping
+// sbtc-registry and sbtc-token are deployed as boot contracts. sbtc-deposit is
+// not a boot contract, but we include it here for contract-address mapping.
 pub const SBTC_CONTRACTS_NAMES: &[&str] = &["sbtc-registry", "sbtc-token", "sbtc-deposit"];
 
 pub const SBTC_TESTNET_ADDRESS: &str = "ST1F7QA2MDF17S807EPA36TSS8AMEFY4KA9TVGWXT";
@@ -55,6 +55,9 @@ pub const SBTC_MAINNET_ADDRESS: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ
 
 pub static SBTC_TESTNET_ADDRESS_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(SBTC_TESTNET_ADDRESS).unwrap());
+
+pub static SBTC_MAINNET_ADDRESS_PRINCIPAL: LazyLock<StandardPrincipalData> =
+    LazyLock::new(|| PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap());
 
 pub static SBTC_DEPOSIT_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
     LazyLock::new(|| {
@@ -106,19 +109,16 @@ static BOOT_CODE_POX_3_TESTNET: LazyLock<String> =
     LazyLock::new(|| format!("{POX_TESTNET}\n{POX_3_BODY}"));
 static BOOT_CODE_COST_VOTING_TESTNET: LazyLock<String> = LazyLock::new(make_testnet_cost_voting);
 
-/// mainnet sBTC token contract principal baked into pox-5 source.
-const SBTC_TOKEN_MAINNET_CONTRACT: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token";
-
 /// mainnet bond-admin principal baked into pox-5 source.
 const POX_5_BOND_ADMIN_MAINNET: &str = "SP000000000000000000002Q6VF78";
 
-/// Build the testnet pox-5 body by rewriting the mainnet sBTC contract
-/// reference and bond-admin to the simnet/testnet equivalents.
+/// Build the testnet pox-5 body by rewriting the bond-admin to the
+/// simnet/testnet equivalent.
 fn make_pox_5_testnet() -> String {
-    let sbtc_testnet = format!("{SBTC_TESTNET_ADDRESS}.sbtc-token");
-    POX_5_BODY
-        .replace(SBTC_TOKEN_MAINNET_CONTRACT, &sbtc_testnet)
-        .replace(POX_5_BOND_ADMIN_MAINNET, BOOT_TESTNET_ADDRESS)
+    // Only rewrite the bond-admin principal. The sBTC contract reference
+    // keeps the mainnet address (SM3VDXK3...) because on simnet sbtc-token
+    // is only deployed at that address
+    POX_5_BODY.replace(POX_5_BOND_ADMIN_MAINNET, BOOT_TESTNET_ADDRESS)
 }
 
 static BOOT_CODE_POX_5_TESTNET: LazyLock<String> = LazyLock::new(make_pox_5_testnet);
@@ -267,11 +267,8 @@ pub fn get_boot_contracts_data_with_overrides(
     result
 }
 
-pub static SBTC_MAINNET_ADDRESS_PRINCIPAL: LazyLock<StandardPrincipalData> =
-    LazyLock::new(|| PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap());
-
-/// Pre-parsed sbtc-registry and sbtc-token contracts deployed at both the
-/// testnet and mainnet sBTC addresses.
+/// Pre-parsed sbtc-registry and sbtc-token contracts deployed at the
+/// mainnet sBTC address (SM3VDXK3...).
 /// - sbtc-registry deployed first (required by sbtc-token)
 /// - sbtc-token next before the regular boot contracts (required by pox-5)
 ///
@@ -295,20 +292,18 @@ pub static SBTC_BOOT_CONTRACTS: LazyLock<
         ("sbtc-token", SBTC_TOKEN_SOURCE),
     ];
 
-    for address in [SBTC_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS] {
-        for (name, source) in &contracts {
-            let contract = ClarityContract {
-                code_source: ClarityCodeSource::ContractInMemory(source.to_string()),
-                deployer: ContractDeployer::Address(address.to_string()),
-                name: name.to_string(),
-                epoch: Epoch::Specific(epoch),
-                clarity_version,
-                skip_analysis: true,
-            };
-            let (ast, _, _) = interpreter.build_ast(&contract);
-            let contract_id = contract.expect_resolved_contract_identifier(None);
-            result.push((contract_id, (contract, ast)));
-        }
+    for (name, source) in &contracts {
+        let contract = ClarityContract {
+            code_source: ClarityCodeSource::ContractInMemory(source.to_string()),
+            deployer: ContractDeployer::Address(SBTC_MAINNET_ADDRESS.to_string()),
+            name: name.to_string(),
+            epoch: Epoch::Specific(epoch),
+            clarity_version,
+            skip_analysis: true,
+        };
+        let (ast, _, _) = interpreter.build_ast(&contract);
+        let contract_id = contract.expect_resolved_contract_identifier(None);
+        result.push((contract_id, (contract, ast)));
     }
 
     result

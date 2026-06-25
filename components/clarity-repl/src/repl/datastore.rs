@@ -1104,6 +1104,7 @@ impl HeadersDB for Datastore {
     fn get_vrf_seed_for_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<VRFSeed> {
         let bbh = self.get_burn_header_hash_for_block(id_bhh)?;
@@ -1176,7 +1177,7 @@ impl HeadersDB for Datastore {
 
     fn get_stacks_height_for_tenure_height(
         &self,
-        _id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         tenure_height: u32,
     ) -> Option<u32> {
         if let Some(height) = self
@@ -1194,6 +1195,7 @@ impl HeadersDB for Datastore {
     fn get_miner_address(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<StacksAddress> {
         if self.get_burn_block_height_for_block(id_bhh).is_some() {
@@ -1205,6 +1207,7 @@ impl HeadersDB for Datastore {
     fn get_burnchain_tokens_spent_for_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<u128> {
         if id_bhh == &self.genesis_id {
@@ -1219,6 +1222,7 @@ impl HeadersDB for Datastore {
     fn get_burnchain_tokens_spent_for_winning_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<u128> {
         if id_bhh == &self.genesis_id {
@@ -1230,6 +1234,7 @@ impl HeadersDB for Datastore {
     fn get_tokens_earned_for_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<u128> {
         if id_bhh == &self.genesis_id {

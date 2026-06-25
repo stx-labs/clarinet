@@ -43,6 +43,7 @@ use stackslib::chainstate::stacks::address::PoxAddress;
 use stackslib::util_lib::signed_structured_data::pox4::{
     make_pox_4_signer_key_signature, Pox4SignatureTopic,
 };
+use stackslib::util_lib::signed_structured_data::pox5::make_pox_5_signer_grant_signature;
 
 use super::ChainsCoordinatorCommand;
 use crate::command::run_docker_command;
@@ -321,6 +322,7 @@ pub async fn start_chains_coordinator(
     let observer_event_oper = sel.recv(&observer_event_rx);
 
     let stacks_signers_keys = config.devnet_config.stacks_signers_keys.clone();
+    let mut last_pox_contract = String::new();
 
     loop {
         let oper = sel.select();
@@ -399,6 +401,7 @@ pub async fn start_chains_coordinator(
                                 &config.services_map_hosts,
                                 config.deployment_fee_rate,
                                 bitcoin_block_height as u32,
+                                &mut last_pox_contract,
                             )
                             .await;
                             if let Some(tx_count) = res {
@@ -802,6 +805,7 @@ pub async fn publish_stacking_orders(
     services_map_hosts: &ServicesMapHosts,
     fee_rate: u64,
     bitcoin_block_height: u32,
+    last_pox_contract: &mut String,
 ) -> Option<usize> {
     let node_rpc_url = format!("http://{}", &services_map_hosts.stacks_node_host);
     let pox_info: PoxInfo = match reqwest::get(format!("{node_rpc_url}/v2/pox")).await {
@@ -829,11 +833,24 @@ pub async fn publish_stacking_orders(
     let pox_cycle_length = pox_info.reward_cycle_length;
     let pox_cycle_position = effective_height % pox_cycle_length;
 
-    if pox_cycle_position != 10 {
+    let pox_contract_id = pox_info.contract_id;
+
+    // Detect pox contract transition (e.g. pox-4 → pox-5). When the active
+    // contract changes, stacking state resets and we must re-stack immediately
+    // rather than waiting for the normal cycle-position trigger.
+    let pox_transitioned = !last_pox_contract.is_empty() && *last_pox_contract != pox_contract_id;
+    if pox_transitioned {
+        let _ = devnet_event_tx.send(DevnetEvent::info(format!(
+            "PoX contract changed from {} to {}, re-submitting stacking orders",
+            last_pox_contract, pox_contract_id
+        )));
+    }
+    *last_pox_contract = pox_contract_id.clone();
+
+    if !pox_transitioned && pox_cycle_position != 10 {
         return None;
     }
 
-    let pox_contract_id = pox_info.contract_id;
     let pox_version = pox_contract_id
         .rsplit('-')
         .next()
@@ -842,12 +859,16 @@ pub async fn publish_stacking_orders(
 
     let mut transactions = 0;
     for (i, pox_stacking_order) in devnet_config.pox_stacking_orders.iter().enumerate() {
-        if !should_publish_stacking_orders(&current_cycle, pox_stacking_order) {
+        // On pox transition, re-stack all active orders as new stacks (not extends).
+        // The new pox contract has no prior stacking state.
+        if !pox_transitioned && !should_publish_stacking_orders(&current_cycle, pox_stacking_order)
+        {
             continue;
         }
 
         // if the is not the first cycle of this stacker, then stacking order will be extended
-        let extend_stacking = current_cycle != pox_stacking_order.start_at_cycle - 1;
+        let extend_stacking =
+            !pox_transitioned && current_cycle != pox_stacking_order.start_at_cycle - 1;
         if extend_stacking && !pox_stacking_order.auto_extend.unwrap_or_default() {
             continue;
         }
@@ -872,11 +893,17 @@ pub async fn publish_stacking_orders(
         let signer_key =
             devnet_config.stacks_signers_keys[i % devnet_config.stacks_signers_keys.len()].clone();
 
+        let stacking_order_index = i;
+        // pox-5 initial staking requires a bit of a wait for the mined txn
+        let needs_deploy_wait = pox_version >= 5 && !extend_stacking;
+        let devnet_event_tx_moved = devnet_event_tx.clone();
         let stacking_result =
             hiro_system_kit::thread_named("Stacking orders handler").spawn(move || {
                 let default_fee = fee_rate * 1000;
                 let stacks_rpc = StacksRpc::new(&node_rpc_url_moved);
-                let nonce = stacks_rpc.get_nonce(&account.stx_address)?;
+                let nonce = stacks_rpc
+                    .get_nonce(&account.stx_address)
+                    .map_err(|e| format!("{e}"))?;
 
                 let (_, _, account_secret_key) = clarinet_files::compute_addresses(
                     &account.mnemonic,
@@ -884,48 +911,103 @@ pub async fn publish_stacking_orders(
                     &StacksNetwork::Devnet.get_networks(),
                 );
 
-                let (method, arguments) = get_stacking_tx_method_and_args(
-                    pox_version,
-                    bitcoin_block_height,
-                    current_cycle.into(),
-                    &signer_key,
-                    extend_stacking,
-                    &btc_address_moved,
-                    stx_amount,
-                    duration,
-                    i.try_into().unwrap(),
-                );
+                let secret_key_bytes = hex_bytes(&account_secret_key).unwrap();
 
-                let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
-                    pox_contract_id_moved,
-                    method,
-                    arguments,
-                    nonce,
-                    default_fee,
-                    &hex_bytes(&account_secret_key).unwrap(),
-                );
+                if pox_version >= 5 {
+                    publish_pox5_stacking_transactions(Pox5StackingTxns {
+                        stacks_rpc: &stacks_rpc,
+                        pox_contract_id: &pox_contract_id_moved,
+                        secret_key_bytes: &secret_key_bytes,
+                        signer_key: &signer_key,
+                        nonce,
+                        fee: default_fee,
+                        stacking_order_index,
+                        extend_stacking,
+                        stx_amount,
+                        duration,
+                        bitcoin_block_height,
+                        stx_address: &account.stx_address,
+                    })
+                } else {
+                    let (method, arguments) = get_stacking_tx_method_and_args(
+                        pox_version,
+                        bitcoin_block_height,
+                        current_cycle.into(),
+                        &signer_key,
+                        extend_stacking,
+                        &btc_address_moved,
+                        stx_amount,
+                        duration,
+                        stacking_order_index.try_into().unwrap(),
+                    );
 
-                stacks_rpc.post_transaction(&tx)
+                    let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+                        pox_contract_id_moved,
+                        method,
+                        arguments,
+                        nonce,
+                        default_fee,
+                        &secret_key_bytes,
+                    );
+
+                    stacks_rpc
+                        .post_transaction(&tx)
+                        .map(|_| ())
+                        .map_err(|e| format!("{e}"))
+                }
             });
 
-        match stacking_result {
-            Ok(result) => {
-                if let Ok(result) = result.join() {
-                    match result {
-                        Ok(_) => {
-                            let _ = devnet_event_tx.send(DevnetEvent::success(format!(
-                                "Stacking order for {stx_amount} STX submitted"
-                            )));
-                        }
-                        Err(e) => {
-                            let _ = devnet_event_tx
-                                .send(DevnetEvent::error(format!("Unable to stack: {e}")));
-                        }
-                    }
-                };
+        if needs_deploy_wait {
+            // Don't block the coordinator — let the thread report its own result.
+            match stacking_result {
+                Ok(handle) => {
+                    let _ =
+                        hiro_system_kit::thread_named("Stacking orders monitor").spawn(move || {
+                            match handle.join() {
+                                Ok(Ok(_)) => {
+                                    let _ = devnet_event_tx_moved.send(DevnetEvent::success(
+                                        format!("Stacking order for {stx_amount} STX submitted"),
+                                    ));
+                                }
+                                Ok(Err(e)) => {
+                                    let _ = devnet_event_tx_moved
+                                        .send(DevnetEvent::error(format!("Unable to stack: {e}")));
+                                }
+                                Err(_) => {
+                                    let _ = devnet_event_tx_moved.send(DevnetEvent::error(
+                                        "Stacking order thread panicked".to_string(),
+                                    ));
+                                }
+                            }
+                        });
+                }
+                Err(e) => {
+                    let _ = devnet_event_tx.send(DevnetEvent::error(format!(
+                        "Unable to spawn stacking thread: {e}"
+                    )));
+                }
             }
-            Err(e) => {
-                let _ = devnet_event_tx.send(DevnetEvent::error(format!("Unable to stack: {e}")));
+        } else {
+            match stacking_result {
+                Ok(result) => {
+                    if let Ok(result) = result.join() {
+                        match result {
+                            Ok(_) => {
+                                let _ = devnet_event_tx.send(DevnetEvent::success(format!(
+                                    "Stacking order for {stx_amount} STX submitted"
+                                )));
+                            }
+                            Err(e) => {
+                                let _ = devnet_event_tx
+                                    .send(DevnetEvent::error(format!("Unable to stack: {e}")));
+                            }
+                        }
+                    };
+                }
+                Err(e) => {
+                    let _ =
+                        devnet_event_tx.send(DevnetEvent::error(format!("Unable to stack: {e}")));
+                }
             }
         }
     }
@@ -1162,6 +1244,219 @@ async fn handle_bitcoin_mining(
         }
     }
 }
+
+struct Pox5StackingTxns<'a> {
+    stacks_rpc: &'a StacksRpc,
+    pox_contract_id: &'a str,
+    secret_key_bytes: &'a [u8],
+    signer_key: &'a StacksPrivateKey,
+    nonce: u64,
+    fee: u64,
+    stacking_order_index: usize,
+    extend_stacking: bool,
+    stx_amount: u64,
+    duration: u32,
+    bitcoin_block_height: u32,
+    stx_address: &'a str,
+}
+/// Publishes the pox-5 stacking transactions for a single stacking order.
+///
+/// For the initial stake (not extending), this submits three sequential transactions:
+/// 1. Deploy the signer-manager contract
+/// 2. Call `register-self` on the signer-manager (grants signer key + registers)
+/// 3. Call `pox-5.stake`
+///
+/// For extensions (`stake-update`), only one transaction is submitted.
+fn publish_pox5_stacking_transactions(
+    Pox5StackingTxns {
+        stacks_rpc,
+        pox_contract_id,
+        secret_key_bytes,
+        signer_key,
+        mut nonce,
+        fee,
+        stacking_order_index,
+        extend_stacking,
+        stx_amount,
+        duration,
+        bitcoin_block_height,
+        stx_address,
+    }: Pox5StackingTxns,
+) -> Result<(), String> {
+    let signer_pub_key = StacksPublicKey::from_private(signer_key);
+    let contract_name = pox5_signer_manager_name(stacking_order_index);
+    let signer_manager_principal = PrincipalData::parse(&format!("{stx_address}.{contract_name}"))
+        .expect("Invalid signer-manager principal");
+    let signer_manager_cv = ClarityValue::Principal(signer_manager_principal.clone());
+
+    if extend_stacking {
+        // For extensions, submit a single stake-update transaction.
+        // Uses the same signer-manager for both old and new.
+        let arguments = vec![
+            signer_manager_cv.clone(),           // signer-manager
+            signer_manager_cv,                   // old-signer-manager
+            ClarityValue::UInt(duration.into()), // cycles-to-extend
+            ClarityValue::UInt(0),               // amount-increase (keep same amount)
+            ClarityValue::none(),                // signer-calldata
+        ];
+        let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+            pox_contract_id.to_string(),
+            "stake-update".to_string(),
+            arguments,
+            nonce,
+            fee,
+            secret_key_bytes,
+        );
+        stacks_rpc
+            .post_transaction(&tx)
+            .map_err(|e| format!("{e}"))?;
+        return Ok(());
+    }
+
+    // Initial stake: deploy signer-manager, register, then stake.
+
+    // Step 1: Deploy the signer-manager contract
+    let deploy_tx = stacks_rpc_client::crypto::build_contract_publish_transaction(
+        &contract_name,
+        POX5_SIGNER_MANAGER_SOURCE,
+        Some(clarity::vm::ClarityVersion::Clarity6),
+        nonce,
+        fee,
+        secret_key_bytes,
+    );
+    stacks_rpc
+        .post_transaction(&deploy_tx)
+        .map_err(|e| format!("{e}"))?;
+    nonce += 1;
+
+    // Wait for the signer-manager contract to be deployed on-chain.
+    // The node rejects contract-call transactions if the target contract
+    // is only in the mempool and not yet mined.
+    let contract_url = format!(
+        "{}/v2/contracts/source/{stx_address}/{contract_name}",
+        stacks_rpc.url
+    );
+    let mut contract_deployed = false;
+    for _ in 0..60 {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if let Ok(resp) = reqwest::blocking::get(&contract_url) {
+            if resp.status().is_success() {
+                contract_deployed = true;
+                break;
+            }
+        }
+    }
+    if !contract_deployed {
+        return Err(format!(
+            "Timed out waiting for signer-manager contract {stx_address}.{contract_name} to be mined"
+        ));
+    }
+
+    // Step 2: Call register-self on the signer-manager contract.
+    // This grants the signer key and registers the signer in pox-5.
+    let auth_id: u128 = stacking_order_index.try_into().unwrap();
+    let grant_sig = make_pox_5_signer_grant_signature(
+        &signer_manager_principal,
+        auth_id,
+        CHAIN_ID_TESTNET,
+        signer_key,
+    )
+    .expect("Unable to make pox-5 signer grant signature");
+
+    let register_args = vec![
+        signer_manager_cv.clone(), // signer-manager (self)
+        ClarityValue::buff_from(signer_pub_key.to_bytes()).unwrap(), // signer-key
+        ClarityValue::UInt(auth_id), // auth-id
+        ClarityValue::buff_from(grant_sig.to_rsv()).unwrap(), // signer-sig
+    ];
+    let register_tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+        format!("{stx_address}.{contract_name}"),
+        "register-self".to_string(),
+        register_args,
+        nonce,
+        fee,
+        secret_key_bytes,
+    );
+    stacks_rpc
+        .post_transaction(&register_tx)
+        .map_err(|e| format!("{e}"))?;
+    nonce += 1;
+
+    // Step 3: Call pox-5.stake
+    let burn_block_height: u128 = (bitcoin_block_height - 1).into();
+    let stake_args = vec![
+        signer_manager_cv,                     // signer-manager
+        ClarityValue::UInt(stx_amount.into()), // amount-ustx
+        ClarityValue::UInt(duration.into()),   // num-cycles
+        ClarityValue::UInt(burn_block_height), // start-burn-ht
+        ClarityValue::none(),                  // signer-calldata
+    ];
+    let stake_tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+        pox_contract_id.to_string(),
+        "stake".to_string(),
+        stake_args,
+        nonce,
+        fee,
+        secret_key_bytes,
+    );
+    stacks_rpc
+        .post_transaction(&stake_tx)
+        .map_err(|e| format!("{e}"))?;
+    Ok(())
+}
+
+/// Contract name for the per-stacker signer-manager deployed during pox-5 stacking.
+fn pox5_signer_manager_name(stacking_order_index: usize) -> String {
+    format!("pox5-signer-{stacking_order_index}")
+}
+
+/// Minimal signer-manager contract implementing pox-5's signer-manager-trait.
+///
+/// This is a copy of `pox5_signer_manager_source()` from stacks-core
+/// (`stacks-node/src/tests/signer/v0/mod.rs`). That function is `pub(crate)`
+/// so we cannot import it directly. If the trait definition in pox-5.clar
+/// changes, this source must be updated to match.
+const POX5_SIGNER_MANAGER_SOURCE: &str = r#"
+(impl-trait 'ST000000000000000000002AMW42H.pox-5.signer-manager-trait)
+(use-trait signer-manager-trait 'ST000000000000000000002AMW42H.pox-5.signer-manager-trait)
+
+(define-public (validate-stake!
+        (staker principal)
+        (first-index uint)
+        (num-indexes uint)
+        (amount-ustx uint)
+        (amount-sats uint)
+        (is-bond bool)
+        (signer-calldata (optional (buff 500)))
+    )
+    (ok true)
+)
+
+(define-public (checkpoint-staker
+        (staker principal)
+        (first-index uint)
+        (num-indexes uint)
+        (is-bond bool)
+    )
+    (ok true)
+)
+
+(define-public (register-self
+        (signer-manager <signer-manager-trait>)
+        (signer-key (buff 33))
+        (auth-id uint)
+        (signer-sig (buff 65))
+    )
+    (as-contract? ()
+        (try! (contract-call? 'ST000000000000000000002AMW42H.pox-5 grant-signer-key
+            signer-key current-contract auth-id signer-sig
+        ))
+        (try! (contract-call? 'ST000000000000000000002AMW42H.pox-5 register-signer
+            signer-manager signer-key
+        ))
+    )
+)
+"#;
 
 fn get_stacking_tx_method_and_args(
     pox_version: u32,

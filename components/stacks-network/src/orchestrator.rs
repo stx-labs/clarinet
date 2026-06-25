@@ -878,6 +878,28 @@ impl DevnetOrchestrator {
             pre_nakamoto_mock_signing = devnet_config.pre_nakamoto_mock_signing,
         );
 
+        // pox-5 needs sbtc-token and sbtc-registry contracts to be resolvable.
+        // sBTC contracts are always deployed as boot dependencies, so always
+        // tell the stacks-node where they'll be deployed.
+        if let Some(deployer) = network_config
+            .accounts
+            .values()
+            .find(|a| a.label == "deployer")
+        {
+            let deployer_addr = &deployer.stx_address;
+            stacks_conf = stacks_conf.replacen(
+                "[connection_options]",
+                &formatdoc!(
+                    r#"pox_5_sbtc_contract = "{deployer_addr}.sbtc-token"
+                    pox_5_sbtc_registry_contract = "{deployer_addr}.sbtc-registry"
+                    pox_5_bond_admin = "{deployer_addr}"
+
+                    [connection_options]"#,
+                ),
+                1,
+            );
+        }
+
         for (_, account) in network_config.accounts.iter() {
             stacks_conf.push_str(&formatdoc!(
                 r#"
@@ -1306,6 +1328,7 @@ impl DevnetOrchestrator {
             format!("STACKS_CHAIN_ID=2147483648"),
             format!("V2_POX_MIN_AMOUNT_USTX=90000000260"),
             format!("FAUCET_PRIVATE_KEY={}", devnet_config.faucet_secret_key_hex),
+            "PG_SCHEMA=public".to_string(),
             "NODE_ENV=development".to_string(),
         ];
         env.append(&mut devnet_config.stacks_api_env_vars.clone());

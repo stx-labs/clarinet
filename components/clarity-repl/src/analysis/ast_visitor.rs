@@ -706,7 +706,9 @@ pub trait ASTVisitor<'a> {
                         | AllowanceWithFt
                         | AllowanceWithNft
                         | AllowanceWithStacking
-                        | AllowanceAll => {
+                        | AllowanceAll
+                        | AllowanceWithStaking
+                        | AllowanceWithPox => {
                             self.traverse_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
                         VerifyMerkleProof => self.traverse_verify_merkle_proof(

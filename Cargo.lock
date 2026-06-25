@@ -799,7 +799,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -916,7 +916,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "lazy_static",
  "regex",
@@ -926,6 +926,7 @@ dependencies = [
  "serde_json",
  "slog",
  "stacks-common",
+ "variant_count",
 ]
 
 [[package]]
@@ -2488,7 +2489,7 @@ dependencies = [
 [[package]]
 name = "libsigner"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "clarity",
  "hashbrown 0.15.5",
@@ -2518,7 +2519,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "clarity",
  "serde",
@@ -3061,7 +3062,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "clarity",
  "slog",
@@ -4237,17 +4238,18 @@ dependencies = [
 [[package]]
 name = "stacks-codec"
 version = "0.1.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "clarity-types",
  "serde",
  "stacks-common",
+ "variant_count",
 ]
 
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4335,7 +4337,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12#6dd4b092ec69bc54548a56c8dfbe2bbcb1facb12"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=890ee21c70c64e11405806bb700a3449c1b10cbb#890ee21c70c64e11405806bb700a3449c1b10cbb"
 dependencies = [
  "clarity",
  "ed25519-dalek",
@@ -5027,6 +5029,17 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "variant_count"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1935e10c6f04d22688d07c0790f2fc0e1b1c5c2c55bc0cc87ed67656e587dd8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "vcpkg"
