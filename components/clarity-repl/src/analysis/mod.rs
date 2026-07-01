@@ -148,9 +148,11 @@ pub struct Settings {
     check_checker: check_checker::Settings,
     /// Compiled glob patterns for files to include in linting.
     #[serde(skip)]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
     lint_include: Vec<Pattern>,
     /// Compiled glob patterns for files to exclude from linting.
     #[serde(skip)]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
     lint_exclude: Vec<Pattern>,
 }
 

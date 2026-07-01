@@ -1600,18 +1600,17 @@ fn print_available_lints(settings: &analysis::Settings) {
     println!();
     println!("{}", "Configure lints in Clarinet.toml:".bold());
     let sample = r#"
+  # Only lint files matching these patterns
+  [repl.analysis]
+  lint_include = ["contracts/*.clar"]
+  lint_exclude = []
+
   [repl.analysis.lint_groups]
   style = "warning"
 
   [repl.analysis.lints]
   unused_const = "error"
   at_block = false
-
-  # Only lint files matching these patterns
-  lint_include = ["contracts/*.clar"]
-
-  # Exclude files matching these patterns from linting
-  lint_exclude = []
 "#;
     println!("{}", sample.dimmed());
     println!(
