@@ -30,7 +30,7 @@ use clarity_types::Value;
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
 use super::settings::{ApiUrl, RemoteNetworkInfo};
-use super::ClarityContract;
+use super::{ClarityCodeSource, ClarityContract};
 use crate::analysis::annotation::{Annotation, AnnotationKind};
 use crate::analysis::ast_dependency_detector::{ASTDependencyDetector, Dependency};
 use crate::analysis::{self, LintDiagnostic};
@@ -295,11 +295,19 @@ impl ClarityInterpreter {
 
         // Run REPL-only analyses (linter, check_checker, etc.)
         let lint_diagnostics = if !contract.skip_analysis {
+            let skip_lints = match &contract.code_source {
+                ClarityCodeSource::ContractOnDisk(path) => !self
+                    .repl_settings
+                    .analysis
+                    .should_lint(&path.to_string_lossy()),
+                _ => false,
+            };
             analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,
                 annotations,
                 &self.repl_settings.analysis,
+                skip_lints,
             )
             .map_err(|lds| {
                 // Extract the last diagnostic as the representative error.

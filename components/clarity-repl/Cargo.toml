@@ -25,6 +25,7 @@ categories = [
 clarinet-defaults = { workspace = true }
 chrono = { workspace = true }
 colored = { workspace = true }
+glob = "0.3"
 indexmap = { workspace = true, features = ["serde"] }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
