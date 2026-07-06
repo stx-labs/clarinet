@@ -1,3 +1,12 @@
+# [3.21.1](https://github.com/stx-labs/clarinet/compare/v3.21.0...v3.21.1) (2026-07-06)
+
+##### Chores
+
+* Update pox5 and stacks-core dep  (#2452) (8728e77c)
+* **deps:**
+  *  Bump nixpkgs from `9ae611a` to `b5aa0fb` (#2449) (732dff74)
+  *  Bump rust-overlay from `06f25b8` to `13139ae` (#2448) (5cd208b5)
+
 # [3.21.0](https://github.com/stx-labs/clarinet/compare/v3.20.0...v3.21.0) (2026-06-25)
 
 ##### New Features
