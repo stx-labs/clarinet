@@ -480,9 +480,19 @@ impl SDK {
             .map(|p| p.to_path_buf())
             .unwrap_or_default();
         for (name, entry) in &manifest.project.override_boot_contracts_source {
+            let contract_name = match clarity::vm::ContractName::try_from(name.as_str()) {
+                Ok(name) => name,
+                Err(_) => {
+                    log!(
+                        "Warning: Skipping override boot contract '{}' - invalid contract name",
+                        name
+                    );
+                    continue;
+                }
+            };
             let contract_id = QualifiedContractIdentifier::new(
                 clarity_repl::repl::boot::BOOT_TESTNET_PRINCIPAL.clone(),
-                clarity::vm::ContractName::try_from(name.as_str()).unwrap(),
+                contract_name,
             );
             contracts_locations.insert(contract_id, project_root.join(&entry.path));
         }
