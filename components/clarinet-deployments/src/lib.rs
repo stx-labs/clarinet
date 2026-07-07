@@ -48,17 +48,23 @@ pub fn setup_session_with_deployment(
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
     enable_analysis: bool,
 ) -> DeploymentGenerationArtifacts {
-    // Mark contracts not in the project manifest as requirements
-    // so that REPL analysis (linting) is skipped for them.
-    // This is needed when the deployment plan is loaded from YAML,
-    // where `skip_analysis` is not serialized. We match by location
-    // (absolute path) rather than contract name because requirements
-    // can share a name with a project contract.
+    // Mark contracts that should skip analysis:
+    // - All contracts when analysis is globally disabled
+    // - Contracts not in the project manifest (requirements)
+    // - Contracts excluded by include/exclude filters in analysis settings
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
                 if !enable_analysis || !manifest.contracts_settings.contains_key(&spec.location) {
                     spec.skip_analysis = true;
+                } else if let Ok(relative) = spec.location.strip_prefix(&manifest.root_dir) {
+                    if !manifest
+                        .repl_settings
+                        .analysis
+                        .should_analyze(&relative.to_string_lossy())
+                    {
+                        spec.skip_analysis = true;
+                    }
                 }
             }
         }

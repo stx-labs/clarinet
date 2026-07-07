@@ -146,14 +146,14 @@ pub struct Settings {
     passes: HashSet<Pass>,
     lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
-    /// Compiled glob patterns for files to include in linting.
+    /// Compiled glob patterns for files to include in analysis.
     #[serde(skip)]
     #[cfg_attr(feature = "json_schema", schemars(skip))]
-    lint_include: Vec<Pattern>,
-    /// Compiled glob patterns for files to exclude from linting.
+    include: Vec<Pattern>,
+    /// Compiled glob patterns for files to exclude from analysis.
     #[serde(skip)]
     #[cfg_attr(feature = "json_schema", schemars(skip))]
-    lint_exclude: Vec<Pattern>,
+    exclude: Vec<Pattern>,
 }
 
 impl Settings {
@@ -167,8 +167,8 @@ impl Settings {
             passes,
             lints,
             check_checker: check_checker::Settings::default(),
-            lint_include: Vec::new(),
-            lint_exclude: Vec::new(),
+            include: Vec::new(),
+            exclude: Vec::new(),
         }
     }
 
@@ -221,22 +221,22 @@ impl Settings {
         &self.lints
     }
 
-    /// Check if lints should run for the given file path.
+    /// Check if analysis should run for the given file path.
     ///
-    /// - If `lint_include` is set, the file must match at least one pattern.
-    /// - If `lint_exclude` is set, the file must not match any pattern.
-    /// - If neither is set, all files are linted.
-    pub fn should_lint(&self, path: &str) -> bool {
+    /// - If `include` is set, the file must match at least one pattern.
+    /// - If `exclude` is set, the file must not match any pattern.
+    /// - If neither is set, all files are analyzed.
+    pub fn should_analyze(&self, path: &str) -> bool {
         // Normalize path to forward slashes for consistent matching
         let path = path.replace('\\', "/");
 
         // If include patterns are set, file must match at least one
-        if !self.lint_include.is_empty() && !self.lint_include.iter().any(|p| p.matches(&path)) {
+        if !self.include.is_empty() && !self.include.iter().any(|p| p.matches(&path)) {
             return false;
         }
 
         // If exclude patterns are set, file must not match any
-        if self.lint_exclude.iter().any(|p| p.matches(&path)) {
+        if self.exclude.iter().any(|p| p.matches(&path)) {
             return false;
         }
 
@@ -279,12 +279,12 @@ pub struct SettingsFile {
     lint_groups: Option<IndexMap<LintGroup, BoolOr<LintLevel>>>,
     lints: Option<IndexMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
-    /// Glob patterns for files to include in linting.
+    /// Glob patterns for files to include in analysis.
     #[serde(default)]
-    lint_include: Option<OneOrList<String>>,
-    /// Glob patterns for files to exclude from linting.
+    include: Option<OneOrList<String>>,
+    /// Glob patterns for files to exclude from analysis.
     #[serde(default)]
-    lint_exclude: Option<OneOrList<String>>,
+    exclude: Option<OneOrList<String>>,
 }
 
 impl From<SettingsFile> for Settings {
@@ -327,22 +327,22 @@ impl From<SettingsFile> for Settings {
             settings.check_checker = check_checker::Settings::from(check_checker);
         }
 
-        // Process lint_include patterns
-        if let Some(include) = from_file.lint_include {
+        // Process include patterns
+        if let Some(include) = from_file.include {
             let raw = match include {
                 OneOrList::One(s) => vec![s],
                 OneOrList::List(v) => v,
             };
-            settings.lint_include = compile_patterns(raw, "lint_include");
+            settings.include = compile_patterns(raw, "include");
         }
 
-        // Process lint_exclude patterns
-        if let Some(exclude) = from_file.lint_exclude {
+        // Process exclude patterns
+        if let Some(exclude) = from_file.exclude {
             let raw = match exclude {
                 OneOrList::One(s) => vec![s],
                 OneOrList::List(v) => v,
             };
-            settings.lint_exclude = compile_patterns(raw, "lint_exclude");
+            settings.exclude = compile_patterns(raw, "exclude");
         }
 
         settings
@@ -366,23 +366,20 @@ pub fn run_analysis(
     analysis_db: &mut AnalysisDatabase,
     annotations: &[Annotation],
     settings: &Settings,
-    skip_lints: bool,
 ) -> Result<Vec<LintDiagnostic>, Vec<LintDiagnostic>> {
     let mut errors: Vec<LintDiagnostic> = vec![];
 
-    // Collect non-lint analysis passes (no lint name) - always run
+    // Collect non-lint analysis passes (no lint name)
     let mut passes: Vec<(AnalysisPassFn, ClarityDiagnosticLevel, Option<LintName>)> = vec![];
     for pass in &settings.passes {
         let f = AnalysisPassFn::try_from(pass).unwrap();
         passes.push((f, pass.default_level(), None));
     }
 
-    // Collect lint passes (with lint name) - only if not skipped by include/exclude filters
-    if !skip_lints {
-        for (name, level) in &settings.lints {
-            let lint = AnalysisPassFn::from(name);
-            passes.push((lint, level.clone(), Some(*name)));
-        }
+    // Collect lint passes (with lint name)
+    for (name, level) in &settings.lints {
+        let lint = AnalysisPassFn::from(name);
+        passes.push((lint, level.clone(), Some(*name)));
     }
 
     // Create shared cache for all passes/lints
@@ -463,8 +460,8 @@ mod tests {
             lint_groups: None,
             lints: None,
             check_checker: None,
-            lint_include: None,
-            lint_exclude: None,
+            include: None,
+            exclude: None,
         };
         let settings = Settings::from(file);
         assert!(!settings.lints.is_empty());
@@ -494,58 +491,58 @@ mod tests {
     }
 
     #[test]
-    fn should_lint_with_no_filters() {
+    fn should_analyze_with_no_filters() {
         let settings = Settings::with_default_lints();
-        assert!(settings.should_lint("contracts/foo.clar"));
-        assert!(settings.should_lint("tests/bar.clar"));
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(settings.should_analyze("tests/bar.clar"));
     }
 
     #[test]
-    fn should_lint_with_include_filter() {
+    fn should_analyze_with_include_filter() {
         let file = SettingsFile {
-            lint_include: Some(OneOrList::One("contracts/*.clar".to_string())),
+            include: Some(OneOrList::One("contracts/*.clar".to_string())),
             ..Default::default()
         };
         let settings = Settings::from(file);
 
-        assert!(settings.should_lint("contracts/foo.clar"));
-        assert!(!settings.should_lint("tests/foo.clar"));
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
     }
 
     #[test]
-    fn should_lint_with_exclude_filter() {
+    fn should_analyze_with_exclude_filter() {
         let file = SettingsFile {
-            lint_exclude: Some(OneOrList::One("tests/*.clar".to_string())),
+            exclude: Some(OneOrList::One("tests/*.clar".to_string())),
             ..Default::default()
         };
         let settings = Settings::from(file);
 
-        assert!(settings.should_lint("contracts/foo.clar"));
-        assert!(!settings.should_lint("tests/foo.clar"));
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
     }
 
     #[test]
-    fn should_lint_with_include_and_exclude() {
+    fn should_analyze_with_include_and_exclude() {
         let file = SettingsFile {
-            lint_include: Some(OneOrList::List(vec![
+            include: Some(OneOrList::List(vec![
                 "contracts/*.clar".to_string(),
                 "lib/*.clar".to_string(),
             ])),
-            lint_exclude: Some(OneOrList::One("contracts/legacy*.clar".to_string())),
+            exclude: Some(OneOrList::One("contracts/legacy*.clar".to_string())),
             ..Default::default()
         };
         let settings = Settings::from(file);
 
-        assert!(settings.should_lint("contracts/foo.clar"));
-        assert!(!settings.should_lint("contracts/legacy.clar"));
-        assert!(settings.should_lint("lib/utils.clar"));
-        assert!(!settings.should_lint("tests/foo.clar"));
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(!settings.should_analyze("contracts/legacy.clar"));
+        assert!(settings.should_analyze("lib/utils.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
     }
 
     #[test]
-    fn should_lint_with_list_include() {
+    fn should_analyze_with_list_include() {
         let file = SettingsFile {
-            lint_include: Some(OneOrList::List(vec![
+            include: Some(OneOrList::List(vec![
                 "contracts/*.clar".to_string(),
                 "src/*.clar".to_string(),
             ])),
@@ -553,8 +550,8 @@ mod tests {
         };
         let settings = Settings::from(file);
 
-        assert!(settings.should_lint("contracts/foo.clar"));
-        assert!(settings.should_lint("src/bar.clar"));
-        assert!(!settings.should_lint("tests/foo.clar"));
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(settings.should_analyze("src/bar.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
     }
 }

@@ -1254,13 +1254,11 @@ pub fn main() {
                 contract.clarity_version,
             );
             let mut analysis_db = AnalysisDatabase::new(&mut session.interpreter.clarity_datastore);
-            let skip_lints = !settings.repl_settings.analysis.should_lint(&file);
             let lint_diagnostics = match analysis::run_analysis(
                 &mut contract_analysis,
                 &mut analysis_db,
                 &annotations,
                 &settings.repl_settings.analysis,
-                skip_lints,
             ) {
                 Ok(lint_diags) => lint_diags,
                 Err(lint_diags) => {
@@ -1600,10 +1598,10 @@ fn print_available_lints(settings: &analysis::Settings) {
     println!();
     println!("{}", "Configure lints in Clarinet.toml:".bold());
     let sample = r#"
-  # Only lint files matching these patterns
+  # Only analyze files matching these patterns
   [repl.analysis]
-  lint_include = ["contracts/*.clar"]
-  lint_exclude = []
+  include = ["contracts/*.clar"]
+  exclude = []
 
   [repl.analysis.lint_groups]
   style = "warning"
@@ -3188,7 +3186,6 @@ mod tests {
             &mut analysis_db,
             &annotations,
             &settings.repl_settings.analysis,
-            false,
         ) {
             Ok(lint_diags) => lint_diags,
             Err(lint_diags) => {
