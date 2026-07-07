@@ -362,7 +362,7 @@ impl ProjectManifest {
         allow_remote_data_fetching: bool,
     ) -> Result<ProjectManifest, String> {
         let mut repl_settings = if let Some(repl_settings) = project_manifest_file.repl {
-            repl::Settings::from(repl_settings)
+            repl::Settings::try_from(repl_settings)?
         } else {
             repl::Settings {
                 analysis: clarity_repl::analysis::Settings::with_default_lints(),

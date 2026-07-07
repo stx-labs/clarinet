@@ -1492,8 +1492,10 @@ mod tests {
         session.update_epoch(epoch);
 
         // Enable default lints on the session so analysis actually runs
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
 
         let spec = EmulatedContractPublishSpecification {
             contract_name: ContractName::from_literal("lint-test"),
@@ -1526,8 +1528,10 @@ mod tests {
         session.update_epoch(epoch);
 
         // Enable default lints — but skip_analysis on the contract overrides
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
 
         let spec = EmulatedContractPublishSpecification {
             contract_name: ContractName::from_literal("lint-test"),
@@ -1565,8 +1569,10 @@ mod tests {
 
         // Enable default lints, then disable them globally
         // (this is what setup_session_with_deployment does when enable_analysis=false)
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
         session.interpreter.repl_settings.analysis.disable_all();
 
         let spec = EmulatedContractPublishSpecification {
@@ -1600,8 +1606,10 @@ mod tests {
         let epoch = StacksEpochId::Epoch25;
         session.update_epoch(epoch);
 
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
         if disable_analysis {
             session.interpreter.repl_settings.analysis.disable_all();
         }

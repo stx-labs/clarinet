@@ -287,8 +287,10 @@ pub struct SettingsFile {
     exclude: Option<OneOrList<String>>,
 }
 
-impl From<SettingsFile> for Settings {
-    fn from(from_file: SettingsFile) -> Self {
+impl TryFrom<SettingsFile> for Settings {
+    type Error = String;
+
+    fn try_from(from_file: SettingsFile) -> Result<Self, Self::Error> {
         let mut settings = Self::with_default_lints();
 
         // Process lint groups first
@@ -333,7 +335,7 @@ impl From<SettingsFile> for Settings {
                 OneOrList::One(s) => vec![s],
                 OneOrList::List(v) => v,
             };
-            settings.include = compile_patterns(raw, "include");
+            settings.include = compile_patterns(raw, "include")?;
         }
 
         // Process exclude patterns
@@ -342,21 +344,18 @@ impl From<SettingsFile> for Settings {
                 OneOrList::One(s) => vec![s],
                 OneOrList::List(v) => v,
             };
-            settings.exclude = compile_patterns(raw, "exclude");
+            settings.exclude = compile_patterns(raw, "exclude")?;
         }
 
-        settings
+        Ok(settings)
     }
 }
 
-fn compile_patterns(raw: Vec<String>, field_name: &str) -> Vec<Pattern> {
+fn compile_patterns(raw: Vec<String>, field_name: &str) -> Result<Vec<Pattern>, String> {
     raw.into_iter()
-        .filter_map(|p| match Pattern::new(&p) {
-            Ok(pattern) => Some(pattern),
-            Err(e) => {
-                eprintln!("warning: invalid glob pattern in {field_name}: \"{p}\": {e}");
-                None
-            }
+        .map(|p| {
+            Pattern::new(&p)
+                .map_err(|e| format!("invalid glob pattern in {field_name}: \"{p}\": {e}"))
         })
         .collect()
 }
@@ -446,7 +445,7 @@ mod tests {
     /// `SettingsFile::default()`, which should produce the same defaults.
     #[test]
     fn settings_from_empty_settings_file_enables_default_lints() {
-        let settings = Settings::from(SettingsFile::default());
+        let settings = Settings::try_from(SettingsFile::default()).unwrap();
         assert!(!settings.lints.is_empty());
         assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
     }
@@ -463,14 +462,14 @@ mod tests {
             include: None,
             exclude: None,
         };
-        let settings = Settings::from(file);
+        let settings = Settings::try_from(file).unwrap();
         assert!(!settings.lints.is_empty());
         assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
     }
 
     #[test]
     fn disable_all_clears_lints_and_passes() {
-        let mut settings = Settings::from(SettingsFile::default());
+        let mut settings = Settings::try_from(SettingsFile::default()).unwrap();
         assert!(!settings.lints.is_empty());
         assert!(!settings.passes.is_empty());
 
@@ -481,7 +480,7 @@ mod tests {
 
     #[test]
     fn disable_all_passes_preserves_lints() {
-        let mut settings = Settings::from(SettingsFile::default());
+        let mut settings = Settings::try_from(SettingsFile::default()).unwrap();
         assert!(!settings.lints.is_empty());
         assert!(!settings.passes.is_empty());
 
@@ -503,7 +502,7 @@ mod tests {
             include: Some(OneOrList::One("contracts/*.clar".to_string())),
             ..Default::default()
         };
-        let settings = Settings::from(file);
+        let settings = Settings::try_from(file).unwrap();
 
         assert!(settings.should_analyze("contracts/foo.clar"));
         assert!(!settings.should_analyze("tests/foo.clar"));
@@ -515,7 +514,7 @@ mod tests {
             exclude: Some(OneOrList::One("tests/*.clar".to_string())),
             ..Default::default()
         };
-        let settings = Settings::from(file);
+        let settings = Settings::try_from(file).unwrap();
 
         assert!(settings.should_analyze("contracts/foo.clar"));
         assert!(!settings.should_analyze("tests/foo.clar"));
@@ -531,7 +530,7 @@ mod tests {
             exclude: Some(OneOrList::One("contracts/legacy*.clar".to_string())),
             ..Default::default()
         };
-        let settings = Settings::from(file);
+        let settings = Settings::try_from(file).unwrap();
 
         assert!(settings.should_analyze("contracts/foo.clar"));
         assert!(!settings.should_analyze("contracts/legacy.clar"));
@@ -548,7 +547,7 @@ mod tests {
             ])),
             ..Default::default()
         };
-        let settings = Settings::from(file);
+        let settings = Settings::try_from(file).unwrap();
 
         assert!(settings.should_analyze("contracts/foo.clar"));
         assert!(settings.should_analyze("src/bar.clar"));
