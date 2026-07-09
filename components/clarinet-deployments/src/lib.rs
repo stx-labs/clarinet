@@ -19,7 +19,10 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{
     ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
 };
-use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, ClarinetRuntimeCheckErrorKind, DependencySet, build_incorrect_contract_height_message};
+use clarity_repl::analysis::ast_dependency_detector::{
+    build_incorrect_contract_height_message, ASTDependencyDetector, ClarinetRuntimeCheckErrorKind,
+    DependencySet,
+};
 use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_BOOT_CONTRACTS,
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
@@ -823,9 +826,9 @@ pub async fn generate_default_deployment_with_cache(
                             "unable to order requirements: {}",
                             build_incorrect_contract_height_message(
                                 contract_id.clone(),
-                                contract_epoch.clone(),
+                                contract_epoch,
                                 dep_contract_id.clone(),
-                                dep_epoch.clone(),
+                                dep_epoch,
                             )
                         ),
                         ClarinetRuntimeCheckErrorKind::FromStacksCore(e) => {
@@ -1156,8 +1159,8 @@ pub async fn generate_default_deployment_with_cache(
     // Post-loop errors are safe to `?` through: `cache_guard` is still
     // live and its `Drop` will restore `pending` into `cached_asts`.
     let ordered_contracts_ids =
-        ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs)
-            .map_err(|e| match e {
+        ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs).map_err(
+            |e| match e {
                 ClarinetRuntimeCheckErrorKind::IncorrectContractHeight {
                     contract_id,
                     contract_epoch,
@@ -1165,12 +1168,13 @@ pub async fn generate_default_deployment_with_cache(
                     dep_epoch,
                 } => build_incorrect_contract_height_message(
                     contract_id.clone(),
-                    contract_epoch.clone(),
+                    contract_epoch,
                     dep_contract_id.clone(),
-                    dep_epoch.clone(),
+                    dep_epoch,
                 ),
                 ClarinetRuntimeCheckErrorKind::FromStacksCore(e) => e.to_string(),
-            })?;
+            },
+        )?;
 
     // Track the latest epoch that a contract is deployed in, so that we can
     // ensure that all contracts are deployed after their dependencies.
