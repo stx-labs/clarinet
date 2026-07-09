@@ -75,7 +75,7 @@ pub fn build_incorrect_contract_height_message(
     dep_epoch: StacksEpochId,
 ) -> String {
     format!(
-        "Contract '{}' is deployed at epoch {:?}, but dependency '{}' requires epoch {:?}. The dependency contract was deployed at a later epoch than this contract.",
+        "Contract '{}' is deployed at epoch {}, but dependency '{}' requires epoch {}. The dependency contract was deployed at a later epoch than this contract.",
         contract_id, contract_epoch, dep_contract_id, dep_epoch
     )
 }
