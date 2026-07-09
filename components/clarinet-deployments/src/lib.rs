@@ -794,7 +794,7 @@ pub async fn generate_default_deployment_with_cache(
                     // In the case of unknown dependencies, we were unable to construct an exhaustive list of dependencies.
                     // As such, we will re-enqueue the present (front) and push all the unknown contract_ids in front of it,
                     // and we will keep the source in memory to avoid useless disk access.
-                    for (_, dependencies) in inferable_dependencies.iter() {
+                    for dependencies in inferable_dependencies.values() {
                         for dependency in dependencies.iter() {
                             queue.push_back(dependency.contract_id.clone());
                         }
@@ -921,7 +921,7 @@ pub async fn generate_default_deployment_with_cache(
     let sources: HashMap<String, String> = match file_accessor {
         None => {
             let mut sources = HashMap::new();
-            for (_, contract_config) in manifest.contracts.iter() {
+            for contract_config in manifest.contracts.values() {
                 let contract_location =
                     project_root.join(contract_config.expect_contract_path_as_str());
                 let source = paths::read_content_as_utf8(&contract_location).map_err(|_| {
@@ -973,7 +973,7 @@ pub async fn generate_default_deployment_with_cache(
             .get(contract_location.to_string_lossy().as_ref())
             .ok_or(format!(
                 "Invalid Clarinet.toml, source file not found for: {}",
-                &name
+                name
             ))?
             .clone();
 

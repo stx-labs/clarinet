@@ -82,7 +82,7 @@ impl ForkScratchPad {
         };
 
         let mut fork_updated = None;
-        for (_, fork) in self.forks.iter_mut() {
+        for fork in self.forks.values_mut() {
             let (block_appended, mut new_fork) = fork.try_append_block(&header, ctx);
             if block_appended {
                 if let Some(new_fork) = new_fork.take() {
