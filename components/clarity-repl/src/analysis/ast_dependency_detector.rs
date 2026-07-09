@@ -21,6 +21,72 @@ use clarity_types::types::{
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 
+/// Extended runtime check error type that wraps stacks-core's `RuntimeCheckErrorKind`
+/// and adds clarinet-specific error variants.
+///
+/// This allows clarinet to provide more specific error messages for issues that
+/// arise from epoch mismatches between contracts and their dependencies.
+#[derive(Debug)]
+pub enum ClarinetRuntimeCheckErrorKind {
+    /// Wraps the original stacks-core error variants.
+    FromStacksCore(RuntimeCheckErrorKind),
+    /// Contract exists but was deployed at a lower epoch than its dependency,
+    /// meaning the dependency contract wasn't yet available when this contract
+    /// was deployed.
+    IncorrectContractHeight {
+        contract_id: String,
+        contract_epoch: StacksEpochId,
+        dep_contract_id: String,
+        dep_epoch: StacksEpochId,
+    },
+}
+
+impl std::fmt::Display for ClarinetRuntimeCheckErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClarinetRuntimeCheckErrorKind::FromStacksCore(e) => write!(f, "{e}"),
+            ClarinetRuntimeCheckErrorKind::IncorrectContractHeight {
+                contract_id,
+                contract_epoch,
+                dep_contract_id,
+                dep_epoch,
+            } => {
+                write!(f, "{}", build_incorrect_contract_height_message(
+                    contract_id.clone(),
+                    contract_epoch.clone(),
+                    dep_contract_id.clone(),
+                    dep_epoch.clone(),
+                ))
+            }
+        }
+    }
+}
+
+impl std::error::Error for ClarinetRuntimeCheckErrorKind {}
+
+/// Builds a user-friendly error message for the `IncorrectContractHeight` case.
+///
+/// This message explains that a contract was deployed at a lower epoch than
+/// its dependency requires, which is the root cause of the confusing
+/// `NoSuchContract` error that users would otherwise see.
+pub fn build_incorrect_contract_height_message(
+    contract_id: String,
+    contract_epoch: StacksEpochId,
+    dep_contract_id: String,
+    dep_epoch: StacksEpochId,
+) -> String {
+    format!(
+        "Contract '{}' is deployed at epoch {:?}, but dependency '{}' requires epoch {:?}. The dependency contract was deployed at a later epoch than this contract.",
+        contract_id, contract_epoch, dep_contract_id, dep_epoch
+    )
+}
+
+impl From<RuntimeCheckErrorKind> for ClarinetRuntimeCheckErrorKind {
+    fn from(e: RuntimeCheckErrorKind) -> Self {
+        ClarinetRuntimeCheckErrorKind::FromStacksCore(e)
+    }
+}
+
 pub static DEFAULT_NAME: LazyLock<ClarityName> =
     LazyLock::new(|| ClarityName::from_literal("placeholder"));
 
@@ -262,7 +328,7 @@ impl<'a> ASTDependencyDetector<'a> {
     pub fn order_contracts<'deps>(
         dependencies: &'deps BTreeMap<QualifiedContractIdentifier, DependencySet>,
         contract_epochs: &HashMap<QualifiedContractIdentifier, StacksEpochId>,
-    ) -> Result<Vec<&'deps QualifiedContractIdentifier>, RuntimeCheckErrorKind> {
+    ) -> Result<Vec<&'deps QualifiedContractIdentifier>, ClarinetRuntimeCheckErrorKind> {
         let mut lookup = BTreeMap::new();
         let mut reverse_lookup = Vec::new();
 
@@ -288,9 +354,12 @@ impl<'a> ASTDependencyDetector<'a> {
                     .get(&dep.contract_id)
                     .unwrap_or(&StacksEpochId::Epoch20);
                 if contract_epoch < dep_epoch {
-                    return Err(RuntimeCheckErrorKind::NoSuchContract(
-                        dep.contract_id.to_string(),
-                    ));
+                    return Err(ClarinetRuntimeCheckErrorKind::IncorrectContractHeight {
+                        contract_id: contract.to_string(),
+                        contract_epoch: contract_epoch.clone(),
+                        dep_contract_id: dep.contract_id.to_string(),
+                        dep_epoch: dep_epoch.clone(),
+                    });
                 }
                 let Some(dep_id) = lookup.get(&dep.contract_id) else {
                     // No need to report an error here, it will be caught
@@ -312,7 +381,9 @@ impl<'a> ASTDependencyDetector<'a> {
                 let contract = reverse_lookup[*index];
                 contracts.push(contract.name.to_string());
             }
-            return Err(RuntimeCheckErrorKind::CircularReference(contracts));
+            return Err(ClarinetRuntimeCheckErrorKind::FromStacksCore(
+                RuntimeCheckErrorKind::CircularReference(contracts),
+            ));
         }
 
         Ok(sorted_indexes
