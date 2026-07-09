@@ -807,7 +807,7 @@ pub async fn publish_stacking_orders(
     bitcoin_block_height: u32,
     last_pox_contract: &mut String,
 ) -> Option<usize> {
-    let node_rpc_url = format!("http://{}", &services_map_hosts.stacks_node_host);
+    let node_rpc_url = format!("http://{}", services_map_hosts.stacks_node_host);
     let pox_info: PoxInfo = match reqwest::get(format!("{node_rpc_url}/v2/pox")).await {
         Ok(result) => match result.json().await {
             Ok(pox_info) => Some(pox_info),
@@ -1045,7 +1045,7 @@ fn fund_genesis_account(
         while !boot_completed_moved.load(Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
-        let node_rpc_url = format!("http://{}", &stacks_api_host_moved);
+        let node_rpc_url = format!("http://{}", stacks_api_host_moved);
         let stacks_rpc = StacksRpc::new(&node_rpc_url);
 
         let info = match stacks_rpc.call_with_retry(|client| client.get_info(), 5) {
