@@ -109,8 +109,10 @@ fn deploy_boot_contracts(
     // Deploy sbtc boot contracts first so that pox-5 can resolve
     for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
         if let Some(max_ep) = max_epoch {
-            // Only deploy sbtc contracts if they belong to an epoch <= max_epoch
-            let (sbtc_epoch, _) = boot::get_boot_contract_epoch_and_clarity_version("sbtc-token");
+            // Derive the epoch from the contract itself so this stays correct
+            // if SBTC_BOOT_CONTRACTS ever gains contracts at different epochs.
+            let (sbtc_epoch, _) =
+                boot::get_boot_contract_epoch_and_clarity_version(contract_id.name.as_str());
             if sbtc_epoch > max_ep {
                 continue;
             }
@@ -155,15 +157,19 @@ fn deploy_boot_contracts(
 
 /// Deploy boot contracts whose associated epoch is in (from_epoch, to_epoch].
 /// Used by `update_epoch` to install contracts when transitioning between epochs.
+/// Returns the newly deployed contracts so the caller can merge them into
+/// its tracking map, preventing redeploys on repeated epoch transitions.
 fn deploy_boot_contracts_for_range(
     from_epoch: StacksEpochId,
     to_epoch: StacksEpochId,
     settings: &SessionSettings,
     interpreter: &mut ClarityInterpreter,
     already_deployed: &ExecutionResultMap,
-) {
+) -> ExecutionResultMap {
+    let mut newly_deployed = BTreeMap::new();
+
     if from_epoch >= to_epoch {
-        return; // no transition, nothing to deploy
+        return newly_deployed; // no transition, nothing to deploy
     }
 
     // Deploy sbtc boot contracts if they fall in the range
@@ -171,7 +177,9 @@ fn deploy_boot_contracts_for_range(
     if sbtc_epoch > from_epoch && sbtc_epoch <= to_epoch {
         for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
             // Skip if already deployed
-            if already_deployed.contains_key(contract_id) {
+            if already_deployed.contains_key(contract_id)
+                || newly_deployed.contains_key(contract_id)
+            {
                 continue;
             }
             let result = interpreter.run(contract, Some(ast), false, None);
@@ -183,6 +191,7 @@ fn deploy_boot_contracts_for_range(
                     );
                 }
             }
+            newly_deployed.insert(contract_id.clone(), result);
         }
     }
 
@@ -197,7 +206,9 @@ fn deploy_boot_contracts_for_range(
         let (contract_epoch, _) = boot::get_boot_contract_epoch_and_clarity_version(&contract.name);
         if contract_epoch > from_epoch && contract_epoch <= to_epoch {
             // Skip if already deployed (e.g., deployed at session creation)
-            if already_deployed.contains_key(&contract_id) {
+            if already_deployed.contains_key(&contract_id)
+                || newly_deployed.contains_key(&contract_id)
+            {
                 continue;
             }
             let result = interpreter.run(&contract, Some(&ast), false, None);
@@ -206,8 +217,11 @@ fn deploy_boot_contracts_for_range(
                     ueprint!("Error deploying boot contract {contract_id}: {}", e.message);
                 }
             }
+            newly_deployed.insert(contract_id, result);
         }
     }
+
+    newly_deployed
 }
 
 impl AnnotatedExecutionResult {
@@ -250,10 +264,9 @@ impl Session {
 
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
         let boot_contracts = if with_boot_contracts {
-            // Deploy all boot contracts whose epoch <= session's start epoch (Epoch2_05).
-            // This means starting at epoch 2.05 deploys all contracts (since 2.05 is the
-            // earliest epoch), but starting at a lower epoch would deploy fewer.
-            deploy_boot_contracts(&settings, &mut interpreter, Some(StacksEpochId::Epoch2_05))
+            // Deploy all boot contracts whose epoch <= the interpreter's current epoch.
+            let initial_epoch = interpreter.datastore.get_current_epoch();
+            deploy_boot_contracts(&settings, &mut interpreter, Some(initial_epoch))
         } else {
             BTreeMap::new()
         };
@@ -1204,13 +1217,14 @@ impl Session {
         // deploys contracts with epochs between the current epoch
         // and the target epoch (exclusive of current, inclusive of target).
         let current = self.interpreter.datastore.get_current_epoch();
-        deploy_boot_contracts_for_range(
+        let newly_deployed = deploy_boot_contracts_for_range(
             current,
             epoch,
             &self.settings,
             &mut self.interpreter,
             &self.boot_contracts,
         );
+        self.boot_contracts.extend(newly_deployed);
 
         self.interpreter.set_current_epoch(epoch);
         if epoch >= StacksEpochId::Epoch30 {
