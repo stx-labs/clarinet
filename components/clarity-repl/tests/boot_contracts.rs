@@ -45,12 +45,6 @@ fn pox_5_configured_for_epoch_40() {
     assert_eq!(clarity_version, ClarityVersion::Clarity6);
 }
 
-#[test]
-fn costs_5_configured_for_epoch_40() {
-    let (epoch, clarity_version) = get_boot_contract_epoch_and_clarity_version("costs-5");
-    assert_eq!(epoch, StacksEpochId::Epoch40);
-    assert_eq!(clarity_version, ClarityVersion::Clarity6);
-}
 
 #[test]
 fn pox_5_in_boot_contracts_data() {

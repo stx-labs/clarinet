@@ -20,7 +20,7 @@ use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
 use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
-    EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult,
+    EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult, time_tracker::TimeTracker,
 };
 use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
@@ -290,6 +290,7 @@ impl ClarityInterpreter {
             contract.epoch.resolve(),
             contract.clarity_version,
             true,
+            TimeTracker::unlimited(),
         )
         .map_err(|boxed_error| boxed_error.0.diagnostic)?;
 
