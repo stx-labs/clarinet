@@ -322,6 +322,7 @@ pub fn get_boot_contract_epoch_and_clarity_version(
         "pox-3" => (StacksEpochId::Epoch24, ClarityVersion::Clarity2),
         "pox-2" | "costs-3" => (StacksEpochId::Epoch21, ClarityVersion::Clarity2),
         "costs-2" => (StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
+        "sbtc-registry" | "sbtc-token" => (StacksEpochId::Epoch30, ClarityVersion::Clarity3),
         "genesis" | "lockup" | "bns" | "cost-voting" | "costs" | "pox" => {
             (StacksEpochId::Epoch20, ClarityVersion::Clarity1)
         }
@@ -333,4 +334,33 @@ pub fn get_boot_contract_epoch_and_clarity_version(
         }
     };
     (epoch, clarity_version)
+}
+
+/// Returns the list of boot contract names that belong to this epoch,
+/// sorted in deployment order within the epoch.
+pub fn boot_contracts_for_epoch(epoch: StacksEpochId) -> Vec<&'static str> {
+    match epoch {
+        StacksEpochId::Epoch20 => {
+            vec!["genesis", "lockup", "bns", "cost-voting", "costs", "pox"]
+        }
+        StacksEpochId::Epoch2_05 => vec!["costs-2"],
+        StacksEpochId::Epoch21 => vec!["pox-2", "costs-3"],
+        StacksEpochId::Epoch24 => vec!["pox-3"],
+        StacksEpochId::Epoch25 => vec!["pox-4", "signers", "signers-voting"],
+        StacksEpochId::Epoch30 => vec!["sbtc-registry", "sbtc-token"],
+        StacksEpochId::Epoch33 => vec!["costs-4"],
+        StacksEpochId::Epoch40 => vec!["costs-5", "pox-5"],
+        _ => vec![],
+    }
+}
+
+/// Returns all boot contract names, grouped by their associated epoch,
+/// sorted by epoch order. Includes sbtc-registry and sbtc-token at epoch 3.0.
+pub fn boot_contracts_by_epoch() -> BTreeMap<StacksEpochId, Vec<&'static str>> {
+    let mut map = BTreeMap::new();
+    for name in BOOT_CONTRACTS_NAMES.iter() {
+        let (epoch, _) = get_boot_contract_epoch_and_clarity_version(name);
+        map.entry(epoch).or_insert_with(Vec::new).push(*name);
+    }
+    map
 }
