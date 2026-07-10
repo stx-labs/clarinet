@@ -829,7 +829,7 @@ impl SDK {
     pub fn call_read_only_fn(&mut self, args: &CallFnArgs) -> Result<TransactionRes, String> {
         if let Ok(interface) = self.get_function_interface(&args.contract, &args.method) {
             if interface.access != ContractInterfaceFunctionAccess::read_only {
-                return Err(format!("{} is not a read-only function", &args.method));
+                return Err(format!("{} is not a read-only function", args.method));
             }
         }
         self.call_contract_fn(args, false)
@@ -842,7 +842,7 @@ impl SDK {
     ) -> Result<TransactionRes, String> {
         if let Ok(interface) = self.get_function_interface(&args.contract, &args.method) {
             if interface.access != ContractInterfaceFunctionAccess::public {
-                return Err(format!("{} is not a public function", &args.method));
+                return Err(format!("{} is not a public function", args.method));
             }
         }
 
@@ -860,7 +860,7 @@ impl SDK {
     ) -> Result<TransactionRes, String> {
         if let Ok(interface) = self.get_function_interface(&args.contract, &args.method) {
             if interface.access != ContractInterfaceFunctionAccess::private {
-                return Err(format!("{} is not a private function", &args.method));
+                return Err(format!("{} is not a private function", args.method));
             }
         }
         if advance_chain_tip {

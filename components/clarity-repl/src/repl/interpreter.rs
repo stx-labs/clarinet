@@ -18,9 +18,10 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::events::*;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
 use clarity::vm::representations::{Span, SymbolicExpression};
+use clarity::vm::time_tracker::TimeTracker;
 use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvalHook,
-    EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult, time_tracker::TimeTracker,
+    EvaluationResult, ExecutionResult, ParsedContract, SnippetEvaluationResult,
 };
 use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,

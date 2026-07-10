@@ -45,7 +45,6 @@ fn pox_5_configured_for_epoch_40() {
     assert_eq!(clarity_version, ClarityVersion::Clarity6);
 }
 
-
 #[test]
 fn pox_5_in_boot_contracts_data() {
     let pox_5_testnet = format!("{BOOT_TESTNET_ADDRESS}.pox-5");

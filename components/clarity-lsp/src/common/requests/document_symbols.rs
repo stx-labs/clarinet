@@ -302,7 +302,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
 
         self.symbols.push(build_symbol(
             &name.to_owned(),
-            Some(format!("NFT {}", &nft_type)),
+            Some(format!("NFT {}", nft_type)),
             ClaritySymbolKind::TOKEN,
             &expr.span,
             None,
