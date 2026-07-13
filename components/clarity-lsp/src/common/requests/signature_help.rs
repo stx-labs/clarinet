@@ -56,7 +56,7 @@ pub fn get_signatures(
             let label = if output_type.eq("Not Applicable") {
                 String::from(signature)
             } else {
-                format!("{} -> {}", signature, output_type)
+                format!("{signature} -> {output_type}")
             };
 
             SignatureInformation {
