@@ -1045,7 +1045,7 @@ fn fund_genesis_account(
         while !boot_completed_moved.load(Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
-        let node_rpc_url = format!("http://{}", stacks_api_host_moved);
+        let node_rpc_url = format!("http://{stacks_api_host_moved}");
         let stacks_rpc = StacksRpc::new(&node_rpc_url);
 
         let info = match stacks_rpc.call_with_retry(|client| client.get_info(), 5) {

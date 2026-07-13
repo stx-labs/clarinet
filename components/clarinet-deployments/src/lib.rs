@@ -972,8 +972,7 @@ pub async fn generate_default_deployment_with_cache(
         let mut source = sources
             .get(contract_location.to_string_lossy().as_ref())
             .ok_or(format!(
-                "Invalid Clarinet.toml, source file not found for: {}",
-                name
+                "Invalid Clarinet.toml, source file not found for: {name}"
             ))?
             .clone();
 
