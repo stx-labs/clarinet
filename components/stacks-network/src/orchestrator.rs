@@ -900,7 +900,7 @@ impl DevnetOrchestrator {
             );
         }
 
-        for (_, account) in network_config.accounts.iter() {
+        for account in network_config.accounts.values() {
             stacks_conf.push_str(&formatdoc!(
                 r#"
                 [[ustx_balance]]
@@ -2123,7 +2123,7 @@ impl DevnetOrchestrator {
         )
         .await?;
         // Index devnet's wallets by default
-        for (_, account) in accounts.iter() {
+        for account in accounts.values() {
             let address = Address::from_str(&account.btc_address)
                 .map_err(|e| format!("unable to create address: {e:?}"))?;
             register_descriptor(
