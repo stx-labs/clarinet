@@ -62,13 +62,13 @@ pub static API_REF: LazyLock<HashMap<String, (String, Option<FunctionAPI>)>> =
                 (
                     Vec::from([
                         &code(
-                            format!("{} -> {}", &reference.signature, &reference.output_type)
+                            format!("{} -> {}", reference.signature, reference.output_type)
                                 .as_str(),
                         ),
                         separator,
                         &reference.description,
                         separator,
-                        &format!("Introduced in **{}**  ", &reference.min_version),
+                        &format!("Introduced in **{}**  ", reference.min_version),
                         &format_removed_in(reference.max_version),
                         separator,
                         "**Example**",
@@ -88,7 +88,7 @@ pub static API_REF: LazyLock<HashMap<String, (String, Option<FunctionAPI>)>> =
                     Vec::from([
                         reference.description,
                         separator,
-                        &format!("Introduced in **{}**  ", &reference.min_version),
+                        &format!("Introduced in **{}**  ", reference.min_version),
                         &format_removed_in(reference.max_version),
                         separator,
                         "**Example**",

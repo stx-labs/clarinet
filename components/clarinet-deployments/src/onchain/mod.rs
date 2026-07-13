@@ -326,12 +326,12 @@ pub fn apply_on_chain_deployment(
     let mut stx_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
     let mut btc_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
     if !fetch_initial_nonces {
-        for (_, account) in network_manifest.accounts.iter() {
+        for account in network_manifest.accounts.values() {
             accounts_cached_nonces.insert(account.stx_address.clone(), 0);
         }
     }
 
-    for (_, account) in network_manifest.accounts.iter() {
+    for account in network_manifest.accounts.values() {
         stx_accounts_lookup.insert(account.stx_address.clone(), account);
         btc_accounts_lookup.insert(account.btc_address.clone(), account);
     }
@@ -827,7 +827,7 @@ pub fn apply_on_chain_deployment(
 
             // Handle Stacks releated checks
             if stacks_tip_height > last_stacks_chain_check_at_height {
-                for (_, tracker) in ongoing_batch.iter_mut() {
+                for tracker in ongoing_batch.values_mut() {
                     let TransactionStatus::Broadcasted(brodcasting_status, _) = &tracker.status
                     else {
                         continue;
@@ -874,7 +874,7 @@ pub fn apply_on_chain_deployment(
 
             // Handle Bitcoin releated checks
             if bitcoin_tip_height > last_bitcoin_chain_check_at_height {
-                for (_, tracker) in ongoing_batch.iter_mut() {
+                for tracker in ongoing_batch.values_mut() {
                     let TransactionStatus::Broadcasted(brodcasting_status, _) = &tracker.status
                     else {
                         continue;

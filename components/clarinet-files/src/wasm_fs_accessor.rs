@@ -48,9 +48,9 @@ impl WASMFileSystemAccessor {
             match request_promise {
                 Ok(promise) => match JsFuture::from(Promise::resolve(&promise)).await {
                     Ok(js_data) => Ok(js_data),
-                    Err(err) => Err(format!("error: {:?}", &err)),
+                    Err(err) => Err(format!("error: {err:?}")),
                 },
-                Err(err) => Err(format!("error: {:?}", &err)),
+                Err(err) => Err(format!("error: {err:?}")),
             }
         })
     }

@@ -331,7 +331,7 @@ impl EditorState {
 
     pub fn clear_protocol(&mut self, manifest_location: &Path) {
         if let Some(protocol) = self.protocols.remove(manifest_location) {
-            for (contract_location, _) in protocol.contracts.iter() {
+            for contract_location in protocol.contracts.keys() {
                 self.contracts_lookup.remove(contract_location);
             }
         }
@@ -645,7 +645,7 @@ impl EditorState {
         let mut erroring_files = HashSet::new();
         let mut warning_files = HashSet::new();
 
-        for (_, protocol_state) in self.protocols.iter() {
+        for protocol_state in self.protocols.values() {
             for (contract_url, state) in protocol_state.contracts.iter() {
                 let mut diags: Vec<LintDiagnostic> = vec![];
 
