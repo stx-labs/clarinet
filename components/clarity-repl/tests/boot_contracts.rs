@@ -32,7 +32,7 @@ fn can_run_boot_contracts() {
             }
             Err(err) => {
                 dbg!(&err);
-                panic!("failed to interpret {} boot contract", &boot_contract.name);
+                panic!("failed to interpret {} boot contract", boot_contract.name);
             }
         }
     }
