@@ -13,7 +13,11 @@ const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
 let simnet: Simnet;
 
-const nbOfBootContracts = 32;
+// Boot contracts deployed through Epoch31 (the highest epoch in Clarinet.toml):
+// 13 names × 2 addresses (testnet + mainnet) + 2 sbtc contracts at Epoch30
+const nbOfBootContracts = 28;
+// After setEpoch("3.4") (Epoch34), costs-4 (Epoch33) is also deployed: +2
+const nbOfBootContractsAtEpoch34 = nbOfBootContracts + 2;
 const latestEpochStr = "3.4";
 
 const deploymentPlanPath = path.join(
@@ -445,7 +449,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(res.result).toStrictEqual(Cl.int(42));
 
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(nbOfBootContracts + 5);
+    expect(contractInterfaces).toHaveLength(nbOfBootContractsAtEpoch34 + 5);
   });
 
   it("can deploy contracts", () => {
@@ -455,7 +459,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(deployRes.result).toStrictEqual(Cl.bool(true));
 
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(nbOfBootContracts + 6);
+    expect(contractInterfaces).toHaveLength(nbOfBootContractsAtEpoch34 + 6);
 
     const addRes = simnet.callPublicFn("op", "add", [Cl.uint(13), Cl.uint(29)], address1);
     expect(addRes.result).toStrictEqual(Cl.ok(Cl.uint(42)));

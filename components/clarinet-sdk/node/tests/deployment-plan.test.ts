@@ -7,7 +7,12 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { initSimnet, generateDeployement } from "..";
 import { Cl } from "@stacks/transactions";
 
-const nbOfBootContracts = 32;
+// Boot contracts deployed through Epoch31 (Clarinet.toml highest epoch):
+// 13 names × 2 addresses + 2 sbtc contracts = 28
+const nbOfBootContractsEpoch31 = 28;
+// Boot contracts deployed through Epoch24 (LightManifest.toml highest epoch):
+// 10 names × 2 addresses = 20
+const nbOfBootContractsEpoch24 = 20;
 
 const deploymentPlanPath = path.join(
   process.cwd(),
@@ -62,7 +67,7 @@ describe("initSimnet deployment plans test", async () => {
 
     // test that all 3 contracts are deployed
     const contracts = simnet.getContractsInterfaces();
-    expect(contracts.size).toBe(nbOfBootContracts + 5);
+    expect(contracts.size).toBe(nbOfBootContractsEpoch31 + 5);
 
     // the additional custom tx should have been applied
     const count = simnet.getDataVar("counter", "count");
@@ -76,7 +81,7 @@ describe("initSimnet deployment plans test", async () => {
 
     // only two contract should be deployed with the light manifest
     const contracts = simnet.getContractsInterfaces();
-    expect(contracts.size).toBe(nbOfBootContracts + 2);
+    expect(contracts.size).toBe(nbOfBootContractsEpoch24 + 2);
 
     // the additional custom tx should have been applied
     const count = simnet.getDataVar("counter", "count");

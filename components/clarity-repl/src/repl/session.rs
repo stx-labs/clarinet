@@ -1217,6 +1217,14 @@ impl Session {
         // deploys contracts with epochs between the current epoch
         // and the target epoch (exclusive of current, inclusive of target).
         let current = self.interpreter.datastore.get_current_epoch();
+
+        // Set the epoch first so boot contracts are deployed at the correct
+        // interpreter epoch (e.g. Clarity3 contracts must deploy at Epoch30+).
+        self.interpreter.set_current_epoch(epoch);
+        if epoch >= StacksEpochId::Epoch30 {
+            self.interpreter.set_tenure_height();
+        }
+
         let newly_deployed = deploy_boot_contracts_for_range(
             current,
             epoch,
@@ -1225,11 +1233,6 @@ impl Session {
             &self.boot_contracts,
         );
         self.boot_contracts.extend(newly_deployed);
-
-        self.interpreter.set_current_epoch(epoch);
-        if epoch >= StacksEpochId::Epoch30 {
-            self.interpreter.set_tenure_height();
-        }
     }
 
     pub fn encode(&mut self, cmd: &str) -> String {
