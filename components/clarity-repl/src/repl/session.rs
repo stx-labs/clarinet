@@ -172,27 +172,28 @@ fn deploy_boot_contracts_for_range(
         return newly_deployed; // no transition, nothing to deploy
     }
 
-    // Deploy sbtc boot contracts if they fall in the range
-    let sbtc_epoch = StacksEpochId::Epoch30;
-    if sbtc_epoch > from_epoch && sbtc_epoch <= to_epoch {
-        for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
-            // Skip if already deployed
-            if already_deployed.contains_key(contract_id)
-                || newly_deployed.contains_key(contract_id)
-            {
-                continue;
-            }
-            let result = interpreter.run(contract, Some(ast), false, None);
-            if let Err(errs) = &result {
-                for e in errs {
-                    ueprint!(
-                        "Error deploying sbtc boot contract {contract_id}: {}",
-                        e.message
-                    );
-                }
-            }
-            newly_deployed.insert(contract_id.clone(), result);
+    // Deploy sbtc boot contracts if they fall in the range.
+    // Derive the epoch per-contract so this stays correct if SBTC_BOOT_CONTRACTS
+    // ever gains contracts at different epochs.
+    for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
+        let (sbtc_epoch, _) =
+            boot::get_boot_contract_epoch_and_clarity_version(contract_id.name.as_str());
+        if sbtc_epoch <= from_epoch || sbtc_epoch > to_epoch {
+            continue;
         }
+        if already_deployed.contains_key(contract_id) || newly_deployed.contains_key(contract_id) {
+            continue;
+        }
+        let result = interpreter.run(contract, Some(ast), false, None);
+        if let Err(errs) = &result {
+            for e in errs {
+                ueprint!(
+                    "Error deploying sbtc boot contract {contract_id}: {}",
+                    e.message
+                );
+            }
+        }
+        newly_deployed.insert(contract_id.clone(), result);
     }
 
     // Deploy regular boot contracts that fall in the range
