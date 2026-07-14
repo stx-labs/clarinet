@@ -13,9 +13,10 @@ const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
 let simnet: Simnet;
 
-// Boot contracts deployed through Epoch31 (the highest epoch in Clarinet.toml):
-// 13 names × 2 addresses (testnet + mainnet) + 2 sbtc contracts at Epoch30
-const nbOfBootContracts = 28;
+// Boot contracts with valid interfaces deployed through Epoch31 (the highest epoch in Clarinet.toml):
+// 12 names × 2 addresses (genesis has no functions and deploys as a snippet)
+// + 2 sbtc contracts at Epoch30 = 26
+const nbOfBootContracts = 26;
 // After setEpoch("3.4") (Epoch34), costs-4 (Epoch33) is also deployed: +2
 const nbOfBootContractsAtEpoch34 = nbOfBootContracts + 2;
 const latestEpochStr = "3.4";

@@ -7,12 +7,12 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { initSimnet, generateDeployement } from "..";
 import { Cl } from "@stacks/transactions";
 
-// Boot contracts deployed through Epoch31 (Clarinet.toml highest epoch):
-// 13 names × 2 addresses + 2 sbtc contracts = 28
-const nbOfBootContractsEpoch31 = 28;
-// Boot contracts deployed through Epoch24 (LightManifest.toml highest epoch):
-// 10 names × 2 addresses = 20
-const nbOfBootContractsEpoch24 = 20;
+// Boot contracts with valid interfaces deployed through Epoch31 (Clarinet.toml highest epoch):
+// 12 names × 2 addresses (genesis has no functions) + 2 sbtc contracts = 26
+const nbOfBootContractsEpoch31 = 26;
+// Boot contracts with valid interfaces deployed through Epoch24 (LightManifest.toml highest epoch):
+// 9 names × 2 addresses (genesis has no functions) = 18
+const nbOfBootContractsEpoch24 = 18;
 
 const deploymentPlanPath = path.join(
   process.cwd(),

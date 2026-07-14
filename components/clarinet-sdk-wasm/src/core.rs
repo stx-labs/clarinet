@@ -651,8 +651,35 @@ impl SDK {
             DEFAULT_EPOCH
         });
 
-        let session = self.get_session_mut();
-        session.update_epoch(epoch);
+        self.get_session_mut().update_epoch(epoch);
+
+        // Propagate any newly deployed boot contracts into contracts_interfaces.
+        let new_entries: Vec<_> = self
+            .get_session()
+            .boot_contracts
+            .values()
+            .filter_map(|result| {
+                result.as_ref().ok().and_then(|exec| {
+                    if let EvaluationResult::Contract(ref c) = exec.result {
+                        c.contract
+                            .analysis
+                            .contract_interface
+                            .as_ref()
+                            .map(|iface| {
+                                (
+                                    c.contract.analysis.contract_identifier.clone(),
+                                    iface.clone(),
+                                )
+                            })
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        for (contract_id, interface) in new_entries {
+            self.contracts_interfaces.insert(contract_id, interface);
+        }
     }
 
     #[wasm_bindgen(js_name=getContractsInterfaces)]
