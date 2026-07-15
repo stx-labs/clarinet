@@ -21,6 +21,27 @@ use clarity_types::types::{
 use super::ast_visitor::TypedVar;
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 
+/// Contract exists but was deployed at a lower epoch than its dependency,
+/// meaning the dependency contract wasn't yet available when this contract
+/// was deployed.
+#[derive(Debug)]
+pub struct IncorrectContractHeight {
+    pub contract_id: String,
+    pub contract_epoch: StacksEpochId,
+    pub dep_contract_id: String,
+    pub dep_epoch: StacksEpochId,
+}
+
+impl std::fmt::Display for IncorrectContractHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Contract '{}' is deployed at epoch {}, but dependency '{}' requires epoch {}.\n The dependency contract was deployed at a later epoch than this contract.",
+            self.contract_id, self.contract_epoch, self.dep_contract_id, self.dep_epoch
+        )
+    }
+}
+
 /// Extended runtime check error type that wraps stacks-core's `RuntimeCheckErrorKind`
 /// and adds clarinet-specific error variants.
 ///
@@ -30,55 +51,20 @@ use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 pub enum ClarinetRuntimeCheckErrorKind {
     /// Wraps the original stacks-core error variants.
     FromStacksCore(RuntimeCheckErrorKind),
-    /// Contract exists but was deployed at a lower epoch than its dependency,
-    /// meaning the dependency contract wasn't yet available when this contract
-    /// was deployed.
-    IncorrectContractHeight {
-        contract_id: String,
-        contract_epoch: StacksEpochId,
-        dep_contract_id: String,
-        dep_epoch: StacksEpochId,
-    },
+    /// Contract exists but was deployed at a lower epoch than its dependency.
+    IncorrectContractHeight(IncorrectContractHeight),
 }
 
 impl std::fmt::Display for ClarinetRuntimeCheckErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ClarinetRuntimeCheckErrorKind::FromStacksCore(e) => write!(f, "{e}"),
-            ClarinetRuntimeCheckErrorKind::IncorrectContractHeight {
-                contract_id,
-                contract_epoch,
-                dep_contract_id,
-                dep_epoch,
-            } => {
-                write!(
-                    f,
-                    "{}",
-                    build_incorrect_contract_height_message(
-                        contract_id.clone(),
-                        *contract_epoch,
-                        dep_contract_id.clone(),
-                        *dep_epoch,
-                    )
-                )
-            }
+            ClarinetRuntimeCheckErrorKind::IncorrectContractHeight(e) => write!(f, "{e}"),
         }
     }
 }
 
 impl std::error::Error for ClarinetRuntimeCheckErrorKind {}
-
-pub fn build_incorrect_contract_height_message(
-    contract_id: String,
-    contract_epoch: StacksEpochId,
-    dep_contract_id: String,
-    dep_epoch: StacksEpochId,
-) -> String {
-    format!(
-        "Contract '{}' is deployed at epoch {}, but dependency '{}' requires epoch {}. The dependency contract was deployed at a later epoch than this contract.",
-        contract_id, contract_epoch, dep_contract_id, dep_epoch
-    )
-}
 
 impl From<RuntimeCheckErrorKind> for ClarinetRuntimeCheckErrorKind {
     fn from(e: RuntimeCheckErrorKind) -> Self {
@@ -353,12 +339,14 @@ impl<'a> ASTDependencyDetector<'a> {
                     .get(&dep.contract_id)
                     .unwrap_or(&StacksEpochId::Epoch20);
                 if contract_epoch < dep_epoch {
-                    return Err(ClarinetRuntimeCheckErrorKind::IncorrectContractHeight {
-                        contract_id: contract.to_string(),
-                        contract_epoch: *contract_epoch,
-                        dep_contract_id: dep.contract_id.to_string(),
-                        dep_epoch: *dep_epoch,
-                    });
+                    return Err(ClarinetRuntimeCheckErrorKind::IncorrectContractHeight(
+                        IncorrectContractHeight {
+                            contract_id: contract.to_string(),
+                            contract_epoch: *contract_epoch,
+                            dep_contract_id: dep.contract_id.to_string(),
+                            dep_epoch: *dep_epoch,
+                        },
+                    ));
                 }
                 let Some(dep_id) = lookup.get(&dep.contract_id) else {
                     // No need to report an error here, it will be caught
@@ -1685,18 +1673,30 @@ mod tests {
         let result = ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs);
 
         match result {
-            Err(ClarinetRuntimeCheckErrorKind::IncorrectContractHeight {
-                contract_id,
-                contract_epoch,
-                dep_contract_id,
-                dep_epoch,
-            }) => {
-                assert_eq!(contract_id, test_identifier.to_string());
-                assert_eq!(contract_epoch, StacksEpochId::Epoch21);
-                assert_eq!(dep_contract_id, foo.to_string());
-                assert_eq!(dep_epoch, StacksEpochId::Epoch24);
+            Err(ClarinetRuntimeCheckErrorKind::IncorrectContractHeight(e)) => {
+                assert_eq!(e.contract_id, test_identifier.to_string());
+                assert_eq!(e.contract_epoch, StacksEpochId::Epoch21);
+                assert_eq!(e.dep_contract_id, foo.to_string());
+                assert_eq!(e.dep_epoch, StacksEpochId::Epoch24);
+                let msg = e.to_string();
+                assert!(
+                    msg.contains(&test_identifier.to_string()),
+                    "error message should contain the contract id"
+                );
+                assert!(
+                    msg.contains(&foo.to_string()),
+                    "error message should contain the dependency contract id"
+                );
+                assert!(
+                    msg.contains("2.1"),
+                    "error message should contain the contract epoch"
+                );
+                assert!(
+                    msg.contains("2.4"),
+                    "error message should contain the dependency epoch"
+                );
             }
-            other => panic!("expected IncorrectContractHeight, got {:?}", other),
+            other => panic!("expected IncorrectContractHeight, got {other:?}"),
         }
     }
 }
