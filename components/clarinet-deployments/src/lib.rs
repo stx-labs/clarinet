@@ -813,7 +813,7 @@ pub async fn generate_default_deployment_with_cache(
         if !matches!(network, StacksNetwork::Mainnet) && !simnet_remote_data {
             let mut ordered_contracts_ids =
                 ASTDependencyDetector::order_contracts(&requirements_deps, &contract_epochs)
-                    .map_err(|e| format!("unable to order requirements {e}"))?;
+                    .map_err(|e| format!("unable to order requirements: {e}"))?;
 
             // Filter out boot contracts from requirement dependencies.
             // On devnet, also filter sbtc boot contracts — they are deployed
