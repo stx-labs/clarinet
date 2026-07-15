@@ -354,6 +354,11 @@ impl TryFrom<SettingsFile> for Settings {
 fn compile_patterns(raw: Vec<String>, field_name: &str) -> Result<Vec<Pattern>, String> {
     raw.into_iter()
         .map(|p| {
+            if std::path::Path::new(&p).is_absolute() {
+                return Err(format!(
+                    "invalid glob pattern in {field_name}: \"{p}\": absolute paths are not supported, use paths relative to the project root"
+                ));
+            }
             Pattern::new(&p)
                 .map_err(|e| format!("invalid glob pattern in {field_name}: \"{p}\": {e}"))
         })
@@ -536,6 +541,32 @@ mod tests {
         assert!(!settings.should_analyze("contracts/legacy.clar"));
         assert!(settings.should_analyze("lib/utils.clar"));
         assert!(!settings.should_analyze("tests/foo.clar"));
+    }
+
+    #[test]
+    fn absolute_path_in_include_returns_error() {
+        let file = SettingsFile {
+            include: Some(OneOrList::One("/absolute/path/*.clar".to_string())),
+            ..Default::default()
+        };
+        let result = Settings::try_from(file);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("absolute paths are not supported"));
+    }
+
+    #[test]
+    fn absolute_path_in_exclude_returns_error() {
+        let file = SettingsFile {
+            exclude: Some(OneOrList::One("/absolute/path/*.clar".to_string())),
+            ..Default::default()
+        };
+        let result = Settings::try_from(file);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("absolute paths are not supported"));
     }
 
     #[test]
