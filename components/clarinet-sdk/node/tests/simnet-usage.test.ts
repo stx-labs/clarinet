@@ -13,7 +13,7 @@ const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
 let simnet: Simnet;
 
-const nbOfBootContracts = 32;
+const nbOfBootContracts = 30;
 const latestEpochStr = "3.4";
 
 const deploymentPlanPath = path.join(
