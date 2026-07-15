@@ -354,7 +354,7 @@ impl TryFrom<SettingsFile> for Settings {
 fn compile_patterns(raw: Vec<String>, field_name: &str) -> Result<Vec<Pattern>, String> {
     raw.into_iter()
         .map(|p| {
-            if std::path::Path::new(&p).is_absolute() {
+            if p.starts_with('/') || std::path::Path::new(&p).is_absolute() {
                 return Err(format!(
                     "invalid glob pattern in {field_name}: \"{p}\": absolute paths are not supported, use paths relative to the project root"
                 ));
@@ -560,6 +560,20 @@ mod tests {
     fn absolute_path_in_exclude_returns_error() {
         let file = SettingsFile {
             exclude: Some(OneOrList::One("/absolute/path/*.clar".to_string())),
+            ..Default::default()
+        };
+        let result = Settings::try_from(file);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("absolute paths are not supported"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_absolute_path_in_include_returns_error() {
+        let file = SettingsFile {
+            include: Some(OneOrList::One("C:\\absolute\\path\\*.clar".to_string())),
             ..Default::default()
         };
         let result = Settings::try_from(file);
