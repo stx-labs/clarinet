@@ -323,7 +323,7 @@ fn retrieve_executable_lines_and_branches(
             if let Some(children) = cur_expr.match_list() {
                 if let Some((func, args)) = try_parse_native_func(children) {
                     // handle code branches
-                    // (if, asserts!, unwrap!, unwrap-err!, and, or, match)
+                    // (if, asserts!, and, or, match)
                     match func {
                         NativeFunctions::If => {
                             let (_cond, args) = args.split_first().unwrap();
@@ -352,40 +352,6 @@ fn retrieve_executable_lines_and_branches(
                                 vec![
                                     (cond_expr.span.start_line, cond_expr.id),
                                     (error_expr.span.start_line, error_expr.id),
-                                ],
-                            );
-                        }
-                        NativeFunctions::UnwrapRet => {
-                            // unwrap!(input, thrown-value)
-                            // Branch 0 (input evaluated): always evaluated
-                            // Branch 1 (thrown path): evaluated when input is none/err
-                            let (Some(input), Some(thrown)) = (args.first(), args.get(1)) else {
-                                continue;
-                            };
-                            let input_expr = extract_expr_from_list(input);
-                            let thrown_expr = extract_expr_from_list(thrown);
-                            branches.insert(
-                                cur_expr.id,
-                                vec![
-                                    (input_expr.span.start_line, input_expr.id),
-                                    (thrown_expr.span.start_line, thrown_expr.id),
-                                ],
-                            );
-                        }
-                        NativeFunctions::UnwrapErrRet => {
-                            // unwrap-err!(input, thrown-value)
-                            // Branch 0 (input evaluated): always evaluated
-                            // Branch 1 (thrown path): evaluated when input is ok/some
-                            let (Some(input), Some(thrown)) = (args.first(), args.get(1)) else {
-                                continue;
-                            };
-                            let input_expr = extract_expr_from_list(input);
-                            let thrown_expr = extract_expr_from_list(thrown);
-                            branches.insert(
-                                cur_expr.id,
-                                vec![
-                                    (input_expr.span.start_line, input_expr.id),
-                                    (thrown_expr.span.start_line, thrown_expr.id),
                                 ],
                             );
                         }
