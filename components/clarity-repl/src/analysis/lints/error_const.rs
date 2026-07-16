@@ -110,7 +110,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
         let candidate_consts = constants
             .iter()
             // Ignore constants that don't start with `ERR_PREFIX`
-            .filter(|(name, _)| name.as_str().starts_with(ERR_PREFIX))
+            .filter(|(name, _)| name.starts_with(ERR_PREFIX))
             // Ignore constants we explicitly allow
             .filter(|(_, const_data)| !Self::allow(const_data, annotations));
 

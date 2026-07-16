@@ -89,7 +89,7 @@ fn infer_field_type_from_binding(
 
         // Check if it's a reserved variable
         if let Some(native_var) =
-            NativeVariables::lookup_by_name_at_version(value_atom.as_str(), &clarity_version)
+            NativeVariables::lookup_by_name_at_version(value_atom, &clarity_version)
         {
             match native_var {
                 NativeVariables::TxSender
@@ -284,7 +284,7 @@ fn get_argument_sizes(
         // Try reserved variables
         let clarity_version = ClarityVersion::default_for_epoch(epoch);
         if let Some(native_var) =
-            NativeVariables::lookup_by_name_at_version(var_name.as_str(), &clarity_version)
+            NativeVariables::lookup_by_name_at_version(var_name, &clarity_version)
         {
             if let Some((min, max)) = get_reserved_variable_size(native_var) {
                 return (Some(min), Some(max));

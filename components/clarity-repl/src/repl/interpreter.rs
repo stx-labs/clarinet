@@ -577,7 +577,7 @@ impl ClarityInterpreter {
                     .get_arguments()
                     .iter()
                     .zip(defined_func.get_arg_types().iter())
-                    .map(|(n, t)| format!("({} {})", n.as_str(), t))
+                    .map(|(n, t)| format!("({n} {t})"))
                     .collect();
 
                 functions.insert(name.to_string(), args);
