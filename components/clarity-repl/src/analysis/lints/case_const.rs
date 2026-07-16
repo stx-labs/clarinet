@@ -90,7 +90,7 @@ impl<'a, 'b> CaseConst<'a, 'b> {
             if Self::allow(const_data, annotations) {
                 continue;
             }
-            let Err(error) = match_screaming_snake_case(const_name.as_str()) else {
+            let Err(error) = match_screaming_snake_case(const_name) else {
                 continue;
             };
             let message = Self::make_diagnostic_message(const_name, &error);

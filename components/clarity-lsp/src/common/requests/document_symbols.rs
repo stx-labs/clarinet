@@ -129,7 +129,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
         for (name, expr) in values.iter() {
             if let Some(name) = name {
                 symbols.push(build_symbol(
-                    name.as_str(),
+                    name,
                     None,
                     ClaritySymbolKind::VALUE,
                     &expr.span,
@@ -346,7 +346,7 @@ impl<'a> ASTVisitor<'a> for ASTSymbols {
         let mut bindings_children: Vec<DocumentSymbol> = Vec::new();
         for (name, binding) in bindings.iter() {
             bindings_children.push(build_symbol(
-                name.as_str(),
+                name,
                 None,
                 ClaritySymbolKind::LET_BINDING,
                 &binding.value.span,

@@ -510,7 +510,7 @@ impl TraitCountVisitor for TraitCountCollector {
         }
 
         // Determine the containing function name for children
-        let fn_name = if is_function_definition(user_function.as_str()) {
+        let fn_name = if is_function_definition(user_function) {
             context.containing_fn_name.clone()
         } else {
             user_function.to_string()
@@ -573,7 +573,7 @@ impl<'a> TraitCountPropagator<'a> {
         // 1. It's not a function definition keyword
         // 2. It's not a trait call (trait names are in trait_names)
         // 3. It's not a known function from the contract (not in visited_functions or trait_counts)
-        !is_function_definition(user_function.as_str())
+        !is_function_definition(user_function)
             && !self.trait_names.contains_key(user_function)
             && !self.trait_counts.contains_key(fn_name_str)
             && !self.visited_functions.contains(fn_name_str)
@@ -707,9 +707,7 @@ impl<'a> TraitCountVisitor for TraitCountPropagator<'a> {
         user_function: &ClarityName,
         context: &TraitCountContext,
     ) {
-        if !is_function_definition(user_function.as_str())
-            && !self.trait_names.contains_key(user_function)
-        {
+        if !is_function_definition(user_function) && !self.trait_names.contains_key(user_function) {
             // This is a regular function call, not a trait call or function definition
             // Propagate trait counts from the callee to the caller
             let callee_name = user_function.to_string();
@@ -758,7 +756,7 @@ impl<'a> TraitCountVisitor for TraitCountPropagator<'a> {
         // If this is a function call, use the function name as context (for its body)
         // If this is a let-bound variable, keep the current context
         let fn_name_str = user_function.to_string();
-        let fn_name = if is_function_definition(user_function.as_str()) {
+        let fn_name = if is_function_definition(user_function) {
             context.containing_fn_name.clone()
         } else if self.is_let_bound_variable(user_function, &fn_name_str) {
             // This is a let-bound variable - keep the current context

@@ -896,7 +896,7 @@ impl DAPDebugger {
                 .database
                 .lookup_variable(
                     &contract_context.contract_identifier,
-                    name.as_str(),
+                    name,
                     data_types,
                     &DEFAULT_EPOCH,
                 )

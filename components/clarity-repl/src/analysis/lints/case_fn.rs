@@ -55,7 +55,7 @@ impl<'a, 'b> CaseFn<'a, 'b> {
         if Self::allow(annotation, annotations) {
             return;
         }
-        let Err(error) = match_kebab_case(strip_unused_suffix(name.as_str())) else {
+        let Err(error) = match_kebab_case(strip_unused_suffix(name)) else {
             return;
         };
         let message = Self::make_diagnostic_message(name, &error);
