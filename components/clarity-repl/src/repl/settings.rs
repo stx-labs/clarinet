@@ -121,11 +121,14 @@ pub struct SettingsFile {
     log_print_events: Option<LogPrintEvents>,
 }
 
-impl From<SettingsFile> for Settings {
-    fn from(file: SettingsFile) -> Self {
+impl TryFrom<SettingsFile> for Settings {
+    type Error = String;
+
+    fn try_from(file: SettingsFile) -> Result<Self, Self::Error> {
         let analysis = file
             .analysis
-            .map(analysis::Settings::from)
+            .map(analysis::Settings::try_from)
+            .transpose()?
             .unwrap_or_else(analysis::Settings::with_default_lints);
 
         let remote_data = file
@@ -133,12 +136,12 @@ impl From<SettingsFile> for Settings {
             .map(RemoteDataSettings::from)
             .unwrap_or_default();
 
-        Self {
+        Ok(Self {
             analysis,
             remote_data,
             log_print_events: file.log_print_events.unwrap_or_default(),
             show_timings: false,
-        }
+        })
     }
 }
 

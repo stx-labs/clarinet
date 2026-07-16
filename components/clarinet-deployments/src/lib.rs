@@ -48,17 +48,23 @@ pub fn setup_session_with_deployment(
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
     enable_analysis: bool,
 ) -> DeploymentGenerationArtifacts {
-    // Mark contracts not in the project manifest as requirements
-    // so that REPL analysis (linting) is skipped for them.
-    // This is needed when the deployment plan is loaded from YAML,
-    // where `skip_analysis` is not serialized. We match by location
-    // (absolute path) rather than contract name because requirements
-    // can share a name with a project contract.
+    // Mark contracts that should skip analysis:
+    // - All contracts when analysis is globally disabled
+    // - Contracts not in the project manifest (requirements)
+    // - Contracts excluded by include/exclude filters in analysis settings
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
                 if !enable_analysis || !manifest.contracts_settings.contains_key(&spec.location) {
                     spec.skip_analysis = true;
+                } else if let Ok(relative) = spec.location.strip_prefix(&manifest.root_dir) {
+                    if !manifest
+                        .repl_settings
+                        .analysis
+                        .should_analyze(&relative.to_string_lossy())
+                    {
+                        spec.skip_analysis = true;
+                    }
                 }
             }
         }
@@ -1485,8 +1491,10 @@ mod tests {
         session.update_epoch(epoch);
 
         // Enable default lints on the session so analysis actually runs
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
 
         let spec = EmulatedContractPublishSpecification {
             contract_name: ContractName::from_literal("lint-test"),
@@ -1519,8 +1527,10 @@ mod tests {
         session.update_epoch(epoch);
 
         // Enable default lints — but skip_analysis on the contract overrides
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
 
         let spec = EmulatedContractPublishSpecification {
             contract_name: ContractName::from_literal("lint-test"),
@@ -1558,8 +1568,10 @@ mod tests {
 
         // Enable default lints, then disable them globally
         // (this is what setup_session_with_deployment does when enable_analysis=false)
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
         session.interpreter.repl_settings.analysis.disable_all();
 
         let spec = EmulatedContractPublishSpecification {
@@ -1593,8 +1605,10 @@ mod tests {
         let epoch = StacksEpochId::Epoch25;
         session.update_epoch(epoch);
 
-        session.interpreter.repl_settings.analysis =
-            clarity_repl::analysis::Settings::from(clarity_repl::analysis::SettingsFile::default());
+        session.interpreter.repl_settings.analysis = clarity_repl::analysis::Settings::try_from(
+            clarity_repl::analysis::SettingsFile::default(),
+        )
+        .unwrap();
         if disable_analysis {
             session.interpreter.repl_settings.analysis.disable_all();
         }

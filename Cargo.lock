@@ -872,6 +872,7 @@ dependencies = [
  "debug_types",
  "divan",
  "futures",
+ "glob",
  "hiro-system-kit",
  "httparse",
  "indexmap 2.13.0",
