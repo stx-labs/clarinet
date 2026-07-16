@@ -301,6 +301,27 @@ pub struct SDK {
     api_base_url: Option<String>,
 }
 
+/// Extracts the contract identifier and interface from a successful execution result.
+/// Returns `None` if the result is not a contract deployment or has no interface.
+fn contract_interface_from_result(
+    result: &ExecutionResult,
+) -> Option<(QualifiedContractIdentifier, ContractInterface)> {
+    if let EvaluationResult::Contract(ref c) = result.result {
+        c.contract
+            .analysis
+            .contract_interface
+            .as_ref()
+            .map(|iface| {
+                (
+                    c.contract.analysis.contract_identifier.clone(),
+                    iface.clone(),
+                )
+            })
+    } else {
+        None
+    }
+}
+
 #[wasm_bindgen]
 impl SDK {
     #[wasm_bindgen(constructor)]
@@ -446,14 +467,8 @@ impl SDK {
         {
             match result {
                 Ok(execution_result) => {
-                    if let EvaluationResult::Contract(ref result) = &execution_result.result {
-                        let contract_id = result.contract.analysis.contract_identifier.clone();
-                        if let Some(contract_interface) =
-                            &result.contract.analysis.contract_interface
-                        {
-                            contracts_interfaces
-                                .insert(contract_id.clone(), contract_interface.clone());
-                        }
+                    if let Some((id, iface)) = contract_interface_from_result(&execution_result) {
+                        contracts_interfaces.insert(id, iface);
                     }
                 }
                 Err(diagnostics) => {
@@ -659,22 +674,10 @@ impl SDK {
             .boot_contracts
             .values()
             .filter_map(|result| {
-                result.as_ref().ok().and_then(|exec| {
-                    if let EvaluationResult::Contract(ref c) = exec.result {
-                        c.contract
-                            .analysis
-                            .contract_interface
-                            .as_ref()
-                            .map(|iface| {
-                                (
-                                    c.contract.analysis.contract_identifier.clone(),
-                                    iface.clone(),
-                                )
-                            })
-                    } else {
-                        None
-                    }
-                })
+                result
+                    .as_ref()
+                    .ok()
+                    .and_then(|exec| contract_interface_from_result(exec))
             })
             .collect();
         for (contract_id, interface) in new_entries {

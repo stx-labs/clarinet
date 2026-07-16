@@ -330,15 +330,3 @@ pub fn get_boot_contract_epoch_and_clarity_version(
     };
     (epoch, clarity_version)
 }
-
-/// Returns all boot contract names, grouped by their associated epoch,
-/// sorted by epoch order. Includes sbtc-registry and sbtc-token at epoch 3.0.
-pub fn boot_contracts_by_epoch() -> BTreeMap<StacksEpochId, Vec<&'static str>> {
-    let mut map = BTreeMap::new();
-    let sbtc_names: &[&str] = &["sbtc-registry", "sbtc-token"];
-    for name in BOOT_CONTRACTS_NAMES.iter().chain(sbtc_names) {
-        let (epoch, _) = get_boot_contract_epoch_and_clarity_version(name);
-        map.entry(epoch).or_insert_with(Vec::new).push(*name);
-    }
-    map
-}
