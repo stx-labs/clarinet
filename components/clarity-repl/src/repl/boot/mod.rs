@@ -35,7 +35,6 @@ const POX_3_BODY: &str = std::include_str!("pox-3.clar");
 const POX_4_BODY: &str = std::include_str!("pox-4.clar");
 const POX_5_BODY: &str = std::include_str!("pox-5.clar");
 
-const BOOT_CODE_COSTS_5: &str = std::include_str!("costs-5.clar");
 const BOOT_CODE_SIGNERS: &str = std::include_str!("signers.clar");
 const BOOT_CODE_SIGNERS_VOTING: &str = std::include_str!("signers-voting.clar");
 
@@ -123,7 +122,7 @@ fn make_pox_5_testnet() -> String {
 
 static BOOT_CODE_POX_5_TESTNET: LazyLock<String> = LazyLock::new(make_pox_5_testnet);
 
-pub static BOOT_CODE_MAINNET: LazyLock<[(&'static str, &'static str); 16]> = LazyLock::new(|| {
+pub static BOOT_CODE_MAINNET: LazyLock<[(&'static str, &'static str); 15]> = LazyLock::new(|| {
     [
         ("pox", &BOOT_CODE_POX_MAINNET),
         ("lockup", BOOT_CODE_LOCKUP),
@@ -139,12 +138,11 @@ pub static BOOT_CODE_MAINNET: LazyLock<[(&'static str, &'static str); 16]> = Laz
         ("signers", BOOT_CODE_SIGNERS),
         ("signers-voting", BOOT_CODE_SIGNERS_VOTING),
         ("costs-4", BOOT_CODE_COSTS_4),
-        ("costs-5", BOOT_CODE_COSTS_5),
         ("pox-5", POX_5_BODY),
     ]
 });
 
-pub static BOOT_CODE_TESTNET: LazyLock<[(&'static str, &'static str); 16]> = LazyLock::new(|| {
+pub static BOOT_CODE_TESTNET: LazyLock<[(&'static str, &'static str); 15]> = LazyLock::new(|| {
     [
         ("pox", &BOOT_CODE_POX_TESTNET),
         ("lockup", BOOT_CODE_LOCKUP),
@@ -160,7 +158,6 @@ pub static BOOT_CODE_TESTNET: LazyLock<[(&'static str, &'static str); 16]> = Laz
         ("signers", BOOT_CODE_SIGNERS),
         ("signers-voting", BOOT_CODE_SIGNERS_VOTING),
         ("costs-4", BOOT_CODE_COSTS_4),
-        ("costs-5", BOOT_CODE_COSTS_5),
         ("pox-5", &BOOT_CODE_POX_5_TESTNET),
     ]
 });
@@ -183,7 +180,6 @@ pub const BOOT_CONTRACTS_NAMES: &[&str] = &[
     "signers",
     "signers-voting",
     "costs-4",
-    "costs-5",
     "pox-5",
 ];
 
@@ -195,7 +191,7 @@ pub static BOOT_CONTRACTS_DATA: LazyLock<
     BTreeMap<QualifiedContractIdentifier, (ClarityContract, ContractAST)>,
 > = LazyLock::new(|| {
     let mut result = BTreeMap::new();
-    let deploy: [(&StandardPrincipalData, [(&str, &str); 16]); 2] = [
+    let deploy: [(&StandardPrincipalData, [(&str, &str); 15]); 2] = [
         (&*BOOT_TESTNET_PRINCIPAL, *BOOT_CODE_TESTNET),
         (&*BOOT_MAINNET_PRINCIPAL, *BOOT_CODE_MAINNET),
     ];
@@ -314,7 +310,6 @@ pub fn get_boot_contract_epoch_and_clarity_version(
 ) -> (StacksEpochId, ClarityVersion) {
     let (epoch, clarity_version) = match contract_name {
         "pox-5" => (StacksEpochId::Epoch40, ClarityVersion::Clarity6),
-        "costs-5" => (StacksEpochId::Epoch40, ClarityVersion::Clarity6),
         "costs-4" => (StacksEpochId::Epoch33, ClarityVersion::Clarity4),
         "pox-4" | "signers" | "signers-voting" => {
             (StacksEpochId::Epoch25, ClarityVersion::Clarity2)
