@@ -480,15 +480,9 @@ impl SDK {
             .map(|p| p.to_path_buf())
             .unwrap_or_default();
         for (name, entry) in &manifest.project.override_boot_contracts_source {
-            let contract_name = match clarity::vm::ContractName::try_from(name.as_str()) {
-                Ok(name) => name,
-                Err(_) => {
-                    log!(
-                        "Warning: Skipping override boot contract '{}' - invalid contract name",
-                        name
-                    );
-                    continue;
-                }
+            let Ok(contract_name) = clarity::vm::ContractName::try_from(name.as_str()) else {
+                log!("Warning: Skipping override boot contract '{name}' - invalid contract name");
+                continue;
             };
             let contract_id = QualifiedContractIdentifier::new(
                 clarity_repl::repl::boot::BOOT_TESTNET_PRINCIPAL.clone(),
@@ -1229,8 +1223,8 @@ impl SDK {
             let name = contract_id.name.to_string();
             let is_override = overrides.contains_key(&name);
 
-            // Always include overridden boot contracts Only include default
-            // boot contracts when explicitly requested.
+            // Always include overridden boot contracts.
+            // Only include default boot contracts when explicitly requested.
             if !include_boot_contracts && !is_override {
                 continue;
             }
