@@ -472,6 +472,25 @@ impl SDK {
             contracts_locations.insert(contract_id.clone(), location.clone());
         }
 
+        // Register override boot contract file paths so LCOV coverage
+        // reports the correct source file for overridden contracts.
+        let project_root = manifest
+            .location
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        for (name, entry) in &manifest.project.override_boot_contracts_source {
+            let Ok(contract_name) = clarity::vm::ContractName::try_from(name.as_str()) else {
+                log!("Warning: Skipping override boot contract '{name}' - invalid contract name");
+                continue;
+            };
+            let contract_id = QualifiedContractIdentifier::new(
+                clarity_repl::repl::boot::BOOT_TESTNET_PRINCIPAL.clone(),
+                contract_name,
+            );
+            contracts_locations.insert(contract_id, project_root.join(&entry.path));
+        }
+
         let cache = ProjectCache {
             accounts,
             contracts_interfaces,
@@ -1199,11 +1218,30 @@ impl SDK {
             );
         }
 
-        if include_boot_contracts {
-            for (contract_id, (_, ast)) in clarity_repl::repl::boot::BOOT_CONTRACTS_DATA.iter() {
-                asts.insert(contract_id.clone(), ast.clone());
+        let overrides = &session.settings.override_boot_contracts_source;
+        for (contract_id, result) in session.boot_contracts.iter() {
+            let name = contract_id.name.to_string();
+            let is_override = overrides.contains_key(&name);
+
+            // Always include overridden boot contracts.
+            // Only include default boot contracts when explicitly requested.
+            if !include_boot_contracts && !is_override {
+                continue;
+            }
+
+            // Use the session's actual deployed ASTs rather than rebuilding
+            // from source (which would assign new expression IDs).
+            if let Ok(execution_result) = result {
+                if let EvaluationResult::Contract(ref contract_result) = execution_result.result {
+                    asts.insert(contract_id.clone(), contract_result.contract.ast.clone());
+                }
+            }
+            // For overridden boot contracts, the override file path is already
+            // in contract_paths from contracts_locations. For standard boot
+            // contracts, use the default boot contracts path.
+            if !is_override || !contract_paths.contains_key(&name) {
                 contract_paths.insert(
-                    contract_id.name.to_string(),
+                    name,
                     format!("{boot_contracts_path}/{}.clar", contract_id.name),
                 );
             }

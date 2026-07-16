@@ -224,7 +224,6 @@ impl Session {
         contract_paths: &BTreeMap<String, String>,
     ) -> String {
         if let Some(coverage_hook) = &mut self.coverage_hook {
-            println!("Collecting coverage data...");
             coverage_hook.collect_lcov_content(asts, contract_paths)
         } else {
             "".to_string()
