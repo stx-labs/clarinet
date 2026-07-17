@@ -18,6 +18,7 @@ use check_checker::CheckChecker;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level as ClarityDiagnosticLevel};
+use glob::Pattern;
 use indexmap::IndexMap;
 use linter::{LintLevel, LintMapBuilder, LintName};
 #[cfg(feature = "json_schema")]
@@ -145,6 +146,14 @@ pub struct Settings {
     passes: HashSet<Pass>,
     lints: HashMap<LintName, ClarityDiagnosticLevel>,
     check_checker: check_checker::Settings,
+    /// Compiled glob patterns for files to include in analysis.
+    #[serde(skip)]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    include: Vec<Pattern>,
+    /// Compiled glob patterns for files to exclude from analysis.
+    #[serde(skip)]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    exclude: Vec<Pattern>,
 }
 
 impl Settings {
@@ -158,6 +167,8 @@ impl Settings {
             passes,
             lints,
             check_checker: check_checker::Settings::default(),
+            include: Vec::new(),
+            exclude: Vec::new(),
         }
     }
 
@@ -209,6 +220,28 @@ impl Settings {
     pub fn lints(&self) -> &HashMap<LintName, ClarityDiagnosticLevel> {
         &self.lints
     }
+
+    /// Check if analysis should run for the given file path.
+    ///
+    /// - If `include` is set, the file must match at least one pattern.
+    /// - If `exclude` is set, the file must not match any pattern.
+    /// - If neither is set, all files are analyzed.
+    pub fn should_analyze(&self, path: &str) -> bool {
+        // Normalize path to forward slashes for consistent matching
+        let path = path.replace('\\', "/");
+
+        // If include patterns are set, file must match at least one
+        if !self.include.is_empty() && !self.include.iter().any(|p| p.matches(&path)) {
+            return false;
+        }
+
+        // If exclude patterns are set, file must not match any
+        if self.exclude.iter().any(|p| p.matches(&path)) {
+            return false;
+        }
+
+        true
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -246,10 +279,18 @@ pub struct SettingsFile {
     lint_groups: Option<IndexMap<LintGroup, BoolOr<LintLevel>>>,
     lints: Option<IndexMap<LintName, BoolOr<LintLevel>>>,
     check_checker: Option<check_checker::SettingsFile>,
+    /// Glob patterns for files to include in analysis.
+    #[serde(default)]
+    include: Option<OneOrList<String>>,
+    /// Glob patterns for files to exclude from analysis.
+    #[serde(default)]
+    exclude: Option<OneOrList<String>>,
 }
 
-impl From<SettingsFile> for Settings {
-    fn from(from_file: SettingsFile) -> Self {
+impl TryFrom<SettingsFile> for Settings {
+    type Error = String;
+
+    fn try_from(from_file: SettingsFile) -> Result<Self, Self::Error> {
         let mut settings = Self::with_default_lints();
 
         // Process lint groups first
@@ -288,8 +329,40 @@ impl From<SettingsFile> for Settings {
             settings.check_checker = check_checker::Settings::from(check_checker);
         }
 
-        settings
+        // Process include patterns
+        if let Some(include) = from_file.include {
+            let raw = match include {
+                OneOrList::One(s) => vec![s],
+                OneOrList::List(v) => v,
+            };
+            settings.include = compile_patterns(raw, "include")?;
+        }
+
+        // Process exclude patterns
+        if let Some(exclude) = from_file.exclude {
+            let raw = match exclude {
+                OneOrList::One(s) => vec![s],
+                OneOrList::List(v) => v,
+            };
+            settings.exclude = compile_patterns(raw, "exclude")?;
+        }
+
+        Ok(settings)
     }
+}
+
+fn compile_patterns(raw: Vec<String>, field_name: &str) -> Result<Vec<Pattern>, String> {
+    raw.into_iter()
+        .map(|p| {
+            if p.starts_with('/') || std::path::Path::new(&p).is_absolute() {
+                return Err(format!(
+                    "invalid glob pattern in {field_name}: \"{p}\": absolute paths are not supported, use paths relative to the project root"
+                ));
+            }
+            Pattern::new(&p)
+                .map_err(|e| format!("invalid glob pattern in {field_name}: \"{p}\": {e}"))
+        })
+        .collect()
 }
 
 pub fn run_analysis(
@@ -377,7 +450,7 @@ mod tests {
     /// `SettingsFile::default()`, which should produce the same defaults.
     #[test]
     fn settings_from_empty_settings_file_enables_default_lints() {
-        let settings = Settings::from(SettingsFile::default());
+        let settings = Settings::try_from(SettingsFile::default()).unwrap();
         assert!(!settings.lints.is_empty());
         assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
     }
@@ -391,15 +464,17 @@ mod tests {
             lint_groups: None,
             lints: None,
             check_checker: None,
+            include: None,
+            exclude: None,
         };
-        let settings = Settings::from(file);
+        let settings = Settings::try_from(file).unwrap();
         assert!(!settings.lints.is_empty());
         assert_eq!(settings.passes, HashSet::from(DEFAULT_PASSES));
     }
 
     #[test]
     fn disable_all_clears_lints_and_passes() {
-        let mut settings = Settings::from(SettingsFile::default());
+        let mut settings = Settings::try_from(SettingsFile::default()).unwrap();
         assert!(!settings.lints.is_empty());
         assert!(!settings.passes.is_empty());
 
@@ -410,12 +485,117 @@ mod tests {
 
     #[test]
     fn disable_all_passes_preserves_lints() {
-        let mut settings = Settings::from(SettingsFile::default());
+        let mut settings = Settings::try_from(SettingsFile::default()).unwrap();
         assert!(!settings.lints.is_empty());
         assert!(!settings.passes.is_empty());
 
         settings.disable_all_passes();
         assert!(!settings.lints.is_empty(), "lints should be preserved");
         assert!(settings.passes.is_empty());
+    }
+
+    #[test]
+    fn should_analyze_with_no_filters() {
+        let settings = Settings::with_default_lints();
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(settings.should_analyze("tests/bar.clar"));
+    }
+
+    #[test]
+    fn should_analyze_with_include_filter() {
+        let file = SettingsFile {
+            include: Some(OneOrList::One("contracts/*.clar".to_string())),
+            ..Default::default()
+        };
+        let settings = Settings::try_from(file).unwrap();
+
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
+    }
+
+    #[test]
+    fn should_analyze_with_exclude_filter() {
+        let file = SettingsFile {
+            exclude: Some(OneOrList::One("tests/*.clar".to_string())),
+            ..Default::default()
+        };
+        let settings = Settings::try_from(file).unwrap();
+
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
+    }
+
+    #[test]
+    fn should_analyze_with_include_and_exclude() {
+        let file = SettingsFile {
+            include: Some(OneOrList::List(vec![
+                "contracts/*.clar".to_string(),
+                "lib/*.clar".to_string(),
+            ])),
+            exclude: Some(OneOrList::One("contracts/legacy*.clar".to_string())),
+            ..Default::default()
+        };
+        let settings = Settings::try_from(file).unwrap();
+
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(!settings.should_analyze("contracts/legacy.clar"));
+        assert!(settings.should_analyze("lib/utils.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
+    }
+
+    #[test]
+    fn absolute_path_in_include_returns_error() {
+        let file = SettingsFile {
+            include: Some(OneOrList::One("/absolute/path/*.clar".to_string())),
+            ..Default::default()
+        };
+        let result = Settings::try_from(file);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("absolute paths are not supported"));
+    }
+
+    #[test]
+    fn absolute_path_in_exclude_returns_error() {
+        let file = SettingsFile {
+            exclude: Some(OneOrList::One("/absolute/path/*.clar".to_string())),
+            ..Default::default()
+        };
+        let result = Settings::try_from(file);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("absolute paths are not supported"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_absolute_path_in_include_returns_error() {
+        let file = SettingsFile {
+            include: Some(OneOrList::One("C:\\absolute\\path\\*.clar".to_string())),
+            ..Default::default()
+        };
+        let result = Settings::try_from(file);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("absolute paths are not supported"));
+    }
+
+    #[test]
+    fn should_analyze_with_list_include() {
+        let file = SettingsFile {
+            include: Some(OneOrList::List(vec![
+                "contracts/*.clar".to_string(),
+                "src/*.clar".to_string(),
+            ])),
+            ..Default::default()
+        };
+        let settings = Settings::try_from(file).unwrap();
+
+        assert!(settings.should_analyze("contracts/foo.clar"));
+        assert!(settings.should_analyze("src/bar.clar"));
+        assert!(!settings.should_analyze("tests/foo.clar"));
     }
 }

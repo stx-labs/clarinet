@@ -1572,7 +1572,7 @@ impl<'a> Aggregator<'a> {
             return result;
         }
         let result = match pse.pre_expr {
-            PreSymbolicExpressionType::Atom(ref value) => t(value.as_str()).to_string(),
+            PreSymbolicExpressionType::Atom(ref value) => t(value).to_string(),
             PreSymbolicExpressionType::AtomValue(ref value) => match value {
                 clarity::vm::types::Value::Principal(c) => {
                     format!("'{c}")

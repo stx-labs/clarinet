@@ -666,7 +666,7 @@ fn extract_function_name(expr: &SymbolicExpression) -> Option<String> {
     expr.match_list().and_then(|list| {
         list.first()
             .and_then(|first| first.match_atom())
-            .filter(|atom| is_function_definition(atom.as_str()))
+            .filter(|atom| is_function_definition(atom))
             .and_then(|_| list.get(1))
             .and_then(|sig| sig.match_list())
             .and_then(|signature| signature.first())
@@ -874,7 +874,7 @@ pub fn build_cost_analysis_tree(
     match &expr.expr {
         SymbolicExpressionType::List(list) => {
             if let Some(function_name) = list.first().and_then(|first| first.match_atom()) {
-                if is_function_definition(function_name.as_str()) {
+                if is_function_definition(function_name) {
                     let (returned_function_name, cost_analysis_tree) =
                         build_function_definition_cost_analysis_tree(
                             list, user_args, ctx, None, None, env,
@@ -1157,7 +1157,7 @@ pub(crate) fn infer_type_from_expression(
         }
         SymbolicExpressionType::Atom(name) => {
             // Try to parse as a type name (e.g., "uint", "int", "bool")
-            TypeSignature::parse_atom_type(name.as_str())
+            TypeSignature::parse_atom_type(name)
                 .map_err(|e| StaticCostError::TypeParse(format!("{e:?}")))
         }
         SymbolicExpressionType::List(_) => {
@@ -1641,7 +1641,7 @@ fn build_listlike_cost_analysis_tree(
             // special functions
             //   - let, etc use bindings lengths not argument lengths
             if let Some(native_function) =
-                NativeFunctions::lookup_by_name_at_version(name.as_str(), ctx.clarity_version)
+                NativeFunctions::lookup_by_name_at_version(name, ctx.clarity_version)
             {
                 // Special handling for Let: increment depth before processing body
                 if native_function == NativeFunctions::Let {
@@ -1822,7 +1822,7 @@ fn build_listlike_cost_analysis_tree(
                 });
                 if ctx.cost_map.contains_key(name.as_str()) {
                     let expr_node = CostExprNode::UserFunction(name.clone());
-                    let default_cost = calculate_function_cost(name.as_str(), ctx.cost_map)?;
+                    let default_cost = calculate_function_cost(name, ctx.cost_map)?;
                     let mut cost =
                         try_narrow_user_function_cost(name, &exprs[1..], user_args, ctx, env)
                             .unwrap_or(default_cost);
@@ -1916,7 +1916,7 @@ fn collect_fn_calls(
     calls: &mut HashSet<String>,
 ) {
     if let CostExprNode::UserFunction(fn_name) = &node.expr {
-        if !is_function_definition(fn_name.as_str())
+        if !is_function_definition(fn_name)
             && !trait_names.contains_key(fn_name)
             && visited_functions.contains(fn_name.as_str())
         {

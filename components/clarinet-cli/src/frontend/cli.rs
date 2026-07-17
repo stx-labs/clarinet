@@ -1075,10 +1075,8 @@ pub fn main() {
 
                 let mut answer = String::new();
                 println!(
-                    "{} This command will delete the files {}.test.ts, {}.clar, and remove the contract from the manifest. Do you confirm? [y/N]",
-                    yellow!("warning:"),
-                    contract_name,
-                    contract_name
+                    "{} This command will delete the files {contract_name}.test.ts, {contract_name}.clar, and remove the contract from the manifest. Do you confirm? [y/N]",
+                    yellow!("warning:")
                 );
                 std::io::stdin().read_line(&mut answer).unwrap();
                 if !answer.trim().eq_ignore_ascii_case("y") {
@@ -1598,6 +1596,11 @@ fn print_available_lints(settings: &analysis::Settings) {
     println!();
     println!("{}", "Configure lints in Clarinet.toml:".bold());
     let sample = r#"
+  # Only analyze files matching these patterns
+  [repl.analysis]
+  include = ["contracts/*.clar"]
+  exclude = []
+
   [repl.analysis.lint_groups]
   style = "warning"
 

@@ -63,18 +63,31 @@ impl CoverageHook {
     ) -> String {
         let mut file_content = String::new();
 
-        let mut filtered_asts = HashMap::new();
+        // Functions only depend on source text, so one copy per contract name
+        // suffices. Executable lines/branches contain expression IDs that differ
+        // between ASTs built from the same source (e.g. a boot contract override
+        // and a user-deployed contract), so we store those per contract ID.
+        let mut functions_by_name: HashMap<String, Vec<(String, u32, u32)>> = HashMap::new();
+        let mut executables_by_id: HashMap<
+            &QualifiedContractIdentifier,
+            (ExecutableLines, ExecutableBranches),
+        > = HashMap::new();
+        // Which contract IDs map to each contract name
+        let mut ids_by_name: HashMap<String, Vec<&QualifiedContractIdentifier>> = HashMap::new();
         for (contract_id, ast) in asts.iter() {
             let contract_name = contract_id.name.to_string();
             if contract_paths.contains_key(&contract_name) {
-                filtered_asts.insert(
-                    contract_name,
-                    (
-                        contract_id,
-                        retrieve_functions(&ast.expressions),
-                        retrieve_executable_lines_and_branches(&ast.expressions),
-                    ),
+                functions_by_name
+                    .entry(contract_name.clone())
+                    .or_insert_with(|| retrieve_functions(&ast.expressions));
+                executables_by_id.insert(
+                    contract_id,
+                    retrieve_executable_lines_and_branches(&ast.expressions),
                 );
+                ids_by_name
+                    .entry(contract_name)
+                    .or_default()
+                    .push(contract_id);
             }
         }
 
@@ -92,12 +105,11 @@ impl CoverageHook {
             for (contract_name, contract_path) in contract_paths.iter() {
                 file_content.push_str(&format!("SF:{contract_path}\n"));
 
-                if let Some((contract_id, functions, executable)) = filtered_asts.get(contract_name)
-                {
+                if let Some(functions) = functions_by_name.get(contract_name) {
+                    let contract_ids = &ids_by_name[contract_name];
                     for (function, line_start, _) in functions.iter() {
                         file_content.push_str(&format!("FN:{line_start},{function}\n"));
                     }
-                    let (executable_lines, executables_branches) = executable;
 
                     let mut function_hits = BTreeMap::new();
                     let mut line_execution_counts = BTreeMap::new();
@@ -107,7 +119,16 @@ impl CoverageHook {
                     let mut branch_execution_counts = BTreeMap::new();
 
                     for report in test_reports {
-                        if let Some(coverage) = report.coverage.get(contract_id) {
+                        // Find the contract ID that has coverage data and use
+                        // its executable lines/branches (expression IDs differ
+                        // between ASTs built from the same source).
+                        let matched = contract_ids.iter().find_map(|id| {
+                            let cov = report.coverage.get(*id)?;
+                            let exec = executables_by_id.get(*id)?;
+                            Some((cov, exec))
+                        });
+                        if let Some((coverage, (executable_lines, executables_branches))) = matched
+                        {
                             let mut local_function_hits = BTreeSet::new();
 
                             for (line, expr_ids) in executable_lines.iter() {
@@ -301,7 +322,7 @@ fn retrieve_executable_lines_and_branches(
 
             if let Some(children) = cur_expr.match_list() {
                 if let Some((func, args)) = try_parse_native_func(children) {
-                    // handle codes branches
+                    // handle code branches
                     // (if, asserts!, and, or, match)
                     match func {
                         NativeFunctions::If => {
