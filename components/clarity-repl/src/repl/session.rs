@@ -99,14 +99,24 @@ fn set_up_accounts(accounts: &[Account], interpreter: &mut ClarityInterpreter) {
 fn deploy_boot_contracts(
     settings: &SessionSettings,
     interpreter: &mut ClarityInterpreter,
+    max_epoch: Option<StacksEpochId>,
 ) -> ExecutionResultMap {
     if settings.repl_settings.remote_data.enabled {
         return BTreeMap::new();
     }
     let mut boot_contracts = BTreeMap::new();
 
-    // Deploy sbtc-token first so that pox-5 can resolve
+    // Deploy sbtc boot contracts first so that pox-5 can resolve
     for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
+        if let Some(max_ep) = max_epoch {
+            // Derive the epoch from the contract itself so this stays correct
+            // if SBTC_BOOT_CONTRACTS ever gains contracts at different epochs.
+            let (sbtc_epoch, _) =
+                boot::get_boot_contract_epoch_and_clarity_version(contract_id.name.as_str());
+            if sbtc_epoch > max_ep {
+                continue;
+            }
+        }
         let result = interpreter.run(contract, Some(ast), false, None);
         if let Err(errs) = &result {
             for e in errs {
@@ -127,6 +137,13 @@ fn deploy_boot_contracts(
     };
 
     for (contract_id, (contract, ast)) in boot_contracts_data {
+        if let Some(max_ep) = max_epoch {
+            let (contract_epoch, _) =
+                boot::get_boot_contract_epoch_and_clarity_version(&contract.name);
+            if contract_epoch > max_ep {
+                continue;
+            }
+        }
         let result = interpreter.run(&contract, Some(&ast), false, None);
         if let Err(errs) = &result {
             for e in errs {
@@ -136,6 +153,76 @@ fn deploy_boot_contracts(
         boot_contracts.insert(contract_id, result);
     }
     boot_contracts
+}
+
+/// Deploy boot contracts whose associated epoch is in (from_epoch, to_epoch].
+/// Used by `update_epoch` to install contracts when transitioning between epochs.
+/// Returns the newly deployed contracts so the caller can merge them into
+/// its tracking map, preventing redeploys on repeated epoch transitions.
+fn deploy_boot_contracts_for_range(
+    from_epoch: StacksEpochId,
+    to_epoch: StacksEpochId,
+    settings: &SessionSettings,
+    interpreter: &mut ClarityInterpreter,
+    already_deployed: &ExecutionResultMap,
+) -> ExecutionResultMap {
+    let mut newly_deployed = BTreeMap::new();
+
+    if from_epoch >= to_epoch {
+        return newly_deployed; // no transition, nothing to deploy
+    }
+
+    // Deploy sbtc boot contracts if they fall in the range.
+    // Derive the epoch per-contract so this stays correct if SBTC_BOOT_CONTRACTS
+    // ever gains contracts at different epochs.
+    for (contract_id, (contract, ast)) in boot::SBTC_BOOT_CONTRACTS.iter() {
+        let (sbtc_epoch, _) =
+            boot::get_boot_contract_epoch_and_clarity_version(contract_id.name.as_str());
+        if sbtc_epoch <= from_epoch || sbtc_epoch > to_epoch {
+            continue;
+        }
+        if already_deployed.contains_key(contract_id) || newly_deployed.contains_key(contract_id) {
+            continue;
+        }
+        let result = interpreter.run(contract, Some(ast), false, None);
+        if let Err(errs) = &result {
+            for e in errs {
+                ueprint!(
+                    "Error deploying sbtc boot contract {contract_id}: {}",
+                    e.message
+                );
+            }
+        }
+        newly_deployed.insert(contract_id.clone(), result);
+    }
+
+    // Deploy regular boot contracts that fall in the range
+    let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
+        boot::BOOT_CONTRACTS_DATA.clone()
+    } else {
+        boot::get_boot_contracts_data_with_overrides(&settings.override_boot_contracts_source)
+    };
+
+    for (contract_id, (contract, ast)) in boot_contracts_data {
+        let (contract_epoch, _) = boot::get_boot_contract_epoch_and_clarity_version(&contract.name);
+        if contract_epoch > from_epoch && contract_epoch <= to_epoch {
+            // Skip if already deployed (e.g., deployed at session creation)
+            if already_deployed.contains_key(&contract_id)
+                || newly_deployed.contains_key(&contract_id)
+            {
+                continue;
+            }
+            let result = interpreter.run(&contract, Some(&ast), false, None);
+            if let Err(errs) = &result {
+                for e in errs {
+                    ueprint!("Error deploying boot contract {contract_id}: {}", e.message);
+                }
+            }
+            newly_deployed.insert(contract_id, result);
+        }
+    }
+
+    newly_deployed
 }
 
 impl AnnotatedExecutionResult {
@@ -178,7 +265,9 @@ impl Session {
 
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
         let boot_contracts = if with_boot_contracts {
-            deploy_boot_contracts(&settings, &mut interpreter)
+            // Deploy all boot contracts whose epoch <= the interpreter's current epoch.
+            let initial_epoch = interpreter.datastore.get_current_epoch();
+            deploy_boot_contracts(&settings, &mut interpreter, Some(initial_epoch))
         } else {
             BTreeMap::new()
         };
@@ -1125,10 +1214,25 @@ impl Session {
     }
 
     pub fn update_epoch(&mut self, epoch: StacksEpochId) {
+        // deploys contracts with epochs between the current epoch
+        // and the target epoch (exclusive of current, inclusive of target).
+        let current = self.interpreter.datastore.get_current_epoch();
+
+        // Set the epoch first so boot contracts are deployed at the correct
+        // interpreter epoch (e.g. Clarity3 contracts must deploy at Epoch30+).
         self.interpreter.set_current_epoch(epoch);
         if epoch >= StacksEpochId::Epoch30 {
             self.interpreter.set_tenure_height();
         }
+
+        let newly_deployed = deploy_boot_contracts_for_range(
+            current,
+            epoch,
+            &self.settings,
+            &mut self.interpreter,
+            &self.boot_contracts,
+        );
+        self.boot_contracts.extend(newly_deployed);
     }
 
     pub fn encode(&mut self, cmd: &str) -> String {
@@ -2379,6 +2483,85 @@ mod tests {
             .interpreter
             .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared());
         assert_eq!(balance, 11100);
+    }
+
+    fn count_boot_contracts_with_interface(
+        boot_contracts: &ExecutionResultMap,
+    ) -> (usize, Vec<String>) {
+        let mut count = 0;
+        let mut missing = Vec::new();
+        for (id, result) in boot_contracts {
+            match result {
+                Ok(exec_result) => match &exec_result.result {
+                    EvaluationResult::Contract(ref c) => {
+                        if c.contract.analysis.contract_interface.is_some() {
+                            count += 1;
+                        } else {
+                            missing.push(format!("{id} (Contract but no interface)"));
+                        }
+                    }
+                    EvaluationResult::Snippet(_) => {
+                        missing.push(format!("{id} (Snippet)"));
+                    }
+                },
+                Err(e) => {
+                    missing.push(format!(
+                        "{id} (Err: {})",
+                        e.iter()
+                            .map(|d| d.message.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+        }
+        (count, missing)
+    }
+
+    #[test]
+    fn test_boot_contract_interface_count_at_epoch24() {
+        let settings = SessionSettings::default();
+        let mut session = Session::new(settings);
+
+        session.advance_chain_tip(1);
+        session.update_epoch(StacksEpochId::Epoch24);
+
+        let (count, missing) = count_boot_contracts_with_interface(&session.boot_contracts);
+        if !missing.is_empty() {
+            println!("Missing from interface at Epoch24:");
+            for m in &missing {
+                println!("  {m}");
+            }
+        }
+        // 9 names × 2 addresses = 18 (genesis has no functions; no sbtc at Epoch24)
+        assert_eq!(
+            count, 18,
+            "Expected 18 boot contracts with interface at Epoch24, missing: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn test_boot_contract_interface_count_at_epoch31() {
+        let settings = SessionSettings::default();
+        let mut session = Session::new(settings);
+
+        session.advance_chain_tip(1);
+        session.update_epoch(StacksEpochId::Epoch24);
+        session.advance_chain_tip(1);
+        session.update_epoch(StacksEpochId::Epoch31);
+
+        let (count, missing) = count_boot_contracts_with_interface(&session.boot_contracts);
+        if !missing.is_empty() {
+            println!("Missing from interface at Epoch31:");
+            for m in &missing {
+                println!("  {m}");
+            }
+        }
+        // 12 names × 2 addresses + 2 sbtc = 26 (genesis has no functions)
+        assert_eq!(
+            count, 26,
+            "Expected 26 boot contracts with interface at Epoch31, missing: {missing:?}"
+        );
     }
 
     #[test]

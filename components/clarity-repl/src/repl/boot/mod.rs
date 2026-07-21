@@ -317,6 +317,7 @@ pub fn get_boot_contract_epoch_and_clarity_version(
         "pox-3" => (StacksEpochId::Epoch24, ClarityVersion::Clarity2),
         "pox-2" | "costs-3" => (StacksEpochId::Epoch21, ClarityVersion::Clarity2),
         "costs-2" => (StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
+        "sbtc-registry" | "sbtc-token" => (StacksEpochId::Epoch30, ClarityVersion::Clarity3),
         "genesis" | "lockup" | "bns" | "cost-voting" | "costs" | "pox" => {
             (StacksEpochId::Epoch20, ClarityVersion::Clarity1)
         }

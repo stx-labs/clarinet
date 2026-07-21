@@ -13,7 +13,12 @@ const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
 let simnet: Simnet;
 
-const nbOfBootContracts = 30;
+// Boot contracts with valid interfaces deployed through Epoch31 (the highest epoch in Clarinet.toml):
+// 12 names × 2 addresses (genesis has no functions and deploys as a snippet)
+// + 2 sbtc contracts at Epoch30 = 26
+const bootContractsAtGenesis = 26;
+// After setEpoch("3.4") (Epoch34), costs-4 (Epoch33) is also deployed: +2
+const bootContractsAtEpoch34 = bootContractsAtGenesis + 2;
 const latestEpochStr = "3.4";
 
 const deploymentPlanPath = path.join(
@@ -399,7 +404,7 @@ describe("simnet can read contracts data vars and maps", () => {
 describe("simnet can get contracts info and deploy contracts", () => {
   it("can get contract interfaces", () => {
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(nbOfBootContracts + 5);
+    expect(contractInterfaces).toHaveLength(bootContractsAtGenesis + 5);
 
     const counterInterface = contractInterfaces.get(`${deployerAddr}.counter`);
     expect(counterInterface).not.toBeNull();
@@ -445,7 +450,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(res.result).toStrictEqual(Cl.int(42));
 
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(nbOfBootContracts + 5);
+    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch34 + 5);
   });
 
   it("can deploy contracts", () => {
@@ -455,7 +460,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(deployRes.result).toStrictEqual(Cl.bool(true));
 
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(nbOfBootContracts + 6);
+    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch34 + 6);
 
     const addRes = simnet.callPublicFn("op", "add", [Cl.uint(13), Cl.uint(29)], address1);
     expect(addRes.result).toStrictEqual(Cl.ok(Cl.uint(42)));

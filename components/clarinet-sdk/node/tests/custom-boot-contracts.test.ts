@@ -10,6 +10,8 @@ let simnet: Simnet;
 describe("override_boot_contracts_source under the wasm SDK", () => {
   beforeEach(async () => {
     simnet = await initSimnet("tests/fixtures/ManifestCustomBootContracts.toml");
+    // pox-4 belongs to Epoch 2.5; advance the epoch so it gets deployed.
+    simnet.setEpoch("2.5");
   });
 
   it("replaces pox-4 with the source pointed to by the manifest", () => {
