@@ -29,12 +29,12 @@ version = "3.21.1"
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "5595f08a244362cefc316f95b398510a2b8cb791", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "5595f08a244362cefc316f95b398510a2b8cb791", package = "clarity-types" }
-libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "5595f08a244362cefc316f95b398510a2b8cb791", package = "libsigner", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "5595f08a244362cefc316f95b398510a2b8cb791", package = "pox-locking", default-features = false }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "5595f08a244362cefc316f95b398510a2b8cb791", package = "stacks-common", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "5595f08a244362cefc316f95b398510a2b8cb791", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "clarity-types" }
+libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "libsigner", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "pox-locking", default-features = false }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stacks-common", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }
