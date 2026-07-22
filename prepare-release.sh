@@ -87,7 +87,7 @@ update_cargo_toml "./Cargo.toml" "$NEW_VERSION"
 
 # Build SDK WASM
 echo "Building SDK WASM..."
-pnpm run build:sdk-wasm
+pnpm --config.verify-deps-before-run=false run build:sdk-wasm
 
 # Update clarity-vscode
 echo "Updating clarity-vscode..."
