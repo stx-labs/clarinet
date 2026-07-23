@@ -81,9 +81,31 @@ impl DevnetDiffConfig {
                 name: "epoch_3_0".to_string(),
                 extractor: make_extractor(|config| config.epoch_3_0),
             },
-            // With the default snapshot, the devnet starts at epoch 3.0
-            // So users can set custom higher epoch heights
-
+            SignificantField {
+                name: "epoch_3_1".to_string(),
+                extractor: make_extractor(|config| config.epoch_3_1),
+            },
+            SignificantField {
+                name: "epoch_3_2".to_string(),
+                extractor: make_extractor(|config| config.epoch_3_2),
+            },
+            SignificantField {
+                name: "epoch_3_3".to_string(),
+                extractor: make_extractor(|config| config.epoch_3_3),
+            },
+            SignificantField {
+                name: "epoch_3_4".to_string(),
+                extractor: make_extractor(|config| config.epoch_3_4),
+            },
+            SignificantField {
+                name: "epoch_4_0".to_string(),
+                extractor: make_extractor(|config| {
+                    config
+                        .epoch_4_0
+                        .map(|height| height.to_string())
+                        .unwrap_or_else(|| "none".to_string())
+                }),
+            },
             // Signers
             SignificantField {
                 name: "stacks_signers_keys".to_string(),
