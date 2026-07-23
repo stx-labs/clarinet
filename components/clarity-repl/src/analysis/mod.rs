@@ -90,6 +90,7 @@ impl From<&LintName> for AnalysisPassFn {
             LintName::FlattenVariadic => lints::FlattenVariadic::run_pass,
             LintName::Noop => lints::NoopChecker::run_pass,
             LintName::Panic => lints::PanicChecker::run_pass,
+            LintName::RenamedWithStacking => lints::RenamedWithStacking::run_pass,
             LintName::UnnecessaryAsMaxLen => lints::UnnecessaryAsMaxLen::run_pass,
             LintName::UnnecessaryPublic => lints::UnnecessaryPublic::run_pass,
             LintName::UnnecessaryTuple => lints::UnnecessaryTuple::run_pass,

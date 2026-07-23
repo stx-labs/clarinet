@@ -150,8 +150,8 @@ impl ClarityInterpreter {
 
         let (analysis, lint_diagnostics) = match self.run_analysis(contract, &ast, &annotations) {
             Ok((analysis, lint_diags)) => (analysis, lint_diags),
-            Err(diagnostic) => {
-                diagnostics.push(diagnostic);
+            Err(mut analysis_diagnostics) => {
+                diagnostics.append(&mut analysis_diagnostics);
                 return Err(diagnostics.to_vec());
             }
         };
@@ -277,9 +277,23 @@ impl ClarityInterpreter {
         contract: &ClarityContract,
         contract_ast: &ContractAST,
         annotations: &[Annotation],
-    ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Diagnostic> {
+    ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Vec<Diagnostic>> {
         let mut analysis_db = AnalysisDatabase::new(&mut self.clarity_datastore);
         let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
+        let renamed_with_stacking_diagnostics = self
+            .repl_settings
+            .analysis
+            .lints()
+            .get(&analysis::linter::LintName::RenamedWithStacking)
+            .map(|level| {
+                analysis::lints::check_renamed_with_stacking(
+                    &contract_ast.expressions,
+                    contract.clarity_version,
+                    annotations,
+                    level.clone(),
+                )
+            })
+            .unwrap_or_default();
 
         // Run standard clarity analyses
         let mut contract_analysis = clarity::vm::analysis::run_analysis(
@@ -293,7 +307,11 @@ impl ClarityInterpreter {
             true,
             TimeTracker::unlimited(),
         )
-        .map_err(|boxed_error| boxed_error.0.diagnostic)?;
+        .map_err(|boxed_error| {
+            let mut diagnostics = renamed_with_stacking_diagnostics.clone();
+            diagnostics.push(boxed_error.0.diagnostic);
+            diagnostics
+        })?;
 
         // Run REPL-only analyses (linter, check_checker, etc.)
         let lint_diagnostics = if !contract.skip_analysis {
@@ -303,11 +321,7 @@ impl ClarityInterpreter {
                 annotations,
                 &self.repl_settings.analysis,
             )
-            .map_err(|lds| {
-                // Extract the last diagnostic as the representative error.
-                // Safe: run_analysis only returns Err after accumulating at least one diagnostic.
-                Diagnostic::from(lds.into_iter().last().expect("non-empty error list"))
-            })?
+            .map_err(|lds| lds.into_iter().map(Diagnostic::from).collect::<Vec<_>>())?
         } else {
             vec![]
         };
