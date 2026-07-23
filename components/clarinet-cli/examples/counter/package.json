@@ -12,7 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@stacks/clarinet-sdk": "3.19.0",
+    "@stacks/clarinet-sdk": "link:/Users/brady/work/clarinet/components/clarinet-sdk/node",
     "@stacks/transactions": "7.4.0",
     "chokidar-cli": "3.0.0",
     "vitest": "4.1.8",

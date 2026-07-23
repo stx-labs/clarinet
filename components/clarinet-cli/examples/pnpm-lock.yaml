@@ -29,8 +29,8 @@ importers:
   counter:
     dependencies:
       '@stacks/clarinet-sdk':
-        specifier: 3.19.0
-        version: 3.19.0
+        specifier: link:/Users/brady/work/clarinet/components/clarinet-sdk/node
+        version: link:../../../clarinet-sdk/node
       '@stacks/transactions':
         specifier: 7.4.0
         version: 7.4.0
@@ -42,7 +42,7 @@ importers:
         version: 4.1.8(vite@8.0.16)
       vitest-environment-clarinet:
         specifier: 3.0.2
-        version: 3.0.2(@stacks/clarinet-sdk@3.19.0)(vitest@4.1.8(vite@8.0.16))
+        version: 3.0.2(@stacks/clarinet-sdk@..+clarinet-sdk+node)(vitest@4.1.8(vite@8.0.16))
 
   simple-nft:
     dependencies:
@@ -1305,6 +1305,11 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       fsevents: 2.3.3
+
+  vitest-environment-clarinet@3.0.2(@stacks/clarinet-sdk@..+clarinet-sdk+node)(vitest@4.1.8(vite@8.0.16)):
+    dependencies:
+      '@stacks/clarinet-sdk': link:../../clarinet-sdk/node
+      vitest: 4.1.8(vite@8.0.16)
 
   vitest-environment-clarinet@3.0.2(@stacks/clarinet-sdk@3.19.0)(vitest@4.1.8(vite@8.0.16)):
     dependencies:

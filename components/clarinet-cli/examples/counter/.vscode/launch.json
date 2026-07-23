@@ -1,0 +1,11 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "clarinet",
+            "request": "attach",
+            "name": "Debug Clarity tests",
+            "debugServer": 7777
+        }
+    ]
+}

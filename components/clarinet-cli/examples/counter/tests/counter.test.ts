@@ -1,10 +1,20 @@
-import { tx } from "@stacks/clarinet-sdk";
+import { tx, connectDebugServer } from "@stacks/clarinet-sdk";
 import { Cl } from "@stacks/transactions";
 import { expect, it } from "vitest";
 
 const accounts = simnet.getAccounts();
 const address1 = accounts.get("wallet_1")!;
 const address2 = accounts.get("wallet_2")!;
+const deployer = accounts.get("deployer")!;
+
+it("debug: increment counter and hit breakpoints", async () => {
+  const client = await connectDebugServer(); // connects to port 7778
+  // counter starts at u1, increment(1) → u1+u1 = u2
+  // Timeout is long to allow interactive debugging in VSCode (press Continue to resume).
+  const result = await client.callPublicFn("counter", "increment", [Cl.uint(1)], deployer);
+  expect(result.value).toBe("(ok u2)");
+  await client.disconnect();
+}, 0);
 
 /*
   The test below is an example. Learn more in the documentation: https://docs.stacks.co/clarinet/testing-with-clarinet-sdk

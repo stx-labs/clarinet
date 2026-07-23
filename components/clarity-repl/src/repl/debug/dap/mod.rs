@@ -20,12 +20,16 @@ use debug_types::types::*;
 use debug_types::*;
 use futures::{SinkExt, StreamExt};
 use tokio;
-use tokio::io::{Stdin, Stdout};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::runtime::Runtime;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use self::codec::{DebugAdapterCodec, ParseError};
 use super::{extract_watch_variable, AccessType, DebugState, State};
+
+type DapReader = FramedRead<Box<dyn AsyncRead + Unpin + Send>, DebugAdapterCodec<ProtocolMessage>>;
+type DapWriter =
+    FramedWrite<Box<dyn AsyncWrite + Unpin + Send>, DebugAdapterCodec<ProtocolMessage>>;
 
 pub mod codec;
 
@@ -59,14 +63,18 @@ pub struct DAPDebugger {
     default_sender: Option<StandardPrincipalData>,
     pub path_to_contract_id: HashMap<PathBuf, QualifiedContractIdentifier>,
     pub contract_id_to_path: HashMap<QualifiedContractIdentifier, PathBuf>,
-    reader: FramedRead<Stdin, DebugAdapterCodec<ProtocolMessage>>,
-    writer: FramedWrite<Stdout, DebugAdapterCodec<ProtocolMessage>>,
+    reader: DapReader,
+    writer: DapWriter,
     state: Option<DebugState>,
     send_seq: i64,
     launched: Option<(String, String)>,
     launch_seq: i64,
     current: Option<Current>,
     init_complete: bool,
+    /// True when operating as a persistent TCP server (attach mode).
+    attach_mode: bool,
+    /// Set to true once `configurationDone` is received in attach mode.
+    config_done: bool,
 
     stack_frames: HashMap<FunctionIdentifier, StackFrame>,
     scopes: HashMap<i32, Vec<Scope>>,
@@ -81,15 +89,42 @@ impl Default for DAPDebugger {
 
 impl DAPDebugger {
     pub fn new() -> Self {
-        let stdin = tokio::io::stdin();
-        let stdout = tokio::io::stdout();
-
-        let reader = FramedRead::new(stdin, DebugAdapterCodec::<ProtocolMessage>::default());
-        let writer = FramedWrite::new(stdout, DebugAdapterCodec::<ProtocolMessage>::default());
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
+        let reader: Box<dyn AsyncRead + Unpin + Send> = Box::new(tokio::io::stdin());
+        let writer: Box<dyn AsyncWrite + Unpin + Send> = Box::new(tokio::io::stdout());
+        Self::from_io(rt, reader, writer, false)
+    }
+
+    /// Create a `DAPDebugger` that communicates over an existing TCP stream instead of stdio.
+    /// The server uses this to support VSCode's "attach" debug configuration.
+    pub fn from_std_tcp_stream(std_stream: std::net::TcpStream) -> Self {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let tokio_stream = rt.block_on(async {
+            std_stream
+                .set_nonblocking(true)
+                .expect("failed to set nonblocking on TCP stream");
+            tokio::net::TcpStream::from_std(std_stream).expect("failed to create tokio TcpStream")
+        });
+        let (read, write) = tokio_stream.into_split();
+        let reader: Box<dyn AsyncRead + Unpin + Send> = Box::new(read);
+        let writer: Box<dyn AsyncWrite + Unpin + Send> = Box::new(write);
+        Self::from_io(rt, reader, writer, true)
+    }
+
+    fn from_io(
+        rt: Runtime,
+        reader: Box<dyn AsyncRead + Unpin + Send>,
+        writer: Box<dyn AsyncWrite + Unpin + Send>,
+        attach_mode: bool,
+    ) -> Self {
+        let reader = FramedRead::new(reader, DebugAdapterCodec::<ProtocolMessage>::default());
+        let writer = FramedWrite::new(writer, DebugAdapterCodec::<ProtocolMessage>::default());
         Self {
             rt,
             default_sender: None,
@@ -103,10 +138,36 @@ impl DAPDebugger {
             launch_seq: 0,
             current: None,
             init_complete: false,
+            attach_mode,
+            config_done: false,
             stack_frames: HashMap::new(),
             scopes: HashMap::new(),
             variables: HashMap::new(),
         }
+    }
+
+    /// Prepare for debugging a new contract call in server (attach) mode.
+    /// Preserves all breakpoints and watchpoints from the current debug state,
+    /// resetting only the execution state so the call starts in continue mode
+    /// and only pauses when a breakpoint is actually hit.
+    pub fn prepare_for_call(&mut self, contract_id: &QualifiedContractIdentifier, snippet: &str) {
+        match &mut self.state {
+            Some(state) => state.reset_for_new_call(contract_id, snippet),
+            None => self.state = Some(DebugState::new(contract_id, snippet)),
+        }
+    }
+
+    /// Run the DAP attach handshake: process `initialize`, `attach`,
+    /// `setBreakpoints`, and `configurationDone`, then return.
+    /// After this returns the server is ready to accept SDK contract calls.
+    pub fn init_attach(&mut self) -> Result<(), ParseError> {
+        while !self.config_done {
+            match self.wait_for_command(None, None, None) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
     }
 
     fn get_state(&mut self) -> &mut DebugState {
@@ -203,6 +264,7 @@ impl DAPDebugger {
         match command {
             Initialize(arguments) => self.initialize(seq, arguments),
             Launch(arguments) => self.launch(seq, arguments),
+            Attach(arguments) => self.attach(seq, arguments),
             ConfigurationDone => self.configuration_done(seq),
             SetBreakpoints(arguments) => self.set_breakpoints(seq, arguments),
             SetExceptionBreakpoints(arguments) => self.set_exception_breakpoints(seq, arguments),
@@ -375,6 +437,23 @@ impl DAPDebugger {
         false
     }
 
+    fn attach(&mut self, seq: i64, _arguments: AttachRequestArguments) -> bool {
+        let contract_id = QualifiedContractIdentifier::transient();
+        self.state = Some(DebugState::new(&contract_id, ""));
+
+        self.send_response(Response {
+            request_seq: seq,
+            success: true,
+            message: None,
+            body: Some(ResponseBody::Attach),
+        });
+
+        // Trigger breakpoint configuration in the editor
+        self.send_event(EventBody::Initialized);
+
+        false
+    }
+
     fn configuration_done(&mut self, seq: i64) -> bool {
         self.send_response(Response {
             request_seq: seq,
@@ -383,13 +462,18 @@ impl DAPDebugger {
             body: Some(ResponseBody::ConfigurationDone),
         });
 
-        // Now that configuration is done, we can respond to the launch
-        self.send_response(Response {
-            request_seq: seq,
-            success: true,
-            message: None,
-            body: Some(ResponseBody::Launch),
-        });
+        if self.attach_mode {
+            // Signal init_attach() that the editor has finished configuring breakpoints
+            self.config_done = true;
+        } else {
+            // Now that configuration is done, we can respond to the launch
+            self.send_response(Response {
+                request_seq: seq,
+                success: true,
+                message: None,
+                body: Some(ResponseBody::Launch),
+            });
+        }
 
         false
     }
@@ -491,10 +575,13 @@ impl DAPDebugger {
             })),
         });
 
-        // VSCode doesn't seem to want to send us a ConfigurationDone request,
-        // so assume that this is the end of configuration instead. This is an
-        // ugly hack and should be changed!
-        if !self.init_complete {
+        // VSCode doesn't send ConfigurationDone in either mode; treat the first
+        // Threads request as the end of the initialization/configuration phase.
+        // In attach mode we signal init_attach() by setting config_done.
+        if self.attach_mode && !self.config_done {
+            self.config_done = true;
+        }
+        if !self.attach_mode && !self.init_complete {
             self.send_response(Response {
                 request_seq: self.launch_seq,
                 success: true,
@@ -520,16 +607,19 @@ impl DAPDebugger {
     }
 
     fn stack_trace(&mut self, seq: i64, _arguments: StackTraceArguments) -> bool {
-        let current = self.current.as_ref().unwrap();
-        let frames: Vec<_> = current
-            .stack
-            .iter()
-            .rev()
-            .filter(|function| !function.to_string().starts_with("_native_:"))
-            .map(|function| self.stack_frames[function].clone())
-            .collect();
-
-        let len = current.stack.len() as i32;
+        let (frames, len) = if let Some(current) = self.current.as_ref() {
+            let frames: Vec<_> = current
+                .stack
+                .iter()
+                .rev()
+                .filter(|function| !function.to_string().starts_with("_native_:"))
+                .map(|function| self.stack_frames[function].clone())
+                .collect();
+            let len = current.stack.len() as i32;
+            (frames, len)
+        } else {
+            (vec![], 0)
+        };
         self.send_response(Response {
             request_seq: seq,
             success: true,
