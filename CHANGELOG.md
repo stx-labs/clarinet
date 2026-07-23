@@ -1,3 +1,23 @@
+# [3.21.1](https://github.com/stx-labs/clarinet/compare/v3.21.1...v3.22.0) (2026-07-22)
+
+##### New Features
+
+*  Include/Exclude lint filter (#2450) (5f220d81)
+*  Add IncorrectContractHeight error type  (#2455) (e43607d7)
+
+##### Bug Fixes
+
+*  Boot contracts deploy during correct epoch (#2457) (ff001e3f)
+*  LCOV: Override boot contracts coverage (#2447) (9ed2e489)
+
+##### Chores
+
+*  Update stacks-core to most recent develop (#2469) (45c202cd)
+*  Remove unnecessary `.as_str()`s (#2465) (e4f62021)
+*  Remove costs-5.clar  (#2458) (b5c108cc)
+* **deps:**
+  *  Bump serde_with from 3.17.0 to 3.21.0 (#2464) (c627fe18)
+
 # [3.21.1](https://github.com/stx-labs/clarinet/compare/v3.21.0...v3.21.1) (2026-07-06)
 
 ##### Chores
