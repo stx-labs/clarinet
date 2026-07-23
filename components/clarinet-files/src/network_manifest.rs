@@ -16,8 +16,8 @@ use crate::paths;
 
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
-pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.0-alpine";
-pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.0-alpine";
+pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.1-alpine";
+pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.1-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
@@ -60,6 +60,7 @@ pub const DEFAULT_EPOCH_3_1: u64 = 144;
 pub const DEFAULT_EPOCH_3_2: u64 = 146;
 pub const DEFAULT_EPOCH_3_3: u64 = 148;
 pub const DEFAULT_EPOCH_3_4: u64 = 150;
+pub const DEFAULT_EPOCH_4_0: u64 = 162;
 
 // Currently, the pox-4 contract has these values hardcoded:
 // https://github.com/stacks-network/stacks-core/blob/e09ab931e2f15ff70f3bb5c2f4d7afb[…]42bd7bec6/stackslib/src/chainstate/stacks/boot/pox-testnet.clar
@@ -756,6 +757,18 @@ impl NetworkManifest {
                     devnet_config.epoch_3_2 = Some(*val);
                 }
 
+                if let Some(ref val) = devnet_override.epoch_3_3 {
+                    devnet_config.epoch_3_3 = Some(*val);
+                }
+
+                if let Some(ref val) = devnet_override.epoch_3_4 {
+                    devnet_config.epoch_3_4 = Some(*val);
+                }
+
+                if let Some(ref val) = devnet_override.epoch_4_0 {
+                    devnet_config.epoch_4_0 = Some(*val);
+                }
+
                 if let Some(val) = devnet_override.network_id {
                     devnet_config.network_id = Some(val);
                 }
@@ -1012,7 +1025,7 @@ impl NetworkManifest {
                 epoch_3_2: devnet_config.epoch_3_2.unwrap_or(DEFAULT_EPOCH_3_2),
                 epoch_3_3: devnet_config.epoch_3_3.unwrap_or(DEFAULT_EPOCH_3_3),
                 epoch_3_4: devnet_config.epoch_3_4.unwrap_or(DEFAULT_EPOCH_3_4),
-                epoch_4_0: devnet_config.epoch_4_0,
+                epoch_4_0: Some(devnet_config.epoch_4_0.unwrap_or(DEFAULT_EPOCH_4_0)),
                 stacks_node_env_vars: devnet_config
                     .stacks_node_env_vars
                     .take()
@@ -1142,7 +1155,7 @@ impl Default for DevnetConfig {
             epoch_3_2: DEFAULT_EPOCH_3_2,
             epoch_3_3: DEFAULT_EPOCH_3_3,
             epoch_3_4: DEFAULT_EPOCH_3_4,
-            epoch_4_0: None,
+            epoch_4_0: Some(DEFAULT_EPOCH_4_0),
             use_docker_gateway_routing: false,
             docker_platform: None,
         }
@@ -1252,7 +1265,7 @@ mod tests {
     use crate::{DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE};
 
     #[test]
-    #[ignore = "image version (4.0.0) is ahead of the default epoch (3.4); re-enable when epoch default is bumped to 4.0"]
+    #[ignore = "image version (4.0.1) is ahead of the default epoch (3.4); re-enable when the global default epoch is bumped to 4.0"]
     fn test_default_stacks_docker_images_version() {
         let epoch = DEFAULT_EPOCH.to_string();
 
@@ -1265,7 +1278,7 @@ mod tests {
             "The default Stacks node image {DEFAULT_STACKS_NODE_IMAGE} does not start with {epoch}"
         );
 
-        let default_signer_version = DEFAULT_STACKS_NODE_IMAGE
+        let default_signer_version = DEFAULT_STACKS_SIGNER_IMAGE
             .split(':')
             .nth(1)
             .expect("Default Stacks signer image should contain a version tag");

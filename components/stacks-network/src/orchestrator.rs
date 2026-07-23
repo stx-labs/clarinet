@@ -71,6 +71,7 @@ pub struct ServicesMapHosts {
 
 pub static EXCLUDED_STACKS_SNAPSHOT_FILES: &[&str] =
     &["event_observers.sqlite", "event_observers.sqlite-journal"];
+pub const DEVNET_SNAPSHOT_READY_MARKER: &str = "epoch_4_ready";
 
 impl DevnetOrchestrator {
     pub fn new(

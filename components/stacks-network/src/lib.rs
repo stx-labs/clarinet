@@ -29,7 +29,7 @@ use observer::event_handler::ObserverCommand;
 pub use observer::types::{BitcoinNetwork, StacksNetwork};
 pub use observer::utils::Context;
 pub use orchestrator::DevnetOrchestrator;
-use orchestrator::ServicesMapHosts;
+use orchestrator::{ServicesMapHosts, DEVNET_SNAPSHOT_READY_MARKER};
 
 use self::chains_coordinator::DevnetEventObserverConfig;
 
@@ -159,7 +159,9 @@ async fn do_run_devnet(
         let global_snapshot_dir = orchestrator::get_global_snapshot_dir();
 
         // First, try to extract embedded snapshot if it exists and we don't have snapshot yet
-        let global_snapshot_ready = global_snapshot_dir.join("epoch_3_ready").exists();
+        let global_snapshot_ready = global_snapshot_dir
+            .join(DEVNET_SNAPSHOT_READY_MARKER)
+            .exists();
 
         if !global_snapshot_ready {
             let _ = devnet_events_tx.send(DevnetEvent::info(

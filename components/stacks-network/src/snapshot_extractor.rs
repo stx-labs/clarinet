@@ -5,6 +5,7 @@ use std::sync::mpsc::Sender;
 use flate2::read::GzDecoder;
 use tar::Archive;
 
+use crate::orchestrator::DEVNET_SNAPSHOT_READY_MARKER;
 use crate::DevnetEvent;
 
 /// Extract embedded devnet snapshot to the specified directory
@@ -18,6 +19,11 @@ pub fn extract_embedded_snapshot(
     let _ = devnet_event_tx.send(DevnetEvent::info(
         "Extracting embedded devnet snapshot data...".to_string(),
     ));
+
+    if snapshot_dir.exists() {
+        fs::remove_dir_all(snapshot_dir)
+            .map_err(|e| format!("Failed to remove stale snapshot directory: {e}"))?;
+    }
 
     // Create the snapshot directory if it doesn't exist
     fs::create_dir_all(snapshot_dir)
@@ -47,7 +53,7 @@ pub fn extract_embedded_snapshot(
     }
 
     // Create a marker file to indicate the snapshot is ready
-    let marker_path = snapshot_dir.join("epoch_3_ready");
+    let marker_path = snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
     if let Some(parent) = marker_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create marker directory: {e}"))?;
