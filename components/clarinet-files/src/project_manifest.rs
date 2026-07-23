@@ -19,7 +19,7 @@ use crate::schema;
 use crate::{paths, FileAccessor};
 
 pub const INVALID_CLARITY_VERSION: &str =
-    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5)";
+    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5, 6)";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ClarityContractMetadata {
@@ -515,11 +515,11 @@ fn get_epoch_and_clarity_version(
     settings_epoch: Option<&str>,
     settings_clarity_version: Option<&str>,
 ) -> Result<(clarity_repl::repl::Epoch, ClarityVersion), String> {
-    // if neither epoch or version are specified in clarinet.toml use: epoch 2.05 and clarity 1
+    // if neither epoch or version are specified in clarinet.toml use: epoch 4.0 and clarity 6
     // if epoch is specified but not version: use the default version for that epoch
 
     let epoch = match settings_epoch {
-        None => clarity_repl::repl::Epoch::Specific(StacksEpochId::Epoch2_05), // Keep the existing default unchanged
+        None => clarity_repl::repl::Epoch::Specific(StacksEpochId::Epoch40),
         // The "latest" epoch means the current epoch that is running on mainnet
         // Which can differ from `StacksEpochId::latest()` if it hasn't been activated yet
         Some("latest") => clarity_repl::repl::Epoch::Latest,
@@ -532,10 +532,7 @@ fn get_epoch_and_clarity_version(
     };
 
     let clarity_version = match settings_clarity_version {
-        None => match settings_epoch {
-            None => ClarityVersion::Clarity1,
-            Some(_) => ClarityVersion::default_for_epoch(epoch.resolve()),
-        },
+        None => ClarityVersion::default_for_epoch(epoch.resolve()),
         Some(version) => ClarityVersion::from_str(&format!("clarity{version}"))
             .map_err(|_| INVALID_CLARITY_VERSION)?,
     };
@@ -581,9 +578,9 @@ mod tests {
         use clarity::vm::ClarityVersion::*;
         use clarity_repl::repl::Epoch::*;
 
-        // no epoch, no version
+        // no epoch, no version -> defaults to epoch 4.0 and clarity 6
         let result = get_epoch_and_clarity_version(None, None);
-        assert_eq!(result, Ok((Specific(Epoch2_05), Clarity1)));
+        assert_eq!(result, Ok((Specific(Epoch40), Clarity6)));
 
         // epoch 2.0, no version
         let result = get_epoch_and_clarity_version(Some("2.0"), None);
@@ -605,14 +602,13 @@ mod tests {
         let result = get_epoch_and_clarity_version(Some("3.1"), None);
         assert_eq!(result, Ok((Specific(Epoch31), Clarity3)));
 
-        // no epoch
-        // no epoch, version 1
+        // no epoch, version 1 -> uses default epoch (4.0)
         let result = get_epoch_and_clarity_version(None, Some("1"));
-        assert_eq!(result, Ok((Specific(Epoch2_05), Clarity1)));
+        assert_eq!(result, Ok((Specific(Epoch40), Clarity1)));
 
-        // no epoch, version 2 -> error, must specify epoch
+        // no epoch, version 2 -> uses default epoch (4.0)
         let result = get_epoch_and_clarity_version(None, Some("2"));
-        assert_eq!(result, Err("Clarity 2 can not be used with 2.05".into()));
+        assert_eq!(result, Ok((Specific(Epoch40), Clarity2)));
 
         // epoch and clarity version
         // no epoch 2.05, version 1

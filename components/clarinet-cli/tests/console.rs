@@ -32,7 +32,7 @@ fn run_console_command(args: &[&str], commands: &[&str]) -> Vec<String> {
 #[test]
 fn can_set_epoch_in_empty_session() {
     let output = run_console_command(&[], &["::get_epoch", "::set_epoch 3.1", "::get_epoch"]);
-    assert_eq!(output[0], "Current epoch: 2.05");
+    assert_eq!(output[0], "Current epoch: 4.0");
     assert_eq!(output[1], "Epoch updated to: 3.1");
     assert_eq!(output[2], "Current epoch: 3.1");
 }

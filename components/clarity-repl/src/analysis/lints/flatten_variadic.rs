@@ -354,7 +354,18 @@ mod tests {
             )
         "#).to_string();
 
-        let (_, result) = run_snippet(snippet);
+        // Use pre-Clarity6 epoch: nested concat is the only way to concatenate
+        // multiple strings before variadic concat was introduced in Clarity6.
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(FlattenVariadic::get_name(), Level::Warning);
+        let mut session = Session::new_without_boot_contracts(settings);
+        session.update_epoch(StacksEpochId::Epoch25);
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
         assert_eq!(result.lint_diagnostics.len(), 0);
     }
 
