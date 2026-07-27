@@ -64,7 +64,7 @@ describe("clarity 3", () => {
 
     // `tenure-height` was introduced in clarity 3
     let resOk3 = simnet.execute("(print tenure-height)");
-    expect(resOk3.result).toStrictEqual(Cl.uint(4));
+    expect(resOk3.result).toStrictEqual(Cl.uint(3));
 
     // `block-height` was removed in clarity 3
     expect(() => simnet.execute("(print block-height)")).toThrowError(
