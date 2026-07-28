@@ -61,13 +61,21 @@ pub fn run_dap() -> Result<(), String> {
 
 /// Run a DAP debug server that accepts two TCP connections:
 ///
-/// 1. A DAP client (e.g. VSCode) connects on `dap_port` using the attach protocol.
+/// 1. (Optional) A DAP client (e.g. VSCode) connects on `dap_port` using the attach
+///    protocol. When omitted the server runs in SDK-only mode: no breakpoints fire
+///    but the test runner can still drive contract evaluation via the SDK port.
 /// 2. A test runner (e.g. Vitest) connects on `sdk_port` and sends newline-delimited
 ///    JSON requests to evaluate Clarity snippets under debugger control.
 ///
-/// This allows test authors to place breakpoints in `.clar` source files and have
-/// the debugger pause when those lines are reached during a test run.
-pub fn run_dap_server(dap_port: u16, sdk_port: u16, manifest_path: PathBuf) -> Result<(), String> {
+/// Both listeners are bound before either connection is accepted, so the server
+/// prints `CLARINET_DAP_SDK_READY:<sdk_port>` to stderr as soon as it is ready.
+/// The SDK client and the DAP client then connect in any order; the eval loop
+/// starts only after both (or just the SDK client in SDK-only mode) are ready.
+pub fn run_dap_server(
+    dap_port: Option<u16>,
+    sdk_port: u16,
+    manifest_path: PathBuf,
+) -> Result<(), String> {
     // Set up the simnet session from the project manifest.
     let project_manifest = ProjectManifest::from_location(&manifest_path, false)?;
     let (mut deployment, artifacts, _) = generate_default_deployment(
@@ -84,39 +92,77 @@ pub fn run_dap_server(dap_port: u16, sdk_port: u16, manifest_path: PathBuf) -> R
     )
     .session;
 
-    // Wait for a VSCode DAP connection on the DAP port.
-    eprintln!("clarinet dap: listening for DAP client on 127.0.0.1:{dap_port}");
-    let dap_listener = std::net::TcpListener::bind(("127.0.0.1", dap_port))
-        .map_err(|e| format!("failed to bind DAP port {dap_port}: {e}"))?;
-    let (dap_stream, _) = dap_listener
-        .accept()
-        .map_err(|e| format!("DAP accept error: {e}"))?;
+    // Pre-compute the contract → path maps; we need them in both threads.
+    let contract_maps: Vec<(QualifiedContractIdentifier, PathBuf)> = deployment
+        .contracts
+        .into_iter()
+        .map(|(contract_id, (_, location))| {
+            let abs = std::fs::canonicalize(&location).unwrap_or(location);
+            (contract_id, abs)
+        })
+        .collect();
 
-    // Build the DAP debugger over the TCP stream and populate the contract path maps
-    // before the attach handshake so that setBreakpoints requests can resolve paths.
-    let mut dap = DAPDebugger::from_std_tcp_stream(dap_stream);
-    for (contract_id, (_, location)) in deployment.contracts {
-        // Canonicalize to absolute path so the map matches what VSCode sends.
-        let abs = std::fs::canonicalize(&location).unwrap_or(location);
-        dap.path_to_contract_id
-            .insert(abs.clone(), contract_id.clone());
-        dap.contract_id_to_path.insert(contract_id, abs);
-    }
-
-    // Complete the DAP attach handshake: initialize → attach → setBreakpoints → configurationDone.
-    eprintln!("clarinet dap: completing attach handshake...");
-    dap.init_attach()
-        .map_err(|e| format!("DAP init_attach error: {e:?}"))?;
-    eprintln!("clarinet dap: DAP client attached");
-
-    // Wait for the test-runner SDK client on the SDK port.
-    eprintln!("clarinet dap: listening for SDK client on 127.0.0.1:{sdk_port}");
+    // Bind the SDK listener first so we can signal readiness once both are bound.
     let sdk_listener = std::net::TcpListener::bind(("127.0.0.1", sdk_port))
         .map_err(|e| format!("failed to bind SDK port {sdk_port}: {e}"))?;
+
+    // If a DAP port was requested, bind that listener and spawn a background thread
+    // to accept the DAP connection while the main thread waits for the SDK client.
+    // This allows both clients to connect in any order.
+    let dap_accept_thread = if let Some(dap_port) = dap_port {
+        let dap_listener = std::net::TcpListener::bind(("127.0.0.1", dap_port))
+            .map_err(|e| format!("failed to bind DAP port {dap_port}: {e}"))?;
+        eprintln!("clarinet dap: listening for DAP client on 127.0.0.1:{dap_port}");
+        Some(std::thread::spawn(move || -> Result<std::net::TcpStream, String> {
+            let (stream, _) = dap_listener
+                .accept()
+                .map_err(|e| format!("DAP accept error: {e}"))?;
+            Ok(stream)
+        }))
+    } else {
+        None
+    };
+
+    // Signal that the server is ready. The SDK client (spawned by `startDebugServer`)
+    // waits for this line on stderr before connecting.
+    eprintln!("CLARINET_DAP_SDK_READY:{sdk_port}");
+
+    // Accept the SDK client.
+    eprintln!("clarinet dap: listening for SDK client on 127.0.0.1:{sdk_port}");
     let (sdk_stream, _) = sdk_listener
         .accept()
         .map_err(|e| format!("SDK accept error: {e}"))?;
-    eprintln!("clarinet dap: SDK client connected, ready to evaluate");
+    eprintln!("clarinet dap: SDK client connected");
+
+    // Build the DAP debugger: either from the accepted TCP stream (with VSCode attach
+    // handshake) or a no-op instance when running in SDK-only mode.
+    let mut dap = if let Some(thread) = dap_accept_thread {
+        let dap_stream = thread
+            .join()
+            .map_err(|_| "DAP accept thread panicked".to_string())??;
+
+        let mut d = DAPDebugger::from_std_tcp_stream(dap_stream);
+        for (contract_id, path) in &contract_maps {
+            d.path_to_contract_id
+                .insert(path.clone(), contract_id.clone());
+            d.contract_id_to_path.insert(contract_id.clone(), path.clone());
+        }
+
+        eprintln!("clarinet dap: completing attach handshake...");
+        d.init_attach()
+            .map_err(|e| format!("DAP init_attach error: {e:?}"))?;
+        eprintln!("clarinet dap: DAP client attached, ready to evaluate");
+        d
+    } else {
+        eprintln!("clarinet dap: running in SDK-only mode (no DAP client)");
+        let mut d = DAPDebugger::no_op();
+        for (contract_id, path) in &contract_maps {
+            d.path_to_contract_id
+                .insert(path.clone(), contract_id.clone());
+            d.contract_id_to_path.insert(contract_id.clone(), path.clone());
+        }
+        d
+    };
 
     // Clone the stream so we can have independent reader/writer halves.
     let sdk_read_stream = sdk_stream

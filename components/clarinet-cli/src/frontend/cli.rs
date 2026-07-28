@@ -1455,14 +1455,18 @@ pub fn main() {
         }
         Command::LSP => run_lsp(),
         Command::DAP(cmd) => {
-            let result = if let Some(dap_port) = cmd.dap_port {
-                let sdk_port = cmd.sdk_port.unwrap_or(dap_port + 1);
+            let result = if cmd.sdk_port.is_some() || cmd.dap_port.is_some() {
+                // Server mode: either SDK-only (--sdk-port) or full attach (--dap-port + --sdk-port).
+                let sdk_port = cmd
+                    .sdk_port
+                    .or_else(|| cmd.dap_port.map(|p| p + 1))
+                    .unwrap();
                 let manifest_path = cmd
                     .manifest_path
                     .map(PathBuf::from)
                     .or_else(|| get_manifest_location(None))
                     .unwrap_or_else(|| PathBuf::from("Clarinet.toml"));
-                super::dap::run_dap_server(dap_port, sdk_port, manifest_path)
+                super::dap::run_dap_server(cmd.dap_port, sdk_port, manifest_path)
             } else {
                 super::dap::run_dap()
             };

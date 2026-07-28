@@ -98,6 +98,21 @@ impl DAPDebugger {
         Self::from_io(rt, reader, writer, false)
     }
 
+    /// Create a no-op `DAPDebugger` backed by null I/O.
+    ///
+    /// Used in SDK-only server mode when no DAP client is attached. Since no
+    /// breakpoints are ever registered, execution runs straight through without
+    /// pausing and the null reader/writer are never actually exercised.
+    pub fn no_op() -> Self {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let reader: Box<dyn AsyncRead + Unpin + Send> = Box::new(tokio::io::empty());
+        let writer: Box<dyn AsyncWrite + Unpin + Send> = Box::new(tokio::io::sink());
+        Self::from_io(rt, reader, writer, false)
+    }
+
     /// Create a `DAPDebugger` that communicates over an existing TCP stream instead of stdio.
     /// The server uses this to support VSCode's "attach" debug configuration.
     pub fn from_std_tcp_stream(std_stream: std::net::TcpStream) -> Self {

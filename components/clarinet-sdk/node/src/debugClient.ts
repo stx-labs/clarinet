@@ -1,4 +1,5 @@
 import * as net from "net";
+import { spawn, type ChildProcess } from "child_process";
 
 import { Cl, type ClarityValue } from "@stacks/transactions";
 
@@ -38,9 +39,12 @@ export class DebugClient {
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private buffer = "";
+  /** Set when this client owns the `clarinet dap` process (via `startDebugServer`). */
+  private readonly _process?: ChildProcess;
 
-  constructor(socket: net.Socket) {
+  constructor(socket: net.Socket, process?: ChildProcess) {
     this.socket = socket;
+    this._process = process;
 
     socket.on("data", (chunk: Buffer) => {
       this.buffer += chunk.toString("utf8");
@@ -129,8 +133,19 @@ export class DebugClient {
       await this.send({ method: "disconnect" });
     } finally {
       this.socket.destroy();
+      this._process?.kill();
     }
   }
+}
+
+function openSocket(port: number): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ port, host: "127.0.0.1" }, () => {
+      socket.removeListener("error", reject);
+      resolve(socket);
+    });
+    socket.once("error", reject);
+  });
 }
 
 /**
@@ -150,14 +165,85 @@ export class DebugClient {
  * ```
  */
 export async function connectDebugServer(port?: number): Promise<DebugClient> {
-  const resolvedPort =
-    port ?? Number(process.env["CLARINET_DEBUG_PORT"] ?? "7778");
+  const resolvedPort = port ?? Number(process.env["CLARINET_DEBUG_PORT"] ?? "7778");
+  const socket = await openSocket(resolvedPort);
+  return new DebugClient(socket);
+}
 
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ port: resolvedPort, host: "127.0.0.1" }, () => {
-      socket.removeListener("error", reject);
-      resolve(new DebugClient(socket));
-    });
-    socket.once("error", reject);
+/**
+ * Spawn a `clarinet dap` server and return a connected {@link DebugClient}.
+ *
+ * This is the zero-configuration entry point: no terminal command is needed.
+ * The server process is owned by the returned client and is killed automatically
+ * when {@link DebugClient.disconnect} is called.
+ *
+ * When `dapPort` is supplied the server also listens for a DAP client (e.g.
+ * VSCode) on that port so breakpoints in `.clar` files will be hit. Without
+ * `dapPort` the server runs in SDK-only mode: execution is uninterrupted but
+ * the full `DebugClient` API is still available.
+ *
+ * @example
+ * ```ts
+ * // SDK-only mode — no VSCode attachment needed
+ * const client = await startDebugServer({ manifest: "./Clarinet.toml" });
+ * const result = await client.callPublicFn("counter", "increment", [], deployer);
+ * await client.disconnect();
+ *
+ * // With breakpoints — attach VSCode to dapPort (7777) after calling this
+ * const client = await startDebugServer({ dapPort: 7777, sdkPort: 7778 });
+ * ```
+ */
+export async function startDebugServer(options?: {
+  /** Path to Clarinet.toml. Defaults to `"./Clarinet.toml"`. */
+  manifest?: string;
+  /** SDK port for this client to connect on. Defaults to `7778`. */
+  sdkPort?: number;
+  /**
+   * When set, the server also accepts a DAP client (e.g. VSCode) on this port,
+   * enabling breakpoint debugging. When omitted the server runs in SDK-only mode.
+   */
+  dapPort?: number;
+}): Promise<DebugClient> {
+  const sdkPort = options?.sdkPort ?? 7778;
+  const manifest = options?.manifest ?? "./Clarinet.toml";
+
+  const args = ["dap", "--sdk-port", String(sdkPort), "--manifest", manifest];
+  if (options?.dapPort != null) {
+    args.push("--dap-port", String(options.dapPort));
+  }
+
+  const child = spawn("clarinet", args, {
+    stdio: ["ignore", "ignore", "pipe"],
   });
+
+  // Wait for the ready signal printed to stderr by run_dap_server.
+  await new Promise<void>((resolve, reject) => {
+    const readyToken = `CLARINET_DAP_SDK_READY:${sdkPort}`;
+    let stderrBuf = "";
+    const timeout = setTimeout(
+      () => reject(new Error("clarinet dap server did not start within 15 s")),
+      15_000,
+    );
+
+    child.stderr!.on("data", (chunk: Buffer) => {
+      stderrBuf += chunk.toString("utf8");
+      if (stderrBuf.includes(readyToken)) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(new Error(`failed to spawn clarinet: ${err.message}`));
+    });
+
+    child.on("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`clarinet dap exited unexpectedly with code ${code}`));
+    });
+  });
+
+  const socket = await openSocket(sdkPort);
+  return new DebugClient(socket, child);
 }

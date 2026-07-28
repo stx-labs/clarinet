@@ -185,7 +185,13 @@
         "path": "./syntaxes/clarity.tmLanguage.json"
       }
     ],
-    "commands": [],
+    "commands": [
+      {
+        "command": "clarity.debugTest",
+        "title": "Debug with Clarinet",
+        "category": "Clarity"
+      }
+    ],
     "breakpoints": [
       {
         "language": "clarity"
