@@ -5,16 +5,16 @@ use clarity::util::secp256k1::{MessageSignature, Secp256k1PrivateKey, Secp256k1P
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value as ClarityValue};
 use libsecp256k1::PublicKey;
+use stacks_codec::strings::StacksString;
+use stacks_codec::transaction::{
+    SinglesigHashMode, SinglesigSpendingCondition, StacksTransaction, TokenTransferMemo,
+    TransactionAnchorMode, TransactionAuth, TransactionContractCall, TransactionPayload,
+    TransactionPostConditionMode, TransactionPublicKeyEncoding, TransactionSmartContract,
+    TransactionSpendingCondition, TransactionVersion,
+};
 use stacks_common::address::{
     AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
-use stackslib::chainstate::stacks::{
-    SinglesigHashMode, SinglesigSpendingCondition, StacksTransaction, StacksTransactionSigner,
-    TokenTransferMemo, TransactionAnchorMode, TransactionAuth, TransactionContractCall,
-    TransactionPayload, TransactionPostConditionMode, TransactionPublicKeyEncoding,
-    TransactionSmartContract, TransactionSpendingCondition, TransactionVersion,
-};
-use stackslib::util_lib::strings::StacksString;
 
 #[derive(Clone, Debug)]
 pub struct Wallet {
@@ -102,9 +102,11 @@ pub fn sign_transaction_payload(
         .consensus_serialize(&mut unsigned_tx_bytes)
         .expect("FATAL: invalid transaction");
 
-    let mut tx_signer = StacksTransactionSigner::new(&unsigned_tx);
-    tx_signer.sign_origin(&keypair.secret_key).unwrap();
-    let signed_tx = tx_signer.get_tx().unwrap();
+    let mut signed_tx = unsigned_tx;
+    let sighash = signed_tx.sign_begin();
+    signed_tx
+        .sign_next_origin(&sighash, &keypair.secret_key)
+        .unwrap();
     Ok(signed_tx)
 }
 
@@ -219,10 +221,11 @@ pub fn build_contract_call_transaction(
         .consensus_serialize(&mut unsigned_tx_bytes)
         .expect("FATAL: invalid transaction");
 
-    let mut tx_signer = StacksTransactionSigner::new(&unsigned_tx);
-    tx_signer.sign_origin(&secret_key).unwrap();
+    let mut signed_tx = unsigned_tx;
+    let sighash = signed_tx.sign_begin();
+    signed_tx.sign_next_origin(&sighash, &secret_key).unwrap();
 
-    tx_signer.get_tx().unwrap()
+    signed_tx
 }
 
 pub fn build_contract_publish_transaction(
@@ -272,8 +275,9 @@ pub fn build_contract_publish_transaction(
         .consensus_serialize(&mut unsigned_tx_bytes)
         .expect("FATAL: invalid transaction");
 
-    let mut tx_signer = StacksTransactionSigner::new(&unsigned_tx);
-    tx_signer.sign_origin(&secret_key).unwrap();
+    let mut signed_tx = unsigned_tx;
+    let sighash = signed_tx.sign_begin();
+    signed_tx.sign_next_origin(&sighash, &secret_key).unwrap();
 
-    tx_signer.get_tx().unwrap()
+    signed_tx
 }

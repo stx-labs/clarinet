@@ -17,17 +17,17 @@ use clarity_repl::repl::boot::{
 use clarity_repl::repl::{Session, SessionSettings};
 use libsecp256k1::PublicKey;
 use reqwest::Url;
+use stacks_codec::strings::StacksString;
+use stacks_codec::transaction::{
+    SinglesigHashMode, SinglesigSpendingCondition, StacksTransaction, TokenTransferMemo,
+    TransactionAnchorMode, TransactionAuth, TransactionContractCall, TransactionPayload,
+    TransactionPostConditionMode, TransactionPublicKeyEncoding, TransactionSmartContract,
+    TransactionSpendingCondition, TransactionVersion,
+};
 use stacks_common::address::{
     AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
 use stacks_rpc_client::StacksRpc;
-use stackslib::chainstate::stacks::{
-    SinglesigHashMode, SinglesigSpendingCondition, StacksTransaction, StacksTransactionSigner,
-    TokenTransferMemo, TransactionAnchorMode, TransactionAuth, TransactionContractCall,
-    TransactionPayload, TransactionPostConditionMode, TransactionPublicKeyEncoding,
-    TransactionSmartContract, TransactionSpendingCondition, TransactionVersion,
-};
-use stackslib::util_lib::strings::StacksString;
 
 mod bitcoin_deployment;
 
@@ -105,9 +105,9 @@ fn sign_transaction_payload(
         .consensus_serialize(&mut unsigned_tx_bytes)
         .expect("FATAL: invalid transaction");
 
-    let mut tx_signer = StacksTransactionSigner::new(&unsigned_tx);
-    tx_signer.sign_origin(&secret_key).unwrap();
-    let signed_tx = tx_signer.get_tx().unwrap();
+    let mut signed_tx = unsigned_tx;
+    let sighash = signed_tx.sign_begin();
+    signed_tx.sign_next_origin(&sighash, &secret_key).unwrap();
     Ok(signed_tx)
 }
 
