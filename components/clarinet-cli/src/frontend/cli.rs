@@ -513,7 +513,7 @@ struct DevnetStart {
     /// Save container logs locally
     #[clap(long = "save-container-logs")]
     pub save_container_logs: bool,
-    /// Create a new global snapshot when reaching epoch 3.0
+    /// Create a new global snapshot after the first epoch 4.0 Stacks block
     #[clap(long = "create-new-snapshot")]
     pub create_new_snapshot: bool,
     /// If specified, use this deployment file

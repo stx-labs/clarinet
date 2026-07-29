@@ -50,11 +50,11 @@ use crate::command::run_docker_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::orchestrator::{
     copy_directory, get_global_snapshot_dir, get_project_snapshot_dir, ServicesMapHosts,
-    EXCLUDED_STACKS_SNAPSHOT_FILES,
+    DEVNET_SNAPSHOT_READY_MARKER, EXCLUDED_STACKS_SNAPSHOT_FILES,
 };
 
-const SNAPSHOT_STACKS_START_HEIGHT: u64 = 38;
-const SNAPSHOT_BURN_START_HEIGHT: u64 = 143;
+const SNAPSHOT_STACKS_START_HEIGHT: u64 = 60;
+const SNAPSHOT_BURN_START_HEIGHT: u64 = 163;
 
 #[derive(Deserialize)]
 pub struct NewTransaction {
@@ -323,6 +323,7 @@ pub async fn start_chains_coordinator(
 
     let stacks_signers_keys = config.devnet_config.stacks_signers_keys.clone();
     let mut last_pox_contract = String::new();
+    let mut snapshot_created = false;
 
     loop {
         let oper = sel.select();
@@ -378,18 +379,6 @@ pub async fn start_chains_coordinator(
                         let comment =
                             format!("mining blocks (chain_tip = #{bitcoin_block_height})");
 
-                        // Check if we've reached the target height for database export (142)
-                        // If we've reached epoch 3.0, create the global snapshot
-                        if create_new_snapshot
-                            && bitcoin_block_height == config.devnet_config.epoch_3_0
-                        {
-                            let _ = create_global_snapshot(
-                                &config,
-                                &devnet_event_tx,
-                                mining_command_tx.clone(),
-                            )
-                            .await;
-                        }
                         // Stacking orders can't be published until devnet is ready
                         if !stacks_signers_keys.is_empty()
                             && bitcoin_block_height >= DEFAULT_FIRST_BURN_HEADER_HEIGHT + 10
@@ -507,6 +496,27 @@ pub async fn start_chains_coordinator(
 
                 let _ = devnet_event_tx.send(DevnetEvent::StacksChainEvent(chain_event));
 
+                let burn_height = stacks_block_update
+                    .block
+                    .metadata
+                    .bitcoin_anchor_block_identifier
+                    .index;
+                if create_new_snapshot
+                    && !snapshot_created
+                    && config
+                        .devnet_config
+                        .epoch_4_0
+                        .is_some_and(|epoch_4_0| burn_height >= epoch_4_0)
+                {
+                    snapshot_created = true;
+                    let _ = create_global_snapshot(
+                        &config,
+                        &devnet_event_tx,
+                        mining_command_tx.clone(),
+                    )
+                    .await;
+                }
+
                 // Partially update the UI. With current approach a full update
                 // would require either cloning the block, or passing ownership.
                 send_status_update(
@@ -547,15 +557,14 @@ pub async fn start_chains_coordinator(
             }
             ObserverEvent::NotifyBitcoinTransactionProxied => {
                 if !boot_completed.load(Ordering::SeqCst) {
-                    if config
+                    let snapshot_target_height = config
                         .devnet_config
-                        .epoch_3_0
-                        .saturating_sub(current_burn_height)
-                        > 6
-                    {
+                        .epoch_4_0
+                        .unwrap_or(config.devnet_config.epoch_3_0);
+                    if snapshot_target_height.saturating_sub(current_burn_height) > 6 {
                         std::thread::sleep(std::time::Duration::from_millis(750));
                     } else {
-                        // as epoch 3.0 gets closer, bitcoin blocks need to slow down
+                        // As the snapshot target gets closer, bitcoin blocks need to slow down.
                         std::thread::sleep(std::time::Duration::from_millis(4000));
                     }
                     let res = mine_bitcoin_block(
@@ -709,12 +718,12 @@ pub async fn create_global_snapshot(
     let project_snapshot_dir = get_project_snapshot_dir(devnet_config);
 
     // Project snapshot marker
-    let project_marker = project_snapshot_dir.join("epoch_3_ready");
+    let project_marker = project_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
     if !project_marker.exists() {
         match std::fs::File::create(&project_marker) {
             Ok(_) => {
                 let _ = devnet_event_tx.send(DevnetEvent::success(
-                    "Project snapshot data prepared up to epoch 3.0. Future project starts will be faster.".to_string(),
+                    "Project snapshot data prepared for epoch 4.0. Future project starts will be faster.".to_string(),
                 ));
             }
             Err(e) => {
@@ -725,7 +734,7 @@ pub async fn create_global_snapshot(
         }
     }
 
-    let global_marker = global_snapshot_dir.join("epoch_3_ready");
+    let global_marker = global_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
     if !global_marker.exists() {
         // Copy project snapshot to global snapshot as a template
         if project_snapshot_dir != global_snapshot_dir {
@@ -772,7 +781,7 @@ pub async fn create_global_snapshot(
         }
     }
     let _ = devnet_event_tx.send(DevnetEvent::info(
-        "Reached block height 142, preparing to export Stacks API events...".to_string(),
+        "Reached epoch 4.0 snapshot target, preparing to export Stacks API events...".to_string(),
     ));
 
     // To properly export, we need to:
