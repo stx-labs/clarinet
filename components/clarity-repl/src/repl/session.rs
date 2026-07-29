@@ -26,6 +26,7 @@ use super::{
     SessionSettings,
 };
 use crate::analysis::coverage::CoverageHook;
+use clarinet_defaults::DEFAULT_EPOCH;
 use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
@@ -263,10 +264,10 @@ impl Session {
             settings.cache_location.clone(),
         );
 
-        // If a specific starting epoch is requested, override the datastore default.
-        if let Some(epoch) = settings.epoch_id {
-            interpreter.set_current_epoch(epoch);
-        }
+        // Override the datastore default epoch: use the explicitly requested epoch if set,
+        // otherwise fall back to DEFAULT_EPOCH.
+        let epoch = settings.epoch_id.unwrap_or(DEFAULT_EPOCH);
+        interpreter.set_current_epoch(epoch);
 
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
         let boot_contracts = if with_boot_contracts {
