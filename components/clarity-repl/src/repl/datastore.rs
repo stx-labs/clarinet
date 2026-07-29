@@ -761,7 +761,7 @@ impl Datastore {
             consensus_hash_lookup,
             tenure_height_at_stacks_height,
             stacks_height_at_tenure_height,
-            current_epoch: StacksEpochId::Epoch2_05,
+            current_epoch: StacksEpochId::Epoch40,
             current_epoch_start_height: stacks_chain_height,
             constants,
             remote_network_info: None,
@@ -1550,11 +1550,11 @@ mod tests {
         assert_eq!(
             epoch,
             Some(StacksEpoch {
-                epoch_id: StacksEpochId::Epoch2_05,
+                epoch_id: StacksEpochId::Epoch40,
                 start_height: 0,
                 end_height: u64::MAX,
                 block_limit: BLOCK_LIMIT_MAINNET,
-                network_epoch: clarity::consts::PEER_VERSION_EPOCH_2_05,
+                network_epoch: epoch_to_peer_version(StacksEpochId::Epoch40),
             })
         );
     }
@@ -1562,16 +1562,17 @@ mod tests {
     #[test]
     fn test_get_stacks_epoch_by_epoch_id() {
         let (_, datastore) = get_datastores();
-        let epoch_id = StacksEpochId::Epoch2_05;
+        // get_stacks_epoch_by_epoch_id ignores the parameter and returns the current epoch
+        let epoch_id = StacksEpochId::Epoch40;
         let epoch = datastore.get_stacks_epoch_by_epoch_id(&epoch_id);
         assert_eq!(
             epoch,
             Some(StacksEpoch {
-                epoch_id: StacksEpochId::Epoch2_05,
+                epoch_id: StacksEpochId::Epoch40,
                 start_height: 0,
                 end_height: u64::MAX,
                 block_limit: BLOCK_LIMIT_MAINNET,
-                network_epoch: clarity::consts::PEER_VERSION_EPOCH_2_05,
+                network_epoch: epoch_to_peer_version(StacksEpochId::Epoch40),
             })
         );
     }

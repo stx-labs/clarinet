@@ -263,6 +263,11 @@ impl Session {
             settings.cache_location.clone(),
         );
 
+        // If a specific starting epoch is requested, override the datastore default.
+        if let Some(epoch) = settings.epoch_id {
+            interpreter.set_current_epoch(epoch);
+        }
+
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
         let boot_contracts = if with_boot_contracts {
             // Deploy all boot contracts whose epoch <= the interpreter's current epoch.
@@ -1204,7 +1209,7 @@ impl Session {
         let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
             Some(epoch) => epoch,
             None => {
-                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4"
+                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0"
                     .red()
                     .to_string()
             }
@@ -1679,6 +1684,7 @@ mod tests {
     #[test]
     fn test_parse_and_advance_stacks_chain_tip() {
         let mut session = Session::new(SessionSettings::default());
+        session.handle_command("::set_epoch 2.5");
         let result = session.handle_command("::advance_stacks_chain_tip 1");
         assert_eq!(
             result,
@@ -1696,6 +1702,7 @@ mod tests {
     #[test]
     fn test_parse_and_advance_burn_chain_tip_pre_epoch3() {
         let mut session = Session::new(SessionSettings::default());
+        session.handle_command("::set_epoch 2.5");
         let result = session.handle_command("::advance_burn_chain_tip 1");
         assert_eq!(
             result,
@@ -1742,8 +1749,8 @@ mod tests {
         let mut session = Session::new(SessionSettings::default());
         let initial_block_height = session.interpreter.get_block_height();
         let initial_epoch = session.handle_command("::get_epoch");
-        // initial epoch is 2.05
-        assert_eq!(initial_epoch, "Current epoch: 2.05");
+        // initial epoch is 4.0
+        assert_eq!(initial_epoch, "Current epoch: 4.0");
 
         // it can be lowered to 2.0
         // it's possible that in the feature we want to start from 2.0 and forbid lowering the epoch
@@ -2520,7 +2527,10 @@ mod tests {
 
     #[test]
     fn test_boot_contract_interface_count_at_epoch24() {
-        let settings = SessionSettings::default();
+        let settings = SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch2_05),
+            ..Default::default()
+        };
         let mut session = Session::new(settings);
 
         session.advance_chain_tip(1);
@@ -2542,7 +2552,10 @@ mod tests {
 
     #[test]
     fn test_boot_contract_interface_count_at_epoch31() {
-        let settings = SessionSettings::default();
+        let settings = SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch2_05),
+            ..Default::default()
+        };
         let mut session = Session::new(settings);
 
         session.advance_chain_tip(1);

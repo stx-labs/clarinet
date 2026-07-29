@@ -39,7 +39,9 @@ async fn it_can_execute_clarity_code() {
 #[wasm_bindgen_test]
 async fn it_can_set_epoch() {
     let mut sdk = init_sdk().await;
-    assert_eq!(sdk.block_height(), 1);
+    // With Epoch40 as the default, set_epoch("4.0") is a no-op (no transition),
+    // so no burn/stacks chain tip advancement occurs.
+    assert_eq!(sdk.block_height(), 0);
     assert_eq!(sdk.current_epoch(), StacksEpochId::latest().to_string());
 }
 
