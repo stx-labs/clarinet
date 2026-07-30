@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
@@ -44,8 +45,12 @@ fn collect_user_defined_functions(expressions: &[SymbolicExpression]) -> HashSet
             continue;
         };
         if !matches!(
-            first.as_str(),
-            "define-private" | "define-public" | "define-read-only"
+            DefineFunctions::lookup_by_name(first),
+            Some(
+                DefineFunctions::PrivateFunction
+                    | DefineFunctions::PublicFunction
+                    | DefineFunctions::ReadOnlyFunction
+            )
         ) {
             continue;
         }
@@ -140,7 +145,7 @@ impl<'a> ASTVisitor<'a> for RenameBuiltin<'a> {
         self.diagnostics.push(Diagnostic {
             level: self.level.clone(),
             message: format!(
-                "`{}` was renamed to `{}` in Clarity {}. Replace this call with `{}`.",
+                "`{}` was renamed to `{}` in {}. Replace this call with `{}`.",
                 entry.old_name, entry.new_name, entry.since, entry.new_name,
             ),
             spans: vec![expr.span.clone()],
