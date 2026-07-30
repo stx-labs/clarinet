@@ -1,4 +1,17 @@
-# [3.21.1](https://github.com/stx-labs/clarinet/compare/v3.21.1...v3.22.0) (2026-07-22)
+
+# [3.23.0](https://github.com/stx-labs/clarinet/compare/v3.22.0...v3.23.0) (2026-07-30)
+
+##### New Features
+
+*  Add `renamed_builtin` lint for `with-stacking` deprecation (#2475) (2bfde32a)
+
+##### Chores
+
+*  Add new snapshot starting at epoch 4.0 (block 163) (#2474) (d0956bf)
+*  Use epoch 4.0 and Clarity 6 defaults (#2473) (be9a9d89)
+*  Update Stacks mainnet 4.0 start height (#2480) (21088828)
+
+# [3.22.0](https://github.com/stx-labs/clarinet/compare/v3.21.1...v3.22.0) (2026-07-22)
 
 ##### New Features
 
