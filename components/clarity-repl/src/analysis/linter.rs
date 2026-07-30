@@ -52,8 +52,8 @@ pub enum LintName {
     Noop,
     /// Warn about `unwrap-panic` and `unwrap-err-panic`
     Panic,
-    /// Warn that `with-stacking` was renamed to `with-staking` in Clarity 6
-    RenamedWithStacking,
+    /// Warn that a builtin function was renamed in a later Clarity version
+    RenameBuiltin,
     /// Find unnecessary `as-max-len?` calls
     UnnecessaryAsMaxLen,
     /// Find public functions that could be read-only
@@ -142,7 +142,7 @@ impl LintGroup {
                 LintName::ErrorConst,
                 LintName::Noop,
                 LintName::Panic,
-                LintName::RenamedWithStacking,
+                LintName::RenameBuiltin,
             ],
             Style => &[
                 LintName::CaseBinding,

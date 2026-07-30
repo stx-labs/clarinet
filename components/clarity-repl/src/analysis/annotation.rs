@@ -109,7 +109,7 @@ pub enum WarningKind {
     FlattenVariadic,
     Noop,
     Panic,
-    RenamedWithStacking,
+    RenameBuiltin,
     UnnecessaryAsMaxLen,
     UnnecessaryPublic,
     UnnecessaryTuple,

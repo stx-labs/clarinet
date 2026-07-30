@@ -1,5 +1,6 @@
-//! Lint to explain that `with-stacking` was renamed to `with-staking`
-//! starting in Clarity 6.
+//! Lint to detect calls to builtin functions that were renamed in a later
+//! Clarity version.  All renames are checked in a single AST pass, so adding
+//! a new entry here does not require an additional traversal.
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
@@ -12,17 +13,32 @@ use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
 
-pub fn check_renamed_with_stacking(
+/// A single rename entry: the old name, the new name, and the minimum Clarity
+/// version in which the rename takes effect.
+struct RenameEntry {
+    old_name: &'static str,
+    new_name: &'static str,
+    since: ClarityVersion,
+}
+
+/// All known builtin renames, checked in a single AST pass.
+const RENAMES: &[RenameEntry] = &[RenameEntry {
+    old_name: "with-stacking",
+    new_name: "with-staking",
+    since: ClarityVersion::Clarity6,
+}];
+
+pub fn check_rename_builtin(
     expressions: &[SymbolicExpression],
     clarity_version: ClarityVersion,
     annotations: &[Annotation],
     level: Level,
 ) -> Vec<Diagnostic> {
-    let checker = RenamedWithStacking::new(clarity_version, annotations, level);
+    let checker = RenameBuiltin::new(clarity_version, annotations, level);
     checker.run_expressions(expressions)
 }
 
-pub struct RenamedWithStacking<'a> {
+pub struct RenameBuiltin<'a> {
     clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
     annotations: &'a [Annotation],
@@ -30,7 +46,7 @@ pub struct RenamedWithStacking<'a> {
     active_annotation: Option<usize>,
 }
 
-impl<'a> RenamedWithStacking<'a> {
+impl<'a> RenameBuiltin<'a> {
     fn new(clarity_version: ClarityVersion, annotations: &'a [Annotation], level: Level) -> Self {
         Self {
             clarity_version,
@@ -42,19 +58,11 @@ impl<'a> RenamedWithStacking<'a> {
     }
 
     fn run(mut self, contract_analysis: &'a ContractAnalysis) -> AnalysisResult {
-        if contract_analysis.clarity_version < ClarityVersion::Clarity6 {
-            return Ok(self.diagnostics);
-        }
-
         traverse(&mut self, &contract_analysis.expressions);
         Ok(self.diagnostics)
     }
 
     fn run_expressions(mut self, expressions: &'a [SymbolicExpression]) -> Vec<Diagnostic> {
-        if self.clarity_version < ClarityVersion::Clarity6 {
-            return self.diagnostics;
-        }
-
         traverse(&mut self, expressions);
         self.diagnostics
     }
@@ -66,7 +74,7 @@ impl<'a> RenamedWithStacking<'a> {
     }
 }
 
-impl<'a> ASTVisitor<'a> for RenamedWithStacking<'a> {
+impl<'a> ASTVisitor<'a> for RenameBuiltin<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
     }
@@ -77,9 +85,13 @@ impl<'a> ASTVisitor<'a> for RenamedWithStacking<'a> {
         name: &'a ClarityName,
         _args: &'a [SymbolicExpression],
     ) -> bool {
-        if name.as_str() != "with-stacking" {
+        let entry = RENAMES
+            .iter()
+            .find(|e| e.old_name == name.as_str() && self.clarity_version >= e.since);
+
+        let Some(entry) = entry else {
             return true;
-        }
+        };
 
         self.active_annotation = get_index_of_span(self.annotations, &expr.span);
         if self.allow() {
@@ -88,25 +100,29 @@ impl<'a> ASTVisitor<'a> for RenamedWithStacking<'a> {
 
         self.diagnostics.push(Diagnostic {
             level: self.level.clone(),
-            message:
-                "`with-stacking` was renamed to `with-staking` in Clarity 6. Replace this call with `with-staking`."
-                    .to_string(),
+            message: format!(
+                "`{}` was renamed to `{}` in Clarity {}. Replace this call with `{}`.",
+                entry.old_name, entry.new_name, entry.since, entry.new_name,
+            ),
             spans: vec![expr.span.clone()],
-            suggestion: Some("Replace `with-stacking` with `with-staking`.".to_string()),
+            suggestion: Some(format!(
+                "Replace `{}` with `{}`.",
+                entry.old_name, entry.new_name
+            )),
         });
 
         true
     }
 }
 
-impl AnalysisPass for RenamedWithStacking<'_> {
+impl AnalysisPass for RenameBuiltin<'_> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let checker = RenamedWithStacking::new(
+        let checker = RenameBuiltin::new(
             analysis_cache.contract_analysis.clarity_version,
             analysis_cache.annotations,
             level,
@@ -115,15 +131,15 @@ impl AnalysisPass for RenamedWithStacking<'_> {
     }
 }
 
-impl Lint for RenamedWithStacking<'_> {
+impl Lint for RenameBuiltin<'_> {
     fn get_name() -> LintName {
-        LintName::RenamedWithStacking
+        LintName::RenameBuiltin
     }
 
     fn match_allow_annotation(annotation: &Annotation) -> bool {
         match &annotation.kind {
             AnnotationKind::Allow(warning_kinds) => {
-                warning_kinds.contains(&WarningKind::RenamedWithStacking)
+                warning_kinds.contains(&WarningKind::RenameBuiltin)
             }
             _ => false,
         }
@@ -136,7 +152,7 @@ mod tests {
     use clarity::vm::diagnostic::Level;
     use indoc::indoc;
 
-    use super::{check_renamed_with_stacking, RenamedWithStacking};
+    use super::{check_rename_builtin, RenameBuiltin};
     use crate::analysis::annotation::Annotation;
     use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
@@ -153,7 +169,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(RenamedWithStacking::get_name(), Level::Warning);
+            .enable_lint(RenameBuiltin::get_name(), Level::Warning);
 
         let mut session = Session::new_without_boot_contracts(settings);
         session.update_epoch(StacksEpochId::Epoch40);
@@ -202,7 +218,7 @@ mod tests {
             .build();
         let (ast, _, _) = session.interpreter.build_ast(&contract);
 
-        let diagnostics = check_renamed_with_stacking(
+        let diagnostics = check_rename_builtin(
             &ast.expressions,
             clarity::vm::ClarityVersion::Clarity6,
             &Vec::<Annotation>::new(),
@@ -218,7 +234,7 @@ mod tests {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (test)
-                ;; #[allow(renamed_with_stacking)]
+                ;; #[allow(rename_builtin)]
                 (as-contract? ((with-stacking u1)) true))
         ").to_string();
 
