@@ -135,13 +135,16 @@ impl CallFnArgs {
     }
 }
 
-fn clarity_version_from_u32(v: Option<u32>) -> ClarityVersion {
+fn clarity_version_from_u32(
+    v: Option<u32>,
+    current_epoch: clarity::types::StacksEpochId,
+) -> ClarityVersion {
     match v {
         Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8).unwrap_or_else(|| {
             log!("Invalid clarity version {v}. Using default version.");
             DEFAULT_CLARITY_VERSION
         }),
-        None => DEFAULT_CLARITY_VERSION,
+        None => ClarityVersion::default_for_epoch(current_epoch),
     }
 }
 
@@ -973,6 +976,7 @@ impl SDK {
 
             let clarity_version = clarity_version_from_u32(
                 args.options.as_ref().and_then(|opts| opts.clarity_version),
+                current_epoch,
             );
 
             let contract = ClarityContract {
