@@ -696,11 +696,10 @@ pub trait ASTVisitor<'a> {
                         ),
                         RestrictAssets => {
                             let owner = args.get(0).unwrap_or(&DEFAULT_EXPR);
-                            let allowances = match_pairs(args.get(0).unwrap_or(&DEFAULT_EXPR))
-                                .unwrap_or_default();
+                            let raw_allowances = args.get(1).unwrap_or(&DEFAULT_EXPR);
                             let body = if args.len() >= 2 { &args[2..] } else { &[] };
 
-                            self.traverse_restrict_assets(expr, owner, &allowances, body)
+                            self.traverse_restrict_assets(expr, owner, raw_allowances, body)
                         }
                         AllowanceWithStx
                         | AllowanceWithFt
@@ -2810,12 +2809,30 @@ pub trait ASTVisitor<'a> {
         &mut self,
         expr: &'a SymbolicExpression,
         owner: &'a SymbolicExpression,
-        allowance: &HashMap<&'a ClarityName, LetBinding<'a>>,
+        // We receive the raw allowance list expression rather than a pre-parsed
+        // HashMap for two reasons:
+        //
+        // 1. `match_pairs` converts `((fn arg) ...)` into `{fn: LetBinding{value:
+        //    arg}}`, discarding the original call expressions.  Iterating the
+        //    HashMap values would only visit each *argument* (e.g. `u1`), never the
+        //    call expression itself (e.g. `(with-staking u1)`).  Visitors that
+        //    need to inspect the call — such as a renamed-builtin lint — would
+        //    never fire.
+        //
+        // 2. We still want to give `visit_restrict_assets` a structured view of
+        //    the allowances, so we parse via `match_pairs` inside this function
+        //    and pass the HashMap downstream.
+        raw_allowances: &'a SymbolicExpression,
         body: &'a [SymbolicExpression],
     ) -> bool {
-        for binding in allowance.values() {
-            if !self.traverse_expr(binding.value) {
-                return false;
+        let allowances = match_pairs(raw_allowances).unwrap_or_default();
+        // Traverse each full allowance call expression (e.g. `(with-staking u1)`)
+        // so that visitors can inspect the call itself, not just its arguments.
+        if let Some(allowance_list) = raw_allowances.match_list() {
+            for allowance_expr in allowance_list {
+                if !self.traverse_expr(allowance_expr) {
+                    return false;
+                }
             }
         }
         for expr in body {
@@ -2823,7 +2840,7 @@ pub trait ASTVisitor<'a> {
                 return false;
             }
         }
-        self.visit_restrict_assets(expr, owner, allowance, body)
+        self.visit_restrict_assets(expr, owner, &allowances, body)
     }
 
     fn visit_restrict_assets(
