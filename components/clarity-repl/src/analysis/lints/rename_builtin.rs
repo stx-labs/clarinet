@@ -34,9 +34,7 @@ const RENAMES: &[RenameEntry] = &[RenameEntry {
 /// (`define-private`, `define-public`, `define-read-only`).
 ///
 /// We do this in a separate pass so that forward references are handled correctly.
-fn collect_user_defined_functions<'a>(
-    expressions: &'a [SymbolicExpression],
-) -> HashSet<&'a ClarityName> {
+fn collect_user_defined_functions(expressions: &[SymbolicExpression]) -> HashSet<&ClarityName> {
     let mut names = HashSet::new();
     for expr in expressions {
         let Some(list) = expr.match_list() else {
