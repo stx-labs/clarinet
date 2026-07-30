@@ -65,18 +65,18 @@ fn collect_user_defined_functions(expressions: &[SymbolicExpression]) -> HashSet
     names
 }
 
-pub fn check_rename_builtin(
+pub fn check_renamed_builtin(
     expressions: &[SymbolicExpression],
     clarity_version: ClarityVersion,
     annotations: &[Annotation],
     level: Level,
 ) -> Vec<Diagnostic> {
-    let mut checker = RenameBuiltin::new(clarity_version, annotations, level, expressions);
+    let mut checker = RenamedBuiltin::new(clarity_version, annotations, level, expressions);
     traverse(&mut checker, expressions);
     checker.diagnostics
 }
 
-pub struct RenameBuiltin<'a> {
+pub struct RenamedBuiltin<'a> {
     clarity_version: ClarityVersion,
     diagnostics: Vec<Diagnostic>,
     annotations: &'a [Annotation],
@@ -87,7 +87,7 @@ pub struct RenameBuiltin<'a> {
     user_defined_functions: HashSet<&'a ClarityName>,
 }
 
-impl<'a> RenameBuiltin<'a> {
+impl<'a> RenamedBuiltin<'a> {
     fn new(
         clarity_version: ClarityVersion,
         annotations: &'a [Annotation],
@@ -116,7 +116,7 @@ impl<'a> RenameBuiltin<'a> {
     }
 }
 
-impl<'a> ASTVisitor<'a> for RenameBuiltin<'a> {
+impl<'a> ASTVisitor<'a> for RenamedBuiltin<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion {
         &self.clarity_version
     }
@@ -159,14 +159,14 @@ impl<'a> ASTVisitor<'a> for RenameBuiltin<'a> {
     }
 }
 
-impl AnalysisPass for RenameBuiltin<'_> {
+impl AnalysisPass for RenamedBuiltin<'_> {
     fn run_pass(
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
         _settings: &analysis::Settings,
     ) -> AnalysisResult {
-        let checker = RenameBuiltin::new(
+        let checker = RenamedBuiltin::new(
             analysis_cache.contract_analysis.clarity_version,
             analysis_cache.annotations,
             level,
@@ -176,15 +176,15 @@ impl AnalysisPass for RenameBuiltin<'_> {
     }
 }
 
-impl Lint for RenameBuiltin<'_> {
+impl Lint for RenamedBuiltin<'_> {
     fn get_name() -> LintName {
-        LintName::RenameBuiltin
+        LintName::RenamedBuiltin
     }
 
     fn match_allow_annotation(annotation: &Annotation) -> bool {
         match &annotation.kind {
             AnnotationKind::Allow(warning_kinds) => {
-                warning_kinds.contains(&WarningKind::RenameBuiltin)
+                warning_kinds.contains(&WarningKind::RenamedBuiltin)
             }
             _ => false,
         }
@@ -198,7 +198,7 @@ mod tests {
     use clarity::vm::ClarityVersion;
     use indoc::indoc;
 
-    use super::{check_rename_builtin, RenameBuiltin};
+    use super::{check_renamed_builtin, RenamedBuiltin};
     use crate::analysis::annotation::Annotation;
     use crate::analysis::linter::Lint;
     use crate::repl::session::Session;
@@ -226,7 +226,7 @@ mod tests {
             .build();
         let (ast, _, _) = session.interpreter.build_ast(&contract);
 
-        check_rename_builtin(
+        check_renamed_builtin(
             &ast.expressions,
             clarity_version,
             &Vec::<Annotation>::new(),
@@ -249,7 +249,7 @@ mod tests {
         settings
             .repl_settings
             .analysis
-            .enable_lint(RenameBuiltin::get_name(), Level::Warning);
+            .enable_lint(RenamedBuiltin::get_name(), Level::Warning);
 
         let mut session = Session::new_without_boot_contracts(settings);
         session.update_epoch(StacksEpochId::Epoch40);
@@ -298,7 +298,7 @@ mod tests {
             .build();
         let (ast, _, _) = session.interpreter.build_ast(&contract);
 
-        let diagnostics = check_rename_builtin(
+        let diagnostics = check_renamed_builtin(
             &ast.expressions,
             clarity::vm::ClarityVersion::Clarity6,
             &Vec::<Annotation>::new(),
@@ -420,7 +420,7 @@ mod tests {
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (test)
-                ;; #[allow(rename_builtin)]
+                ;; #[allow(renamed_builtin)]
                 (as-contract? ((with-stacking u1)) true))
         ").to_string();
 

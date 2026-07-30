@@ -280,11 +280,11 @@ impl ClarityInterpreter {
     ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Vec<Diagnostic>> {
         // Extract the lint level before borrowing self.clarity_datastore via analysis_db.
         // Only bother if skip_analysis is false; boot contracts and similar skip lints entirely.
-        let rename_builtin_level = if !contract.skip_analysis {
+        let renamed_builtin_level = if !contract.skip_analysis {
             self.repl_settings
                 .analysis
                 .lints()
-                .get(&analysis::linter::LintName::RenameBuiltin)
+                .get(&analysis::linter::LintName::RenamedBuiltin)
                 .cloned()
         } else {
             None
@@ -306,10 +306,10 @@ impl ClarityInterpreter {
             TimeTracker::unlimited(),
         )
         .map_err(|boxed_error| {
-            let mut diagnostics = rename_builtin_level
+            let mut diagnostics = renamed_builtin_level
                 .as_ref()
                 .map(|level| {
-                    analysis::lints::check_rename_builtin(
+                    analysis::lints::check_renamed_builtin(
                         &contract_ast.expressions,
                         contract.clarity_version,
                         annotations,

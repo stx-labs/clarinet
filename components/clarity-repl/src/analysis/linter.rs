@@ -53,7 +53,7 @@ pub enum LintName {
     /// Warn about `unwrap-panic` and `unwrap-err-panic`
     Panic,
     /// Warn that a builtin function was renamed in a later Clarity version
-    RenameBuiltin,
+    RenamedBuiltin,
     /// Find unnecessary `as-max-len?` calls
     UnnecessaryAsMaxLen,
     /// Find public functions that could be read-only
@@ -142,7 +142,7 @@ impl LintGroup {
                 LintName::ErrorConst,
                 LintName::Noop,
                 LintName::Panic,
-                LintName::RenameBuiltin,
+                LintName::RenamedBuiltin,
             ],
             Style => &[
                 LintName::CaseBinding,
