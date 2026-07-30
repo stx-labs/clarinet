@@ -107,7 +107,7 @@ describe("test pox-3", () => {
       }),
     );
 
-    simnet.mineEmptyBlocks(2);
+    simnet.mineEmptyBlocks(1);
     const stxAccountAfter = simnet.execute(`(stx-account '${address1})`);
     expect(stxAccountAfter.result).toStrictEqual(
       Cl.tuple({
