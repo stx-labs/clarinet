@@ -2826,6 +2826,9 @@ pub trait ASTVisitor<'a> {
         body: &'a [SymbolicExpression],
     ) -> bool {
         let allowances = match_pairs(raw_allowances).unwrap_or_default();
+        if !self.traverse_expr(owner) {
+            return false;
+        }
         // Traverse each full allowance call expression (e.g. `(with-staking u1)`)
         // so that visitors can inspect the call itself, not just its arguments.
         if let Some(allowance_list) = raw_allowances.match_list() {

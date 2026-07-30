@@ -311,4 +311,54 @@ mod tests {
             .expect("Invalid code snippet");
         assert_eq!(result.lint_diagnostics.len(), 0);
     }
+
+    #[test]
+    fn used_in_restrict_assets_allowances() {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(UnusedConst::get_name(), Level::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+        session.update_epoch(clarity::types::StacksEpochId::Epoch33);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant TRANSFER_AMOUNT u1000)
+
+            (define-public (my-func)
+                (restrict-assets? tx-sender ((with-stx TRANSFER_AMOUNT)) true))
+        ").to_string();
+
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn used_as_restrict_assets_owner() {
+        let mut settings = SessionSettings::default();
+        settings
+            .repl_settings
+            .analysis
+            .enable_lint(UnusedConst::get_name(), Level::Warning);
+
+        let mut session = Session::new_without_boot_contracts(settings);
+        session.update_epoch(clarity::types::StacksEpochId::Epoch33);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-constant CONTRACT_OWNER tx-sender)
+
+            (define-public (my-func)
+                (restrict-assets? CONTRACT_OWNER ((with-stx u1000)) true))
+        ").to_string();
+
+        let (_, result) = session
+            .formatted_interpretation(snippet, Some("checker".to_string()), false, None)
+            .expect("Invalid code snippet");
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
 }
