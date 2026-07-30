@@ -15,10 +15,7 @@ fn eval_snippet(session: &mut Session, snippet: &str) -> Value {
 
 fn init_session_epoch_24() -> Session {
     use StacksEpochId::*;
-    let mut session = Session::new(SessionSettings {
-        epoch_id: Some(Epoch2_05),
-        ..Default::default()
-    });
+    let mut session = Session::new(SessionSettings::default());
 
     // move through certain epochs to populate the datastore
     let epochs = [Epoch21, Epoch24];
@@ -31,10 +28,7 @@ fn init_session_epoch_24() -> Session {
 
 fn init_session() -> Session {
     use StacksEpochId::*;
-    let mut session = Session::new(SessionSettings {
-        epoch_id: Some(Epoch2_05),
-        ..Default::default()
-    });
+    let mut session = Session::new(SessionSettings::default());
 
     // move through certain epochs to populate the datastore
     let epochs = [Epoch24, Epoch25, Epoch30, Epoch32];

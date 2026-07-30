@@ -915,7 +915,6 @@ fn match_contract_caller(expr: &SymbolicExpression) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use clarity::types::StacksEpochId;
     use indoc::indoc;
 
     use crate::analysis::Pass;
@@ -928,10 +927,7 @@ mod tests {
             .repl_settings
             .analysis
             .enable_passes(&[Pass::CheckChecker]);
-        // Use Epoch25 (Clarity2) since `as-contract` was removed in Clarity4+
-        let mut session = Session::new_without_boot_contracts(settings);
-        session.update_epoch(StacksEpochId::Epoch25);
-        session
+        Session::new_without_boot_contracts(settings)
     }
 
     #[test]
@@ -2276,7 +2272,6 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        session.update_epoch(StacksEpochId::Epoch25);
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (my-transfer (amount uint))
@@ -2651,7 +2646,6 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        session.update_epoch(StacksEpochId::Epoch25);
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (tainted (amount uint))
@@ -2685,7 +2679,6 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = true;
         let mut session = Session::new_without_boot_contracts(settings);
-        session.update_epoch(StacksEpochId::Epoch25);
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (tainted (amount uint))
@@ -2811,7 +2804,6 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.trusted_sender = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        session.update_epoch(StacksEpochId::Epoch25);
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-data-var admin principal tx-sender)
@@ -2909,7 +2901,6 @@ mod tests {
             .enable_passes(&[Pass::CheckChecker]);
         settings.repl_settings.analysis.check_checker.callee_filter = false;
         let mut session = Session::new_without_boot_contracts(settings);
-        session.update_epoch(StacksEpochId::Epoch25);
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-private (my-transfer (amount uint))

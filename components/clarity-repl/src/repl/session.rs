@@ -1683,10 +1683,7 @@ mod tests {
 
     #[test]
     fn test_parse_and_advance_stacks_chain_tip() {
-        let mut session = Session::new(SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        });
+        let mut session = Session::new(SessionSettings::default());
         let result = session.handle_command("::advance_stacks_chain_tip 1");
         assert_eq!(
             result,
@@ -1703,10 +1700,7 @@ mod tests {
 
     #[test]
     fn test_parse_and_advance_burn_chain_tip_pre_epoch3() {
-        let mut session = Session::new(SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        });
+        let mut session = Session::new(SessionSettings::default());
         let result = session.handle_command("::advance_burn_chain_tip 1");
         assert_eq!(
             result,
@@ -1728,10 +1722,7 @@ mod tests {
 
     #[test]
     fn test_parse_and_advance_burn_chain_tip_epoch3() {
-        let mut session = Session::new(SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        });
+        let mut session = Session::new(SessionSettings::default());
         session.handle_command("::set_epoch 3.0");
         let result = session.handle_command("::advance_burn_chain_tip 1");
         assert_eq!(
@@ -1759,7 +1750,7 @@ mod tests {
         assert_eq!(initial_epoch, "Current epoch: 2.05");
 
         // it can be lowered to 2.0
-        // it's possible that in the feature we want to start from 2.0 and forbid lowering the epoch
+        // it's possible that in the future we want to start from 2.0 and forbid lowering the epoch
         // this test would have to be updated
         session.handle_command("::set_epoch 2.0");
         let current_epoch = session.handle_command("::get_epoch");
@@ -1917,11 +1908,7 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let settings = SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        };
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
 
         session.handle_command("::set_epoch 2.5");
 
@@ -2184,11 +2171,7 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch2_5() {
-        let settings = SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        };
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch25);
 
         let snippet = [
@@ -2246,11 +2229,7 @@ mod tests {
     fn burn_block_height_behavior_epoch3_0() {
         // test that clarinet preserves the 3.0 and 3.1 special behavior of burn-block-height
         // https://github.com/stacks-network/stacks-core/pull/5524
-        let settings = SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        };
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch30);
 
         let snippet = [
@@ -2282,11 +2261,7 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch3_0_contract_in_2_5() {
-        let settings = SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        };
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch25);
 
         let snippet = [
@@ -2545,11 +2520,7 @@ mod tests {
 
     #[test]
     fn test_boot_contract_interface_count_at_epoch24() {
-        let settings = SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        };
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
 
         session.advance_chain_tip(1);
         session.update_epoch(StacksEpochId::Epoch24);
@@ -2570,11 +2541,7 @@ mod tests {
 
     #[test]
     fn test_boot_contract_interface_count_at_epoch31() {
-        let settings = SessionSettings {
-            epoch_id: Some(StacksEpochId::Epoch2_05),
-            ..Default::default()
-        };
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
 
         session.advance_chain_tip(1);
         session.update_epoch(StacksEpochId::Epoch24);
