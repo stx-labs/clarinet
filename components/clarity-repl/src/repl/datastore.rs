@@ -1562,8 +1562,9 @@ mod tests {
     #[test]
     fn test_get_stacks_epoch_by_epoch_id() {
         let (_, datastore) = get_datastores();
-        let epoch_id = StacksEpochId::Epoch2_05;
-        let epoch = datastore.get_stacks_epoch_by_epoch_id(&epoch_id);
+        // The parameter is ignored; the function always returns the current epoch.
+        // Pass a different epoch_id to confirm the result reflects current state, not the argument.
+        let epoch = datastore.get_stacks_epoch_by_epoch_id(&StacksEpochId::Epoch40);
         assert_eq!(
             epoch,
             Some(StacksEpoch {

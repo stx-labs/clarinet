@@ -19,7 +19,7 @@ use crate::schema;
 use crate::{paths, FileAccessor};
 
 pub const INVALID_CLARITY_VERSION: &str =
-    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5)";
+    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5, 6)";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ClarityContractMetadata {
@@ -605,7 +605,6 @@ mod tests {
         let result = get_epoch_and_clarity_version(Some("3.1"), None);
         assert_eq!(result, Ok((Specific(Epoch31), Clarity3)));
 
-        // no epoch
         // no epoch, version 1
         let result = get_epoch_and_clarity_version(None, Some("1"));
         assert_eq!(result, Ok((Specific(Epoch2_05), Clarity1)));

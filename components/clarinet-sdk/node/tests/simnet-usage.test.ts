@@ -17,9 +17,11 @@ let simnet: Simnet;
 // 12 names × 2 addresses (genesis has no functions and deploys as a snippet)
 // + 2 sbtc contracts at Epoch30 = 26
 const bootContractsAtGenesis = 26;
-// After setEpoch("3.4") (Epoch34), costs-4 (Epoch33) is also deployed: +2
-const bootContractsAtEpoch34 = bootContractsAtGenesis + 2;
-const latestEpochStr = "3.4";
+// After setEpoch("4.0") (Epoch40):
+//   costs-4 (Epoch33) x 2 addrs
+//   pox-5   (Epoch40) x 2 addrs
+const bootContractsAtEpoch40 = bootContractsAtGenesis + 4;
+const latestEpochStr = "4.0";
 
 const deploymentPlanPath = path.join(
   process.cwd(),
@@ -450,7 +452,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(res.result).toStrictEqual(Cl.int(42));
 
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch34 + 5);
+    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch40 + 5);
   });
 
   it("can deploy contracts", () => {
@@ -460,7 +462,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(deployRes.result).toStrictEqual(Cl.bool(true));
 
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch34 + 6);
+    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch40 + 6);
 
     const addRes = simnet.callPublicFn("op", "add", [Cl.uint(13), Cl.uint(29)], address1);
     expect(addRes.result).toStrictEqual(Cl.ok(Cl.uint(42)));

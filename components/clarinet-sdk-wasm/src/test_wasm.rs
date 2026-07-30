@@ -39,6 +39,7 @@ async fn it_can_execute_clarity_code() {
 #[wasm_bindgen_test]
 async fn it_can_set_epoch() {
     let mut sdk = init_sdk().await;
+    // set_epoch("4.0") transitions from Epoch2_05, which advances the burn chain tip by 1.
     assert_eq!(sdk.block_height(), 1);
     assert_eq!(sdk.current_epoch(), StacksEpochId::latest().to_string());
 }

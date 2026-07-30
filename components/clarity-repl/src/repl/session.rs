@@ -263,6 +263,11 @@ impl Session {
             settings.cache_location.clone(),
         );
 
+        // If a specific starting epoch is requested, override the datastore default.
+        if let Some(epoch) = settings.epoch_id {
+            interpreter.set_current_epoch(epoch);
+        }
+
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
         let boot_contracts = if with_boot_contracts {
             // Deploy all boot contracts whose epoch <= the interpreter's current epoch.
@@ -1204,7 +1209,7 @@ impl Session {
         let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
             Some(epoch) => epoch,
             None => {
-                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4"
+                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0"
                     .red()
                     .to_string()
             }
@@ -1742,11 +1747,10 @@ mod tests {
         let mut session = Session::new(SessionSettings::default());
         let initial_block_height = session.interpreter.get_block_height();
         let initial_epoch = session.handle_command("::get_epoch");
-        // initial epoch is 2.05
         assert_eq!(initial_epoch, "Current epoch: 2.05");
 
         // it can be lowered to 2.0
-        // it's possible that in the feature we want to start from 2.0 and forbid lowering the epoch
+        // it's possible that in the future we want to start from 2.0 and forbid lowering the epoch
         // this test would have to be updated
         session.handle_command("::set_epoch 2.0");
         let current_epoch = session.handle_command("::get_epoch");
@@ -1904,8 +1908,7 @@ mod tests {
 
     #[test]
     fn evaluate_at_block() {
-        let settings = SessionSettings::default();
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
 
         session.handle_command("::set_epoch 2.5");
 
@@ -2168,8 +2171,7 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch2_5() {
-        let settings = SessionSettings::default();
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch25);
 
         let snippet = [
@@ -2227,8 +2229,7 @@ mod tests {
     fn burn_block_height_behavior_epoch3_0() {
         // test that clarinet preserves the 3.0 and 3.1 special behavior of burn-block-height
         // https://github.com/stacks-network/stacks-core/pull/5524
-        let settings = SessionSettings::default();
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch30);
 
         let snippet = [
@@ -2260,8 +2261,7 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch3_0_contract_in_2_5() {
-        let settings = SessionSettings::default();
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch25);
 
         let snippet = [
@@ -2520,8 +2520,7 @@ mod tests {
 
     #[test]
     fn test_boot_contract_interface_count_at_epoch24() {
-        let settings = SessionSettings::default();
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
 
         session.advance_chain_tip(1);
         session.update_epoch(StacksEpochId::Epoch24);
@@ -2542,8 +2541,7 @@ mod tests {
 
     #[test]
     fn test_boot_contract_interface_count_at_epoch31() {
-        let settings = SessionSettings::default();
-        let mut session = Session::new(settings);
+        let mut session = Session::new(SessionSettings::default());
 
         session.advance_chain_tip(1);
         session.update_epoch(StacksEpochId::Epoch24);
