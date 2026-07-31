@@ -102,64 +102,71 @@ pub fn run_dap_server(
         })
         .collect();
 
-    // Bind the SDK listener first so we can signal readiness once both are bound.
+    // Bind both listeners up-front so the ready signal is accurate.
     let sdk_listener = std::net::TcpListener::bind(("127.0.0.1", sdk_port))
         .map_err(|e| format!("failed to bind SDK port {sdk_port}: {e}"))?;
 
-    // If a DAP port was requested, bind that listener and spawn a background thread
-    // to accept the DAP connection while the main thread waits for the SDK client.
-    // This allows both clients to connect in any order.
-    let dap_accept_thread = if let Some(dap_port) = dap_port {
+    // When a DAP port is given, bind that listener and spawn a background thread
+    // that accepts the DAP client and drives the full attach handshake
+    // (`init_attach`) to completion.  Running the handshake in a thread lets
+    // `startDebugging` in the VSCode extension complete (it waits for
+    // `configurationDone`) while the main thread concurrently waits for the
+    // SDK client.  Without this separation the two sides deadlock: the extension
+    // only opens the test terminal after `startDebugging` returns, so the SDK
+    // client can only connect after the handshake is already done.
+    let dap_thread = if let Some(dap_port) = dap_port {
         let dap_listener = std::net::TcpListener::bind(("127.0.0.1", dap_port))
             .map_err(|e| format!("failed to bind DAP port {dap_port}: {e}"))?;
         eprintln!("clarinet dap: listening for DAP client on 127.0.0.1:{dap_port}");
-        Some(std::thread::spawn(move || -> Result<std::net::TcpStream, String> {
-            let (stream, _) = dap_listener
-                .accept()
-                .map_err(|e| format!("DAP accept error: {e}"))?;
-            Ok(stream)
-        }))
+        let maps = contract_maps.clone();
+        Some(std::thread::spawn(
+            move || -> Result<DAPDebugger, String> {
+                let (stream, _) = dap_listener
+                    .accept()
+                    .map_err(|e| format!("DAP accept error: {e}"))?;
+                let mut d = DAPDebugger::from_std_tcp_stream(stream);
+                for (contract_id, path) in &maps {
+                    d.path_to_contract_id
+                        .insert(path.clone(), contract_id.clone());
+                    d.contract_id_to_path
+                        .insert(contract_id.clone(), path.clone());
+                }
+                eprintln!("clarinet dap: completing attach handshake...");
+                d.init_attach()
+                    .map_err(|e| format!("DAP init_attach error: {e:?}"))?;
+                eprintln!("clarinet dap: DAP client attached");
+                Ok(d)
+            },
+        ))
     } else {
         None
     };
 
-    // Signal that the server is ready. The SDK client (spawned by `startDebugServer`)
-    // waits for this line on stderr before connecting.
+    // Signal readiness - both ports are now bound and accepting.
     eprintln!("CLARINET_DAP_SDK_READY:{sdk_port}");
 
-    // Accept the SDK client.
+    // Accept the SDK client on the main thread (runs concurrently with the
+    // DAP handshake in the background thread above).
     eprintln!("clarinet dap: listening for SDK client on 127.0.0.1:{sdk_port}");
     let (sdk_stream, _) = sdk_listener
         .accept()
         .map_err(|e| format!("SDK accept error: {e}"))?;
     eprintln!("clarinet dap: SDK client connected");
 
-    // Build the DAP debugger: either from the accepted TCP stream (with VSCode attach
-    // handshake) or a no-op instance when running in SDK-only mode.
-    let mut dap = if let Some(thread) = dap_accept_thread {
-        let dap_stream = thread
+    // Join the DAP thread (waits for the handshake to finish if it hasn't yet)
+    // or build a no-op debugger for SDK-only mode.
+    let mut dap = if let Some(thread) = dap_thread {
+        thread
             .join()
-            .map_err(|_| "DAP accept thread panicked".to_string())??;
-
-        let mut d = DAPDebugger::from_std_tcp_stream(dap_stream);
-        for (contract_id, path) in &contract_maps {
-            d.path_to_contract_id
-                .insert(path.clone(), contract_id.clone());
-            d.contract_id_to_path.insert(contract_id.clone(), path.clone());
-        }
-
-        eprintln!("clarinet dap: completing attach handshake...");
-        d.init_attach()
-            .map_err(|e| format!("DAP init_attach error: {e:?}"))?;
-        eprintln!("clarinet dap: DAP client attached, ready to evaluate");
-        d
+            .map_err(|_| "DAP handshake thread panicked".to_string())??
     } else {
         eprintln!("clarinet dap: running in SDK-only mode (no DAP client)");
         let mut d = DAPDebugger::no_op();
         for (contract_id, path) in &contract_maps {
             d.path_to_contract_id
                 .insert(path.clone(), contract_id.clone());
-            d.contract_id_to_path.insert(contract_id.clone(), path.clone());
+            d.contract_id_to_path
+                .insert(contract_id.clone(), path.clone());
         }
         d
     };
@@ -175,7 +182,7 @@ pub fn run_dap_server(
     loop {
         line.clear();
         match reader.read_line(&mut line) {
-            Ok(0) => break, // EOF — client disconnected
+            Ok(0) => break, // EOF - client disconnected
             Ok(_) => {}
             Err(e) => return Err(format!("SDK read error: {e}")),
         }
@@ -234,7 +241,7 @@ pub fn run_dap_server(
                         // Already a full principal like "ST1PQHQ....counter"
                         format!("'{contract}")
                     } else {
-                        // Short name like "counter" — find in deployed contracts
+                        // find in deployed contracts
                         let short_name = contract.trim_start_matches('.');
                         dap.contract_id_to_path
                             .keys()

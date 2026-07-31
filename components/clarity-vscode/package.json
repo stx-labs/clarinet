@@ -64,6 +64,12 @@
         "id": "clarity-lsp",
         "title": "Clarity",
         "properties": {
+          "clarity-lsp.clarinetPath": {
+            "type": "string",
+            "scope": "machine",
+            "default": "",
+            "description": "Absolute path to the clarinet binary. Leave empty to auto-detect (checks ~/.cargo/bin, Homebrew, and system PATH)."
+          },
           "clarity-lsp.trace.server": {
             "type": "string",
             "scope": "window",

@@ -1,4 +1,6 @@
 import * as path from "path";
+import * as fs from "fs";
+import * as os from "os";
 import * as net from "net";
 import { spawn } from "child_process";
 import { ExtensionContext } from "vscode";
@@ -46,6 +48,64 @@ class ClarityDebugTestLensProvider implements vscode.CodeLensProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Walk up the directory tree from `startDir` until we find a Clarinet.toml,
+// stopping at `stopDir` (the workspace root).  Returns undefined if not found.
+// ---------------------------------------------------------------------------
+async function findManifest(
+  startDir: string,
+  stopDir: string,
+): Promise<string | undefined> {
+  let dir = startDir;
+  while (true) {
+    const candidate = path.join(dir, "Clarinet.toml");
+    try {
+      await fs.promises.access(candidate, fs.constants.R_OK);
+      return candidate;
+    } catch {
+      // not here
+    }
+    if (dir === stopDir || path.dirname(dir) === dir) break;
+    dir = path.dirname(dir);
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Locate the clarinet binary.
+//
+// VSCode extensions on macOS/Linux don't inherit the user's interactive-shell
+// PATH (e.g. ~/.cargo/bin is not visible when VSCode is opened from the Dock).
+// We check well-known install locations before falling back to a bare name so
+// that `spawn` can at least try system PATH as a last resort.
+// ---------------------------------------------------------------------------
+async function findClarinet(): Promise<string> {
+  // Allow the user to pin an explicit path in settings.
+  const configured = vscode.workspace
+    .getConfiguration("clarity-lsp")
+    .get<string>("clarinetPath");
+  if (configured) return configured;
+
+  const candidates = [
+    path.join(os.homedir(), ".cargo", "bin", "clarinet"), // cargo install
+    "/opt/homebrew/bin/clarinet",                          // Homebrew (Apple Silicon)
+    "/usr/local/bin/clarinet",                             // Homebrew (Intel) / manual
+    "/usr/bin/clarinet",
+  ];
+
+  for (const bin of candidates) {
+    try {
+      await fs.promises.access(bin, fs.constants.X_OK);
+      return bin;
+    } catch {
+      // not found at this location, try next
+    }
+  }
+
+  // Fall back to bare name and let the OS resolve via PATH.
+  return "clarinet";
+}
+
+// ---------------------------------------------------------------------------
 // Find a free local TCP port by briefly binding to port 0.
 // ---------------------------------------------------------------------------
 function getFreePort(): Promise<number> {
@@ -58,6 +118,9 @@ function getFreePort(): Promise<number> {
     srv.on("error", reject);
   });
 }
+
+// Persistent output channel — shows every step of the debug-test command.
+const debugOutput = vscode.window.createOutputChannel("Clarinet Debug", { log: true });
 
 let client: LanguageClient;
 export async function activate(context: ExtensionContext) {
@@ -93,89 +156,130 @@ export async function activate(context: ExtensionContext) {
     vscode.commands.registerCommand(
       "clarity.debugTest",
       async (fileUri: vscode.Uri, testName: string) => {
-        const workspaceFolder = vscode.workspace.getWorkspaceFolder(fileUri);
-        if (!workspaceFolder) {
-          vscode.window.showErrorMessage("clarity.debugTest: no workspace folder found");
-          return;
-        }
+        debugOutput.show(true);
+        debugOutput.info(`clarity.debugTest triggered`);
+        debugOutput.info(`  file: ${fileUri.fsPath}`);
+        debugOutput.info(`  test: ${testName}`);
 
-        const [dapPort, sdkPort] = await Promise.all([getFreePort(), getFreePort()]);
-        const manifestPath = path.join(workspaceFolder.uri.fsPath, "Clarinet.toml");
-        const relativeFile = path.relative(workspaceFolder.uri.fsPath, fileUri.fsPath);
+        try {
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(fileUri);
+          if (!workspaceFolder) {
+            throw new Error("no workspace folder found for this file");
+          }
+          debugOutput.info(`  workspace: ${workspaceFolder.uri.fsPath}`);
 
-        // Spawn the clarinet dap server. Both listeners are bound before
-        // CLARINET_DAP_SDK_READY is printed, so VSCode can attach right away.
-        const dapProcess = spawn(
-          "clarinet",
-          [
+          const [dapPort, sdkPort, clarinet] = await Promise.all([
+            getFreePort(),
+            getFreePort(),
+            findClarinet(),
+          ]);
+          debugOutput.info(`  clarinet: ${clarinet}`);
+          debugOutput.info(`  dap port: ${dapPort}  sdk port: ${sdkPort}`);
+
+          const testDir = path.dirname(fileUri.fsPath);
+          const manifestPath = await findManifest(testDir, workspaceFolder.uri.fsPath);
+          if (!manifestPath) {
+            throw new Error(
+              "Could not find Clarinet.toml near this file. Make sure the test lives inside a Clarinet project.",
+            );
+          }
+          const projectRoot = path.dirname(manifestPath);
+          const relativeFile = path.relative(projectRoot, fileUri.fsPath);
+          debugOutput.info(`  manifest: ${manifestPath}`);
+          debugOutput.info(`  relativeFile: ${relativeFile}`);
+
+          // Spawn the clarinet dap server.
+          const args = [
             "dap",
             "--dap-port", String(dapPort),
             "--sdk-port", String(sdkPort),
             "--manifest", manifestPath,
-          ],
-          { cwd: workspaceFolder.uri.fsPath, stdio: ["ignore", "ignore", "pipe"] },
-        );
+          ];
+          debugOutput.info(`  spawning: ${clarinet} ${args.join(" ")}`);
+          const dapProcess = spawn(clarinet, args, {
+            cwd: projectRoot,
+            stdio: ["ignore", "ignore", "pipe"],
+          });
 
-        dapProcess.on("error", (err) => {
-          vscode.window.showErrorMessage(`Failed to start clarinet dap: ${err.message}`);
-        });
+          dapProcess.on("error", (err) => {
+            debugOutput.error(`  spawn error: ${err.message}`);
+            vscode.window.showErrorMessage(`Failed to start clarinet dap: ${err.message}`);
+          });
 
-        // Wait for the server to be ready before attaching.
-        await new Promise<void>((resolve, reject) => {
-          const token = `CLARINET_DAP_SDK_READY:${sdkPort}`;
-          let buf = "";
-          const timeout = setTimeout(
-            () => reject(new Error("clarinet dap server did not start within 15 s")),
-            15_000,
-          );
+          // Forward all server stderr to the output channel.
           dapProcess.stderr!.on("data", (chunk: Buffer) => {
-            buf += chunk.toString("utf8");
-            if (buf.includes(token)) {
-              clearTimeout(timeout);
-              resolve();
+            for (const line of chunk.toString("utf8").trimEnd().split("\n")) {
+              debugOutput.info(`  [dap] ${line}`);
             }
           });
-          dapProcess.on("exit", (code) => {
-            clearTimeout(timeout);
-            reject(new Error(`clarinet dap exited with code ${code}`));
+
+          // Wait for the READY signal.
+          debugOutput.info("  waiting for CLARINET_DAP_SDK_READY...");
+          await new Promise<void>((resolve, reject) => {
+            const token = `CLARINET_DAP_SDK_READY:${sdkPort}`;
+            let buf = "";
+            const timeout = setTimeout(
+              () => reject(new Error("clarinet dap server did not start within 15 s")),
+              15_000,
+            );
+            dapProcess.stderr!.on("data", (chunk: Buffer) => {
+              buf += chunk.toString("utf8");
+              if (buf.includes(token)) {
+                clearTimeout(timeout);
+                resolve();
+              }
+            });
+            dapProcess.on("exit", (code) => {
+              clearTimeout(timeout);
+              reject(new Error(`clarinet dap exited with code ${code}`));
+            });
           });
-        }).catch((err: Error) => {
-          vscode.window.showErrorMessage(`clarinet dap: ${err.message}`);
-          dapProcess.kill();
-          return Promise.reject(err);
-        });
+          debugOutput.info("  server ready");
 
-        // Attach the VSCode debugger — no launch.json required.
-        const started = await vscode.debug.startDebugging(workspaceFolder, {
-          type: "clarinet",
-          request: "attach",
-          name: `Debug: ${testName}`,
-          port: dapPort,
-        });
+          // Attach the VSCode debugger directly to the TCP port via `debugServer`.
+          // This bypasses the debug.js adapter relay: VSCode opens a raw socket
+          // to the clarinet dap server and speaks DAP directly, which is exactly
+          // what the server expects.  The `type: "clarinet"` keeps breakpoint
+          // support active (VSCode knows .clar files are relevant).
+          debugOutput.info(`  calling vscode.debug.startDebugging on port ${dapPort}...`);
+          const started = await vscode.debug.startDebugging(workspaceFolder, {
+            type: "clarinet",
+            request: "attach",
+            name: `Debug: ${testName}`,
+            debugServer: dapPort,
+          });
+          debugOutput.info(`  startDebugging returned: ${started}`);
 
-        if (!started) {
-          vscode.window.showErrorMessage("Failed to attach Clarinet debugger");
-          dapProcess.kill();
-          return;
+          if (!started) {
+            dapProcess.kill();
+            throw new Error("vscode.debug.startDebugging returned false — check the Debug Console for adapter errors");
+          }
+
+          // Kill the server when the debug session ends.
+          const disposable = vscode.debug.onDidTerminateDebugSession(() => {
+            debugOutput.info("  debug session terminated — killing dap server");
+            dapProcess.kill();
+            disposable.dispose();
+          });
+          context.subscriptions.push(disposable);
+
+          // Run the test in a terminal.
+          // Use vitest.codelens.config.ts so the project's default `include`
+          // list doesn't exclude the file being debugged.
+          const cmd = `CLARINET_DEBUG_PORT=${sdkPort} npx vitest run --config=vitest.codelens.config.ts ${relativeFile} -t ${JSON.stringify(testName)}`;
+          debugOutput.info(`  opening terminal: ${cmd}`);
+          const terminal = vscode.window.createTerminal({
+            name: `Clarinet Debug: ${testName}`,
+            cwd: projectRoot,
+          });
+          terminal.show();
+          terminal.sendText(cmd);
+          debugOutput.info("  done — test is running in terminal");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          debugOutput.error(`  ERROR: ${msg}`);
+          vscode.window.showErrorMessage(`Clarinet debugTest: ${msg}`);
         }
-
-        // Kill the server when the debug session ends.
-        const disposable = vscode.debug.onDidTerminateDebugSession(() => {
-          dapProcess.kill();
-          disposable.dispose();
-        });
-        context.subscriptions.push(disposable);
-
-        // Run the specific test in a terminal; it will connect to sdk-port.
-        const terminal = vscode.window.createTerminal({
-          name: `Clarinet Debug: ${testName}`,
-          cwd: workspaceFolder.uri.fsPath,
-          env: { CLARINET_DEBUG_PORT: String(sdkPort) },
-        });
-        terminal.show();
-        terminal.sendText(
-          `npx vitest run ${relativeFile} -t ${JSON.stringify(testName)}`,
-        );
       },
     ),
   );

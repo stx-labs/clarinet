@@ -184,12 +184,12 @@ export async function connectDebugServer(port?: number): Promise<DebugClient> {
  *
  * @example
  * ```ts
- * // SDK-only mode — no VSCode attachment needed
+ * // SDK-only mode (no VSCode attachment needed)
  * const client = await startDebugServer({ manifest: "./Clarinet.toml" });
  * const result = await client.callPublicFn("counter", "increment", [], deployer);
  * await client.disconnect();
  *
- * // With breakpoints — attach VSCode to dapPort (7777) after calling this
+ * // With breakpoints - attach VSCode to dapPort (7777) after calling this
  * const client = await startDebugServer({ dapPort: 7777, sdkPort: 7778 });
  * ```
  */
