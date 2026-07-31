@@ -715,9 +715,9 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "stacks-codec",
  "stacks-common",
  "stacks-rpc-client",
- "stackslib",
  "strum",
  "tempfile",
  "tokio",
@@ -4332,8 +4332,8 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "stacks-codec",
  "stacks-common",
- "stackslib",
 ]
 
 [[package]]
