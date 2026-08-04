@@ -2,6 +2,8 @@ export {
   tx,
   type ClarityEvent,
   type ParsedTransactionResult,
+  type TraceEntry,
+  type TraceKind,
   type DeployContractOptions,
   type Tx,
   type TransferSTX,

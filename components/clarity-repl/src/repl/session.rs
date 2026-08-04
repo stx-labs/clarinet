@@ -29,6 +29,7 @@ use crate::analysis::coverage::CoverageHook;
 use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
+use crate::repl::hooks::agent_tracer::{AgentTraceHook, TraceEntry};
 use crate::repl::hooks::tracer::TracerHook;
 use crate::repl::settings::{Account, LogPrintEvents};
 use crate::utils::serialize_event;
@@ -240,6 +241,7 @@ pub struct Session {
     pub interpreter: ClarityInterpreter,
     pub show_costs: bool,
     pub last_contract_call_trace: Option<String>,
+    pub last_call_trace: Vec<TraceEntry>,
 
     coverage_hook: Option<CoverageHook>,
     logger_hook: Option<LoggerHook>,
@@ -284,6 +286,7 @@ impl Session {
             show_costs: false,
             settings,
             last_contract_call_trace: None,
+            last_call_trace: Vec::new(),
 
             coverage_hook: None,
             logger_hook: None,
@@ -785,7 +788,8 @@ impl Session {
         self.set_tx_sender(sender);
 
         let mut tracer_hook = TracerHook::new();
-        let mut hooks: Vec<&mut dyn EvalHook> = vec![&mut tracer_hook];
+        let mut agent_trace_hook = AgentTraceHook::new();
+        let mut hooks: Vec<&mut dyn EvalHook> = vec![&mut tracer_hook, &mut agent_trace_hook];
         if let Some(ref mut coverage_hook) = self.coverage_hook {
             hooks.push(coverage_hook);
         }
@@ -809,6 +813,7 @@ impl Session {
         );
         self.set_tx_sender(&initial_tx_sender);
         self.last_contract_call_trace = Some(tracer_hook.output.join("\n"));
+        self.last_call_trace = agent_trace_hook.entries;
 
         contract_call_result.map_err(|e| {
             ueprint!("{}", tracer_hook.output.join("\n"));

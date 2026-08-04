@@ -20,11 +20,32 @@ export type ClarityCosts = {
   memory_limit: number;
 };
 
+export type TraceKind = "call" | "return" | "event" | "error";
+
+export type TraceEntry = {
+  kind: TraceKind;
+  /** Call-stack depth (0 = top-level call). */
+  depth: number;
+  contract: string;
+  /** Function name; empty for `event` and `error` entries. */
+  function: string;
+  line: number;
+  column: number;
+  /** Argument values as Clarity strings, present on `call` entries. */
+  args?: string[];
+  /** Return value (`return`), event description (`event`), or undefined. */
+  value?: string;
+  /** Error message, present on `error` entries. */
+  error?: string;
+};
+
 export type ParsedTransactionResult = {
   result: ClarityValue;
   events: ClarityEvent[];
   costs: ClarityCosts | null;
   performance: string | undefined;
+  /** Structured execution trace, one entry per function call/return/event/error. */
+  trace: TraceEntry[];
 };
 
 export type CallFn = (
@@ -126,6 +147,15 @@ export function parseEvents(events: string): ClarityEvent[] {
     });
   } catch (e) {
     console.error(`Fail to parse events: ${e}`);
+    return [];
+  }
+}
+
+export function parseTrace(trace: string | null | undefined): TraceEntry[] {
+  if (!trace) return [];
+  try {
+    return JSON.parse(trace) as TraceEntry[];
+  } catch {
     return [];
   }
 }

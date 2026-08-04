@@ -222,6 +222,8 @@ pub struct TransactionRes {
     pub events: String,
     pub costs: String,
     pub performance: Option<String>,
+    /// JSON-serialized `Vec<TraceEntry>` from `AgentTraceHook`.
+    pub trace: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -255,6 +257,7 @@ pub fn execution_result_to_transaction_res(execution: &ExecutionResult) -> Trans
         events: json!(events_as_strings).to_string(),
         costs: json!(execution.cost).to_string(),
         performance: None,
+        trace: None,
     }
 }
 
@@ -850,6 +853,7 @@ impl SDK {
         } else {
             None
         };
+        let trace_json = serde_json::to_string(&session.last_call_trace).ok();
 
         // Release the session borrow before accessing self.costs_reports
         let _ = session;
@@ -873,6 +877,7 @@ impl SDK {
         if let Some(perf_data) = performance_data {
             response.performance = Some(perf_data);
         }
+        response.trace = trace_json;
 
         Ok(response)
     }
