@@ -1,26 +1,27 @@
 /**
- * counter.codelens.test.ts — connectDebugServer() demo
+ * counter.codelens.test.ts — CodeLens debug demo
  *
- * This file uses `connectDebugServer`, which makes the Clarity VSCode extension
+ * This file uses `startDebugServer`, which makes the Clarity VSCode extension
  * show a "Debug with Clarinet" button above each test below.
  *
  * Clicking that button will:
  *   1. Spawn `clarinet dap` on ephemeral ports
  *   2. Attach the VSCode debugger (no launch.json needed)
  *   3. Run this specific test in a terminal with CLARINET_DEBUG_PORT set
+ *      so that `startDebugServer` connects to the extension-managed server
  *
  * Set a breakpoint in contracts/counter.clar before clicking the button.
  */
 
 import { describe, it, expect } from "vitest";
-import { connectDebugServer } from "@stacks/clarinet-sdk";
+import { startDebugServer } from "@stacks/clarinet-sdk";
 import { Cl } from "@stacks/transactions";
 
 const deployer = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 
 describe("counter - CodeLens flow", () => {
   it("increments from zero", async () => {
-    const client = await connectDebugServer();
+    const client = await startDebugServer();
 
     const result = await client.callPublicFn("counter", "increment", [], deployer);
     expect(result.value).toBe("(ok u1)");
@@ -32,7 +33,7 @@ describe("counter - CodeLens flow", () => {
   });
 
   it("adds a specific amount", async () => {
-    const client = await connectDebugServer();
+    const client = await startDebugServer();
 
     await client.callPublicFn("counter", "increment", [], deployer);
     const result = await client.callPublicFn("counter", "add", [Cl.uint(9)], deployer);
@@ -42,7 +43,7 @@ describe("counter - CodeLens flow", () => {
   });
 
   it("resets to zero", async () => {
-    const client = await connectDebugServer();
+    const client = await startDebugServer();
 
     await client.callPublicFn("counter", "increment", [], deployer);
     await client.callPublicFn("counter", "reset", [], deployer);

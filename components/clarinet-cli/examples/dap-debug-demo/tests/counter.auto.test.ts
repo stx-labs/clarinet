@@ -17,7 +17,7 @@ import { Cl } from "@stacks/transactions";
 
 const deployer = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 
-describe("counter — auto server", () => {
+describe("counter - auto server", () => {
   it("increments from zero", async () => {
     const client = await startDebugServer({ manifest: "./Clarinet.toml" });
 

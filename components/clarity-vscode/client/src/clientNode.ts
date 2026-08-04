@@ -16,12 +16,10 @@ import { initClient, clientOpts } from "./common";
 
 // ---------------------------------------------------------------------------
 // CodeLens provider: show "Debug with Clarinet" above test blocks in files
-// that use connectDebugServer / startDebugServer from @stacks/clarinet-sdk.
+// that use startDebugServer from @stacks/clarinet-sdk.
 // ---------------------------------------------------------------------------
 
-// Only match tests that connect to an externally-managed server. Tests that
-// call `startDebugServer` spin up their own process and don't need the CodeLens.
-const DEBUG_PATTERN = /\b(?:connectDebugServer|DebugClient)\b/;
+const DEBUG_PATTERN = /\bstartDebugServer\b/;
 const TEST_PATTERN = /^\s*(?:it|test)\s*\(\s*(['"`])(.*?)\1/;
 
 class ClarityDebugTestLensProvider implements vscode.CodeLensProvider {
@@ -106,16 +104,21 @@ async function findClarinet(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Find a free local TCP port by briefly binding to port 0.
+// Try to use `preferred`; if it is already in use let the OS pick a free port.
 // ---------------------------------------------------------------------------
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
+function resolvePort(preferred: number): Promise<number> {
+  return new Promise((resolve) => {
     const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const addr = srv.address() as net.AddressInfo;
-      srv.close(() => resolve(addr.port));
+    srv.listen(preferred, "127.0.0.1", () => {
+      srv.close(() => resolve(preferred));
     });
-    srv.on("error", reject);
+    srv.on("error", () => {
+      const fallback = net.createServer();
+      fallback.listen(0, "127.0.0.1", () => {
+        const addr = fallback.address() as net.AddressInfo;
+        fallback.close(() => resolve(addr.port));
+      });
+    });
   });
 }
 
@@ -169,8 +172,8 @@ export async function activate(context: ExtensionContext) {
           debugOutput.info(`  workspace: ${workspaceFolder.uri.fsPath}`);
 
           const [dapPort, sdkPort, clarinet] = await Promise.all([
-            getFreePort(),
-            getFreePort(),
+            resolvePort(7777),
+            resolvePort(7778),
             findClarinet(),
           ]);
           debugOutput.info(`  clarinet: ${clarinet}`);

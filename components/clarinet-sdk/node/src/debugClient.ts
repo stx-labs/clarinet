@@ -28,7 +28,7 @@ type SdkResponse = {
  *
  * @example
  * ```ts
- * const debugger = await connectDebugServer();
+ * const debugger = await startDebugServer();
  * const result = await debugger.callPublicFn("counter", "increment", [], deployer);
  * expect(result.value).toBe("(ok u1)");
  * await debugger.disconnect();
@@ -149,62 +149,56 @@ function openSocket(port: number): Promise<net.Socket> {
 }
 
 /**
- * Connect to a running `clarinet dap` debug server.
+ * Start or connect to a `clarinet dap` debug server and return a
+ * {@link DebugClient}.
  *
- * The port is resolved in order:
- * 1. The `port` argument
- * 2. The `CLARINET_DEBUG_PORT` environment variable
- * 3. The default of `7778`
+ * **Auto-spawn mode** (default): when no `port` is provided and
+ * `CLARINET_DEBUG_PORT` is not set, `clarinet dap` is spawned automatically.
+ * The returned client owns the process and kills it on
+ * {@link DebugClient.disconnect}.
  *
- * @example
- * ```ts
- * // In a Vitest test file
- * import { connectDebugServer } from "@stacks/clarinet-sdk";
- *
- * const debugClient = await connectDebugServer();
- * ```
- */
-export async function connectDebugServer(port?: number): Promise<DebugClient> {
-  const resolvedPort = port ?? Number(process.env["CLARINET_DEBUG_PORT"] ?? "7778");
-  const socket = await openSocket(resolvedPort);
-  return new DebugClient(socket);
-}
-
-/**
- * Spawn a `clarinet dap` server and return a connected {@link DebugClient}.
- *
- * This is the zero-configuration entry point: no terminal command is needed.
- * The server process is owned by the returned client and is killed automatically
- * when {@link DebugClient.disconnect} is called.
- *
- * When `dapPort` is supplied the server also listens for a DAP client (e.g.
- * VSCode) on that port so breakpoints in `.clar` files will be hit. Without
- * `dapPort` the server runs in SDK-only mode: execution is uninterrupted but
- * the full `DebugClient` API is still available.
+ * **Connect mode**: when `port` is provided (or `CLARINET_DEBUG_PORT` is set),
+ * the function connects to a server that is already running — for example one
+ * started by the VSCode extension's CodeLens button.
  *
  * @example
  * ```ts
- * // SDK-only mode (no VSCode attachment needed)
+ * // Zero-config — server is spawned automatically
  * const client = await startDebugServer({ manifest: "./Clarinet.toml" });
  * const result = await client.callPublicFn("counter", "increment", [], deployer);
  * await client.disconnect();
  *
- * // With breakpoints - attach VSCode to dapPort (7777) after calling this
- * const client = await startDebugServer({ dapPort: 7777, sdkPort: 7778 });
+ * // With VSCode breakpoints — also open a DAP port for the editor to attach
+ * const client = await startDebugServer({ dapPort: 7777 });
  * ```
  */
 export async function startDebugServer(options?: {
   /** Path to Clarinet.toml. Defaults to `"./Clarinet.toml"`. */
   manifest?: string;
-  /** SDK port for this client to connect on. Defaults to `7778`. */
-  sdkPort?: number;
   /**
-   * When set, the server also accepts a DAP client (e.g. VSCode) on this port,
-   * enabling breakpoint debugging. When omitted the server runs in SDK-only mode.
+   * Connect to this port instead of spawning a new server.
+   * Falls back to `CLARINET_DEBUG_PORT` env var, then auto-spawn.
+   */
+  port?: number;
+  /**
+   * When auto-spawning, also open a DAP port so a DAP client (e.g. VSCode)
+   * can attach and hit breakpoints. Ignored in connect mode.
    */
   dapPort?: number;
 }): Promise<DebugClient> {
-  const sdkPort = options?.sdkPort ?? 7778;
+  const envPort = process.env["CLARINET_DEBUG_PORT"]
+    ? Number(process.env["CLARINET_DEBUG_PORT"])
+    : undefined;
+  const connectPort = options?.port ?? envPort;
+
+  // Connect mode: server is already running externally.
+  if (connectPort != null) {
+    const socket = await openSocket(connectPort);
+    return new DebugClient(socket);
+  }
+
+  // Auto-spawn mode: launch clarinet dap ourselves.
+  const sdkPort = 7778;
   const manifest = options?.manifest ?? "./Clarinet.toml";
 
   const args = ["dap", "--sdk-port", String(sdkPort), "--manifest", manifest];
