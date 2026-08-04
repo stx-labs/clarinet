@@ -1,0 +1,9 @@
+[project]
+name = "dap-debug-demo"
+description = "Demo project for testing the DAP debug adapter"
+telemetry = false
+
+[contracts.counter]
+path = "contracts/counter.clar"
+clarity_version = 3
+epoch = 3.1

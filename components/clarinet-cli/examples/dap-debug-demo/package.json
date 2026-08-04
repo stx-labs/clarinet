@@ -1,0 +1,15 @@
+{
+  "name": "dap-debug-demo",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@stacks/clarinet-sdk": "workspace:*",
+    "@stacks/transactions": "7.4.0"
+  },
+  "devDependencies": {
+    "vitest": "4.0.8"
+  }
+}

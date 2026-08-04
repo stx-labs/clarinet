@@ -124,7 +124,22 @@ enum Command {
     Formatter(Formatter),
     /// Step by step debugging and breakpoints from your code editor (VSCode, vim, emacs, etc)
     #[clap(name = "dap", bin_name = "dap")]
-    DAP,
+    DAP(DapCommand),
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+struct DapCommand {
+    /// TCP port for the DAP client (e.g. VSCode) to attach to.
+    /// When set, `clarinet dap` runs as a persistent server instead of using stdio.
+    #[clap(long = "dap-port")]
+    pub dap_port: Option<u16>,
+    /// TCP port for the test-runner SDK client to connect to.
+    /// Required when `--dap-port` is set.
+    #[clap(long = "sdk-port")]
+    pub sdk_port: Option<u16>,
+    /// Path to Clarinet.toml. Required when `--dap-port` is set.
+    #[clap(long = "manifest-path", alias = "manifest", short = 'm')]
+    pub manifest_path: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1439,13 +1454,30 @@ pub fn main() {
             devnet_start(cmd, clarinetrc)
         }
         Command::LSP => run_lsp(),
-        Command::DAP => match super::dap::run_dap() {
-            Ok(_) => (),
-            Err(e) => {
-                eprintln!("{}", red!(e));
-                process::exit(1);
+        Command::DAP(cmd) => {
+            let result = if cmd.sdk_port.is_some() || cmd.dap_port.is_some() {
+                // Server mode: either SDK-only (--sdk-port) or full attach (--dap-port + --sdk-port).
+                let sdk_port = cmd
+                    .sdk_port
+                    .or_else(|| cmd.dap_port.map(|p| p + 1))
+                    .unwrap();
+                let manifest_path = cmd
+                    .manifest_path
+                    .map(PathBuf::from)
+                    .or_else(|| get_manifest_location(None))
+                    .unwrap_or_else(|| PathBuf::from("Clarinet.toml"));
+                super::dap::run_dap_server(cmd.dap_port, sdk_port, manifest_path)
+            } else {
+                super::dap::run_dap()
+            };
+            match result {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("{}", red!(e));
+                    process::exit(1);
+                }
             }
-        },
+        }
         Command::Formatter(cmd) => {
             eprintln!(
                 "{}",

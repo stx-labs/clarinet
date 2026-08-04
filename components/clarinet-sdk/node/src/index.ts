@@ -84,3 +84,9 @@ function memoizedInit() {
 
 
 export const initSimnet = memoizedInit();
+
+export {
+  startDebugServer,
+  DebugClient,
+  type DebugCallResult,
+} from "./debugClient.js";

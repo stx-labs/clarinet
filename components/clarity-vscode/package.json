@@ -16,6 +16,7 @@
   "private": true,
   "scripts": {
     "clean": "rimraf .vscode-test-web ./debug/dist ./client/dist ./server/dist ./server/src/clarity-lsp-*",
+    "build:dap": "rspack build --config rspack.dap.js",
     "pretest": "NODE_ENV=test concurrently \"rspack build -c ./rspack.config.dev.js\" \"swc --config-file .runTests.swcrc ./client/tests/runTests.ts -o ./client/dist/tests/runTests.js\"",
     "test": "node client/dist/tests/runTests.js",
     "lint": "eslint ./client/src ./server/src",
@@ -63,6 +64,12 @@
         "id": "clarity-lsp",
         "title": "Clarity",
         "properties": {
+          "clarity-lsp.clarinetPath": {
+            "type": "string",
+            "scope": "machine",
+            "default": "",
+            "description": "Absolute path to the clarinet binary. Leave empty to auto-detect (checks ~/.cargo/bin, Homebrew, and system PATH)."
+          },
           "clarity-lsp.trace.server": {
             "type": "string",
             "scope": "window",
@@ -184,7 +191,13 @@
         "path": "./syntaxes/clarity.tmLanguage.json"
       }
     ],
-    "commands": [],
+    "commands": [
+      {
+        "command": "clarity.debugTest",
+        "title": "Debug with Clarinet",
+        "category": "Clarity"
+      }
+    ],
     "breakpoints": [
       {
         "language": "clarity"
@@ -215,6 +228,15 @@
                 "description": "Expression to debug."
               }
             }
+          },
+          "attach": {
+            "properties": {
+              "port": {
+                "type": "number",
+                "description": "DAP port of the running `clarinet dap --dap-port` server.",
+                "default": 7777
+              }
+            }
           }
         },
         "initialConfigurations": [
@@ -236,6 +258,16 @@
               "name": "Call .foo.bar",
               "manifest": "${workspaceFolder}/Clarinet.toml",
               "expression": "(contract-call? .foo bar 42)"
+            }
+          },
+          {
+            "label": "Clarinet Debugger: Attach",
+            "description": "Attach to a running `clarinet dap --dap-port` server for debugging test runs.",
+            "body": {
+              "type": "clarinet",
+              "request": "attach",
+              "name": "Attach to Clarinet DAP server",
+              "port": 7777
             }
           }
         ]
