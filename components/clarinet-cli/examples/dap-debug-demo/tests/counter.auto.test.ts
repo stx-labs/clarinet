@@ -1,14 +1,10 @@
 /**
- * counter.auto.test.ts — startDebugServer() demo
+ * counter.test.ts — startDebugServer() demo
  *
- * The SDK spawns `clarinet dap` automatically. No terminal command, no
- * launch.json, no VSCode extension required.
+ * Running `pnpm test` spawns `clarinet dap` automatically
  *
- * To exercise breakpoints:
- *   1. Open contracts/counter.clar and set a breakpoint (e.g. on the `asserts!` line).
- *   2. Pass dapPort to startDebugServer so a DAP listener is also started.
- *   3. Attach VSCode: Run > Start Debugging > "Clarinet DAP (attach)" pointing at that port.
- *   4. Run this test normally (`pnpm test`) - execution will pause at the breakpoint.
+ * The VSCode Clarity extension also shows a "Debug with Clarinet" CodeLens
+ * button above each test block.
  */
 
 import { describe, it, expect } from "vitest";
@@ -17,7 +13,9 @@ import { Cl } from "@stacks/transactions";
 
 const deployer = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 
-describe("counter - auto server", () => {
+// These tests spawn a `clarinet dap` process and require the binary in PATH.
+// Skip in CI where the binary is not available.
+describe.skipIf(!!process.env.CI)("counter - auto server", () => {
   it("increments from zero", async () => {
     const client = await startDebugServer({ manifest: "./Clarinet.toml" });
 
