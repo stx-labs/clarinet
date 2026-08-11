@@ -197,6 +197,7 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
                 SBTC_MAINNET_ADDRESS,
                 false,
                 false,
+                false,
             );
         }
     }
@@ -316,6 +317,7 @@ fn handle_emulated_contract_call(
         &params,
         &tx.emulated_sender.to_string(),
         true,
+        false,
         false,
     );
     if let Err(errors) = &result {

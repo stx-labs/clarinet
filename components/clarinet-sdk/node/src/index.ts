@@ -28,6 +28,7 @@ type Options = {
   trackCosts: boolean;
   trackCoverage: boolean;
   trackPerformance?: boolean;
+  trackTrace?: boolean;
 };
 
 export async function getSDK(options?: Options): Promise<Simnet> {
@@ -36,6 +37,7 @@ export async function getSDK(options?: Options): Promise<Simnet> {
     !!options?.trackCosts,
     !!options?.trackCoverage,
     !!options?.trackPerformance,
+    !!options?.trackTrace,
   );
 
   const simnet = new Proxy(
@@ -69,6 +71,7 @@ function memoizedInit() {
       trackCosts: boolean;
       trackCoverage: boolean;
       trackPerformance?: boolean;
+      trackTrace?: boolean;
       performanceCostField?: string;
       apiUrl?: string;
     },

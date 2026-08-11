@@ -29,7 +29,7 @@ use crate::analysis::coverage::CoverageHook;
 use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
-use crate::repl::hooks::agent_tracer::{AgentTraceHook, TraceEntry};
+use crate::repl::hooks::agent_tracer::{AgentTraceHook, TraceEntry, TraceKind};
 use crate::repl::hooks::tracer::TracerHook;
 use crate::repl::settings::{Account, LogPrintEvents};
 use crate::utils::serialize_event;
@@ -773,6 +773,7 @@ impl Session {
         sender: &str,
         allow_private: bool,
         track_costs: bool,
+        track_trace: bool,
     ) -> Result<ExecutionResult, Vec<Diagnostic>> {
         let initial_tx_sender = self.get_tx_sender();
 
@@ -788,8 +789,11 @@ impl Session {
         self.set_tx_sender(sender);
 
         let mut tracer_hook = TracerHook::new();
-        let mut agent_trace_hook = AgentTraceHook::new();
-        let mut hooks: Vec<&mut dyn EvalHook> = vec![&mut tracer_hook, &mut agent_trace_hook];
+        let mut agent_trace_hook = track_trace.then(AgentTraceHook::new);
+        let mut hooks: Vec<&mut dyn EvalHook> = vec![&mut tracer_hook];
+        if let Some(ref mut hook) = agent_trace_hook {
+            hooks.push(hook);
+        }
         if let Some(ref mut coverage_hook) = self.coverage_hook {
             hooks.push(coverage_hook);
         }
@@ -813,7 +817,50 @@ impl Session {
         );
         self.set_tx_sender(&initial_tx_sender);
         self.last_contract_call_trace = Some(tracer_hook.output.join("\n"));
-        self.last_call_trace = agent_trace_hook.entries;
+
+        if let Some(hook) = agent_trace_hook {
+            // Wrap the inner trace with depth-0 Call/Return entries for the
+            // top-level entry point (the interpreter calls it directly, so the
+            // hook never sees it as an expression).
+            let contract_name = contract_id.name.to_string();
+            let return_value = contract_call_result
+                .as_ref()
+                .ok()
+                .map(|exec| match &exec.result {
+                    EvaluationResult::Snippet(s) => s.result.to_string(),
+                    EvaluationResult::Contract(c) => c
+                        .result
+                        .as_ref()
+                        .map_or_else(String::new, |v| v.to_string()),
+                });
+            self.last_call_trace = std::iter::once(TraceEntry {
+                kind: TraceKind::Call,
+                depth: 0,
+                contract: contract_name.clone(),
+                function: method.to_string(),
+                line: 0,
+                column: 0,
+                args: args.iter().map(|a| a.to_string()).collect(),
+                value: None,
+                error: None,
+            })
+            .chain(hook.entries.into_iter().map(|mut e| {
+                e.depth += 1;
+                e
+            }))
+            .chain(std::iter::once(TraceEntry {
+                kind: TraceKind::Return,
+                depth: 0,
+                contract: contract_name,
+                function: method.to_string(),
+                line: 0,
+                column: 0,
+                args: vec![],
+                value: return_value,
+                error: None,
+            }))
+            .collect();
+        }
 
         contract_call_result.map_err(|e| {
             ueprint!("{}", tracer_hook.output.join("\n"));
@@ -2023,6 +2070,7 @@ mod tests {
             BOOT_TESTNET_ADDRESS,
             false,
             false,
+            false,
         );
         assert_execution_result_value(
             &result,
@@ -2086,6 +2134,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            false,
         );
         assert_execution_result_value(&result, Value::okay(Value::Bool(true)).unwrap());
 
@@ -2097,6 +2146,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            false,
         );
         assert_execution_result_value(&result, Value::UInt(1));
 
@@ -2106,6 +2156,7 @@ mod tests {
             "current-pox-reward-cycle",
             &[],
             BOOT_MAINNET_ADDRESS,
+            false,
             false,
             false,
         );
@@ -2129,6 +2180,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
+            false,
         );
         assert_execution_result_value(&result, Value::okay(Value::UInt(1)).unwrap());
 
@@ -2137,6 +2189,7 @@ mod tests {
             "get-x",
             &[],
             &session.get_tx_sender(),
+            false,
             false,
             false,
         );
@@ -2336,6 +2389,7 @@ mod tests {
             "doesnt-exist",
             &[],
             &session.get_tx_sender(),
+            false,
             false,
             false,
         );
