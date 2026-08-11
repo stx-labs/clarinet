@@ -10,6 +10,7 @@ import {
 
 import {
   parseEvents,
+  parseTrace,
   type CallFn,
   type DeployContract,
   type GetDataVar,
@@ -51,6 +52,7 @@ function parseTxResponse(response: TransactionRes): ParsedTransactionResult {
     events: parseEvents(response.events),
     costs: parseCosts(response.costs),
     performance: response.performance,
+    trace: parseTrace(response.trace),
   };
 }
 

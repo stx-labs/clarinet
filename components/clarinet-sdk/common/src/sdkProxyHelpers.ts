@@ -160,6 +160,23 @@ export function parseTrace(trace: string | null | undefined): TraceEntry[] {
   }
 }
 
+export function printTrace(label: string, trace: TraceEntry[]): void {
+  console.log(`\n── trace: ${label} ──`);
+  for (const entry of trace) {
+    const indent = "  ".repeat(entry.depth);
+    if (entry.kind === "call") {
+      const args = entry.args?.length ? `(${entry.args.join(", ")})` : "()";
+      console.log(`${indent}→ call  ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
+    } else if (entry.kind === "return") {
+      console.log(`${indent}← return ${entry.contract}.${entry.function} = ${entry.value}`);
+    } else if (entry.kind === "event") {
+      console.log(`${indent}★ ${entry.value}`);
+    } else if (entry.kind === "error") {
+      console.log(`${indent}✗ error at ${entry.contract} ${entry.line}:${entry.column}: ${entry.error}`);
+    }
+  }
+}
+
 export function parseCosts(costs: string): ClarityCosts | null {
   try {
     let { memory, memory_limit, total, limit } = JSON.parse(costs);
