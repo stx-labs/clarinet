@@ -7,6 +7,7 @@ use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::EvaluationResult;
 use clarity_repl::repl::clarity_values::value_to_string;
 use clarity_repl::repl::debug::dap::DAPDebugger;
+use clarity_repl::repl::hooks::agent_tracer::{AgentTraceHook, TraceEntry};
 use clarity_repl::utils::Environment;
 
 #[cfg(feature = "telemetry")]
@@ -216,7 +217,7 @@ pub fn run_dap_server(
                 let contract_id = QualifiedContractIdentifier::transient();
                 dap.prepare_for_call(&contract_id, &snippet);
 
-                let response = eval_snippet(&mut session, &mut dap, snippet, id);
+                let response = eval_snippet(&mut session, &mut dap, snippet, id, false);
                 write_response(&mut writer, &response)?;
             }
             // `call` evaluates a contract call by name, resolving the contract to its full
@@ -270,8 +271,14 @@ pub fn run_dap_server(
                     .cloned()
                     .unwrap_or_else(QualifiedContractIdentifier::transient);
 
+                // Advance by one block before every contract call so that
+                // block-height-dependent logic (e.g. reward accumulators that
+                // measure elapsed blocks) behaves the same as in a normal simnet
+                // session where each transaction is mined in its own block.
+                session.advance_chain_tip(1);
+
                 dap.prepare_for_call(&contract_id, &snippet);
-                let response = eval_snippet(&mut session, &mut dap, snippet, id);
+                let response = eval_snippet(&mut session, &mut dap, snippet, id, true);
 
                 if let Some(ref prev) = original_sender {
                     session.set_tx_sender(prev);
@@ -295,8 +302,17 @@ fn eval_snippet(
     dap: &mut DAPDebugger,
     snippet: String,
     id: serde_json::Value,
+    track_trace: bool,
 ) -> serde_json::Value {
-    match session.eval_with_hooks(snippet, Some(vec![dap]), false) {
+    let mut tracer = track_trace.then(AgentTraceHook::new);
+
+    let hooks: Option<Vec<&mut dyn clarity::vm::EvalHook>> =
+        Some(match tracer.as_mut() {
+            Some(t) => vec![dap, t],
+            None => vec![dap],
+        });
+
+    match session.eval_with_hooks(snippet, hooks, false) {
         Ok(result) => {
             let value_str = match &result.result {
                 EvaluationResult::Contract(contract_result) => contract_result
@@ -308,7 +324,18 @@ fn eval_snippet(
                     value_to_string(&snippet_result.result)
                 }
             };
-            serde_json::json!({"id": id, "result": {"value": value_str}})
+            let trace_json = tracer.map(|t| {
+                let entries: Vec<TraceEntry> = t.entries
+                    .into_iter()
+                    .map(|mut e| { e.depth += 1; e })
+                .collect();
+                serde_json::to_string(&entries).unwrap_or_default()
+            });
+            let mut res = serde_json::json!({"id": id, "result": {"value": value_str}});
+            if let Some(trace) = trace_json {
+                res["result"]["trace"] = serde_json::Value::String(trace);
+            }
+            res
         }
         Err(diagnostics) => {
             let errors: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();

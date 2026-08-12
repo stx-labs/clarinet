@@ -166,9 +166,9 @@ export function printTrace(label: string, trace: TraceEntry[]): void {
     const indent = "  ".repeat(entry.depth);
     if (entry.kind === "call") {
       const args = entry.args?.length ? `(${entry.args.join(", ")})` : "()";
-      console.log(`${indent}→ call  ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
+      console.log(`${indent}→ ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
     } else if (entry.kind === "return") {
-      console.log(`${indent}← return ${entry.contract}.${entry.function} = ${entry.value}`);
+      console.log(`${indent}← ${entry.contract}.${entry.function} = ${entry.value}`);
     } else if (entry.kind === "event") {
       console.log(`${indent}★ ${entry.value}`);
     } else if (entry.kind === "error") {

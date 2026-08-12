@@ -267,9 +267,22 @@ export async function activate(context: ExtensionContext) {
           context.subscriptions.push(disposable);
 
           // Run the test in a terminal.
-          // Use vitest.codelens.config.ts so the project's default `include`
-          // list doesn't exclude the file being debugged.
-          const cmd = `CLARINET_DEBUG_PORT=${sdkPort} npx vitest run --config=vitest.codelens.config.ts ${relativeFile} -t ${JSON.stringify(testName)}`;
+          // Prefer vitest.codelens.config.ts (a minimal config without an
+          // `include` restriction so any file can be targeted).  If it doesn't
+          // exist in the project, fall back to the project's own vitest config,
+          // and if none is found omit --config entirely.
+          const codelensConfig = path.join(projectRoot, "vitest.codelens.config.ts");
+          const defaultConfigs = [
+            "vitest.config.ts",
+            "vitest.config.js",
+            "vitest.config.mts",
+            "vitest.config.mjs",
+          ];
+          const vitestConfig = fs.existsSync(codelensConfig)
+            ? "vitest.codelens.config.ts"
+            : defaultConfigs.find((c) => fs.existsSync(path.join(projectRoot, c)));
+          const configFlag = vitestConfig ? `--config=${vitestConfig}` : "";
+          const cmd = `CLARINET_DEBUG_PORT=${sdkPort} npx vitest run ${configFlag} --testTimeout=0 ${relativeFile} -t ${JSON.stringify(testName)}`;
           debugOutput.info(`  opening terminal: ${cmd}`);
           const terminal = vscode.window.createTerminal({
             name: `Clarinet Debug: ${testName}`,

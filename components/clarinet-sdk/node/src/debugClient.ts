@@ -2,10 +2,13 @@ import * as net from "net";
 import { spawn, type ChildProcess } from "child_process";
 
 import { Cl, type ClarityValue } from "@stacks/transactions";
+import { parseTrace, type TraceEntry } from "../../common/src/sdkProxyHelpers.js";
 
 export type DebugCallResult = {
   /** The Clarity return value as a human-readable string, e.g. `"(ok u1)"`. */
   value: string;
+  /** Structured execution trace. Only present on `callPublicFn` results. */
+  trace: TraceEntry[];
 };
 
 type PendingRequest = {
@@ -15,7 +18,7 @@ type PendingRequest = {
 
 type SdkResponse = {
   id: number;
-  result?: { value: string };
+  result?: { value: string; trace?: string };
   error?: string;
 };
 
@@ -102,7 +105,10 @@ export class DebugClient {
       sender,
     });
     if (response.error) throw new Error(response.error);
-    return { value: response.result!.value };
+    return {
+      value: response.result!.value,
+      trace: parseTrace(response.result!.trace),
+    };
   }
 
   /**
@@ -124,7 +130,7 @@ export class DebugClient {
   async execute(snippet: string): Promise<DebugCallResult> {
     const response = await this.send({ method: "eval", snippet });
     if (response.error) throw new Error(response.error);
-    return { value: response.result!.value };
+    return { value: response.result!.value, trace: parseTrace(response.result!.trace) };
   }
 
   /** Gracefully disconnect from the debug server. */
