@@ -85,6 +85,60 @@ describe("basic simnet interactions", () => {
     expect(assets.get("STX")?.get(address1)).toBe(100000000000000n);
   });
 
+  it("expose account nonces", () => {
+    // Contract publishes in the deployment plan are transactions, so the
+    // deployer has already consumed nonces before the first test runs.
+    expect(simnet.getAccountNonce(deployerAddr)).toBeGreaterThan(0n);
+    expect(simnet.getAccountNonce(address1)).toBe(0n);
+  });
+
+  it("bumps the sender nonce for transactions but not read-only calls", () => {
+    const before = simnet.getAccountNonce(address1);
+
+    simnet.callReadOnlyFn("counter", "get-count", [], address1);
+    expect(simnet.getAccountNonce(address1)).toBe(before);
+
+    simnet.callPublicFn("counter", "increment", [], address1);
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
+
+    simnet.transferSTX(1000, address2, address1);
+    expect(simnet.getAccountNonce(address1)).toBe(before + 2n);
+
+    // address2 received STX but sent nothing, so it owes no nonce.
+    expect(simnet.getAccountNonce(address2)).toBe(0n);
+  });
+
+  it("bumps the nonce of a call that reverts", () => {
+    // `(err ...)` is a successful transaction returning a failure response:
+    // mainnet mines it and charges the nonce, and so does simnet. `withdraw`
+    // asserts the caller is the contract owner, which address1 is not.
+    const before = simnet.getAccountNonce(address1);
+
+    const { result } = simnet.callPublicFn("counter", "withdraw", [Cl.uint(1)], address1);
+    expect(result).toStrictEqual(Cl.error(Cl.uint(1)));
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
+  });
+
+  it("bumps the nonce once per transaction in a mined block", () => {
+    const before = simnet.getAccountNonce(address1);
+    const deployerBefore = simnet.getAccountNonce(deployerAddr);
+
+    simnet.mineBlock([
+      tx.callPublicFn("counter", "increment", [], address1),
+      tx.callPublicFn("counter", "increment", [], address1),
+      tx.transferSTX(1000, address2, address1),
+      tx.deployContract("mined-contract", "(define-read-only (n) u1)", null, deployerAddr),
+      tx.callPrivateFn("counter", "inner-increment", [], address1),
+    ]);
+
+    // Batching into one block does not merge the transactions: each still
+    // consumes its own nonce, as it would on mainnet.
+    expect(simnet.getAccountNonce(address1)).toBe(before + 4n);
+    // The deploy is charged to its own sender, not the block's first sender.
+    expect(simnet.getAccountNonce(deployerAddr)).toBe(deployerBefore + 1n);
+  });
+
   it("can get and set epoch", () => {
     // should be 3.1 at the beginning because
     // the latest contract in the manifest is deployed in 3.1

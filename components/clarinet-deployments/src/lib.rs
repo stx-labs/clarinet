@@ -1439,6 +1439,80 @@ mod tests {
     }
 
     #[test]
+    fn test_emulated_plan_transactions_consume_the_senders_nonce() {
+        // Every entry in a deployment plan is a transaction the emulated sender
+        // sent, so each consumes a nonce — the publishes as well as the calls.
+        // This is why a project's deployer starts above zero.
+        let mut session = Session::new(SessionSettings::default());
+        let epoch = StacksEpochId::Epoch25;
+        session.update_epoch(epoch);
+
+        let deployer: PrincipalData = PrincipalData::parse_standard_principal(DEPLOYER)
+            .unwrap()
+            .into();
+        assert_eq!(session.get_nonce(&deployer).unwrap(), 0);
+
+        let snippet = [
+            "(define-data-var x int 0)",
+            "(define-public (add (n int)) (ok (var-set x (+ (var-get x) n))))",
+            "(define-public (boom) (ok (/ (var-get x) 0)))",
+        ]
+        .join("\n");
+        deploy_contract(&mut session, "contract_1", &snippet, epoch).unwrap();
+        assert_eq!(
+            session.get_nonce(&deployer).unwrap(),
+            1,
+            "an emulated publish is a transaction"
+        );
+
+        let contract_id = QualifiedContractIdentifier::new(
+            PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
+            ContractName::from_literal("contract_1"),
+        );
+        let call = |method: &'static str| EmulatedContractCallSpecification {
+            contract_id: contract_id.clone(),
+            emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
+            method: ClarityName::from_literal(method),
+            parameters: vec![],
+        };
+
+        // A call that fails at runtime is still mined on mainnet, so it still
+        // consumes a nonce. Assert the state change too, so a regression that
+        // turns the successful call into a no-op cannot pass vacuously.
+        let mut spec = call("add");
+        spec.parameters = vec!["1".to_string()];
+        handle_emulated_contract_call(&mut session, &spec).unwrap();
+        assert_eq!(
+            session.interpreter.get_data_var(&contract_id, "x"),
+            Some(to_raw_value(&Value::Int(1)))
+        );
+        assert_eq!(session.get_nonce(&deployer).unwrap(), 2);
+
+        assert!(
+            handle_emulated_contract_call(&mut session, &call("boom")).is_err(),
+            "dividing by zero must surface as an error"
+        );
+        assert_eq!(
+            session.get_nonce(&deployer).unwrap(),
+            3,
+            "a failed-but-included plan call still consumes a nonce"
+        );
+
+        // Calling a function that does not exist raises `UndefinedFunction`, a
+        // `RuntimeCheck` error. It is not in `RuntimeCheckErrorKind::rejectable`,
+        // so from epoch 2.1 onward mainnet mines the transaction and it fails —
+        // it is only rejected in earlier epochs. Worth stating because it is
+        // easy to assume "the function doesn't exist" means "never a valid
+        // transaction"; the epoch is what decides.
+        assert!(handle_emulated_contract_call(&mut session, &call("nope")).is_err());
+        assert_eq!(
+            session.get_nonce(&deployer).unwrap(),
+            4,
+            "an undefined function is an included runtime failure from epoch 2.1"
+        );
+    }
+
+    #[test]
     fn test_handle_emulated_contract_call_with_tuple() {
         let mut session = Session::new(SessionSettings::default());
         let epoch = StacksEpochId::Epoch25;

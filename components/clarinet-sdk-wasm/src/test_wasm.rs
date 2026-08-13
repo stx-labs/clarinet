@@ -1,4 +1,4 @@
-use clarity::types::StacksEpochId;
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::vm::Value as ClarityValue;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use gloo_utils::format::JsValueSerdeExt;
@@ -13,8 +13,20 @@ async fn init_sdk() -> SDK {
     let js_noop = JsFunction::new_no_args("return");
     let mut sdk = SDK::new(js_noop, None);
     let _ = sdk.init_empty_session(JsValue::undefined()).await;
-    sdk.set_epoch(EpochString::new(&StacksEpochId::latest().to_string()));
+    // `DEFAULT_EPOCH`, not `StacksEpochId::latest()`: clarinet trails upstream
+    // until an epoch is adopted here, and `set_epoch` falls back to the default
+    // for one it does not know — which would make these tests assert against an
+    // epoch they did not actually select.
+    sdk.set_epoch(EpochString::new(&DEFAULT_EPOCH.to_string()));
     sdk
+}
+
+#[track_caller]
+fn assert_tx_result(tx: &TransactionRes, expected: ClarityValue) {
+    assert_eq!(
+        tx.result,
+        format!("0x{}", expected.serialize_to_hex().unwrap())
+    );
 }
 
 #[track_caller]
@@ -41,7 +53,7 @@ async fn it_can_set_epoch() {
     let mut sdk = init_sdk().await;
     // set_epoch("4.0") transitions from Epoch2_05, which advances the burn chain tip by 1.
     assert_eq!(sdk.block_height(), 1);
-    assert_eq!(sdk.current_epoch(), StacksEpochId::latest().to_string());
+    assert_eq!(sdk.current_epoch(), DEFAULT_EPOCH.to_string());
 }
 
 #[wasm_bindgen_test]
@@ -66,6 +78,91 @@ async fn it_can_call_a_private_function() {
         .unwrap();
     let expected = format!("0x{}", ClarityValue::UInt(2).serialize_to_hex().unwrap());
     assert_eq!(tx.result, expected);
+}
+
+/// Which contract calls consume a nonce is decided here in `core.rs`, not in
+/// `Session::call_contract_fn` — that primitive also backs `callReadOnlyFn`,
+/// which sends nothing. So this rule can only be tested at this layer; a
+/// `cargo tst` run will not tell you whether a call consumes a nonce.
+#[wasm_bindgen_test]
+async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
+    const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    let mut sdk = init_sdk().await;
+
+    let call = |method: &str| {
+        CallFnArgs::new(
+            format!("{SENDER}.nonce-contract"),
+            method.into(),
+            vec![],
+            SENDER.into(),
+        )
+    };
+
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 0);
+
+    sdk.deploy_contract(&DeployContractArgs::new(
+        "nonce-contract".into(),
+        "(define-read-only (peek) u1)
+         (define-public (poke) (ok u1))
+         (define-private (hidden) u1)
+         (define-public (boom) (ok (/ u1 u0)))"
+            .into(),
+        ContractOptions::new(None),
+        SENDER.into(),
+    ))
+    .unwrap();
+
+    // The deploy is itself a transaction. Landing on exactly 1 also proves the
+    // boot contracts deployed by `init_sdk` consumed nothing.
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
+
+    // Each call asserts its return value as well as the nonce, so that a
+    // regression turning one of these into a no-op cannot satisfy the nonce
+    // check vacuously.
+    assert_tx_result(
+        &sdk.call_read_only_fn(&call("peek")).unwrap(),
+        ClarityValue::UInt(1),
+    );
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        1,
+        "a read-only call sends nothing and must not consume a nonce"
+    );
+
+    assert_tx_result(
+        &sdk.call_public_fn(&call("poke")).unwrap(),
+        ClarityValue::okay(ClarityValue::UInt(1)).unwrap(),
+    );
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 2);
+
+    // simnet models a private call as a transaction, even though mainnet has no
+    // way to reach a private function from one.
+    assert_tx_result(
+        &sdk.call_private_fn(&call("hidden")).unwrap(),
+        ClarityValue::UInt(1),
+    );
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 3);
+
+    // A call that fails at runtime is still mined on mainnet, so it still
+    // consumes a nonce. This is the divergence the old `is_ok()` rule had, and
+    // the contract-call half of it can only be observed from here.
+    let err = sdk
+        .call_public_fn(&call("boom"))
+        .expect_err("dividing by zero must surface as an error");
+    assert!(err.contains("DivisionByZero"), "got: {err}");
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        4,
+        "a failed-but-included contract call still consumes a nonce"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn it_rejects_a_nonce_lookup_for_an_invalid_address() {
+    let mut sdk = init_sdk().await;
+
+    let err = sdk.get_account_nonce("not-an-address").unwrap_err();
+    assert!(err.contains("Invalid address"), "got: {err}");
 }
 
 #[wasm_bindgen_test]
