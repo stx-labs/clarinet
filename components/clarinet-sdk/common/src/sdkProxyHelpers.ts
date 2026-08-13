@@ -20,14 +20,14 @@ export type ClarityCosts = {
   memory_limit: number;
 };
 
-export type TraceKind = "call" | "return" | "event" | "error";
+export type TraceKind = "call" | "return" | "event" | "error" | "var";
 
 export type TraceEntry = {
   kind: TraceKind;
   /** Call-stack depth (0 = top-level call). */
   depth: number;
   contract: string;
-  /** Function name; empty for `event` and `error` entries. */
+  /** Function name for `call`/`return`; variable name for `var`; empty for `event`/`error`. */
   function: string;
   line: number;
   column: number;
@@ -166,13 +166,22 @@ export function printTrace(label: string, trace: TraceEntry[]): void {
     const indent = "  ".repeat(entry.depth);
     if (entry.kind === "call") {
       const args = entry.args?.length ? `(${entry.args.join(", ")})` : "()";
-      console.log(`${indent}→ ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
+      const isFoldMap = /^(fold|map):/.test(entry.function);
+      if (isFoldMap) {
+        console.log(`${indent}⟳ ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
+      } else {
+        console.log(`${indent}→ ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
+      }
     } else if (entry.kind === "return") {
-      console.log(`${indent}← ${entry.contract}.${entry.function} = ${entry.value}`);
+      const isFoldMap = /^(fold|map):/.test(entry.function);
+      const arrow = isFoldMap ? "⟳" : "←";
+      console.log(`${indent}${arrow} ${entry.contract}.${entry.function} = ${entry.value}`);
     } else if (entry.kind === "event") {
       console.log(`${indent}★ ${entry.value}`);
     } else if (entry.kind === "error") {
       console.log(`${indent}✗ error at ${entry.contract} ${entry.line}:${entry.column}: ${entry.error}`);
+    } else if (entry.kind === "var") {
+      console.log(`${indent}let ${entry.function} = ${entry.value}`);
     }
   }
 }

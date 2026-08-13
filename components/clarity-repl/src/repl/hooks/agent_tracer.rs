@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::events::{FTEventType, NFTEventType, STXEventType, StacksTransactionEvent};
@@ -20,6 +22,9 @@ pub enum TraceKind {
     Return,
     Event,
     Error,
+    /// A `let`-binding value captured during evaluation. `function` holds the
+    /// variable name and `value` holds the evaluated result.
+    Var,
 }
 
 /// A single entry in a structured execution trace.
@@ -97,6 +102,10 @@ pub struct AgentTraceHook {
     pending_call_meta: Vec<PendingCallMeta>,
     nb_of_emitted_events: usize,
     error_recorded: bool,
+    /// Maps a binding value expression ID to its variable name for `let` forms.
+    /// Populated in `will_begin_eval` when a `let` is encountered, consumed in
+    /// `did_finish_eval` to emit `Var` trace entries.
+    binding_names: HashMap<u64, String>,
 }
 
 impl Default for AgentTraceHook {
@@ -110,6 +119,7 @@ impl Default for AgentTraceHook {
             pending_call_meta: Vec::new(),
             nb_of_emitted_events: 0,
             error_recorded: false,
+            binding_names: HashMap::new(),
         }
     }
 }
@@ -142,6 +152,28 @@ impl EvalHook for AgentTraceHook {
             return;
         }
 
+        // Special case: register `let` binding IDs so we can emit Var entries.
+        if matches!(
+            NativeFunctions::lookup_by_name_at_version(function_name, &ClarityVersion::latest()),
+            Some(NativeFunctions::Let)
+        ) {
+            // args[0] = binding list: a List of (name value) pairs.
+            if let Some(SymbolicExpressionType::List(bindings)) = args.first().map(|a| &a.expr) {
+                for binding in bindings.iter() {
+                    if let SymbolicExpressionType::List(pair) = &binding.expr {
+                        if let Some((name_expr, rest)) = pair.split_first() {
+                            if let (Some(name), Some(val_expr)) =
+                                (name_expr.match_atom(), rest.first())
+                            {
+                                self.binding_names.insert(val_expr.id, name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
         let current_depth = self.depth;
 
         let (contract, function, arg_ids) = if let Some(native) =
@@ -168,6 +200,34 @@ impl EvalHook for AgentTraceHook {
                         .map(|a| a.id)
                         .collect::<Vec<_>>();
                     (callee, fn_name, ids)
+                }
+                NativeFunctions::Fold | NativeFunctions::Map => {
+                    // args[0] = callback name atom, args[1..] = sequence(s) [+ initial acc for fold].
+                    // Both fold and map dispatch the callback via apply_evaluated (bypassing hooks),
+                    // so individual iterations are invisible. We emit one entry for the whole
+                    // operation using a "fold:name" / "map:name" prefix to make this clear.
+                    let op = if matches!(native, NativeFunctions::Fold) {
+                        "fold"
+                    } else {
+                        "map"
+                    };
+                    let callback_name = args
+                        .first()
+                        .and_then(|a| a.match_atom())
+                        .map(|s| format!("{op}:{s}"))
+                        .unwrap_or_else(|| format!("{op}:?"));
+                    let contract = invoke_ctx
+                        .contract_context
+                        .contract_identifier
+                        .name
+                        .to_string();
+                    let ids = args
+                        .get(1..)
+                        .unwrap_or(&[])
+                        .iter()
+                        .map(|a| a.id)
+                        .collect::<Vec<_>>();
+                    (contract, callback_name, ids)
                 }
                 _ => return,
             }
@@ -327,6 +387,23 @@ impl EvalHook for AgentTraceHook {
                         arg_stack.remove(0);
                     }
                 }
+            }
+        }
+
+        // 5. Emit a Var entry for any let-binding whose value just finished.
+        if let Some(var_name) = self.binding_names.remove(&expr.id) {
+            if let Ok(value) = res {
+                self.entries.push(TraceEntry {
+                    kind: TraceKind::Var,
+                    depth: self.depth,
+                    contract: current_contract(),
+                    function: var_name,
+                    line: expr.span.start_line,
+                    column: expr.span.start_column,
+                    args: vec![],
+                    value: Some(value.as_ref().to_string()),
+                    error: None,
+                });
             }
         }
     }

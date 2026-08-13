@@ -306,11 +306,10 @@ fn eval_snippet(
 ) -> serde_json::Value {
     let mut tracer = track_trace.then(AgentTraceHook::new);
 
-    let hooks: Option<Vec<&mut dyn clarity::vm::EvalHook>> =
-        Some(match tracer.as_mut() {
-            Some(t) => vec![dap, t],
-            None => vec![dap],
-        });
+    let hooks: Option<Vec<&mut dyn clarity::vm::EvalHook>> = Some(match tracer.as_mut() {
+        Some(t) => vec![dap, t],
+        None => vec![dap],
+    });
 
     match session.eval_with_hooks(snippet, hooks, false) {
         Ok(result) => {
@@ -325,10 +324,14 @@ fn eval_snippet(
                 }
             };
             let trace_json = tracer.map(|t| {
-                let entries: Vec<TraceEntry> = t.entries
+                let entries: Vec<TraceEntry> = t
+                    .entries
                     .into_iter()
-                    .map(|mut e| { e.depth += 1; e })
-                .collect();
+                    .map(|mut e| {
+                        e.depth += 1;
+                        e
+                    })
+                    .collect();
                 serde_json::to_string(&entries).unwrap_or_default()
             });
             let mut res = serde_json::json!({"id": id, "result": {"value": value_str}});

@@ -19,19 +19,44 @@ import { initClient, clientOpts } from "./common";
 // that use startDebugServer from @stacks/clarinet-sdk.
 // ---------------------------------------------------------------------------
 
-const DEBUG_PATTERN = /\bstartDebugServer\b/;
 const TEST_PATTERN = /^\s*(?:it|test)\s*\(\s*(['"`])(.*?)\1/;
+
+/**
+ * Scan forward from `itLine` through the body of the `it()`/`test()` call,
+ * tracking paren/brace depth to find where the callback ends, and return true
+ * if `startDebugServer` appears anywhere inside that scope.
+ */
+function itBodyUsesDebugServer(lines: string[], itLine: number): boolean {
+  let depth = 0;
+  let started = false;
+  for (let i = itLine; i < Math.min(itLine + 300, lines.length); i++) {
+    const line = lines[i];
+    if (line.includes("startDebugServer")) return true;
+    for (const ch of line) {
+      if (ch === "(" || ch === "{") {
+        depth++;
+        started = true;
+      } else if (ch === ")" || ch === "}") {
+        depth--;
+        if (started && depth === 0) return false;
+      }
+    }
+  }
+  return false;
+}
 
 class ClarityDebugTestLensProvider implements vscode.CodeLensProvider {
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
     const text = document.getText();
-    if (!DEBUG_PATTERN.test(text)) return [];
+    // Quick bail: no startDebugServer anywhere in the file.
+    if (!text.includes("startDebugServer")) return [];
 
     const lenses: vscode.CodeLens[] = [];
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const m = TEST_PATTERN.exec(lines[i]);
       if (!m) continue;
+      if (!itBodyUsesDebugServer(lines, i)) continue;
       const range = new vscode.Range(i, 0, i, lines[i].length);
       lenses.push(
         new vscode.CodeLens(range, {
