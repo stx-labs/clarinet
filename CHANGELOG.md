@@ -1,3 +1,8 @@
+# [3.23.1](https://github.com/stx-labs/clarinet/compare/v3.23.0...v3.23.1) (2026-07-31)
+
+##### Refactors
+
+*  Replace `stackslib` with `stacks-codec` where possible (#2479) (b9eb3f08)
 
 # [3.23.0](https://github.com/stx-labs/clarinet/compare/v3.22.0...v3.23.0) (2026-07-30)
 

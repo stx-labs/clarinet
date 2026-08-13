@@ -24,7 +24,7 @@ default-members = ["components/clarinet-cli"]
 opt-level = 3
 
 [workspace.package]
-version = "3.23.0"
+version = "3.23.1"
 
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
@@ -33,6 +33,7 @@ clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b1
 clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "clarity-types" }
 libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "libsigner", default-features = false }
 pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "pox-locking", default-features = false }
+stacks-codec = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stacks-codec" }
 stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stacks-common", default-features = false }
 stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stackslib", default-features = false }
 

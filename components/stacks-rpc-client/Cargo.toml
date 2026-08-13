@@ -12,8 +12,8 @@ reqwest = { workspace = true, features = ["blocking"] }
 libsecp256k1 = { workspace = true }
 
 clarity = { workspace = true, default-features = false }
+stacks-codec = { workspace = true }
 stacks-common = { workspace = true, default-features = false }
-stackslib = { workspace = true }
 clarinet-utils = { path = "../clarinet-utils" }
 
 # enable mock stacks rpc for tests
