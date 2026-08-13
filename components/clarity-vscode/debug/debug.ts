@@ -45,7 +45,8 @@ const onData = async (chunk: Buffer) => {
   inputChunks.push(chunk);
   accumulated = Buffer.concat([accumulated, chunk]);
 
-  const { messages } = extractMessages(accumulated);
+  const { messages, remaining } = extractMessages(accumulated);
+  accumulated = remaining;
 
   for (const msg of messages) {
     if (msg.type !== "request") continue;

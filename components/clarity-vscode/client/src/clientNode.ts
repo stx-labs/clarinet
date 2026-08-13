@@ -81,8 +81,18 @@ async function findClarinet(): Promise<string> {
   const configured = vscode.workspace
     .getConfiguration("clarity-lsp")
     .get<string>("clarinetPath");
-  if (configured) return configured;
-
+  if (configured) {
+    if (path.isAbsolute(configured)) {
+      try {
+        await fs.promises.access(configured, fs.constants.X_OK);
+        return configured;
+      } catch {
+        debugOutput.warn(`configured clarinetPath is not executable, falling back to auto-detect: ${configured}`);
+      }
+    } else {
+      debugOutput.warn(`configured clarinetPath is not absolute, falling back to auto-detect: ${configured}`);
+    }
+  }
   const candidates = [
     path.join(os.homedir(), ".cargo", "bin", "clarinet"), // cargo install
     "/opt/homebrew/bin/clarinet",                          // Homebrew (Apple Silicon)
@@ -258,18 +268,18 @@ export async function activate(context: ExtensionContext) {
             throw new Error("vscode.debug.startDebugging returned false — check the Debug Console for adapter errors");
           }
 
-          // Kill the server when the debug session ends.
-          const disposable = vscode.debug.onDidTerminateDebugSession(() => {
+          // Kill only the server owned by this command's debug session.
+          const sessionName = `Debug: ${testName}`;
+          const disposable = vscode.debug.onDidTerminateDebugSession((session) => {
+            if (session.name !== sessionName) return;
             debugOutput.info("  debug session terminated — killing dap server");
             dapProcess.kill();
             disposable.dispose();
           });
-          context.subscriptions.push(disposable);
 
-          // Run the test in a terminal.
-          // Use vitest.codelens.config.ts so the project's default `include`
-          // list doesn't exclude the file being debugged.
-          const cmd = `CLARINET_DEBUG_PORT=${sdkPort} npx vitest run --config=vitest.codelens.config.ts ${relativeFile} -t ${JSON.stringify(testName)}`;
+          // Run the selected test file directly. Passing the file path avoids
+          // relying on project-specific Vitest include patterns or extra config files.
+          const cmd = `CLARINET_DEBUG_PORT=${sdkPort} npx vitest run ${JSON.stringify(relativeFile)} -t ${JSON.stringify(testName)}`;
           debugOutput.info(`  opening terminal: ${cmd}`);
           const terminal = vscode.window.createTerminal({
             name: `Clarinet Debug: ${testName}`,

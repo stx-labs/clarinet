@@ -134,10 +134,10 @@ struct DapCommand {
     #[clap(long = "dap-port")]
     pub dap_port: Option<u16>,
     /// TCP port for the test-runner SDK client to connect to.
-    /// Required when `--dap-port` is set.
+    /// Defaults to `--dap-port + 1` when `--dap-port` is set.
     #[clap(long = "sdk-port")]
     pub sdk_port: Option<u16>,
-    /// Path to Clarinet.toml. Required when `--dap-port` is set.
+    /// Path to Clarinet.toml. Defaults to auto-detecting the manifest.
     #[clap(long = "manifest-path", alias = "manifest", short = 'm')]
     pub manifest_path: Option<String>,
 }

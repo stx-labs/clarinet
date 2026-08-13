@@ -102,9 +102,12 @@ pub fn run_dap_server(
         })
         .collect();
 
-    // Bind both listeners up-front so the ready signal is accurate.
     let sdk_listener = std::net::TcpListener::bind(("127.0.0.1", sdk_port))
         .map_err(|e| format!("failed to bind SDK port {sdk_port}: {e}"))?;
+    let sdk_port = sdk_listener
+        .local_addr()
+        .map_err(|e| format!("failed to read SDK listener address: {e}"))?
+        .port();
 
     // When a DAP port is given, bind that listener and spawn a background thread
     // that accepts the DAP client and drives the full attach handshake

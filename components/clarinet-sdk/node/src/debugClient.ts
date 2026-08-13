@@ -67,11 +67,16 @@ export class DebugClient {
       }
     });
 
-    socket.on("error", (err: Error) => {
+    const rejectPending = (err: Error) => {
       for (const { reject } of this.pending.values()) {
         reject(err);
       }
       this.pending.clear();
+    };
+
+    socket.on("error", rejectPending);
+    socket.on("close", () => {
+      rejectPending(new Error("debug server connection closed"));
     });
   }
 
@@ -197,11 +202,12 @@ export async function startDebugServer(options?: {
     return new DebugClient(socket);
   }
 
-  // Auto-spawn mode: launch clarinet dap ourselves.
-  const sdkPort = 7778;
+  // Auto-spawn mode: launch clarinet dap ourselves. Ask the OS for a free SDK
+  // port so parallel test runs don't contend for a fixed port.
+  let sdkPort: number | undefined;
   const manifest = options?.manifest ?? "./Clarinet.toml";
 
-  const args = ["dap", "--sdk-port", String(sdkPort), "--manifest", manifest];
+  const args = ["dap", "--sdk-port", "0", "--manifest", manifest];
   if (options?.dapPort != null) {
     args.push("--dap-port", String(options.dapPort));
   }
@@ -212,31 +218,49 @@ export async function startDebugServer(options?: {
 
   // Wait for the ready signal printed to stderr by run_dap_server.
   await new Promise<void>((resolve, reject) => {
-    const readyToken = `CLARINET_DAP_SDK_READY:${sdkPort}`;
+    const readyPattern = /CLARINET_DAP_SDK_READY:(\d+)/;
     let stderrBuf = "";
     const timeout = setTimeout(
       () => reject(new Error("clarinet dap server did not start within 15 s")),
       15_000,
     );
 
-    child.stderr!.on("data", (chunk: Buffer) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.stderr!.removeListener("data", onStderr);
+      child.removeListener("error", onError);
+      child.removeListener("exit", onExit);
+    };
+
+    const onStderr = (chunk: Buffer) => {
       stderrBuf += chunk.toString("utf8");
-      if (stderrBuf.includes(readyToken)) {
-        clearTimeout(timeout);
+      const match = readyPattern.exec(stderrBuf);
+      if (match) {
+        sdkPort = Number(match[1]);
+        cleanup();
         resolve();
       }
-    });
+    };
 
-    child.on("error", (err) => {
-      clearTimeout(timeout);
+    const onError = (err: Error) => {
+      cleanup();
       reject(new Error(`failed to spawn clarinet: ${err.message}`));
-    });
+    };
 
-    child.on("exit", (code) => {
-      clearTimeout(timeout);
+    const onExit = (code: number | null) => {
+      cleanup();
       reject(new Error(`clarinet dap exited unexpectedly with code ${code}`));
-    });
+    };
+
+    child.stderr!.on("data", onStderr);
+    child.on("error", onError);
+    child.on("exit", onExit);
   });
+
+  if (sdkPort == null) {
+    child.kill();
+    throw new Error("clarinet dap did not report an SDK port");
+  }
 
   const socket = await openSocket(sdkPort);
   return new DebugClient(socket, child);

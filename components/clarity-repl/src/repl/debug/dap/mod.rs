@@ -480,14 +480,6 @@ impl DAPDebugger {
         if self.attach_mode {
             // Signal init_attach() that the editor has finished configuring breakpoints
             self.config_done = true;
-        } else {
-            // Now that configuration is done, we can respond to the launch
-            self.send_response(Response {
-                request_seq: seq,
-                success: true,
-                message: None,
-                body: Some(ResponseBody::Launch),
-            });
         }
 
         false
