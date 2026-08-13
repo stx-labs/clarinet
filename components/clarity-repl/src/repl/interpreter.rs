@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
+use clarity::vm::analysis::errors::RuntimeCheckErrorKind;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast, build_ast_with_diagnostics, ContractAST};
 use clarity::vm::clarity::{
@@ -18,6 +19,7 @@ use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::clarity_db::ContractDataVarName;
 use clarity::vm::database::{ClarityBackingStore, ClarityDatabase, StoreType};
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::errors::{VmExecutionError, VmInternalError};
 use clarity::vm::events::*;
 use clarity::vm::hooks::EvalHook;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
@@ -152,14 +154,45 @@ pub enum ContractCallError {
     Uncategorized(String),
 }
 
-impl From<String> for ContractCallError {
-    fn from(s: String) -> Self {
-        if s.contains("UndefinedFunction") || s.contains("NoSuchPublicFunction") {
-            ContractCallError::NoSuchFunction(s)
-        } else if s.contains("Failed to read non-consensus contract metadata") {
-            ContractCallError::NoSuchContract(s)
-        } else {
-            ContractCallError::Uncategorized(s)
+impl ContractCallError {
+    /// Classify a VM failure by the error the VM actually raised.
+    ///
+    /// This used to grep the *formatted* message for `"UndefinedFunction"`,
+    /// which matched whenever that text appeared anywhere in a nested error's
+    /// `Debug` output — including inside an unrelated failure that merely
+    /// mentioned one. Matching the typed error instead makes the classification
+    /// mean what it says.
+    ///
+    /// `message` is still carried verbatim, and the variants are unchanged, so
+    /// the diagnostics `Session::call_contract_fn` builds from these are
+    /// identical for every input that was already classified correctly.
+    fn from_vm_error(error: &VmExecutionError, message: String) -> Self {
+        match error {
+            // Either the function is absent, or it exists but is not callable
+            // from outside the contract.
+            VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::UndefinedFunction(_)
+                | RuntimeCheckErrorKind::NoSuchPublicFunction(..),
+            ) => ContractCallError::NoSuchFunction(message),
+
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NoSuchContract(_)) => {
+                ContractCallError::NoSuchContract(message)
+            }
+
+            // Simnet reaches a missing contract by a different route than a
+            // `contract-call?` does. `call_contract_fn` enters with a contract
+            // id already in hand, so the metadata read fails before any name
+            // resolution, and `clarity` reports that as a failed internal
+            // expectation rather than `NoSuchContract`. Scoped to the one
+            // variant that can carry it, rather than searched for in the whole
+            // formatted message.
+            VmExecutionError::Internal(VmInternalError::Expect(e))
+                if e.starts_with("Failed to read non-consensus contract metadata") =>
+            {
+                ContractCallError::NoSuchContract(message)
+            }
+
+            _ => ContractCallError::Uncategorized(message),
         }
     }
 }
@@ -264,6 +297,11 @@ impl ClarityInterpreter {
                 });
             }
         };
+        // Note the ordering, which predates the inclusion work: analysis runs
+        // before the parse result is consulted, so a source that fails both
+        // reports the *analysis* verdict. Mainnet parses first and would report
+        // the parse one. Both go through `handle_clarity_analysis_error`, so
+        // the two agree unless exactly one of them is `rejectable_in_epoch`.
         if !success {
             return Err(ExecutionError {
                 inclusion: self.classify_parse_failure(contract),
@@ -849,7 +887,8 @@ impl ClarityInterpreter {
         let mut global_context =
             self.get_global_context(epoch, track_costs)
                 .map_err(|e| ContractCallFailure {
-                    error: ContractCallError::from(e),
+                    // Not a VM error, so there is nothing to classify.
+                    error: ContractCallError::Uncategorized(e),
                     inclusion: BlockInclusion::Rejected,
                 })?;
 
@@ -898,7 +937,7 @@ impl ClarityInterpreter {
                 global_context.eval_hooks = Some(eval_hooks);
             }
             ContractCallFailure {
-                error: ContractCallError::from(err),
+                error: ContractCallError::from_vm_error(&e, err),
                 inclusion: BlockInclusion::from_runtime_error(ClarityError::Interpreter(e), epoch),
             }
         });
@@ -1520,6 +1559,41 @@ mod tests {
         PrincipalData::parse_standard_principal(addr)
             .expect("valid principal")
             .into()
+    }
+
+    #[test]
+    fn contract_call_errors_are_classified_by_type_not_message() {
+        use clarity::vm::errors::RuntimeError;
+
+        // The old classifier searched the *formatted* message, so any failure
+        // whose text merely mentioned `UndefinedFunction` was reported to the
+        // user as a missing function. Nested `Debug` output is exactly how that
+        // text gets somewhere it does not belong.
+        let misleading =
+            VmExecutionError::Runtime(RuntimeError::Arithmetic("UndefinedFunction".into()), None);
+        assert!(matches!(
+            ContractCallError::from_vm_error(&misleading, "UndefinedFunction".into()),
+            ContractCallError::Uncategorized(_)
+        ));
+
+        // A genuinely undefined function is still classified as one.
+        let undefined =
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::UndefinedFunction("no".into()));
+        assert!(matches!(
+            ContractCallError::from_vm_error(&undefined, "message".into()),
+            ContractCallError::NoSuchFunction(_)
+        ));
+
+        // As is the internal-expectation route simnet takes to a contract that
+        // does not exist.
+        let missing_contract = VmExecutionError::Internal(VmInternalError::Expect(
+            "Failed to read non-consensus contract metadata, even though contract exists in MARF."
+                .into(),
+        ));
+        assert!(matches!(
+            ContractCallError::from_vm_error(&missing_contract, "message".into()),
+            ContractCallError::NoSuchContract(_)
+        ));
     }
 
     /// Pin both directions of the delegation to `clarity`.
