@@ -29,13 +29,13 @@ version = "3.23.2"
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "clarity-types" }
-libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "libsigner", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "pox-locking", default-features = false }
-stacks-codec = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stacks-codec" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stacks-common", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/jbencin-stacks/stacks-core.git", rev = "87f959466930be798592355534ac601d121339f2", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/jbencin-stacks/stacks-core.git", rev = "87f959466930be798592355534ac601d121339f2", package = "clarity-types" }
+libsigner = { git = "https://github.com/jbencin-stacks/stacks-core.git", rev = "87f959466930be798592355534ac601d121339f2", package = "libsigner", default-features = false }
+pox-locking = { git = "https://github.com/jbencin-stacks/stacks-core.git", rev = "87f959466930be798592355534ac601d121339f2", package = "pox-locking", default-features = false }
+stacks-codec = { git = "https://github.com/jbencin-stacks/stacks-core.git", rev = "87f959466930be798592355534ac601d121339f2", package = "stacks-codec" }
+stacks-common = { git = "https://github.com/jbencin-stacks/stacks-core.git", rev = "87f959466930be798592355534ac601d121339f2", package = "stacks-common", default-features = false }
+stackslib = { git = "https://github.com/jbencin-stacks/stacks-core.git", rev = "87f959466930be798592355534ac601d121339f2", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }
@@ -95,7 +95,7 @@ wasm-bindgen-futures = { version = "0.4.58" }
 web-sys = { version = "0.3.85" }
 yaml_serde = "0.10.3"
 
-# [patch.'https://github.com/stacks-network/stacks-core.git']
+# [patch.'https://github.com/jbencin-stacks/stacks-core.git']
 # clarity = { path = "../stacks-core/clarity" }
 # clarity-types = { path = "../stacks-core/clarity-types" }
 # libsigner = { path = "../stacks-core/libsigner" }

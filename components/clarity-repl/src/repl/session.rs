@@ -7,9 +7,10 @@ use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::hooks::EvalHook;
 use clarity::vm::{
-    ClarityName, ClarityVersion, CostSynthesis, EvalHook, EvaluationResult, ExecutionResult,
-    ParsedContract, SymbolicExpression,
+    ClarityName, ClarityVersion, CostSynthesis, EvaluationResult, ExecutionResult, ParsedContract,
+    SymbolicExpression,
 };
 use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier};
 use clarity_types::Value;
@@ -1773,11 +1774,33 @@ mod tests {
             initial_block_height + 1
         );
 
-        // ensure latest epoch is correctly handled
-        let latest_epoch = StacksEpochId::latest().to_string();
-        session.handle_command(&format!("::set_epoch {latest_epoch}"));
+        // The latest epoch clarinet supports, which deliberately trails
+        // `StacksEpochId::latest()` until an epoch is adopted here — adoption
+        // means `epoch_from_str`, `EpochSpec`, and the devnet config, not just
+        // the interpreter.
+        let supported_latest = DEFAULT_EPOCH.to_string();
+        session.handle_command(&format!("::set_epoch {supported_latest}"));
         let current_epoch = session.handle_command("::get_epoch");
-        assert_eq!(current_epoch, format!("Current epoch: {latest_epoch}"));
+        assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
+
+        // Canary for upstream adding an epoch. Clarinet supports through 4.0;
+        // 4.1 exists upstream but is not adopted here. If this fails, upstream
+        // has moved again — adopt the pending epoch, or re-pin this and say why.
+        assert_eq!(
+            StacksEpochId::latest(),
+            StacksEpochId::Epoch41,
+            "upstream added an epoch past the one clarinet knows is pending"
+        );
+
+        // An unadopted epoch is reported as unusable rather than silently
+        // ignored, so the session never lands somewhere the caller didn't ask for.
+        let result = session.handle_command("::set_epoch 4.1");
+        assert!(
+            result.contains("Usage:"),
+            "expected usage error, got: {result}"
+        );
+        let current_epoch = session.handle_command("::get_epoch");
+        assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
     }
 
     #[test]
