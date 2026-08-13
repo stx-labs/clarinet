@@ -319,11 +319,21 @@ fn handle_emulated_contract_call(
         false,
     );
     if let Err(errors) = &result {
-        println!("error: {:?}", errors.first().unwrap().message);
+        println!("error: {:?}", errors.diagnostics.first().unwrap().message);
+    }
+
+    // An emulated contract call in a deployment plan is a transaction, so it
+    // consumes the emulated sender's nonce — same reasoning as the plan's
+    // contract publishes, and including failures mainnet would still mine.
+    let included = result
+        .as_ref()
+        .map_or_else(|e| e.inclusion.is_included(), |_| true);
+    if included {
+        session.bump_nonce(tx.emulated_sender.clone().into());
     }
 
     session.set_tx_sender(&default_tx_sender);
-    result
+    result.map_err(Vec::from)
 }
 
 /// Hash contract source for cache validation. SHA-256 is hardware-accelerated

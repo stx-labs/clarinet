@@ -21,6 +21,7 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPri
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
+use clarity_repl::repl::interpreter::BlockInclusion;
 use clarity_repl::repl::session::CostsReport;
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -72,6 +73,35 @@ struct DeploymentArtifacts {
     artifacts: DeploymentGenerationArtifacts,
     deployment: DeploymentSpecification,
     manifest: ProjectManifest,
+}
+
+/// A failed simnet operation, plus whether mainnet would still have included
+/// the transaction that produced it.
+///
+/// Only the callers that decide nonce consumption need the verdict; the wasm
+/// boundary reports a plain message, so it is dropped on the way out via
+/// `String::from`.
+struct OperationFailure {
+    message: String,
+    inclusion: BlockInclusion,
+}
+
+impl OperationFailure {
+    /// A failure simnet detects before running anything — an invalid sender,
+    /// an unknown contract id. Mainnet would not have included such a
+    /// transaction either, so it consumes no nonce.
+    fn rejected(message: String) -> Self {
+        Self {
+            message,
+            inclusion: BlockInclusion::Rejected,
+        }
+    }
+}
+
+impl From<OperationFailure> for String {
+    fn from(failure: OperationFailure) -> Self {
+        failure.message
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -816,13 +846,15 @@ impl SDK {
             sender,
         }: &CallFnArgs,
         allow_private: bool,
-    ) -> Result<TransactionRes, String> {
+    ) -> Result<TransactionRes, OperationFailure> {
         let test_name = self.current_test_name.clone();
         let track_costs = self.options.track_costs;
         let track_performance = self.options.track_performance;
 
         if PrincipalData::parse_standard_principal(sender).is_err() {
-            return Err(format!("Invalid sender address '{sender}'."));
+            return Err(OperationFailure::rejected(format!(
+                "Invalid sender address '{sender}'."
+            )));
         }
 
         let parsed_args = args
@@ -840,7 +872,7 @@ impl SDK {
                 allow_private,
                 track_costs,
             )
-            .map_err(|diagnostics| {
+            .map_err(|failure| {
                 let mut message = format!(
                     "Call contract function error: {contract}::{method}({})",
                     args.iter()
@@ -848,10 +880,13 @@ impl SDK {
                         .collect::<Vec<String>>()
                         .join(", ")
                 );
-                if let Some(diag) = diagnostics.last() {
+                if let Some(diag) = failure.diagnostics.last() {
                     message = format!("{message} -> {}", diag.message);
                 }
-                message
+                OperationFailure {
+                    message,
+                    inclusion: failure.inclusion,
+                }
             })?;
 
         // Collect performance data before accessing self.costs_reports
@@ -866,8 +901,12 @@ impl SDK {
 
         if track_costs {
             if let Some(ref cost) = execution.cost {
-                let contract_id =
-                    Session::desugar_contract_id(&self.deployer, contract)?.to_string();
+                // Unreachable in practice: the same id was desugared to run
+                // the call above. Classify conservatively rather than claim a
+                // transaction happened on a path that cannot be reached.
+                let contract_id = Session::desugar_contract_id(&self.deployer, contract)
+                    .map_err(OperationFailure::rejected)?
+                    .to_string();
                 self.costs_reports.push(CostsReport {
                     test_name,
                     contract_id,
@@ -894,7 +933,36 @@ impl SDK {
                 return Err(format!("{} is not a read-only function", args.method));
             }
         }
-        self.call_contract_fn(args, false)
+        self.call_contract_fn(args, false).map_err(String::from)
+    }
+
+    /// Bump `sender`'s nonce if the call made it into a block.
+    ///
+    /// Only the callers that know an operation is a transaction do this.
+    /// `callReadOnlyFn` shares the same underlying session primitive as the
+    /// public and private call paths, but a read-only call sends nothing, so it
+    /// deliberately does not bump.
+    fn bump_sender_nonce_if_included(
+        &mut self,
+        sender: &str,
+        result: &Result<TransactionRes, OperationFailure>,
+    ) {
+        let included = match result {
+            Ok(_) => true,
+            Err(failure) => failure.inclusion.is_included(),
+        };
+        if !included {
+            return;
+        }
+        match PrincipalData::parse_standard_principal(sender) {
+            Ok(principal) => self.get_session_mut().bump_nonce(principal.into()),
+            Err(e) => {
+                // `call_contract_fn` rejects an unparseable sender before
+                // running anything, so reaching an included result here implies
+                // a valid address.
+                log!("Failed to bump nonce for '{sender}': {e:?}");
+            }
+        }
     }
 
     fn inner_call_public_fn(
@@ -912,7 +980,9 @@ impl SDK {
             let session = self.get_session_mut();
             session.advance_chain_tip(1);
         }
-        self.call_contract_fn(args, false)
+        let result = self.call_contract_fn(args, false);
+        self.bump_sender_nonce_if_included(&args.sender, &result);
+        result.map_err(String::from)
     }
 
     fn inner_call_private_fn(
@@ -929,7 +999,9 @@ impl SDK {
             let session = self.get_session_mut();
             session.advance_chain_tip(1);
         }
-        self.call_contract_fn(args, true)
+        let result = self.call_contract_fn(args, true);
+        self.bump_sender_nonce_if_included(&args.sender, &result);
+        result.map_err(String::from)
     }
 
     fn inner_transfer_stx(

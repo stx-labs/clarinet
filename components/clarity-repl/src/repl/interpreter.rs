@@ -6,7 +6,10 @@ use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
-use clarity::vm::ast::{build_ast_with_diagnostics, ContractAST};
+use clarity::vm::ast::{build_ast, build_ast_with_diagnostics, ContractAST};
+use clarity::vm::clarity::{
+    handle_clarity_analysis_error, handle_clarity_runtime_error, ClarityError,
+};
 use clarity::vm::contexts::{
     CallStack, ContractContext, ExecutionState, GlobalContext, InvocationContext, LocalContext,
 };
@@ -39,6 +42,108 @@ use crate::analysis::{self, LintDiagnostic};
 use crate::repl::datastore::{ClarityDatastore, Datastore};
 use crate::repl::session::AnnotatedExecutionResult;
 use crate::repl::Settings;
+
+/// Whether mainnet would still include the transaction that produced a
+/// failure — and therefore charge its fee and advance its nonces.
+///
+/// Never decide this by matching `ClarityError` variants here. The rule is
+/// consensus-critical and changes as variants are added upstream, so it is
+/// delegated to `clarity`'s `handle_clarity_runtime_error` /
+/// `handle_clarity_analysis_error`, which the node itself calls on the block
+/// assembly path. See stacks-network/stacks-core#7486.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockInclusion {
+    /// The transaction is included: it consumes a nonce even though it failed.
+    Included,
+    /// The transaction is invalid: nothing happens, and no nonce is consumed.
+    Rejected,
+}
+
+impl BlockInclusion {
+    /// Classify a failure from the execution phase — a contract call, an STX
+    /// transfer, or the body of a contract being deployed.
+    pub fn from_runtime_error(error: ClarityError, epoch: StacksEpochId) -> Self {
+        Self::from(handle_clarity_runtime_error(error, epoch).is_included_in_block())
+    }
+
+    /// Classify a failure from a deployment's analysis phase, which never
+    /// reaches `handle_clarity_runtime_error` on mainnet: the `SmartContract`
+    /// arm matches `ClarityError` directly and decides on `rejectable_in_epoch`.
+    pub fn from_analysis_error(error: ClarityError, epoch: StacksEpochId) -> Self {
+        Self::from(handle_clarity_analysis_error(error, epoch).is_included_in_block())
+    }
+
+    pub fn is_included(self) -> bool {
+        self == BlockInclusion::Included
+    }
+}
+
+impl From<bool> for BlockInclusion {
+    fn from(is_included: bool) -> Self {
+        if is_included {
+            BlockInclusion::Included
+        } else {
+            BlockInclusion::Rejected
+        }
+    }
+}
+
+/// A failed `ClarityInterpreter::run`, carrying the diagnostics to report and
+/// whether the operation still counts as a transaction on mainnet.
+#[derive(Debug, Clone)]
+pub struct ExecutionError {
+    pub diagnostics: Vec<Diagnostic>,
+    pub inclusion: BlockInclusion,
+}
+
+impl ExecutionError {
+    /// A failure that invalidates the transaction outright. This is the right
+    /// default for anything simnet rejects before execution — an unparseable
+    /// epoch, a bad contract id — none of which mainnet would include.
+    pub fn rejected(diagnostics: Vec<Diagnostic>) -> Self {
+        Self {
+            diagnostics,
+            inclusion: BlockInclusion::Rejected,
+        }
+    }
+}
+
+impl From<ExecutionError> for Vec<Diagnostic> {
+    fn from(e: ExecutionError) -> Self {
+        e.diagnostics
+    }
+}
+
+/// Wrap a failure message the way `ClarityInterpreter::run` has always
+/// reported one. Kept in one place because the exact text is asserted by
+/// `simnet-usage.test.ts` and matched by the tracer hook.
+fn runtime_diagnostic(message: impl std::fmt::Display) -> Diagnostic {
+    Diagnostic {
+        level: Level::Error,
+        message: format!("Runtime Error: {message}"),
+        spans: vec![],
+        suggestion: None,
+    }
+}
+
+/// A failed contract call, carrying the same disposition as [`ExecutionError`].
+///
+/// The verdict is a sibling of the error rather than part of it because
+/// [`ContractCallError`] still classifies itself by matching on formatted
+/// message text; keeping them separate lets that be replaced independently.
+#[derive(Debug, Clone)]
+pub struct ContractCallFailure {
+    pub error: ContractCallError,
+    pub inclusion: BlockInclusion,
+}
+
+impl std::fmt::Display for ContractCallFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for ContractCallFailure {}
 
 #[derive(Debug, Clone)]
 pub enum ContractCallError {
@@ -138,7 +243,7 @@ impl ClarityInterpreter {
         cached_ast: Option<&ContractAST>,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, ExecutionError> {
         let (ast, mut diagnostics, success) = match cached_ast {
             Some(ast) => (ast.clone(), vec![], true),
             None => self.build_ast(contract),
@@ -151,25 +256,29 @@ impl ClarityInterpreter {
 
         let (analysis, lint_diagnostics) = match self.run_analysis(contract, &ast, &annotations) {
             Ok((analysis, lint_diags)) => (analysis, lint_diags),
-            Err(mut analysis_diagnostics) => {
-                diagnostics.append(&mut analysis_diagnostics);
-                return Err(diagnostics.to_vec());
+            Err(mut analysis_failure) => {
+                diagnostics.append(&mut analysis_failure.diagnostics);
+                return Err(ExecutionError {
+                    diagnostics,
+                    inclusion: analysis_failure.inclusion,
+                });
             }
         };
         if !success {
-            return Err(diagnostics.to_vec());
+            return Err(ExecutionError {
+                inclusion: self.classify_parse_failure(contract),
+                diagnostics,
+            });
         }
 
         let mut result = match self.execute(contract, &ast, analysis, cost_track, eval_hooks) {
             Ok(result) => result,
-            Err(e) => {
-                diagnostics.push(Diagnostic {
-                    level: Level::Error,
-                    message: format!("Runtime Error: {e}"),
-                    spans: vec![],
-                    suggestion: None,
+            Err(mut runtime_failure) => {
+                diagnostics.append(&mut runtime_failure.diagnostics);
+                return Err(ExecutionError {
+                    diagnostics,
+                    inclusion: runtime_failure.inclusion,
                 });
-                return Err(diagnostics.to_vec());
             }
         };
 
@@ -225,6 +334,31 @@ impl ClarityInterpreter {
         )
     }
 
+    /// Whether a deploy that failed to parse is still included in a block.
+    ///
+    /// Ordinary syntax errors are included on mainnet — the deploy is mined and
+    /// fails — while `rejectable_in_epoch` errors invalidate the transaction.
+    /// `build_ast_with_diagnostics` reports every diagnostic but discards the
+    /// typed `ParseError` that distinction needs, so re-parse here to recover
+    /// it. This runs only on the failure path, and the diagnostics the caller
+    /// reports still come from the richer pass.
+    fn classify_parse_failure(&self, contract: &ClarityContract) -> BlockInclusion {
+        let epoch = contract.epoch.resolve();
+        let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
+        match build_ast(
+            &contract_id,
+            contract.expect_in_memory_code_source(),
+            &mut (),
+            contract.clarity_version,
+            epoch,
+        ) {
+            Err(e) => BlockInclusion::from_analysis_error(ClarityError::Parse(e), epoch),
+            // The diagnostic pass found a problem the typed pass did not, so
+            // there is no error to classify. Stay conservative.
+            Ok(_) => BlockInclusion::Rejected,
+        }
+    }
+
     pub fn collect_annotations(&self, code_source: &str) -> (Vec<Annotation>, Vec<Diagnostic>) {
         let mut annotations = vec![];
         let mut diagnostics = vec![];
@@ -278,7 +412,7 @@ impl ClarityInterpreter {
         contract: &ClarityContract,
         contract_ast: &ContractAST,
         annotations: &[Annotation],
-    ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), Vec<Diagnostic>> {
+    ) -> Result<(ContractAnalysis, Vec<LintDiagnostic>), ExecutionError> {
         // Extract the lint level before borrowing self.clarity_datastore via analysis_db.
         // Only bother if skip_analysis is false; boot contracts and similar skip lints entirely.
         let renamed_builtin_level = if !contract.skip_analysis {
@@ -318,11 +452,20 @@ impl ClarityInterpreter {
                     )
                 })
                 .unwrap_or_default();
-            diagnostics.push(boxed_error.0.diagnostic);
-            diagnostics
+            let static_check_error = boxed_error.0;
+            diagnostics.push(static_check_error.diagnostic.clone());
+            ExecutionError {
+                diagnostics,
+                inclusion: BlockInclusion::from_analysis_error(
+                    ClarityError::StaticCheck(static_check_error),
+                    contract.epoch.resolve(),
+                ),
+            }
         })?;
 
-        // Run REPL-only analyses (linter, check_checker, etc.)
+        // Run REPL-only analyses (linter, check_checker, etc.). These are
+        // clarinet's own lints, not consensus rules, so a mainnet node would
+        // never see them — they can only reject an operation here.
         let lint_diagnostics = if !contract.skip_analysis {
             analysis::run_analysis(
                 &mut contract_analysis,
@@ -330,7 +473,9 @@ impl ClarityInterpreter {
                 annotations,
                 &self.repl_settings.analysis,
             )
-            .map_err(|lds| lds.into_iter().map(Diagnostic::from).collect::<Vec<_>>())?
+            .map_err(|lds| {
+                ExecutionError::rejected(lds.into_iter().map(Diagnostic::from).collect())
+            })?
         } else {
             vec![]
         };
@@ -459,7 +604,7 @@ impl ClarityInterpreter {
         analysis: ContractAnalysis,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-    ) -> Result<ExecutionResult, String> {
+    ) -> Result<ExecutionResult, ExecutionError> {
         let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
         let snippet = contract.expect_in_memory_code_source();
         let mut contract_context =
@@ -470,7 +615,12 @@ impl ClarityInterpreter {
 
         let tx_sender: PrincipalData = self.tx_sender.clone().into();
 
-        let mut global_context = self.get_global_context(contract.epoch.resolve(), cost_track)?;
+        let epoch = contract.epoch.resolve();
+        // Failing to stand up the VM is a simnet problem, not a transaction
+        // outcome — mainnet would never have accepted the transaction at all.
+        let mut global_context = self
+            .get_global_context(epoch, cost_track)
+            .map_err(|e| ExecutionError::rejected(vec![runtime_diagnostic(e)]))?;
 
         if let Some(in_hooks) = eval_hooks {
             let mut hooks: Vec<&mut dyn EvalHook> = Vec::new();
@@ -564,16 +714,25 @@ impl ClarityInterpreter {
             eval_all(&contract_ast.expressions, &mut contract_context, g, None)
         });
 
-        let value = result.map_err(|e| {
-            let err = format!("Runtime error while interpreting {contract_id}: {e:?}");
-            if let Some(mut eval_hooks) = global_context.eval_hooks.take() {
-                for hook in eval_hooks.iter_mut() {
-                    hook.did_complete(Err(err.clone()));
+        let value = match result {
+            Ok(value) => value,
+            Err(e) => {
+                let err = format!("Runtime error while interpreting {contract_id}: {e:?}");
+                if let Some(mut eval_hooks) = global_context.eval_hooks.take() {
+                    for hook in eval_hooks.iter_mut() {
+                        hook.did_complete(Err(err.clone()));
+                    }
+                    global_context.eval_hooks = Some(eval_hooks);
                 }
-                global_context.eval_hooks = Some(eval_hooks);
+                return Err(ExecutionError {
+                    diagnostics: vec![runtime_diagnostic(err)],
+                    inclusion: BlockInclusion::from_runtime_error(
+                        ClarityError::Interpreter(e),
+                        epoch,
+                    ),
+                });
             }
-            err
-        })?;
+        };
 
         let mut cost = None;
         if cost_track {
@@ -682,12 +841,17 @@ impl ClarityInterpreter {
         track_costs: bool,
         allow_private: bool,
         eval_hooks: Vec<&mut dyn EvalHook>,
-    ) -> Result<ExecutionResult, ContractCallError> {
+    ) -> Result<ExecutionResult, ContractCallFailure> {
         let tx_sender: PrincipalData = self.tx_sender.clone().into();
 
-        let mut global_context = self
-            .get_global_context(epoch, track_costs)
-            .map_err(ContractCallError::from)?;
+        // Failing to stand up the VM is a simnet problem, not a transaction
+        // outcome — mainnet would never have accepted the transaction at all.
+        let mut global_context =
+            self.get_global_context(epoch, track_costs)
+                .map_err(|e| ContractCallFailure {
+                    error: ContractCallError::from(e),
+                    inclusion: BlockInclusion::Rejected,
+                })?;
 
         let mut hooks: Vec<&mut dyn EvalHook> = Vec::new();
         for hook in eval_hooks {
@@ -733,7 +897,10 @@ impl ClarityInterpreter {
                 }
                 global_context.eval_hooks = Some(eval_hooks);
             }
-            err
+            ContractCallFailure {
+                error: ContractCallError::from(err),
+                inclusion: BlockInclusion::from_runtime_error(ClarityError::Interpreter(e), epoch),
+            }
         });
 
         let mut cost = None;
@@ -747,12 +914,7 @@ impl ClarityInterpreter {
             .flat_map(|b| b.0.events.clone())
             .collect::<Vec<_>>();
 
-        let eval_result = match value {
-            Ok(result) => EvaluationResult::Snippet(SnippetEvaluationResult { result }),
-            Err(e) => {
-                return Err(ContractCallError::from(e));
-            }
-        };
+        let eval_result = EvaluationResult::Snippet(SnippetEvaluationResult { result: value? });
         global_context.commit().unwrap();
 
         let (events, accounts_to_credit, accounts_to_debit) =
@@ -1163,7 +1325,7 @@ mod tests {
     fn deploy_contract(
         interpreter: &mut ClarityInterpreter,
         contract: &ClarityContract,
-    ) -> Result<ExecutionResult, ContractCallError> {
+    ) -> Result<ExecutionResult, ExecutionError> {
         let source = contract.expect_in_memory_code_source();
         let (ast, ..) = interpreter.build_ast(contract);
         let (annotations, _) = interpreter.collect_annotations(source);
@@ -1172,17 +1334,16 @@ mod tests {
             .run_analysis(contract, &ast, &annotations)
             .unwrap();
 
-        let result = interpreter
-            .execute(contract, &ast, analysis, false, None)
-            .map_err(ContractCallError::from);
+        let result = interpreter.execute(contract, &ast, analysis, false, None);
         assert!(result.is_ok());
         result
     }
 
+    // Generic over the error so it serves both `execute` (`ExecutionError`)
+    // and `call_contract_fn` (`ContractCallFailure`).
     #[track_caller]
-    fn get_evaluation_result(result: Result<ExecutionResult, ContractCallError>) -> Value {
-        assert!(result.is_ok());
-        let result = result.unwrap();
+    fn get_evaluation_result<E: std::fmt::Debug>(result: Result<ExecutionResult, E>) -> Value {
+        let result = result.expect("execution should succeed");
         match result.result {
             EvaluationResult::Contract(_) => unreachable!(),
             EvaluationResult::Snippet(res) => res.result,
@@ -1190,8 +1351,8 @@ mod tests {
     }
 
     #[track_caller]
-    fn assert_execution_result_value(
-        result: Result<ExecutionResult, ContractCallError>,
+    fn assert_execution_result_value<E: std::fmt::Debug>(
+        result: Result<ExecutionResult, E>,
         expected_value: Value,
     ) {
         let result = get_evaluation_result(result);
@@ -1359,6 +1520,59 @@ mod tests {
         PrincipalData::parse_standard_principal(addr)
             .expect("valid principal")
             .into()
+    }
+
+    /// Pin both directions of the delegation to `clarity`.
+    ///
+    /// The end-to-end nonce tests in `session.rs` only reach *included*
+    /// failures, because the rejected ones — cost overruns, resource-budget
+    /// exhaustion, `rejectable_in_epoch` errors — are impractical to provoke
+    /// from ordinary contract source. Without this test, mapping every failure
+    /// to `Included` would pass the whole suite.
+    ///
+    /// This asserts that clarinet asks the right classifier and reads the
+    /// answer the right way round. Which specific variants fall on which side
+    /// is upstream's business, and is tested there.
+    #[test]
+    fn block_inclusion_delegates_to_clarity() {
+        use clarity::vm::analysis::errors::{StaticCheckError, StaticCheckErrorKind};
+        use clarity::vm::errors::{RuntimeError, VmExecutionError};
+
+        let epoch = StacksEpochId::latest();
+
+        // Included: an ordinary runtime failure is mined, and pays for itself.
+        assert!(BlockInclusion::from_runtime_error(
+            ClarityError::Interpreter(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticOverflow,
+                None
+            )),
+            epoch,
+        )
+        .is_included());
+
+        // Rejected: a cost overrun would invalidate the block, so the
+        // transaction never lands and consumes nothing.
+        assert!(!BlockInclusion::from_runtime_error(
+            ClarityError::CostError(ExecutionCost::ZERO, ExecutionCost::max_value()),
+            epoch,
+        )
+        .is_included());
+
+        // Included: an ordinary type error is mined as a failed deploy.
+        assert!(BlockInclusion::from_analysis_error(
+            ClarityError::StaticCheck(StaticCheckError::new(
+                StaticCheckErrorKind::UnknownFunction("no-such-fn".into())
+            )),
+            epoch,
+        )
+        .is_included());
+
+        // Rejected: analysis that exhausts its resource budget is not mineable.
+        assert!(!BlockInclusion::from_analysis_error(
+            ClarityError::AnalysisResourceBudgetExceeded("too slow".into()),
+            epoch,
+        )
+        .is_included());
     }
 
     #[test]
@@ -1556,7 +1770,7 @@ mod tests {
             .build();
         let result = interpreter.run(&contract, None, false, None);
         assert!(result.is_err());
-        let diagnostics = result.unwrap_err();
+        let diagnostics = result.unwrap_err().diagnostics;
         assert_eq!(diagnostics.len(), 1);
     }
 
@@ -1571,7 +1785,7 @@ mod tests {
         let result = interpreter.run(&contract, None, false, None);
         assert!(result.is_err());
 
-        let diagnostics = result.unwrap_err();
+        let diagnostics = result.unwrap_err().diagnostics;
         assert_eq!(diagnostics.len(), 1);
 
         let message = format!("Runtime Error: Runtime error while interpreting {}.{}: Runtime(DivisionByZero, Some([FunctionIdentifier {{ identifier: \"_native_:native_div\" }}]))", StandardPrincipalData::transient(), contract.name);
@@ -2252,7 +2466,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        matches!(result.unwrap_err(), ContractCallError::NoSuchFunction(_));
+        matches!(
+            result.unwrap_err().error,
+            ContractCallError::NoSuchFunction(_)
+        );
 
         let result = interpreter.call_contract_fn(
             &QualifiedContractIdentifier {
@@ -2269,7 +2486,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        matches!(result.unwrap_err(), ContractCallError::NoSuchContract(_));
+        matches!(
+            result.unwrap_err().error,
+            ContractCallError::NoSuchContract(_)
+        );
     }
 
     #[test]
@@ -2325,7 +2545,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().error;
         match err {
             ContractCallError::NoSuchFunction(ref function_name) => {
                 assert!(function_name.contains("private-func"));
