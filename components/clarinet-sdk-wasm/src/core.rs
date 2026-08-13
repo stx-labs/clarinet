@@ -750,6 +750,16 @@ impl SDK {
         Ok(encode_to_js(&self.accounts)?.unchecked_into::<Accounts>())
     }
 
+    /// The number of transactions `address` has sent, as mainnet counts them.
+    /// The deployer starts above zero because the deployment plan's contract
+    /// publishes are themselves transactions.
+    #[wasm_bindgen(js_name=getAccountNonce)]
+    pub fn get_account_nonce(&mut self, address: &str) -> Result<u64, String> {
+        let principal = PrincipalData::parse_standard_principal(address)
+            .map_err(|e| format!("Invalid address '{address}': {e}"))?;
+        self.get_session_mut().get_nonce(&principal.into())
+    }
+
     #[wasm_bindgen(js_name=getDataVar)]
     pub fn get_data_var(&mut self, contract: &str, var_name: &str) -> Result<String, String> {
         let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;

@@ -1164,6 +1164,27 @@ impl Session {
         self.interpreter.get_assets_maps()
     }
 
+    /// Read the transaction nonce of `principal`. Unknown principals are at 0.
+    pub fn get_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
+        self.interpreter.get_nonce(principal)
+    }
+
+    /// Bump the nonce of `principal` after a transaction it sent.
+    ///
+    /// Callers are the ones that know whether an operation is a transaction:
+    /// `call_contract_fn` is deliberately not one of them, because it also
+    /// backs `simnet.callReadOnlyFn`, and a read-only call is not a
+    /// transaction. See `inner_call_public_fn` / `inner_call_private_fn` in
+    /// `clarinet-sdk-wasm`, which do know.
+    ///
+    /// A failure here means the datastore is unhealthy, not that the
+    /// transaction was invalid, so it is reported rather than propagated.
+    pub fn bump_nonce(&mut self, principal: PrincipalData) {
+        if let Err(e) = self.interpreter.increment_nonce(&principal) {
+            ueprint!("Failed to bump nonce for {principal}: {e}");
+        }
+    }
+
     pub fn get_contract_ast(
         &mut self,
         contract_id: &QualifiedContractIdentifier,

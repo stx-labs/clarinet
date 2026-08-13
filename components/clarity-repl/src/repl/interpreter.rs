@@ -1090,6 +1090,50 @@ impl ClarityInterpreter {
             _ => 0,
         }
     }
+
+    /// Read the transaction nonce of `principal`.
+    ///
+    /// Nonces are kept where mainnet keeps them — behind the
+    /// `ClarityBackingStore`, under `make_key_for_account_nonce` — rather than
+    /// beside the `tokens` map, which is a reporting mirror with no rollback.
+    /// Storing them in the backing store means a nonce bump is discarded along
+    /// with the rest of a rolled-back transaction, which is what post-condition
+    /// enforcement will rely on.
+    pub fn get_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
+        let mut conn = ClarityDatabase::new(
+            &mut self.clarity_datastore,
+            &self.datastore,
+            &self.datastore,
+        );
+        // Reads through the rollback wrapper require a nested context.
+        conn.begin();
+        let nonce = conn
+            .get_account_nonce(principal)
+            .map_err(|e| format!("failed to read nonce for {principal}: {e}"));
+        // Discard rather than commit: a read must not leave anything behind.
+        conn.roll_back()
+            .map_err(|e| format!("failed to roll back nonce read for {principal}: {e}"))?;
+        nonce
+    }
+
+    /// Bump the transaction nonce of `principal`, returning the new value.
+    pub fn increment_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
+        let mut conn = ClarityDatabase::new(
+            &mut self.clarity_datastore,
+            &self.datastore,
+            &self.datastore,
+        );
+        conn.begin();
+        let next = conn
+            .get_account_nonce(principal)
+            .map_err(|e| format!("failed to read nonce for {principal}: {e}"))?
+            .saturating_add(1);
+        conn.set_account_nonce(principal, next)
+            .map_err(|e| format!("failed to set nonce for {principal}: {e}"))?;
+        conn.commit()
+            .map_err(|e| format!("failed to commit nonce for {principal}: {e}"))?;
+        Ok(next)
+    }
 }
 
 #[cfg(test)]
@@ -1308,6 +1352,57 @@ mod tests {
 
         let balance = interpreter.get_balance_for_account(addr, "STX");
         assert_eq!(balance, amount);
+    }
+
+    #[track_caller]
+    fn principal(addr: &str) -> PrincipalData {
+        PrincipalData::parse_standard_principal(addr)
+            .expect("valid principal")
+            .into()
+    }
+
+    #[test]
+    fn test_nonce_starts_at_zero() {
+        let mut interpreter = get_interpreter(None);
+        let addr = principal("ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5");
+
+        assert_eq!(interpreter.get_nonce(&addr).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_increment_nonce() {
+        let mut interpreter = get_interpreter(None);
+        let addr = principal("ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5");
+
+        assert_eq!(interpreter.increment_nonce(&addr).unwrap(), 1);
+        assert_eq!(interpreter.get_nonce(&addr).unwrap(), 1);
+
+        assert_eq!(interpreter.increment_nonce(&addr).unwrap(), 2);
+        assert_eq!(interpreter.get_nonce(&addr).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_nonces_are_tracked_per_principal() {
+        let mut interpreter = get_interpreter(None);
+        let addr_1 = principal("ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5");
+        let addr_2 = principal("ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG");
+
+        interpreter.increment_nonce(&addr_1).unwrap();
+        interpreter.increment_nonce(&addr_1).unwrap();
+
+        assert_eq!(interpreter.get_nonce(&addr_1).unwrap(), 2);
+        assert_eq!(interpreter.get_nonce(&addr_2).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_reading_a_nonce_does_not_bump_it() {
+        let mut interpreter = get_interpreter(None);
+        let addr = principal("ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5");
+
+        interpreter.increment_nonce(&addr).unwrap();
+        for _ in 0..3 {
+            assert_eq!(interpreter.get_nonce(&addr).unwrap(), 1);
+        }
     }
 
     #[test]
