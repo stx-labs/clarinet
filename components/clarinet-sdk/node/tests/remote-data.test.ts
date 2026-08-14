@@ -43,7 +43,10 @@ afterAll(() => {
   deleteMetadataFsCache();
 });
 
-describe("simnet remote interactions", { retry: 2 }, async () => {
+// TODO: STJCAB2T9TR2EJM7YS4DM2CGBBVTF7BV237Y8KNV.counter no longer exists on the
+// current krypton testnet after the 2026 reset. These tests need to be updated
+// to use a new testnet contract once one is available.
+describe.skip("simnet remote interactions", { retry: 2 }, async () => {
   const simnet = await getSDK();
 
   it("can call a remote contract", async () => {
