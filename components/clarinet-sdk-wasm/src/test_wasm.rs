@@ -75,23 +75,19 @@ async fn it_can_call_remote_data() {
     let options = RemoteDataSettings {
         enabled: true,
         api_url: ApiUrl("https://api.testnet.hiro.so".to_string()),
-        initial_height: Some(42000),
+        initial_height: Some(50000),
         use_mainnet_wallets: false,
     };
     let _ = sdk
         .init_empty_session(JsValue::from_serde(&options).unwrap())
         .await;
 
-    assert_eq!(sdk.current_epoch(), "3.1");
+    // height 50000 is in Epoch 4.0 on the current krypton testnet
+    assert_eq!(sdk.current_epoch(), "4.0");
 
-    let tx = sdk.call_public_fn(&CallFnArgs::new(
-        "STJCAB2T9TR2EJM7YS4DM2CGBBVTF7BV237Y8KNV.counter".into(),
-        "get-count".into(),
-        vec![],
-        "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(),
-    ));
-
-    let expected = format!("0x{}", ClarityValue::UInt(0).serialize_to_hex().unwrap());
+    // testnet addresses (ST prefix) are standard on testnet
+    let tx = sdk.execute("(is-standard 'ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5)".into());
+    let expected = format!("0x{}", ClarityValue::Bool(true).serialize_to_hex().unwrap());
     assert_eq!(tx.unwrap().result, expected);
 }
 

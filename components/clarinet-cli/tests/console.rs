@@ -39,14 +39,14 @@ fn can_set_epoch_in_empty_session() {
 
 #[test]
 fn can_init_console_with_mxs() {
-    // testnet
+    // testnet — height 50000 is in Epoch 4.0 on the krypton testnet
     let output = run_console_command(
         &[
             "--enable-remote-data",
             "--remote-data-api-url",
             "https://api.testnet.hiro.so",
             "--remote-data-initial-height",
-            "74380",
+            "50000",
         ],
         &[
             "::get_epoch",
@@ -54,7 +54,7 @@ fn can_init_console_with_mxs() {
             "(is-standard 'SP1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRCBGD7R)",
         ],
     );
-    assert_eq!(output[0], "Current epoch: 3.1");
+    assert_eq!(output[0], "Current epoch: 4.0");
     assert_eq!(output[1], "true");
     assert_eq!(output[2], "false");
 
