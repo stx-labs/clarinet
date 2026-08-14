@@ -2431,8 +2431,9 @@ mod tests {
     /// Hashing more input must cost more, which catches static analysis passing
     /// `arg_count` instead of the input size.
     ///
-    /// The sizes straddle 512 bytes because epoch 4.0 prices hashing per
-    /// 512-byte block, so smaller inputs all cost the same.
+    /// From epoch 4.0 the cost is `(serialized_size >> 9) + 38`
+    /// (`Costs5::cost_hash160`), so inputs under ~512 bytes all cost the same.
+    /// The sizes below straddle that step.
     #[track_caller]
     fn assert_hash_cost_grows_with_input(hash_fn: &str) {
         let v = &ClarityVersion::Clarity3;
