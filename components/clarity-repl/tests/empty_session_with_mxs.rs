@@ -62,13 +62,18 @@ fn init_mainnet_session(initial_height: u32) -> Session {
 
 #[test]
 fn it_starts_in_the_right_epoch() {
+    // height 42000 is in Epoch 4.0 on the new krypton testnet (Epoch 4.0 starts at ~2825)
     let session = init_testnet_session(42000);
     assert_eq!(
         session.interpreter.datastore.get_current_epoch(),
-        StacksEpochId::Epoch31
+        StacksEpochId::Epoch40
     );
 }
 
+// The counter contract tests are skipped because the counter contract
+// (STJCAB2T9TR2EJM7YS4DM2CGBBVTF7BV237Y8KNV.counter) was deployed on the
+// previous krypton testnet and does not exist on the current chain.
+// TODO: deploy a new counter contract on the current testnet and update these tests.
 mod test_counter_contract {
     use clarity::vm::Value;
 
@@ -85,6 +90,7 @@ mod test_counter_contract {
     const COUNTER2_ADDR: &str = "ST22JXZG7Q4AN1100RZ7MMHQP6VF1WJX41SPB94CR.counter2";
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_can_fetch_remote() {
         // count at block 42000 is 0
         let mut session = init_testnet_session(42000);
@@ -100,6 +106,7 @@ mod test_counter_contract {
     }
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_can_fork_state() {
         let mut session = init_testnet_session(57000);
         let snippet_get_count = format!("(contract-call? '{COUNTER_ADDR} get-count)");
@@ -116,6 +123,7 @@ mod test_counter_contract {
     }
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_keeps_track_of_historical_data() {
         let mut session = init_testnet_session(57000);
 
@@ -129,6 +137,7 @@ mod test_counter_contract {
     }
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_handles_at_block() {
         let mut session = init_testnet_session(60000);
 
@@ -156,6 +165,7 @@ mod test_counter_contract {
     }
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_parses_contracts() {
         let mut session = init_testnet_session(57000);
         let snippet = format!("(contract-call? '{COUNTER_ADDR} get-count)");
@@ -164,6 +174,7 @@ mod test_counter_contract {
     }
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_evualuates_constant_values() {
         let mut session = init_testnet_session(41614);
         let snippet = format!("(contract-call? '{COUNTER_ADDR} decrement)");
@@ -172,6 +183,7 @@ mod test_counter_contract {
     }
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_properly_evaluates_constant_values() {
         let mut session = init_testnet_session(3530273);
         // we expect COUNTER2 to hold the count value from COUNTER_ADDR at deployment, which is 2
@@ -181,6 +193,7 @@ mod test_counter_contract {
     }
 
     #[test]
+    #[ignore = "counter contract not deployed on current testnet"]
     fn it_saves_metadata_to_cache() {
         let mut session = init_testnet_session(57000);
         let snippet = format!("(contract-call? '{COUNTER_ADDR} get-count)");
@@ -283,13 +296,14 @@ mod test_mxs_session_test {
             Value::some(Value::buff_from(expected_header_hash).unwrap()).unwrap()
         );
 
-        // // test for a bug where a burn block height higher than the current stacks block height would return invalid data
+        // test for a bug where a burn block height higher than the current stacks block height would return invalid data
+        // On the current krypton testnet, Stacks block 2000 is at burn block height 2461.
         let mut session = init_testnet_session(2000);
         let result = eval_snippet(&mut session, "burn-block-height");
-        assert_eq!(result, Value::UInt(2836));
-        let result = eval_snippet(&mut session, "(get-burn-block-info? header-hash u2832)");
+        assert_eq!(result, Value::UInt(2461));
+        let result = eval_snippet(&mut session, "(get-burn-block-info? header-hash u2461)");
         let expected_header_hash =
-            hex_bytes("088722e90bf5c04639aa91cc30585b068883693a8ecc95a12aab71be2c7252ed").unwrap();
+            hex_bytes("70155a53331b45ad1e9688e589f25073e9c6973f6b1b877d738c7977c4a55771").unwrap();
         assert_eq!(
             result,
             Value::some(Value::buff_from(expected_header_hash).unwrap()).unwrap()
@@ -298,10 +312,10 @@ mod test_mxs_session_test {
         // advance the burn chain tip will result in a fork, bitcoin data is now mocked
         session.advance_burn_chain_tip(10);
         let result = eval_snippet(&mut session, "burn-block-height");
-        assert_eq!(result, Value::UInt(2846));
-        let result = eval_snippet(&mut session, "(get-burn-block-info? header-hash u2840)");
+        assert_eq!(result, Value::UInt(2471));
+        let result = eval_snippet(&mut session, "(get-burn-block-info? header-hash u2465)");
         let expected_mocked_header_hash =
-            hex_bytes("0224cd36a1bb63d40c62a249d8e05153ba4f6411e3024ad569ac28e0b50b41f2").unwrap();
+            hex_bytes("0230d2971ebdfa17ca0c33d926431c1c9f8817251d307d56533091bd305f4f2c").unwrap();
         assert_eq!(
             result,
             Value::some(Value::buff_from(expected_mocked_header_hash).unwrap()).unwrap()
@@ -310,22 +324,26 @@ mod test_mxs_session_test {
 
     #[test]
     fn it_can_get_tenure_info_time() {
+        // get-tenure-info? takes a Stacks block height. Both 56999 and 50999 exist on the
+        // current krypton testnet. Values are the burn_block_time at those heights.
         let mut session = init_testnet_session(57000);
         let result = eval_snippet(&mut session, "(get-tenure-info? time u56999)");
-        assert_eq!(result, Value::some(Value::UInt(1737053962)).unwrap());
+        assert_eq!(result, Value::some(Value::UInt(1786576582)).unwrap());
         let result = eval_snippet(&mut session, "(get-tenure-info? time u50999)");
-        assert_eq!(result, Value::some(Value::UInt(1736980481)).unwrap());
+        assert_eq!(result, Value::some(Value::UInt(1786517175)).unwrap());
     }
 
     #[test]
     fn it_can_get_tenure_info_bhh() {
+        // get-tenure-info? takes a Stacks block height. Block 56888 exists on the current
+        // krypton testnet (burn_block_height 4905, burn_block_hash verified from API).
         let mut session = init_testnet_session(57000);
         let result = eval_snippet(
             &mut session,
             "(get-tenure-info? burnchain-header-hash u56888)",
         );
         let expected_header_hash =
-            hex_bytes("026c12afb50b4baabb5cac8b940eda8b437f979b9819eef4cdd14c9f1a78133c").unwrap();
+            hex_bytes("1522f4a47bf5f4ceb09a8939e89e2347154d6df2032e6d36c2853c8f141c9885").unwrap();
         assert_eq!(
             result,
             Value::some(Value::buff_from(expected_header_hash).unwrap()).unwrap()
@@ -386,12 +404,14 @@ mod test_mxs_session_test {
 
     #[test]
     fn it_handles_clarity2_block_height_in_epoch3() {
-        let mut session = init_testnet_session(3557367);
+        // On the current krypton testnet, Stacks block 730 is in Epoch 3.2 (burn_block_height 1804)
+        // with tenure_height 728.
+        let mut session = init_testnet_session(730);
         let epoch = session.get_epoch();
         assert_eq!(epoch, "Current epoch: 3.2");
 
         let tenure_height = eval_snippet(&mut session, "tenure-height");
-        assert_eq!(tenure_height, Value::UInt(88911));
+        assert_eq!(tenure_height, Value::UInt(728));
 
         let deployer = "ST23YMXQ25679FCF71F8FRGYPQBZQJFJWA4GFT84T";
 
@@ -412,12 +432,12 @@ mod test_mxs_session_test {
 
         let snippet = format!("(contract-call? '{deployer}.gbh get-block-height)");
         let result = eval_snippet(&mut session, &snippet);
-        assert_eq!(result, Value::UInt(88911));
+        assert_eq!(result, Value::UInt(728));
 
         session.advance_burn_chain_tip(1);
         let snippet = format!("(contract-call? '{deployer}.gbh get-block-height)");
         let result = eval_snippet(&mut session, &snippet);
-        assert_eq!(result, Value::UInt(88912));
+        assert_eq!(result, Value::UInt(729));
     }
 
     #[test]
