@@ -157,6 +157,85 @@ async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
     );
 }
 
+/// The access preflight short-circuits a call the VM would otherwise run, so
+/// it has to reach the VM's answer about the nonce as well as about the error.
+///
+/// Mainnet mines a `contract-call?` naming a non-public function:
+/// `NoSuchPublicFunction` is a non-rejectable `RuntimeCheck`. The pairs below
+/// are that same failure arriving by the two different routes — one with a
+/// cached interface, one without — and they must not disagree.
+#[wasm_bindgen_test]
+async fn it_charges_a_nonce_for_a_call_the_access_preflight_rejects() {
+    const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    let mut sdk = init_sdk().await;
+
+    let call = |method: &str| {
+        CallFnArgs::new(
+            format!("{SENDER}.access-contract"),
+            method.into(),
+            vec![],
+            SENDER.into(),
+        )
+    };
+
+    sdk.deploy_contract(&DeployContractArgs::new(
+        "access-contract".into(),
+        "(define-read-only (peek) u1)
+         (define-public (poke) (ok u1))
+         (define-private (hidden) u1)"
+            .into(),
+        ContractOptions::new(None),
+        SENDER.into(),
+    ))
+    .unwrap();
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
+
+    // Rejected by the preflight, because the interface says the access is wrong.
+    for (method, expected) in [
+        ("peek", "peek is not a public function"),
+        ("hidden", "hidden is not a public function"),
+    ] {
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        let err = sdk.call_public_fn(&call(method)).unwrap_err();
+        assert_eq!(err, expected);
+        assert_eq!(
+            sdk.get_account_nonce(SENDER).unwrap(),
+            before + 1,
+            "mainnet mines a call to a non-public function, so `{method}` owes a nonce"
+        );
+    }
+
+    // The same failure reached through the VM: no interface entry exists for a
+    // name the contract does not define, so the preflight has nothing to say.
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    sdk.call_public_fn(&call("no-such-fn"))
+        .expect_err("a call to an undefined function must fail");
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        before + 1,
+        "the VM route must charge the same nonce the preflight route does"
+    );
+
+    // simnet models a private call as a transaction, so its preflight follows
+    // the same rule.
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    let err = sdk.call_private_fn(&call("poke")).unwrap_err();
+    assert_eq!(err, "poke is not a private function");
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), before + 1);
+
+    // A read-only call sends nothing, so neither route charges anything.
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    let err = sdk.call_read_only_fn(&call("poke")).unwrap_err();
+    assert_eq!(err, "poke is not a read-only function");
+    sdk.call_read_only_fn(&call("no-such-fn"))
+        .expect_err("a read-only call to an undefined function must fail");
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        before,
+        "a read-only call is not a transaction by either route"
+    );
+}
+
 #[wasm_bindgen_test]
 async fn it_rejects_a_nonce_lookup_for_an_invalid_address() {
     let mut sdk = init_sdk().await;

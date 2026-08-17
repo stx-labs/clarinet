@@ -21,7 +21,7 @@ use serde::Serialize;
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
 use super::hooks::perf::{CostField, PerfHook};
-use super::interpreter::{ContractCallError, ExecutionError};
+use super::interpreter::{BlockInclusion, ContractCallError, ExecutionError};
 use super::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch,
     SessionSettings,
@@ -709,7 +709,8 @@ impl Session {
         // An STX transfer is a transaction and consumes a nonce. The bump lives
         // here rather than in `eval`, which also backs bare snippets and
         // function-argument evaluation — neither of which is a transaction.
-        self.bump_nonce_if_included(sender.into(), &result);
+        self.bump_nonce_if_included(sender.into(), &result)
+            .map_err(Self::nonce_failure)?;
 
         result.map_err(Vec::from)
     }
@@ -768,7 +769,8 @@ impl Session {
         // contracts (pox, sbtc, …) bypass this method and call `interpreter.run`
         // directly, so they correctly stay at nonce 0 — on mainnet they are
         // genesis state, not transactions.
-        self.bump_nonce_if_included(contract_id.issuer.clone().into(), &result);
+        self.bump_nonce_if_included(contract_id.issuer.clone().into(), &result)
+            .map_err(Self::nonce_failure)?;
 
         result
             .inspect(|result| {
@@ -1213,13 +1215,8 @@ impl Session {
     /// backs `simnet.callReadOnlyFn`, and a read-only call is not a
     /// transaction. See `inner_call_public_fn` / `inner_call_private_fn` in
     /// `clarinet-sdk-wasm`, which do know.
-    ///
-    /// A failure here means the datastore is unhealthy, not that the
-    /// transaction was invalid, so it is reported rather than propagated.
-    pub fn bump_nonce(&mut self, principal: PrincipalData) {
-        if let Err(e) = self.interpreter.increment_nonce(&principal) {
-            ueprint!("Failed to bump nonce for {principal}: {e}");
-        }
+    pub fn bump_nonce(&mut self, principal: PrincipalData) -> Result<u64, String> {
+        self.interpreter.increment_nonce(&principal)
     }
 
     /// Bump `sender`'s nonce if the operation made it into a block.
@@ -1227,18 +1224,31 @@ impl Session {
     /// A failure is not the same as a rejection: mainnet mines a transaction
     /// that reverts, charging its fee and consuming its nonce. Which failures
     /// those are is decided by `clarity`, not here — see [`BlockInclusion`].
+    ///
+    /// The bump itself can fail — a remote-data session reads the nonce of a
+    /// non-local principal over the network. That is a broken session, not a
+    /// rejected transaction, but it must not be swallowed: the operation has
+    /// already committed, so a dropped bump leaves the next transaction
+    /// reusing this one's nonce.
     fn bump_nonce_if_included<T>(
         &mut self,
         sender: PrincipalData,
         result: &Result<T, ExecutionError>,
-    ) {
-        let included = match result {
-            Ok(_) => true,
-            Err(e) => e.inclusion.is_included(),
-        };
-        if included {
-            self.bump_nonce(sender);
+    ) -> Result<(), String> {
+        if BlockInclusion::of_result(result).is_included() {
+            self.bump_nonce(sender)?;
         }
+        Ok(())
+    }
+
+    /// Report a nonce bump that failed after its transaction had committed.
+    pub fn nonce_failure(error: String) -> Vec<Diagnostic> {
+        vec![Diagnostic {
+            level: Level::Error,
+            message: format!("Transaction succeeded but its nonce was not recorded: {error}"),
+            spans: vec![],
+            suggestion: None,
+        }]
     }
 
     pub fn get_contract_ast(
@@ -2063,11 +2073,9 @@ mod tests {
 
     #[test]
     fn calling_a_contract_function_does_not_bump_a_nonce_on_its_own() {
-        // `Session::call_contract_fn` is a primitive shared by transactions and
-        // read-only queries, so it must stay nonce-neutral — the bump is the
-        // caller's job (see `Session::bump_nonce_if_included`). This is what
-        // makes `simnet.callReadOnlyFn` safe. If this test fails because a bump
-        // was added here, read-only calls have started consuming nonces.
+        // `Session::call_contract_fn` is shared by transactions and read-only
+        // queries, so it must stay nonce-neutral: the bump is the caller's job.
+        // A bump added here would make `simnet.callReadOnlyFn` consume nonces.
         let mut session = Session::new(SessionSettings::default());
         let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
         let addr = principal(sender);
@@ -2168,6 +2176,65 @@ mod tests {
         }
 
         assert_eq!(session.get_nonce(&addr).unwrap(), 1);
+    }
+
+    /// A contract-call naming a contract that was never deployed fails with
+    /// `NoSuchContract` on mainnet — a non-rejectable `RuntimeCheck`, so the
+    /// transaction is mined and charged.
+    ///
+    /// Simnet reaches that failure by a different route: `call_contract_fn`
+    /// enters with a contract id already in hand, so the metadata read fails
+    /// before any name resolution and `clarity` reports a `VmInternalError`,
+    /// which `handle_clarity_runtime_error` rejects. The disposition has to be
+    /// corrected for the route, or the call consumes nothing.
+    #[test]
+    fn a_call_to_a_contract_that_was_never_deployed_is_still_included() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+
+        session.update_epoch(DEFAULT_EPOCH);
+
+        let failure = session
+            .call_contract_fn(
+                &format!("{sender}.never-deployed"),
+                "whatever",
+                &[],
+                sender,
+                false,
+                false,
+            )
+            .expect_err("a call to a missing contract must fail");
+
+        assert!(
+            failure.inclusion.is_included(),
+            "mainnet mines a call to a missing contract and charges its nonce"
+        );
+    }
+
+    #[test]
+    fn a_transaction_whose_nonce_cannot_be_recorded_is_not_reported_as_a_success() {
+        // A bump can fail for real: a remote-data session reads the nonce of a
+        // non-local principal over the network. Overflow is the one failure
+        // reachable without a network, and it exercises the same path — the
+        // transfer below commits, then the bump fails.
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let addr = principal(sender);
+
+        session.set_tx_sender(sender);
+        session.interpreter.force_nonce(&addr, u64::MAX);
+
+        let diagnostics = session
+            .stx_transfer(1000, "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG")
+            .expect_err("a transfer whose nonce cannot be recorded is not a success");
+
+        // Silently swallowing this would leave the next transaction reusing
+        // this one's nonce, with nothing in the result to say so.
+        let message = &diagnostics.first().expect("a diagnostic").message;
+        assert!(
+            message.contains("nonce was not recorded"),
+            "the failure must name its cause, got: {message}"
+        );
     }
 
     /// The three cases below are the divergences the old nonce implementation

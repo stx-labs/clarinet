@@ -328,15 +328,44 @@ describe("simnet can call contracts function", () => {
   });
 
   it("can not call a public function with callPrivateFn", () => {
+    const before = simnet.getAccountNonce(address1);
+
     expect(() => {
       simnet.callPrivateFn("counter", "increment", [], address1);
     }).toThrow(/^increment is not a private function$/);
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
   });
 
   it("can not call a private function with callPublicFn", () => {
+    // Mainnet mines a contract-call naming a non-public function and charges
+    // its nonce, so rejecting it here early must charge one too — otherwise
+    // this call and a call to a name the contract does not define, which fail
+    // identically on mainnet, would disagree.
+    const before = simnet.getAccountNonce(address1);
+
     expect(() => {
       simnet.callPublicFn("counter", "inner-increment", [], address1);
     }).toThrow(/^inner-increment is not a public function$/);
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
+
+    expect(() => {
+      simnet.callPublicFn("counter", "no-such-function", [], address1);
+    }).toThrow();
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 2n);
+  });
+
+  it("can not call a public function with callReadOnlyFn, and is charged nothing", () => {
+    const before = simnet.getAccountNonce(address1);
+
+    expect(() => {
+      simnet.callReadOnlyFn("counter", "increment", [], address1);
+    }).toThrow(/^increment is not a read-only function$/);
+
+    // A read-only call sends nothing, so no route through it is a transaction.
+    expect(simnet.getAccountNonce(address1)).toBe(before);
   });
 
   it("can get updated assets map", () => {

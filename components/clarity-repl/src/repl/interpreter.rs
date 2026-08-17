@@ -48,11 +48,10 @@ use crate::repl::Settings;
 /// Whether mainnet would still include the transaction that produced a
 /// failure — and therefore charge its fee and advance its nonces.
 ///
-/// Never decide this by matching `ClarityError` variants here. The rule is
-/// consensus-critical and changes as variants are added upstream, so it is
-/// delegated to `clarity`'s `handle_clarity_runtime_error` /
-/// `handle_clarity_analysis_error`, which the node itself calls on the block
-/// assembly path. See stacks-network/stacks-core#7486.
+/// Never decide this by matching `ClarityError` variants here: the rule is
+/// consensus-critical and moves as variants are added upstream. Delegate to
+/// `clarity`'s `handle_clarity_runtime_error` / `handle_clarity_analysis_error`,
+/// which the node itself calls on the block-assembly path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockInclusion {
     /// The transaction is included: it consumes a nonce even though it failed.
@@ -61,7 +60,24 @@ pub enum BlockInclusion {
     Rejected,
 }
 
+/// A failure that knows whether the transaction producing it was still mined.
+///
+/// Implemented by every error type on a transaction path so that the
+/// success-is-included half of the rule lives in [`BlockInclusion::of_result`]
+/// alone, instead of being re-derived by each caller that bumps a nonce.
+pub trait FailureInclusion {
+    fn inclusion(&self) -> BlockInclusion;
+}
+
 impl BlockInclusion {
+    /// The disposition of a whole operation. A success is always included.
+    pub fn of_result<T, E: FailureInclusion>(result: &Result<T, E>) -> Self {
+        match result {
+            Ok(_) => BlockInclusion::Included,
+            Err(e) => e.inclusion(),
+        }
+    }
+
     /// Classify a failure from the execution phase — a contract call, an STX
     /// transfer, or the body of a contract being deployed.
     pub fn from_runtime_error(error: ClarityError, epoch: StacksEpochId) -> Self {
@@ -90,12 +106,19 @@ impl From<bool> for BlockInclusion {
     }
 }
 
-/// A failed `ClarityInterpreter::run`, carrying the diagnostics to report and
-/// whether the operation still counts as a transaction on mainnet.
+/// A failed `ClarityInterpreter::run`.
 #[derive(Debug, Clone)]
 pub struct ExecutionError {
+    /// Everything to report to the user about the failure.
     pub diagnostics: Vec<Diagnostic>,
+    /// Whether the operation still counts as a transaction on mainnet.
     pub inclusion: BlockInclusion,
+}
+
+impl FailureInclusion for ExecutionError {
+    fn inclusion(&self) -> BlockInclusion {
+        self.inclusion
+    }
 }
 
 impl ExecutionError {
@@ -128,15 +151,23 @@ fn runtime_diagnostic(message: impl std::fmt::Display) -> Diagnostic {
     }
 }
 
-/// A failed contract call, carrying the same disposition as [`ExecutionError`].
+/// A failed contract call.
 ///
-/// The verdict is a sibling of the error rather than part of it because
-/// [`ContractCallError`] still classifies itself by matching on formatted
-/// message text; keeping them separate lets that be replaced independently.
+/// The two fields answer different questions and are derived from the VM error
+/// independently: `error` decides which message the user sees, `inclusion`
+/// decides whether a nonce is consumed. Neither may be inferred from the other.
 #[derive(Debug, Clone)]
 pub struct ContractCallFailure {
+    /// What to tell the user went wrong.
     pub error: ContractCallError,
+    /// Whether the call still counts as a transaction on mainnet.
     pub inclusion: BlockInclusion,
+}
+
+impl FailureInclusion for ContractCallFailure {
+    fn inclusion(&self) -> BlockInclusion {
+        self.inclusion
+    }
 }
 
 impl std::fmt::Display for ContractCallFailure {
@@ -155,17 +186,11 @@ pub enum ContractCallError {
 }
 
 impl ContractCallError {
-    /// Classify a VM failure by the error the VM actually raised.
+    /// Classify a VM failure by the typed error, never by `message`.
     ///
-    /// This used to grep the *formatted* message for `"UndefinedFunction"`,
-    /// which matched whenever that text appeared anywhere in a nested error's
-    /// `Debug` output — including inside an unrelated failure that merely
-    /// mentioned one. Matching the typed error instead makes the classification
-    /// mean what it says.
-    ///
-    /// `message` is still carried verbatim, and the variants are unchanged, so
-    /// the diagnostics `Session::call_contract_fn` builds from these are
-    /// identical for every input that was already classified correctly.
+    /// `message` is the `Debug` rendering of the whole error, so it embeds the
+    /// text of any nested error too: searching it for a variant name matches
+    /// unrelated failures that merely mention one.
     fn from_vm_error(error: &VmExecutionError, message: String) -> Self {
         match error {
             // Either the function is absent, or it exists but is not callable
@@ -179,20 +204,46 @@ impl ContractCallError {
                 ContractCallError::NoSuchContract(message)
             }
 
-            // Simnet reaches a missing contract by a different route than a
-            // `contract-call?` does. `call_contract_fn` enters with a contract
-            // id already in hand, so the metadata read fails before any name
-            // resolution, and `clarity` reports that as a failed internal
-            // expectation rather than `NoSuchContract`. Scoped to the one
-            // variant that can carry it, rather than searched for in the whole
-            // formatted message.
-            VmExecutionError::Internal(VmInternalError::Expect(e))
-                if e.starts_with("Failed to read non-consensus contract metadata") =>
-            {
-                ContractCallError::NoSuchContract(message)
-            }
+            _ if is_missing_contract_metadata(error) => ContractCallError::NoSuchContract(message),
 
             _ => ContractCallError::Uncategorized(message),
+        }
+    }
+}
+
+/// Whether this failure is simnet's way of saying the contract is not deployed.
+///
+/// A `contract-call?` resolves the contract name first and raises
+/// `NoSuchContract`. `call_contract_fn` enters with a contract id already in
+/// hand, so the metadata read fails before any name resolution and `clarity`
+/// reports a failed internal expectation instead. Scoped to the one variant
+/// that can carry it, rather than searched for in the whole formatted message.
+fn is_missing_contract_metadata(error: &VmExecutionError) -> bool {
+    matches!(
+        error,
+        VmExecutionError::Internal(VmInternalError::Expect(e))
+            if e.starts_with("Failed to read non-consensus contract metadata")
+    )
+}
+
+impl ContractCallFailure {
+    /// Classify a VM failure from `ClarityInterpreter::call_contract_fn`.
+    ///
+    /// The disposition normally comes straight from `clarity`, but the route
+    /// described on [`is_missing_contract_metadata`] hands it a
+    /// `VmInternalError`, which it rejects. Mainnet raises `NoSuchContract`
+    /// there — a non-rejectable `RuntimeCheck` — and mines the transaction, so
+    /// the nonce is charged. Follow mainnet rather than the route simnet took.
+    fn from_vm_error(error: VmExecutionError, message: String, epoch: StacksEpochId) -> Self {
+        if is_missing_contract_metadata(&error) {
+            return Self {
+                error: ContractCallError::from_vm_error(&error, message),
+                inclusion: BlockInclusion::Included,
+            };
+        }
+        Self {
+            error: ContractCallError::from_vm_error(&error, message),
+            inclusion: BlockInclusion::from_runtime_error(ClarityError::Interpreter(error), epoch),
         }
     }
 }
@@ -936,10 +987,7 @@ impl ClarityInterpreter {
                 }
                 global_context.eval_hooks = Some(eval_hooks);
             }
-            ContractCallFailure {
-                error: ContractCallError::from_vm_error(&e, err),
-                inclusion: BlockInclusion::from_runtime_error(ClarityError::Interpreter(e), epoch),
-            }
+            ContractCallFailure::from_vm_error(e, err, epoch)
         });
 
         let mut cost = None;
@@ -1294,12 +1342,15 @@ impl ClarityInterpreter {
 
     /// Read the transaction nonce of `principal`.
     ///
-    /// Nonces are kept where mainnet keeps them — behind the
-    /// `ClarityBackingStore`, under `make_key_for_account_nonce` — rather than
-    /// beside the `tokens` map, which is a reporting mirror with no rollback.
-    /// Storing them in the backing store means a nonce bump is discarded along
-    /// with the rest of a rolled-back transaction, which is what post-condition
-    /// enforcement will rely on.
+    /// Nonces live where mainnet keeps them — behind the `ClarityBackingStore`,
+    /// under `make_key_for_account_nonce` — rather than beside the `tokens`
+    /// map, which is a reporting mirror the VM cannot see. Keeping them in the
+    /// backing store is what will let a future post-condition abort roll a
+    /// nonce back with the transaction that set it; today the bump is a
+    /// separate commit made after execution, so nothing rolls it back yet.
+    ///
+    /// Takes `&mut self` because every `ClarityBackingStore` read does, and
+    /// because a remote-data session may fetch the value over the network.
     pub fn get_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
         let mut conn = ClarityDatabase::new(
             &mut self.clarity_datastore,
@@ -1318,6 +1369,10 @@ impl ClarityInterpreter {
     }
 
     /// Bump the transaction nonce of `principal`, returning the new value.
+    ///
+    /// Errors if the nonce would overflow. Saturating instead would report
+    /// success while leaving the nonce unchanged, so every later transaction
+    /// would silently reuse it.
     pub fn increment_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
         let mut conn = ClarityDatabase::new(
             &mut self.clarity_datastore,
@@ -1328,12 +1383,30 @@ impl ClarityInterpreter {
         let next = conn
             .get_account_nonce(principal)
             .map_err(|e| format!("failed to read nonce for {principal}: {e}"))?
-            .saturating_add(1);
+            .checked_add(1)
+            .ok_or_else(|| format!("nonce overflow for {principal}"))?;
         conn.set_account_nonce(principal, next)
             .map_err(|e| format!("failed to set nonce for {principal}: {e}"))?;
         conn.commit()
             .map_err(|e| format!("failed to commit nonce for {principal}: {e}"))?;
         Ok(next)
+    }
+
+    /// Drive a principal's nonce straight to `nonce`.
+    ///
+    /// Nothing reachable from the public API can do this — the only writer is
+    /// `increment_nonce`, one step at a time — so the failure paths that depend
+    /// on a nonce's value are otherwise unreachable from a test.
+    #[cfg(test)]
+    pub(crate) fn force_nonce(&mut self, principal: &PrincipalData, nonce: u64) {
+        let mut conn = ClarityDatabase::new(
+            &mut self.clarity_datastore,
+            &self.datastore,
+            &self.datastore,
+        );
+        conn.begin();
+        conn.set_account_nonce(principal, nonce).unwrap();
+        conn.commit().unwrap();
     }
 }
 
@@ -1565,10 +1638,8 @@ mod tests {
     fn contract_call_errors_are_classified_by_type_not_message() {
         use clarity::vm::errors::RuntimeError;
 
-        // The old classifier searched the *formatted* message, so any failure
-        // whose text merely mentioned `UndefinedFunction` was reported to the
-        // user as a missing function. Nested `Debug` output is exactly how that
-        // text gets somewhere it does not belong.
+        // An unrelated failure whose text merely mentions `UndefinedFunction`
+        // must not be reported as a missing function.
         let misleading =
             VmExecutionError::Runtime(RuntimeError::Arithmetic("UndefinedFunction".into()), None);
         assert!(matches!(
@@ -1598,15 +1669,12 @@ mod tests {
 
     /// Pin both directions of the delegation to `clarity`.
     ///
-    /// The end-to-end nonce tests in `session.rs` only reach *included*
-    /// failures, because the rejected ones — cost overruns, resource-budget
-    /// exhaustion, `rejectable_in_epoch` errors — are impractical to provoke
-    /// from ordinary contract source. Without this test, mapping every failure
-    /// to `Included` would pass the whole suite.
-    ///
-    /// This asserts that clarinet asks the right classifier and reads the
-    /// answer the right way round. Which specific variants fall on which side
-    /// is upstream's business, and is tested there.
+    /// Rejected failures — cost overruns, resource-budget exhaustion — are
+    /// impractical to provoke from contract source, so the end-to-end tests
+    /// reach only included ones: without this, mapping *everything* to
+    /// `Included` would pass the whole suite. Which variants fall on which
+    /// side is upstream's business; this only checks that clarinet asks the
+    /// right classifier and reads the answer the right way round.
     #[test]
     fn block_inclusion_delegates_to_clarity() {
         use clarity::vm::analysis::errors::{StaticCheckError, StaticCheckErrorKind};
@@ -1667,6 +1735,24 @@ mod tests {
 
         assert_eq!(interpreter.increment_nonce(&addr).unwrap(), 2);
         assert_eq!(interpreter.get_nonce(&addr).unwrap(), 2);
+    }
+
+    #[test]
+    fn a_nonce_at_the_maximum_fails_instead_of_repeating_itself() {
+        let mut interpreter = get_interpreter(None);
+        let addr = principal("ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5");
+
+        interpreter.force_nonce(&addr, u64::MAX - 1);
+
+        assert_eq!(interpreter.increment_nonce(&addr).unwrap(), u64::MAX);
+
+        // Saturating here would report success and hand the same nonce to
+        // every later transaction.
+        let err = interpreter
+            .increment_nonce(&addr)
+            .expect_err("a nonce past u64::MAX has nowhere to go");
+        assert!(err.contains("overflow"), "got: {err}");
+        assert_eq!(interpreter.get_nonce(&addr).unwrap(), u64::MAX);
     }
 
     #[test]

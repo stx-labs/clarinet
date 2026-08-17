@@ -21,7 +21,7 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPri
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
-use clarity_repl::repl::interpreter::BlockInclusion;
+use clarity_repl::repl::interpreter::{BlockInclusion, FailureInclusion};
 use clarity_repl::repl::session::CostsReport;
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -95,6 +95,21 @@ impl OperationFailure {
             message,
             inclusion: BlockInclusion::Rejected,
         }
+    }
+
+    /// A failure simnet detects before running anything, for a transaction
+    /// mainnet *would* have mined and charged a nonce for.
+    fn included(message: String) -> Self {
+        Self {
+            message,
+            inclusion: BlockInclusion::Included,
+        }
+    }
+}
+
+impl FailureInclusion for OperationFailure {
+    fn inclusion(&self) -> BlockInclusion {
+        self.inclusion
     }
 }
 
@@ -946,23 +961,54 @@ impl SDK {
         &mut self,
         sender: &str,
         result: &Result<TransactionRes, OperationFailure>,
-    ) {
-        let included = match result {
-            Ok(_) => true,
-            Err(failure) => failure.inclusion.is_included(),
-        };
-        if !included {
-            return;
+    ) -> Result<(), String> {
+        if !BlockInclusion::of_result(result).is_included() {
+            return Ok(());
         }
-        match PrincipalData::parse_standard_principal(sender) {
-            Ok(principal) => self.get_session_mut().bump_nonce(principal.into()),
-            Err(e) => {
-                // `call_contract_fn` rejects an unparseable sender before
-                // running anything, so reaching an included result here implies
-                // a valid address.
-                log!("Failed to bump nonce for '{sender}': {e:?}");
+        // `call_contract_fn` rejects an unparseable sender before running
+        // anything, so reaching an included result here implies a valid address.
+        let principal = PrincipalData::parse_standard_principal(sender)
+            .map_err(|e| format!("Failed to bump nonce for '{sender}': {e:?}"))?;
+        self.get_session_mut().bump_nonce(principal.into())?;
+        Ok(())
+    }
+
+    /// Run a contract call submitted as a transaction, and charge its nonce.
+    ///
+    /// The access check is done here, ahead of the VM, only so the error names
+    /// the mistake. The VM reaches the same verdict on its own — a function
+    /// that is not public raises `NoSuchPublicFunction`, a non-rejectable
+    /// `RuntimeCheck` that mainnet mines and charges a nonce for. So this
+    /// shortcut has to report the same disposition and take the same block, or
+    /// one call would consume a nonce and an identical one would not, decided
+    /// by nothing more than whether an interface happened to be cached.
+    fn call_fn_as_transaction(
+        &mut self,
+        args: &CallFnArgs,
+        advance_chain_tip: bool,
+        required_access: ContractInterfaceFunctionAccess,
+    ) -> Result<TransactionRes, String> {
+        let wrong_access = match self.get_function_interface(&args.contract, &args.method) {
+            Ok(interface) if interface.access != required_access => {
+                Some(OperationFailure::included(format!(
+                    "{} is not a {required_access:?} function",
+                    args.method
+                )))
             }
+            _ => None,
+        };
+
+        if advance_chain_tip {
+            self.get_session_mut().advance_chain_tip(1);
         }
+
+        let allow_private = required_access == ContractInterfaceFunctionAccess::private;
+        let result = match wrong_access {
+            Some(failure) => Err(failure),
+            None => self.call_contract_fn(args, allow_private),
+        };
+        self.bump_sender_nonce_if_included(&args.sender, &result)?;
+        result.map_err(String::from)
     }
 
     fn inner_call_public_fn(
@@ -970,19 +1016,11 @@ impl SDK {
         args: &CallFnArgs,
         advance_chain_tip: bool,
     ) -> Result<TransactionRes, String> {
-        if let Ok(interface) = self.get_function_interface(&args.contract, &args.method) {
-            if interface.access != ContractInterfaceFunctionAccess::public {
-                return Err(format!("{} is not a public function", args.method));
-            }
-        }
-
-        if advance_chain_tip {
-            let session = self.get_session_mut();
-            session.advance_chain_tip(1);
-        }
-        let result = self.call_contract_fn(args, false);
-        self.bump_sender_nonce_if_included(&args.sender, &result);
-        result.map_err(String::from)
+        self.call_fn_as_transaction(
+            args,
+            advance_chain_tip,
+            ContractInterfaceFunctionAccess::public,
+        )
     }
 
     fn inner_call_private_fn(
@@ -990,18 +1028,11 @@ impl SDK {
         args: &CallFnArgs,
         advance_chain_tip: bool,
     ) -> Result<TransactionRes, String> {
-        if let Ok(interface) = self.get_function_interface(&args.contract, &args.method) {
-            if interface.access != ContractInterfaceFunctionAccess::private {
-                return Err(format!("{} is not a private function", args.method));
-            }
-        }
-        if advance_chain_tip {
-            let session = self.get_session_mut();
-            session.advance_chain_tip(1);
-        }
-        let result = self.call_contract_fn(args, true);
-        self.bump_sender_nonce_if_included(&args.sender, &result);
-        result.map_err(String::from)
+        self.call_fn_as_transaction(
+            args,
+            advance_chain_tip,
+            ContractInterfaceFunctionAccess::private,
+        )
     }
 
     fn inner_transfer_stx(
