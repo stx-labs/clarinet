@@ -21,8 +21,7 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPri
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
-use clarity_repl::repl::interpreter::{BlockInclusion, FailureInclusion};
-use clarity_repl::repl::session::CostsReport;
+use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
     clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
@@ -73,50 +72,6 @@ struct DeploymentArtifacts {
     artifacts: DeploymentGenerationArtifacts,
     deployment: DeploymentSpecification,
     manifest: ProjectManifest,
-}
-
-/// A failed simnet operation, plus whether mainnet would still have included
-/// the transaction that produced it.
-///
-/// Only the callers that decide nonce consumption need the verdict; the wasm
-/// boundary reports a plain message, so it is dropped on the way out via
-/// `String::from`.
-struct OperationFailure {
-    message: String,
-    inclusion: BlockInclusion,
-}
-
-impl OperationFailure {
-    /// A failure simnet detects before running anything — an invalid sender,
-    /// an unknown contract id. Mainnet would not have included such a
-    /// transaction either, so it consumes no nonce.
-    fn rejected(message: String) -> Self {
-        Self {
-            message,
-            inclusion: BlockInclusion::Rejected,
-        }
-    }
-
-    /// A failure simnet detects before running anything, for a transaction
-    /// mainnet *would* have mined and charged a nonce for.
-    fn included(message: String) -> Self {
-        Self {
-            message,
-            inclusion: BlockInclusion::Included,
-        }
-    }
-}
-
-impl FailureInclusion for OperationFailure {
-    fn inclusion(&self) -> BlockInclusion {
-        self.inclusion
-    }
-}
-
-impl From<OperationFailure> for String {
-    fn from(failure: OperationFailure) -> Self {
-        failure.message
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -861,15 +816,14 @@ impl SDK {
             sender,
         }: &CallFnArgs,
         allow_private: bool,
-    ) -> Result<TransactionRes, OperationFailure> {
+        kind: CallKind,
+    ) -> Result<TransactionRes, String> {
         let test_name = self.current_test_name.clone();
         let track_costs = self.options.track_costs;
         let track_performance = self.options.track_performance;
 
         if PrincipalData::parse_standard_principal(sender).is_err() {
-            return Err(OperationFailure::rejected(format!(
-                "Invalid sender address '{sender}'."
-            )));
+            return Err(format!("Invalid sender address '{sender}'."));
         }
 
         let parsed_args = args
@@ -886,6 +840,7 @@ impl SDK {
                 sender,
                 allow_private,
                 track_costs,
+                kind,
             )
             .map_err(|failure| {
                 let mut message = format!(
@@ -898,10 +853,7 @@ impl SDK {
                 if let Some(diag) = failure.diagnostics.last() {
                     message = format!("{message} -> {}", diag.message);
                 }
-                OperationFailure {
-                    message,
-                    inclusion: failure.inclusion,
-                }
+                message
             })?;
 
         // Collect performance data before accessing self.costs_reports
@@ -919,9 +871,8 @@ impl SDK {
                 // Unreachable in practice: the same id was desugared to run
                 // the call above. Classify conservatively rather than claim a
                 // transaction happened on a path that cannot be reached.
-                let contract_id = Session::desugar_contract_id(&self.deployer, contract)
-                    .map_err(OperationFailure::rejected)?
-                    .to_string();
+                let contract_id =
+                    Session::desugar_contract_id(&self.deployer, contract)?.to_string();
                 self.costs_reports.push(CostsReport {
                     test_name,
                     contract_id,
@@ -948,28 +899,22 @@ impl SDK {
                 return Err(format!("{} is not a read-only function", args.method));
             }
         }
-        self.call_contract_fn(args, false).map_err(String::from)
+        // A read-only call sends nothing, so it is never a transaction.
+        self.call_contract_fn(args, false, CallKind::Free)
     }
 
-    /// Bump `sender`'s nonce if the call made it into a block.
+    /// Charge `sender` for a transaction rejected before it reached the VM.
     ///
-    /// Only the callers that know an operation is a transaction do this.
-    /// `callReadOnlyFn` shares the same underlying session primitive as the
-    /// public and private call paths, but a read-only call sends nothing, so it
-    /// deliberately does not bump.
-    fn bump_sender_nonce_if_included(
-        &mut self,
-        sender: &str,
-        result: &Result<TransactionRes, OperationFailure>,
-    ) -> Result<(), String> {
-        if !BlockInclusion::of_result(result).is_included() {
-            return Ok(());
-        }
-        // `call_contract_fn` rejects an unparseable sender before running
-        // anything, so reaching an included result here implies a valid address.
+    /// Safe as a standalone write only because nothing has executed: the
+    /// preflight below runs before `call_contract_fn`, so there is no committed
+    /// state for a failed charge to come apart from. Every path that *does*
+    /// execute names a `CallKind` instead, and is charged inside the
+    /// execution's own transaction.
+    fn charge_preflight_rejection(&mut self, sender: &str) -> Result<(), String> {
         let principal = PrincipalData::parse_standard_principal(sender)
-            .map_err(|e| format!("Failed to bump nonce for '{sender}': {e:?}"))?;
-        self.get_session_mut().bump_nonce(principal.into())?;
+            .map_err(|e| format!("Failed to charge a nonce for '{sender}': {e:?}"))?;
+        self.get_session_mut()
+            .charge_nonce_without_execution(principal.into())?;
         Ok(())
     }
 
@@ -989,12 +934,10 @@ impl SDK {
         required_access: ContractInterfaceFunctionAccess,
     ) -> Result<TransactionRes, String> {
         let wrong_access = match self.get_function_interface(&args.contract, &args.method) {
-            Ok(interface) if interface.access != required_access => {
-                Some(OperationFailure::included(format!(
-                    "{} is not a {required_access:?} function",
-                    args.method
-                )))
-            }
+            Ok(interface) if interface.access != required_access => Some(format!(
+                "{} is not a {required_access:?} function",
+                args.method
+            )),
             _ => None,
         };
 
@@ -1002,13 +945,13 @@ impl SDK {
             self.get_session_mut().advance_chain_tip(1);
         }
 
+        if let Some(message) = wrong_access {
+            self.charge_preflight_rejection(&args.sender)?;
+            return Err(message);
+        }
+
         let allow_private = required_access == ContractInterfaceFunctionAccess::private;
-        let result = match wrong_access {
-            Some(failure) => Err(failure),
-            None => self.call_contract_fn(args, allow_private),
-        };
-        self.bump_sender_nonce_if_included(&args.sender, &result)?;
-        result.map_err(String::from)
+        self.call_contract_fn(args, allow_private, CallKind::Transaction)
     }
 
     fn inner_call_public_fn(

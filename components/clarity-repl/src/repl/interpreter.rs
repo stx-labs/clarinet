@@ -60,24 +60,7 @@ pub enum BlockInclusion {
     Rejected,
 }
 
-/// A failure that knows whether the transaction producing it was still mined.
-///
-/// Implemented by every error type on a transaction path so that the
-/// success-is-included half of the rule lives in [`BlockInclusion::of_result`]
-/// alone, instead of being re-derived by each caller that bumps a nonce.
-pub trait FailureInclusion {
-    fn inclusion(&self) -> BlockInclusion;
-}
-
 impl BlockInclusion {
-    /// The disposition of a whole operation. A success is always included.
-    pub fn of_result<T, E: FailureInclusion>(result: &Result<T, E>) -> Self {
-        match result {
-            Ok(_) => BlockInclusion::Included,
-            Err(e) => e.inclusion(),
-        }
-    }
-
     /// Classify a failure from the execution phase — a contract call, an STX
     /// transfer, or the body of a contract being deployed.
     pub fn from_runtime_error(error: ClarityError, epoch: StacksEpochId) -> Self {
@@ -106,6 +89,54 @@ impl From<bool> for BlockInclusion {
     }
 }
 
+/// Whose nonce an execution consumes, if it consumes one.
+///
+/// Passed *into* execution rather than applied after it. A bump issued
+/// afterwards is a second database transaction that can fail on its own,
+/// leaving committed state behind a nonce that never moved — and since the next
+/// transaction then reuses the stale value, a caller retrying the reported
+/// error would apply the state changes twice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum NonceCharge {
+    /// Not a transaction: a read-only call, or bare snippet evaluation.
+    #[default]
+    Free,
+    /// A transaction sent by this principal, consuming one of its nonces.
+    Sender(PrincipalData),
+}
+
+impl NonceCharge {
+    /// Write the charge into `db`'s open transaction, so it lands or is
+    /// discarded with everything else that transaction holds.
+    fn apply(&self, db: &mut ClarityDatabase) -> Result<(), String> {
+        let NonceCharge::Sender(principal) = self else {
+            return Ok(());
+        };
+        let next = db
+            .get_account_nonce(principal)
+            .map_err(|e| format!("failed to read nonce for {principal}: {e}"))?
+            .checked_add(1)
+            .ok_or_else(|| format!("nonce overflow for {principal}"))?;
+        db.set_account_nonce(principal, next)
+            .map_err(|e| format!("failed to set nonce for {principal}: {e}"))
+    }
+
+    /// Commit the charge as the *only* write in `global_context`'s open
+    /// transaction, for a failure mainnet would still have mined.
+    ///
+    /// `GlobalContext::execute` rolls its own context back before returning an
+    /// error, and nothing else writes to the enclosing one, so this commit
+    /// carries the nonce alone. That is what makes charging a failed
+    /// transaction safe here: there is no half-applied state to pair it with.
+    fn commit_alone(&self, global_context: &mut GlobalContext) -> Result<(), String> {
+        self.apply(&mut global_context.database)?;
+        global_context
+            .commit()
+            .map(|_| ())
+            .map_err(|e| format!("failed to commit nonce: {e}"))
+    }
+}
+
 /// A failed `ClarityInterpreter::run`.
 #[derive(Debug, Clone)]
 pub struct ExecutionError {
@@ -113,12 +144,6 @@ pub struct ExecutionError {
     pub diagnostics: Vec<Diagnostic>,
     /// Whether the operation still counts as a transaction on mainnet.
     pub inclusion: BlockInclusion,
-}
-
-impl FailureInclusion for ExecutionError {
-    fn inclusion(&self) -> BlockInclusion {
-        self.inclusion
-    }
 }
 
 impl ExecutionError {
@@ -162,12 +187,6 @@ pub struct ContractCallFailure {
     pub error: ContractCallError,
     /// Whether the call still counts as a transaction on mainnet.
     pub inclusion: BlockInclusion,
-}
-
-impl FailureInclusion for ContractCallFailure {
-    fn inclusion(&self) -> BlockInclusion {
-        self.inclusion
-    }
 }
 
 impl std::fmt::Display for ContractCallFailure {
@@ -321,12 +340,52 @@ impl ClarityInterpreter {
         }
     }
 
+    /// Execute `contract` without consuming anyone's nonce.
+    ///
+    /// For bare snippets and function-argument evaluation. A deploy or an STX
+    /// transfer is a transaction and must use [`Self::run_transaction`].
     pub fn run(
         &mut self,
         contract: &ClarityContract,
         cached_ast: Option<&ContractAST>,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
+    ) -> Result<AnnotatedExecutionResult, ExecutionError> {
+        self.run_with_charge(
+            contract,
+            cached_ast,
+            cost_track,
+            eval_hooks,
+            &NonceCharge::Free,
+        )
+    }
+
+    /// Execute `contract` as a transaction sent by `sender`, consuming one of
+    /// its nonces in the same commit as the execution's own state changes.
+    pub fn run_transaction(
+        &mut self,
+        contract: &ClarityContract,
+        cached_ast: Option<&ContractAST>,
+        cost_track: bool,
+        eval_hooks: Option<Vec<&mut dyn EvalHook>>,
+        sender: PrincipalData,
+    ) -> Result<AnnotatedExecutionResult, ExecutionError> {
+        self.run_with_charge(
+            contract,
+            cached_ast,
+            cost_track,
+            eval_hooks,
+            &NonceCharge::Sender(sender),
+        )
+    }
+
+    pub(crate) fn run_with_charge(
+        &mut self,
+        contract: &ClarityContract,
+        cached_ast: Option<&ContractAST>,
+        cost_track: bool,
+        eval_hooks: Option<Vec<&mut dyn EvalHook>>,
+        charge: &NonceCharge,
     ) -> Result<AnnotatedExecutionResult, ExecutionError> {
         let (ast, mut diagnostics, success) = match cached_ast {
             Some(ast) => (ast.clone(), vec![], true),
@@ -342,10 +401,11 @@ impl ClarityInterpreter {
             Ok((analysis, lint_diags)) => (analysis, lint_diags),
             Err(mut analysis_failure) => {
                 diagnostics.append(&mut analysis_failure.diagnostics);
-                return Err(ExecutionError {
+                return Err(self.fail_before_execution(
                     diagnostics,
-                    inclusion: analysis_failure.inclusion,
-                });
+                    analysis_failure.inclusion,
+                    charge,
+                ));
             }
         };
         // Note the ordering, which predates the inclusion work: analysis runs
@@ -354,28 +414,53 @@ impl ClarityInterpreter {
         // the parse one. Both go through `handle_clarity_analysis_error`, so
         // the two agree unless exactly one of them is `rejectable_in_epoch`.
         if !success {
-            return Err(ExecutionError {
-                inclusion: self.classify_parse_failure(contract),
-                diagnostics,
-            });
+            let inclusion = self.classify_parse_failure(contract);
+            return Err(self.fail_before_execution(diagnostics, inclusion, charge));
         }
 
-        let mut result = match self.execute(contract, &ast, analysis, cost_track, eval_hooks) {
-            Ok(result) => result,
-            Err(mut runtime_failure) => {
-                diagnostics.append(&mut runtime_failure.diagnostics);
-                return Err(ExecutionError {
-                    diagnostics,
-                    inclusion: runtime_failure.inclusion,
-                });
-            }
-        };
+        let mut result =
+            match self.execute(contract, &ast, analysis, cost_track, eval_hooks, charge) {
+                Ok(result) => result,
+                Err(mut runtime_failure) => {
+                    diagnostics.append(&mut runtime_failure.diagnostics);
+                    return Err(ExecutionError {
+                        diagnostics,
+                        inclusion: runtime_failure.inclusion,
+                    });
+                }
+            };
 
         result.diagnostics = diagnostics.to_vec();
         Ok(AnnotatedExecutionResult {
             execution_result: result,
             lint_diagnostics,
         })
+    }
+
+    /// Build the error for a transaction that failed before reaching the VM,
+    /// charging its nonce if mainnet would still have mined it.
+    ///
+    /// Parse and analysis failures never enter `execute`, so there is no
+    /// execution transaction for the charge to ride along in. A standalone
+    /// commit is safe precisely because nothing ran: it cannot leave a nonce
+    /// paired with half-applied state, and if it fails, nothing happened at all
+    /// and the transaction becomes a rejection.
+    fn fail_before_execution(
+        &mut self,
+        mut diagnostics: Vec<Diagnostic>,
+        inclusion: BlockInclusion,
+        charge: &NonceCharge,
+    ) -> ExecutionError {
+        if let (BlockInclusion::Included, NonceCharge::Sender(principal)) = (inclusion, charge) {
+            if let Err(e) = self.increment_nonce(&principal.clone()) {
+                diagnostics.push(runtime_diagnostic(e));
+                return ExecutionError::rejected(diagnostics);
+            }
+        }
+        ExecutionError {
+            diagnostics,
+            inclusion,
+        }
     }
 
     pub fn detect_dependencies(
@@ -693,6 +778,7 @@ impl ClarityInterpreter {
         analysis: ContractAnalysis,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
+        charge: &NonceCharge,
     ) -> Result<ExecutionResult, ExecutionError> {
         let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
         let snippet = contract.expect_in_memory_code_source();
@@ -813,12 +899,23 @@ impl ClarityInterpreter {
                     }
                     global_context.eval_hooks = Some(eval_hooks);
                 }
+                let inclusion =
+                    BlockInclusion::from_runtime_error(ClarityError::Interpreter(e), epoch);
+                let mut diagnostics = vec![runtime_diagnostic(err)];
+
+                // The execution left nothing behind, but mainnet still mines an
+                // included failure and charges it. Nothing else is pending, so
+                // this commit carries the nonce alone; if it fails, nothing at
+                // all happened and the operation is a rejection.
+                if inclusion.is_included() {
+                    if let Err(e) = charge.commit_alone(&mut global_context) {
+                        diagnostics.push(runtime_diagnostic(e));
+                        return Err(ExecutionError::rejected(diagnostics));
+                    }
+                }
                 return Err(ExecutionError {
-                    diagnostics: vec![runtime_diagnostic(err)],
-                    inclusion: BlockInclusion::from_runtime_error(
-                        ClarityError::Interpreter(e),
-                        epoch,
-                    ),
+                    diagnostics,
+                    inclusion,
                 });
             }
         };
@@ -884,6 +981,11 @@ impl ClarityInterpreter {
             EvaluationResult::Snippet(SnippetEvaluationResult { result })
         };
 
+        // The nonce joins the execution's own transaction, so the commit below
+        // either lands both or lands neither.
+        if let Err(e) = charge.apply(&mut global_context.database) {
+            return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)]));
+        }
         global_context.commit().unwrap();
 
         let (events, accounts_to_credit, accounts_to_debit) =
@@ -920,6 +1022,12 @@ impl ClarityInterpreter {
         Ok(execution_result)
     }
 
+    /// Call `method`, charging `charge` in the same commit as the call's own
+    /// state changes.
+    ///
+    /// This primitive backs both transactions and read-only queries, so the
+    /// charge is the caller's to name — see [`NonceCharge`].
+    #[allow(clippy::too_many_arguments)]
     pub fn call_contract_fn(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
@@ -930,6 +1038,7 @@ impl ClarityInterpreter {
         track_costs: bool,
         allow_private: bool,
         eval_hooks: Vec<&mut dyn EvalHook>,
+        charge: &NonceCharge,
     ) -> Result<ExecutionResult, ContractCallFailure> {
         let tx_sender: PrincipalData = self.tx_sender.clone().into();
 
@@ -1001,7 +1110,35 @@ impl ClarityInterpreter {
             .flat_map(|b| b.0.events.clone())
             .collect::<Vec<_>>();
 
-        let eval_result = EvaluationResult::Snippet(SnippetEvaluationResult { result: value? });
+        let value = match value {
+            Ok(value) => value,
+            Err(failure) => {
+                // The call left nothing behind, but mainnet still mines an
+                // included failure and charges it. Nothing else is pending, so
+                // this commit carries the nonce alone; if it fails, nothing at
+                // all happened and the call is a rejection.
+                if failure.inclusion.is_included() {
+                    if let Err(e) = charge.commit_alone(&mut global_context) {
+                        return Err(ContractCallFailure {
+                            error: ContractCallError::Uncategorized(e),
+                            inclusion: BlockInclusion::Rejected,
+                        });
+                    }
+                }
+                return Err(failure);
+            }
+        };
+
+        let eval_result = EvaluationResult::Snippet(SnippetEvaluationResult { result: value });
+
+        // The nonce joins the call's own transaction, so the commit below
+        // either lands both or lands neither.
+        if let Err(e) = charge.apply(&mut global_context.database) {
+            return Err(ContractCallFailure {
+                error: ContractCallError::Uncategorized(e),
+                inclusion: BlockInclusion::Rejected,
+            });
+        }
         global_context.commit().unwrap();
 
         let (events, accounts_to_credit, accounts_to_debit) =
@@ -1446,7 +1583,7 @@ mod tests {
             .run_analysis(contract, &ast, &annotations)
             .unwrap();
 
-        let result = interpreter.execute(contract, &ast, analysis, false, None);
+        let result = interpreter.execute(contract, &ast, analysis, false, None, &NonceCharge::Free);
         assert!(result.is_ok());
         result
     }
@@ -1998,7 +2135,8 @@ mod tests {
             .run_analysis(&contract, &ast, &annotations)
             .unwrap();
 
-        let result = interpreter.execute(&contract, &ast, analysis, false, None);
+        let result =
+            interpreter.execute(&contract, &ast, analysis, false, None, &NonceCharge::Free);
         assert!(result.is_ok());
         let ExecutionResult {
             diagnostics,
@@ -2247,6 +2385,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
         assert_execution_result_value(
             result,
@@ -2270,6 +2409,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
         assert_execution_result_value(
             result,
@@ -2326,6 +2466,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
         assert_execution_result_value(
             result,
@@ -2391,6 +2532,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
         assert_execution_result_value(
             result,
@@ -2417,6 +2559,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
         assert_execution_result_value(
             result,
@@ -2594,6 +2737,7 @@ mod tests {
             false,
             allow_private,
             vec![],
+            &NonceCharge::Free,
         );
 
         assert!(result.is_ok());
@@ -2623,6 +2767,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
 
         assert!(result.is_err());
@@ -2643,6 +2788,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
 
         assert!(result.is_err());
@@ -2672,6 +2818,7 @@ mod tests {
             false,
             allow_private,
             vec![],
+            &NonceCharge::Free,
         );
 
         assert!(result.is_ok());
@@ -2702,6 +2849,7 @@ mod tests {
             false,
             allow_private,
             vec![],
+            &NonceCharge::Free,
         );
 
         assert!(result.is_err());
@@ -2744,6 +2892,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
 
         // this hash changes if the contract id or the block height at which it is deployed changes
@@ -2784,6 +2933,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
 
         let value = get_evaluation_result(get_time).expect_tuple().unwrap();
@@ -2824,6 +2974,7 @@ mod tests {
             false,
             false,
             vec![],
+            &NonceCharge::Free,
         );
 
         assert_execution_result_value(

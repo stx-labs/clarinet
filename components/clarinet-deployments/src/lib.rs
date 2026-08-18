@@ -25,8 +25,7 @@ use clarity_repl::repl::boot::{
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
     SBTC_TOKEN_MAINNET_ADDRESS,
 };
-use clarity_repl::repl::interpreter::BlockInclusion;
-use clarity_repl::repl::session::{AnnotatedExecutionResult, ExecutionResultMap};
+use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
@@ -191,6 +190,8 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
                 height.clone(),
                 sweep_tx_id,
             ];
+            // Session setup, not something the sbtc address sent: like the
+            // boot contracts, it stays at nonce 0.
             let _ = session.call_contract_fn(
                 &SBTC_DEPOSIT_MAINNET_ADDRESS.to_string(),
                 "complete-deposit-wrapper",
@@ -198,6 +199,7 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
                 SBTC_MAINNET_ADDRESS,
                 false,
                 false,
+                CallKind::Free,
             );
         }
     }
@@ -311,6 +313,9 @@ fn handle_emulated_contract_call(
         .iter()
         .map(|p| session.eval_clarity_string(p))
         .collect();
+    // An emulated contract call in a deployment plan is a transaction, so it
+    // consumes the emulated sender's nonce — same reasoning as the plan's
+    // contract publishes, and including failures mainnet would still mine.
     let result = session.call_contract_fn(
         &tx.contract_id.to_string(),
         &tx.method.to_string(),
@@ -318,23 +323,13 @@ fn handle_emulated_contract_call(
         &tx.emulated_sender.to_string(),
         true,
         false,
+        CallKind::Transaction,
     );
     if let Err(errors) = &result {
         println!("error: {:?}", errors.diagnostics.first().unwrap().message);
     }
 
-    // An emulated contract call in a deployment plan is a transaction, so it
-    // consumes the emulated sender's nonce — same reasoning as the plan's
-    // contract publishes, and including failures mainnet would still mine.
-    let bump = BlockInclusion::of_result(&result)
-        .is_included()
-        .then(|| session.bump_nonce(tx.emulated_sender.clone().into()))
-        .transpose();
-
-    // Restore the sender before reporting, so a failed bump does not also
-    // leave the session pointed at the emulated sender.
     session.set_tx_sender(&default_tx_sender);
-    bump.map_err(Session::nonce_failure)?;
     result.map_err(Vec::from)
 }
 

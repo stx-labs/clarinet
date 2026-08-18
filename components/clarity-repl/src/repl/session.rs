@@ -21,7 +21,7 @@ use serde::Serialize;
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
 use super::hooks::perf::{CostField, PerfHook};
-use super::interpreter::{BlockInclusion, ContractCallError, ExecutionError};
+use super::interpreter::{ContractCallError, ExecutionError, NonceCharge};
 use super::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch,
     SessionSettings,
@@ -231,6 +231,19 @@ impl AnnotatedExecutionResult {
     pub fn into_inner(self) -> ExecutionResult {
         self.execution_result
     }
+}
+
+/// Whether a [`Session::call_contract_fn`] is a transaction from its sender.
+///
+/// The same primitive backs `simnet.callPublicFn` and `simnet.callReadOnlyFn`,
+/// and only the first sends anything, so the caller has to say which it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallKind {
+    /// A transaction sent by `sender`, consuming one of its nonces.
+    Transaction,
+    /// Not a transaction: a read-only query, or session setup that stands in
+    /// for genesis state rather than for something anyone sent.
+    Free,
 }
 
 #[derive(Clone)]
@@ -704,15 +717,12 @@ impl Session {
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let sender = self.interpreter.get_tx_sender();
         let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
-        let result = self.eval_with_inclusion(snippet, false);
 
-        // An STX transfer is a transaction and consumes a nonce. The bump lives
-        // here rather than in `eval`, which also backs bare snippets and
-        // function-argument evaluation — neither of which is a transaction.
-        self.bump_nonce_if_included(sender.into(), &result)
-            .map_err(Self::nonce_failure)?;
-
-        result.map_err(Vec::from)
+        // An STX transfer is a transaction and consumes a nonce. `eval` also
+        // backs bare snippets and function-argument evaluation, neither of
+        // which is one, so the charge is named here.
+        self.eval_with_inclusion(snippet, false, NonceCharge::Sender(sender.into()))
+            .map_err(Vec::from)
     }
 
     pub fn deploy_contract(
@@ -762,15 +772,18 @@ impl Session {
         let contract_id =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
 
-        let result = self.interpreter.run(contract, ast, cost_track, Some(hooks));
-
         // A contract deploy is a transaction and consumes a nonce. This covers
         // both the boot deployment plan and `simnet.deployContract`. System boot
         // contracts (pox, sbtc, …) bypass this method and call `interpreter.run`
         // directly, so they correctly stay at nonce 0 — on mainnet they are
         // genesis state, not transactions.
-        self.bump_nonce_if_included(contract_id.issuer.clone().into(), &result)
-            .map_err(Self::nonce_failure)?;
+        let result = self.interpreter.run_transaction(
+            contract,
+            ast,
+            cost_track,
+            Some(hooks),
+            contract_id.issuer.clone().into(),
+        );
 
         result
             .inspect(|result| {
@@ -782,6 +795,14 @@ impl Session {
             .map_err(Vec::from)
     }
 
+    /// Call `method` on `contract` as `sender`.
+    ///
+    /// `kind` decides whether this is a transaction: the same primitive backs
+    /// `simnet.callPublicFn` and `simnet.callReadOnlyFn`, and only the first
+    /// sends anything. The nonce is charged inside the call's own database
+    /// transaction, so it can never be recorded without the call's effects or
+    /// the other way round.
+    #[allow(clippy::too_many_arguments)]
     pub fn call_contract_fn(
         &mut self,
         contract: &str,
@@ -790,6 +811,7 @@ impl Session {
         sender: &str,
         allow_private: bool,
         track_costs: bool,
+        kind: CallKind,
     ) -> Result<ExecutionResult, ExecutionError> {
         let initial_tx_sender = self.get_tx_sender();
 
@@ -817,6 +839,13 @@ impl Session {
             hooks.push(perf_hook);
         }
 
+        // Taken from the interpreter rather than re-parsed, so the principal
+        // charged is exactly the one the call runs as.
+        let charge = match kind {
+            CallKind::Transaction => NonceCharge::Sender(self.interpreter.get_tx_sender().into()),
+            CallKind::Free => NonceCharge::Free,
+        };
+
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract_call_result = self.interpreter.call_contract_fn(
             &contract_id,
@@ -827,6 +856,7 @@ impl Session {
             track_costs,
             allow_private,
             hooks,
+            &charge,
         );
         self.set_tx_sender(&initial_tx_sender);
         self.last_contract_call_trace = Some(tracer_hook.output.join("\n"));
@@ -866,7 +896,7 @@ impl Session {
         snippet: String,
         cost_track: bool,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
-        self.eval_with_inclusion(snippet, cost_track)
+        self.eval_with_inclusion(snippet, cost_track, NonceCharge::Free)
             .map_err(Vec::from)
     }
 
@@ -881,6 +911,7 @@ impl Session {
         &mut self,
         snippet: String,
         cost_track: bool,
+        charge: NonceCharge,
     ) -> Result<AnnotatedExecutionResult, ExecutionError> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
@@ -905,9 +936,9 @@ impl Session {
             hooks.push(perf_hook);
         }
 
-        let result = self
-            .interpreter
-            .run(&contract, None, cost_track, Some(hooks));
+        let result =
+            self.interpreter
+                .run_with_charge(&contract, None, cost_track, Some(hooks), &charge);
 
         result.inspect(|result| {
             if let EvaluationResult::Contract(contract_result) = &result.result {
@@ -1208,47 +1239,18 @@ impl Session {
         self.interpreter.get_nonce(principal)
     }
 
-    /// Bump the nonce of `principal` after a transaction it sent.
+    /// Charge `principal` a nonce for a transaction that never reached the VM.
     ///
-    /// Callers are the ones that know whether an operation is a transaction:
-    /// `call_contract_fn` is deliberately not one of them, because it also
-    /// backs `simnet.callReadOnlyFn`, and a read-only call is not a
-    /// transaction. See `inner_call_public_fn` / `inner_call_private_fn` in
-    /// `clarinet-sdk-wasm`, which do know.
-    pub fn bump_nonce(&mut self, principal: PrincipalData) -> Result<u64, String> {
-        self.interpreter.increment_nonce(&principal)
-    }
-
-    /// Bump `sender`'s nonce if the operation made it into a block.
-    ///
-    /// A failure is not the same as a rejection: mainnet mines a transaction
-    /// that reverts, charging its fee and consuming its nonce. Which failures
-    /// those are is decided by `clarity`, not here — see [`BlockInclusion`].
-    ///
-    /// The bump itself can fail — a remote-data session reads the nonce of a
-    /// non-local principal over the network. That is a broken session, not a
-    /// rejected transaction, but it must not be swallowed: the operation has
-    /// already committed, so a dropped bump leaves the next transaction
-    /// reusing this one's nonce.
-    fn bump_nonce_if_included<T>(
+    /// The only caller is the SDK's access preflight, which rejects a call
+    /// mainnet would have mined before any execution happens. Nothing is
+    /// pending when this runs, so it cannot leave a nonce paired with
+    /// half-applied state — unlike a bump issued *after* an execution, which is
+    /// why every other path names a [`NonceCharge`] up front instead.
+    pub fn charge_nonce_without_execution(
         &mut self,
-        sender: PrincipalData,
-        result: &Result<T, ExecutionError>,
-    ) -> Result<(), String> {
-        if BlockInclusion::of_result(result).is_included() {
-            self.bump_nonce(sender)?;
-        }
-        Ok(())
-    }
-
-    /// Report a nonce bump that failed after its transaction had committed.
-    pub fn nonce_failure(error: String) -> Vec<Diagnostic> {
-        vec![Diagnostic {
-            level: Level::Error,
-            message: format!("Transaction succeeded but its nonce was not recorded: {error}"),
-            spans: vec![],
-            suggestion: None,
-        }]
+        principal: PrincipalData,
+    ) -> Result<u64, String> {
+        self.interpreter.increment_nonce(&principal)
     }
 
     pub fn get_contract_ast(
@@ -2100,6 +2102,7 @@ mod tests {
                     sender,
                     false,
                     false,
+                    CallKind::Free,
                 )
                 .unwrap_or_else(|e| panic!("{method} should execute: {e:?}"));
 
@@ -2202,6 +2205,7 @@ mod tests {
                 sender,
                 false,
                 false,
+                CallKind::Free,
             )
             .expect_err("a call to a missing contract must fail");
 
@@ -2211,30 +2215,112 @@ mod tests {
         );
     }
 
+    /// A transaction whose nonce cannot be written must not commit either.
+    ///
+    /// A charge can fail for real: a remote-data session reads the nonce of a
+    /// non-local principal over the network. Overflow is the one failure
+    /// reachable without a network, and it takes the same path — the charge is
+    /// applied to the transfer's own database transaction, just before the
+    /// commit that would have made both durable.
+    ///
+    /// The balances are what this test is really about. Reporting an error is
+    /// not enough: if the transfer had already moved STX, a caller retrying the
+    /// error would move it twice, and against a nonce that never advanced.
     #[test]
-    fn a_transaction_whose_nonce_cannot_be_recorded_is_not_reported_as_a_success() {
-        // A bump can fail for real: a remote-data session reads the nonce of a
-        // non-local principal over the network. Overflow is the one failure
-        // reachable without a network, and it exercises the same path — the
-        // transfer below commits, then the bump fails.
+    fn a_transaction_whose_nonce_cannot_be_recorded_does_not_commit() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+        let addr = principal(sender);
+
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1_000_000)
+            .unwrap();
+        session.set_tx_sender(sender);
+        session.interpreter.force_nonce(&addr, u64::MAX);
+
+        let sender_before = session.interpreter.get_balance_for_account(sender, "STX");
+
+        let diagnostics = session
+            .stx_transfer(1000, recipient)
+            .expect_err("a transfer whose nonce cannot be recorded is not a success");
+
+        let message = &diagnostics.last().expect("a diagnostic").message;
+        assert!(
+            message.contains("nonce overflow"),
+            "the failure must name its cause, got: {message}"
+        );
+
+        assert_eq!(
+            session.interpreter.get_balance_for_account(sender, "STX"),
+            sender_before,
+            "the transfer must be rolled back with the nonce, not left committed"
+        );
+        assert_eq!(
+            session
+                .interpreter
+                .get_balance_for_account(recipient, "STX"),
+            0,
+            "the recipient must not have been paid by a transaction that failed"
+        );
+        assert_eq!(
+            session.get_nonce(&addr).unwrap(),
+            u64::MAX,
+            "and the nonce must not have moved either"
+        );
+    }
+
+    /// The contract-call path has its own database transaction, so it needs its
+    /// own proof that a failed charge takes the call's state changes with it.
+    #[test]
+    fn a_contract_call_whose_nonce_cannot_be_recorded_does_not_commit() {
         let mut session = Session::new(SessionSettings::default());
         let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
         let addr = principal(sender);
 
-        session.set_tx_sender(sender);
+        session.update_epoch(DEFAULT_EPOCH);
+
+        let contract = ClarityContractBuilder::new().deployer(sender).build();
+        session.deploy_contract(&contract, false, None).unwrap();
+        let contract_id = format!("{sender}.contract");
+
+        // Only now, so the deploy above is unaffected.
         session.interpreter.force_nonce(&addr, u64::MAX);
 
-        let diagnostics = session
-            .stx_transfer(1000, "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG")
-            .expect_err("a transfer whose nonce cannot be recorded is not a success");
+        session
+            .call_contract_fn(
+                &contract_id,
+                "incr",
+                &[],
+                sender,
+                false,
+                false,
+                CallKind::Transaction,
+            )
+            .expect_err("a call whose nonce cannot be recorded is not a success");
 
-        // Silently swallowing this would leave the next transaction reusing
-        // this one's nonce, with nothing in the result to say so.
-        let message = &diagnostics.first().expect("a diagnostic").message;
-        assert!(
-            message.contains("nonce was not recorded"),
-            "the failure must name its cause, got: {message}"
-        );
+        // `incr` bumps a data var. If the call had committed while the nonce
+        // did not, this would read 1 and the next call would reuse the nonce.
+        let result = session
+            .call_contract_fn(
+                &contract_id,
+                "get-x",
+                &[],
+                sender,
+                false,
+                false,
+                CallKind::Free,
+            )
+            .expect("a read-only call charges nothing and still works");
+        match result.result {
+            EvaluationResult::Snippet(res) => assert_eq!(
+                res.result,
+                Value::UInt(0),
+                "the call must be rolled back with the nonce it could not record"
+            ),
+            EvaluationResult::Contract(_) => unreachable!("not a deploy"),
+        }
     }
 
     /// The three cases below are the divergences the old nonce implementation
@@ -2437,6 +2523,7 @@ mod tests {
             BOOT_TESTNET_ADDRESS,
             false,
             false,
+            CallKind::Free,
         );
         assert_execution_result_value(
             &result,
@@ -2500,6 +2587,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            CallKind::Free,
         );
         assert_execution_result_value(&result, Value::okay(Value::Bool(true)).unwrap());
 
@@ -2511,6 +2599,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            CallKind::Free,
         );
         assert_execution_result_value(&result, Value::UInt(1));
 
@@ -2522,6 +2611,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            CallKind::Free,
         );
         assert!(result.is_ok());
     }
@@ -2543,6 +2633,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
+            CallKind::Free,
         );
         assert_execution_result_value(&result, Value::okay(Value::UInt(1)).unwrap());
 
@@ -2553,6 +2644,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
+            CallKind::Free,
         );
         assert_execution_result_value(&result, Value::UInt(1));
     }
@@ -2752,6 +2844,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
+            CallKind::Free,
         );
 
         assert!(result.is_err());
