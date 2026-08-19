@@ -216,18 +216,28 @@ fn is_missing_contract_metadata(error: &VmExecutionError) -> bool {
 }
 
 impl ContractCallFailure {
-    /// Classify a call failure, correcting simnet's missing-contract internal
-    /// error to the included `NoSuchContract` disposition mainnet produces.
-    fn from_vm_error(error: VmExecutionError, message: String, epoch: StacksEpochId) -> Self {
-        if is_missing_contract_metadata(&error) {
-            return Self {
-                error: ContractCallError::from_vm_error(&error, message),
-                inclusion: BlockInclusion::Included,
-            };
-        }
+    /// Classify simnet's missing-contract internal error as the equivalent
+    /// `NoSuchContract`, preserving upstream's epoch-dependent disposition.
+    fn from_vm_error(
+        error: VmExecutionError,
+        message: String,
+        contract_id: &QualifiedContractIdentifier,
+        epoch: StacksEpochId,
+    ) -> Self {
+        let kind = ContractCallError::from_vm_error(&error, message);
+        let as_mainnet_raised_it = if is_missing_contract_metadata(&error) {
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NoSuchContract(
+                contract_id.to_string(),
+            ))
+        } else {
+            error
+        };
         Self {
-            error: ContractCallError::from_vm_error(&error, message),
-            inclusion: BlockInclusion::from_runtime_error(ClarityError::Interpreter(error), epoch),
+            error: kind,
+            inclusion: BlockInclusion::from_runtime_error(
+                ClarityError::Interpreter(as_mainnet_raised_it),
+                epoch,
+            ),
         }
     }
 }
@@ -1043,7 +1053,7 @@ impl ClarityInterpreter {
                 }
                 global_context.eval_hooks = Some(eval_hooks);
             }
-            ContractCallFailure::from_vm_error(e, err, epoch)
+            ContractCallFailure::from_vm_error(e, err, contract_id, epoch)
         });
 
         let mut cost = None;
@@ -2694,11 +2704,14 @@ mod tests {
             &NonceCharge::Free,
         );
 
-        assert!(result.is_err());
-        matches!(
-            result.unwrap_err().error,
-            ContractCallError::NoSuchFunction(_)
+        let failure = result.expect_err("calling an undefined function must fail");
+        assert!(
+            matches!(failure.error, ContractCallError::NoSuchFunction(_)),
+            "got: {:?}",
+            failure.error
         );
+        // This non-rejectable runtime check is included from epoch 2.1 onward.
+        assert!(failure.inclusion.is_included());
 
         let result = interpreter.call_contract_fn(
             &QualifiedContractIdentifier {
@@ -2715,11 +2728,55 @@ mod tests {
             &NonceCharge::Free,
         );
 
-        assert!(result.is_err());
-        matches!(
-            result.unwrap_err().error,
-            ContractCallError::NoSuchContract(_)
+        let failure = result.expect_err("calling a missing contract must fail");
+        assert!(
+            matches!(failure.error, ContractCallError::NoSuchContract(_)),
+            "got: {:?}",
+            failure.error
         );
+        assert!(failure.inclusion.is_included());
+    }
+
+    #[test]
+    fn a_missing_contract_is_included_only_from_epoch_2_1() {
+        // Pin both sides of upstream's epoch gate for non-rejectable runtime checks.
+        let missing = QualifiedContractIdentifier {
+            issuer: StandardPrincipalData::transient(),
+            name: ContractName::from_literal("unexisting"),
+        };
+
+        for (epoch, expected_included) in [
+            (StacksEpochId::Epoch20, false),
+            (StacksEpochId::Epoch2_05, false),
+            (StacksEpochId::Epoch21, true),
+            (StacksEpochId::Epoch24, true),
+        ] {
+            let mut interpreter = get_interpreter(None);
+            let failure = interpreter
+                .call_contract_fn(
+                    &missing,
+                    "whatever",
+                    &[],
+                    epoch,
+                    ClarityVersion::Clarity1,
+                    false,
+                    false,
+                    vec![],
+                    &NonceCharge::Free,
+                )
+                .expect_err("calling a missing contract must fail");
+
+            assert!(
+                matches!(failure.error, ContractCallError::NoSuchContract(_)),
+                "{epoch}: got {:?}",
+                failure.error
+            );
+            assert_eq!(
+                failure.inclusion.is_included(),
+                expected_included,
+                "{epoch} disagrees with the mainnet gate"
+            );
+        }
     }
 
     #[test]
