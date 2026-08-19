@@ -80,10 +80,6 @@ async fn it_can_call_a_private_function() {
     assert_eq!(tx.result, expected);
 }
 
-/// Which contract calls consume a nonce is decided here in `core.rs`, not in
-/// `Session::call_contract_fn` — that primitive also backs `callReadOnlyFn`,
-/// which sends nothing. So this rule can only be tested at this layer; a
-/// `cargo tst` run will not tell you whether a call consumes a nonce.
 #[wasm_bindgen_test]
 async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
     const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
@@ -116,9 +112,7 @@ async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
     // boot contracts deployed by `init_sdk` consumed nothing.
     assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
 
-    // Each call asserts its return value as well as the nonce, so that a
-    // regression turning one of these into a no-op cannot satisfy the nonce
-    // check vacuously.
+    // Assert results as well as nonces so calls cannot pass as no-ops.
     assert_tx_result(
         &sdk.call_read_only_fn(&call("peek")).unwrap(),
         ClarityValue::UInt(1),
@@ -143,9 +137,7 @@ async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
     );
     assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 3);
 
-    // A call that fails at runtime is still mined on mainnet, so it still
-    // consumes a nonce. This is the divergence the old `is_ok()` rule had, and
-    // the contract-call half of it can only be observed from here.
+    // Included runtime failures still consume a nonce.
     let err = sdk
         .call_public_fn(&call("boom"))
         .expect_err("dividing by zero must surface as an error");
@@ -157,15 +149,9 @@ async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
     );
 }
 
-/// The access preflight short-circuits a call the VM would otherwise run, so
-/// it has to reach the VM's answer about the nonce as well as about the error.
-///
-/// Mainnet mines a `contract-call?` naming a non-public function:
-/// `NoSuchPublicFunction` is a non-rejectable `RuntimeCheck`. The pairs below
-/// are that same failure arriving by the two different routes — one with a
-/// cached interface, one without — and they must not disagree.
 #[wasm_bindgen_test]
 async fn it_charges_a_nonce_for_a_call_the_access_preflight_rejects() {
+    // Cached-interface and VM paths must agree on nonce consumption.
     const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
     let mut sdk = init_sdk().await;
 

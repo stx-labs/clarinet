@@ -903,13 +903,7 @@ impl SDK {
         self.call_contract_fn(args, false, CallKind::Free)
     }
 
-    /// Charge `sender` for a transaction rejected before it reached the VM.
-    ///
-    /// Safe as a standalone write only because nothing has executed: the
-    /// preflight below runs before `call_contract_fn`, so there is no committed
-    /// state for a failed charge to come apart from. Every path that *does*
-    /// execute names a `CallKind` instead, and is charged inside the
-    /// execution's own transaction.
+    /// Charge an included preflight failure. No VM state exists to commit.
     fn charge_preflight_rejection(&mut self, sender: &str) -> Result<(), String> {
         let principal = PrincipalData::parse_standard_principal(sender)
             .map_err(|e| format!("Failed to charge a nonce for '{sender}': {e:?}"))?;
@@ -918,15 +912,8 @@ impl SDK {
         Ok(())
     }
 
-    /// Run a contract call submitted as a transaction, and charge its nonce.
-    ///
-    /// The access check is done here, ahead of the VM, only so the error names
-    /// the mistake. The VM reaches the same verdict on its own — a function
-    /// that is not public raises `NoSuchPublicFunction`, a non-rejectable
-    /// `RuntimeCheck` that mainnet mines and charges a nonce for. So this
-    /// shortcut has to report the same disposition and take the same block, or
-    /// one call would consume a nonce and an identical one would not, decided
-    /// by nothing more than whether an interface happened to be cached.
+    /// Run a contract-call transaction. The cached-interface preflight must
+    /// preserve the VM path's nonce and block-advance behavior.
     fn call_fn_as_transaction(
         &mut self,
         args: &CallFnArgs,

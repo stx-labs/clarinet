@@ -45,13 +45,8 @@ use crate::repl::datastore::{ClarityDatastore, Datastore};
 use crate::repl::session::AnnotatedExecutionResult;
 use crate::repl::Settings;
 
-/// Whether mainnet would still include the transaction that produced a
-/// failure — and therefore charge its fee and advance its nonces.
-///
-/// Never decide this by matching `ClarityError` variants here: the rule is
-/// consensus-critical and moves as variants are added upstream. Delegate to
-/// `clarity`'s `handle_clarity_runtime_error` / `handle_clarity_analysis_error`,
-/// which the node itself calls on the block-assembly path.
+/// Whether mainnet includes a failed transaction and consumes its nonce.
+/// Classification is delegated to the upstream `clarity` handlers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockInclusion {
     /// The transaction is included: it consumes a nonce even though it failed.
@@ -89,16 +84,10 @@ impl From<bool> for BlockInclusion {
     }
 }
 
-/// Whose nonce an execution consumes, if it consumes one.
-///
-/// Passed *into* execution rather than applied after it. A bump issued
-/// afterwards is a second database transaction that can fail on its own,
-/// leaving committed state behind a nonce that never moved — and since the next
-/// transaction then reuses the stale value, a caller retrying the reported
-/// error would apply the state changes twice.
+/// The nonce charge to include in an execution's database transaction.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum NonceCharge {
-    /// Not a transaction: a read-only call, or bare snippet evaluation.
+    /// An operation that does not consume a sender nonce.
     #[default]
     Free,
     /// A transaction sent by this principal, consuming one of its nonces.
@@ -106,8 +95,7 @@ pub enum NonceCharge {
 }
 
 impl NonceCharge {
-    /// Write the charge into `db`'s open transaction, so it lands or is
-    /// discarded with everything else that transaction holds.
+    /// Write the charge into `db`'s open transaction.
     fn apply(&self, db: &mut ClarityDatabase) -> Result<(), String> {
         let NonceCharge::Sender(principal) = self else {
             return Ok(());
@@ -121,13 +109,8 @@ impl NonceCharge {
             .map_err(|e| format!("failed to set nonce for {principal}: {e}"))
     }
 
-    /// Commit the charge as the *only* write in `global_context`'s open
-    /// transaction, for a failure mainnet would still have mined.
-    ///
-    /// `GlobalContext::execute` rolls its own context back before returning an
-    /// error, and nothing else writes to the enclosing one, so this commit
-    /// carries the nonce alone. That is what makes charging a failed
-    /// transaction safe here: there is no half-applied state to pair it with.
+    /// Commit only the charge after an included execution failure.
+    /// `GlobalContext::execute` has already rolled back the nested execution.
     fn commit_alone(&self, global_context: &mut GlobalContext) -> Result<(), String> {
         self.apply(&mut global_context.database)?;
         global_context
@@ -176,11 +159,7 @@ fn runtime_diagnostic(message: impl std::fmt::Display) -> Diagnostic {
     }
 }
 
-/// A failed contract call.
-///
-/// The two fields answer different questions and are derived from the VM error
-/// independently: `error` decides which message the user sees, `inclusion`
-/// decides whether a nonce is consumed. Neither may be inferred from the other.
+/// A failed contract call and its block-inclusion disposition.
 #[derive(Debug, Clone)]
 pub struct ContractCallFailure {
     /// What to tell the user went wrong.
@@ -205,11 +184,8 @@ pub enum ContractCallError {
 }
 
 impl ContractCallError {
-    /// Classify a VM failure by the typed error, never by `message`.
-    ///
-    /// `message` is the `Debug` rendering of the whole error, so it embeds the
-    /// text of any nested error too: searching it for a variant name matches
-    /// unrelated failures that merely mention one.
+    /// Classify the typed error; the formatted message may contain unrelated
+    /// nested error names.
     fn from_vm_error(error: &VmExecutionError, message: String) -> Self {
         match error {
             // Either the function is absent, or it exists but is not callable
@@ -230,13 +206,7 @@ impl ContractCallError {
     }
 }
 
-/// Whether this failure is simnet's way of saying the contract is not deployed.
-///
-/// A `contract-call?` resolves the contract name first and raises
-/// `NoSuchContract`. `call_contract_fn` enters with a contract id already in
-/// hand, so the metadata read fails before any name resolution and `clarity`
-/// reports a failed internal expectation instead. Scoped to the one variant
-/// that can carry it, rather than searched for in the whole formatted message.
+/// Detect simnet's internal-error representation of a missing contract.
 fn is_missing_contract_metadata(error: &VmExecutionError) -> bool {
     matches!(
         error,
@@ -246,13 +216,8 @@ fn is_missing_contract_metadata(error: &VmExecutionError) -> bool {
 }
 
 impl ContractCallFailure {
-    /// Classify a VM failure from `ClarityInterpreter::call_contract_fn`.
-    ///
-    /// The disposition normally comes straight from `clarity`, but the route
-    /// described on [`is_missing_contract_metadata`] hands it a
-    /// `VmInternalError`, which it rejects. Mainnet raises `NoSuchContract`
-    /// there — a non-rejectable `RuntimeCheck` — and mines the transaction, so
-    /// the nonce is charged. Follow mainnet rather than the route simnet took.
+    /// Classify a call failure, correcting simnet's missing-contract internal
+    /// error to the included `NoSuchContract` disposition mainnet produces.
     fn from_vm_error(error: VmExecutionError, message: String, epoch: StacksEpochId) -> Self {
         if is_missing_contract_metadata(&error) {
             return Self {
@@ -408,11 +373,9 @@ impl ClarityInterpreter {
                 ));
             }
         };
-        // Note the ordering, which predates the inclusion work: analysis runs
-        // before the parse result is consulted, so a source that fails both
-        // reports the *analysis* verdict. Mainnet parses first and would report
-        // the parse one. Both go through `handle_clarity_analysis_error`, so
-        // the two agree unless exactly one of them is `rejectable_in_epoch`.
+        // Analysis currently runs before the parse result is checked. Mainnet
+        // checks parsing first, so a source failing both may get a different
+        // verdict when only one error is rejectable in this epoch.
         if !success {
             let inclusion = self.classify_parse_failure(contract);
             return Err(self.fail_before_execution(diagnostics, inclusion, charge));
@@ -437,14 +400,7 @@ impl ClarityInterpreter {
         })
     }
 
-    /// Build the error for a transaction that failed before reaching the VM,
-    /// charging its nonce if mainnet would still have mined it.
-    ///
-    /// Parse and analysis failures never enter `execute`, so there is no
-    /// execution transaction for the charge to ride along in. A standalone
-    /// commit is safe precisely because nothing ran: it cannot leave a nonce
-    /// paired with half-applied state, and if it fails, nothing happened at all
-    /// and the transaction becomes a rejection.
+    /// Charge an included parse or analysis failure, for which no VM state exists.
     fn fail_before_execution(
         &mut self,
         mut diagnostics: Vec<Diagnostic>,
@@ -508,14 +464,8 @@ impl ClarityInterpreter {
         )
     }
 
-    /// Whether a deploy that failed to parse is still included in a block.
-    ///
-    /// Ordinary syntax errors are included on mainnet — the deploy is mined and
-    /// fails — while `rejectable_in_epoch` errors invalidate the transaction.
-    /// `build_ast_with_diagnostics` reports every diagnostic but discards the
-    /// typed `ParseError` that distinction needs, so re-parse here to recover
-    /// it. This runs only on the failure path, and the diagnostics the caller
-    /// reports still come from the richer pass.
+    /// Recover the typed parse error discarded by the diagnostic AST builder
+    /// and ask upstream whether it is rejectable in this epoch.
     fn classify_parse_failure(&self, contract: &ClarityContract) -> BlockInclusion {
         let epoch = contract.epoch.resolve();
         let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
@@ -903,10 +853,8 @@ impl ClarityInterpreter {
                     BlockInclusion::from_runtime_error(ClarityError::Interpreter(e), epoch);
                 let mut diagnostics = vec![runtime_diagnostic(err)];
 
-                // The execution left nothing behind, but mainnet still mines an
-                // included failure and charges it. Nothing else is pending, so
-                // this commit carries the nonce alone; if it fails, nothing at
-                // all happened and the operation is a rejection.
+                // The nested execution was rolled back; an included failure
+                // commits only its nonce.
                 if inclusion.is_included() {
                     if let Err(e) = charge.commit_alone(&mut global_context) {
                         diagnostics.push(runtime_diagnostic(e));
@@ -981,8 +929,7 @@ impl ClarityInterpreter {
             EvaluationResult::Snippet(SnippetEvaluationResult { result })
         };
 
-        // The nonce joins the execution's own transaction, so the commit below
-        // either lands both or lands neither.
+        // Commit the nonce and execution state atomically.
         if let Err(e) = charge.apply(&mut global_context.database) {
             return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)]));
         }
@@ -1113,10 +1060,8 @@ impl ClarityInterpreter {
         let value = match value {
             Ok(value) => value,
             Err(failure) => {
-                // The call left nothing behind, but mainnet still mines an
-                // included failure and charges it. Nothing else is pending, so
-                // this commit carries the nonce alone; if it fails, nothing at
-                // all happened and the call is a rejection.
+                // The nested call was rolled back; an included failure commits
+                // only its nonce.
                 if failure.inclusion.is_included() {
                     if let Err(e) = charge.commit_alone(&mut global_context) {
                         return Err(ContractCallFailure {
@@ -1131,8 +1076,7 @@ impl ClarityInterpreter {
 
         let eval_result = EvaluationResult::Snippet(SnippetEvaluationResult { result: value });
 
-        // The nonce joins the call's own transaction, so the commit below
-        // either lands both or lands neither.
+        // Commit the nonce and call state atomically.
         if let Err(e) = charge.apply(&mut global_context.database) {
             return Err(ContractCallFailure {
                 error: ContractCallError::Uncategorized(e),
@@ -1479,15 +1423,9 @@ impl ClarityInterpreter {
 
     /// Read the transaction nonce of `principal`.
     ///
-    /// Nonces live where mainnet keeps them — behind the `ClarityBackingStore`,
-    /// under `make_key_for_account_nonce` — rather than beside the `tokens`
-    /// map, which is a reporting mirror the VM cannot see. Keeping them in the
-    /// backing store is what will let a future post-condition abort roll a
-    /// nonce back with the transaction that set it; today the bump is a
-    /// separate commit made after execution, so nothing rolls it back yet.
-    ///
-    /// Takes `&mut self` because every `ClarityBackingStore` read does, and
-    /// because a remote-data session may fetch the value over the network.
+    /// Stored in the `ClarityBackingStore`, so transaction rollback also rolls
+    /// back its nonce. The mutable borrow is required because remote reads may
+    /// populate the local cache.
     pub fn get_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
         let mut conn = ClarityDatabase::new(
             &mut self.clarity_datastore,
@@ -1505,11 +1443,7 @@ impl ClarityInterpreter {
         nonce
     }
 
-    /// Bump the transaction nonce of `principal`, returning the new value.
-    ///
-    /// Errors if the nonce would overflow. Saturating instead would report
-    /// success while leaving the nonce unchanged, so every later transaction
-    /// would silently reuse it.
+    /// Increment `principal`'s nonce, returning an error on overflow.
     pub fn increment_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
         let mut conn = ClarityDatabase::new(
             &mut self.clarity_datastore,
@@ -1529,11 +1463,7 @@ impl ClarityInterpreter {
         Ok(next)
     }
 
-    /// Drive a principal's nonce straight to `nonce`.
-    ///
-    /// Nothing reachable from the public API can do this — the only writer is
-    /// `increment_nonce`, one step at a time — so the failure paths that depend
-    /// on a nonce's value are otherwise unreachable from a test.
+    /// Set a nonce directly so tests can exercise overflow handling.
     #[cfg(test)]
     pub(crate) fn force_nonce(&mut self, principal: &PrincipalData, nonce: u64) {
         let mut conn = ClarityDatabase::new(
@@ -1804,16 +1734,10 @@ mod tests {
         ));
     }
 
-    /// Pin both directions of the delegation to `clarity`.
-    ///
-    /// Rejected failures — cost overruns, resource-budget exhaustion — are
-    /// impractical to provoke from contract source, so the end-to-end tests
-    /// reach only included ones: without this, mapping *everything* to
-    /// `Included` would pass the whole suite. Which variants fall on which
-    /// side is upstream's business; this only checks that clarinet asks the
-    /// right classifier and reads the answer the right way round.
     #[test]
     fn block_inclusion_delegates_to_clarity() {
+        // Cover both classifier outcomes; end-to-end tests cannot easily
+        // provoke rejected cost/resource failures from contract source.
         use clarity::vm::analysis::errors::{StaticCheckError, StaticCheckErrorKind};
         use clarity::vm::errors::{RuntimeError, VmExecutionError};
 

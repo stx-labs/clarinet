@@ -313,9 +313,7 @@ fn handle_emulated_contract_call(
         .iter()
         .map(|p| session.eval_clarity_string(p))
         .collect();
-    // An emulated contract call in a deployment plan is a transaction, so it
-    // consumes the emulated sender's nonce — same reasoning as the plan's
-    // contract publishes, and including failures mainnet would still mine.
+    // Deployment-plan calls are transactions from the emulated sender.
     let result = session.call_contract_fn(
         &tx.contract_id.to_string(),
         &tx.method.to_string(),
@@ -1437,9 +1435,7 @@ mod tests {
 
     #[test]
     fn test_emulated_plan_transactions_consume_the_senders_nonce() {
-        // Every entry in a deployment plan is a transaction the emulated sender
-        // sent, so each consumes a nonce — the publishes as well as the calls.
-        // This is why a project's deployer starts above zero.
+        // Publishes and emulated calls are transactions from the plan's sender.
         let mut session = Session::new(SessionSettings::default());
         let epoch = StacksEpochId::Epoch25;
         session.update_epoch(epoch);
@@ -1473,9 +1469,7 @@ mod tests {
             parameters: vec![],
         };
 
-        // A call that fails at runtime is still mined on mainnet, so it still
-        // consumes a nonce. Assert the state change too, so a regression that
-        // turns the successful call into a no-op cannot pass vacuously.
+        // Assert the state change so the successful call cannot pass as a no-op.
         let mut spec = call("add");
         spec.parameters = vec!["1".to_string()];
         handle_emulated_contract_call(&mut session, &spec).unwrap();
@@ -1495,12 +1489,7 @@ mod tests {
             "a failed-but-included plan call still consumes a nonce"
         );
 
-        // Calling a function that does not exist raises `UndefinedFunction`, a
-        // `RuntimeCheck` error. It is not in `RuntimeCheckErrorKind::rejectable`,
-        // so from epoch 2.1 onward mainnet mines the transaction and it fails —
-        // it is only rejected in earlier epochs. Worth stating because it is
-        // easy to assume "the function doesn't exist" means "never a valid
-        // transaction"; the epoch is what decides.
+        // `UndefinedFunction` is an included failure from epoch 2.1 onward.
         assert!(handle_emulated_contract_call(&mut session, &call("nope")).is_err());
         assert_eq!(
             session.get_nonce(&deployer).unwrap(),
