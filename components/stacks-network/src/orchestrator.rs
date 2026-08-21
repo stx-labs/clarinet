@@ -1305,7 +1305,7 @@ impl DevnetOrchestrator {
 
         let mut env = vec![
             format!("STACKS_CORE_RPC_HOST=stacks-node.{}", self.network_name),
-            format!("STACKS_BLOCKCHAIN_API_DB=pg"),
+            "STACKS_BLOCKCHAIN_API_DB=pg".to_string(),
             format!(
                 "STACKS_CORE_RPC_PORT={}",
                 devnet_config.stacks_node_rpc_port
@@ -1314,20 +1314,20 @@ impl DevnetOrchestrator {
                 "STACKS_BLOCKCHAIN_API_PORT={}",
                 devnet_config.stacks_api_port
             ),
-            format!("STACKS_BLOCKCHAIN_API_HOST=0.0.0.0"),
+            "STACKS_BLOCKCHAIN_API_HOST=0.0.0.0".to_string(),
             format!(
                 "STACKS_CORE_EVENT_PORT={}",
                 devnet_config.stacks_api_events_port
             ),
-            format!("STACKS_CORE_EVENT_HOST=0.0.0.0"),
-            format!("STACKS_API_ENABLE_FT_METADATA=1"),
+            "STACKS_CORE_EVENT_HOST=0.0.0.0".to_string(),
+            "STACKS_API_ENABLE_FT_METADATA=1".to_string(),
             format!("PG_HOST=postgres.{}", self.network_name),
-            format!("PG_PORT=5432"),
+            "PG_PORT=5432".to_string(),
             format!("PG_USER={}", devnet_config.postgres_username),
             format!("PG_PASSWORD={}", devnet_config.postgres_password),
             format!("PG_DATABASE={}", devnet_config.stacks_api_postgres_database),
-            format!("STACKS_CHAIN_ID=2147483648"),
-            format!("V2_POX_MIN_AMOUNT_USTX=90000000260"),
+            "STACKS_CHAIN_ID=2147483648".to_string(),
+            "V2_POX_MIN_AMOUNT_USTX=90000000260".to_string(),
             format!("FAUCET_PRIVATE_KEY={}", devnet_config.faucet_secret_key_hex),
             "PG_SCHEMA=public".to_string(),
             "NODE_ENV=development".to_string(),
@@ -1676,9 +1676,9 @@ impl DevnetOrchestrator {
             tty: None,
             exposed_ports: Some(exposed_ports),
             env: Some(vec![
-                format!("BTCEXP_HOST=0.0.0.0",),
+                "BTCEXP_HOST=0.0.0.0".to_string(),
                 format!("BTCEXP_PORT={}", devnet_config.bitcoin_explorer_port),
-                format!("BTCEXP_BITCOIND_HOST=host.docker.internal",),
+                "BTCEXP_BITCOIND_HOST=host.docker.internal".to_string(),
                 format!(
                     "BTCEXP_BITCOIND_PORT={}",
                     devnet_config.bitcoin_node_rpc_port
@@ -1695,7 +1695,7 @@ impl DevnetOrchestrator {
                     "BTCEXP_BASIC_AUTH_PASSWORD={}",
                     devnet_config.bitcoin_node_password
                 ),
-                format!("BTCEXP_RPC_ALLOWALL=true",),
+                "BTCEXP_RPC_ALLOWALL=true".to_string(),
             ]),
             host_config: Some(HostConfig {
                 auto_remove: Some(true),

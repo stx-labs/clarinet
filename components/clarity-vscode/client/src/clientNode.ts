@@ -279,11 +279,16 @@ export async function activate(context: ExtensionContext) {
 
           // Run the selected test file directly. Passing the file path avoids
           // relying on project-specific Vitest include patterns or extra config files.
-          const cmd = `CLARINET_DEBUG_PORT=${sdkPort} npx vitest run ${JSON.stringify(relativeFile)} -t ${JSON.stringify(testName)}`;
+          // Single-quote escaping ensures no shell metacharacters in the file path
+          // or test name are interpreted. CLARINET_DEBUG_PORT is passed via the
+          // terminal env rather than inline in the shell command.
+          const shellQuote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
+          const cmd = `npx vitest run ${shellQuote(relativeFile)} -t ${shellQuote(testName)}`;
           debugOutput.info(`  opening terminal: ${cmd}`);
           const terminal = vscode.window.createTerminal({
             name: `Clarinet Debug: ${testName}`,
             cwd: projectRoot,
+            env: { CLARINET_DEBUG_PORT: String(sdkPort) },
           });
           terminal.show();
           terminal.sendText(cmd);

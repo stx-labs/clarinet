@@ -1664,7 +1664,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             diags[0].message,
-            format!("use of unresolved function 'slice?'",)
+            "use of unresolved function 'slice?'"
         );
         session.update_epoch(StacksEpochId::Epoch21);
         let annotated = session

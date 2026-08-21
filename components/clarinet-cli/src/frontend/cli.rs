@@ -57,9 +57,9 @@ use crate::deployments::{
 };
 use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
+use crate::frontend::dap::{run_dap, run_dap_server};
 use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
-use crate::frontend::dap::{run_dap, run_dap_server};
 use crate::lsp::run_lsp;
 
 #[derive(Clone, PartialEq, Debug, clap::ValueEnum)]
