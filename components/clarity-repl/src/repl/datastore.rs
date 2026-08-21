@@ -12,18 +12,23 @@ use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::build_ast;
+use clarity::vm::contexts::GlobalContext;
 use clarity::vm::database::clarity_db::ContractDataVarName;
 use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
 };
 use clarity::vm::errors::{VmExecutionError, VmInternalError};
-use clarity::vm::{ContractContext, StacksEpoch};
+use clarity::vm::{ContractContext, StacksEpoch, Value};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };
-use pox_locking::handle_contract_call_special_cases;
+use pox_locking::{
+    handle_contract_call_special_cases, POX_1_NAME, POX_2_NAME, POX_3_NAME, POX_4_NAME, POX_5_NAME,
+};
 use sha2::{Digest, Sha512_256};
+
+use super::boot::{BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL};
 
 /// Local serde wrapper matching the `Contract` struct shape that Stacks nodes
 /// return from `/v2/clarity/metadata/.../vm-metadata::9::contract`.
@@ -62,6 +67,49 @@ fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
         StacksEpochId::Epoch34 => PEER_VERSION_EPOCH_3_4,
         StacksEpochId::Epoch40 => PEER_VERSION_EPOCH_4_0,
     }
+}
+
+const POX_CONTRACT_NAMES: [&str; 5] = [POX_1_NAME, POX_2_NAME, POX_3_NAME, POX_4_NAME, POX_5_NAME];
+
+/// Apply PoX locks for calls to a PoX boot contract at *either* boot address.
+///
+/// The boot contracts are deployed under both boot addresses (see
+/// [`super::boot`]), but [`handle_contract_call_special_cases`] only recognizes
+/// the one matching `GlobalContext::mainnet`, so stacking through the other
+/// address never locked. Flipping the flag rather than rewriting the contract
+/// identifier keeps the synthesized print events (which read the PoX contract's
+/// own maps) and the `STXLockEvent` pointing at the contract actually called.
+fn handle_pox_contract_call_special_cases(
+    global_context: &mut GlobalContext,
+    sender: Option<&PrincipalData>,
+    sponsor: Option<&PrincipalData>,
+    contract_id: &QualifiedContractIdentifier,
+    function_name: &str,
+    args: &[Value],
+    result: &Value,
+) -> Result<(), VmExecutionError> {
+    let was_mainnet = global_context.mainnet;
+
+    let issuer_is_mainnet_boot = contract_id.issuer == *BOOT_MAINNET_PRINCIPAL;
+    let is_boot_issuer = issuer_is_mainnet_boot || contract_id.issuer == *BOOT_TESTNET_PRINCIPAL;
+    if is_boot_issuer
+        && issuer_is_mainnet_boot != was_mainnet
+        && POX_CONTRACT_NAMES.contains(&contract_id.name.as_str())
+    {
+        global_context.mainnet = issuer_is_mainnet_boot;
+    }
+
+    let outcome = handle_contract_call_special_cases(
+        global_context,
+        sender,
+        sponsor,
+        contract_id,
+        function_name,
+        args,
+        result,
+    );
+    global_context.mainnet = was_mainnet;
+    outcome
 }
 
 /// This stores all of the data for the Clarity VM, especially MARF values
@@ -683,7 +731,7 @@ impl ClarityBackingStore for ClarityDatastore {
     }
 
     fn get_cc_special_cases_handler(&self) -> Option<clarity::vm::database::SpecialCaseHandler> {
-        Some(&handle_contract_call_special_cases)
+        Some(&handle_pox_contract_call_special_cases)
     }
 
     fn make_contract_commitment(&mut self, contract_hash: Sha512Trunc256Sum) -> String {

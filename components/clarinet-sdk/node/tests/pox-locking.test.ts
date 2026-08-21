@@ -144,6 +144,54 @@ describe("test pox-3", () => {
   });
 });
 
+// the boot contracts are deployed under both boot addresses, and stacking
+// through the mainnet one used to leave `stx-account` reporting `locked: u0`
+// — see https://github.com/stx-labs/clarinet/issues/2491
+describe("test pox-3 at the mainnet boot address", () => {
+  const poxContract = "SP000000000000000000002Q6VF78.pox-3";
+  const ustxAmount = initialSTXBalance * 0.9;
+
+  beforeEach(async () => {
+    simnet = await initSimnet("tests/fixtures/LightManifest.toml");
+    simnet.setEpoch("2.4");
+  });
+
+  it("locks stx when stacking on the mainnet pox-3", () => {
+    const stackStxArgs = [
+      Cl.uint(ustxAmount),
+      Cl.tuple({
+        version: Cl.bufferFromHex("00"),
+        hashbytes: Cl.bufferFromHex("7321b74e2b6a7e949e6c4ad313035b1665095017"),
+      }),
+      Cl.uint(0),
+      Cl.uint(1),
+    ];
+    const stackStx = simnet.callPublicFn(poxContract, "stack-stx", stackStxArgs, address1);
+    expect(stackStx.result).toStrictEqual(
+      Cl.ok(
+        Cl.tuple({
+          "lock-amount": Cl.uint(ustxAmount),
+          "unlock-burn-height": Cl.uint(4200),
+          stacker: Cl.principal(address1),
+        }),
+      ),
+    );
+    expect(stackStx.events).toHaveLength(2);
+
+    const stxAccount = simnet.execute(`(stx-account '${address1})`);
+    expect(stxAccount.result).toStrictEqual(
+      Cl.tuple({
+        locked: Cl.uint(ustxAmount),
+        unlocked: Cl.uint(initialSTXBalance - ustxAmount),
+        "unlock-height": Cl.uint(4200),
+      }),
+    );
+
+    const transfer = simnet.transferSTX(ustxAmount, address2, address1);
+    expect(transfer.result).toStrictEqual(Cl.error(Cl.uint(1)));
+  });
+});
+
 describe("test pox-4", () => {
   const poxContract = `${poxDeployer}.pox-4`;
 
