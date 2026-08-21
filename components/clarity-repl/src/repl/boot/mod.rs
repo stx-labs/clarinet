@@ -49,7 +49,7 @@ const SBTC_TOKEN_SOURCE: &str = std::include_str!("sbtc-token.clar");
 // not a boot contract, but we include it here for contract-address mapping.
 pub const SBTC_CONTRACTS_NAMES: &[&str] = &["sbtc-registry", "sbtc-token", "sbtc-deposit"];
 
-pub const SBTC_TESTNET_ADDRESS: &str = "ST1F7QA2MDF17S807EPA36TSS8AMEFY4KA9TVGWXT";
+pub const SBTC_TESTNET_ADDRESS: &str = "SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1";
 pub const SBTC_MAINNET_ADDRESS: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
 
 pub static SBTC_TESTNET_ADDRESS_PRINCIPAL: LazyLock<StandardPrincipalData> =
