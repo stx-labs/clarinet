@@ -33,6 +33,41 @@ mod bitcoin_deployment;
 
 use crate::types::{DeploymentSpecification, EpochSpec, TransactionSpecification};
 
+fn boot_contract_ids_to_remap() -> HashSet<(String, String)> {
+    let mut contract_ids = HashSet::new();
+
+    for contract_name in BOOT_CONTRACTS_NAMES {
+        contract_ids.insert((
+            format!("{BOOT_MAINNET_ADDRESS}.{contract_name}"),
+            format!("{BOOT_TESTNET_ADDRESS}.{contract_name}"),
+        ));
+    }
+
+    for contract_name in SBTC_CONTRACTS_NAMES {
+        contract_ids.insert((
+            format!("{SBTC_MAINNET_ADDRESS}.{contract_name}"),
+            format!("{SBTC_TESTNET_ADDRESS}.{contract_name}"),
+        ));
+    }
+
+    contract_ids
+}
+
+fn remap_contract_ids(source: &str, contract_ids: &HashSet<(String, String)>) -> String {
+    let mut source = source.to_string();
+    for (old_contract_id, new_contract_id) in contract_ids {
+        let mut matched_indices = source
+            .match_indices(old_contract_id)
+            .map(|(i, _)| i)
+            .collect::<Vec<usize>>();
+        matched_indices.reverse();
+        for index in matched_indices {
+            source.replace_range(index..index + old_contract_id.len(), new_contract_id);
+        }
+    }
+    source
+}
+
 fn get_btc_secret_key(account: &AccountConfig) -> bitcoincore_rpc::bitcoin::secp256k1::SecretKey {
     use bitcoincore_rpc::bitcoin::secp256k1::SecretKey;
     let (secret_bytes, _) =
@@ -359,21 +394,7 @@ pub fn apply_on_chain_deployment(
     // Using a session to encode + coerce/check (todo) contract calls arguments.
     let mut session = Session::new(SessionSettings::default());
     let mut index = 0;
-    let mut contracts_ids_to_remap: HashSet<(String, String)> = HashSet::new();
-
-    for contract in BOOT_CONTRACTS_NAMES {
-        contracts_ids_to_remap.insert((
-            format!("{BOOT_MAINNET_ADDRESS}:{contract}"),
-            format!("{BOOT_TESTNET_ADDRESS}:{contract}"),
-        ));
-    }
-
-    for contract_name in SBTC_CONTRACTS_NAMES.iter() {
-        contracts_ids_to_remap.insert((
-            format!("{SBTC_MAINNET_ADDRESS}:{contract_name}"),
-            format!("{SBTC_TESTNET_ADDRESS}:{contract_name}"),
-        ));
-    }
+    let mut contracts_ids_to_remap = boot_contract_ids_to_remap();
 
     for batch_spec in deployment.plan.batches.iter() {
         let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
@@ -545,22 +566,7 @@ pub fn apply_on_chain_deployment(
                         deployment.network,
                         StacksNetwork::Devnet | StacksNetwork::Testnet
                     ) {
-                        // Remapping - This is happening
-                        let mut source = tx.source.clone();
-                        for (old_contract_id, new_contract_id) in contracts_ids_to_remap.iter() {
-                            let mut matched_indices = source
-                                .match_indices(old_contract_id)
-                                .map(|(i, _)| i)
-                                .collect::<Vec<usize>>();
-                            matched_indices.reverse();
-                            for index in matched_indices {
-                                source.replace_range(
-                                    index..index + old_contract_id.len(),
-                                    new_contract_id,
-                                );
-                            }
-                        }
-                        source
+                        remap_contract_ids(&tx.source, &contracts_ids_to_remap)
                     } else {
                         tx.source.clone()
                     };
@@ -969,4 +975,33 @@ pub fn get_initial_transactions_trackers(
         }
     }
     trackers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrites_sbtc_contract_references_for_testnet_deployments() {
+        assert_ne!(SBTC_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS);
+
+        let source = format!(
+            "(contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-registry get-bitcoin-wallet-public-key)\n\
+             (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-name)\n\
+             (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-deposit get-deposit-status u1)\n\
+             (contract-call? 'SP000000000000000000002Q6VF78.unrelated get-name)"
+        );
+
+        let remapped = remap_contract_ids(&source, &boot_contract_ids_to_remap());
+
+        assert_eq!(
+            remapped,
+            format!(
+                "(contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-registry get-bitcoin-wallet-public-key)\n\
+                 (contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-token get-name)\n\
+                 (contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-deposit get-deposit-status u1)\n\
+                 (contract-call? 'SP000000000000000000002Q6VF78.unrelated get-name)"
+            )
+        );
+    }
 }
