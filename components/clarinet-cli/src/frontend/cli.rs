@@ -59,6 +59,7 @@ use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
 use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
+use crate::frontend::dap::{run_dap, run_dap_server};
 use crate::lsp::run_lsp;
 
 #[derive(Clone, PartialEq, Debug, clap::ValueEnum)]
@@ -1455,20 +1456,23 @@ pub fn main() {
         }
         Command::LSP => run_lsp(),
         Command::DAP(cmd) => {
-            let result = if cmd.sdk_port.is_some() || cmd.dap_port.is_some() {
-                // Server mode: either SDK-only (--sdk-port) or full attach (--dap-port + --sdk-port).
-                let sdk_port = cmd
-                    .sdk_port
-                    .or_else(|| cmd.dap_port.map(|p| p + 1))
-                    .unwrap();
-                let manifest_path = cmd
-                    .manifest_path
-                    .map(PathBuf::from)
-                    .or_else(|| get_manifest_location(None))
-                    .unwrap_or_else(|| PathBuf::from("Clarinet.toml"));
-                super::dap::run_dap_server(cmd.dap_port, sdk_port, manifest_path)
-            } else {
-                super::dap::run_dap()
+            let result = match (cmd.sdk_port, cmd.dap_port) {
+                (None, None) => run_dap(),
+                (sdk_port, dap_port) => {
+                    // Server mode: either SDK-only (--sdk-port) or full attach (--dap-port + --sdk-port).
+                    let sdk_port = sdk_port
+                        .or_else(|| dap_port.and_then(|p| p.checked_add(1)))
+                        .unwrap_or_else(|| {
+                            eprintln!("{}", red!("--dap-port 65535 is too large to derive an sdk-port automatically; use --sdk-port to specify one explicitly"));
+                            process::exit(1);
+                        });
+                    let manifest_path = cmd
+                        .manifest_path
+                        .map(PathBuf::from)
+                        .or_else(|| get_manifest_location(None))
+                        .unwrap_or_else(|| PathBuf::from("Clarinet.toml"));
+                    run_dap_server(dap_port, sdk_port, manifest_path)
+                }
             };
             match result {
                 Ok(_) => (),
