@@ -11,3 +11,6 @@ minimumReleaseAge: 4320
 
 publicHoistPattern:
   - '@stacks/clarinet-sdk-wasm'
+
+overrides:
+  '@stacks/clarinet-sdk': 'link:../../../components/clarinet-sdk/node'

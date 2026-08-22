@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufWriter, Write};
 use std::path::PathBuf;
 
@@ -5,8 +6,9 @@ use clarinet_deployments::setup_session_with_deployment;
 use clarinet_files::{ProjectManifest, StacksNetwork};
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::EvaluationResult;
-use clarity_repl::repl::clarity_values::value_to_string;
+use clarity_repl::repl::clarity_values::to_raw_value;
 use clarity_repl::repl::debug::dap::DAPDebugger;
+use clarity_repl::repl::Session;
 use clarity_repl::utils::Environment;
 
 #[cfg(feature = "telemetry")]
@@ -59,6 +61,58 @@ pub fn run_dap() -> Result<(), String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Session setup helper — builds a fresh simnet session from a manifest.
+// Returns (session, accounts map, deployer address, contract→path pairs).
+// ---------------------------------------------------------------------------
+fn make_session(
+    manifest_path: &PathBuf,
+) -> Result<
+    (
+        Session,
+        HashMap<String, String>,
+        String,
+        Vec<(QualifiedContractIdentifier, PathBuf)>,
+    ),
+    String,
+> {
+    let project_manifest = ProjectManifest::from_location(manifest_path, false)?;
+    let (mut deployment, artifacts, _) = generate_default_deployment(
+        &project_manifest,
+        &StacksNetwork::Simnet,
+        false,
+        Environment::Simnet,
+    )?;
+
+    // Extract accounts from genesis before deployment is consumed.
+    let mut accounts: HashMap<String, String> = HashMap::new();
+    let mut deployer = String::new();
+    if let Some(ref genesis) = deployment.genesis {
+        for wallet in &genesis.wallets {
+            let addr = wallet.address.to_string();
+            if wallet.name == "deployer" {
+                deployer = addr.clone();
+            }
+            accounts.insert(wallet.name.clone(), addr);
+        }
+    }
+
+    let contract_maps: Vec<(QualifiedContractIdentifier, PathBuf)> = deployment
+        .contracts
+        .iter()
+        .map(|(contract_id, (_, location))| {
+            let abs = std::fs::canonicalize(location).unwrap_or(location.clone());
+            (contract_id.clone(), abs)
+        })
+        .collect();
+
+    let session =
+        setup_session_with_deployment(&project_manifest, &mut deployment, Some(&artifacts.asts), false)
+            .session;
+
+    Ok((session, accounts, deployer, contract_maps))
+}
+
 /// Run a DAP debug server that accepts two TCP connections:
 ///
 /// 1. (Optional) A DAP client (e.g. VSCode) connects on `dap_port` using the attach
@@ -76,31 +130,7 @@ pub fn run_dap_server(
     sdk_port: u16,
     manifest_path: PathBuf,
 ) -> Result<(), String> {
-    // Set up the simnet session from the project manifest.
-    let project_manifest = ProjectManifest::from_location(&manifest_path, false)?;
-    let (mut deployment, artifacts, _) = generate_default_deployment(
-        &project_manifest,
-        &StacksNetwork::Simnet,
-        false,
-        Environment::Simnet,
-    )?;
-    let mut session = setup_session_with_deployment(
-        &project_manifest,
-        &mut deployment,
-        Some(&artifacts.asts),
-        false,
-    )
-    .session;
-
-    // Pre-compute the contract → path maps; we need them in both threads.
-    let contract_maps: Vec<(QualifiedContractIdentifier, PathBuf)> = deployment
-        .contracts
-        .into_iter()
-        .map(|(contract_id, (_, location))| {
-            let abs = std::fs::canonicalize(&location).unwrap_or(location);
-            (contract_id, abs)
-        })
-        .collect();
+    let (mut session, accounts, _deployer, contract_maps) = make_session(&manifest_path)?;
 
     let sdk_listener = std::net::TcpListener::bind(("127.0.0.1", sdk_port))
         .map_err(|e| format!("failed to bind SDK port {sdk_port}: {e}"))?;
@@ -213,18 +243,67 @@ pub fn run_dap_server(
                 let _ = writer.flush();
                 break;
             }
-            // `eval` runs an arbitrary Clarity snippet in the simnet under the debugger.
-            "eval" => {
+
+            // Re-initialise the simnet session from the manifest on disk.
+            "initSession" => {
+                match make_session(&manifest_path) {
+                    Ok((new_session, _, _, new_maps)) => {
+                        session = new_session;
+                        // Rebuild the contract maps in the debugger.
+                        dap.path_to_contract_id.clear();
+                        dap.contract_id_to_path.clear();
+                        for (contract_id, path) in &new_maps {
+                            dap.path_to_contract_id
+                                .insert(path.clone(), contract_id.clone());
+                            dap.contract_id_to_path
+                                .insert(contract_id.clone(), path.clone());
+                        }
+                        let resp = serde_json::json!({"id": id, "result": {}});
+                        write_response(&mut writer, &resp)?;
+                    }
+                    Err(e) => {
+                        let resp = serde_json::json!({"id": id, "error": e});
+                        write_response(&mut writer, &resp)?;
+                    }
+                }
+            }
+
+            // Return the accounts map (name → address).
+            "getAccounts" => {
+                let resp = serde_json::json!({"id": id, "result": {"accounts": accounts}});
+                write_response(&mut writer, &resp)?;
+            }
+
+            // Return STX and token balances as string-encoded amounts.
+            "getAssetsMap" => {
+                let assets = session.get_assets_maps();
+                // Convert u128 balances to strings so they survive JSON without precision loss.
+                let as_strings: HashMap<&str, HashMap<String, String>> = assets
+                    .iter()
+                    .map(|(asset, holders)| {
+                        let inner: HashMap<String, String> = holders
+                            .iter()
+                            .map(|(addr, bal)| (addr.clone(), bal.to_string()))
+                            .collect();
+                        (asset.as_str(), inner)
+                    })
+                    .collect();
+                let resp = serde_json::json!({"id": id, "result": {"assetsMap": as_strings}});
+                write_response(&mut writer, &resp)?;
+            }
+
+            // Execute an arbitrary Clarity snippet under the debugger.
+            "eval" | "execute" => {
                 let snippet = request["snippet"].as_str().unwrap_or("").to_string();
                 let contract_id = QualifiedContractIdentifier::transient();
                 dap.prepare_for_call(&contract_id, &snippet);
-
-                let response = eval_snippet(&mut session, &mut dap, snippet, id);
+                let inner = eval_snippet_as_tx(&mut session, &mut dap, snippet);
+                let response = wrap_response(id, inner);
                 write_response(&mut writer, &response)?;
             }
-            // `call` evaluates a contract call by name, resolving the contract to its full
-            // principal and optionally setting the tx-sender.
-            "call" => {
+
+            // Execute a single public or read-only contract call.
+            "call" | "callPublicFn" | "callReadOnlyFn" => {
                 let contract = request["contract"].as_str().unwrap_or("").to_string();
                 let function = request["function"].as_str().unwrap_or("").to_string();
                 let sender = request["sender"].as_str().map(|s| s.to_string());
@@ -237,54 +316,76 @@ pub fn run_dap_server(
                     })
                     .unwrap_or_default();
 
-                // Resolve the short contract name to a full principal by matching against
-                // the contracts registered in the DAP debugger's path map.
-                let full_contract_principal =
-                    if contract.contains('.') && !contract.starts_with('.') {
-                        // Already a full principal like "ST1PQHQ....counter"
-                        format!("'{contract}")
-                    } else {
-                        // find in deployed contracts
-                        let short_name = contract.trim_start_matches('.');
-                        dap.contract_id_to_path
-                            .keys()
-                            .find(|id| id.name.as_str() == short_name)
-                            .map(|id| format!("'{id}"))
-                            .unwrap_or_else(|| format!(".{short_name}"))
-                    };
-
-                let args_str = args.join(" ");
-                let snippet = if args_str.is_empty() {
-                    format!("(contract-call? {full_contract_principal} {function})")
-                } else {
-                    format!("(contract-call? {full_contract_principal} {function} {args_str})")
-                };
-
-                // Temporarily set the tx-sender if the client provided one.
-                let original_sender = sender.as_ref().map(|_| session.get_tx_sender());
-                if let Some(ref s) = sender {
-                    session.set_tx_sender(s);
-                }
-
-                let contract_id = dap
-                    .contract_id_to_path
-                    .keys()
-                    .find(|id| id.name.as_str() == contract.trim_start_matches('.'))
-                    .cloned()
-                    .unwrap_or_else(QualifiedContractIdentifier::transient);
-
-                dap.prepare_for_call(&contract_id, &snippet);
-                let response = eval_snippet(&mut session, &mut dap, snippet, id);
-
-                if let Some(ref prev) = original_sender {
-                    session.set_tx_sender(prev);
-                }
-
+                let inner =
+                    call_contract(&mut session, &mut dap, &contract, &function, &args, sender);
+                let response = wrap_response(id, inner);
                 write_response(&mut writer, &response)?;
             }
+
+            // Execute a block of transactions in order, returning one result per tx.
+            "mineBlock" => {
+                let txs = request["txs"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+
+                let mut results: Vec<serde_json::Value> = Vec::with_capacity(txs.len());
+                for tx_val in &txs {
+                    let tx_type = tx_val["type"].as_str().unwrap_or("");
+                    let result = match tx_type {
+                        "callPublicFn" | "callPrivateFn" => {
+                            let contract =
+                                tx_val["contract"].as_str().unwrap_or("").to_string();
+                            let function =
+                                tx_val["function"].as_str().unwrap_or("").to_string();
+                            let sender =
+                                tx_val["sender"].as_str().map(|s| s.to_string());
+                            let args: Vec<String> = tx_val["args"]
+                                .as_array()
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            call_contract(
+                                &mut session,
+                                &mut dap,
+                                &contract,
+                                &function,
+                                &args,
+                                sender,
+                            )
+                        }
+                        "transferSTX" => {
+                            let amount =
+                                tx_val["amount"].as_u64().unwrap_or(0);
+                            let recipient =
+                                tx_val["recipient"].as_str().unwrap_or("").to_string();
+                            let sender =
+                                tx_val["sender"].as_str().unwrap_or("").to_string();
+                            let snippet = format!(
+                                "(stx-transfer? u{amount} tx-sender '{recipient})"
+                            );
+                            let orig = session.get_tx_sender();
+                            session.set_tx_sender(&sender);
+                            let cid = QualifiedContractIdentifier::transient();
+                            dap.prepare_for_call(&cid, &snippet);
+                            let r = eval_snippet_as_tx(&mut session, &mut dap, snippet);
+                            session.set_tx_sender(&orig);
+                            r
+                        }
+                        _ => serde_json::json!({"result": "0x09", "events": "[]", "costs": "null"}),
+                    };
+                    results.push(result);
+                }
+
+                let response = serde_json::json!({"id": id, "result": {"results": results}});
+                write_response(&mut writer, &response)?;
+            }
+
             _ => {
-                let response =
-                    serde_json::json!({"id": id, "error": format!("unknown method: {method}")});
+                let response = serde_json::json!({"id": id, "error": format!("unknown method: {method}")});
                 write_response(&mut writer, &response)?;
             }
         }
@@ -293,30 +394,104 @@ pub fn run_dap_server(
     Ok(())
 }
 
-fn eval_snippet(
-    session: &mut clarity_repl::repl::Session,
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Resolve a short contract name or full principal to the snippet form `'principal`.
+fn resolve_contract_principal(dap: &DAPDebugger, contract: &str) -> String {
+    if contract.contains('.') && !contract.starts_with('.') {
+        format!("'{contract}")
+    } else {
+        let short = contract.trim_start_matches('.');
+        dap.contract_id_to_path
+            .keys()
+            .find(|id| id.name.as_str() == short)
+            .map(|id| format!("'{id}"))
+            .unwrap_or_else(|| format!(".{short}"))
+    }
+}
+
+/// Execute a contract-call? snippet and return an inner tx-result JSON object
+/// (`{"result": "0x...", "events": "[]", "costs": "..."}` on success, or
+/// `{"error": "..."}` on failure). The caller is responsible for wrapping with
+/// `{"id": ..., "result": ...}` or `{"id": ..., "error": ...}`.
+fn call_contract(
+    session: &mut Session,
+    dap: &mut DAPDebugger,
+    contract: &str,
+    function: &str,
+    args: &[String],
+    sender: Option<String>,
+) -> serde_json::Value {
+    let principal = resolve_contract_principal(dap, contract);
+    let args_str = args.join(" ");
+    let snippet = if args_str.is_empty() {
+        format!("(contract-call? {principal} {function})")
+    } else {
+        format!("(contract-call? {principal} {function} {args_str})")
+    };
+
+    let orig_sender = sender.as_ref().map(|_| session.get_tx_sender());
+    if let Some(ref s) = sender {
+        session.set_tx_sender(s);
+    }
+
+    let contract_id = dap
+        .contract_id_to_path
+        .keys()
+        .find(|id| id.name.as_str() == contract.trim_start_matches('.'))
+        .cloned()
+        .unwrap_or_else(QualifiedContractIdentifier::transient);
+
+    dap.prepare_for_call(&contract_id, &snippet);
+    let result = eval_snippet_as_tx(session, dap, snippet);
+
+    if let Some(ref prev) = orig_sender {
+        session.set_tx_sender(prev);
+    }
+
+    result
+}
+
+/// Run a Clarity snippet via `eval_with_hooks` and return an inner tx-result JSON object:
+/// `{"result": "0x...", "events": "[]", "costs": "..."}` on success, or
+/// `{"error": "..."}` on failure.
+///
+/// Callers must wrap the returned value with `wrap_response(id, inner)` before
+/// sending to the SDK client.
+fn eval_snippet_as_tx(
+    session: &mut Session,
     dap: &mut DAPDebugger,
     snippet: String,
-    id: serde_json::Value,
 ) -> serde_json::Value {
     match session.eval_with_hooks(snippet, Some(vec![dap]), false) {
         Ok(result) => {
-            let value_str = match &result.result {
-                EvaluationResult::Contract(contract_result) => contract_result
+            let hex = match &result.result {
+                EvaluationResult::Contract(c) => c
                     .result
                     .as_ref()
-                    .map(value_to_string)
-                    .unwrap_or_default(),
-                EvaluationResult::Snippet(snippet_result) => {
-                    value_to_string(&snippet_result.result)
-                }
+                    .map(|v| to_raw_value(v))
+                    .unwrap_or_else(|| "0x03".to_string()),
+                EvaluationResult::Snippet(s) => to_raw_value(&s.result),
             };
-            serde_json::json!({"id": id, "result": {"value": value_str}})
+            let costs_json = serde_json::to_string(&result.cost).unwrap_or_else(|_| "null".into());
+            serde_json::json!({"result": hex, "events": "[]", "costs": costs_json})
         }
         Err(diagnostics) => {
             let errors: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
-            serde_json::json!({"id": id, "error": errors.join("; ")})
+            let msg = errors.join("; ");
+            serde_json::json!({"error": msg})
         }
+    }
+}
+
+/// Wrap an inner result with `{"id": ..., "result": ...}` or `{"id": ..., "error": ...}`.
+fn wrap_response(id: serde_json::Value, inner: serde_json::Value) -> serde_json::Value {
+    if let Some(msg) = inner.get("error") {
+        serde_json::json!({"id": id, "error": msg})
+    } else {
+        serde_json::json!({"id": id, "result": inner})
     }
 }
 
