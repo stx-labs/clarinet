@@ -20,11 +20,32 @@ export type ClarityCosts = {
   memory_limit: number;
 };
 
+export type TraceKind = "call" | "return" | "event" | "error" | "var";
+
+export type TraceEntry = {
+  kind: TraceKind;
+  /** Call-stack depth (0 = top-level call). */
+  depth: number;
+  contract: string;
+  /** Function name for `call`/`return`; variable name for `var`; empty for `event`/`error`. */
+  function: string;
+  line: number;
+  column: number;
+  /** Argument values as Clarity strings, present on `call` entries. */
+  args?: string[];
+  /** Return value (`return`), event description (`event`), or undefined. */
+  value?: string;
+  /** Error message, present on `error` entries. */
+  error?: string;
+};
+
 export type ParsedTransactionResult = {
   result: ClarityValue;
   events: ClarityEvent[];
   costs: ClarityCosts | null;
   performance: string | undefined;
+  /** Structured execution trace, one entry per function call/return/event/error. */
+  trace: TraceEntry[];
 };
 
 export type CallFn = (
@@ -127,6 +148,41 @@ export function parseEvents(events: string): ClarityEvent[] {
   } catch (e) {
     console.error(`Fail to parse events: ${e}`);
     return [];
+  }
+}
+
+export function parseTrace(trace: string | null | undefined): TraceEntry[] {
+  if (!trace) return [];
+  try {
+    return JSON.parse(trace) as TraceEntry[];
+  } catch {
+    return [];
+  }
+}
+
+export function printTrace(label: string, trace: TraceEntry[]): void {
+  console.log(`\n── trace: ${label} ──`);
+  for (const entry of trace) {
+    const indent = "  ".repeat(entry.depth);
+    if (entry.kind === "call") {
+      const args = entry.args?.length ? `(${entry.args.join(", ")})` : "()";
+      const isFoldMap = /^(fold|map):/.test(entry.function);
+      if (isFoldMap) {
+        console.log(`${indent}⟳ ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
+      } else {
+        console.log(`${indent}→ ${entry.contract}.${entry.function}${args}  [${entry.line}:${entry.column}]`);
+      }
+    } else if (entry.kind === "return") {
+      const isFoldMap = /^(fold|map):/.test(entry.function);
+      const arrow = isFoldMap ? "⟳" : "←";
+      console.log(`${indent}${arrow} ${entry.contract}.${entry.function} = ${entry.value}`);
+    } else if (entry.kind === "event") {
+      console.log(`${indent}★ ${entry.value}`);
+    } else if (entry.kind === "error") {
+      console.log(`${indent}✗ error at ${entry.contract} ${entry.line}:${entry.column}: ${entry.error}`);
+    } else if (entry.kind === "var") {
+      console.log(`${indent}let ${entry.function} = ${entry.value}`);
+    }
   }
 }
 

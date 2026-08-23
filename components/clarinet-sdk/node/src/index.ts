@@ -1,7 +1,10 @@
 export {
   tx,
+  printTrace,
   type ClarityEvent,
   type ParsedTransactionResult,
+  type TraceEntry,
+  type TraceKind,
   type DeployContractOptions,
   type Tx,
   type TransferSTX,
@@ -26,14 +29,17 @@ type Options = {
   trackCosts: boolean;
   trackCoverage: boolean;
   trackPerformance?: boolean;
+  trackTrace?: boolean;
 };
 
 export async function getSDK(options?: Options): Promise<Simnet> {
   const module = await wasmModule;
-  let sdkOptions = new module.SDKOptions(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sdkOptions = new (module.SDKOptions as any)(
     !!options?.trackCosts,
     !!options?.trackCoverage,
     !!options?.trackPerformance,
+    !!options?.trackTrace,
   );
 
   const simnet = new Proxy(
@@ -67,6 +73,7 @@ function memoizedInit() {
       trackCosts: boolean;
       trackCoverage: boolean;
       trackPerformance?: boolean;
+      trackTrace?: boolean;
       performanceCostField?: string;
       apiUrl?: string;
     },
@@ -84,3 +91,9 @@ function memoizedInit() {
 
 
 export const initSimnet = memoizedInit();
+
+export {
+  startDebugServer,
+  DebugClient,
+  type DebugCallResult,
+} from "./debugClient.js";

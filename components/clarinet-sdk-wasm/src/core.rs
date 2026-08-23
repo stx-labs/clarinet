@@ -222,6 +222,8 @@ pub struct TransactionRes {
     pub events: String,
     pub costs: String,
     pub performance: Option<String>,
+    /// JSON-serialized `Vec<TraceEntry>` from `AgentTraceHook`.
+    pub trace: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -255,6 +257,7 @@ pub fn execution_result_to_transaction_res(execution: &ExecutionResult) -> Trans
         events: json!(events_as_strings).to_string(),
         costs: json!(execution.cost).to_string(),
         performance: None,
+        trace: None,
     }
 }
 
@@ -274,16 +277,24 @@ pub struct SDKOptions {
     pub track_coverage: bool,
     #[wasm_bindgen(js_name = trackPerformance)]
     pub track_performance: bool,
+    #[wasm_bindgen(js_name = trackTrace)]
+    pub track_trace: bool,
 }
 
 #[wasm_bindgen]
 impl SDKOptions {
     #[wasm_bindgen(constructor)]
-    pub fn new(track_costs: bool, track_coverage: bool, track_performance: Option<bool>) -> Self {
+    pub fn new(
+        track_costs: bool,
+        track_coverage: bool,
+        track_performance: Option<bool>,
+        track_trace: Option<bool>,
+    ) -> Self {
         Self {
             track_costs,
             track_coverage,
             track_performance: track_performance.unwrap_or(false),
+            track_trace: track_trace.unwrap_or(false),
         }
     }
 }
@@ -336,6 +347,7 @@ impl SDK {
         let track_coverage = options.as_ref().is_some_and(|o| o.track_coverage);
         let track_costs = options.as_ref().is_some_and(|o| o.track_costs);
         let track_performance = options.as_ref().is_some_and(|o| o.track_performance);
+        let track_trace = options.as_ref().is_some_and(|o| o.track_trace);
 
         Self {
             deployer: String::new(),
@@ -349,6 +361,7 @@ impl SDK {
                 track_coverage,
                 track_costs,
                 track_performance,
+                track_trace,
             },
             current_test_name: String::new(),
             costs_reports: vec![],
@@ -810,6 +823,7 @@ impl SDK {
         let test_name = self.current_test_name.clone();
         let track_costs = self.options.track_costs;
         let track_performance = self.options.track_performance;
+        let track_trace = self.options.track_trace;
 
         if PrincipalData::parse_standard_principal(sender).is_err() {
             return Err(format!("Invalid sender address '{sender}'."));
@@ -829,6 +843,7 @@ impl SDK {
                 sender,
                 allow_private,
                 track_costs,
+                track_trace,
             )
             .map_err(|diagnostics| {
                 let mut message = format!(
@@ -850,6 +865,9 @@ impl SDK {
         } else {
             None
         };
+        let trace_json = track_trace
+            .then(|| serde_json::to_string(&session.last_call_trace).ok())
+            .flatten();
 
         // Release the session borrow before accessing self.costs_reports
         let _ = session;
@@ -873,6 +891,7 @@ impl SDK {
         if let Some(perf_data) = performance_data {
             response.performance = Some(perf_data);
         }
+        response.trace = trace_json;
 
         Ok(response)
     }
