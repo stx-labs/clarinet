@@ -15,17 +15,46 @@ import {
 import { initClient, clientOpts } from "./common";
 
 // ---------------------------------------------------------------------------
-// CodeLens provider: show "Debug with Clarinet" above test blocks in files
-// that use startDebugServer from @stacks/clarinet-sdk.
+// CodeLens provider: show "Debug" above every it/test block in
+// TypeScript test files that live inside a Clarinet project
+// (i.e. a Clarinet.toml exists somewhere in the workspace).
 // ---------------------------------------------------------------------------
 
-const DEBUG_PATTERN = /\bstartDebugServer\b/;
 const TEST_PATTERN = /^\s*(?:it|test)\s*\(\s*(['"`])(.*?)\1/;
+// Light filter: only show the button in files that look like Clarinet tests
+// (they import from @stacks/clarinet-sdk or use the `simnet` global) or that
+// explicitly use the debug API.  This avoids the button appearing in plain
+// Vitest projects that happen to be open in the same workspace.
+const CLARINET_USAGE_PATTERN = /\b(?:clarinet-sdk|simnet|startDebugServer|connectDebugServer)\b/;
 
 class ClarityDebugTestLensProvider implements vscode.CodeLensProvider {
+  /** Cache: workspace root → whether a Clarinet.toml was found anywhere in it. */
+  private readonly _cache = new Map<string, boolean>();
+
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
     const text = document.getText();
-    if (!DEBUG_PATTERN.test(text)) return [];
+    // Quick text-content filter before doing filesystem work.
+    if (!CLARINET_USAGE_PATTERN.test(text)) return [];
+
+    // Check (cached) that a Clarinet.toml exists in the workspace.
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (!workspaceFolder) return [];
+    const root = workspaceFolder.uri.fsPath;
+    if (!this._cache.has(root)) {
+      const found = vscode.workspace.findFiles(
+        new vscode.RelativePattern(workspaceFolder, "**/Clarinet.toml"),
+        "**/node_modules/**",
+        1,
+      );
+      // findFiles is async; we kick it off and update the cache for next time.
+      // On the first call we default to showing the lens (optimistic) and
+      // update after the promise resolves.
+      this._cache.set(root, true); // optimistic
+      found.then((files) => {
+        this._cache.set(root, files.length > 0);
+      });
+    }
+    if (!this._cache.get(root)) return [];
 
     const lenses: vscode.CodeLens[] = [];
     const lines = text.split("\n");
@@ -35,7 +64,7 @@ class ClarityDebugTestLensProvider implements vscode.CodeLensProvider {
       const range = new vscode.Range(i, 0, i, lines[i].length);
       lenses.push(
         new vscode.CodeLens(range, {
-          title: "$(debug) Debug with Clarinet",
+          title: "$(debug) Debug",
           command: "clarity.debugTest",
           arguments: [document.uri, m[2]],
         }),
@@ -156,7 +185,7 @@ export async function activate(context: ExtensionContext) {
   );
   initClient(context, client);
 
-  // CodeLens: "Debug with Clarinet" buttons in TypeScript test files.
+  // CodeLens: "Debug" buttons in TypeScript test files.
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(
       { language: "typescript" },
@@ -283,7 +312,7 @@ export async function activate(context: ExtensionContext) {
           // or test name are interpreted. CLARINET_DEBUG_PORT is passed via the
           // terminal env rather than inline in the shell command.
           const shellQuote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
-          const cmd = `npx vitest run ${shellQuote(relativeFile)} -t ${shellQuote(testName)}`;
+          const cmd = `npx vitest run ${shellQuote(relativeFile)} -t ${shellQuote(testName)} --testTimeout=0`;
           debugOutput.info(`  opening terminal: ${cmd}`);
           const terminal = vscode.window.createTerminal({
             name: `Clarinet Debug: ${testName}`,

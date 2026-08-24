@@ -194,7 +194,7 @@
     "commands": [
       {
         "command": "clarity.debugTest",
-        "title": "Debug with Clarinet",
+        "title": "Debug",
         "category": "Clarity"
       }
     ],

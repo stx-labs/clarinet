@@ -11,6 +11,8 @@ import type { SDK } from "@stacks/clarinet-sdk-wasm";
 
 import { vfs } from "./vfs.js";
 import { Simnet, getSessionProxy } from "./sdkProxy.js";
+import { connectSyncSocket } from "./syncDebugSocket.js";
+import { createSyncDebugSimnet } from "./syncDebugSimnet.js";
 
 export { type Simnet } from "./sdkProxy.js";
 
@@ -59,6 +61,8 @@ export async function generateDeployement(manifestPath = "./Clarinet.toml") {
 // load wasm only once and memoize it
 function memoizedInit() {
   let simnet: Simnet | null = null;
+  // When CLARINET_DEBUG_PORT is set, a single debug proxy is shared across all calls.
+  let debugSimnet: Simnet | null = null;
 
   return async (
     manifestPath = "./Clarinet.toml",
@@ -71,6 +75,21 @@ function memoizedInit() {
       apiUrl?: string;
     },
   ) => {
+    const debugPort = process.env["CLARINET_DEBUG_PORT"]
+      ? Number(process.env["CLARINET_DEBUG_PORT"])
+      : undefined;
+
+    if (debugPort != null) {
+      // Connect to the debug server (no-op if already connected).
+      await connectSyncSocket(debugPort);
+      if (!debugSimnet || noCache) {
+        debugSimnet = createSyncDebugSimnet() as unknown as Simnet;
+      }
+      // Tell the server to reinitialise its session (mirrors initSession semantics).
+      await (debugSimnet as unknown as { initSession(cwd: string, mp: string): Promise<void> }).initSession(process.cwd(), manifestPath);
+      return debugSimnet;
+    }
+
     if (noCache || !simnet) {
       simnet = await getSDK(options);
     }
@@ -80,8 +99,6 @@ function memoizedInit() {
     return simnet;
   };
 }
-
-
 
 export const initSimnet = memoizedInit();
 
