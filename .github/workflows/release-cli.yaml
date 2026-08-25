@@ -26,7 +26,7 @@ jobs:
         id: docker_meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         env:
-          TAG: ${{ github.event.client_payload.tag }}
+          TAG: ${{ github.event.release.tag_name }}
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -38,7 +38,7 @@ jobs:
             org.opencontainers.image.description=Clarinet is a simple, modern and opinionated runtime for testing, integrating and deploying Clarity smart contracts.
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ env.TAG }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.created=${{ github.event.release.published_at }}
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Login to GitHub Container Registry
@@ -51,7 +51,7 @@ jobs:
       - name: Download release asset
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.client_payload.tag }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release download $TAG --pattern "clarinet-linux-x64-glibc.tar.gz"
 
@@ -67,9 +67,9 @@ jobs:
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
 
-  homebrew:
-    name: Homebrew
-    runs-on: macos-latest
+  winget:
+    name: Winget
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     environment: release
@@ -78,81 +78,29 @@ jobs:
         id: generate-token
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
-          app-id: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_PEM }}
+          app-id: ${{ secrets.STACKSLABS_PKG_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.STACKSLABS_PKG_RELEASE_BOT_APP_PEM }}
+          owner: stx-labs  # token scoped to the org so forking works
 
-      - name: Get bot user ID
-        id: get-user-id
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          APP_SLUG: ${{ steps.generate-token.outputs.app-slug }}
-        run: echo "user-id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
-
-      - name: Homebrew version bump
-        env:
-          HOMEBREW_GITHUB_API_TOKEN: ${{ steps.generate-token.outputs.token }}
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          TAG: ${{ github.event.client_payload.tag }}
-          GIT_AUTHOR_NAME: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}
-          GIT_AUTHOR_EMAIL: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}@users.noreply.github.com
+      - name: Install komac
         run: |
-          # Get version info
-          VERSION=$(echo "${TAG#v}")
+          KOMAC_VERSION="2.16.0"
+          KOMAC_SHA256="7d2707fa6210f2789a3702de49fbd150b736dbf426ee0b9bc8e098736f9fd82d"
+          KOMAC_TARBALL="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSLO "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/${KOMAC_TARBALL}"
+          echo "${KOMAC_SHA256}  ${KOMAC_TARBALL}" | sha256sum --check
+          tar xzf "${KOMAC_TARBALL}" komac
+          chmod +x komac
+          sudo mv komac /usr/local/bin/
 
-          # Configure git configs
-          git config --global user.name "${GIT_AUTHOR_NAME}"
-          git config --global user.email "${GIT_AUTHOR_EMAIL}"
-
-          brew developer on
-          brew update
-          brew bump-formula-pr \
-            --no-browse \
-            --no-audit \
-            --force \
-            --tag "${TAG}" \
+      - name: Update winget manifest and submit PR
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG#v}"
+          komac update StacksLabs.Clarinet \
+            --urls "https://github.com/${{ github.repository }}/releases/download/${TAG}/clarinet-windows-x64.zip" \
             --version "${VERSION}" \
-            clarinet
-
-  # winget:
-  #   name: Winget
-  #   runs-on: windows-latest
-  #   steps:
-  #     - name: Generate release bot app token
-  #       id: generate-token
-  #       uses: actions/create-github-app-token@v1
-  #       with:
-  #         app-id: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_ID }}
-  #         private-key: ${{ secrets.HIROSYSTEMS_PKG_RELEASE_BOT_APP_PEM }}
-
-  #     - name: Get bot user ID
-  #       id: get-user-id
-  #       run: |
-  #         $userId = $(gh api "/users/${{ steps.generate-token.outputs.app-slug }}[bot]" --jq .id)
-  #         echo "user-id=$userId" >> $env:GITHUB_OUTPUT
-  #       env:
-  #         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-
-  #     - name: Winget version bump
-  #       env:
-  #         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-  #         TAG: ${{ github.event.client_payload.tag }}
-  #         GIT_AUTHOR_NAME: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}
-  #         GIT_AUTHOR_EMAIL: ${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}@users.noreply.github.com
-  #       run: |
-  #         # Get version info
-  #         $VERSION=${env:TAG}.substring(1)
-
-  #         # Configure git configs
-  #         git config --global user.name "${env:GIT_AUTHOR_NAME}"
-  #         git config --global user.email "${env:GIT_AUTHOR_EMAIL}"
-
-  #         # Get wingetcreate
-  #         iwr https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
-
-  #         # Update manifest and submit PR
-  #         ./wingetcreate.exe update `
-  #           --urls https://github.com/${{ github.repository }}/releases/download/${env:TAG}/clarinet-windows-x64.msi `
-  #           --version ${VERSION} `
-  #           --token ${{ steps.generate-token.outputs.token }} `
-  #           --submit `
-  #           HiroSystems.Clarinet
+            --submit \
+            --token "${GH_TOKEN}"
