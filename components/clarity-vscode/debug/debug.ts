@@ -35,7 +35,7 @@ function extractMessages(buffer: Buffer): { messages: any[]; remaining: Buffer }
   return { messages, remaining: buffer.subarray(pos) };
 }
 
-/** Wrap a DAP message in the Content-Length framing used on the wire. */
+/** Encode a DAP message for the transport. */
 function frame(message: unknown): Buffer {
   const body = Buffer.from(JSON.stringify(message), "utf8");
   return Buffer.concat([
@@ -44,32 +44,9 @@ function frame(message: unknown): Buffer {
   ]);
 }
 
-/**
- * Body of our `initialize` response.
- *
- * This relay owns the connection to the editor, so it has to answer
- * `initialize` itself: the editor waits for that response before it sends
- * `launch` or `attach`, and until one of those arrives we cannot know which
- * transport to open. Answering it is also required of any adapter by the DAP
- * spec.
- *
- * `initialize` is deliberately *not* forwarded once a transport opens.
- * `DAPDebugger::initialize` (clarity-repl/src/repl/debug/dap/mod.rs) only writes
- * this response and sets no state, and neither `init()` (which waits for
- * `launch`) nor `init_attach()` (which waits for `configurationDone`) depends on
- * having seen it — so consuming it here cannot leave the adapter half-configured,
- * and the editor never receives two responses for the same request.
- *
- * The shape mirrors what `clarity-repl` emits, including the extra
- * `capabilities` nesting: `debug_types::InitializeResponse` is a struct with a
- * `capabilities` field and is not flattened, so the Rust adapter puts the
- * capabilities one level deeper than the DAP spec does. Emitting the
- * spec-correct shape here would make this relay advertise capabilities the
- * stdio adapter does not, changing the request sequence the editor uses — in
- * particular whether it sends `configurationDone`, which `threads()` currently
- * compensates for. That is an interactive path with no automated coverage, so
- * the two are kept identical and should be corrected together.
- */
+// The relay answers `initialize` because the client waits for it before sending
+// the `launch` or `attach` request that selects the transport. Keep this response
+// in sync with the Rust adapter.
 const INITIALIZE_BODY = {
   capabilities: {
     supportsConfigurationDoneRequest: true,
@@ -82,12 +59,9 @@ const INITIALIZE_BODY = {
   },
 };
 
-// Messages to hand to the transport once it exists, plus any trailing partial
-// message still accumulating.
+// Complete messages and trailing input buffered until the transport opens.
 const forward: Buffer[] = [];
-// Annotated as `Buffer` (i.e. `Buffer<ArrayBufferLike>`) rather than inferred:
-// `Buffer.alloc` returns `Buffer<ArrayBuffer>`, which `subarray`'s
-// `Buffer<ArrayBufferLike>` result is not assignable to.
+// Explicit type accommodates the result of Buffer.subarray().
 let accumulated: Buffer = Buffer.alloc(0);
 let handled = false;
 let sendSeq = 1;
@@ -105,7 +79,7 @@ function answerInitialize(requestSeq: number) {
   );
 }
 
-/** Hand everything buffered so far to a newly opened transport, in order. */
+/** Replay buffered input to the transport. */
 function replay(write: (chunk: Buffer) => void) {
   for (const message of forward) write(message);
   forward.length = 0;
@@ -155,8 +129,7 @@ const onData = async (chunk: Buffer) => {
   const { messages, remaining } = extractMessages(accumulated);
   accumulated = remaining;
 
-  // Classify the whole batch before opening anything, so messages that share a
-  // chunk with `launch`/`attach` are still forwarded rather than dropped.
+  // Classify the batch first so coalesced messages are not dropped.
   let transport: { kind: "launch" } | { kind: "attach"; port: number } | undefined;
   for (const msg of messages) {
     if (msg?.type === "request" && msg.command === "initialize") {
@@ -176,10 +149,7 @@ const onData = async (chunk: Buffer) => {
 
   if (!transport) return;
 
-  // Stop reading stdin while the transport opens. Pausing (rather than only
-  // removing the listener) keeps anything that arrives in the meantime buffered
-  // by Node instead of being emitted and discarded; `replay` then `resume`
-  // hand it over in order.
+  // Pause stdin while the transport opens so new input stays buffered in order.
   handled = true;
   process.stdin.removeListener("data", onData);
   process.stdin.pause();

@@ -1,24 +1,6 @@
 /**
- * Regression test for finding 1 of the PR #2483 review: the DAP adapter relay
- * must answer `initialize`.
- *
- * VSCode launches this file as the debug adapter for both `program`-based
- * configurations (`debuggers[].program = ./debug/dist/debug.js` in
- * package.json): the pre-existing "Clarinet Debugger" launch config and the new
- * "Clarinet Debugger: Attach" snippet. It sends `initialize` first and awaits
- * the **response** before sending `launch` or `attach`, and the DAP spec
- * requires every adapter to answer it.
- *
- * The regression these guard against: the relay acted only on `launch`/`attach`,
- * so `initialize` fell through both branches, nothing was written to stdout, and
- * the session hung with an empty Debug Console. Before the buffering rewrite this
- * file spawned `clarinet dap` immediately with inherited stdio, so `initialize`
- * was answered by the Rust side; buffering removed the only thing that could
- * answer it without putting anything in its place.
- *
- * Tests the built bundle rather than the source, matching the convention in
- * `clarinet-sdk/node/tests` ("test the built package and not the source code")
- * and because the bundle is literally what VSCode executes.
+ * Regression tests for the DAP relay's `initialize` handshake and request
+ * forwarding. These run against the bundle used by VSCode.
  *
  *   pnpm run build:dap && pnpm run test:dap
  */
@@ -114,16 +96,7 @@ test("`initialize` is answered before the transport is known", async (t) => {
   );
 });
 
-/**
- * The other half of the contract: `attach` must still open the socket and hand
- * over everything buffered, and `initialize` must *not* be among it. The relay
- * answers `initialize` locally, so forwarding it as well would give the editor
- * two responses for the same request seq.
- *
- * This also keeps the test above honest — it proves the harness can observe the
- * adapter's I/O, so a silent stdout there is the adapter's doing, not the
- * harness's.
- */
+// `initialize` is handled locally; only subsequent requests reach the adapter.
 test("`attach` opens the socket and forwards buffered requests", async (t) => {
   const chunks = [];
   const server = net.createServer((socket) => {
