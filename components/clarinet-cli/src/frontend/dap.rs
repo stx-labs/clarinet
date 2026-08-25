@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clarinet_deployments::setup_session_with_deployment;
 use clarinet_files::{ProjectManifest, StacksNetwork};
@@ -66,7 +66,7 @@ pub fn run_dap() -> Result<(), String> {
 // Returns (session, accounts map, deployer address, contract→path pairs).
 // ---------------------------------------------------------------------------
 fn make_session(
-    manifest_path: &PathBuf,
+    manifest_path: &Path,
 ) -> Result<
     (
         Session,
@@ -106,9 +106,13 @@ fn make_session(
         })
         .collect();
 
-    let session =
-        setup_session_with_deployment(&project_manifest, &mut deployment, Some(&artifacts.asts), false)
-            .session;
+    let session = setup_session_with_deployment(
+        &project_manifest,
+        &mut deployment,
+        Some(&artifacts.asts),
+        false,
+    )
+    .session;
 
     Ok((session, accounts, deployer, contract_maps))
 }
@@ -324,22 +328,16 @@ pub fn run_dap_server(
 
             // Execute a block of transactions in order, returning one result per tx.
             "mineBlock" => {
-                let txs = request["txs"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
+                let txs = request["txs"].as_array().cloned().unwrap_or_default();
 
                 let mut results: Vec<serde_json::Value> = Vec::with_capacity(txs.len());
                 for tx_val in &txs {
                     let tx_type = tx_val["type"].as_str().unwrap_or("");
                     let result = match tx_type {
                         "callPublicFn" | "callPrivateFn" => {
-                            let contract =
-                                tx_val["contract"].as_str().unwrap_or("").to_string();
-                            let function =
-                                tx_val["function"].as_str().unwrap_or("").to_string();
-                            let sender =
-                                tx_val["sender"].as_str().map(|s| s.to_string());
+                            let contract = tx_val["contract"].as_str().unwrap_or("").to_string();
+                            let function = tx_val["function"].as_str().unwrap_or("").to_string();
+                            let sender = tx_val["sender"].as_str().map(|s| s.to_string());
                             let args: Vec<String> = tx_val["args"]
                                 .as_array()
                                 .map(|a| {
@@ -358,15 +356,11 @@ pub fn run_dap_server(
                             )
                         }
                         "transferSTX" => {
-                            let amount =
-                                tx_val["amount"].as_u64().unwrap_or(0);
-                            let recipient =
-                                tx_val["recipient"].as_str().unwrap_or("").to_string();
-                            let sender =
-                                tx_val["sender"].as_str().unwrap_or("").to_string();
-                            let snippet = format!(
-                                "(stx-transfer? u{amount} tx-sender '{recipient})"
-                            );
+                            let amount = tx_val["amount"].as_u64().unwrap_or(0);
+                            let recipient = tx_val["recipient"].as_str().unwrap_or("").to_string();
+                            let sender = tx_val["sender"].as_str().unwrap_or("").to_string();
+                            let snippet =
+                                format!("(stx-transfer? u{amount} tx-sender '{recipient})");
                             let orig = session.get_tx_sender();
                             session.set_tx_sender(&sender);
                             let cid = QualifiedContractIdentifier::transient();
@@ -385,7 +379,8 @@ pub fn run_dap_server(
             }
 
             _ => {
-                let response = serde_json::json!({"id": id, "error": format!("unknown method: {method}")});
+                let response =
+                    serde_json::json!({"id": id, "error": format!("unknown method: {method}")});
                 write_response(&mut writer, &response)?;
             }
         }
@@ -471,7 +466,7 @@ fn eval_snippet_as_tx(
                 EvaluationResult::Contract(c) => c
                     .result
                     .as_ref()
-                    .map(|v| to_raw_value(v))
+                    .map(to_raw_value)
                     .unwrap_or_else(|| "0x03".to_string()),
                 EvaluationResult::Snippet(s) => to_raw_value(&s.result),
             };
