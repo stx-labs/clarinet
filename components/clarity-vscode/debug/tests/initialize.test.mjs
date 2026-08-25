@@ -6,14 +6,15 @@
  * configurations (`debuggers[].program = ./debug/dist/debug.js` in
  * package.json): the pre-existing "Clarinet Debugger" launch config and the new
  * "Clarinet Debugger: Attach" snippet. It sends `initialize` first and awaits
- * the **response** before sending `launch` or `attach`. The rewritten relay acts
- * only on `launch`/`attach`, so `initialize` falls through both branches and
- * nothing is ever written to stdout — the session hangs with an empty Debug
- * Console.
+ * the **response** before sending `launch` or `attach`, and the DAP spec
+ * requires every adapter to answer it.
  *
- * On `main` this file spawned `clarinet dap` immediately with inherited stdio,
- * so `initialize` was answered by the Rust side. The buffering rewrite removed
- * the only thing that could answer it.
+ * The regression these guard against: the relay acted only on `launch`/`attach`,
+ * so `initialize` fell through both branches, nothing was written to stdout, and
+ * the session hung with an empty Debug Console. Before the buffering rewrite this
+ * file spawned `clarinet dap` immediately with inherited stdio, so `initialize`
+ * was answered by the Rust side; buffering removed the only thing that could
+ * answer it without putting anything in its place.
  *
  * Tests the built bundle rather than the source, matching the convention in
  * `clarinet-sdk/node/tests` ("test the built package and not the source code")
@@ -114,12 +115,16 @@ test("`initialize` is answered before the transport is known", async (t) => {
 });
 
 /**
- * Control: proves the harness itself is sound and isolates the defect above to
- * the missing `initialize` response. Once `attach` arrives the relay does open
- * the socket and replay the buffered stdin — including the `initialize` bytes it
- * never answered. This test passes today.
+ * The other half of the contract: `attach` must still open the socket and hand
+ * over everything buffered, and `initialize` must *not* be among it. The relay
+ * answers `initialize` locally, so forwarding it as well would give the editor
+ * two responses for the same request seq.
+ *
+ * This also keeps the test above honest — it proves the harness can observe the
+ * adapter's I/O, so a silent stdout there is the adapter's doing, not the
+ * harness's.
  */
-test("control: `attach` opens the socket and replays buffered stdin", async (t) => {
+test("`attach` opens the socket and forwards buffered requests", async (t) => {
   const chunks = [];
   const server = net.createServer((socket) => {
     socket.on("data", (chunk) => chunks.push(chunk.toString("utf8")));
@@ -136,14 +141,19 @@ test("control: `attach` opens the socket and replays buffered stdin", async (t) 
   );
 
   const relayed = await waitFor(
-    () => chunks.join("").includes('"initialize"'),
+    () => chunks.join("").includes('"attach"'),
     RELAY_TIMEOUT_MS,
   );
 
   assert.ok(
     relayed,
-    "the relay never forwarded the buffered `initialize` to the DAP port; " +
-      "the test harness or the attach branch is broken, not just the " +
-      "initialize response",
+    "the relay never forwarded the buffered `attach` request to the DAP port; " +
+      "`DAPDebugger::attach` is what initialises the debug state, so without it " +
+      "the adapter panics on the first `setBreakpoints` or `disconnect`",
+  );
+  assert.ok(
+    !chunks.join("").includes('"initialize"'),
+    "the relay forwarded `initialize` to the adapter as well as answering it " +
+      "locally; the editor would receive two responses for the same request seq",
   );
 });
