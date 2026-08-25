@@ -17,6 +17,7 @@
   "scripts": {
     "clean": "rimraf .vscode-test-web ./debug/dist ./client/dist ./server/dist ./server/src/clarity-lsp-*",
     "build:dap": "rspack build --config rspack.dap.js",
+    "test:dap": "node --test debug/tests/*.test.mjs",
     "pretest": "NODE_ENV=test concurrently \"rspack build -c ./rspack.config.dev.js\" \"swc --config-file .runTests.swcrc ./client/tests/runTests.ts -o ./client/dist/tests/runTests.js\"",
     "test": "node client/dist/tests/runTests.js",
     "lint": "eslint ./client/src ./server/src",
