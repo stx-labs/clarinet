@@ -50,9 +50,14 @@ function argString(v: ClarityValue): string {
 }
 
 export type SyncDebugSimnet = {
-  deployer: string;
+  readonly deployer: string;
+  readonly blockHeight: number;
+  readonly burnBlockHeight: number;
+  readonly stacksBlockHeight: number;
   getAccounts(): Map<string, string>;
   mineBlock(txs: Tx[]): ParsedTransactionResult[];
+  mineEmptyBlock(count?: number): number;
+  mineEmptyStacksBlock(): number;
   callPublicFn(
     contract: string,
     method: string,
@@ -72,8 +77,14 @@ export type SyncDebugSimnet = {
     sender: string,
   ): ParsedTransactionResult;
   execute(snippet: string): ParsedTransactionResult;
+  runSnippet(snippet: string): string;
   getAssetsMap(): Map<string, Map<string, bigint>>;
   getLastContractCallTrace(): string | undefined;
+  setCurrentTestName(name: string): void;
+  collectReport(
+    includeBootContracts: boolean,
+    bootContractsPath: string,
+  ): { coverage: string; costs: string };
   // initSession is async to match the Simnet interface called in vitest.setup.ts
   initSession(cwd: string, manifestPath: string): Promise<void>;
 };
@@ -95,8 +106,50 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
   return {
     deployer,
 
+    get blockHeight(): number {
+      const resp = send({ method: "getBlockHeight" }) as { blockHeight: number };
+      return resp.blockHeight;
+    },
+
+    get burnBlockHeight(): number {
+      const resp = send({ method: "getBurnBlockHeight" }) as { burnBlockHeight: number };
+      return resp.burnBlockHeight;
+    },
+
+    get stacksBlockHeight(): number {
+      const resp = send({ method: "getBlockHeight" }) as { blockHeight: number };
+      return resp.blockHeight;
+    },
+
     getAccounts(): Map<string, string> {
       return new Map(Object.entries(accountsRecord));
+    },
+
+    mineEmptyBlock(count = 1): number {
+      const resp = send({ method: "mineEmptyBlock", count }) as { blockHeight: number };
+      return resp.blockHeight;
+    },
+
+    mineEmptyStacksBlock(): number {
+      const resp = send({ method: "mineEmptyBlock", count: 1 }) as { blockHeight: number };
+      return resp.blockHeight;
+    },
+
+    setCurrentTestName(_name: string): void {
+      // No-op in debug mode: coverage tracking is not supported.
+    },
+
+    collectReport(
+      _includeBootContracts: boolean,
+      _bootContractsPath: string,
+    ): { coverage: string; costs: string } {
+      // No-op in debug mode: coverage and cost reports are not supported.
+      return { coverage: "", costs: "" };
+    },
+
+    runSnippet(snippet: string): string {
+      const resp = send({ method: "execute", snippet }) as ServerTxResult;
+      return Cl.stringify(Cl.deserialize(resp.result));
     },
 
     mineBlock(txs: Tx[]): ParsedTransactionResult[] {

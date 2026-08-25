@@ -21,19 +21,6 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
-  components/clarinet-cli/examples/dap-debug-demo:
-    dependencies:
-      '@stacks/clarinet-sdk':
-        specifier: workspace:*
-        version: link:../../../clarinet-sdk/node
-      '@stacks/transactions':
-        specifier: 7.4.0
-        version: 7.4.0
-    devDependencies:
-      vitest:
-        specifier: 4.0.8
-        version: 4.0.8(@types/node@24.0.14)(terser@5.46.1)
-
   components/clarinet-sdk-wasm/pkg-browser: {}
 
   components/clarinet-sdk-wasm/pkg-node: {}

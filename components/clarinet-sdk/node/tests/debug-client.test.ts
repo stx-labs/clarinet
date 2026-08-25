@@ -16,7 +16,7 @@ type SdkRequest = {
 
 type SdkResponse = {
   id: number;
-  result?: { value: string } | null;
+  result?: { result: string; events: string; costs: string } | null;
   error?: string;
 };
 
@@ -71,9 +71,14 @@ async function startMockSdkServer(
 
 describe("DebugClient", () => {
   it("connects to an existing SDK server and sends framed call requests", async () => {
+    // 0x03 is the Clarity hex encoding of `true` (BoolTrue).
+    const mockHex = "0x03";
     const { port, requests } = await startMockSdkServer((request) => ({
       id: request.id,
-      result: request.method === "disconnect" ? null : { value: "(ok u42)" },
+      result:
+        request.method === "disconnect"
+          ? null
+          : { result: mockHex, events: "[]", costs: "null" },
     }));
 
     const client = await startDebugServer({ port });
@@ -85,7 +90,7 @@ describe("DebugClient", () => {
     );
     await client.disconnect();
 
-    expect(result).toEqual({ value: "(ok u42)" });
+    expect(result).toEqual({ value: Cl.stringify(Cl.deserialize(mockHex)) });
     expect(requests).toEqual([
       {
         id: 1,

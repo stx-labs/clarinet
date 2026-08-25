@@ -98,11 +98,13 @@ impl DAPDebugger {
         Self::from_io(rt, reader, writer, false)
     }
 
-    /// Create a no-op `DAPDebugger` backed by null I/O.
+    /// Create a headless `DAPDebugger` backed by null I/O for SDK-only server mode.
     ///
-    /// Used in SDK-only server mode when no DAP client is attached. Since no
-    /// breakpoints are ever registered, execution runs straight through without
-    /// pausing and the null reader/writer are never actually exercised.
+    /// No DAP client is attached, so no breakpoints are registered and execution
+    /// runs straight through. The debug state is pre-initialized so the first
+    /// `prepare_for_call` always takes the `reset_for_new_call` path
+    /// (`State::Continue`) rather than `new` (`State::Start`). `State::Start`
+    /// would cause `will_begin_eval` to attempt I/O against the null streams.
     pub fn no_op() -> Self {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -110,7 +112,12 @@ impl DAPDebugger {
             .unwrap();
         let reader: Box<dyn AsyncRead + Unpin + Send> = Box::new(tokio::io::empty());
         let writer: Box<dyn AsyncWrite + Unpin + Send> = Box::new(tokio::io::sink());
-        Self::from_io(rt, reader, writer, false)
+        let mut d = Self::from_io(rt, reader, writer, false);
+        d.state = Some(DebugState::new(
+            &QualifiedContractIdentifier::transient(),
+            "",
+        ));
+        d
     }
 
     /// Create a `DAPDebugger` that communicates over an existing TCP stream instead of stdio.
@@ -177,10 +184,7 @@ impl DAPDebugger {
     /// After this returns the server is ready to accept SDK contract calls.
     pub fn init_attach(&mut self) -> Result<(), ParseError> {
         while !self.config_done {
-            match self.wait_for_command(None, None, None) {
-                Ok(_) => (),
-                Err(e) => return Err(e),
-            }
+            self.wait_for_command(None, None, None)?;
         }
         Ok(())
     }
@@ -228,7 +232,7 @@ impl DAPDebugger {
                 Err(e) => Err(e),
             }
         } else {
-            Ok(true)
+            Err(ParseError::Eof)
         }
     }
 
@@ -1169,6 +1173,7 @@ impl EvalHook for DAPDebugger {
             while !proceed {
                 proceed = match self.wait_for_command(Some(env), Some(invoke_ctx), Some(context)) {
                     Ok(proceed) => proceed,
+                    Err(codec::ParseError::Eof) => true,
                     Err(e) => {
                         self.log(format!("error: {e}"));
                         false

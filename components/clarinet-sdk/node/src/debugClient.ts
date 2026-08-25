@@ -15,7 +15,7 @@ type PendingRequest = {
 
 type SdkResponse = {
   id: number;
-  result?: { value: string };
+  result?: { result: string; events: string; costs: string };
   error?: string;
 };
 
@@ -107,20 +107,7 @@ export class DebugClient {
       sender,
     });
     if (response.error) throw new Error(response.error);
-    return { value: response.result!.value };
-  }
-
-  /**
-   * Call a read-only contract function through the debug server.
-   * Behaves the same as `callPublicFn` for debugging purposes.
-   */
-  async callReadOnlyFn(
-    contract: string,
-    method: string,
-    args: ClarityValue[],
-    sender: string,
-  ): Promise<DebugCallResult> {
-    return this.callPublicFn(contract, method, args, sender);
+    return { value: Cl.stringify(Cl.deserialize(response.result!.result)) };
   }
 
   /**
@@ -129,7 +116,7 @@ export class DebugClient {
   async execute(snippet: string): Promise<DebugCallResult> {
     const response = await this.send({ method: "eval", snippet });
     if (response.error) throw new Error(response.error);
-    return { value: response.result!.value };
+    return { value: Cl.stringify(Cl.deserialize(response.result!.result)) };
   }
 
   /** Gracefully disconnect from the debug server. */
@@ -138,7 +125,11 @@ export class DebugClient {
       await this.send({ method: "disconnect" });
     } finally {
       this.socket.destroy();
-      this._process?.kill();
+      try {
+        this._process?.kill();
+      } catch {
+        // ignore: process may have already exited
+      }
     }
   }
 }
@@ -172,9 +163,6 @@ function openSocket(port: number): Promise<net.Socket> {
  * const client = await startDebugServer({ manifest: "./Clarinet.toml" });
  * const result = await client.callPublicFn("counter", "increment", [], deployer);
  * await client.disconnect();
- *
- * // With VSCode breakpoints — also open a DAP port for the editor to attach
- * const client = await startDebugServer({ dapPort: 7777 });
  * ```
  */
 export async function startDebugServer(options?: {
@@ -238,6 +226,9 @@ export async function startDebugServer(options?: {
       if (match) {
         sdkPort = Number(match[1]);
         cleanup();
+        // Keep draining stderr so the pipe doesn't fill and block the server,
+        // and so crash messages appear in the parent process output.
+        child.stderr!.on("data", (c: Buffer) => process.stderr.write(c));
         resolve();
       }
     };
