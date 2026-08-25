@@ -79,6 +79,20 @@ function answerInitialize(requestSeq: number) {
   );
 }
 
+function relayOutput(source: NodeJS.ReadableStream) {
+  let buffered: Buffer = Buffer.alloc(0);
+  source.on("data", (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    const { messages, remaining } = extractMessages(buffered);
+    buffered = remaining;
+
+    for (const message of messages) {
+      message.seq = sendSeq++;
+      process.stdout.write(frame(message));
+    }
+  });
+}
+
 /** Replay buffered input to the transport. */
 function replay(write: (chunk: Buffer) => void) {
   for (const message of forward) write(message);
@@ -101,7 +115,7 @@ async function startLaunch() {
   replay((chunk) => dap.stdin!.write(chunk));
   process.stdin.resume();
   process.stdin.pipe(dap.stdin!);
-  dap.stdout!.pipe(process.stdout);
+  relayOutput(dap.stdout!);
   dap.stderr!.pipe(process.stderr);
   dap.on("exit", (code) => process.exit(code ?? 0));
 }
@@ -111,7 +125,7 @@ function startAttach(port: number) {
     replay((chunk) => socket.write(chunk));
     process.stdin.resume();
     process.stdin.pipe(socket);
-    socket.pipe(process.stdout);
+    relayOutput(socket);
   });
 
   socket.on("error", (err: Error) => {
