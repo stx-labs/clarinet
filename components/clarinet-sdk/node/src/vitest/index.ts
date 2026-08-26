@@ -42,12 +42,9 @@ export function getClarinetVitestsArgv() {
     }).argv;
 }
 
-// ensure vitest helpers can be imported even in workspace setup
-// import.meta.resolve return an url like "file:///absolute/path/to/clarinet-sdk/dist/esm/index.js"
-const sdkURL = import.meta.resolve("@stacks/clarinet-sdk");
-const sdkPath = url.fileURLToPath(sdkURL);
-const sdkDir = path.dirname(sdkPath);
+// Derive the package root from this module's own location
+const sdkDir = path.dirname(url.fileURLToPath(import.meta.url));
 
-// sdkDir is in /dist/esm/node/src, hence the ../../../../
-export const vitestHelpersPath = path.join(sdkDir, "../../../../vitest-helpers/src/");
+// sdkDir is /dist/esm/node/src/vitest, hence the ../../../../../
+export const vitestHelpersPath = path.join(sdkDir, "../../../../../vitest-helpers/src/");
 export const vitestSetupFilePath = path.join(vitestHelpersPath, "vitest.setup.ts");
