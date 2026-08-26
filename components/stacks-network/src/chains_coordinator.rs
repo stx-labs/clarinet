@@ -324,6 +324,11 @@ pub async fn start_chains_coordinator(
     let stacks_signers_keys = config.devnet_config.stacks_signers_keys.clone();
     let mut last_pox_contract = String::new();
     let mut snapshot_created = false;
+    // Number of `pox-5.stake` calls expected in mined blocks before snapshotting.
+    // Set when publish_stacking_orders fires on the pox-4 → pox-5 transition.
+    let mut pox5_stakes_expected: usize = 0;
+    // Number of successful `pox-5.stake` contract calls seen in mined Stacks blocks.
+    let mut pox5_stakes_confirmed: usize = 0;
 
     loop {
         let oper = sel.select();
@@ -397,6 +402,14 @@ pub async fn start_chains_coordinator(
                                 let _ = devnet_event_tx.send(DevnetEvent::success(format!(
                                     "Broadcasted {tx_count} stacking orders"
                                 )));
+                                // Record how many pox-5.stake calls to expect on-chain.
+                                // This fires exactly once: on the pox-4 → pox-5 transition.
+                                if create_new_snapshot
+                                    && pox5_stakes_expected == 0
+                                    && last_pox_contract.contains(".pox-5")
+                                {
+                                    pox5_stakes_expected = tx_count;
+                                }
                             }
                         }
 
@@ -496,17 +509,28 @@ pub async fn start_chains_coordinator(
 
                 let _ = devnet_event_tx.send(DevnetEvent::StacksChainEvent(chain_event));
 
-                let burn_height = stacks_block_update
-                    .block
-                    .metadata
-                    .bitcoin_anchor_block_identifier
-                    .index;
+                // Count successful pox-5.stake calls in this block so we can
+                // snapshot only after all stacking orders are confirmed on-chain.
+                if create_new_snapshot && pox5_stakes_expected > 0 && !snapshot_created {
+                    pox5_stakes_confirmed += stacks_block_update
+                        .block
+                        .transactions
+                        .iter()
+                        .filter(|tx| {
+                            tx.metadata.success
+                                && matches!(
+                                    &tx.metadata.kind,
+                                    StacksTransactionKind::ContractCall(c)
+                                        if c.contract_identifier.ends_with(".pox-5")
+                                            && c.method == "stake"
+                                )
+                        })
+                        .count();
+                }
                 if create_new_snapshot
                     && !snapshot_created
-                    && config
-                        .devnet_config
-                        .epoch_4_0
-                        .is_some_and(|epoch_4_0| burn_height >= epoch_4_0)
+                    && pox5_stakes_expected > 0
+                    && pox5_stakes_confirmed >= pox5_stakes_expected
                 {
                     snapshot_created = true;
                     let _ = create_global_snapshot(
