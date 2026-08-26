@@ -33,6 +33,45 @@ mod bitcoin_deployment;
 
 use crate::types::{DeploymentSpecification, EpochSpec, TransactionSpecification};
 
+/// Return the initial contract-ID remappings for `network`.
+/// Devnet sBTC mappings are added later from its requirement transactions.
+fn boot_contract_ids_to_remap(network: &StacksNetwork) -> HashSet<(String, String)> {
+    let mut contract_ids = HashSet::new();
+
+    for contract_name in BOOT_CONTRACTS_NAMES {
+        contract_ids.insert((
+            format!("{BOOT_MAINNET_ADDRESS}.{contract_name}"),
+            format!("{BOOT_TESTNET_ADDRESS}.{contract_name}"),
+        ));
+    }
+
+    if matches!(network, StacksNetwork::Testnet) {
+        for contract_name in SBTC_CONTRACTS_NAMES {
+            contract_ids.insert((
+                format!("{SBTC_MAINNET_ADDRESS}.{contract_name}"),
+                format!("{SBTC_TESTNET_ADDRESS}.{contract_name}"),
+            ));
+        }
+    }
+
+    contract_ids
+}
+
+fn remap_contract_ids(source: &str, contract_ids: &HashSet<(String, String)>) -> String {
+    let mut source = source.to_string();
+    for (old_contract_id, new_contract_id) in contract_ids {
+        let mut matched_indices = source
+            .match_indices(old_contract_id)
+            .map(|(i, _)| i)
+            .collect::<Vec<usize>>();
+        matched_indices.reverse();
+        for index in matched_indices {
+            source.replace_range(index..index + old_contract_id.len(), new_contract_id);
+        }
+    }
+    source
+}
+
 fn get_btc_secret_key(account: &AccountConfig) -> bitcoincore_rpc::bitcoin::secp256k1::SecretKey {
     use bitcoincore_rpc::bitcoin::secp256k1::SecretKey;
     let (secret_bytes, _) =
@@ -359,21 +398,7 @@ pub fn apply_on_chain_deployment(
     // Using a session to encode + coerce/check (todo) contract calls arguments.
     let mut session = Session::new(SessionSettings::default());
     let mut index = 0;
-    let mut contracts_ids_to_remap: HashSet<(String, String)> = HashSet::new();
-
-    for contract in BOOT_CONTRACTS_NAMES {
-        contracts_ids_to_remap.insert((
-            format!("{BOOT_MAINNET_ADDRESS}:{contract}"),
-            format!("{BOOT_TESTNET_ADDRESS}:{contract}"),
-        ));
-    }
-
-    for contract_name in SBTC_CONTRACTS_NAMES.iter() {
-        contracts_ids_to_remap.insert((
-            format!("{SBTC_MAINNET_ADDRESS}:{contract_name}"),
-            format!("{SBTC_TESTNET_ADDRESS}:{contract_name}"),
-        ));
-    }
+    let mut contracts_ids_to_remap = boot_contract_ids_to_remap(&deployment.network);
 
     for batch_spec in deployment.plan.batches.iter() {
         let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
@@ -545,22 +570,7 @@ pub fn apply_on_chain_deployment(
                         deployment.network,
                         StacksNetwork::Devnet | StacksNetwork::Testnet
                     ) {
-                        // Remapping - This is happening
-                        let mut source = tx.source.clone();
-                        for (old_contract_id, new_contract_id) in contracts_ids_to_remap.iter() {
-                            let mut matched_indices = source
-                                .match_indices(old_contract_id)
-                                .map(|(i, _)| i)
-                                .collect::<Vec<usize>>();
-                            matched_indices.reverse();
-                            for index in matched_indices {
-                                source.replace_range(
-                                    index..index + old_contract_id.len(),
-                                    new_contract_id,
-                                );
-                            }
-                        }
-                        source
+                        remap_contract_ids(&tx.source, &contracts_ids_to_remap)
                     } else {
                         tx.source.clone()
                     };
@@ -969,4 +979,127 @@ pub fn get_initial_transactions_trackers(
         }
     }
     trackers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrites_sbtc_contract_references_for_testnet_deployments() {
+        assert_ne!(SBTC_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS);
+
+        let source = format!(
+            "(contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-registry get-bitcoin-wallet-public-key)\n\
+             (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-name)\n\
+             (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-deposit get-deposit-status u1)\n\
+             (contract-call? 'SP000000000000000000002Q6VF78.unrelated get-name)"
+        );
+
+        let remapped = remap_contract_ids(
+            &source,
+            &boot_contract_ids_to_remap(&StacksNetwork::Testnet),
+        );
+
+        assert_eq!(
+            remapped,
+            format!(
+                "(contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-registry get-bitcoin-wallet-public-key)\n\
+                 (contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-token get-name)\n\
+                 (contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-deposit get-deposit-status u1)\n\
+                 (contract-call? 'SP000000000000000000002Q6VF78.unrelated get-name)"
+            )
+        );
+    }
+
+    /// Default deployer from the generated Devnet settings.
+    const TEST_DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+
+    /// Build the mapping added for a Devnet sBTC requirement.
+    fn devnet_requirement_mapping(contract_name: &str) -> (String, String) {
+        let deployer = PrincipalData::parse_standard_principal(TEST_DEPLOYER).unwrap();
+        (
+            format!("{SBTC_MAINNET_ADDRESS}.{contract_name}"),
+            QualifiedContractIdentifier::new(
+                deployer,
+                ContractName::try_from(contract_name.to_string()).unwrap(),
+            )
+            .to_string(),
+        )
+    }
+
+    #[test]
+    fn boot_contract_references_are_rewritten_on_every_non_mainnet_network() {
+        for network in [StacksNetwork::Devnet, StacksNetwork::Testnet] {
+            let source = format!("(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-4 get-pox-info)");
+            let remapped = remap_contract_ids(&source, &boot_contract_ids_to_remap(&network));
+
+            assert_eq!(
+                remapped,
+                format!("(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-4 get-pox-info)"),
+                "boot contracts live at the testnet boot address on {network:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sbtc_contract_references_are_not_rewritten_for_devnet_deployments() {
+        let contract_ids = boot_contract_ids_to_remap(&StacksNetwork::Devnet);
+
+        for contract_name in SBTC_CONTRACTS_NAMES {
+            let source_id = format!("{SBTC_MAINNET_ADDRESS}.{contract_name}");
+            assert!(
+                !contract_ids.iter().any(|(old, _)| *old == source_id),
+                "Devnet must not use the testnet sBTC destination"
+            );
+        }
+    }
+
+    #[test]
+    fn devnet_sbtc_mapping_has_a_single_destination() {
+        // The requirement mapping must be the only destination for this source.
+        let mut contract_ids = boot_contract_ids_to_remap(&StacksNetwork::Devnet);
+        let (source_id, deployer_id) = devnet_requirement_mapping("sbtc-token");
+        contract_ids.insert((source_id.clone(), deployer_id.clone()));
+
+        assert_eq!(
+            contract_ids
+                .iter()
+                .filter(|(old, _)| *old == source_id)
+                .count(),
+            1,
+            "{source_id} must have exactly one destination"
+        );
+
+        let source = format!("(contract-call? '{source_id} get-name)");
+        assert_eq!(
+            remap_contract_ids(&source, &contract_ids),
+            format!("(contract-call? '{deployer_id} get-name)"),
+            "devnet must rewrite sBTC references to the locally deployed contract"
+        );
+    }
+
+    #[test]
+    fn testnet_sbtc_mapping_is_unchanged_by_the_requirement_arm() {
+        // The requirement arm re-inserts the same Testnet pair.
+        let mut contract_ids = boot_contract_ids_to_remap(&StacksNetwork::Testnet);
+        let before = contract_ids.len();
+
+        let source_id = format!("{SBTC_MAINNET_ADDRESS}.sbtc-token");
+        let testnet_id = format!("{SBTC_TESTNET_ADDRESS}.sbtc-token");
+        contract_ids.insert((source_id.clone(), testnet_id.clone()));
+
+        assert_eq!(
+            contract_ids.len(),
+            before,
+            "the pair should already be present"
+        );
+        assert_eq!(
+            contract_ids
+                .iter()
+                .filter(|(old, _)| *old == source_id)
+                .count(),
+            1
+        );
+    }
 }

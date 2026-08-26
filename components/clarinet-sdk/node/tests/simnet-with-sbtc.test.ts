@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { Cl } from "@stacks/transactions";
 import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
 
 // test the built package and not the source code
@@ -90,5 +91,65 @@ describe("sbtc funding", () => {
     expect(sbtcBalance.size).toBe(4);
     expect(sbtcBalance.get(address1)).toBe(1000000000n);
     expect(sbtcBalance.get(address2)).toBe(1000000000n);
+  });
+});
+
+const sbtcDeployer = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
+const sbtcToken = `${sbtcDeployer}.sbtc-token`;
+
+// (define-constant ERR_NOT_OWNER (err u4)) in sbtc-token.clar
+const ERR_NOT_OWNER = 4n;
+
+describe("sbtc-token basic functionality", () => {
+  it("exposes its SIP-010 metadata", () => {
+    expect(simnet.callReadOnlyFn(sbtcToken, "get-name", [], address1).result).toStrictEqual(
+      Cl.ok(Cl.stringAscii("sBTC")),
+    );
+    expect(simnet.callReadOnlyFn(sbtcToken, "get-symbol", [], address1).result).toStrictEqual(
+      Cl.ok(Cl.stringAscii("sBTC")),
+    );
+    expect(simnet.callReadOnlyFn(sbtcToken, "get-decimals", [], address1).result).toStrictEqual(
+      Cl.ok(Cl.uint(8)),
+    );
+  });
+
+  it("reports the balance the genesis funding assigned", () => {
+    const res = simnet.callReadOnlyFn(sbtcToken, "get-balance", [Cl.principal(address1)], address1);
+    expect(res.result).toStrictEqual(Cl.ok(Cl.uint(1000000000n)));
+  });
+
+  it("transfers sBTC between wallets", () => {
+    const amount = 42n;
+    const res = simnet.callPublicFn(
+      sbtcToken,
+      "transfer",
+      [Cl.uint(amount), Cl.principal(address1), Cl.principal(address2), Cl.none()],
+      address1,
+    );
+
+    expect(res.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+
+    const transferEvent = res.events.find((e) => e.event === "ft_transfer_event");
+    expect(transferEvent).toBeDefined();
+    expect(transferEvent!.data.amount).toBe(amount.toString());
+
+    expect(
+      simnet.callReadOnlyFn(sbtcToken, "get-balance", [Cl.principal(address1)], address1).result,
+    ).toStrictEqual(Cl.ok(Cl.uint(1000000000n - amount)));
+    expect(
+      simnet.callReadOnlyFn(sbtcToken, "get-balance", [Cl.principal(address2)], address1).result,
+    ).toStrictEqual(Cl.ok(Cl.uint(1000000000n + amount)));
+  });
+
+  it("refuses to move sBTC the caller does not own", () => {
+    const res = simnet.callPublicFn(
+      sbtcToken,
+      "transfer",
+      // address1 signs, but tries to move address2's balance
+      [Cl.uint(1n), Cl.principal(address2), Cl.principal(address1), Cl.none()],
+      address1,
+    );
+
+    expect(res.result).toStrictEqual(Cl.error(Cl.uint(ERR_NOT_OWNER)));
   });
 });
