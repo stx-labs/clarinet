@@ -1,3 +1,13 @@
+# [3.23.2](https://github.com/stx-labs/clarinet/compare/v3.23.1...v3.23.2) (2026-08-26)
+
+##### Bug Fixes
+
+*  Vitest-helper path derivation (#2505) (00fb51b3)
+*  Update testnet sBTC contract address (#2504) (f39e1a52)
+*  Use komac for winget release with new stxlabs scoping (#2486) (0239c797)
+*  Update testnet heights (#2494) (6debe450)
+* **static-cost:**  Price epoch 4.0 with costs-5 (#2495) (98ca35c9)
+
 # [3.23.1](https://github.com/stx-labs/clarinet/compare/v3.23.0...v3.23.1) (2026-07-31)
 
 ##### Refactors
