@@ -263,7 +263,7 @@ impl EvalHook for CoverageHook {
     fn did_complete(&mut self, _result: Result<&mut clarity::vm::ExecutionResult, String>) {
         self.reports.push(CoverageReport {
             test_name: self.current_test_name.clone().unwrap_or_default(),
-            coverage: self.contracts_coverage.drain().collect(),
+            coverage: std::mem::take(&mut self.contracts_coverage),
         });
     }
 }
