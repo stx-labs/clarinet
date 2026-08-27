@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -248,9 +248,6 @@ impl Serialize for ProjectConfig {
 pub struct AddressMapEntry {
     /// Canonical contract identifier used in Clarity source code
     pub contract_id: String,
-    /// Override for simnet (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub simnet: Option<String>,
     /// Override for devnet (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub devnet: Option<String>,
@@ -463,6 +460,7 @@ impl ProjectManifest {
         let mut config_contracts = BTreeMap::new();
         let mut contracts_settings = HashMap::new();
         let mut config_address_map: Vec<AddressMapEntry> = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
 
         // Parse legacy `[[project.requirements]]` entries.
         if let Some(TomlValue::Array(requirements)) = project_manifest_file.project.requirements {
@@ -471,35 +469,58 @@ impl ProjectManifest {
                     let Some(TomlValue::String(contract_id)) = table.get("contract_id") else {
                         continue;
                     };
-                    config_address_map.push(AddressMapEntry {
-                        contract_id: contract_id.clone(),
-                        ..Default::default()
-                    });
+                    let get_opt = |key: &str| {
+                        table
+                            .get(key)
+                            .and_then(TomlValue::as_str)
+                            .map(str::to_owned)
+                    };
+                    if seen_ids.insert(contract_id.clone()) {
+                        config_address_map.push(AddressMapEntry {
+                            contract_id: contract_id.clone(),
+                            devnet: get_opt("devnet"),
+                            testnet: get_opt("testnet"),
+                            mainnet: get_opt("mainnet"),
+                        });
+                    }
                 }
             }
         }
 
         // Parse `[[project.address_map]]` entries (superset of requirements).
+        // If the same contract_id appears in both sections, the address_map entry
+        // wins because it may carry per-network overrides. We replace the
+        // requirements-derived entry in-place to preserve ordering.
         if let Some(TomlValue::Array(entries)) = project_manifest_file.project.address_map {
             for item in entries.iter() {
                 if let TomlValue::Table(table) = item {
                     let Some(TomlValue::String(contract_id)) = table.get("contract_id") else {
                         continue;
                     };
-                    let get_opt = |key: &str| -> Option<String> {
-                        if let Some(TomlValue::String(s)) = table.get(key) {
-                            Some(s.clone())
-                        } else {
-                            None
-                        }
+                    let get_opt = |key: &str| {
+                        table
+                            .get(key)
+                            .and_then(TomlValue::as_str)
+                            .map(str::to_owned)
                     };
-                    config_address_map.push(AddressMapEntry {
+                    let entry = AddressMapEntry {
                         contract_id: contract_id.clone(),
-                        simnet: get_opt("simnet"),
                         devnet: get_opt("devnet"),
                         testnet: get_opt("testnet"),
                         mainnet: get_opt("mainnet"),
-                    });
+                    };
+                    if !seen_ids.insert(contract_id.clone()) {
+                        // Already present from requirements — replace in-place so
+                        // the address_map version (with network overrides) wins.
+                        if let Some(existing) = config_address_map
+                            .iter_mut()
+                            .find(|e| &e.contract_id == contract_id)
+                        {
+                            *existing = entry;
+                            continue;
+                        }
+                    }
+                    config_address_map.push(entry);
                 }
             }
         }
@@ -802,6 +823,130 @@ mod tests {
             .project
             .override_boot_contracts_source
             .contains_key("pox-x"));
+    }
+
+    #[test]
+    fn test_address_map_parsing() {
+        let manifest_str = r#"
+[project]
+name = "test-project"
+telemetry = false
+
+[[project.address_map]]
+contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+testnet = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait"
+
+[[project.address_map]]
+contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.sip010-trait"
+devnet = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sip010-devnet"
+mainnet = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.sip010-trait"
+"#;
+        let manifest_file: ProjectManifestFile = toml::from_str(manifest_str).unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        assert_eq!(manifest.project.address_map.len(), 2);
+
+        let nft = &manifest.project.address_map[0];
+        assert_eq!(
+            nft.contract_id,
+            "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+        );
+        assert_eq!(
+            nft.testnet.as_deref(),
+            Some("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait")
+        );
+        assert_eq!(nft.devnet, None);
+        assert_eq!(nft.mainnet, None);
+
+        let sip010 = &manifest.project.address_map[1];
+        assert_eq!(
+            sip010.contract_id,
+            "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.sip010-trait"
+        );
+        assert_eq!(
+            sip010.devnet.as_deref(),
+            Some("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sip010-devnet")
+        );
+        assert_eq!(
+            sip010.mainnet.as_deref(),
+            Some("SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.sip010-trait")
+        );
+        assert_eq!(sip010.testnet, None);
+    }
+
+    #[test]
+    fn test_requirements_backward_compat() {
+        let manifest_str = r#"
+[project]
+name = "test-project"
+telemetry = false
+
+[[project.requirements]]
+contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+
+[[project.requirements]]
+contract_id = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.sip010-trait"
+"#;
+        let manifest_file: ProjectManifestFile = toml::from_str(manifest_str).unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        // Both legacy requirements appear in address_map with only contract_id set.
+        assert_eq!(manifest.project.address_map.len(), 2);
+        assert_eq!(
+            manifest.project.address_map[0].contract_id,
+            "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+        );
+        assert_eq!(manifest.project.address_map[0].devnet, None);
+        assert_eq!(manifest.project.address_map[0].testnet, None);
+        assert_eq!(manifest.project.address_map[0].mainnet, None);
+        assert_eq!(
+            manifest.project.address_map[1].contract_id,
+            "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.sip010-trait"
+        );
+    }
+
+    #[test]
+    fn test_address_map_deduplication() {
+        // Same contract_id in both sections: address_map entry wins (has overrides),
+        // the entry keeps the position from the requirements section.
+        let manifest_str = r#"
+[project]
+name = "test-project"
+telemetry = false
+
+[[project.requirements]]
+contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+
+[[project.requirements]]
+contract_id = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.other-trait"
+
+[[project.address_map]]
+contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+testnet = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait"
+"#;
+        let manifest_file: ProjectManifestFile = toml::from_str(manifest_str).unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        // Duplicate is removed — only 2 entries, not 3.
+        assert_eq!(manifest.project.address_map.len(), 2);
+
+        // address_map version wins: testnet override is present.
+        let nft = manifest
+            .project
+            .address_map
+            .iter()
+            .find(|e| e.contract_id == "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait")
+            .expect("nft-trait should be in address_map");
+        assert_eq!(
+            nft.testnet.as_deref(),
+            Some("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait")
+        );
     }
 
     #[test]

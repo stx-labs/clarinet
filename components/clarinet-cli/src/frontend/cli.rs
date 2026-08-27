@@ -2038,7 +2038,7 @@ fn load_manifest(location: &Path) -> Option<DocumentMut> {
 /// Edit a TOML document directly, preserving comments and structure.
 fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> DocumentMut {
     for req in options.requirements_to_add.drain(..) {
-        add_requirement_to_doc(&mut doc, &req.contract_id);
+        add_address_map_entry_to_doc(&mut doc, &req.contract_id);
     }
 
     for (name, contract) in options.contracts_to_add.drain() {
@@ -2052,8 +2052,8 @@ fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> Docume
     doc
 }
 
-/// Add a requirement to the [[project.requirements]] array in the document.
-fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
+/// Add an entry to the [[project.address_map]] array in the document.
+fn add_address_map_entry_to_doc(doc: &mut DocumentMut, contract_id: &str) {
     use toml_edit::{ArrayOfTables, Item, Table};
 
     // Ensure [project] table exists
@@ -2063,31 +2063,31 @@ fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
         .as_table_mut()
         .expect("[project] should be a table");
 
-    // Ensure [[project.requirements]] array exists.
-    // If requirements = [] (an empty inline array), replace it with an array of tables.
+    // Ensure [[project.address_map]] array exists.
+    // If address_map = [] (an empty inline array), replace it with an array of tables.
     if project
-        .get("requirements")
+        .get("address_map")
         .is_some_and(|v| v.as_array().is_some_and(|a| a.is_empty()))
     {
-        project["requirements"] = Item::ArrayOfTables(ArrayOfTables::new());
+        project["address_map"] = Item::ArrayOfTables(ArrayOfTables::new());
     }
 
-    let requirements = project
-        .entry("requirements")
+    let address_map = project
+        .entry("address_map")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
-        .expect("[[project.requirements]] should be an array of tables");
+        .expect("[[project.address_map]] should be an array of tables");
 
     // Check for duplicates
-    let already_exists = requirements
+    let already_exists = address_map
         .iter()
-        .filter_map(|req| req.get("contract_id")?.as_str())
+        .filter_map(|entry| entry.get("contract_id")?.as_str())
         .any(|id| id == contract_id);
 
     if !already_exists {
-        let mut new_req = Table::new();
-        new_req["contract_id"] = toml_edit::value(contract_id);
-        requirements.push(new_req);
+        let mut new_entry = Table::new();
+        new_entry["contract_id"] = toml_edit::value(contract_id);
+        address_map.push(new_entry);
     }
 }
 
@@ -2513,15 +2513,20 @@ mod tests {
         /// Helper to check if a requirement exists in the TOML
         fn has_requirement(content: &str, contract_id: &str) -> bool {
             let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
-            if let Some(project) = doc.get("project").and_then(|p| p.as_table()) {
-                if let Some(requirements) = project.get("requirements") {
-                    if let Some(arr) = requirements.as_array_of_tables() {
-                        return arr.iter().any(|req| {
-                            req.get("contract_id")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s == contract_id)
-                                .unwrap_or(false)
-                        });
+            let Some(project) = doc.get("project").and_then(|p| p.as_table()) else {
+                return false;
+            };
+            // Check both legacy [[project.requirements]] and [[project.address_map]].
+            for key in ["requirements", "address_map"] {
+                if let Some(arr) = project.get(key).and_then(|v| v.as_array_of_tables()) {
+                    if arr.iter().any(|entry| {
+                        entry
+                            .get("contract_id")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s == contract_id)
+                            .unwrap_or(false)
+                    }) {
+                        return true;
                     }
                 }
             }
@@ -2645,7 +2650,7 @@ mod tests {
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(
+            add_address_map_entry_to_doc(
                 &mut doc,
                 "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
             );
@@ -2689,11 +2694,11 @@ mod tests {
             let input = indoc! {r#"
                 [project]
                 name = 'project-template'
-                requirements = []
+                address_map = []
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(
+            add_address_map_entry_to_doc(
                 &mut doc,
                 "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
             );
@@ -2720,14 +2725,14 @@ mod tests {
                 [project]
                 name = "test-project"
 
-                [[project.requirements]]
+                [[project.address_map]]
                 contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
 
             // Try to add the same requirement again
-            add_requirement_to_doc(
+            add_address_map_entry_to_doc(
                 &mut doc,
                 "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
             );
@@ -2750,7 +2755,7 @@ mod tests {
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(
+            add_address_map_entry_to_doc(
                 &mut doc,
                 "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait",
             );
