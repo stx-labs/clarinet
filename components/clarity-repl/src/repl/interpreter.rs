@@ -69,6 +69,19 @@ impl BlockInclusion {
         Self::from(handle_clarity_analysis_error(error, epoch).is_included_in_block())
     }
 
+    /// Classify a preflight rejection as the equivalent VM error.
+    pub fn from_uncallable_function(contract: &str, function: &str, epoch: StacksEpochId) -> Self {
+        Self::from_runtime_error(
+            ClarityError::Interpreter(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::NoSuchPublicFunction(
+                    contract.to_string(),
+                    function.to_string(),
+                ),
+            )),
+            epoch,
+        )
+    }
+
     pub fn is_included(self) -> bool {
         self == BlockInclusion::Included
     }

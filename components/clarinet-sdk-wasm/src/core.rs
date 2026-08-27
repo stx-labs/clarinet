@@ -21,6 +21,7 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPri
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
+use clarity_repl::repl::interpreter::BlockInclusion;
 use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -903,8 +904,17 @@ impl SDK {
         self.call_contract_fn(args, false, CallKind::NonceFree)
     }
 
-    /// Charge an included preflight failure. No VM state exists to commit.
-    fn charge_preflight_rejection(&mut self, sender: &str) -> Result<(), String> {
+    /// Charge the nonce for a preflight failure if the equivalent VM error
+    /// would be included in this epoch.
+    fn charge_preflight_rejection(&mut self, args: &CallFnArgs) -> Result<(), String> {
+        let epoch = self.get_session().interpreter.datastore.get_current_epoch();
+        if !BlockInclusion::from_uncallable_function(&args.contract, &args.method, epoch)
+            .is_included()
+        {
+            return Ok(());
+        }
+
+        let sender = &args.sender;
         let principal = PrincipalData::parse_standard_principal(sender)
             .map_err(|e| format!("Failed to charge a nonce for '{sender}': {e:?}"))?;
         self.get_session_mut()
@@ -933,7 +943,7 @@ impl SDK {
         }
 
         if let Some(message) = wrong_access {
-            self.charge_preflight_rejection(&args.sender)?;
+            self.charge_preflight_rejection(args)?;
             return Err(message);
         }
 

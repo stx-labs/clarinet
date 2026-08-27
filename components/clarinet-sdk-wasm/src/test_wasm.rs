@@ -223,6 +223,70 @@ async fn it_charges_a_nonce_for_a_call_the_access_preflight_rejects() {
 }
 
 #[wasm_bindgen_test]
+async fn it_gates_the_preflight_nonce_on_the_epoch_like_the_vm_does() {
+    // Calling a read-only or private function as a public function produces
+    // `RuntimeCheckErrorKind::NoSuchPublicFunction`. Such transactions are
+    // only included from epoch 2.1 onward. Verify that the cached-interface
+    // preflight applies the same epoch rule as the VM.
+    const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+
+    for (epoch, is_included) in [
+        ("2.0", false),
+        ("2.05", false),
+        ("2.1", true),
+        ("2.4", true),
+    ] {
+        let js_noop = JsFunction::new_no_args("return");
+        let mut sdk = SDK::new(js_noop, None);
+        let _ = sdk.init_empty_session(JsValue::undefined()).await;
+        sdk.set_epoch(EpochString::new(epoch));
+        // Ensure `set_epoch` did not fall back to the default epoch.
+        assert_eq!(sdk.current_epoch(), epoch, "epoch {epoch} was not selected");
+
+        sdk.deploy_contract(&DeployContractArgs::new(
+            "access-contract".into(),
+            "(define-read-only (peek) u1)
+             (define-public (poke) (ok u1))"
+                .into(),
+            ContractOptions::new(None),
+            SENDER.into(),
+        ))
+        .unwrap();
+
+        let call = |method: &str| {
+            CallFnArgs::new(
+                format!("{SENDER}.access-contract"),
+                method.into(),
+                vec![],
+                SENDER.into(),
+            )
+        };
+
+        // The cached interface rejects `peek` before it reaches the VM.
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        let err = sdk.call_public_fn(&call("peek")).unwrap_err();
+        assert_eq!(err, "peek is not a public function");
+        let preflight_delta = sdk.get_account_nonce(SENDER).unwrap() - before;
+
+        // An unknown function reaches the VM and produces the equivalent error.
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        sdk.call_public_fn(&call("no-such-fn"))
+            .expect_err("a call to an undefined function must fail");
+        let vm_delta = sdk.get_account_nonce(SENDER).unwrap() - before;
+
+        let expected = u64::from(is_included);
+        assert_eq!(
+            preflight_delta, expected,
+            "{epoch}: the preflight route disagrees with the mainnet gate"
+        );
+        assert_eq!(
+            vm_delta, expected,
+            "{epoch}: the VM route disagrees with the mainnet gate"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
 async fn it_rejects_a_nonce_lookup_for_an_invalid_address() {
     let mut sdk = init_sdk().await;
 
