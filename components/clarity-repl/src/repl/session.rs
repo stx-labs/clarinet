@@ -2339,6 +2339,79 @@ mod tests {
     }
 
     #[test]
+    fn a_rejectable_parse_error_outranks_a_non_rejectable_analysis_error() {
+        // Before epoch 3.4, excessive nesting is rejectable but a type error is
+        // included. Parsing must therefore determine the nonce disposition.
+        // Put the nesting second so the partial AST also contains the type error;
+        // otherwise the test would pass even if analysis ran first.
+        let deep = format!("{}u1{}", "(+ u1 ".repeat(200), ")".repeat(200));
+        let bad_types = "(define-read-only (b) (no-such-function u1))";
+
+        let deploy = |epoch: StacksEpochId, name: &str, source: &str| {
+            let mut session = Session::new(SessionSettings::default());
+            let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+            session.update_epoch(epoch);
+            let addr = principal(deployer);
+            let before = session.get_nonce(&addr).unwrap();
+            let contract = ClarityContractBuilder::new()
+                .name(name)
+                .deployer(deployer)
+                .epoch(epoch)
+                .clarity_version(ClarityVersion::default_for_epoch(epoch))
+                .code_source(source.to_string())
+                .build();
+            let result = session.deploy_contract(&contract, false, None);
+            let after = session.get_nonce(&addr).unwrap();
+            assert!(
+                result.is_err(),
+                "{epoch} {name}: the deploy must fail, or the nonce assertion is vacuous"
+            );
+            after - before
+        };
+
+        for epoch in [StacksEpochId::Epoch25, StacksEpochId::Epoch30] {
+            // Ensure the individual errors receive different dispositions.
+            assert_eq!(
+                deploy(epoch, "types-only", bad_types),
+                1,
+                "{epoch}: a type error alone is not rejectable, so mainnet mines it"
+            );
+            assert_eq!(
+                deploy(
+                    epoch,
+                    "deep-only",
+                    &format!("(define-read-only (d) {deep})")
+                ),
+                0,
+                "{epoch}: a depth error alone is rejectable, so mainnet drops it"
+            );
+
+            // Parsing takes precedence when both errors are present.
+            assert_eq!(
+                deploy(
+                    epoch,
+                    "both",
+                    &format!("{bad_types}\n(define-read-only (d) {deep})")
+                ),
+                0,
+                "{epoch}: the rejectable parse error must outrank the analysis error"
+            );
+        }
+
+        // From epoch 3.4, this depth error is included and consumes a nonce.
+        let epoch = StacksEpochId::Epoch34;
+        assert_eq!(
+            deploy(
+                epoch,
+                "both-late-epoch",
+                &format!("{bad_types}\n(define-read-only (d) {deep})")
+            ),
+            1,
+            "{epoch}: depth errors are no longer rejectable, so this is mined"
+        );
+    }
+
+    #[test]
     fn test_eval_clarity_string() {
         let mut session = Session::new(SessionSettings::default());
         let epoch = StacksEpochId::Epoch25;

@@ -385,6 +385,14 @@ impl ClarityInterpreter {
         let (annotations, mut annotation_diagnostics) = self.collect_annotations(code_source);
         diagnostics.append(&mut annotation_diagnostics);
 
+        // Mainnet checks parsing before analysis. Their inclusion verdicts can
+        // differ, so analysing a partial AST first could incorrectly charge a
+        // nonce for a transaction rejected during parsing.
+        if !success {
+            let inclusion = self.classify_parse_failure(contract);
+            return Err(self.fail_before_execution(diagnostics, inclusion, charge));
+        }
+
         let (analysis, lint_diagnostics) = match self.run_analysis(contract, &ast, &annotations) {
             Ok((analysis, lint_diags)) => (analysis, lint_diags),
             Err(mut analysis_failure) => {
@@ -396,13 +404,6 @@ impl ClarityInterpreter {
                 ));
             }
         };
-        // Analysis currently runs before the parse result is checked. Mainnet
-        // checks parsing first, so a source failing both may get a different
-        // verdict when only one error is rejectable in this epoch.
-        if !success {
-            let inclusion = self.classify_parse_failure(contract);
-            return Err(self.fail_before_execution(diagnostics, inclusion, charge));
-        }
 
         let mut result =
             match self.execute(contract, &ast, analysis, cost_track, eval_hooks, charge) {
