@@ -900,7 +900,7 @@ impl SDK {
             }
         }
         // A read-only call sends nothing, so it is never a transaction.
-        self.call_contract_fn(args, false, CallKind::Free)
+        self.call_contract_fn(args, false, CallKind::NonceFree)
     }
 
     /// Charge an included preflight failure. No VM state exists to commit.

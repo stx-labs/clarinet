@@ -199,7 +199,7 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
                 SBTC_MAINNET_ADDRESS,
                 false,
                 false,
-                CallKind::Free,
+                CallKind::NonceFree,
             );
         }
     }

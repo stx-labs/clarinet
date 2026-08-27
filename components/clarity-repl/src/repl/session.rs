@@ -238,9 +238,10 @@ impl AnnotatedExecutionResult {
 pub enum CallKind {
     /// A transaction sent by `sender`, consuming one of its nonces.
     Transaction,
-    /// Not a transaction: a read-only query, or session setup that stands in
-    /// for genesis state rather than for something anyone sent.
-    Free,
+    /// Not a transaction, so no nonce moves: a read-only query, or session
+    /// setup that stands in for genesis state rather than for something
+    /// anyone sent.
+    NonceFree,
 }
 
 #[derive(Clone)]
@@ -834,7 +835,7 @@ impl Session {
         // charged is exactly the one the call runs as.
         let charge = match kind {
             CallKind::Transaction => NonceCharge::Sender(self.interpreter.get_tx_sender().into()),
-            CallKind::Free => NonceCharge::Free,
+            CallKind::NonceFree => NonceCharge::Free,
         };
 
         let current_epoch = self.interpreter.datastore.get_current_epoch();
@@ -2079,7 +2080,7 @@ mod tests {
                     sender,
                     false,
                     false,
-                    CallKind::Free,
+                    CallKind::NonceFree,
                 )
                 .unwrap_or_else(|e| panic!("{method} should execute: {e:?}"));
 
@@ -2175,7 +2176,7 @@ mod tests {
                 sender,
                 false,
                 false,
-                CallKind::Free,
+                CallKind::NonceFree,
             )
             .expect_err("a call to a missing contract must fail");
 
@@ -2268,7 +2269,7 @@ mod tests {
                 sender,
                 false,
                 false,
-                CallKind::Free,
+                CallKind::NonceFree,
             )
             .expect("a read-only call charges nothing and still works");
         match result.result {
@@ -2476,7 +2477,7 @@ mod tests {
             BOOT_TESTNET_ADDRESS,
             false,
             false,
-            CallKind::Free,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(
             &result,
@@ -2540,7 +2541,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
-            CallKind::Free,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::okay(Value::Bool(true)).unwrap());
 
@@ -2552,7 +2553,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
-            CallKind::Free,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::UInt(1));
 
@@ -2564,7 +2565,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
-            CallKind::Free,
+            CallKind::NonceFree,
         );
         assert!(result.is_ok());
     }
@@ -2586,7 +2587,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
-            CallKind::Free,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::okay(Value::UInt(1)).unwrap());
 
@@ -2597,7 +2598,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
-            CallKind::Free,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::UInt(1));
     }
@@ -2797,7 +2798,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
-            CallKind::Free,
+            CallKind::NonceFree,
         );
 
         assert!(result.is_err());
