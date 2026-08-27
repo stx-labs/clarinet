@@ -114,6 +114,7 @@ fn deployment(stacks_node_url: &str) -> DeploymentSpecification {
             ],
         },
         contracts: BTreeMap::new(),
+        address_map: vec![],
     }
 }
 

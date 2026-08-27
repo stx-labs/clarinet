@@ -33,6 +33,7 @@ fn build_test_deployement_plan(
         genesis,
         contracts: BTreeMap::new(),
         plan: TransactionPlanSpecification { batches },
+        address_map: vec![],
     }
 }
 

@@ -64,6 +64,11 @@ pub static SBTC_TOKEN_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
         QualifiedContractIdentifier::parse(&format!("{SBTC_MAINNET_ADDRESS}.sbtc-token")).unwrap()
     });
 
+pub static SBTC_DEPOSIT_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
+    LazyLock::new(|| {
+        QualifiedContractIdentifier::parse(&format!("{SBTC_MAINNET_ADDRESS}.sbtc-deposit")).unwrap()
+    });
+
 /// The `sbtc-token` fungible token defined by [`SBTC_TOKEN_MAINNET_ADDRESS`].
 pub static SBTC_TOKEN_ASSET_IDENTIFIER: LazyLock<AssetIdentifier> =
     LazyLock::new(|| AssetIdentifier {
