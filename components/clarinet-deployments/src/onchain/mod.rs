@@ -400,6 +400,23 @@ pub fn apply_on_chain_deployment(
     let mut index = 0;
     let mut contracts_ids_to_remap = boot_contract_ids_to_remap(&deployment.network);
 
+    // Add user-defined address remaps from Clarinet.toml address_map.
+    // Entries with a network-specific override instruct Clarinet to rewrite
+    // contract identifier strings in source text rather than re-deploying.
+    for entry in &deployment.address_map {
+        let override_id = match &deployment.network {
+            StacksNetwork::Devnet => entry.devnet.as_deref(),
+            StacksNetwork::Testnet => entry.testnet.as_deref(),
+            StacksNetwork::Mainnet => entry.mainnet.as_deref(),
+            StacksNetwork::Simnet => continue,
+        };
+        if let Some(override_id) = override_id {
+            if override_id != entry.contract_id {
+                contracts_ids_to_remap.insert((entry.contract_id.clone(), override_id.to_string()));
+            }
+        }
+    }
+
     for batch_spec in deployment.plan.batches.iter() {
         let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
         let mut batch = Vec::new();

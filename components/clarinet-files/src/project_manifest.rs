@@ -44,13 +44,20 @@ pub struct ProjectConfigFile {
     /// Enable or disable telemetry
     #[serde(default)]
     telemetry: Option<bool>,
-    /// External contract dependencies
+    /// External contract dependencies (legacy field — parsed into address_map)
     #[serde(default)]
     #[cfg_attr(
         feature = "json_schema",
         schemars(schema_with = "schema::requirements_schema")
     )]
     requirements: Option<TomlValue>,
+    /// Contract address mappings with optional per-network overrides
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "json_schema",
+        schemars(schema_with = "schema::address_map_schema")
+    )]
+    address_map: Option<TomlValue>,
     /// List of boot contracts to include
     #[serde(default)]
     boot_contracts: Option<Vec<String>>,
@@ -197,7 +204,7 @@ pub struct ProjectConfig {
     pub authors: Vec<String>,
     pub description: String,
     pub telemetry: bool,
-    pub requirements: Option<Vec<RequirementConfig>>,
+    pub address_map: Vec<AddressMapEntry>,
     #[serde(rename = "cache_dir")]
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
@@ -221,8 +228,8 @@ impl Serialize for ProjectConfig {
         map.serialize_entry("authors", &self.authors)?;
         map.serialize_entry("telemetry", &self.telemetry)?;
         map.serialize_entry("cache_dir", &self.cache_location.to_string_lossy())?;
-        if self.requirements.is_some() {
-            map.serialize_entry("requirements", &self.requirements)?;
+        if !self.address_map.is_empty() {
+            map.serialize_entry("address_map", &self.address_map)?;
         }
         if !self.override_boot_contracts_source.is_empty() {
             let paths: BTreeMap<&str, &str> = self
@@ -238,10 +245,27 @@ impl Serialize for ProjectConfig {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-pub struct RequirementConfig {
-    /// Contract identifier (e.g., SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait)
+pub struct AddressMapEntry {
+    /// Canonical contract identifier used in Clarity source code
     pub contract_id: String,
+    /// Override for simnet (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simnet: Option<String>,
+    /// Override for devnet (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub devnet: Option<String>,
+    /// Override for testnet (optional — if set and different from contract_id,
+    /// Clarinet remaps references instead of re-deploying the contract)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub testnet: Option<String>,
+    /// Override for mainnet (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mainnet: Option<String>,
 }
+
+/// Backward-compatible alias — `[[project.requirements]]` entries are parsed
+/// into `AddressMapEntry` values with only `contract_id` set.
+pub type RequirementConfig = AddressMapEntry;
 
 impl ProjectManifest {
     pub async fn from_file_accessor(
@@ -416,7 +440,7 @@ impl ProjectManifest {
 
         let project = ProjectConfig {
             name: project_name,
-            requirements: None,
+            address_map: Vec::new(),
             description: project_manifest_file
                 .project
                 .description
@@ -438,19 +462,47 @@ impl ProjectManifest {
         };
         let mut config_contracts = BTreeMap::new();
         let mut contracts_settings = HashMap::new();
-        let mut config_requirements: Vec<RequirementConfig> = Vec::new();
+        let mut config_address_map: Vec<AddressMapEntry> = Vec::new();
 
+        // Parse legacy `[[project.requirements]]` entries.
         if let Some(TomlValue::Array(requirements)) = project_manifest_file.project.requirements {
-            for link_settings in requirements.iter() {
-                if let TomlValue::Table(link_settings) = link_settings {
-                    let contract_id = match link_settings.get("contract_id") {
-                        Some(TomlValue::String(contract_id)) => contract_id.to_string(),
-                        _ => continue,
+            for item in requirements.iter() {
+                if let TomlValue::Table(table) = item {
+                    let Some(TomlValue::String(contract_id)) = table.get("contract_id") else {
+                        continue;
                     };
-                    config_requirements.push(RequirementConfig { contract_id });
+                    config_address_map.push(AddressMapEntry {
+                        contract_id: contract_id.clone(),
+                        ..Default::default()
+                    });
                 }
             }
-        };
+        }
+
+        // Parse `[[project.address_map]]` entries (superset of requirements).
+        if let Some(TomlValue::Array(entries)) = project_manifest_file.project.address_map {
+            for item in entries.iter() {
+                if let TomlValue::Table(table) = item {
+                    let Some(TomlValue::String(contract_id)) = table.get("contract_id") else {
+                        continue;
+                    };
+                    let get_opt = |key: &str| -> Option<String> {
+                        if let Some(TomlValue::String(s)) = table.get(key) {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    config_address_map.push(AddressMapEntry {
+                        contract_id: contract_id.clone(),
+                        simnet: get_opt("simnet"),
+                        devnet: get_opt("devnet"),
+                        testnet: get_opt("testnet"),
+                        mainnet: get_opt("mainnet"),
+                    });
+                }
+            }
+        }
 
         if let Some(TomlValue::Table(contracts)) = project_manifest_file.contracts {
             for (contract_name, contract_settings) in contracts.iter() {
@@ -502,7 +554,7 @@ impl ProjectManifest {
 
         config.contracts = config_contracts;
         config.contracts_settings = contracts_settings;
-        config.project.requirements = Some(config_requirements);
+        config.project.address_map = config_address_map;
         Ok(config)
     }
 

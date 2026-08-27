@@ -1106,6 +1106,7 @@ pub fn main() {
                     contracts_to_add: HashMap::new(),
                     requirements_to_add: vec![RequirementConfig {
                         contract_id: cmd.contract_id,
+                        ..Default::default()
                     }],
                 };
                 if !execute_changes(vec![Changes::EditTOML(change)]) {
