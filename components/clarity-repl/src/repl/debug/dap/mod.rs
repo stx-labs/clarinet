@@ -7,8 +7,9 @@ use clarity::vm::contexts::{
     ContractContext, ExecutionState, GlobalContext, InvocationContext, LocalContext,
 };
 use clarity::vm::errors::VmExecutionError;
+use clarity::vm::hooks::EvalHook;
 use clarity::vm::representations::Span;
-use clarity::vm::{EvalHook, EvaluationResult, ExecutionResult, SymbolicExpression, ValueRef};
+use clarity::vm::{EvaluationResult, ExecutionResult, SymbolicExpression, ValueRef};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, SequenceData, StandardPrincipalData,
 };

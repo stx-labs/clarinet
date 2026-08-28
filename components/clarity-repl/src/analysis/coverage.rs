@@ -4,7 +4,8 @@ use clarity::vm::ast::ContractAST;
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::functions::define::DefineFunctionsParsed;
 use clarity::vm::functions::NativeFunctions;
-use clarity::vm::{EvalHook, SymbolicExpression};
+use clarity::vm::hooks::EvalHook;
+use clarity::vm::SymbolicExpression;
 use clarity_types::types::QualifiedContractIdentifier;
 use serde::{Deserialize, Serialize};
 

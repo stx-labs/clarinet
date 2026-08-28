@@ -39,7 +39,7 @@ impl CostModel {
             | StacksEpochId::Epoch31
             | StacksEpochId::Epoch32 => CostModel::Costs3,
             StacksEpochId::Epoch33 | StacksEpochId::Epoch34 => CostModel::Costs4,
-            StacksEpochId::Epoch40 => CostModel::Costs5,
+            StacksEpochId::Epoch40 | StacksEpochId::Epoch41 => CostModel::Costs5,
         }
     }
 

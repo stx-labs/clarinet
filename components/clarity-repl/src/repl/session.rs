@@ -7,9 +7,10 @@ use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::hooks::EvalHook;
 use clarity::vm::{
-    ClarityName, ClarityVersion, CostSynthesis, EvalHook, EvaluationResult, ExecutionResult,
-    ParsedContract, SymbolicExpression,
+    ClarityName, ClarityVersion, CostSynthesis, EvaluationResult, ExecutionResult, ParsedContract,
+    SymbolicExpression,
 };
 use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier};
 use clarity_types::Value;
@@ -20,7 +21,7 @@ use serde::Serialize;
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
 use super::hooks::perf::{CostField, PerfHook};
-use super::interpreter::ContractCallError;
+use super::interpreter::{ContractCallError, ExecutionError, NonceCharge};
 use super::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch,
     SessionSettings,
@@ -119,14 +120,14 @@ fn deploy_boot_contracts(
         }
         let result = interpreter.run(contract, Some(ast), false, None);
         if let Err(errs) = &result {
-            for e in errs {
+            for e in &errs.diagnostics {
                 ueprint!(
                     "Error deploying sbtc boot contract {contract_id}: {}",
                     e.message
                 );
             }
         }
-        boot_contracts.insert(contract_id.clone(), result);
+        boot_contracts.insert(contract_id.clone(), result.map_err(Vec::from));
     }
 
     // Load boot contracts (with custom overrides if specified)
@@ -146,11 +147,11 @@ fn deploy_boot_contracts(
         }
         let result = interpreter.run(&contract, Some(&ast), false, None);
         if let Err(errs) = &result {
-            for e in errs {
+            for e in &errs.diagnostics {
                 ueprint!("Error deploying boot contract {contract_id}: {}", e.message);
             }
         }
-        boot_contracts.insert(contract_id, result);
+        boot_contracts.insert(contract_id, result.map_err(Vec::from));
     }
     boot_contracts
 }
@@ -186,14 +187,14 @@ fn deploy_boot_contracts_for_range(
         }
         let result = interpreter.run(contract, Some(ast), false, None);
         if let Err(errs) = &result {
-            for e in errs {
+            for e in &errs.diagnostics {
                 ueprint!(
                     "Error deploying sbtc boot contract {contract_id}: {}",
                     e.message
                 );
             }
         }
-        newly_deployed.insert(contract_id.clone(), result);
+        newly_deployed.insert(contract_id.clone(), result.map_err(Vec::from));
     }
 
     // Deploy regular boot contracts that fall in the range
@@ -214,11 +215,11 @@ fn deploy_boot_contracts_for_range(
             }
             let result = interpreter.run(&contract, Some(&ast), false, None);
             if let Err(errs) = &result {
-                for e in errs {
+                for e in &errs.diagnostics {
                     ueprint!("Error deploying boot contract {contract_id}: {}", e.message);
                 }
             }
-            newly_deployed.insert(contract_id, result);
+            newly_deployed.insert(contract_id, result.map_err(Vec::from));
         }
     }
 
@@ -230,6 +231,17 @@ impl AnnotatedExecutionResult {
     pub fn into_inner(self) -> ExecutionResult {
         self.execution_result
     }
+}
+
+/// Whether a [`Session::call_contract_fn`] consumes a sender nonce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallKind {
+    /// A transaction sent by `sender`, consuming one of its nonces.
+    Transaction,
+    /// Not a transaction, so no nonce moves: a read-only query, or session
+    /// setup that stands in for genesis state rather than for something
+    /// anyone sent.
+    NonceFree,
 }
 
 #[derive(Clone)]
@@ -701,8 +713,14 @@ impl Session {
         amount: u64,
         recipient: &str,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+        let sender = self.interpreter.get_tx_sender();
         let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
-        self.eval(snippet, false)
+
+        // An STX transfer is a transaction and consumes a nonce. `eval` also
+        // backs bare snippets and function-argument evaluation, neither of
+        // which is one, so the charge is named here.
+        self.eval_with_inclusion(snippet, false, NonceCharge::Sender(sender.into()))
+            .map_err(Vec::from)
     }
 
     pub fn deploy_contract(
@@ -752,16 +770,31 @@ impl Session {
         let contract_id =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
 
-        let result = self.interpreter.run(contract, ast, cost_track, Some(hooks));
+        // Boot contracts bypass this transaction path because they are genesis
+        // state and consume no nonce.
+        let result = self.interpreter.run_transaction(
+            contract,
+            ast,
+            cost_track,
+            Some(hooks),
+            contract_id.issuer.clone().into(),
+        );
 
-        result.inspect(|result| {
-            if let EvaluationResult::Contract(contract_result) = &result.result {
-                self.contracts
-                    .insert(contract_id.clone(), contract_result.contract.clone());
-            }
-        })
+        result
+            .inspect(|result| {
+                if let EvaluationResult::Contract(contract_result) = &result.result {
+                    self.contracts
+                        .insert(contract_id.clone(), contract_result.contract.clone());
+                }
+            })
+            .map_err(Vec::from)
     }
 
+    /// Call `method` on `contract` as `sender`.
+    ///
+    /// `kind` controls whether the call consumes a nonce. The nonce and call
+    /// state share one database transaction.
+    #[allow(clippy::too_many_arguments)]
     pub fn call_contract_fn(
         &mut self,
         contract: &str,
@@ -770,16 +803,18 @@ impl Session {
         sender: &str,
         allow_private: bool,
         track_costs: bool,
-    ) -> Result<ExecutionResult, Vec<Diagnostic>> {
+        kind: CallKind,
+    ) -> Result<ExecutionResult, ExecutionError> {
         let initial_tx_sender = self.get_tx_sender();
 
+        // An unresolvable contract id never became a transaction at all.
         let contract_id = Self::desugar_contract_id(&initial_tx_sender, contract).map_err(|e| {
-            vec![Diagnostic {
+            ExecutionError::rejected(vec![Diagnostic {
                 level: Level::Error,
                 message: e,
                 spans: vec![],
                 suggestion: None,
-            }]
+            }])
         })?;
 
         self.set_tx_sender(sender);
@@ -796,6 +831,13 @@ impl Session {
             hooks.push(perf_hook);
         }
 
+        // Taken from the interpreter rather than re-parsed, so the principal
+        // charged is exactly the one the call runs as.
+        let charge = match kind {
+            CallKind::Transaction => NonceCharge::Sender(self.interpreter.get_tx_sender().into()),
+            CallKind::NonceFree => NonceCharge::Free,
+        };
+
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract_call_result = self.interpreter.call_contract_fn(
             &contract_id,
@@ -806,17 +848,18 @@ impl Session {
             track_costs,
             allow_private,
             hooks,
+            &charge,
         );
         self.set_tx_sender(&initial_tx_sender);
         self.last_contract_call_trace = Some(tracer_hook.output.join("\n"));
 
-        contract_call_result.map_err(|e| {
+        contract_call_result.map_err(|failure| {
             ueprint!("{}", tracer_hook.output.join("\n"));
             if let Some(traced_error) = tracer_hook.error {
                 ueprint!("{}", traced_error);
             }
             let contract_id_str = contract_id.to_string();
-            let user_friendly_message = match e {
+            let user_friendly_message = match failure.error {
                 ContractCallError::NoSuchContract(_) => {
                     format!("Contract '{contract_id_str}' does not exist")
                 }
@@ -827,12 +870,15 @@ impl Session {
                     format!("Error calling contract function '{method}': {message}")
                 }
             };
-            vec![Diagnostic {
-                level: Level::Error,
-                message: user_friendly_message,
-                spans: vec![],
-                suggestion: None,
-            }]
+            ExecutionError {
+                diagnostics: vec![Diagnostic {
+                    level: Level::Error,
+                    message: user_friendly_message,
+                    spans: vec![],
+                    suggestion: None,
+                }],
+                inclusion: failure.inclusion,
+            }
         })
     }
 
@@ -842,6 +888,17 @@ impl Session {
         snippet: String,
         cost_track: bool,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+        self.eval_with_inclusion(snippet, cost_track, NonceCharge::Free)
+            .map_err(Vec::from)
+    }
+
+    /// Evaluate a snippet while preserving failure inclusion and nonce policy.
+    fn eval_with_inclusion(
+        &mut self,
+        snippet: String,
+        cost_track: bool,
+        charge: NonceCharge,
+    ) -> Result<AnnotatedExecutionResult, ExecutionError> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
@@ -865,9 +922,9 @@ impl Session {
             hooks.push(perf_hook);
         }
 
-        let result = self
-            .interpreter
-            .run(&contract, None, cost_track, Some(hooks));
+        let result =
+            self.interpreter
+                .run_with_charge(&contract, None, cost_track, Some(hooks), &charge);
 
         result.inspect(|result| {
             if let EvaluationResult::Contract(contract_result) = &result.result {
@@ -917,7 +974,7 @@ impl Session {
                 };
                 Ok(result)
             }
-            Err(res) => Err(res),
+            Err(res) => Err(res.into()),
         }
     }
 
@@ -1161,6 +1218,19 @@ impl Session {
 
     pub fn get_assets_maps(&self) -> BTreeMap<String, BTreeMap<String, u128>> {
         self.interpreter.get_assets_maps()
+    }
+
+    /// Read the transaction nonce of `principal`. Unknown principals are at 0.
+    pub fn get_nonce(&mut self, principal: &PrincipalData) -> Result<u64, String> {
+        self.interpreter.get_nonce(principal)
+    }
+
+    /// Charge an included transaction rejected before VM execution.
+    pub fn charge_nonce_without_execution(
+        &mut self,
+        principal: PrincipalData,
+    ) -> Result<u64, String> {
+        self.interpreter.increment_nonce(&principal)
     }
 
     pub fn get_contract_ast(
@@ -1627,8 +1697,8 @@ mod tests {
     }
 
     #[track_caller]
-    fn assert_execution_result_value(
-        result: &Result<ExecutionResult, Vec<Diagnostic>>,
+    fn assert_execution_result_value<E: std::fmt::Debug>(
+        result: &Result<ExecutionResult, E>,
         expected_value: Value,
     ) {
         assert!(result.is_ok());
@@ -1773,11 +1843,33 @@ mod tests {
             initial_block_height + 1
         );
 
-        // ensure latest epoch is correctly handled
-        let latest_epoch = StacksEpochId::latest().to_string();
-        session.handle_command(&format!("::set_epoch {latest_epoch}"));
+        // The latest epoch clarinet supports, which deliberately trails
+        // `StacksEpochId::latest()` until an epoch is adopted here — adoption
+        // means `epoch_from_str`, `EpochSpec`, and the devnet config, not just
+        // the interpreter.
+        let supported_latest = DEFAULT_EPOCH.to_string();
+        session.handle_command(&format!("::set_epoch {supported_latest}"));
         let current_epoch = session.handle_command("::get_epoch");
-        assert_eq!(current_epoch, format!("Current epoch: {latest_epoch}"));
+        assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
+
+        // Canary for upstream adding an epoch. Clarinet supports through 4.0;
+        // 4.1 exists upstream but is not adopted here. If this fails, upstream
+        // has moved again — adopt the pending epoch, or re-pin this and say why.
+        assert_eq!(
+            StacksEpochId::latest(),
+            StacksEpochId::Epoch41,
+            "upstream added an epoch past the one clarinet knows is pending"
+        );
+
+        // An unadopted epoch is reported as unusable rather than silently
+        // ignored, so the session never lands somewhere the caller didn't ask for.
+        let result = session.handle_command("::set_epoch 4.1");
+        assert!(
+            result.contains("Usage:"),
+            "expected usage error, got: {result}"
+        );
+        let current_epoch = session.handle_command("::get_epoch");
+        assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
     }
 
     #[test]
@@ -1876,6 +1968,446 @@ mod tests {
         assert_eq!(
             err.first().unwrap().message,
             "contract epoch (2.5) does not match current epoch (2.4)"
+        );
+    }
+
+    #[track_caller]
+    fn principal(addr: &str) -> PrincipalData {
+        PrincipalData::parse_standard_principal(addr)
+            .expect("valid principal")
+            .into()
+    }
+
+    /// Deploy `source` as a fresh contract and report the deployer's nonce
+    /// before and after. Each call uses a distinct contract name so a test can
+    /// deploy repeatedly without tripping the duplicate-contract rule.
+    #[track_caller]
+    fn deploy_and_read_nonce(
+        session: &mut Session,
+        deployer: &str,
+        name: &str,
+        source: &str,
+    ) -> (u64, u64, Result<AnnotatedExecutionResult, Vec<Diagnostic>>) {
+        let addr = principal(deployer);
+        let before = session.get_nonce(&addr).unwrap();
+        let contract = ClarityContractBuilder::new()
+            .name(name)
+            .deployer(deployer)
+            .code_source(source.to_string())
+            .build();
+        let result = session.deploy_contract(&contract, false, None);
+        let after = session.get_nonce(&addr).unwrap();
+        (before, after, result)
+    }
+
+    #[test]
+    fn deploying_a_contract_bumps_the_deployer_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let addr = principal(deployer);
+
+        // Match the epoch `ClarityContractBuilder` defaults to.
+        session.update_epoch(DEFAULT_EPOCH);
+
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+
+        for expected_nonce in 1..=2 {
+            let contract = ClarityContractBuilder::new()
+                .name(&format!("counter-{expected_nonce}"))
+                .deployer(deployer)
+                .build();
+            session.deploy_contract(&contract, false, None).unwrap();
+
+            assert_eq!(session.get_nonce(&addr).unwrap(), expected_nonce);
+        }
+    }
+
+    #[test]
+    fn a_rejected_deploy_does_not_bump_the_deployer_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let addr = principal(deployer);
+
+        session.update_epoch(StacksEpochId::Epoch24);
+
+        // An epoch mismatch is rejected before execution, which is the simnet
+        // analogue of an invalid transaction: mainnet consumes no nonce.
+        let contract = ClarityContractBuilder::new()
+            .deployer(deployer)
+            .epoch(StacksEpochId::Epoch25)
+            .clarity_version(ClarityVersion::Clarity2)
+            .build();
+        assert!(session.deploy_contract(&contract, false, None).is_err());
+
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+    }
+
+    #[test]
+    fn boot_contracts_do_not_bump_a_nonce() {
+        // Boot contracts are genesis state on mainnet, not transactions, and
+        // they bypass `deploy_contract` entirely.
+        let mut session = Session::new(SessionSettings::default());
+
+        for addr in [BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS] {
+            assert_eq!(session.get_nonce(&principal(addr)).unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn calling_a_contract_function_does_not_bump_a_nonce_on_its_own() {
+        // A free call executes without consuming a nonce.
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let addr = principal(sender);
+
+        session.update_epoch(DEFAULT_EPOCH);
+
+        let contract = ClarityContractBuilder::new().deployer(sender).build();
+        session.deploy_contract(&contract, false, None).unwrap();
+        let after_deploy = session.get_nonce(&addr).unwrap();
+        assert_eq!(after_deploy, 1, "the deploy itself is a transaction");
+
+        // `get-x` is read-only and `incr` is public: neither bumps from here.
+        for (method, expected) in [
+            ("get-x", Value::UInt(0)),
+            ("incr", Value::okay(Value::UInt(1)).unwrap()),
+        ] {
+            let result = session
+                .call_contract_fn(
+                    &format!("{sender}.contract"),
+                    method,
+                    &[],
+                    sender,
+                    false,
+                    false,
+                    CallKind::NonceFree,
+                )
+                .unwrap_or_else(|e| panic!("{method} should execute: {e:?}"));
+
+            // Assert the call really ran, so the nonce check below is not
+            // vacuously true.
+            match result.result {
+                EvaluationResult::Snippet(res) => assert_eq!(res.result, expected),
+                EvaluationResult::Contract(_) => unreachable!("not a deploy"),
+            }
+            assert_eq!(session.get_nonce(&addr).unwrap(), after_deploy);
+        }
+    }
+
+    #[test]
+    fn evaluating_a_snippet_does_not_bump_a_nonce() {
+        // `eval` also backs bare REPL snippets and function-argument
+        // evaluation, neither of which is a transaction.
+        let mut session = Session::new(SessionSettings::default());
+        let sender = principal(&session.get_tx_sender());
+
+        let before = session.get_nonce(&sender).unwrap();
+        session.eval_clarity_string("u1");
+        let _ = session.eval("(+ 1 2)".to_string(), false);
+
+        assert_eq!(session.get_nonce(&sender).unwrap(), before);
+    }
+
+    #[test]
+    fn stx_transfer_bumps_the_sender_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+        let addr = principal(sender);
+
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1_000_000)
+            .unwrap();
+        session.set_tx_sender(sender);
+
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+
+        session.stx_transfer(1000, recipient).unwrap();
+
+        assert_eq!(session.get_nonce(&addr).unwrap(), 1);
+        // The recipient sent nothing, so it owes no nonce.
+        assert_eq!(session.get_nonce(&principal(recipient)).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_failed_stx_transfer_bumps_the_sender_nonce() {
+        // `stx-transfer?` reports insufficient funds as an `(err …)` response,
+        // not a VM failure, so the transaction succeeded as far as the chain is
+        // concerned. Mainnet mines it and charges the nonce.
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let addr = principal(sender);
+
+        session.set_tx_sender(sender);
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+
+        let result = session
+            .stx_transfer(1000, "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG")
+            .expect("an underfunded transfer still executes");
+        match result.execution_result.result {
+            EvaluationResult::Snippet(res) => {
+                assert!(
+                    matches!(res.result, Value::Response(ref r) if !r.committed),
+                    "expected an (err …) response, got {:?}",
+                    res.result
+                );
+            }
+            EvaluationResult::Contract(_) => unreachable!("not a deploy"),
+        }
+
+        assert_eq!(session.get_nonce(&addr).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_call_to_a_contract_that_was_never_deployed_is_still_included() {
+        // Simnet reports this through an internal metadata error, but mainnet's
+        // equivalent `NoSuchContract` failure is included.
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+
+        session.update_epoch(DEFAULT_EPOCH);
+
+        let failure = session
+            .call_contract_fn(
+                &format!("{sender}.never-deployed"),
+                "whatever",
+                &[],
+                sender,
+                false,
+                false,
+                CallKind::NonceFree,
+            )
+            .expect_err("a call to a missing contract must fail");
+
+        assert!(
+            failure.inclusion.is_included(),
+            "mainnet mines a call to a missing contract and charges its nonce"
+        );
+    }
+
+    #[test]
+    fn a_transaction_whose_nonce_cannot_be_recorded_does_not_commit() {
+        // Overflow injects a charge failure without requiring remote data. The
+        // transfer and nonce must roll back together.
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+        let addr = principal(sender);
+
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1_000_000)
+            .unwrap();
+        session.set_tx_sender(sender);
+        session.interpreter.force_nonce(&addr, u64::MAX);
+
+        let sender_before = session.interpreter.get_balance_for_account(sender, "STX");
+
+        let diagnostics = session
+            .stx_transfer(1000, recipient)
+            .expect_err("a transfer whose nonce cannot be recorded is not a success");
+
+        let message = &diagnostics.last().expect("a diagnostic").message;
+        assert!(
+            message.contains("nonce overflow"),
+            "the failure must name its cause, got: {message}"
+        );
+
+        assert_eq!(
+            session.interpreter.get_balance_for_account(sender, "STX"),
+            sender_before,
+            "the transfer must be rolled back with the nonce, not left committed"
+        );
+        assert_eq!(
+            session
+                .interpreter
+                .get_balance_for_account(recipient, "STX"),
+            0,
+            "the recipient must not have been paid by a transaction that failed"
+        );
+        assert_eq!(
+            session.get_nonce(&addr).unwrap(),
+            u64::MAX,
+            "and the nonce must not have moved either"
+        );
+    }
+
+    #[test]
+    fn a_contract_call_whose_nonce_cannot_be_recorded_does_not_commit() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let addr = principal(sender);
+
+        session.update_epoch(DEFAULT_EPOCH);
+
+        let contract = ClarityContractBuilder::new().deployer(sender).build();
+        session.deploy_contract(&contract, false, None).unwrap();
+        let contract_id = format!("{sender}.contract");
+
+        // Only now, so the deploy above is unaffected.
+        session.interpreter.force_nonce(&addr, u64::MAX);
+
+        session
+            .call_contract_fn(
+                &contract_id,
+                "incr",
+                &[],
+                sender,
+                false,
+                false,
+                CallKind::Transaction,
+            )
+            .expect_err("a call whose nonce cannot be recorded is not a success");
+
+        // A failed nonce charge must also roll back `incr`'s data-var update.
+        let result = session
+            .call_contract_fn(
+                &contract_id,
+                "get-x",
+                &[],
+                sender,
+                false,
+                false,
+                CallKind::NonceFree,
+            )
+            .expect("a read-only call charges nothing and still works");
+        match result.result {
+            EvaluationResult::Snippet(res) => assert_eq!(
+                res.result,
+                Value::UInt(0),
+                "the call must be rolled back with the nonce it could not record"
+            ),
+            EvaluationResult::Contract(_) => unreachable!("not a deploy"),
+        }
+    }
+
+    #[test]
+    fn a_deploy_that_fails_at_runtime_bumps_the_deployer_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        session.update_epoch(DEFAULT_EPOCH);
+
+        // Divide by zero at the top level: `Runtime` → `Acceptable` → included.
+        let (before, after, result) =
+            deploy_and_read_nonce(&mut session, deployer, "div-zero", "(/ u1 u0)");
+        assert!(result.is_err(), "the deploy must still be reported failed");
+        assert_eq!(after, before + 1, "divide-by-zero is included in a block");
+
+        // `unwrap-panic` on `none`: `EarlyReturn` → `Acceptable` → included.
+        let (before, after, result) =
+            deploy_and_read_nonce(&mut session, deployer, "panics", "(unwrap-panic none)");
+        assert!(result.is_err(), "the deploy must still be reported failed");
+        assert_eq!(after, before + 1, "unwrap-panic is included in a block");
+    }
+
+    #[test]
+    fn a_deploy_that_fails_analysis_bumps_the_deployer_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        session.update_epoch(DEFAULT_EPOCH);
+
+        // An ordinary type error is not `rejectable_in_epoch`, so mainnet mines
+        // the deploy and it fails. This is the case the deploy path gets wrong
+        // without `handle_clarity_analysis_error`, since it never routes through
+        // the runtime classifier.
+        let (before, after, result) = deploy_and_read_nonce(
+            &mut session,
+            deployer,
+            "bad-types",
+            "(define-read-only (f) (no-such-function u1))",
+        );
+        assert!(result.is_err(), "the deploy must still be reported failed");
+        assert_eq!(after, before + 1, "an analysis failure is included");
+    }
+
+    #[test]
+    fn a_deploy_that_fails_to_parse_bumps_the_deployer_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        session.update_epoch(DEFAULT_EPOCH);
+
+        // An ordinary syntax error is not `rejectable_in_epoch` either.
+        let (before, after, result) = deploy_and_read_nonce(
+            &mut session,
+            deployer,
+            "unbalanced",
+            "(define-read-only (f)",
+        );
+        assert!(result.is_err(), "the deploy must still be reported failed");
+        assert_eq!(after, before + 1, "an ordinary parse failure is included");
+    }
+
+    #[test]
+    fn a_rejectable_parse_error_outranks_a_non_rejectable_analysis_error() {
+        // Before epoch 3.4, excessive nesting is rejectable but a type error is
+        // included. Parsing must therefore determine the nonce disposition.
+        // Put the nesting second so the partial AST also contains the type error;
+        // otherwise the test would pass even if analysis ran first.
+        let deep = format!("{}u1{}", "(+ u1 ".repeat(200), ")".repeat(200));
+        let bad_types = "(define-read-only (b) (no-such-function u1))";
+
+        let deploy = |epoch: StacksEpochId, name: &str, source: &str| {
+            let mut session = Session::new(SessionSettings::default());
+            let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+            session.update_epoch(epoch);
+            let addr = principal(deployer);
+            let before = session.get_nonce(&addr).unwrap();
+            let contract = ClarityContractBuilder::new()
+                .name(name)
+                .deployer(deployer)
+                .epoch(epoch)
+                .clarity_version(ClarityVersion::default_for_epoch(epoch))
+                .code_source(source.to_string())
+                .build();
+            let result = session.deploy_contract(&contract, false, None);
+            let after = session.get_nonce(&addr).unwrap();
+            assert!(
+                result.is_err(),
+                "{epoch} {name}: the deploy must fail, or the nonce assertion is vacuous"
+            );
+            after - before
+        };
+
+        for epoch in [StacksEpochId::Epoch25, StacksEpochId::Epoch30] {
+            // Ensure the individual errors receive different dispositions.
+            assert_eq!(
+                deploy(epoch, "types-only", bad_types),
+                1,
+                "{epoch}: a type error alone is not rejectable, so mainnet mines it"
+            );
+            assert_eq!(
+                deploy(
+                    epoch,
+                    "deep-only",
+                    &format!("(define-read-only (d) {deep})")
+                ),
+                0,
+                "{epoch}: a depth error alone is rejectable, so mainnet drops it"
+            );
+
+            // Parsing takes precedence when both errors are present.
+            assert_eq!(
+                deploy(
+                    epoch,
+                    "both",
+                    &format!("{bad_types}\n(define-read-only (d) {deep})")
+                ),
+                0,
+                "{epoch}: the rejectable parse error must outrank the analysis error"
+            );
+        }
+
+        // From epoch 3.4, this depth error is included and consumes a nonce.
+        let epoch = StacksEpochId::Epoch34;
+        assert_eq!(
+            deploy(
+                epoch,
+                "both-late-epoch",
+                &format!("{bad_types}\n(define-read-only (d) {deep})")
+            ),
+            1,
+            "{epoch}: depth errors are no longer rejectable, so this is mined"
         );
     }
 
@@ -2018,6 +2550,7 @@ mod tests {
             BOOT_TESTNET_ADDRESS,
             false,
             false,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(
             &result,
@@ -2081,6 +2614,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::okay(Value::Bool(true)).unwrap());
 
@@ -2092,6 +2626,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::UInt(1));
 
@@ -2103,6 +2638,7 @@ mod tests {
             BOOT_MAINNET_ADDRESS,
             false,
             false,
+            CallKind::NonceFree,
         );
         assert!(result.is_ok());
     }
@@ -2124,6 +2660,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::okay(Value::UInt(1)).unwrap());
 
@@ -2134,6 +2671,7 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
+            CallKind::NonceFree,
         );
         assert_execution_result_value(&result, Value::UInt(1));
     }
@@ -2333,10 +2871,11 @@ mod tests {
             &session.get_tx_sender(),
             false,
             false,
+            CallKind::NonceFree,
         );
 
         assert!(result.is_err());
-        let diagnostics = result.unwrap_err();
+        let diagnostics = result.unwrap_err().diagnostics;
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
             diagnostics[0].message,
