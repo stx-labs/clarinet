@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate hiro_system_kit;
 
+// `pub` only so the exported macros can reach `_print`/`_eprint` via `$crate::uprint::…`.
+#[doc(hidden)]
 #[macro_use]
-mod uprint;
+pub mod uprint;
 
 pub mod analysis;
 

@@ -238,7 +238,7 @@ pub fn get_boot_contracts_data_with_overrides(
 
     for (contract_name, custom_source) in overrides {
         if !BOOT_CONTRACTS_NAMES.contains(&contract_name.as_str()) {
-            eprintln!("Warning: Skipping custom boot contract '{contract_name}' - only existing boot contracts can be overridden. Valid boot contracts are: {BOOT_CONTRACTS_NAMES:?}");
+            ueprint!("Warning: Skipping custom boot contract '{contract_name}' - only existing boot contracts can be overridden. Valid boot contracts are: {BOOT_CONTRACTS_NAMES:?}");
             continue;
         }
 

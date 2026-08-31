@@ -324,7 +324,7 @@ fn handle_emulated_contract_call(
         CallKind::Transaction,
     );
     if let Err(errors) = &result {
-        println!("error: {:?}", errors.diagnostics.first().unwrap().message);
+        clarity_repl::ueprint!("error: {:?}", errors.diagnostics.first().unwrap().message);
     }
 
     session.set_tx_sender(&default_tx_sender);
@@ -525,7 +525,7 @@ pub async fn generate_default_deployment_with_cache(
             .collect()
     } else {
         if !manifest.project.override_boot_contracts_source.is_empty() {
-            eprintln!("Warning: Custom boot contracts are only supported on simnet. Ignoring override_boot_contracts_source configuration for {network:?} network.");
+            clarity_repl::ueprint!("Warning: Custom boot contracts are only supported on simnet. Ignoring override_boot_contracts_source configuration for {network:?} network.");
         }
         BTreeMap::new()
     };
@@ -787,7 +787,9 @@ pub async fn generate_default_deployment_with_cache(
             match dependencies {
                 Ok(inferable_dependencies) => {
                     if inferable_dependencies.len() > 1 {
-                        println!("warning: inferable_dependencies contains more than one entry");
+                        clarity_repl::ueprint!(
+                            "warning: inferable_dependencies contains more than one entry"
+                        );
                     }
                     // We submitted a HashMap with one contract, so we have at most one result in the `inferable_dependencies` map.
                     // We will extract and keep the associated data (source, ast, deps).

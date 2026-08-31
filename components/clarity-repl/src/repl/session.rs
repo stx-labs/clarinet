@@ -88,12 +88,12 @@ impl std::fmt::Display for AssetIdentifierParseError {
 fn set_up_accounts(accounts: &[Account], interpreter: &mut ClarityInterpreter) {
     for account in accounts {
         let Ok(recipient) = PrincipalData::parse(&account.address) else {
-            println!("{}", "Unable to parse address to credit".red());
+            ueprint!("{}", "Unable to parse address to credit".red());
             continue;
         };
         let _ = interpreter
             .mint_stx_balance(recipient, account.balance)
-            .inspect_err(|e| println!("{}", e.red()));
+            .inspect_err(|e| ueprint!("{}", e.red()));
     }
 }
 
