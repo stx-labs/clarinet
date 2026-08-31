@@ -80,24 +80,12 @@ pub(crate) fn epoch_number_schema(_gen: &mut schemars::SchemaGenerator) -> schem
 pub(crate) fn requirements_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     use schemars::json_schema;
 
-    let item_schema = gen.subschema_for::<crate::project_manifest::AddressMapEntry>();
+    let item_schema = gen.subschema_for::<crate::project_manifest::RequirementConfig>();
 
     json_schema!({
         "type": "array",
         "items": item_schema,
-        "description": "External contract dependencies (legacy alias for address_map)"
-    })
-}
-
-pub(crate) fn address_map_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    use schemars::json_schema;
-
-    let item_schema = gen.subschema_for::<crate::project_manifest::AddressMapEntry>();
-
-    json_schema!({
-        "type": "array",
-        "items": item_schema,
-        "description": "Contract address mappings with optional per-network overrides"
+        "description": "External contract dependencies"
     })
 }
 
