@@ -726,8 +726,12 @@ pub async fn generate_default_deployment_with_cache(
     // These become auto-detected requirements.
     let auto_detected: Vec<QualifiedContractIdentifier> =
         match ASTDependencyDetector::detect_dependencies(&user_contract_asts, &requirements_data) {
-            Ok(_) => vec![],
-            Err((_, non_inferable)) => non_inferable,
+            Ok(dependencies) => dependencies.keys().cloned().collect(),
+            Err((inferable, non_inferable)) => {
+                let mut ids: Vec<QualifiedContractIdentifier> = inferable.keys().cloned().collect();
+                ids.extend(non_inferable);
+                ids
+            }
         };
 
     // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
@@ -759,8 +763,10 @@ pub async fn generate_default_deployment_with_cache(
             .iter()
             .filter_map(|e| QualifiedContractIdentifier::parse(&e.contract_id).ok())
             .collect();
+        let user_contract_ids: HashSet<&QualifiedContractIdentifier> =
+            user_contract_asts.keys().collect();
         for contract_id in auto_detected {
-            if !explicit_ids.contains(&contract_id) {
+            if !explicit_ids.contains(&contract_id) && !user_contract_ids.contains(&contract_id) {
                 queue.push_back(contract_id);
             }
         }
