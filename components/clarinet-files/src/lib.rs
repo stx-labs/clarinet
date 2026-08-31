@@ -30,8 +30,7 @@ pub use network_manifest::{
     DEFAULT_STACKS_SIGNER_IMAGE,
 };
 pub use project_manifest::{
-    AddressMapEntry, ProjectManifest, ProjectManifestFile, RequirementConfig,
-    INVALID_CLARITY_VERSION,
+    ProjectManifest, ProjectManifestFile, RequirementConfig, INVALID_CLARITY_VERSION,
 };
 #[cfg(target_arch = "wasm32")]
 pub use wasm_fs_accessor::WASMFileSystemAccessor;

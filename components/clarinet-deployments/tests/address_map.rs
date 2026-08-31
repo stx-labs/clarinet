@@ -1,14 +1,4 @@
-//! Integration tests for [[project.address_map]] behavior in generated deployments.
-//!
-//! Covers two new code paths introduced alongside address_map:
-//!
-//! 1. **Skip-redeploy**: when an entry has a `testnet` override that differs from
-//!    its `contract_id`, no `RequirementPublish` transaction is emitted — Clarinet
-//!    remaps the identifier in source text at broadcast time instead.
-//!
-//! 2. **Auto-detection**: a user contract that calls an external contract causes
-//!    that external contract to be auto-detected and published as a requirement,
-//!    even if the user never listed it in `[[project.address_map]]`.
+//! Integration tests for auto-detection of external contract dependencies.
 
 use std::fs;
 use std::path::Path;
@@ -66,78 +56,10 @@ async fn mock_contract(deployer: &str, contract_name: &str) -> ServerGuard {
     server
 }
 
-/// When an address_map entry has a `testnet` override that differs from its
-/// `contract_id`, the testnet plan must NOT contain a RequirementPublish for
-/// that contract — it will be remapped at broadcast time instead.
-#[tokio::test]
-async fn testnet_address_map_override_skips_redeploy() {
-    let temp_dir = TempDir::new().unwrap();
-    let root = temp_dir.path();
-    fs::create_dir_all(root.join("contracts")).unwrap();
-    write_testnet_settings(root);
-
-    fs::write(
-        root.join("Clarinet.toml"),
-        formatdoc!(
-            r#"
-            [project]
-            name = "remap-test"
-            authors = []
-            description = ""
-            telemetry = false
-
-            [[project.address_map]]
-            contract_id = "{EXTERNAL_DEPLOYER}.nft-trait"
-            testnet = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait"
-            "#
-        ),
-    )
-    .unwrap();
-
-    // The contract source is still fetched to build the AST for dependency
-    // detection, so the mock must serve it.
-    let server = mock_contract(EXTERNAL_DEPLOYER, "nft-trait").await;
-
-    let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
-    let (deployment, _artifacts, _) = generate_default_deployment(
-        &manifest,
-        &StacksNetwork::Testnet,
-        false,
-        None,
-        Some(&server.url()),
-        Environment::OnChain,
-    )
-    .await
-    .expect("testnet deployment plan should be generated");
-
-    // No RequirementPublish should appear for the overridden contract.
-    let has_publish = deployment
-        .plan
-        .batches
-        .iter()
-        .flat_map(|b| &b.transactions)
-        .any(|tx| matches!(tx, TransactionSpecification::RequirementPublish(_)));
-    assert!(
-        !has_publish,
-        "a contract with a testnet override should not generate a RequirementPublish"
-    );
-
-    // The deployment spec must carry the address_map entry so apply_on_chain_deployment
-    // can remap the identifier in source text at broadcast time.
-    let entry = deployment
-        .address_map
-        .iter()
-        .find(|e| e.contract_id == format!("{EXTERNAL_DEPLOYER}.nft-trait"))
-        .expect("deployment.address_map should contain the override entry");
-    assert_eq!(
-        entry.testnet.as_deref(),
-        Some("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait")
-    );
-}
-
 /// A user contract that calls an external contract should cause that external
 /// contract to be auto-detected as a requirement and included in the testnet
-/// plan as a RequirementPublish, even when it is not listed in address_map.
+/// plan as a RequirementPublish, without needing an explicit entry in
+/// [[project.requirements]].
 #[tokio::test]
 async fn auto_detected_requirement_included_in_testnet_plan() {
     let temp_dir = TempDir::new().unwrap();
@@ -164,7 +86,7 @@ async fn auto_detected_requirement_included_in_testnet_plan() {
     )
     .unwrap();
 
-    // The user contract calls an external contract that is NOT listed in address_map.
+    // The user contract calls an external contract that is NOT listed in [[project.requirements]].
     // Clarinet should auto-detect it via AST analysis and pull it in as a requirement.
     fs::write(
         root.join("contracts/caller.clar"),

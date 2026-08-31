@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
-use clarinet_files::{paths, AddressMapEntry, DevnetConfig, FileAccessor, StacksNetwork};
+use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
 use clarity::types::StacksEpochId;
 use clarity::util::hash::{hex_bytes, to_hex, Sha256Sum};
 use clarity::vm::analysis::ContractAnalysis;
@@ -1018,10 +1018,6 @@ pub struct DeploymentSpecification {
     // Keep a cache of contract's (source, relative_path)
     #[serde(with = "contracts_serde")]
     pub contracts: BTreeMap<QualifiedContractIdentifier, (String, PathBuf)>,
-    /// User-defined per-network address remaps (from Clarinet.toml address_map).
-    /// Used by on-chain deployment to rewrite contract identifiers in source text.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub address_map: Vec<AddressMapEntry>,
 }
 
 pub mod contracts_serde {
@@ -1274,7 +1270,6 @@ impl DeploymentSpecification {
             genesis,
             plan,
             contracts,
-            address_map: vec![],
         })
     }
 
