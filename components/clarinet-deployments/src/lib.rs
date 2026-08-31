@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::fmt::Write;
 
 pub mod diagnostic_digest;
 #[cfg(not(target_arch = "wasm32"))]
@@ -24,6 +23,7 @@ use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_BOOT_CONTRACTS,
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
 };
+use clarity_repl::repl::clarity_values::value_to_string;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
@@ -154,9 +154,11 @@ fn update_session_with_genesis_accounts(
     }
 }
 
-/// `sbtc-deposit` is deployed as an sBTC boot contract from epoch 3.0 on. It is
-/// missing from sessions that never reach epoch 3.0, and from remote-data
-/// sessions, whose sBTC state comes from the network instead.
+/// `sbtc-deposit` is deployed as an sBTC boot contract from the epoch sBTC
+/// activates at. It is missing from sessions that never reach that epoch, and
+/// from remote-data sessions, whose sBTC state comes from the network instead.
+/// A hand-authored plan can also publish it before the boot set is installed,
+/// which is what the second lookup covers.
 fn is_sbtc_deposit_deployed(session: &Session) -> bool {
     session
         .boot_contracts
@@ -166,6 +168,28 @@ fn is_sbtc_deposit_deployed(session: &Session) -> bool {
             .contains_key(&SBTC_DEPOSIT_MAINNET_ADDRESS)
 }
 
+/// A random 32-byte buffer, standing in for the Bitcoin txid of a deposit.
+fn random_txid() -> SymbolicExpression {
+    let bytes: [u8; 32] = std::array::from_fn(|_| rand::random());
+    SymbolicExpression::atom_value(
+        Value::buff_from(bytes.to_vec()).expect("32 bytes is a valid buffer"),
+    )
+}
+
+/// The `(err ...)` a contract call returned, rendered as Clarity source, or
+/// `None` if the call committed.
+fn err_response(result: &ExecutionResult) -> Option<String> {
+    match &result.result {
+        EvaluationResult::Snippet(snippet) => match &snippet.result {
+            Value::Response(response) if !response.committed => {
+                Some(value_to_string(&snippet.result))
+            }
+            _ => None,
+        },
+        EvaluationResult::Contract(_) => None,
+    }
+}
+
 /// Mint the `sbtc_balance` configured for each genesis wallet, by calling
 /// `sbtc-deposit` the way the sBTC signers would.
 fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &DeploymentSpecification) {
@@ -173,58 +197,49 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
         return;
     };
 
-    let funded_wallets = || spec.wallets.iter().filter(|w| w.sbtc_balance > 0);
-    if funded_wallets().next().is_none() {
+    let mut funded_wallets = spec
+        .wallets
+        .iter()
+        .filter(|wallet| wallet.sbtc_balance > 0)
+        .peekable();
+    if funded_wallets.peek().is_none() {
         return;
     }
 
     if !is_sbtc_deposit_deployed(session) {
+        let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-deposit");
         ueprint!(
-            "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this session. \
-             The sBTC contracts require epoch 3.0 or later.",
+            "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this \
+             session. The sBTC contracts require epoch {sbtc_epoch} or later.",
             *SBTC_DEPOSIT_MAINNET_ADDRESS
         );
         return;
     }
 
+    // The deposit is credited against the burn block below the current tip,
+    // whose header hash `complete-deposit-wrapper` checks for a Bitcoin fork.
     let block_height = session.interpreter.get_burn_block_height() - 1;
-    let height = session.eval_clarity_string(&format!("u{block_height}"));
-    let hash = session.eval_clarity_string(&format!(
+    let burn_hash = session.eval_clarity_string(&format!(
         "(unwrap-panic (get-burn-block-info? header-hash u{block_height}))"
     ));
-    let vout_index = session.eval_clarity_string("u1");
+    let burn_height = SymbolicExpression::atom_value(Value::UInt(block_height.into()));
+    let vout_index = SymbolicExpression::atom_value(Value::UInt(1));
+    let deposit_contract = SBTC_DEPOSIT_MAINNET_ADDRESS.to_string();
 
-    let wallets: Vec<(String, u128)> = funded_wallets()
-        .map(|wallet| (wallet.address.to_string(), wallet.sbtc_balance))
-        .collect();
-
-    for (address, sbtc_balance) in wallets {
-        let mut random_tx_id = String::with_capacity(64);
-        for _ in 0..32 {
-            write!(&mut random_tx_id, "{:02x}", rand::random::<u8>()).unwrap();
-        }
-        let tx_id = session.eval_clarity_string(&format!("0x{random_tx_id}"));
-        let mut random_sweep_txid = String::with_capacity(64);
-        for _ in 0..32 {
-            write!(&mut random_sweep_txid, "{:02x}", rand::random::<u8>()).unwrap();
-        }
-        let sweep_tx_id = session.eval_clarity_string(&format!("0x{random_sweep_txid}"));
-        let amount = session.eval_clarity_string(&format!("u{sbtc_balance}"));
-        let recipient = session.eval_clarity_string(&format!("'{address}"));
-
+    for wallet in funded_wallets {
         let args = vec![
-            tx_id,
+            random_txid(),
             vout_index.clone(),
-            amount,
-            recipient,
-            hash.clone(),
-            height.clone(),
-            sweep_tx_id,
+            SymbolicExpression::atom_value(Value::UInt(wallet.sbtc_balance)),
+            SymbolicExpression::atom_value(Value::Principal(wallet.address.clone().into())),
+            burn_hash.clone(),
+            burn_height.clone(),
+            random_txid(),
         ];
         // Session setup, not something the sbtc address sent: like the
         // boot contracts, it stays at nonce 0.
         let result = session.call_contract_fn(
-            &SBTC_DEPOSIT_MAINNET_ADDRESS.to_string(),
+            &deposit_contract,
             "complete-deposit-wrapper",
             &args,
             SBTC_MAINNET_ADDRESS,
@@ -235,28 +250,23 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
 
         // A silent failure here is indistinguishable from a mint that never
         // ran, so report both the runtime errors and an `(err ...)` response.
-        match result {
-            Ok(execution_result) => {
-                if let EvaluationResult::Snippet(ref snippet) = execution_result.result {
-                    if let Value::Response(ref response) = snippet.result {
-                        if !response.committed {
-                            ueprint!(
-                                "Warning: unable to mint {sbtc_balance} sBTC to {address}: \
-                                 complete-deposit-wrapper returned (err {})",
-                                response.data
-                            );
-                        }
-                    }
-                }
-            }
-            Err(error) => {
-                for diagnostic in &error.diagnostics {
-                    ueprint!(
-                        "Warning: unable to mint {sbtc_balance} sBTC to {address}: {}",
-                        diagnostic.message
-                    );
-                }
-            }
+        let reasons: Vec<String> = match &result {
+            Ok(execution_result) => err_response(execution_result)
+                .map(|err| format!("complete-deposit-wrapper returned {err}"))
+                .into_iter()
+                .collect(),
+            Err(error) => error
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.clone())
+                .collect(),
+        };
+        for reason in reasons {
+            ueprint!(
+                "Warning: unable to mint {} sBTC to {}: {reason}",
+                wallet.sbtc_balance,
+                wallet.address
+            );
         }
     }
 }
@@ -270,18 +280,27 @@ pub fn update_session_with_deployment_plan(
 
     // A plan with nothing to deploy pins no epoch, which would otherwise leave
     // the session on the datastore default (epoch 2.05) — before every boot
-    // contract that matters. Treat it like a batch with no epoch of its own.
-    if deployment.plan.batches.is_empty() {
-        session.advance_chain_tip(1);
-        session.update_epoch(DEFAULT_EPOCH);
-    }
+    // contract that matters. An implicit empty batch routes that case through
+    // the same epoch fallback as a batch that carries no epoch of its own.
+    //
+    // Not for remote-data sessions: their state comes from the network, and
+    // `Session::new` deliberately deploys no boot contracts. Advancing the
+    // epoch would install them anyway, since `update_epoch` has no such guard.
+    let implicit_batch = TransactionsBatchSpecification {
+        id: 0,
+        transactions: vec![],
+        epoch: None,
+    };
+    let synthesize_batch =
+        deployment.plan.batches.is_empty() && !session.settings.repl_settings.remote_data.enabled;
+    let batches = match synthesize_batch {
+        true => std::slice::from_ref(&implicit_batch),
+        false => deployment.plan.batches.as_slice(),
+    };
 
     let mut contracts = BTreeMap::new();
-    for batch in deployment.plan.batches.iter() {
-        let epoch: StacksEpochId = match batch.epoch {
-            Some(epoch) => epoch.into(),
-            _ => DEFAULT_EPOCH,
-        };
+    for batch in batches {
+        let epoch: StacksEpochId = batch.epoch.map(Into::into).unwrap_or(DEFAULT_EPOCH);
         session.advance_chain_tip(1);
         session.update_epoch(epoch);
 
@@ -939,6 +958,12 @@ pub async fn generate_default_deployment_with_cache(
             default_deployer_address.clone(),
         );
 
+        // The sources are written to the requirements cache so the deployment
+        // plan can reload them from disk after a serialization round-trip.
+        let requirements_dir = manifest.project.cache_location.join("requirements");
+        std::fs::create_dir_all(&requirements_dir)
+            .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
+
         // `SBTC_BOOT_CONTRACTS` is ordered by dependency, and so is the batch.
         for (contract_id, _) in SBTC_BOOT_CONTRACTS.iter() {
             let name = contract_id.name.as_str();
@@ -957,11 +982,6 @@ pub async fn generate_default_deployment_with_cache(
                 .remove(name)
                 .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
 
-            // Write source to requirements cache so the deployment plan can
-            // reload it from disk after serialization round-trip.
-            let requirements_dir = manifest.project.cache_location.join("requirements");
-            std::fs::create_dir_all(&requirements_dir)
-                .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
             let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
             std::fs::write(&location, &source)
                 .map_err(|e| format!("unable to write {name} to requirements cache: {e}"))?;

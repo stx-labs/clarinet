@@ -39,6 +39,21 @@ fn build_test_deployement_plan(
     }
 }
 
+/// A genesis spec with a single wallet, whose `sbtc_balance` is what each test
+/// varies. The STX balance is fixed so it can double as a control: it must be
+/// credited whether or not the sBTC mint happens.
+fn genesis_with_sbtc_balance(sbtc_balance: u128) -> GenesisSpecification {
+    GenesisSpecification {
+        contracts: vec![],
+        wallets: vec![WalletSpecification {
+            address: WALLET_1.clone(),
+            balance: 100_000_000,
+            name: "wallet_1".to_string(),
+            sbtc_balance,
+        }],
+    }
+}
+
 /// An empty batch that only moves the session to epoch 3.0, where the sBTC
 /// boot contracts are deployed. A stock project reaches at least this epoch.
 fn epoch_3_0_batch() -> TransactionsBatchSpecification {
@@ -52,15 +67,7 @@ fn epoch_3_0_batch() -> TransactionsBatchSpecification {
 #[test]
 fn fund_genesis_account_with_stx() {
     let mut session = Session::new(SessionSettings::default());
-    let genesis = GenesisSpecification {
-        contracts: vec![],
-        wallets: vec![WalletSpecification {
-            address: WALLET_1.clone(),
-            balance: 100_000_000,
-            name: "wallet_1".to_string(),
-            sbtc_balance: 0,
-        }],
-    };
+    let genesis = genesis_with_sbtc_balance(0);
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
     update_session_with_deployment_plan(&mut session, &deployment, None);
 
@@ -77,15 +84,7 @@ fn fund_genesis_account_with_stx() {
 #[test]
 fn does_not_fund_sbtc_before_epoch_3_0() {
     let mut session = Session::new(SessionSettings::default());
-    let genesis = GenesisSpecification {
-        contracts: vec![],
-        wallets: vec![WalletSpecification {
-            address: WALLET_1.clone(),
-            balance: 100_000_000,
-            name: "wallet_1".to_string(),
-            sbtc_balance: 10_000_000_000,
-        }],
-    };
+    let genesis = genesis_with_sbtc_balance(10_000_000_000);
     let batch = TransactionsBatchSpecification {
         id: 0,
         epoch: Some(EpochSpec::Epoch2_5),
@@ -103,15 +102,7 @@ fn does_not_fund_sbtc_before_epoch_3_0() {
 #[test]
 fn does_not_fund_sbtc_when_the_balance_is_zero() {
     let mut session = Session::new(SessionSettings::default());
-    let genesis = GenesisSpecification {
-        contracts: vec![],
-        wallets: vec![WalletSpecification {
-            address: WALLET_1.clone(),
-            balance: 100_000_000,
-            name: "wallet_1".to_string(),
-            sbtc_balance: 0,
-        }],
-    };
+    let genesis = genesis_with_sbtc_balance(0);
     let deployment = build_test_deployement_plan(vec![epoch_3_0_batch()], Some(genesis));
     update_session_with_deployment_plan(&mut session, &deployment, None);
 
@@ -127,15 +118,7 @@ fn does_not_fund_sbtc_when_the_balance_is_zero() {
 fn can_fund_initial_sbtc_balance_without_any_sbtc_transaction() {
     let mut session = Session::new(SessionSettings::default());
 
-    let genesis = GenesisSpecification {
-        contracts: vec![],
-        wallets: vec![WalletSpecification {
-            address: WALLET_1.clone(),
-            balance: 100_000_000,
-            name: "wallet_1".to_string(),
-            sbtc_balance: 10_000_000_000,
-        }],
-    };
+    let genesis = genesis_with_sbtc_balance(10_000_000_000);
     let deployment = build_test_deployement_plan(vec![epoch_3_0_batch()], Some(genesis));
     update_session_with_deployment_plan(&mut session, &deployment, None);
 
@@ -178,15 +161,7 @@ fn can_fund_initial_sbtc_balance_with_explicit_sbtc_requirements() {
         transactions,
     };
 
-    let genesis = GenesisSpecification {
-        contracts: vec![],
-        wallets: vec![WalletSpecification {
-            address: WALLET_1.clone(),
-            balance: 100_000_000,
-            name: "wallet_1".to_string(),
-            sbtc_balance: 10_000_000_000,
-        }],
-    };
+    let genesis = genesis_with_sbtc_balance(10_000_000_000);
     let deployment = build_test_deployement_plan(vec![batch], Some(genesis));
     update_session_with_deployment_plan(&mut session, &deployment, None);
 
