@@ -247,6 +247,46 @@ describe("post-conditions on fungible tokens", () => {
   });
 });
 
+describe("post-conditions on non-fungible tokens", () => {
+  // The `Nonfungible` variant embeds a Clarity value for the asset id, so this
+  // exercises value serialization inside a post-condition.
+  const source = `
+(define-non-fungible-token badge uint)
+(define-public (mint (id uint) (to principal)) (nft-mint? badge id to))
+(define-public (send (id uint) (to principal)) (nft-transfer? badge id tx-sender to))
+`;
+
+  let token: string;
+
+  beforeEach(() => {
+    simnet.deployContract("badge", source, null, deployer);
+    token = `${deployer}.badge`;
+    simnet.callPublicFn("badge", "mint", [Cl.uint(7), Cl.principal(address1)], deployer);
+  });
+
+  it("accepts a transfer that satisfies the conditions", () => {
+    const { result } = simnet.callPublicFn(
+      "badge",
+      "send",
+      [Cl.uint(7), Cl.principal(address2)],
+      address1,
+      {
+        postConditions: [Pc.principal(address1).willSendAsset().nft(token, "badge", Cl.uint(7))],
+      },
+    );
+
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  });
+
+  it("aborts when the condition names a different asset id", () => {
+    expect(() =>
+      simnet.callPublicFn("badge", "send", [Cl.uint(7), Cl.principal(address2)], address1, {
+        postConditions: [Pc.principal(address1).willSendAsset().nft(token, "badge", Cl.uint(8))],
+      }),
+    ).toThrow(/Post-condition check failure/);
+  });
+});
+
 describe("post-conditions in a mined block", () => {
   it("carries conditions through mineBlock", () => {
     const [ok] = simnet.mineBlock([
@@ -266,6 +306,25 @@ describe("post-conditions in a mined block", () => {
         }),
         tx.callPublicFn("counter", "increment", [], address2, {
           postConditions: [Pc.principal(address2).willSendEq(1).ustx()],
+        }),
+      ]),
+    ).toThrow(/Post-condition check failure/);
+  });
+
+  it("carries conditions through a deployContract in mineBlock", () => {
+    const source = `(begin (unwrap-panic (stx-transfer? u500 tx-sender '${address2})))`;
+
+    const [ok] = simnet.mineBlock([
+      tx.deployContract("pays-in-block", source, null, address1, {
+        postConditions: [Pc.principal(address1).willSendEq(500).ustx()],
+      }),
+    ]);
+    expect(ok.result).toStrictEqual(Cl.bool(true));
+
+    expect(() =>
+      simnet.mineBlock([
+        tx.deployContract("pays-again", source, null, address1, {
+          postConditions: [Pc.principal(address1).willSendEq(1).ustx()],
         }),
       ]),
     ).toThrow(/Post-condition check failure/);
