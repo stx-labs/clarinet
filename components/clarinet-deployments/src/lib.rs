@@ -25,7 +25,7 @@ use clarity_repl::repl::boot::{
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
     SBTC_TOKEN_MAINNET_ADDRESS,
 };
-use clarity_repl::repl::session::{AnnotatedExecutionResult, ExecutionResultMap};
+use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
@@ -190,6 +190,8 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
                 height.clone(),
                 sweep_tx_id,
             ];
+            // Session setup, not something the sbtc address sent: like the
+            // boot contracts, it stays at nonce 0.
             let _ = session.call_contract_fn(
                 &SBTC_DEPOSIT_MAINNET_ADDRESS.to_string(),
                 "complete-deposit-wrapper",
@@ -197,6 +199,7 @@ fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &Deployment
                 SBTC_MAINNET_ADDRESS,
                 false,
                 false,
+                CallKind::NonceFree,
             );
         }
     }
@@ -310,6 +313,7 @@ fn handle_emulated_contract_call(
         .iter()
         .map(|p| session.eval_clarity_string(p))
         .collect();
+    // Deployment-plan calls are transactions from the emulated sender.
     let result = session.call_contract_fn(
         &tx.contract_id.to_string(),
         &tx.method.to_string(),
@@ -317,13 +321,14 @@ fn handle_emulated_contract_call(
         &tx.emulated_sender.to_string(),
         true,
         false,
+        CallKind::Transaction,
     );
     if let Err(errors) = &result {
-        println!("error: {:?}", errors.first().unwrap().message);
+        println!("error: {:?}", errors.diagnostics.first().unwrap().message);
     }
 
     session.set_tx_sender(&default_tx_sender);
-    result
+    result.map_err(Vec::from)
 }
 
 /// Hash contract source for cache validation. SHA-256 is hardware-accelerated
@@ -1504,6 +1509,71 @@ mod tests {
 
         let var_x = session.interpreter.get_data_var(&contract_id, "sum");
         assert_eq!(var_x, Some(to_raw_value(&Value::Int(42))));
+    }
+
+    #[test]
+    fn test_emulated_plan_transactions_consume_the_senders_nonce() {
+        // Publishes and emulated calls are transactions from the plan's sender.
+        let mut session = Session::new(SessionSettings::default());
+        let epoch = StacksEpochId::Epoch25;
+        session.update_epoch(epoch);
+
+        let deployer: PrincipalData = PrincipalData::parse_standard_principal(DEPLOYER)
+            .unwrap()
+            .into();
+        assert_eq!(session.get_nonce(&deployer).unwrap(), 0);
+
+        let snippet = [
+            "(define-data-var x int 0)",
+            "(define-public (add (n int)) (ok (var-set x (+ (var-get x) n))))",
+            "(define-public (boom) (ok (/ (var-get x) 0)))",
+        ]
+        .join("\n");
+        deploy_contract(&mut session, "contract_1", &snippet, epoch).unwrap();
+        assert_eq!(
+            session.get_nonce(&deployer).unwrap(),
+            1,
+            "an emulated publish is a transaction"
+        );
+
+        let contract_id = QualifiedContractIdentifier::new(
+            PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
+            ContractName::from_literal("contract_1"),
+        );
+        let call = |method: &'static str| EmulatedContractCallSpecification {
+            contract_id: contract_id.clone(),
+            emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
+            method: ClarityName::from_literal(method),
+            parameters: vec![],
+        };
+
+        // Assert the state change so the successful call cannot pass as a no-op.
+        let mut spec = call("add");
+        spec.parameters = vec!["1".to_string()];
+        handle_emulated_contract_call(&mut session, &spec).unwrap();
+        assert_eq!(
+            session.interpreter.get_data_var(&contract_id, "x"),
+            Some(to_raw_value(&Value::Int(1)))
+        );
+        assert_eq!(session.get_nonce(&deployer).unwrap(), 2);
+
+        assert!(
+            handle_emulated_contract_call(&mut session, &call("boom")).is_err(),
+            "dividing by zero must surface as an error"
+        );
+        assert_eq!(
+            session.get_nonce(&deployer).unwrap(),
+            3,
+            "a failed-but-included plan call still consumes a nonce"
+        );
+
+        // `UndefinedFunction` is an included failure from epoch 2.1 onward.
+        assert!(handle_emulated_contract_call(&mut session, &call("nope")).is_err());
+        assert_eq!(
+            session.get_nonce(&deployer).unwrap(),
+            4,
+            "an undefined function is an included runtime failure from epoch 2.1"
+        );
     }
 
     #[test]

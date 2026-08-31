@@ -6,7 +6,7 @@ mod trait_counter;
 
 use std::collections::HashMap;
 
-use clarity::vm::callables::CallableType;
+use clarity::vm::callables::{BuiltinKind, CallableType};
 use clarity::vm::costs::cost_functions::ClarityCostFunction;
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::functions::{lookup_reserved_functions, NativeFunctions};
@@ -122,7 +122,10 @@ pub(crate) fn calculate_function_cost_from_native_function(
     }
 
     match lookup_reserved_functions(native_function.to_string().as_str(), &clarity_version) {
-        Some(CallableType::NativeFunction(_, _, cost_fn)) => {
+        Some(CallableType::Builtin {
+            kind: BuiltinKind::Native(_, _, cost_fn),
+            ..
+        }) => {
             let cost = cost_fn
                 .eval_for_epoch(arg_count, epoch)
                 .map_err(|e| StaticCostError::CostCalculation(format!("{e:?}")))?;
@@ -132,7 +135,10 @@ pub(crate) fn calculate_function_cost_from_native_function(
                 max: cost_with_lookup,
             })
         }
-        Some(CallableType::NativeFunction205(_, _, cost_fn, _)) => {
+        Some(CallableType::Builtin {
+            kind: BuiltinKind::Native205(_, _, cost_fn, _),
+            ..
+        }) => {
             let cost = cost_fn
                 .eval_for_epoch(arg_count, epoch)
                 .map_err(|e| StaticCostError::CostCalculation(format!("{e:?}")))?;
@@ -142,7 +148,10 @@ pub(crate) fn calculate_function_cost_from_native_function(
                 max: cost_with_lookup,
             })
         }
-        Some(CallableType::SpecialFunction(_, _)) => {
+        Some(CallableType::Builtin {
+            kind: BuiltinKind::Special(_, _),
+            ..
+        }) => {
             let cost = get_cost_for_special_function(native_function, args, epoch, user_args, env);
             let cost_with_lookup_min = add_lookup_cost(cost.min.clone(), epoch);
             let cost_with_lookup_max = add_lookup_cost(cost.max.clone(), epoch);

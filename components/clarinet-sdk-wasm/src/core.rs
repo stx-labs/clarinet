@@ -21,7 +21,8 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPri
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
-use clarity_repl::repl::session::CostsReport;
+use clarity_repl::repl::interpreter::BlockInclusion;
+use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
     clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
@@ -750,6 +751,16 @@ impl SDK {
         Ok(encode_to_js(&self.accounts)?.unchecked_into::<Accounts>())
     }
 
+    /// The number of transactions `address` has sent, as mainnet counts them.
+    /// The deployer starts above zero because the deployment plan's contract
+    /// publishes are themselves transactions.
+    #[wasm_bindgen(js_name=getAccountNonce)]
+    pub fn get_account_nonce(&mut self, address: &str) -> Result<u64, String> {
+        let principal = PrincipalData::parse_standard_principal(address)
+            .map_err(|e| format!("Invalid address '{address}': {e}"))?;
+        self.get_session_mut().get_nonce(&principal.into())
+    }
+
     #[wasm_bindgen(js_name=getDataVar)]
     pub fn get_data_var(&mut self, contract: &str, var_name: &str) -> Result<String, String> {
         let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
@@ -806,6 +817,7 @@ impl SDK {
             sender,
         }: &CallFnArgs,
         allow_private: bool,
+        kind: CallKind,
     ) -> Result<TransactionRes, String> {
         let test_name = self.current_test_name.clone();
         let track_costs = self.options.track_costs;
@@ -829,8 +841,9 @@ impl SDK {
                 sender,
                 allow_private,
                 track_costs,
+                kind,
             )
-            .map_err(|diagnostics| {
+            .map_err(|failure| {
                 let mut message = format!(
                     "Call contract function error: {contract}::{method}({})",
                     args.iter()
@@ -838,7 +851,7 @@ impl SDK {
                         .collect::<Vec<String>>()
                         .join(", ")
                 );
-                if let Some(diag) = diagnostics.last() {
+                if let Some(diag) = failure.diagnostics.last() {
                     message = format!("{message} -> {}", diag.message);
                 }
                 message
@@ -856,6 +869,9 @@ impl SDK {
 
         if track_costs {
             if let Some(ref cost) = execution.cost {
+                // Unreachable in practice: the same id was desugared to run
+                // the call above. Classify conservatively rather than claim a
+                // transaction happened on a path that cannot be reached.
                 let contract_id =
                     Session::desugar_contract_id(&self.deployer, contract)?.to_string();
                 self.costs_reports.push(CostsReport {
@@ -884,7 +900,55 @@ impl SDK {
                 return Err(format!("{} is not a read-only function", args.method));
             }
         }
-        self.call_contract_fn(args, false)
+        // A read-only call sends nothing, so it is never a transaction.
+        self.call_contract_fn(args, false, CallKind::NonceFree)
+    }
+
+    /// Charge the nonce for a preflight failure if the equivalent VM error
+    /// would be included in this epoch.
+    fn charge_preflight_rejection(&mut self, args: &CallFnArgs) -> Result<(), String> {
+        let epoch = self.get_session().interpreter.datastore.get_current_epoch();
+        if !BlockInclusion::from_uncallable_function(&args.contract, &args.method, epoch)
+            .is_included()
+        {
+            return Ok(());
+        }
+
+        let sender = &args.sender;
+        let principal = PrincipalData::parse_standard_principal(sender)
+            .map_err(|e| format!("Failed to charge a nonce for '{sender}': {e:?}"))?;
+        self.get_session_mut()
+            .charge_nonce_without_execution(principal.into())?;
+        Ok(())
+    }
+
+    /// Run a contract-call transaction. The cached-interface preflight must
+    /// preserve the VM path's nonce and block-advance behavior.
+    fn call_fn_as_transaction(
+        &mut self,
+        args: &CallFnArgs,
+        advance_chain_tip: bool,
+        required_access: ContractInterfaceFunctionAccess,
+    ) -> Result<TransactionRes, String> {
+        let wrong_access = match self.get_function_interface(&args.contract, &args.method) {
+            Ok(interface) if interface.access != required_access => Some(format!(
+                "{} is not a {required_access:?} function",
+                args.method
+            )),
+            _ => None,
+        };
+
+        if advance_chain_tip {
+            self.get_session_mut().advance_chain_tip(1);
+        }
+
+        if let Some(message) = wrong_access {
+            self.charge_preflight_rejection(args)?;
+            return Err(message);
+        }
+
+        let allow_private = required_access == ContractInterfaceFunctionAccess::private;
+        self.call_contract_fn(args, allow_private, CallKind::Transaction)
     }
 
     fn inner_call_public_fn(
@@ -892,17 +956,11 @@ impl SDK {
         args: &CallFnArgs,
         advance_chain_tip: bool,
     ) -> Result<TransactionRes, String> {
-        if let Ok(interface) = self.get_function_interface(&args.contract, &args.method) {
-            if interface.access != ContractInterfaceFunctionAccess::public {
-                return Err(format!("{} is not a public function", args.method));
-            }
-        }
-
-        if advance_chain_tip {
-            let session = self.get_session_mut();
-            session.advance_chain_tip(1);
-        }
-        self.call_contract_fn(args, false)
+        self.call_fn_as_transaction(
+            args,
+            advance_chain_tip,
+            ContractInterfaceFunctionAccess::public,
+        )
     }
 
     fn inner_call_private_fn(
@@ -910,16 +968,11 @@ impl SDK {
         args: &CallFnArgs,
         advance_chain_tip: bool,
     ) -> Result<TransactionRes, String> {
-        if let Ok(interface) = self.get_function_interface(&args.contract, &args.method) {
-            if interface.access != ContractInterfaceFunctionAccess::private {
-                return Err(format!("{} is not a private function", args.method));
-            }
-        }
-        if advance_chain_tip {
-            let session = self.get_session_mut();
-            session.advance_chain_tip(1);
-        }
-        self.call_contract_fn(args, true)
+        self.call_fn_as_transaction(
+            args,
+            advance_chain_tip,
+            ContractInterfaceFunctionAccess::private,
+        )
     }
 
     fn inner_transfer_stx(

@@ -4,7 +4,8 @@ use std::io::Write;
 use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::errors::VmExecutionError;
-use clarity::vm::{EvalHook, SymbolicExpression, SymbolicExpressionType, ValueRef};
+use clarity::vm::hooks::EvalHook;
+use clarity::vm::{SymbolicExpression, SymbolicExpressionType, ValueRef};
 use clarity_types::types::QualifiedContractIdentifier;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
