@@ -7,5 +7,4 @@ disallowed-macros = [
   { path = "std::println", reason = "no-op on wasm32, use clarity_repl::uprint! instead" },
   { path = "std::eprint", reason = "no-op on wasm32, use clarity_repl::ueprint! instead" },
   { path = "std::eprintln", reason = "no-op on wasm32, use clarity_repl::ueprint! instead" },
-  { path = "std::dbg", reason = "no-op on wasm32, use clarity_repl::ueprint! instead" },
 ]
