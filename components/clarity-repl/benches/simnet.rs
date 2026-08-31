@@ -2,6 +2,7 @@ use std::hint::black_box;
 
 use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::vm::{EvaluationResult, ExecutionResult, SymbolicExpression, Value as ClarityValue};
+use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::CallKind;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
@@ -61,9 +62,9 @@ fn init_session() -> Session {
         skip_analysis: false,
     };
 
-    let _ = session.deploy_contract(&contract, false, None);
+    let _ = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
 
-    let _ = session.deploy_contract(&contract, false, None);
+    let _ = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
     session.advance_burn_chain_tip(1);
 
     assert_eq!(session.interpreter.get_block_height(), 3);
@@ -88,6 +89,7 @@ fn call_fn(
             false,
             false,
             CallKind::Transaction,
+            PostConditionCheck::Unchecked,
         )
         .unwrap();
 

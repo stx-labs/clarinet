@@ -35,6 +35,7 @@ libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "
 pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "ab048f9c1b96cbe47572b789e947fe42b0465154", package = "pox-locking", default-features = false }
 stacks-codec = { git = "https://github.com/stacks-network/stacks-core.git", rev = "ab048f9c1b96cbe47572b789e947fe42b0465154", package = "stacks-codec" }
 stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "ab048f9c1b96cbe47572b789e947fe42b0465154", package = "stacks-common", default-features = false }
+stacks-transactions = { git = "https://github.com/stacks-network/stacks-core.git", rev = "ab048f9c1b96cbe47572b789e947fe42b0465154", package = "stacks-transactions", default-features = false }
 stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "ab048f9c1b96cbe47572b789e947fe42b0465154", package = "stackslib", default-features = false }
 
 # Internal crates

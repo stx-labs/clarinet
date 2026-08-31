@@ -1,4 +1,10 @@
-import { Cl, ClarityValue, ClarityVersion } from "@stacks/transactions";
+import {
+  Cl,
+  ClarityValue,
+  ClarityVersion,
+  PostCondition,
+  postConditionToHex,
+} from "@stacks/transactions";
 
 export type ClarityEvent = {
   event: string;
@@ -27,7 +33,58 @@ export type ParsedTransactionResult = {
   performance: string | undefined;
 };
 
+/** How a transaction's asset movement is constrained. */
+export type PostConditionMode = "allow" | "deny" | "originator";
+
+/**
+ * Post-conditions to enforce on a simnet transaction.
+ *
+ * A condition is either a stacks.js `PostCondition` or the hex encoding of one.
+ * Hex is the escape hatch for the `Staking` and `Pox` conditions that stacks.js
+ * cannot build yet.
+ *
+ * Passing neither field leaves asset movement unconstrained, as it has always
+ * been. Passing either one turns enforcement on, and `postConditionMode`
+ * defaults to `"deny"` — so anything you did not account for fails, which is
+ * what a wallet does on mainnet.
+ */
+export type PostConditionOptions = {
+  postConditions?: (PostCondition | string)[];
+  postConditionMode?: PostConditionMode;
+};
+
+/** `PostConditionOptions` as the Wasm SDK takes it: conditions already encoded. */
+export type SerializedPostConditions = {
+  postConditions?: string[];
+  postConditionMode?: PostConditionMode;
+};
+
+export function serializePostConditions(options?: PostConditionOptions): SerializedPostConditions {
+  const conditions = options?.postConditions;
+  const mode = options?.postConditionMode;
+
+  // Absent keys, rather than explicit `undefined`, so an omitted argument stays
+  // distinguishable from an empty list once it reaches Rust.
+  return {
+    ...(conditions !== undefined && {
+      postConditions: conditions.map((pc) =>
+        typeof pc === "string" ? pc : postConditionToHex(pc),
+      ),
+    }),
+    ...(mode !== undefined && { postConditionMode: mode }),
+  };
+}
+
 export type CallFn = (
+  contract: string,
+  method: string,
+  args: ClarityValue[],
+  sender: string,
+  options?: PostConditionOptions,
+) => ParsedTransactionResult;
+
+/** A read-only call moves no assets, so it takes no post-conditions. */
+export type CallReadOnlyFn = (
   contract: string,
   method: string,
   args: ClarityValue[],
@@ -42,14 +99,20 @@ export type DeployContract = (
   content: string,
   options: DeployContractOptions | null,
   sender: string,
+  postConditionOptions?: PostConditionOptions,
 ) => ParsedTransactionResult;
 
 export type TransferSTX = (
   amount: number | bigint,
   recipient: string,
   sender: string,
+  options?: PostConditionOptions,
 ) => ParsedTransactionResult;
 
+/**
+ * A transaction in a `mineBlock` batch. Post-conditions are already encoded,
+ * because the batch is handed to Wasm as plain JSON.
+ */
 export type Tx =
   | {
       callPublicFn: {
@@ -57,7 +120,7 @@ export type Tx =
         method: string;
         args: ClarityValue[];
         sender: string;
-      };
+      } & SerializedPostConditions;
       callPrivateFn?: never;
       deployContract?: never;
       transferSTX?: never;
@@ -69,7 +132,7 @@ export type Tx =
         method: string;
         args: ClarityValue[];
         sender: string;
-      };
+      } & SerializedPostConditions;
       deployContract?: never;
       transferSTX?: never;
     }
@@ -81,33 +144,61 @@ export type Tx =
         content: string;
         options: DeployContractOptions | null;
         sender: string;
-      };
+      } & SerializedPostConditions;
       transferSTX?: never;
     }
   | {
       callPublicFn?: never;
       callPrivateFn?: never;
       deployContract?: never;
-      transferSTX: { amount: number; recipient: string; sender: string };
+      transferSTX: {
+        amount: number;
+        recipient: string;
+        sender: string;
+      } & SerializedPostConditions;
     };
 
 export const tx = {
-  callPublicFn: (contract: string, method: string, args: ClarityValue[], sender: string): Tx => ({
-    callPublicFn: { contract, method, args, sender },
+  callPublicFn: (
+    contract: string,
+    method: string,
+    args: ClarityValue[],
+    sender: string,
+    options?: PostConditionOptions,
+  ): Tx => ({
+    callPublicFn: { contract, method, args, sender, ...serializePostConditions(options) },
   }),
-  callPrivateFn: (contract: string, method: string, args: ClarityValue[], sender: string): Tx => ({
-    callPrivateFn: { contract, method, args, sender },
+  callPrivateFn: (
+    contract: string,
+    method: string,
+    args: ClarityValue[],
+    sender: string,
+    options?: PostConditionOptions,
+  ): Tx => ({
+    callPrivateFn: { contract, method, args, sender, ...serializePostConditions(options) },
   }),
   deployContract: (
     name: string,
     content: string,
     options: DeployContractOptions | null,
     sender: string,
+    postConditionOptions?: PostConditionOptions,
   ): Tx => ({
-    deployContract: { name, content, options, sender },
+    deployContract: {
+      name,
+      content,
+      options,
+      sender,
+      ...serializePostConditions(postConditionOptions),
+    },
   }),
-  transferSTX: (amount: number, recipient: string, sender: string): Tx => ({
-    transferSTX: { amount, recipient, sender },
+  transferSTX: (
+    amount: number,
+    recipient: string,
+    sender: string,
+    options?: PostConditionOptions,
+  ): Tx => ({
+    transferSTX: { amount, recipient, sender, ...serializePostConditions(options) },
   }),
 };
 

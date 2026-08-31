@@ -10,7 +10,9 @@ import {
 
 import {
   parseEvents,
+  serializePostConditions,
   type CallFn,
+  type CallReadOnlyFn,
   type DeployContract,
   type GetDataVar,
   type GetMapEntry,
@@ -26,23 +28,25 @@ type RunSnippet = SDK["runSnippet"];
 
 // because the session is wrapped in a proxy the types need to be hardcoded
 export type Simnet = {
-  [K in keyof SDK]: K extends "callReadOnlyFn" | "callPublicFn" | "callPrivateFn"
-    ? CallFn
-    : K extends "execute"
-      ? Execute
-      : K extends "runSnippet"
-        ? RunSnippet
-        : K extends "deployContract"
-          ? DeployContract
-          : K extends "transferSTX"
-            ? TransferSTX
-            : K extends "mineBlock"
-              ? MineBlock
-              : K extends "getDataVar"
-                ? GetDataVar
-                : K extends "getMapEntry"
-                  ? GetMapEntry
-                  : SDK[K];
+  [K in keyof SDK]: K extends "callReadOnlyFn"
+    ? CallReadOnlyFn
+    : K extends "callPublicFn" | "callPrivateFn"
+      ? CallFn
+      : K extends "execute"
+        ? Execute
+        : K extends "runSnippet"
+          ? RunSnippet
+          : K extends "deployContract"
+            ? DeployContract
+            : K extends "transferSTX"
+              ? TransferSTX
+              : K extends "mineBlock"
+                ? MineBlock
+                : K extends "getDataVar"
+                  ? GetDataVar
+                  : K extends "getMapEntry"
+                    ? GetMapEntry
+                    : SDK[K];
 };
 
 function parseTxResponse(response: TransactionRes): ParsedTransactionResult {
@@ -62,9 +66,17 @@ export function getSessionProxy() {
       // - deserialize output into clarity values
 
       if (prop === "callReadOnlyFn" || prop === "callPublicFn" || prop === "callPrivateFn") {
-        const callFn: CallFn = (contract, method, args, sender) => {
+        const callFn: CallFn = (contract, method, args, sender, options) => {
+          const { postConditions, postConditionMode } = serializePostConditions(options);
           const response = session[prop](
-            new CallFnArgs(contract, method, args.map(serializeCVBytes), sender),
+            new CallFnArgs(
+              contract,
+              method,
+              args.map(serializeCVBytes),
+              sender,
+              postConditions,
+              postConditionMode,
+            ),
           );
           return parseTxResponse(response);
         };
@@ -80,13 +92,28 @@ export function getSessionProxy() {
       }
 
       if (prop === "deployContract") {
-        const callDeployContract: DeployContract = (name, content, options, sender) => {
+        const callDeployContract: DeployContract = (
+          name,
+          content,
+          options,
+          sender,
+          postConditionOptions,
+        ) => {
           const rustOptions = options
             ? new ContractOptions(options.clarityVersion)
             : new ContractOptions();
+          const { postConditions, postConditionMode } =
+            serializePostConditions(postConditionOptions);
 
           const response = session.deployContract(
-            new DeployContractArgs(name, content, rustOptions, sender),
+            new DeployContractArgs(
+              name,
+              content,
+              rustOptions,
+              sender,
+              postConditions,
+              postConditionMode,
+            ),
           );
           return parseTxResponse(response);
         };
@@ -94,8 +121,17 @@ export function getSessionProxy() {
       }
 
       if (prop === "transferSTX") {
-        const callTransferSTX: TransferSTX = (amount, ...args) => {
-          const response = session.transferSTX(new TransferSTXArgs(BigInt(amount), ...args));
+        const callTransferSTX: TransferSTX = (amount, recipient, sender, options) => {
+          const { postConditions, postConditionMode } = serializePostConditions(options);
+          const response = session.transferSTX(
+            new TransferSTXArgs(
+              BigInt(amount),
+              recipient,
+              sender,
+              postConditions,
+              postConditionMode,
+            ),
+          );
           return parseTxResponse(response);
         };
         return callTransferSTX;

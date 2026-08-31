@@ -22,6 +22,7 @@ use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExp
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::interpreter::BlockInclusion;
+use clarity_repl::repl::post_conditions::{parse_post_condition_mode, PostConditionCheck};
 use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -81,6 +82,10 @@ struct CallContractArgsJSON {
     method: String,
     args_maps: Vec<HashMap<usize, u8>>,
     sender: String,
+    #[serde(rename = "postConditions", default)]
+    post_conditions: Option<Vec<String>>,
+    #[serde(rename = "postConditionMode", default)]
+    post_condition_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +95,11 @@ pub struct CallFnArgs {
     method: String,
     args: Vec<Vec<u8>>,
     sender: String,
+    /// Consensus-serialized post-conditions, hex-encoded. `None` means the
+    /// caller asked for no enforcement, which is not the same as an empty
+    /// list — that forbids the sender from moving anything under `Deny`.
+    post_conditions: Option<Vec<String>>,
+    post_condition_mode: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -100,12 +110,16 @@ impl CallFnArgs {
         method: String,
         args: Vec<js_sys::Uint8Array>,
         sender: String,
+        post_conditions: Option<Vec<String>>,
+        post_condition_mode: Option<String>,
     ) -> Self {
         Self {
             contract,
             method,
             args: args.into_iter().map(|a| a.to_vec()).collect(),
             sender,
+            post_conditions,
+            post_condition_mode,
         }
     }
 
@@ -132,6 +146,8 @@ impl CallFnArgs {
             method: json_args.method,
             args,
             sender: json_args.sender,
+            post_conditions: json_args.post_conditions,
+            post_condition_mode: json_args.post_condition_mode,
         }
     }
 }
@@ -171,16 +187,29 @@ pub struct DeployContractArgs {
     content: String,
     options: Option<ContractOptions>,
     sender: String,
+    #[serde(rename = "postConditions", default)]
+    post_conditions: Option<Vec<String>>,
+    #[serde(rename = "postConditionMode", default)]
+    post_condition_mode: Option<String>,
 }
 #[wasm_bindgen]
 impl DeployContractArgs {
     #[wasm_bindgen(constructor)]
-    pub fn new(name: String, content: String, options: ContractOptions, sender: String) -> Self {
+    pub fn new(
+        name: String,
+        content: String,
+        options: ContractOptions,
+        sender: String,
+        post_conditions: Option<Vec<String>>,
+        post_condition_mode: Option<String>,
+    ) -> Self {
         Self {
             name,
             content,
             options: Some(options),
             sender,
+            post_conditions,
+            post_condition_mode,
         }
     }
 }
@@ -191,18 +220,60 @@ pub struct TransferSTXArgs {
     amount: u64,
     recipient: String,
     sender: String,
+    #[serde(rename = "postConditions", default)]
+    post_conditions: Option<Vec<String>>,
+    #[serde(rename = "postConditionMode", default)]
+    post_condition_mode: Option<String>,
 }
 
 #[wasm_bindgen]
 impl TransferSTXArgs {
     #[wasm_bindgen(constructor)]
-    pub fn new(amount: u64, recipient: String, sender: String) -> Self {
+    pub fn new(
+        amount: u64,
+        recipient: String,
+        sender: String,
+        post_conditions: Option<Vec<String>>,
+        post_condition_mode: Option<String>,
+    ) -> Self {
         Self {
             amount,
             recipient,
             sender,
+            post_conditions,
+            post_condition_mode,
         }
     }
+}
+
+/// The mode a transaction gets when it carries post-conditions but does not
+/// name one. Matches what a wallet does on mainnet: anything the caller did not
+/// account for is a failure rather than a silent pass.
+const DEFAULT_POST_CONDITION_MODE: &str = "deny";
+
+/// Build the post-condition check for a transaction sent by `sender`.
+///
+/// Enforcement is off only when the caller supplied neither conditions nor a
+/// mode. That keeps an omitted argument distinct from an explicitly empty list,
+/// which under `Deny` forbids the sender from moving anything at all.
+fn post_condition_check(
+    post_conditions: Option<&Vec<String>>,
+    post_condition_mode: Option<&str>,
+    sender: &str,
+) -> Result<PostConditionCheck, String> {
+    if post_conditions.is_none() && post_condition_mode.is_none() {
+        return Ok(PostConditionCheck::Unchecked);
+    }
+
+    let mode = post_condition_mode.unwrap_or(DEFAULT_POST_CONDITION_MODE);
+    let origin = PrincipalData::parse_standard_principal(sender)
+        .map_err(|e| format!("Invalid sender address '{sender}': {e:?}"))?;
+
+    PostConditionCheck::from_hex(
+        post_conditions.map_or(&[], Vec::as_slice),
+        parse_post_condition_mode(mode)?,
+        origin.into(),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -815,6 +886,8 @@ impl SDK {
             method,
             args,
             sender,
+            post_conditions,
+            post_condition_mode,
         }: &CallFnArgs,
         allow_private: bool,
         kind: CallKind,
@@ -832,6 +905,12 @@ impl SDK {
             .map(|a| SymbolicExpression::atom_value(uint8_to_value(a)))
             .collect::<Vec<SymbolicExpression>>();
 
+        let post_conditions = post_condition_check(
+            post_conditions.as_ref(),
+            post_condition_mode.as_deref(),
+            sender,
+        )?;
+
         let session = self.get_session_mut();
         let execution = session
             .call_contract_fn(
@@ -842,6 +921,7 @@ impl SDK {
                 allow_private,
                 track_costs,
                 kind,
+                post_conditions,
             )
             .map_err(|failure| {
                 let mut message = format!(
@@ -988,11 +1068,17 @@ impl SDK {
             return Err(format!("Invalid recipient address '{}'.", args.recipient));
         }
 
+        let post_conditions = post_condition_check(
+            args.post_conditions.as_ref(),
+            args.post_condition_mode.as_deref(),
+            &args.sender,
+        )?;
+
         let session = self.get_session_mut();
         let initial_tx_sender = session.get_tx_sender();
         session.set_tx_sender(&args.sender);
 
-        let execution = match session.stx_transfer(args.amount, &args.recipient) {
+        let execution = match session.stx_transfer(args.amount, &args.recipient, post_conditions) {
             Ok(res) => res,
             Err(diagnostics) => {
                 let mut message = format!("{}: {}", "STX transfer error", args.sender);
@@ -1020,11 +1106,24 @@ impl SDK {
         }
 
         let track_costs = self.options.track_costs;
+        let post_conditions = post_condition_check(
+            args.post_conditions.as_ref(),
+            args.post_condition_mode.as_deref(),
+            &args.sender,
+        )?;
         let execution = {
             let session = self.get_session_mut();
             if advance_chain_tip {
                 session.advance_chain_tip(1);
             }
+
+            // A contract's top-level body runs as the deployer, so the sender
+            // has to be in place before it executes — otherwise a deploy that
+            // moves assets debits whoever the session last acted as. Mirrors
+            // `inner_transfer_stx` and the deployment-plan path.
+            let initial_tx_sender = session.get_tx_sender();
+            session.set_tx_sender(&args.sender);
+
             let current_epoch = session.interpreter.datastore.get_current_epoch();
 
             let clarity_version = clarity_version_from_u32(
@@ -1041,7 +1140,10 @@ impl SDK {
                 skip_analysis: false,
             };
 
-            match session.deploy_contract(&contract, track_costs, None) {
+            let result = session.deploy_contract(&contract, track_costs, None, post_conditions);
+            session.set_tx_sender(&initial_tx_sender);
+
+            match result {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(
