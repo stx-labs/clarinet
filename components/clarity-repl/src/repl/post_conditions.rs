@@ -24,8 +24,8 @@ pub fn parse_post_condition_mode(mode: &str) -> Result<TransactionPostConditionM
 /// database transaction.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum PostConditionCheck {
-    /// Asset movement is unconstrained, as it is for a read-only call or for a
-    /// transaction that carries no post-conditions.
+    /// Asset movement is unconstrained, which is what a transaction carrying no
+    /// post-conditions gets.
     #[default]
     Unchecked,
     /// Constrain asset movement. A violation aborts the payload but still
@@ -54,8 +54,22 @@ impl PostConditionCheck {
             .map(|hex| {
                 let bytes = hex_bytes(hex.strip_prefix("0x").unwrap_or(hex))
                     .map_err(|e| format!("invalid post-condition hex: {e}"))?;
-                TransactionPostCondition::consensus_deserialize(&mut bytes.as_slice())
-                    .map_err(|e| format!("invalid post-condition: {e}"))
+
+                let mut remaining = bytes.as_slice();
+                let condition = TransactionPostCondition::consensus_deserialize(&mut remaining)
+                    .map_err(|e| format!("invalid post-condition: {e}"))?;
+
+                // On the wire a transaction's post-conditions are length-
+                // prefixed, so trailing bytes cannot occur. Here each one
+                // arrives on its own, and ignoring the remainder would accept
+                // input no node would.
+                if !remaining.is_empty() {
+                    return Err(format!(
+                        "invalid post-condition: {} trailing byte(s)",
+                        remaining.len()
+                    ));
+                }
+                Ok(condition)
             })
             .collect::<Result<_, _>>()?;
 
@@ -208,6 +222,19 @@ mod tests {
             principal(SENDER),
         );
         assert!(bad_condition.is_err_and(|e| e.contains("invalid post-condition")));
+    }
+
+    #[test]
+    fn rejects_a_condition_with_trailing_bytes() {
+        let trailing = format!("{}00", hex_of(&sends_exactly(SENDER, 100)));
+
+        let check = PostConditionCheck::from_hex(
+            &[trailing],
+            TransactionPostConditionMode::Deny,
+            principal(SENDER),
+        );
+
+        assert!(check.is_err_and(|e| e.contains("1 trailing byte(s)")));
     }
 
     #[test]

@@ -63,8 +63,8 @@ export function serializePostConditions(options?: PostConditionOptions): Seriali
   const conditions = options?.postConditions;
   const mode = options?.postConditionMode;
 
-  // Absent keys, rather than explicit `undefined`, so an omitted argument stays
-  // distinguishable from an empty list once it reaches Rust.
+  // An omitted list disables enforcement entirely; an empty list denies every
+  // asset movement under the default mode. Both have to reach Rust intact.
   return {
     ...(conditions !== undefined && {
       postConditions: conditions.map((pc) =>

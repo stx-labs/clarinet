@@ -95,9 +95,8 @@ pub struct CallFnArgs {
     method: String,
     args: Vec<Vec<u8>>,
     sender: String,
-    /// Consensus-serialized post-conditions, hex-encoded. `None` means the
-    /// caller asked for no enforcement, which is not the same as an empty
-    /// list — that forbids the sender from moving anything under `Deny`.
+    /// Consensus-serialized post-conditions, hex-encoded. See
+    /// [`post_condition_check`] for what `None` means.
     post_conditions: Option<Vec<String>>,
     post_condition_mode: Option<String>,
 }

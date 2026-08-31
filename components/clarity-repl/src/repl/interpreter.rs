@@ -123,8 +123,9 @@ impl NonceCharge {
             .map_err(|e| format!("failed to set nonce for {principal}: {e}"))
     }
 
-    /// Commit only the charge after an included execution failure.
-    /// `GlobalContext::execute` has already rolled back the nested execution.
+    /// Commit only the charge, for an included failure whose state changes the
+    /// caller has already discarded. Expects an open transaction holding
+    /// nothing but the charge.
     fn commit_alone(&self, global_context: &mut GlobalContext) -> Result<(), String> {
         self.apply(&mut global_context.database)?;
         global_context
@@ -137,25 +138,14 @@ impl NonceCharge {
 /// What an execution owes beyond running its payload.
 ///
 /// Both obligations are settled together, in the payload's own database
-/// transaction — see [`ClarityInterpreter::settle`]. The default is "not a
-/// transaction at all", which is what a read-only call or a bare snippet owes.
+/// transaction — see [`Self::settle`]. The default is "not a transaction at
+/// all", which is what a read-only call or a bare snippet owes.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TransactionTerms {
     /// The sender nonce this execution consumes.
     pub charge: NonceCharge,
     /// The constraint on this execution's asset movement.
     pub post_conditions: PostConditionCheck,
-}
-
-impl TransactionTerms {
-    /// The terms of a transaction sent by `sender` that carries no
-    /// post-conditions.
-    pub fn sent_by(sender: PrincipalData) -> Self {
-        Self {
-            charge: NonceCharge::Sender(sender),
-            post_conditions: PostConditionCheck::Unchecked,
-        }
-    }
 }
 
 impl TransactionTerms {
@@ -171,11 +161,16 @@ impl TransactionTerms {
         global_context: &mut GlobalContext,
         epoch: StacksEpochId,
     ) -> Result<Settlement, String> {
-        let violation = {
-            let asset_map = global_context
-                .get_readonly_asset_map()
-                .map_err(|e| format!("failed to read the asset map: {e}"))?;
-            self.post_conditions.evaluate(asset_map, epoch)?
+        // Read the asset map only when something constrains it, so the path
+        // every pre-existing transaction takes cannot fail here at all.
+        let violation = match &self.post_conditions {
+            PostConditionCheck::Unchecked => None,
+            checked => {
+                let asset_map = global_context
+                    .get_readonly_asset_map()
+                    .map_err(|e| format!("failed to read the asset map: {e}"))?;
+                checked.evaluate(asset_map, epoch)?
+            }
         };
 
         if let Some(reason) = violation {
@@ -195,6 +190,16 @@ impl TransactionTerms {
     }
 }
 
+/// How an execution's database transaction was settled.
+#[derive(Debug)]
+enum Settlement {
+    /// The payload and the nonce both committed.
+    Committed,
+    /// A post-condition rejected the payload. It was rolled back and only the
+    /// nonce committed, the way mainnet handles `AbortedByCallback`.
+    Aborted(String),
+}
+
 /// Report a failed execution to the eval hooks, leaving them installed.
 fn notify_hooks_of_failure(global_context: &mut GlobalContext, error: &str) {
     let Some(mut eval_hooks) = global_context.eval_hooks.take() else {
@@ -204,16 +209,6 @@ fn notify_hooks_of_failure(global_context: &mut GlobalContext, error: &str) {
         hook.did_complete(Err(error.to_string()));
     }
     global_context.eval_hooks = Some(eval_hooks);
-}
-
-/// How an execution's database transaction was settled.
-#[derive(Debug)]
-enum Settlement {
-    /// The payload and the nonce both committed.
-    Committed,
-    /// A post-condition rejected the payload. It was rolled back and only the
-    /// nonce committed, the way mainnet handles `AbortedByCallback`.
-    Aborted(String),
 }
 
 /// A failed `ClarityInterpreter::run`.

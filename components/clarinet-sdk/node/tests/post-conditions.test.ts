@@ -201,6 +201,52 @@ describe("post-conditions on contract deployments", () => {
   });
 });
 
+describe("post-conditions on fungible tokens", () => {
+  const source = `
+(define-fungible-token widget)
+(define-public (mint (amount uint) (to principal)) (ft-mint? widget amount to))
+(define-public (send (amount uint) (to principal)) (ft-transfer? widget amount tx-sender to))
+(define-read-only (balance-of (who principal)) (ft-get-balance widget who))
+`;
+
+  let token: string;
+
+  beforeEach(() => {
+    simnet.deployContract("widget", source, null, deployer);
+    token = `${deployer}.widget`;
+    simnet.callPublicFn("widget", "mint", [Cl.uint(1000), Cl.principal(address1)], deployer);
+  });
+
+  it("accepts a transfer that satisfies the conditions", () => {
+    const { result } = simnet.callPublicFn(
+      "widget",
+      "send",
+      [Cl.uint(50), Cl.principal(address2)],
+      address1,
+      { postConditions: [Pc.principal(address1).willSendEq(50).ft(token, "widget")] },
+    );
+
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  });
+
+  it("aborts a transfer that violates the conditions", () => {
+    expect(() =>
+      simnet.callPublicFn("widget", "send", [Cl.uint(50), Cl.principal(address2)], address1, {
+        postConditions: [Pc.principal(address1).willSendEq(49).ft(token, "widget")],
+      }),
+    ).toThrow(/Post-condition check failure/);
+
+    // The tokens never moved.
+    const { result } = simnet.callReadOnlyFn(
+      "widget",
+      "balance-of",
+      [Cl.principal(address1)],
+      address1,
+    );
+    expect(result).toStrictEqual(Cl.uint(1000));
+  });
+});
+
 describe("post-conditions in a mined block", () => {
   it("carries conditions through mineBlock", () => {
     const [ok] = simnet.mineBlock([
@@ -240,6 +286,20 @@ describe("read-only calls", () => {
   it("takes no post-condition options", () => {
     // @ts-expect-error read-only calls move no assets
     simnet.callReadOnlyFn("counter", "get-count", [], address1, { postConditionMode: "deny" });
+  });
+});
+
+describe("a contract body runs as its declared deployer", () => {
+  it("debits the deployer, not whoever the session last acted as", () => {
+    const source = `(begin (unwrap-panic (stx-transfer? u500 tx-sender '${address2})))`;
+    const before = simnet.getAssetsMap().get("STX")!;
+
+    simnet.deployContract("pays-on-deploy", source, null, address1);
+
+    const after = simnet.getAssetsMap().get("STX")!;
+    expect(after.get(address1)).toBe(before.get(address1)! - 500n);
+    expect(after.get(deployer)).toBe(before.get(deployer));
+    expect(after.get(address2)).toBe(before.get(address2)! + 500n);
   });
 });
 
