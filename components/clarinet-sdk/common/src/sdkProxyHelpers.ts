@@ -43,10 +43,8 @@ export type PostConditionMode = "allow" | "deny" | "originator";
  * Hex is the escape hatch for the `Staking` and `Pox` conditions that stacks.js
  * cannot build yet.
  *
- * Passing neither field leaves asset movement unconstrained, as it has always
- * been. Passing either one turns enforcement on, and `postConditionMode`
- * defaults to `"deny"` — so anything you did not account for fails, which is
- * what a wallet does on mainnet.
+ * Passing neither field preserves the SDK's unchecked behavior. Passing either
+ * enables enforcement; `postConditionMode` defaults to `"deny"`.
  */
 export type PostConditionOptions = {
   postConditions?: (PostCondition | string)[];
@@ -63,8 +61,7 @@ export function serializePostConditions(options?: PostConditionOptions): Seriali
   const conditions = options?.postConditions;
   const mode = options?.postConditionMode;
 
-  // An omitted list disables enforcement entirely; an empty list denies every
-  // asset movement under the default mode. Both have to reach Rust intact.
+  // Preserve the distinction between an omitted list and an explicit empty one.
   return {
     ...(conditions !== undefined && {
       postConditions: conditions.map((pc) =>

@@ -18,18 +18,12 @@ pub fn parse_post_condition_mode(mode: &str) -> Result<TransactionPostConditionM
 }
 
 /// The post-condition check to apply to a transaction's asset movement.
-///
-/// Mirrors [`super::interpreter::NonceCharge`]: the caller names what the
-/// execution owes, and the interpreter applies it inside the execution's own
-/// database transaction.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum PostConditionCheck {
-    /// Asset movement is unconstrained, which is what a transaction carrying no
-    /// post-conditions gets.
+    /// Asset movement is unconstrained.
     #[default]
     Unchecked,
-    /// Constrain asset movement. A violation aborts the payload but still
-    /// consumes a nonce, the way mainnet treats an `AbortedByCallback`.
+    /// Constrain asset movement.
     Checked {
         conditions: Vec<TransactionPostCondition>,
         mode: TransactionPostConditionMode,
@@ -42,8 +36,7 @@ pub enum PostConditionCheck {
 impl PostConditionCheck {
     /// Decode consensus-serialized post-conditions.
     ///
-    /// The SDK sends the same bytes a wallet would put on the wire, so simnet
-    /// accepts exactly the input mainnet does.
+    /// The SDK sends the same encoding used on the transaction wire.
     pub fn from_hex(
         conditions: &[String],
         mode: TransactionPostConditionMode,
@@ -59,10 +52,7 @@ impl PostConditionCheck {
                 let condition = TransactionPostCondition::consensus_deserialize(&mut remaining)
                     .map_err(|e| format!("invalid post-condition: {e}"))?;
 
-                // On the wire a transaction's post-conditions are length-
-                // prefixed, so trailing bytes cannot occur. Here each one
-                // arrives on its own, and ignoring the remainder would accept
-                // input no node would.
+                // Each SDK value must contain exactly one condition.
                 if !remaining.is_empty() {
                     return Err(format!(
                         "invalid post-condition: {} trailing byte(s)",
@@ -82,9 +72,7 @@ impl PostConditionCheck {
 
     /// Reject a transaction whose post-conditions this epoch does not support.
     ///
-    /// Mainnet does this in `process_transaction_precheck`, before any of the
-    /// transaction runs, and treats a failure as `InvalidStacksTransaction` —
-    /// so the caller must reject rather than abort, consuming no nonce.
+    /// Unsupported conditions make the transaction invalid before execution.
     pub fn validate_for_epoch(&self, epoch: StacksEpochId) -> Result<(), String> {
         let Self::Checked {
             conditions, mode, ..
@@ -196,7 +184,7 @@ mod tests {
 
         for encoded in [hex.clone(), format!("0x{hex}")] {
             let check = PostConditionCheck::from_hex(
-                &[encoded.clone()],
+                std::slice::from_ref(&encoded),
                 TransactionPostConditionMode::Deny,
                 principal(SENDER),
             )

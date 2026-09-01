@@ -176,6 +176,18 @@ describe("post-conditions on STX transfers", () => {
 
     expect(simnet.getAssetsMap().get("STX")?.get(address1)).toBe(100000000000000n);
   });
+
+  it("restores the session sender after an aborted transfer", () => {
+    const initialSender = simnet.execute("tx-sender").result;
+
+    expect(() =>
+      simnet.transferSTX(1000, address2, address1, {
+        postConditions: [Pc.principal(address1).willSendEq(999).ustx()],
+      }),
+    ).toThrow(/Post-condition check failure/);
+
+    expect(simnet.execute("tx-sender").result).toStrictEqual(initialSender);
+  });
 });
 
 describe("post-conditions on contract deployments", () => {

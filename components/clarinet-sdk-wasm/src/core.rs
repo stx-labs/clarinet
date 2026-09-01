@@ -95,8 +95,7 @@ pub struct CallFnArgs {
     method: String,
     args: Vec<Vec<u8>>,
     sender: String,
-    /// Consensus-serialized post-conditions, hex-encoded. See
-    /// [`post_condition_check`] for what `None` means.
+    /// Consensus-serialized post-conditions, hex-encoded.
     post_conditions: Option<Vec<String>>,
     post_condition_mode: Option<String>,
 }
@@ -245,18 +244,16 @@ impl TransferSTXArgs {
     }
 }
 
-/// The mode a transaction gets when it carries post-conditions but does not
-/// name one. Matches what a wallet does on mainnet: anything the caller did not
-/// account for is a failure rather than a silent pass.
+/// Default to rejecting asset movement that no condition covers.
 const DEFAULT_POST_CONDITION_MODE: &str = "deny";
 
 /// Build the post-condition check for a transaction sent by `sender`.
 ///
-/// Enforcement is off only when the caller supplied neither conditions nor a
-/// mode. That keeps an omitted argument distinct from an explicitly empty list,
-/// which under `Deny` forbids the sender from moving anything at all.
+/// An omitted list and mode preserve the SDK's historical unchecked behavior.
+/// An explicit empty list remains meaningful: in `deny` mode it rejects any
+/// asset movement by the originator.
 fn post_condition_check(
-    post_conditions: Option<&Vec<String>>,
+    post_conditions: Option<&[String]>,
     post_condition_mode: Option<&str>,
     sender: &str,
 ) -> Result<PostConditionCheck, String> {
@@ -269,7 +266,7 @@ fn post_condition_check(
         .map_err(|e| format!("Invalid sender address '{sender}': {e:?}"))?;
 
     PostConditionCheck::from_hex(
-        post_conditions.map_or(&[], Vec::as_slice),
+        post_conditions.unwrap_or_default(),
         parse_post_condition_mode(mode)?,
         origin.into(),
     )
@@ -905,7 +902,7 @@ impl SDK {
             .collect::<Vec<SymbolicExpression>>();
 
         let post_conditions = post_condition_check(
-            post_conditions.as_ref(),
+            post_conditions.as_deref(),
             post_condition_mode.as_deref(),
             sender,
         )?;
@@ -1068,7 +1065,7 @@ impl SDK {
         }
 
         let post_conditions = post_condition_check(
-            args.post_conditions.as_ref(),
+            args.post_conditions.as_deref(),
             args.post_condition_mode.as_deref(),
             &args.sender,
         )?;
@@ -1077,7 +1074,10 @@ impl SDK {
         let initial_tx_sender = session.get_tx_sender();
         session.set_tx_sender(&args.sender);
 
-        let execution = match session.stx_transfer(args.amount, &args.recipient, post_conditions) {
+        let result = session.stx_transfer(args.amount, &args.recipient, post_conditions);
+        session.set_tx_sender(&initial_tx_sender);
+
+        let execution = match result {
             Ok(res) => res,
             Err(diagnostics) => {
                 let mut message = format!("{}: {}", "STX transfer error", args.sender);
@@ -1091,7 +1091,6 @@ impl SDK {
         if advance_chain_tip {
             session.advance_chain_tip(1);
         }
-        session.set_tx_sender(&initial_tx_sender);
         Ok(execution_result_to_transaction_res(&execution))
     }
 
@@ -1106,7 +1105,7 @@ impl SDK {
 
         let track_costs = self.options.track_costs;
         let post_conditions = post_condition_check(
-            args.post_conditions.as_ref(),
+            args.post_conditions.as_deref(),
             args.post_condition_mode.as_deref(),
             &args.sender,
         )?;
@@ -1116,10 +1115,7 @@ impl SDK {
                 session.advance_chain_tip(1);
             }
 
-            // A contract's top-level body runs as the deployer, so the sender
-            // has to be in place before it executes — otherwise a deploy that
-            // moves assets debits whoever the session last acted as. Mirrors
-            // `inner_transfer_stx` and the deployment-plan path.
+            // A contract's top-level body runs as its declared deployer.
             let initial_tx_sender = session.get_tx_sender();
             session.set_tx_sender(&args.sender);
 

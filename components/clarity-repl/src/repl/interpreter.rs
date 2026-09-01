@@ -135,11 +135,7 @@ impl NonceCharge {
     }
 }
 
-/// What an execution owes beyond running its payload.
-///
-/// Both obligations are settled together, in the payload's own database
-/// transaction — see [`Self::settle`]. The default is "not a transaction at
-/// all", which is what a read-only call or a bare snippet owes.
+/// Transaction-level obligations applied after executing a payload.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TransactionTerms {
     /// The sender nonce this execution consumes.
@@ -149,20 +145,14 @@ pub struct TransactionTerms {
 }
 
 impl TransactionTerms {
-    /// Settle these terms against the payload `global_context` has executed
-    /// but not yet committed.
-    ///
-    /// Mainnet checks post-conditions in an abort callback, so the decision
-    /// happens *before* the commit: a violation rolls the payload back rather
-    /// than undoing it afterwards. The nonce is charged either way, because a
-    /// post-condition abort is still an included transaction.
+    /// Commit a valid payload, or roll back a post-condition violation while
+    /// still charging the nonce of the included transaction.
     fn settle(
         &self,
         global_context: &mut GlobalContext,
         epoch: StacksEpochId,
     ) -> Result<Settlement, String> {
-        // Read the asset map only when something constrains it, so the path
-        // every pre-existing transaction takes cannot fail here at all.
+        // Preserve the pre-existing path when enforcement is disabled.
         let violation = match &self.post_conditions {
             PostConditionCheck::Unchecked => None,
             checked => {
@@ -195,8 +185,7 @@ impl TransactionTerms {
 enum Settlement {
     /// The payload and the nonce both committed.
     Committed,
-    /// A post-condition rejected the payload. It was rolled back and only the
-    /// nonce committed, the way mainnet handles `AbortedByCallback`.
+    /// The payload was rolled back and only its nonce committed.
     Aborted(String),
 }
 
@@ -442,8 +431,7 @@ impl ClarityInterpreter {
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
         terms: &TransactionTerms,
     ) -> Result<AnnotatedExecutionResult, ExecutionError> {
-        // Mainnet rejects post-conditions the epoch does not support before any
-        // of the transaction runs, so no nonce is consumed.
+        // Reject unsupported post-conditions before execution.
         if let Err(e) = terms
             .post_conditions
             .validate_for_epoch(contract.epoch.resolve())
@@ -1093,8 +1081,7 @@ impl ClarityInterpreter {
     ) -> Result<ExecutionResult, ContractCallFailure> {
         let tx_sender: PrincipalData = self.tx_sender.clone().into();
 
-        // Mainnet rejects post-conditions the epoch does not support before any
-        // of the transaction runs, so no nonce is consumed.
+        // Reject unsupported post-conditions before execution.
         if let Err(e) = terms.post_conditions.validate_for_epoch(epoch) {
             return Err(ContractCallFailure {
                 error: ContractCallError::Uncategorized(e),
