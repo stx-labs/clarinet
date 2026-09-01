@@ -1,8 +1,7 @@
 import fs from "node:fs";
-import http from "node:http";
 import path from "node:path";
 import { Cl } from "@stacks/transactions";
-import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 // test the built package and not the source code
 // makes it simpler to handle wasm build
@@ -11,9 +10,13 @@ import { Simnet, initSimnet } from "..";
 const address1 = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
 const address2 = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
+const sbtcDeployer = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
+const sbtcToken = `${sbtcDeployer}.sbtc-token`;
+
+// (define-constant ERR_NOT_OWNER (err u4)) in sbtc-token.clar
+const ERR_NOT_OWNER = 4n;
+
 let simnet: Simnet;
-let server: http.Server;
-let serverUrl: string;
 
 const deploymentPlanPath = path.join(
   process.cwd(),
@@ -26,40 +29,14 @@ function deleteExistingDeploymentPlan() {
   }
 }
 
-beforeAll(async () => {
-  server = http.createServer((req, res) => {
-    const match = req.url?.match(/\/extended\/v1\/contract\/(.+)/);
-    if (match) {
-      const fixturePath = path.join("tests/fixtures/api-responses", `${match[1]}.json`);
-      try {
-        const fixture = fs.readFileSync(fixturePath, "utf-8");
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(fixture);
-      } catch {
-        res.writeHead(404);
-        res.end();
-      }
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address() as { port: number };
-  serverUrl = `http://localhost:${addr.port}`;
-});
-
-afterAll(() => {
-  server?.close();
-});
-
+// ManifestWithSBTC.toml declares no contract and no requirement: the sBTC
+// contracts are boot contracts, so `sbtc_balance` must be minted without the
+// project having to opt in to anything.
 beforeEach(async () => {
   deleteExistingDeploymentPlan();
   simnet = await initSimnet("tests/fixtures/ManifestWithSBTC.toml", false, {
     trackCosts: true,
     trackCoverage: false,
-    apiUrl: serverUrl,
   });
 });
 
@@ -68,15 +45,15 @@ afterEach(() => {
 });
 
 describe("sbtc funding", () => {
-  it("boots in epoch 3.0", () => {
-    expect(simnet.currentEpoch).toBe("3.0");
+  it("boots in the latest epoch, since no contract pins an earlier one", () => {
+    expect(simnet.currentEpoch).toBe("4.0");
   });
 
-  it("automatically deployed the sbtc-token contract", () => {
+  it("automatically deployed the sbtc contracts", () => {
     const contracts = simnet.getContractsInterfaces();
-    expect(contracts.has("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-registry")).toBe(true);
-    expect(contracts.has("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token")).toBe(true);
-    expect(contracts.has("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-deposit")).toBe(true);
+    expect(contracts.has(`${sbtcDeployer}.sbtc-registry`)).toBe(true);
+    expect(contracts.has(`${sbtcDeployer}.sbtc-token`)).toBe(true);
+    expect(contracts.has(`${sbtcDeployer}.sbtc-deposit`)).toBe(true);
   });
 
   it("automatically funded the test wallets", () => {
@@ -92,13 +69,13 @@ describe("sbtc funding", () => {
     expect(sbtcBalance.get(address1)).toBe(1000000000n);
     expect(sbtcBalance.get(address2)).toBe(1000000000n);
   });
+
+  it("reports the total supply the genesis funding minted", () => {
+    const total = simnet.callReadOnlyFn(sbtcToken, "get-total-supply", [], address1);
+    // deployer: 100_000_000_000_000, the 3 other wallets: 1_000_000_000 each
+    expect(total.result).toStrictEqual(Cl.ok(Cl.uint(100003000000000n)));
+  });
 });
-
-const sbtcDeployer = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
-const sbtcToken = `${sbtcDeployer}.sbtc-token`;
-
-// (define-constant ERR_NOT_OWNER (err u4)) in sbtc-token.clar
-const ERR_NOT_OWNER = 4n;
 
 describe("sbtc-token basic functionality", () => {
   it("exposes its SIP-010 metadata", () => {

@@ -11,8 +11,8 @@ import { Cl } from "@stacks/transactions";
 // 9 names × 2 addresses (genesis has no functions) = 18
 const bootContractsEpoch24 = 18;
 // Boot contracts with valid interfaces deployed through Epoch31 (Clarinet.toml highest epoch):
-// epoch24 base + 3 more names × 2 addresses + 2 sbtc contracts = +8
-const bootContractsEpoch31 = bootContractsEpoch24 + 8;
+// epoch24 base + 3 more names × 2 addresses + 3 sbtc contracts = +9
+const bootContractsEpoch31 = bootContractsEpoch24 + 9;
 
 const deploymentPlanPath = path.join(
   process.cwd(),

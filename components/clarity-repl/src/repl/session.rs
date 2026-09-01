@@ -3094,10 +3094,10 @@ mod tests {
                 println!("  {m}");
             }
         }
-        // 12 names × 2 addresses + 2 sbtc = 26 (genesis has no functions)
+        // 12 names × 2 addresses + 3 sbtc = 27 (genesis has no functions)
         assert_eq!(
-            count, 26,
-            "Expected 26 boot contracts with interface at Epoch31, missing: {missing:?}"
+            count, 27,
+            "Expected 27 boot contracts with interface at Epoch31, missing: {missing:?}"
         );
     }
 

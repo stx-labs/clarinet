@@ -722,6 +722,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "web-sys",
  "yaml_serde",
 ]
 
