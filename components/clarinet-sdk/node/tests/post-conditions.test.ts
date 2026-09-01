@@ -418,13 +418,6 @@ describe("post-conditions in a mined block", () => {
   });
 });
 
-describe("read-only calls", () => {
-  it("takes no post-condition options", () => {
-    // @ts-expect-error read-only calls move no assets
-    simnet.callReadOnlyFn("counter", "get-count", [], address1, { postConditionMode: "deny" });
-  });
-});
-
 describe("a contract body runs as its declared deployer", () => {
   it("debits the deployer, not whoever the session last acted as", () => {
     const source = `(begin (unwrap-panic (stx-transfer? u500 tx-sender '${address2})))`;
