@@ -29,6 +29,7 @@ use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvaluationResult,
     ExecutionResult, ParsedContract, SnippetEvaluationResult,
 };
+use clarity_types::effects::AssetMap;
 use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
@@ -159,17 +160,22 @@ impl TransactionTerms {
                 let asset_map = global_context
                     .get_readonly_asset_map()
                     .map_err(|e| format!("failed to read the asset map: {e}"))?;
-                checked.evaluate(asset_map, epoch)?
+                checked
+                    .evaluate(asset_map, epoch)?
+                    .map(|reason| (reason, asset_map.clone()))
             }
         };
 
-        if let Some(reason) = violation {
+        if let Some((reason, assets_modified)) = violation {
             global_context
                 .roll_back()
                 .map_err(|e| format!("failed to roll back an aborted transaction: {e}"))?;
             global_context.begin();
             self.charge.commit_alone(global_context)?;
-            return Ok(Settlement::Aborted(reason));
+            return Ok(Settlement::Aborted {
+                reason,
+                assets_modified: Box::new(assets_modified),
+            });
         }
 
         self.charge.apply(&mut global_context.database)?;
@@ -186,7 +192,24 @@ enum Settlement {
     /// The payload and the nonce both committed.
     Committed,
     /// The payload was rolled back and only its nonce committed.
-    Aborted(String),
+    Aborted {
+        reason: String,
+        assets_modified: Box<AssetMap>,
+    },
+}
+
+fn post_condition_abort(
+    output: Option<Value>,
+    assets_modified: AssetMap,
+    tx_events: Vec<StacksTransactionEvent>,
+    reason: String,
+) -> ClarityError {
+    ClarityError::AbortedByCallback {
+        output: output.map(Box::new),
+        assets_modified: Box::new(assets_modified),
+        tx_events,
+        reason,
+    }
 }
 
 /// Report a failed execution to the eval hooks, leaving them installed.
@@ -1017,11 +1040,24 @@ impl ClarityInterpreter {
         // Settle the nonce and execution state atomically.
         match terms.settle(&mut global_context, epoch) {
             Ok(Settlement::Committed) => {}
-            Ok(Settlement::Aborted(reason)) => {
+            Ok(Settlement::Aborted {
+                reason,
+                assets_modified,
+            }) => {
                 notify_hooks_of_failure(&mut global_context, &reason);
+                let output = match &eval_result {
+                    EvaluationResult::Contract(_) => None,
+                    EvaluationResult::Snippet(result) => Some(result.result.clone()),
+                };
+                let clarity_error = post_condition_abort(
+                    output,
+                    *assets_modified,
+                    emitted_events.clone(),
+                    reason.clone(),
+                );
                 return Err(ExecutionError {
                     diagnostics: vec![runtime_diagnostic(reason)],
-                    inclusion: BlockInclusion::Included,
+                    inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
                 });
             }
             Err(e) => return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)])),
@@ -1174,11 +1210,23 @@ impl ClarityInterpreter {
         // Settle the nonce and call state atomically.
         match terms.settle(&mut global_context, epoch) {
             Ok(Settlement::Committed) => {}
-            Ok(Settlement::Aborted(reason)) => {
+            Ok(Settlement::Aborted {
+                reason,
+                assets_modified,
+            }) => {
                 notify_hooks_of_failure(&mut global_context, &reason);
+                let clarity_error = post_condition_abort(
+                    match &eval_result {
+                        EvaluationResult::Snippet(result) => Some(result.result.clone()),
+                        EvaluationResult::Contract(_) => None,
+                    },
+                    *assets_modified,
+                    emitted_events.clone(),
+                    reason.clone(),
+                );
                 return Err(ContractCallFailure {
                     error: ContractCallError::PostConditionAborted(reason),
-                    inclusion: BlockInclusion::Included,
+                    inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
                 });
             }
             Err(e) => {
@@ -1602,6 +1650,36 @@ mod tests {
             settings.unwrap_or_default(),
             None,
         )
+    }
+
+    #[test]
+    fn post_condition_abort_uses_the_mainnet_error_shape() {
+        let output = Value::UInt(7);
+        let error = post_condition_abort(
+            Some(output.clone()),
+            AssetMap::new(),
+            vec![],
+            "condition failed".into(),
+        );
+
+        match &error {
+            ClarityError::AbortedByCallback {
+                output: actual_output,
+                assets_modified,
+                tx_events,
+                reason,
+            } => {
+                assert_eq!(actual_output.as_deref(), Some(&output));
+                assert_eq!(assets_modified.as_ref(), &AssetMap::new());
+                assert!(tx_events.is_empty());
+                assert_eq!(reason, "condition failed");
+            }
+            other => panic!("expected AbortedByCallback, got {other:?}"),
+        }
+        assert_eq!(
+            BlockInclusion::from_runtime_error(error, StacksEpochId::Epoch33),
+            BlockInclusion::Included
+        );
     }
 
     #[track_caller]
