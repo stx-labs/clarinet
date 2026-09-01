@@ -1,6 +1,3 @@
 [project]
 name = 'project-with-sbtc'
-description = 'sample project to test clarinet-sdk with sBTC'
-
-[[project.requirements]]
-contract_id = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-deposit'
+description = 'sample project to test that a stock project gets its sbtc_balance minted'
