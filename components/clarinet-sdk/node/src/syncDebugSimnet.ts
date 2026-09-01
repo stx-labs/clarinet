@@ -143,8 +143,8 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
       _includeBootContracts: boolean,
       _bootContractsPath: string,
     ): { coverage: string; costs: string } {
-      // No-op in debug mode: coverage and cost reports are not supported.
-      return { coverage: "", costs: "" };
+      // Debug mode does not support coverage/cost reports.
+      throw new Error("collectReport: coverage and cost reports are not supported in debug mode");
     },
 
     runSnippet(snippet: string): string {
@@ -236,7 +236,7 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
       sender: string,
     ): ParsedTransactionResult {
       const resp = send({
-        method: "callPublicFn",
+        method: "callPrivateFn",
         contract,
         function: method,
         args: args.map(argString),

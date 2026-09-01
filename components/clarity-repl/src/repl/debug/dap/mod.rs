@@ -154,7 +154,10 @@ impl DAPDebugger {
             contract_id_to_path: HashMap::new(),
             reader,
             writer,
-            state: None,
+            state: Some(DebugState::new(
+                &QualifiedContractIdentifier::transient(),
+                "",
+            )),
             send_seq: 0,
             launched: None,
             launch_seq: 0,
@@ -586,12 +589,8 @@ impl DAPDebugger {
             })),
         });
 
-        // VSCode doesn't send ConfigurationDone in either mode; treat the first
-        // Threads request as the end of the initialization/configuration phase.
-        // In attach mode we signal init_attach() by setting config_done.
-        if self.attach_mode && !self.config_done {
-            self.config_done = true;
-        }
+        // Gate init_attach on configurationDone only. In launch mode the threads
+        // request signals the end of initialization (no ConfigurationDone is sent
         if !self.attach_mode && !self.init_complete {
             self.send_response(Response {
                 request_seq: self.launch_seq,
@@ -1118,9 +1117,9 @@ impl EvalHook for DAPDebugger {
         if !self.get_state().will_begin_eval(invoke_ctx, context, expr) {
             if self.get_state().state == State::Start {
                 // Sending this initialized event triggers the configuration
-                // (e.g. setting breakpoints), after which the ConfigurationDone
-                // request should be sent, but it's not, so there is an ugly
-                // hack in threads to handle that.
+                // (e.g. setting breakpoints). In launch mode the threads request
+                // signals the end of initialization; in attach mode the editor
+                // must send a ConfigurationDone request.
                 self.default_sender = Some(match &invoke_ctx.sender {
                     Some(sender) => match sender {
                         PrincipalData::Standard(standard) => standard.clone(),

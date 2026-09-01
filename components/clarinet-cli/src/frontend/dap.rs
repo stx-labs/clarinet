@@ -9,7 +9,7 @@ use clarity::vm::EvaluationResult;
 use clarity_repl::repl::clarity_values::to_raw_value;
 use clarity_repl::repl::debug::dap::DAPDebugger;
 use clarity_repl::repl::Session;
-use clarity_repl::utils::Environment;
+use clarity_repl::utils::{serialize_event, Environment};
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
@@ -352,8 +352,8 @@ pub fn run_dap_server(
                     write_response(&mut writer, &response)?;
                 }
 
-                // Execute a single public or read-only contract call.
-                "call" | "callPublicFn" | "callReadOnlyFn" => {
+                // Execute a single public contract call.
+                "call" | "callPublicFn" => {
                     let contract = request["contract"].as_str().unwrap_or("").to_string();
                     let function = request["function"].as_str().unwrap_or("").to_string();
                     let sender = request["sender"].as_str().map(|s| s.to_string());
@@ -368,6 +368,56 @@ pub fn run_dap_server(
 
                     let inner =
                         call_contract(&mut session, &mut dap, &contract, &function, &args, sender);
+                    let response = wrap_response(id, inner);
+                    write_response(&mut writer, &response)?;
+                }
+
+                // Execute a read-only contract call (no state mutation).
+                "callReadOnlyFn" => {
+                    let contract = request["contract"].as_str().unwrap_or("").to_string();
+                    let function = request["function"].as_str().unwrap_or("").to_string();
+                    let sender = request["sender"].as_str().map(|s| s.to_string());
+                    let args: Vec<String> = request["args"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let principal = resolve_contract_principal(&mut dap, &contract);
+                    let args_str = args.join(" ");
+                    let snippet = if args_str.is_empty() {
+                        format!("(contract-call? {principal} {function})")
+                    } else {
+                        format!("(contract-call? {principal} {function} {args_str})")
+                    };
+
+                    // Validate and set the sender before calling into the interpreter.
+                    let orig_sender = if let Some(s) = &sender {
+                        if PrincipalData::parse_standard_principal(s).is_err() {
+                            let inner =
+                                serde_json::json!({"error": format!("invalid sender address: {s}")});
+                            let response = wrap_response(id, inner);
+                            write_response(&mut writer, &response)?;
+                            continue 'request;
+                        }
+                        let prev = session.get_tx_sender();
+                        session.set_tx_sender(s);
+                        Some(prev)
+                    } else {
+                        None
+                    };
+
+                    let contract_id = find_contract_id(&mut dap, &contract);
+                    dap.prepare_for_call(&contract_id, &snippet);
+                    let inner = eval_snippet_as_tx(&mut session, &mut dap, snippet);
+
+                    if let Some(prev) = &orig_sender {
+                        session.set_tx_sender(prev);
+                    }
+
                     let response = wrap_response(id, inner);
                     write_response(&mut writer, &response)?;
                 }
@@ -534,7 +584,7 @@ fn call_contract(
 }
 
 /// Run a Clarity snippet via `eval_with_hooks` and return an inner tx-result JSON object:
-/// `{"result": "0x...", "events": "[]", "costs": "..."}` on success, or
+/// `{"result": "0x...", "events": "[...]", "costs": "..."}` on success, or
 /// `{"error": "..."}` on failure.
 ///
 /// Callers must wrap the returned value with `wrap_response(id, inner)` before
@@ -555,7 +605,15 @@ fn eval_snippet_as_tx(
                 EvaluationResult::Snippet(s) => to_raw_value(&s.result),
             };
             let costs_json = serde_json::to_string(&result.cost).unwrap_or_else(|_| "null".into());
-            serde_json::json!({"result": hex, "events": "[]", "costs": costs_json})
+            let events_json = serde_json::to_string(
+                &result
+                    .events
+                    .iter()
+                    .map(|e| serialize_event(e))
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|_| "[]".into());
+            serde_json::json!({"result": hex, "events": events_json, "costs": costs_json})
         }
         Err(diagnostics) => {
             let errors: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
