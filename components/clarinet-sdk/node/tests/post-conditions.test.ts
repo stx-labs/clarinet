@@ -221,23 +221,27 @@ describe("post-conditions on contract deployments", () => {
 });
 
 describe("post-conditions with multiple principals", () => {
-  it("accepts a condition for a contract principal", () => {
+  it("checks STX sent by a contract principal", () => {
     const contract = `${deployer}.counter`;
 
-    const { result } = simnet.callPublicFn(
-      "counter",
-      "transfer-100",
-      [Cl.principal(address2)],
-      address1,
-      {
-        postConditions: [
-          Pc.principal(address1).willSendEq(100).ustx(),
-          Pc.principal(contract).willSendEq(0).ustx(),
-        ],
-      },
-    );
+    simnet.callPublicFn("counter", "increment", [], deployer);
+    const contractBalance = simnet.getAssetsMap().get("STX")!.get(contract)!;
+
+    const { result } = simnet.callPublicFn("counter", "withdraw", [Cl.uint(100)], deployer, {
+      postConditions: [Pc.principal(contract).willSendEq(100).ustx()],
+    });
 
     expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
+    expect(simnet.getAssetsMap().get("STX")!.get(contract)).toBe(contractBalance - 100n);
+
+    const nonce = simnet.getAccountNonce(deployer);
+    expect(() =>
+      simnet.callPublicFn("counter", "withdraw", [Cl.uint(100)], deployer, {
+        postConditions: [Pc.principal(contract).willSendEq(99).ustx()],
+      }),
+    ).toThrow(/Post-condition check failure/);
+    expect(simnet.getAssetsMap().get("STX")!.get(contract)).toBe(contractBalance - 100n);
+    expect(simnet.getAccountNonce(deployer)).toBe(nonce + 1n);
   });
 
   it("enforces every condition independently", () => {
