@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::vec;
 
-use clarinet_defaults::DEFAULT_CLARITY_VERSION;
+use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 pub use clarinet_deployments::CachedContractAST;
 use clarinet_deployments::{
     generate_default_deployment_with_cache, initiate_session_from_manifest,
@@ -753,6 +753,16 @@ impl EditorState {
     ) {
         let epoch = StacksEpochId::Epoch21;
         let contract = ActiveContractData::new(clarity_version, epoch, issuer, source);
+        self.active_contracts.insert(contract_location, contract);
+    }
+
+    /// Insert a contract that has no associated `Clarinet.toml`. It is parsed
+    /// with the default Clarity version and epoch so single-file features
+    /// (definitions, document symbols, hover, signature help, completion) work
+    /// without a configured project.
+    pub fn insert_standalone_contract(&mut self, contract_location: PathBuf, source: String) {
+        let contract =
+            ActiveContractData::new(DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH, None, source);
         self.active_contracts.insert(contract_location, contract);
     }
 
