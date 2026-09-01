@@ -1,4 +1,10 @@
-import { Cl, Pc, postConditionToHex } from "@stacks/transactions";
+import {
+  Cl,
+  Pc,
+  PostConditionMode,
+  postConditionToHex,
+  postConditionToWire,
+} from "@stacks/transactions";
 import { beforeEach, describe, expect, it } from "vitest";
 
 // test the built package and not the source code
@@ -76,10 +82,10 @@ describe("post-conditions on contract calls", () => {
     ).toThrow(/Post-condition check failure/);
   });
 
-  it("permits unlisted asset movement in allow mode", () => {
+  it("accepts the stacks.js mode enum", () => {
     const { result } = simnet.callPublicFn("counter", "increment", [], address1, {
       postConditions: [],
-      postConditionMode: "allow",
+      postConditionMode: PostConditionMode.Allow,
     });
 
     expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
@@ -99,7 +105,7 @@ describe("post-conditions on contract calls", () => {
   it("rejects originator mode before it is supported, without running the call", () => {
     expect(() =>
       simnet.callPublicFn("counter", "transfer-100", [Cl.principal(address2)], address1, {
-        postConditionMode: "originator",
+        postConditionMode: PostConditionMode.Originator,
       }),
     ).toThrow(/Originator post-condition mode is not supported before Stacks 3.4/);
 
@@ -135,6 +141,16 @@ describe("post-conditions on contract calls", () => {
 
     const { result } = simnet.callPublicFn("counter", "increment", [], address1, {
       postConditions: [hex],
+    });
+
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  });
+
+  it("accepts a stacks.js wire post-condition", () => {
+    const condition = postConditionToWire(Pc.principal(address1).willSendEq(INCREMENT_COST).ustx());
+
+    const { result } = simnet.callPublicFn("counter", "increment", [], address1, {
+      postConditions: [condition],
     });
 
     expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));

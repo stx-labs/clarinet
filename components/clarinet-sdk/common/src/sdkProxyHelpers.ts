@@ -2,8 +2,13 @@ import {
   Cl,
   ClarityValue,
   ClarityVersion,
+  ContractCallOptions,
   PostCondition,
+  PostConditionMode,
+  PostConditionModeName,
+  PostConditionWire,
   postConditionToHex,
+  serializePostConditionWire,
 } from "@stacks/transactions";
 
 export type ClarityEvent = {
@@ -33,28 +38,24 @@ export type ParsedTransactionResult = {
   performance: string | undefined;
 };
 
-/** How a transaction's asset movement is constrained. */
-export type PostConditionMode = "allow" | "deny" | "originator";
-
 /**
  * Post-conditions to enforce on a simnet transaction.
  *
- * A condition is either a stacks.js `PostCondition` or the hex encoding of one.
- * Hex is the escape hatch for the `Staking` and `Pox` conditions that stacks.js
- * cannot build yet.
+ * Conditions use the same builder, wire, and hex formats as stacks.js. Hex is
+ * also the escape hatch for conditions that stacks.js cannot build yet.
  *
  * Passing neither field preserves the SDK's unchecked behavior. Passing either
  * enables enforcement; `postConditionMode` defaults to `"deny"`.
  */
-export type PostConditionOptions = {
-  postConditions?: (PostCondition | string)[];
-  postConditionMode?: PostConditionMode;
-};
+export type PostConditionOptions = Pick<
+  ContractCallOptions,
+  "postConditions" | "postConditionMode"
+>;
 
 /** `PostConditionOptions` as the Wasm SDK takes it: conditions already encoded. */
 export type SerializedPostConditions = {
   postConditions?: string[];
-  postConditionMode?: PostConditionMode;
+  postConditionMode?: PostConditionModeName;
 };
 
 export function serializePostConditions(options?: PostConditionOptions): SerializedPostConditions {
@@ -64,11 +65,23 @@ export function serializePostConditions(options?: PostConditionOptions): Seriali
   // Preserve the distinction between an omitted list and an explicit empty one.
   return {
     ...(conditions !== undefined && {
-      postConditions: conditions.map((pc) =>
-        typeof pc === "string" ? pc : postConditionToHex(pc),
-      ),
+      postConditions: conditions.map((pc) => {
+        if (typeof pc === "string") return pc;
+        return typeof pc.type === "string"
+          ? postConditionToHex(pc as PostCondition)
+          : serializePostConditionWire(pc as PostConditionWire);
+      }),
     }),
-    ...(mode !== undefined && { postConditionMode: mode }),
+    ...(mode !== undefined && {
+      postConditionMode:
+        mode === PostConditionMode.Allow
+          ? "allow"
+          : mode === PostConditionMode.Deny
+            ? "deny"
+            : mode === PostConditionMode.Originator
+              ? "originator"
+              : mode,
+    }),
   };
 }
 
