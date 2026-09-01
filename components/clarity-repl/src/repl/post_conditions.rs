@@ -113,7 +113,9 @@ impl PostConditionCheck {
 #[cfg(test)]
 mod tests {
     use clarity::util::hash::to_hex;
-    use stacks_codec::transaction::{FungibleConditionCode, PostConditionPrincipal};
+    use stacks_codec::transaction::{
+        FungibleConditionCode, PostConditionPrincipal, PoxConditionCode,
+    };
 
     use super::*;
 
@@ -293,5 +295,33 @@ mod tests {
             check.evaluate(&stx_sent(SENDER, 1), StacksEpochId::Epoch33),
             Ok(None)
         );
+    }
+
+    #[test]
+    fn decodes_and_epoch_gates_staking_and_pox_conditions() {
+        let conditions = vec![
+            TransactionPostCondition::Staking(
+                PostConditionPrincipal::Origin,
+                FungibleConditionCode::SentLe,
+                100,
+            ),
+            TransactionPostCondition::Pox(
+                PostConditionPrincipal::Origin,
+                PoxConditionCode::MaybePerformed,
+            ),
+        ];
+        let encoded = conditions.iter().map(hex_of).collect::<Vec<_>>();
+        let check = PostConditionCheck::from_hex(
+            &encoded,
+            TransactionPostConditionMode::Deny,
+            principal(SENDER),
+        )
+        .expect("staking and PoX conditions should decode");
+
+        assert_eq!(check, checked(conditions));
+        assert!(check
+            .validate_for_epoch(StacksEpochId::Epoch34)
+            .is_err_and(|e| e.contains("Staking/Pox post-condition is not supported")));
+        assert_eq!(check.validate_for_epoch(StacksEpochId::Epoch40), Ok(()));
     }
 }

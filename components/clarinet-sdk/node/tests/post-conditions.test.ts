@@ -202,6 +202,10 @@ describe("post-conditions on contract deployments", () => {
   });
 
   it("aborts a deployment that violates the conditions", () => {
+    const senderBalance = simnet.getAssetsMap().get("STX")!.get(address1)!;
+    const recipientBalance = simnet.getAssetsMap().get("STX")!.get(address2)!;
+    const nonce = simnet.getAccountNonce(address1);
+
     expect(() =>
       simnet.deployContract("pays-on-deploy", source, null, address1, {
         postConditions: [Pc.principal(address1).willSendEq(1).ustx()],
@@ -210,6 +214,49 @@ describe("post-conditions on contract deployments", () => {
 
     // The aborted deployment left no contract behind.
     expect(simnet.getContractSource(`${address1}.pays-on-deploy`)).toBeUndefined();
+    expect(simnet.getAssetsMap().get("STX")!.get(address1)).toBe(senderBalance);
+    expect(simnet.getAssetsMap().get("STX")!.get(address2)).toBe(recipientBalance);
+    expect(simnet.getAccountNonce(address1)).toBe(nonce + 1n);
+  });
+});
+
+describe("post-conditions with multiple principals", () => {
+  it("accepts a condition for a contract principal", () => {
+    const contract = `${deployer}.counter`;
+
+    const { result } = simnet.callPublicFn(
+      "counter",
+      "transfer-100",
+      [Cl.principal(address2)],
+      address1,
+      {
+        postConditions: [
+          Pc.principal(address1).willSendEq(100).ustx(),
+          Pc.principal(contract).willSendEq(0).ustx(),
+        ],
+      },
+    );
+
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  });
+
+  it("enforces every condition independently", () => {
+    const conditions = [
+      Pc.principal(address1).willSendEq(100).ustx(),
+      Pc.principal(address2).willSendEq(0).ustx(),
+    ];
+
+    expect(
+      simnet.callPublicFn("counter", "transfer-100", [Cl.principal(address2)], address1, {
+        postConditions: conditions,
+      }).result,
+    ).toStrictEqual(Cl.ok(Cl.bool(true)));
+
+    expect(() =>
+      simnet.callPublicFn("counter", "transfer-100", [Cl.principal(address2)], address1, {
+        postConditions: [conditions[0], Pc.principal(address2).willSendEq(1).ustx()],
+      }),
+    ).toThrow(/Post-condition check failure/);
   });
 });
 
@@ -266,6 +313,7 @@ describe("post-conditions on non-fungible tokens", () => {
 (define-non-fungible-token badge uint)
 (define-public (mint (id uint) (to principal)) (nft-mint? badge id to))
 (define-public (send (id uint) (to principal)) (nft-transfer? badge id tx-sender to))
+(define-read-only (owner-of (id uint)) (nft-get-owner? badge id))
 `;
 
   let token: string;
@@ -296,6 +344,10 @@ describe("post-conditions on non-fungible tokens", () => {
         postConditions: [Pc.principal(address1).willSendAsset().nft(token, "badge", Cl.uint(8))],
       }),
     ).toThrow(/Post-condition check failure/);
+
+    expect(simnet.callReadOnlyFn("badge", "owner-of", [Cl.uint(7)], address1).result).toStrictEqual(
+      Cl.some(Cl.principal(address1)),
+    );
   });
 });
 
@@ -311,6 +363,9 @@ describe("post-conditions in a mined block", () => {
   });
 
   it("surfaces a violation in the batch as an error", () => {
+    const address1Nonce = simnet.getAccountNonce(address1);
+    const address2Nonce = simnet.getAccountNonce(address2);
+
     expect(() =>
       simnet.mineBlock([
         tx.callPublicFn("counter", "increment", [], address1, {
@@ -321,6 +376,12 @@ describe("post-conditions in a mined block", () => {
         }),
       ]),
     ).toThrow(/Post-condition check failure/);
+
+    // Transactions before the abort remain committed; the aborted transaction
+    // rolls back its payload but still consumes its nonce.
+    expect(getCount()).toStrictEqual(Cl.ok(Cl.tuple({ count: Cl.uint(1) })));
+    expect(simnet.getAccountNonce(address1)).toBe(address1Nonce + 1n);
+    expect(simnet.getAccountNonce(address2)).toBe(address2Nonce + 1n);
   });
 
   it("carries conditions through a deployContract in mineBlock", () => {
