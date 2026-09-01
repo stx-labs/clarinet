@@ -750,17 +750,6 @@ impl Session {
             return Err(vec![diagnostic]);
         }
 
-        let mut hooks: Vec<&mut dyn EvalHook> = vec![];
-        if let Some(ref mut coverage_hook) = self.coverage_hook {
-            hooks.push(coverage_hook);
-        }
-        if let Some(ref mut logger_hook) = self.logger_hook {
-            hooks.push(logger_hook);
-        }
-        if let Some(ref mut perf_hook) = self.perf_hook {
-            hooks.push(perf_hook);
-        }
-
         if contract.clarity_version > ClarityVersion::default_for_epoch(contract.epoch.resolve()) {
             let diagnostic = Diagnostic {
                 level: Level::Error,
@@ -777,6 +766,20 @@ impl Session {
         let contract_id =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
 
+        let initial_tx_sender = self.get_tx_sender();
+        self.set_tx_sender(&contract_id.issuer.to_string());
+
+        let mut hooks: Vec<&mut dyn EvalHook> = vec![];
+        if let Some(ref mut coverage_hook) = self.coverage_hook {
+            hooks.push(coverage_hook);
+        }
+        if let Some(ref mut logger_hook) = self.logger_hook {
+            hooks.push(logger_hook);
+        }
+        if let Some(ref mut perf_hook) = self.perf_hook {
+            hooks.push(perf_hook);
+        }
+
         // Boot contracts bypass this transaction path because they are genesis
         // state and consume no nonce.
         let terms = TransactionTerms {
@@ -786,6 +789,7 @@ impl Session {
         let result =
             self.interpreter
                 .run_with_terms(contract, ast, cost_track, Some(hooks), &terms);
+        self.set_tx_sender(&initial_tx_sender);
 
         result
             .inspect(|result| {

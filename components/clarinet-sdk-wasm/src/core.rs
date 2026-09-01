@@ -1115,10 +1115,6 @@ impl SDK {
                 session.advance_chain_tip(1);
             }
 
-            // A contract's top-level body runs as its declared deployer.
-            let initial_tx_sender = session.get_tx_sender();
-            session.set_tx_sender(&args.sender);
-
             let current_epoch = session.interpreter.datastore.get_current_epoch();
 
             let clarity_version = clarity_version_from_u32(
@@ -1135,10 +1131,7 @@ impl SDK {
                 skip_analysis: false,
             };
 
-            let result = session.deploy_contract(&contract, track_costs, None, post_conditions);
-            session.set_tx_sender(&initial_tx_sender);
-
-            match result {
+            match session.deploy_contract(&contract, track_costs, None, post_conditions) {
                 Ok(res) => res,
                 Err(diagnostics) => {
                     let mut message = format!(
