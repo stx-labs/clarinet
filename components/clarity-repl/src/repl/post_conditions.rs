@@ -34,6 +34,11 @@ pub enum PostConditionCheck {
 }
 
 impl PostConditionCheck {
+    /// Whether this check contains any declared post-conditions.
+    pub fn has_conditions(&self) -> bool {
+        matches!(self, Self::Checked { conditions, .. } if !conditions.is_empty())
+    }
+
     /// Decode consensus-serialized post-conditions.
     ///
     /// The SDK sends the same encoding used on the transaction wire.

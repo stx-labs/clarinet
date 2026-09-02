@@ -175,32 +175,30 @@ describe("post-conditions on contract calls", () => {
 });
 
 describe("post-conditions on STX transfers", () => {
-  it("accepts a transfer that satisfies the conditions", () => {
-    const { result } = simnet.transferSTX(1000, address2, address1, {
-      postConditions: [Pc.principal(address1).willSendEq(1000).ustx()],
-    });
+  it("rejects the transaction before execution", () => {
+    const senderBalance = simnet.getAssetsMap().get("STX")?.get(address1);
+    const senderNonce = simnet.getAccountNonce(address1);
 
-    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
-  });
-
-  it("aborts a transfer that violates the conditions", () => {
     expect(() =>
       simnet.transferSTX(1000, address2, address1, {
-        postConditions: [Pc.principal(address1).willSendEq(999).ustx()],
+        postConditions: [Pc.principal(address1).willSendEq(1000).ustx()],
       }),
-    ).toThrow(/Post-condition check failure/);
+    ).toThrow(
+      /Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions/,
+    );
 
-    expect(simnet.getAssetsMap().get("STX")?.get(address1)).toBe(100000000000000n);
+    expect(simnet.getAssetsMap().get("STX")?.get(address1)).toBe(senderBalance);
+    expect(simnet.getAccountNonce(address1)).toBe(senderNonce);
   });
 
-  it("restores the session sender after an aborted transfer", () => {
+  it("restores the session sender after a rejected transfer", () => {
     const initialSender = simnet.execute("tx-sender").result;
 
     expect(() =>
       simnet.transferSTX(1000, address2, address1, {
-        postConditions: [Pc.principal(address1).willSendEq(999).ustx()],
+        postConditions: [Pc.principal(address1).willSendEq(1000).ustx()],
       }),
-    ).toThrow(/Post-condition check failure/);
+    ).toThrow(/TokenTransfer transactions do not support post-conditions/);
 
     expect(simnet.execute("tx-sender").result).toStrictEqual(initialSender);
   });
@@ -423,14 +421,14 @@ describe("post-conditions in a mined block", () => {
     ).toThrow(/Post-condition check failure/);
   });
 
-  it("carries conditions through a transferSTX in mineBlock", () => {
-    const [ok] = simnet.mineBlock([
-      tx.transferSTX(1000, address2, address1, {
-        postConditions: [Pc.principal(address1).willSendEq(1000).ustx()],
-      }),
-    ]);
-
-    expect(ok.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  it("rejects post-conditions on a transferSTX in mineBlock", () => {
+    expect(() =>
+      simnet.mineBlock([
+        tx.transferSTX(1000, address2, address1, {
+          postConditions: [Pc.principal(address1).willSendEq(1000).ustx()],
+        }),
+      ]),
+    ).toThrow(/TokenTransfer transactions do not support post-conditions/);
   });
 });
 

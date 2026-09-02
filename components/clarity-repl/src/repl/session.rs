@@ -715,6 +715,17 @@ impl Session {
         recipient: &str,
         post_conditions: PostConditionCheck,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+        // stacks-core rejects TokenTransfer payloads with post-conditions
+        // before execution. Keep simnet aligned with mainnet/testnet here.
+        if post_conditions.has_conditions() {
+            return Err(vec![Diagnostic {
+                level: Level::Error,
+                message: "Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions".into(),
+                spans: vec![],
+                suggestion: None,
+            }]);
+        }
+
         let sender = self.interpreter.get_tx_sender();
         let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
 
@@ -2170,37 +2181,18 @@ mod tests {
     }
 
     #[test]
-    fn a_satisfied_post_condition_commits_the_transfer() {
-        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
-        let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
-        let mut session = funded_session(sender);
-
-        session
-            .stx_transfer(1000, recipient, sends_exactly(sender, 1000))
-            .expect("the transfer should commit");
-
-        assert_eq!(
-            session.interpreter.get_balance_for_account(sender, "STX"),
-            999_000
-        );
-        assert_eq!(session.get_nonce(&principal(sender)).unwrap(), 1);
-    }
-
-    #[test]
-    fn a_violated_post_condition_rolls_back_the_transfer_but_charges_the_nonce() {
+    fn a_stx_transfer_with_post_conditions_is_rejected_before_execution() {
         let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
         let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
         let mut session = funded_session(sender);
 
         let diagnostics = session
-            .stx_transfer(1000, recipient, sends_exactly(sender, 999))
-            .expect_err("the transfer should abort");
-        assert!(diagnostics
-            .last()
-            .is_some_and(|d| d.message.contains("Post-condition check failure")));
+            .stx_transfer(1000, recipient, sends_exactly(sender, 1000))
+            .expect_err("the transfer should be rejected");
 
-        // Mainnet aborts the payload but still includes the transaction, so the
-        // STX stays put and the nonce moves.
+        assert!(diagnostics.last().is_some_and(|d| d.message
+            == "Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions"));
+
         assert_eq!(
             session.interpreter.get_balance_for_account(sender, "STX"),
             1_000_000
@@ -2211,7 +2203,7 @@ mod tests {
                 .get_balance_for_account(recipient, "STX"),
             0
         );
-        assert_eq!(session.get_nonce(&principal(sender)).unwrap(), 1);
+        assert_eq!(session.get_nonce(&principal(sender)).unwrap(), 0);
     }
 
     #[test]
