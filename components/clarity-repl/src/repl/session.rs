@@ -726,6 +726,19 @@ impl Session {
             }]);
         }
 
+        // TokenTransfer payloads do not run the post-condition checker. The
+        // mode is still part of the transaction wire and must be valid for the
+        // current epoch, but it has no effect when the condition list is empty.
+        let current_epoch = self.interpreter.datastore.get_current_epoch();
+        if let Err(message) = post_conditions.validate_for_epoch(current_epoch) {
+            return Err(vec![Diagnostic {
+                level: Level::Error,
+                message,
+                spans: vec![],
+                suggestion: None,
+            }]);
+        }
+
         let sender = self.interpreter.get_tx_sender();
         let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
 
@@ -734,7 +747,7 @@ impl Session {
         // which is one, so the terms are named here.
         let terms = TransactionTerms {
             charge: NonceCharge::Sender(sender.into()),
-            post_conditions,
+            post_conditions: PostConditionCheck::Unchecked,
         };
         self.eval_with_inclusion(snippet, false, terms)
             .map_err(Vec::from)

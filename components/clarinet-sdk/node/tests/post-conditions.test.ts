@@ -175,6 +175,22 @@ describe("post-conditions on contract calls", () => {
 });
 
 describe("post-conditions on STX transfers", () => {
+  it("ignores deny mode when the post-condition list is empty", () => {
+    const senderBalance = simnet.getAssetsMap().get("STX")!.get(address1)!;
+    const recipientBalance = simnet.getAssetsMap().get("STX")!.get(address2)!;
+    const senderNonce = simnet.getAccountNonce(address1);
+
+    const { result } = simnet.transferSTX(1000, address2, address1, {
+      postConditions: [],
+      postConditionMode: "deny",
+    });
+
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
+    expect(simnet.getAssetsMap().get("STX")!.get(address1)).toBe(senderBalance - 1000n);
+    expect(simnet.getAssetsMap().get("STX")!.get(address2)).toBe(recipientBalance + 1000n);
+    expect(simnet.getAccountNonce(address1)).toBe(senderNonce + 1n);
+  });
+
   it("rejects the transaction before execution", () => {
     const senderBalance = simnet.getAssetsMap().get("STX")?.get(address1);
     const senderNonce = simnet.getAccountNonce(address1);
