@@ -4,7 +4,6 @@ packages:
   - "components/clarinet-sdk/common"
   - "components/clarinet-sdk/node"
   - "components/clarinet-sdk/browser"
-  - "components/clarinet-cli/examples/dap-debug-demo"
 
 allowBuilds:
   esbuild: true
