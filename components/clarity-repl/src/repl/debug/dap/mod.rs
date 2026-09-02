@@ -178,7 +178,15 @@ impl DAPDebugger {
     pub fn prepare_for_call(&mut self, contract_id: &QualifiedContractIdentifier, snippet: &str) {
         match &mut self.state {
             Some(state) => state.reset_for_new_call(contract_id, snippet),
-            None => self.state = Some(DebugState::new(contract_id, snippet)),
+            None => {
+                // Initialise a fresh state and immediately apply reset_for_new_call
+                // so the initial State is Continue rather than Start.  State::Start
+                // would cause an unconditional pause before the first expression,
+                // making the debugger stop before any breakpoints are reached.
+                let mut s = DebugState::new(contract_id, snippet);
+                s.reset_for_new_call(contract_id, snippet);
+                self.state = Some(s);
+            }
         }
     }
 
@@ -495,10 +503,10 @@ impl DAPDebugger {
     fn set_breakpoints(&mut self, seq: i64, arguments: SetBreakpointsArguments) -> bool {
         let mut results = vec![];
         if let Some(breakpoints) = arguments.breakpoints {
-            let Some(contract_id) = self
-                .path_to_contract_id
-                .get(&PathBuf::from(arguments.source.path.as_ref().unwrap()))
+            let vscode_path = arguments.source.path.as_ref().unwrap();
+            let Some(contract_id) = self.path_to_contract_id.get(&PathBuf::from(vscode_path))
             else {
+                eprintln!("clarinet dap: setBreakpoints — path not found in map");
                 self.send_response(Response {
                     request_seq: seq,
                     success: false,
@@ -589,8 +597,14 @@ impl DAPDebugger {
             })),
         });
 
+        // In attach mode, modern VSCode sends Threads as the final handshake step
+        // instead of ConfigurationDone — treat it as the done signal so init_attach exits.
+        if self.attach_mode && !self.config_done {
+            self.config_done = true;
+        }
+
         // Gate init_attach on configurationDone only. In launch mode the threads
-        // request signals the end of initialization (no ConfigurationDone is sent
+        // request signals the end of initialization (no ConfigurationDone is sent)
         if !self.attach_mode && !self.init_complete {
             self.send_response(Response {
                 request_seq: self.launch_seq,
@@ -623,7 +637,7 @@ impl DAPDebugger {
                 .iter()
                 .rev()
                 .filter(|function| !function.to_string().starts_with("_native_:"))
-                .map(|function| self.stack_frames[function].clone())
+                .filter_map(|function| self.stack_frames.get(function).cloned())
                 .collect();
             let len = current.stack.len() as i32;
             (frames, len)
@@ -643,13 +657,16 @@ impl DAPDebugger {
     }
 
     fn scopes(&mut self, seq: i64, arguments: ScopesArguments) -> bool {
+        let scopes = self
+            .scopes
+            .get(&arguments.frame_id)
+            .cloned()
+            .unwrap_or_default();
         self.send_response(Response {
             request_seq: seq,
             success: true,
             message: None,
-            body: Some(ResponseBody::Scopes(ScopesResponse {
-                scopes: self.scopes[&arguments.frame_id].clone(),
-            })),
+            body: Some(ResponseBody::Scopes(ScopesResponse { scopes })),
         });
         false
     }
