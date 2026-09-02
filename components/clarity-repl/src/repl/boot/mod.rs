@@ -38,15 +38,16 @@ const POX_5_BODY: &str = std::include_str!("pox-5.clar");
 const BOOT_CODE_SIGNERS: &str = std::include_str!("signers.clar");
 const BOOT_CODE_SIGNERS_VOTING: &str = std::include_str!("signers-voting.clar");
 
-/// mainnet sbtc-registry and sbtc-token contract sources
+/// mainnet sBTC contract sources
 /// (from SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4).
 /// Deployed as boot dependencies so pox-5 can resolve its `contract-call?`
-/// and `with-ft` references to sbtc-token.
+/// and `with-ft` references to sbtc-token, and so genesis `sbtc_balance`
+/// can be minted through sbtc-deposit.
 const SBTC_REGISTRY_SOURCE: &str = std::include_str!("sbtc-registry.clar");
 const SBTC_TOKEN_SOURCE: &str = std::include_str!("sbtc-token.clar");
+const SBTC_DEPOSIT_SOURCE: &str = std::include_str!("sbtc-deposit.clar");
 
-// sbtc-registry and sbtc-token are deployed as boot contracts. sbtc-deposit is
-// not a boot contract, but we include it here for contract-address mapping.
+/// The sBTC contracts deployed as boot contracts, in deployment order.
 pub const SBTC_CONTRACTS_NAMES: &[&str] = &["sbtc-registry", "sbtc-token", "sbtc-deposit"];
 
 pub const SBTC_TESTNET_ADDRESS: &str = "SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1";
@@ -369,7 +370,7 @@ pub fn get_boot_contracts_data_with_overrides(
 
     for (contract_name, custom_source) in overrides {
         if !BOOT_CONTRACTS_NAMES.contains(&contract_name.as_str()) {
-            eprintln!("Warning: Skipping custom boot contract '{contract_name}' - only existing boot contracts can be overridden. Valid boot contracts are: {BOOT_CONTRACTS_NAMES:?}");
+            ueprint!("Warning: Skipping custom boot contract '{contract_name}' - only existing boot contracts can be overridden. Valid boot contracts are: {BOOT_CONTRACTS_NAMES:?}");
             continue;
         }
 
@@ -394,12 +395,12 @@ pub fn get_boot_contracts_data_with_overrides(
     result
 }
 
-/// Pre-parsed sbtc-registry and sbtc-token contracts deployed at the
-/// mainnet sBTC address (SM3VDXK3...).
-/// - sbtc-registry deployed first (required by sbtc-token)
+/// Pre-parsed sBTC contracts deployed at the mainnet sBTC address (SM3VDXK3...).
+/// - sbtc-registry deployed first (required by sbtc-token and sbtc-deposit)
 /// - sbtc-token next before the regular boot contracts (required by pox-5)
+/// - sbtc-deposit last (calls into both, and mints the genesis sBTC balances)
 ///
-/// The Vec preserves deployment order: sbtc-registry before sbtc-token
+/// The Vec preserves that deployment order.
 pub static SBTC_BOOT_CONTRACTS: LazyLock<
     Vec<(QualifiedContractIdentifier, (ClarityContract, ContractAST))>,
 > = LazyLock::new(|| {
@@ -414,9 +415,10 @@ pub static SBTC_BOOT_CONTRACTS: LazyLock<
     let epoch = StacksEpochId::Epoch30;
     let clarity_version = ClarityVersion::Clarity3;
 
-    let contracts: [(&str, &str); 2] = [
+    let contracts: [(&str, &str); 3] = [
         ("sbtc-registry", SBTC_REGISTRY_SOURCE),
         ("sbtc-token", SBTC_TOKEN_SOURCE),
+        ("sbtc-deposit", SBTC_DEPOSIT_SOURCE),
     ];
 
     for (name, source) in &contracts {
@@ -448,7 +450,9 @@ pub fn get_boot_contract_epoch_and_clarity_version(
         "pox-3" => (StacksEpochId::Epoch24, ClarityVersion::Clarity2),
         "pox-2" | "costs-3" => (StacksEpochId::Epoch21, ClarityVersion::Clarity2),
         "costs-2" => (StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
-        "sbtc-registry" | "sbtc-token" => (StacksEpochId::Epoch30, ClarityVersion::Clarity3),
+        "sbtc-registry" | "sbtc-token" | "sbtc-deposit" => {
+            (StacksEpochId::Epoch30, ClarityVersion::Clarity3)
+        }
         "genesis" | "lockup" | "bns" | "cost-voting" | "costs" | "pox" => {
             (StacksEpochId::Epoch20, ClarityVersion::Clarity1)
         }
