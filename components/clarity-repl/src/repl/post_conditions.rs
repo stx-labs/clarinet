@@ -5,6 +5,10 @@ use clarity_types::types::PrincipalData;
 use stacks_codec::transaction::{TransactionPostCondition, TransactionPostConditionMode};
 use stacks_codec::StacksMessageCodec;
 
+/// Default to rejecting asset movement that no condition covers.
+pub const DEFAULT_POST_CONDITION_MODE: TransactionPostConditionMode =
+    TransactionPostConditionMode::Deny;
+
 /// Parse a post-condition mode as the SDK spells it.
 pub fn parse_post_condition_mode(mode: &str) -> Result<TransactionPostConditionMode, String> {
     match mode {

@@ -22,7 +22,9 @@ use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExp
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::interpreter::BlockInclusion;
-use clarity_repl::repl::post_conditions::{parse_post_condition_mode, PostConditionCheck};
+use clarity_repl::repl::post_conditions::{
+    parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
+};
 use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -244,9 +246,6 @@ impl TransferSTXArgs {
     }
 }
 
-/// Default to rejecting asset movement that no condition covers.
-const DEFAULT_POST_CONDITION_MODE: &str = "deny";
-
 /// Build the post-condition check for a transaction sent by `sender`.
 ///
 /// An omitted list and mode preserve the SDK's historical unchecked behavior.
@@ -261,15 +260,14 @@ fn post_condition_check(
         return Ok(PostConditionCheck::Unchecked);
     }
 
-    let mode = post_condition_mode.unwrap_or(DEFAULT_POST_CONDITION_MODE);
+    let mode = post_condition_mode
+        .map(parse_post_condition_mode)
+        .transpose()?
+        .unwrap_or(DEFAULT_POST_CONDITION_MODE);
     let origin = PrincipalData::parse_standard_principal(sender)
         .map_err(|e| format!("Invalid sender address '{sender}': {e:?}"))?;
 
-    PostConditionCheck::from_hex(
-        post_conditions.unwrap_or_default(),
-        parse_post_condition_mode(mode)?,
-        origin.into(),
-    )
+    PostConditionCheck::from_hex(post_conditions.unwrap_or_default(), mode, origin.into())
 }
 
 #[derive(Debug, Deserialize)]
