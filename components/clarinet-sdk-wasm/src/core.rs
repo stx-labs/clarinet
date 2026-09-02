@@ -19,6 +19,9 @@ use clarity::vm::analysis::contract_interface_builder::{
 };
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
+use clarity_repl::repl::boot::{
+    remap_mainnet_boot_principals, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS,
+};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::interpreter::BlockInclusion;
@@ -1032,8 +1035,29 @@ impl SDK {
                 current_epoch,
             );
 
+            // `deployContract` bypasses the deployment plan, so the remap that
+            // `clarinet-deployments` records for manifest contracts has to be
+            // applied here too — otherwise the same source would behave
+            // differently depending on how it was deployed. There is no plan
+            // entry to record it in, so it is logged instead. Skipped under
+            // MXS, where the remote node holds the real mainnet boot
+            // contracts.
+            let mut source = args.content.clone();
+            if !session.interpreter.repl_settings.remote_data.enabled {
+                if let Some(remapped) = remap_mainnet_boot_principals(&source) {
+                    log!(
+                        "note: simnet is testnet-flavored: {} boot principals in {} were deployed \
+                         as {}",
+                        BOOT_MAINNET_ADDRESS,
+                        args.name,
+                        BOOT_TESTNET_ADDRESS
+                    );
+                    source = remapped;
+                }
+            }
+
             let contract = ClarityContract {
-                code_source: ClarityCodeSource::ContractInMemory(args.content.clone()),
+                code_source: ClarityCodeSource::ContractInMemory(source),
                 name: args.name.clone(),
                 deployer: ContractDeployer::Address(args.sender.to_string()),
                 clarity_version,

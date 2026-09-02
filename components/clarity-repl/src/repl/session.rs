@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::Write as _;
 use std::num::ParseIntError;
@@ -256,6 +256,10 @@ pub struct Session {
     coverage_hook: Option<CoverageHook>,
     logger_hook: Option<LoggerHook>,
     perf_hook: Option<PerfHook>,
+
+    /// Mainnet boot contracts whose call redirect has already been announced,
+    /// so a loop calling `pox-5` logs one line rather than one per call.
+    announced_boot_remaps: BTreeSet<QualifiedContractIdentifier>,
 }
 
 impl Session {
@@ -300,6 +304,7 @@ impl Session {
             coverage_hook: None,
             logger_hook: None,
             perf_hook: None,
+            announced_boot_remaps: BTreeSet::new(),
         }
     }
 
@@ -790,6 +795,41 @@ impl Session {
             .map_err(Vec::from)
     }
 
+    /// Redirect a call aimed at a mainnet boot contract to its testnet twin.
+    ///
+    /// Simnet deploys the boot contracts under both addresses, but its chain
+    /// state is testnet-flavored: stacks-core's PoX handler keys off
+    /// `GlobalContext::mainnet`, so `stack-stx` through `SP000....pox-N` never
+    /// locked any STX. Rewriting the target here — rather than switching
+    /// execution context underneath the caller — keeps the result, the trace
+    /// and the resulting chain state all naming the contract that actually
+    /// ran. The companion to this is the deployment-time source remap in
+    /// `clarinet-deployments`, which covers contract-to-contract calls.
+    ///
+    /// Skipped under mainnet execution simulation: there the remote node holds
+    /// the real mainnet contracts and no testnet twin exists.
+    fn remap_mainnet_boot_call_target(
+        &mut self,
+        contract_id: QualifiedContractIdentifier,
+    ) -> QualifiedContractIdentifier {
+        if self.interpreter.repl_settings.remote_data.enabled {
+            return contract_id;
+        }
+        let Some(remapped) = boot::remap_mainnet_boot_contract_id(&contract_id) else {
+            return contract_id;
+        };
+
+        if self.announced_boot_remaps.insert(contract_id.clone()) {
+            uprint!(
+                "{} simnet is testnet-flavored: calls to {} run against {}",
+                yellow!("note:"),
+                contract_id,
+                remapped
+            );
+        }
+        remapped
+    }
+
     /// Call `method` on `contract` as `sender`.
     ///
     /// `kind` controls whether the call consumes a nonce. The nonce and call
@@ -816,6 +856,7 @@ impl Session {
                 suggestion: None,
             }])
         })?;
+        let contract_id = self.remap_mainnet_boot_call_target(contract_id);
 
         self.set_tx_sender(sender);
 

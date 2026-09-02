@@ -104,6 +104,7 @@ fn can_fund_initial_sbtc_balance() {
                     location: PathBuf::from("./fixtures/sbtc-registry.clar"),
                     emulated_sender: SBTC_DEPLOYER.clone(),
                     skip_analysis: false,
+                    remap_principals: BTreeMap::new(),
                 },
             )
         })

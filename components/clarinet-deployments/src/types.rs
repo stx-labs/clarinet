@@ -434,6 +434,11 @@ pub struct EmulatedContractPublishSpecificationFile {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clarity_version: Option<u8>,
+    /// Principals rewritten in the source before it is deployed. Populated on
+    /// simnet for mainnet boot-contract addresses, so the rewrite is visible
+    /// in the plan file rather than hidden inside the interpreter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remap_principals: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -965,6 +970,10 @@ pub struct EmulatedContractPublishSpecification {
     pub location: PathBuf,
     #[serde(skip)]
     pub skip_analysis: bool,
+    /// Principals rewritten in `source` before deployment. Empty unless the
+    /// contract references a mainnet boot contract on simnet.
+    #[serde(default, with = "remap_principals_serde")]
+    pub remap_principals: BTreeMap<StandardPrincipalData, StandardPrincipalData>,
 }
 
 impl EmulatedContractPublishSpecification {
@@ -997,6 +1006,23 @@ impl EmulatedContractPublishSpecification {
         };
         let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
 
+        let mut remap_principals = BTreeMap::new();
+        if let Some(ref remap_principals_spec) = specs.remap_principals {
+            for (src_spec, dst_spec) in remap_principals_spec {
+                let Ok(src) = PrincipalData::parse_standard_principal(src_spec) else {
+                    return Err(format!(
+                        "unable to parse remap source '{src_spec}' as a valid Stacks address"
+                    ));
+                };
+                let Ok(dst) = PrincipalData::parse_standard_principal(dst_spec) else {
+                    return Err(format!(
+                        "unable to parse remap destination '{dst_spec}' as a valid Stacks address"
+                    ));
+                };
+                remap_principals.insert(src, dst);
+            }
+        }
+
         Ok(EmulatedContractPublishSpecification {
             contract_name,
             emulated_sender,
@@ -1004,6 +1030,7 @@ impl EmulatedContractPublishSpecification {
             location,
             clarity_version,
             skip_analysis: false,
+            remap_principals,
         })
     }
 }
@@ -1565,6 +1592,12 @@ impl TransactionPlanSpecification {
                                 emulated_sender: tx.emulated_sender.to_address(),
                                 path: rel_path,
                                 clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
+                                remap_principals: (!tx.remap_principals.is_empty()).then(|| {
+                                    tx.remap_principals
+                                        .iter()
+                                        .map(|(src, dst)| (src.to_address(), dst.to_address()))
+                                        .collect()
+                                }),
                             },
                         )
                     }
