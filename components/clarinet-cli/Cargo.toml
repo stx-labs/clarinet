@@ -32,7 +32,7 @@ strum = { workspace = true }
 tokio = { workspace = true }
 toml_edit = { workspace = true }
 
-clarity-repl = { package = "clarity-repl", path = "../clarity-repl" }
+clarity-repl = { package = "clarity-repl", path = "../clarity-repl", features = ["dap"] }
 clarinet-defaults = { workspace = true }
 clarinet-files = { path = "../clarinet-files" }
 clarity-lsp = { path = "../clarity-lsp" }

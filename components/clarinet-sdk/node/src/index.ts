@@ -87,7 +87,7 @@ function memoizedInit() {
         debugSimnet = createSyncDebugSimnet();
       }
       // Tell the server to reinitialise its session (mirrors initSession semantics).
-      await debugSimnet.initSession(process.cwd(), manifestPath);
+      await debugSimnet.initSession(process.cwd(), manifestPath, options);
       return debugSimnet as unknown as Simnet;
     }
 

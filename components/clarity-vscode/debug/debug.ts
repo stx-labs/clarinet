@@ -48,15 +48,13 @@ function frame(message: unknown): Buffer {
 // the `launch` or `attach` request that selects the transport. Keep this response
 // in sync with the Rust adapter.
 const INITIALIZE_BODY = {
-  capabilities: {
-    supportsConfigurationDoneRequest: true,
-    supportsFunctionBreakpoints: true,
-    supportsStepInTargetsRequest: true,
-    supportTerminateDebuggee: true,
-    supportsLoadedSourcesRequest: true,
-    supportsDataBreakpoints: true,
-    supportsBreakpointLocationsRequest: true,
-  },
+  supportsConfigurationDoneRequest: true,
+  supportsFunctionBreakpoints: true,
+  supportsStepInTargetsRequest: true,
+  supportTerminateDebuggee: true,
+  supportsLoadedSourcesRequest: true,
+  supportsDataBreakpoints: true,
+  supportsBreakpointLocationsRequest: true,
 };
 
 // Complete messages and trailing input buffered until the transport opens.

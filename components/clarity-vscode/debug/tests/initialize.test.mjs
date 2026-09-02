@@ -101,15 +101,13 @@ test("`initialize` is answered before the transport is known", async (t) => {
     success: true,
     command: "initialize",
     body: {
-      capabilities: {
-        supportsConfigurationDoneRequest: true,
-        supportsFunctionBreakpoints: true,
-        supportsStepInTargetsRequest: true,
-        supportTerminateDebuggee: true,
-        supportsLoadedSourcesRequest: true,
-        supportsDataBreakpoints: true,
-        supportsBreakpointLocationsRequest: true,
-      },
+      supportsConfigurationDoneRequest: true,
+      supportsFunctionBreakpoints: true,
+      supportsStepInTargetsRequest: true,
+      supportTerminateDebuggee: true,
+      supportsLoadedSourcesRequest: true,
+      supportsDataBreakpoints: true,
+      supportsBreakpointLocationsRequest: true,
     },
   });
 });

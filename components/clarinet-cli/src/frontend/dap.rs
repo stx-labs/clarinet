@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use clarinet_deployments::setup_session_with_deployment;
-use clarinet_files::{ProjectManifest, StacksNetwork};
+use clarinet_files::{paths, ProjectManifest, StacksNetwork};
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::EvaluationResult;
 use clarity_repl::repl::clarity_values::to_raw_value;
@@ -134,7 +135,9 @@ pub fn run_dap_server(
     sdk_port: u16,
     manifest_path: PathBuf,
 ) -> Result<(), String> {
-    let (mut session, mut accounts, _deployer, contract_maps) = make_session(&manifest_path)?;
+    // Only contract_maps is needed here to configure the outer dap; each SDK
+    // client thread creates its own session and accounts via make_session().
+    let (_, _, _, contract_maps) = make_session(&manifest_path)?;
 
     let sdk_listener = std::net::TcpListener::bind(("127.0.0.1", sdk_port))
         .map_err(|e| format!("failed to bind SDK port {sdk_port}: {e}"))?;
@@ -184,10 +187,32 @@ pub fn run_dap_server(
 
     // Join the DAP thread (waits for the handshake to finish if it hasn't yet)
     // or build a headless debugger for SDK-only mode.
-    let mut dap = if let Some(thread) = dap_thread {
-        thread
+    let dap = if let Some(thread) = dap_thread {
+        match thread
             .join()
-            .map_err(|_| "DAP handshake thread panicked".to_string())??
+            .map_err(|_| "DAP handshake thread panicked".to_string())
+        {
+            Ok(result) => match result {
+                Ok(d) => d,
+                Err(e) if e.contains("Eof") => {
+                    eprintln!("clarinet dap: DAP client disconnected before attach handshake; running in SDK-only mode");
+                    let mut d = DAPDebugger::no_op();
+                    for (contract_id, path) in &contract_maps {
+                        d.path_to_contract_id
+                            .insert(path.clone(), contract_id.clone());
+                        d.contract_id_to_path
+                            .insert(contract_id.clone(), path.clone());
+                    }
+                    d
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            },
+            Err(e) => {
+                return Err(e);
+            }
+        }
     } else {
         eprintln!("clarinet dap: running in SDK-only mode (no DAP client)");
         let mut d = DAPDebugger::no_op();
@@ -200,6 +225,10 @@ pub fn run_dap_server(
         d
     };
 
+    // Wrap in Arc<Mutex> so all SDK client threads share the same DAP state
+    // (breakpoints, contract maps).
+    let dap = Arc::new(Mutex::new(dap));
+
     // Accept SDK clients in a loop so successive Vitest workers (or a reconnect
     // after disconnect) can reuse the same server without restarting it.
     eprintln!("clarinet dap: listening for SDK client on 127.0.0.1:{sdk_port}");
@@ -209,297 +238,359 @@ pub fn run_dap_server(
             .map_err(|e| format!("SDK accept error: {e}"))?;
         eprintln!("clarinet dap: SDK client connected");
 
-        // Clone the stream so we can have independent reader/writer halves.
-        let sdk_read_stream = sdk_stream
-            .try_clone()
-            .map_err(|e| format!("SDK stream clone error: {e}"))?;
-        let mut reader = std::io::BufReader::new(sdk_read_stream);
-        let mut writer = BufWriter::new(sdk_stream);
-        let mut line = String::new();
-
-        'request: loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break 'request, // EOF - client disconnected
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("clarinet dap: SDK read error: {e}");
-                    break 'request;
-                }
+        // Each SDK client gets its own session but all share the same DAP
+        // debugger (breakpoints, contract maps) via Arc<Mutex<>>.
+        let manifest_path_clone = manifest_path.clone();
+        let dap_clone = Arc::clone(&dap);
+        std::thread::spawn(move || match make_session(&manifest_path_clone) {
+            Ok((mut session, mut accounts, _, _)) => {
+                run_sdk_request_loop(
+                    sdk_stream,
+                    &manifest_path_clone,
+                    &mut session,
+                    &mut accounts,
+                    &dap_clone,
+                );
             }
+            Err(e) => {
+                eprintln!("clarinet dap: failed to create session: {e}");
+            }
+        });
+    } // end accept loop
+}
 
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
+fn run_sdk_request_loop(
+    sdk_stream: std::net::TcpStream,
+    manifest_path: &PathBuf,
+    session: &mut Session,
+    accounts: &mut HashMap<String, String>,
+    dap: &Arc<Mutex<DAPDebugger>>,
+) {
+    // Clone the stream so we can have independent reader/writer halves.
+    let sdk_read_stream = match sdk_stream.try_clone() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("clarinet dap: SDK stream clone error: {e}");
+            return;
+        }
+    };
+    let mut reader = std::io::BufReader::new(sdk_read_stream);
+    let mut writer = BufWriter::new(sdk_stream);
+    let mut line = String::new();
+
+    'request: loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break 'request, // EOF - client disconnected
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("clarinet dap: SDK read error: {e}");
+                break 'request;
+            }
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let request: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("clarinet dap: invalid SDK request ({e}): {trimmed}");
                 continue;
             }
+        };
 
-            let request: serde_json::Value = match serde_json::from_str(trimmed) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("clarinet dap: invalid SDK request ({e}): {trimmed}");
-                    continue;
-                }
-            };
+        let id = request["id"].clone();
+        let method = request["method"].as_str().unwrap_or("");
 
-            let id = request["id"].clone();
-            let method = request["method"].as_str().unwrap_or("");
+        match method {
+            "disconnect" => {
+                let resp = serde_json::json!({"id": id, "result": null});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writer.flush();
+                break 'request;
+            }
 
-            match method {
-                "disconnect" => {
-                    let resp = serde_json::json!({"id": id, "result": null});
-                    let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
-                    let _ = writer.flush();
-                    break 'request;
-                }
-
-                // Re-initialise the simnet session from the manifest on disk.
-                "initSession" => {
-                    // Reject requests for a different project so callers get a clear
-                    // error rather than silently using the wrong manifest.
-                    if let Some(req) = request["manifestPath"].as_str() {
-                        let req_path = PathBuf::from(req);
-                        let req_canon = std::fs::canonicalize(&req_path).unwrap_or(req_path);
-                        let srv_canon = std::fs::canonicalize(&manifest_path)
-                            .unwrap_or_else(|_| manifest_path.clone());
-                        if req_canon != srv_canon {
-                            let resp = serde_json::json!({
-                                "id": id,
-                                "error": format!(
-                                    "debug server uses '{}'; pass the same path to initSimnet()",
-                                    manifest_path.display()
-                                )
-                            });
-                            write_response(&mut writer, &resp)?;
-                            continue;
-                        }
-                    }
-                    match make_session(&manifest_path) {
-                        Ok((new_session, new_accounts, _, new_maps)) => {
-                            session = new_session;
-                            accounts = new_accounts;
-                            // Rebuild the contract maps in the debugger.
-                            dap.path_to_contract_id.clear();
-                            dap.contract_id_to_path.clear();
-                            for (contract_id, path) in &new_maps {
-                                dap.path_to_contract_id
-                                    .insert(path.clone(), contract_id.clone());
-                                dap.contract_id_to_path
-                                    .insert(contract_id.clone(), path.clone());
-                            }
-                            let resp = serde_json::json!({"id": id, "result": {}});
-                            write_response(&mut writer, &resp)?;
-                        }
-                        Err(e) => {
-                            let resp = serde_json::json!({"id": id, "error": e});
-                            write_response(&mut writer, &resp)?;
-                        }
+            // Re-initialise the simnet session from the manifest on disk.
+            "initSession" => {
+                // Resolve manifestPath against the client's cwd (if provided)
+                // rather than the server's cwd.
+                let cwd = request["cwd"].as_str().map(PathBuf::from);
+                let resolved_path: PathBuf = if let Some(req) = request["manifestPath"].as_str() {
+                    let req_path = PathBuf::from(req);
+                    paths::try_parse_path(req, cwd.as_deref()).unwrap_or(req_path)
+                } else {
+                    manifest_path.clone()
+                };
+                // Reject requests for a different project so callers get a clear
+                // error rather than silently using the wrong manifest.
+                {
+                    let req_canon =
+                        std::fs::canonicalize(&resolved_path).unwrap_or(resolved_path.clone());
+                    let srv_canon = std::fs::canonicalize(manifest_path)
+                        .unwrap_or_else(|_| manifest_path.clone());
+                    if req_canon != srv_canon {
+                        let resp = serde_json::json!({
+                            "id": id,
+                            "error": format!(
+                                "debug server uses '{}'; pass the same path to initSimnet()",
+                                manifest_path.display()
+                            )
+                        });
+                        let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                        let _ = writer.flush();
+                        continue;
                     }
                 }
-
-                // Return the accounts map (name → address).
-                "getAccounts" => {
-                    let resp = serde_json::json!({"id": id, "result": {"accounts": accounts}});
-                    write_response(&mut writer, &resp)?;
-                }
-
-                // Return STX and token balances as string-encoded amounts.
-                "getAssetsMap" => {
-                    let assets = session.get_assets_maps();
-                    // Convert u128 balances to strings so they survive JSON without precision loss.
-                    let as_strings: HashMap<&str, HashMap<String, String>> = assets
-                        .iter()
-                        .map(|(asset, holders)| {
-                            let inner: HashMap<String, String> = holders
-                                .iter()
-                                .map(|(addr, bal)| (addr.clone(), bal.to_string()))
-                                .collect();
-                            (asset.as_str(), inner)
-                        })
-                        .collect();
-                    let resp = serde_json::json!({"id": id, "result": {"assetsMap": as_strings}});
-                    write_response(&mut writer, &resp)?;
-                }
-
-                // Return the current Stacks block height.
-                "getBlockHeight" => {
-                    let height = session.interpreter.get_block_height();
-                    let resp = serde_json::json!({"id": id, "result": {"blockHeight": height}});
-                    write_response(&mut writer, &resp)?;
-                }
-
-                // Return the current burn (Bitcoin) block height.
-                "getBurnBlockHeight" => {
-                    let height = session.interpreter.get_burn_block_height();
-                    let resp = serde_json::json!({"id": id, "result": {"burnBlockHeight": height}});
-                    write_response(&mut writer, &resp)?;
-                }
-
-                // Advance the chain tip by `count` blocks (default 1).
-                "mineEmptyBlock" => {
-                    let count = request["count"].as_u64().unwrap_or(1) as u32;
-                    let new_height = session.advance_chain_tip(count);
-                    let resp = serde_json::json!({"id": id, "result": {"blockHeight": new_height}});
-                    write_response(&mut writer, &resp)?;
-                }
-
-                // Execute an arbitrary Clarity snippet under the debugger.
-                "eval" | "execute" => {
-                    let snippet = request["snippet"].as_str().unwrap_or("").to_string();
-                    let contract_id = QualifiedContractIdentifier::transient();
-                    dap.prepare_for_call(&contract_id, &snippet);
-                    let inner = eval_snippet_as_tx(&mut session, &mut dap, snippet);
-                    let response = wrap_response(id, inner);
-                    write_response(&mut writer, &response)?;
-                }
-
-                // Execute a single public contract call.
-                "call" | "callPublicFn" => {
-                    let contract = request["contract"].as_str().unwrap_or("").to_string();
-                    let function = request["function"].as_str().unwrap_or("").to_string();
-                    let sender = request["sender"].as_str().map(|s| s.to_string());
-                    let args: Vec<String> = request["args"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let inner =
-                        call_contract(&mut session, &mut dap, &contract, &function, &args, sender);
-                    let response = wrap_response(id, inner);
-                    write_response(&mut writer, &response)?;
-                }
-
-                // Execute a read-only contract call (no state mutation).
-                "callReadOnlyFn" => {
-                    let contract = request["contract"].as_str().unwrap_or("").to_string();
-                    let function = request["function"].as_str().unwrap_or("").to_string();
-                    let sender = request["sender"].as_str().map(|s| s.to_string());
-                    let args: Vec<String> = request["args"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let principal = resolve_contract_principal(&mut dap, &contract);
-                    let args_str = args.join(" ");
-                    let snippet = if args_str.is_empty() {
-                        format!("(contract-call? {principal} {function})")
-                    } else {
-                        format!("(contract-call? {principal} {function} {args_str})")
-                    };
-
-                    // Validate and set the sender before calling into the interpreter.
-                    let orig_sender = if let Some(s) = &sender {
-                        if PrincipalData::parse_standard_principal(s).is_err() {
-                            let inner =
-                                serde_json::json!({"error": format!("invalid sender address: {s}")});
-                            let response = wrap_response(id, inner);
-                            write_response(&mut writer, &response)?;
-                            continue 'request;
+                match make_session(&resolved_path) {
+                    Ok((new_session, new_accounts, _, new_maps)) => {
+                        *session = new_session;
+                        *accounts = new_accounts;
+                        // Rebuild the contract maps in the shared debugger.
+                        let mut dap_guard = dap.lock().expect("DAP mutex poisoned");
+                        dap_guard.path_to_contract_id.clear();
+                        dap_guard.contract_id_to_path.clear();
+                        for (contract_id, path) in &new_maps {
+                            dap_guard
+                                .path_to_contract_id
+                                .insert(path.clone(), contract_id.clone());
+                            dap_guard
+                                .contract_id_to_path
+                                .insert(contract_id.clone(), path.clone());
                         }
-                        let prev = session.get_tx_sender();
-                        session.set_tx_sender(s);
-                        Some(prev)
-                    } else {
-                        None
-                    };
-
-                    let contract_id = find_contract_id(&mut dap, &contract);
-                    dap.prepare_for_call(&contract_id, &snippet);
-                    let inner = eval_snippet_as_tx(&mut session, &mut dap, snippet);
-
-                    if let Some(prev) = &orig_sender {
-                        session.set_tx_sender(prev);
+                        drop(dap_guard);
+                        let resp = serde_json::json!({"id": id, "result": {}});
+                        let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                        let _ = writer.flush();
                     }
-
-                    let response = wrap_response(id, inner);
-                    write_response(&mut writer, &response)?;
-                }
-
-                // Execute a block of transactions in order, returning one result per tx.
-                "mineBlock" => {
-                    let txs = request["txs"].as_array().cloned().unwrap_or_default();
-
-                    let mut results: Vec<serde_json::Value> = Vec::with_capacity(txs.len());
-                    for tx_val in &txs {
-                        let tx_type = tx_val["type"].as_str().unwrap_or("");
-                        let result = match tx_type {
-                            "callPublicFn" | "callPrivateFn" => {
-                                let contract =
-                                    tx_val["contract"].as_str().unwrap_or("").to_string();
-                                let function =
-                                    tx_val["function"].as_str().unwrap_or("").to_string();
-                                let sender = tx_val["sender"].as_str().map(|s| s.to_string());
-                                let args: Vec<String> = tx_val["args"]
-                                    .as_array()
-                                    .map(|a| {
-                                        a.iter()
-                                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-                                call_contract(
-                                    &mut session,
-                                    &mut dap,
-                                    &contract,
-                                    &function,
-                                    &args,
-                                    sender,
-                                )
-                            }
-                            "transferSTX" => {
-                                let amount = tx_val["amount"].as_u64().unwrap_or(0);
-                                let recipient =
-                                    tx_val["recipient"].as_str().unwrap_or("").to_string();
-                                let sender_str = tx_val["sender"].as_str().unwrap_or("");
-                                if sender_str.is_empty() {
-                                    serde_json::json!({"error": "transferSTX: missing sender"})
-                                } else if PrincipalData::parse_standard_principal(sender_str)
-                                    .is_err()
-                                {
-                                    serde_json::json!({"error": format!("transferSTX: invalid sender: {sender_str}")})
-                                } else {
-                                    let snippet =
-                                        format!("(stx-transfer? u{amount} tx-sender '{recipient})");
-                                    let orig = session.get_tx_sender();
-                                    session.set_tx_sender(sender_str);
-                                    let cid = QualifiedContractIdentifier::transient();
-                                    dap.prepare_for_call(&cid, &snippet);
-                                    let r = eval_snippet_as_tx(&mut session, &mut dap, snippet);
-                                    session.set_tx_sender(&orig);
-                                    r
-                                }
-                            }
-                            _ => {
-                                serde_json::json!({"error": format!("unsupported transaction type: {tx_type}")})
-                            }
-                        };
-                        results.push(result);
+                    Err(e) => {
+                        let resp = serde_json::json!({"id": id, "error": e});
+                        let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                        let _ = writer.flush();
                     }
-
-                    // Advance the chain tip by one block, mirroring simnet.mineBlock semantics.
-                    session.advance_chain_tip(1);
-
-                    let response = serde_json::json!({"id": id, "result": {"results": results}});
-                    write_response(&mut writer, &response)?;
-                }
-
-                _ => {
-                    let response =
-                        serde_json::json!({"id": id, "error": format!("unknown method: {method}")});
-                    write_response(&mut writer, &response)?;
                 }
             }
-        } // end 'request loop
 
-        eprintln!("clarinet dap: SDK client disconnected");
-    } // end accept loop
+            // Return the accounts map (name → address).
+            "getAccounts" => {
+                let resp = serde_json::json!({"id": id, "result": {"accounts": accounts}});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Return STX and token balances as string-encoded amounts.
+            "getAssetsMap" => {
+                let assets = session.get_assets_maps();
+                // Convert u128 balances to strings so they survive JSON without precision loss.
+                let as_strings: HashMap<&str, HashMap<String, String>> = assets
+                    .iter()
+                    .map(|(asset, holders)| {
+                        let inner: HashMap<String, String> = holders
+                            .iter()
+                            .map(|(addr, bal)| (addr.clone(), bal.to_string()))
+                            .collect();
+                        (asset.as_str(), inner)
+                    })
+                    .collect();
+                let resp = serde_json::json!({"id": id, "result": {"assetsMap": as_strings}});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Return the current Stacks block height.
+            "getBlockHeight" => {
+                let height = session.interpreter.get_block_height();
+                let resp = serde_json::json!({"id": id, "result": {"blockHeight": height}});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Return the current burn (Bitcoin) block height.
+            "getBurnBlockHeight" => {
+                let height = session.interpreter.get_burn_block_height();
+                let resp = serde_json::json!({"id": id, "result": {"burnBlockHeight": height}});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Advance the chain tip by `count` blocks (default 1).
+            "mineEmptyBlock" => {
+                let count = request["count"].as_u64().unwrap_or(1) as u32;
+                let new_height = session.advance_chain_tip(count);
+                let resp = serde_json::json!({"id": id, "result": {"blockHeight": new_height}});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Execute an arbitrary Clarity snippet under the debugger.
+            "eval" | "execute" => {
+                let snippet = request["snippet"].as_str().unwrap_or("").to_string();
+                let contract_id = QualifiedContractIdentifier::transient();
+                let mut dap_guard = dap.lock().expect("DAP mutex poisoned");
+                dap_guard.prepare_for_call(&contract_id, &snippet);
+                let inner = eval_snippet_as_tx(session, &mut dap_guard, snippet);
+                drop(dap_guard);
+                let response = wrap_response(id, inner);
+                let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Execute a single public contract call.
+            "call" | "callPublicFn" => {
+                let contract = request["contract"].as_str().unwrap_or("").to_string();
+                let function = request["function"].as_str().unwrap_or("").to_string();
+                let sender = request["sender"].as_str().map(|s| s.to_string());
+                let args: Vec<String> = request["args"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let mut dap_guard = dap.lock().expect("DAP mutex poisoned");
+                let inner =
+                    call_contract(session, &mut dap_guard, &contract, &function, &args, sender);
+                drop(dap_guard);
+                let response = wrap_response(id, inner);
+                let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Execute a read-only contract call (no state mutation).
+            "callReadOnlyFn" => {
+                let contract = request["contract"].as_str().unwrap_or("").to_string();
+                let function = request["function"].as_str().unwrap_or("").to_string();
+                let sender = request["sender"].as_str().map(|s| s.to_string());
+                let args: Vec<String> = request["args"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let mut dap_guard = dap.lock().expect("DAP mutex poisoned");
+                let principal = resolve_contract_principal(&dap_guard, &contract);
+                let args_str = args.join(" ");
+                let snippet = if args_str.is_empty() {
+                    format!("(contract-call? {principal} {function})")
+                } else {
+                    format!("(contract-call? {principal} {function} {args_str})")
+                };
+
+                // Validate and set the sender before calling into the interpreter.
+                let orig_sender = if let Some(s) = &sender {
+                    if PrincipalData::parse_standard_principal(s).is_err() {
+                        let inner =
+                            serde_json::json!({"error": format!("invalid sender address: {s}")});
+                        let response = wrap_response(id, inner);
+                        drop(dap_guard);
+                        let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                        let _ = writer.flush();
+                        continue 'request;
+                    }
+                    let prev = session.get_tx_sender();
+                    session.set_tx_sender(s);
+                    Some(prev)
+                } else {
+                    None
+                };
+
+                let contract_id = find_contract_id(&dap_guard, &contract);
+                dap_guard.prepare_for_call(&contract_id, &snippet);
+                let inner = eval_snippet_as_tx(session, &mut dap_guard, snippet);
+                drop(dap_guard);
+
+                if let Some(prev) = &orig_sender {
+                    session.set_tx_sender(prev);
+                }
+
+                let response = wrap_response(id, inner);
+                let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                let _ = writer.flush();
+            }
+
+            // Execute a block of transactions in order, returning one result per tx.
+            "mineBlock" => {
+                let txs = request["txs"].as_array().cloned().unwrap_or_default();
+
+                let mut dap_guard = dap.lock().expect("DAP mutex poisoned");
+                let mut results: Vec<serde_json::Value> = Vec::with_capacity(txs.len());
+                for tx_val in &txs {
+                    let tx_type = tx_val["type"].as_str().unwrap_or("");
+                    let result = match tx_type {
+                        "callPublicFn" | "callPrivateFn" => {
+                            let contract = tx_val["contract"].as_str().unwrap_or("").to_string();
+                            let function = tx_val["function"].as_str().unwrap_or("").to_string();
+                            let sender = tx_val["sender"].as_str().map(|s| s.to_string());
+                            let args: Vec<String> = tx_val["args"]
+                                .as_array()
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            call_contract(
+                                session,
+                                &mut dap_guard,
+                                &contract,
+                                &function,
+                                &args,
+                                sender,
+                            )
+                        }
+                        "transferSTX" => {
+                            let amount = tx_val["amount"].as_u64().unwrap_or(0);
+                            let recipient = tx_val["recipient"].as_str().unwrap_or("").to_string();
+                            let sender_str = tx_val["sender"].as_str().unwrap_or("");
+                            if sender_str.is_empty() {
+                                serde_json::json!({"error": "transferSTX: missing sender"})
+                            } else if PrincipalData::parse_standard_principal(sender_str).is_err() {
+                                serde_json::json!({"error": format!("transferSTX: invalid sender: {sender_str}")})
+                            } else {
+                                let snippet =
+                                    format!("(stx-transfer? u{amount} tx-sender '{recipient})");
+                                let orig = session.get_tx_sender();
+                                session.set_tx_sender(sender_str);
+                                let cid = QualifiedContractIdentifier::transient();
+                                dap_guard.prepare_for_call(&cid, &snippet);
+                                let r = eval_snippet_as_tx(session, &mut dap_guard, snippet);
+                                session.set_tx_sender(&orig);
+                                r
+                            }
+                        }
+                        _ => {
+                            serde_json::json!({"error": format!("unsupported transaction type: {tx_type}")})
+                        }
+                    };
+                    results.push(result);
+                }
+
+                // Advance the chain tip by one block, mirroring simnet.mineBlock semantics.
+                session.advance_chain_tip(1);
+                drop(dap_guard);
+
+                let response = serde_json::json!({"id": id, "result": {"results": results}});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                let _ = writer.flush();
+            }
+
+            _ => {
+                let response =
+                    serde_json::json!({"id": id, "error": format!("unknown method: {method}")});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                let _ = writer.flush();
+            }
+        }
+    } // end 'request loop
+
+    eprintln!("clarinet dap: SDK client disconnected");
 }
 
 // ---------------------------------------------------------------------------
@@ -609,7 +700,7 @@ fn eval_snippet_as_tx(
                 &result
                     .events
                     .iter()
-                    .map(|e| serialize_event(e))
+                    .map(serialize_event)
                     .collect::<Vec<_>>(),
             )
             .unwrap_or_else(|_| "[]".into());
@@ -630,12 +721,4 @@ fn wrap_response(id: serde_json::Value, inner: serde_json::Value) -> serde_json:
     } else {
         serde_json::json!({"id": id, "result": inner})
     }
-}
-
-fn write_response(writer: &mut impl Write, response: &serde_json::Value) -> Result<(), String> {
-    let response_str =
-        serde_json::to_string(response).map_err(|e| format!("serialize error: {e}"))?;
-    writeln!(writer, "{response_str}").map_err(|e| format!("write error: {e}"))?;
-    writer.flush().map_err(|e| format!("flush error: {e}"))?;
-    Ok(())
 }

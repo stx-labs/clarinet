@@ -86,7 +86,13 @@ export type SyncDebugSimnet = {
     bootContractsPath: string,
   ): { coverage: string; costs: string };
   // initSession is async to match the Simnet interface called in vitest.setup.ts
-  initSession(cwd: string, manifestPath: string): Promise<void>;
+  initSession(cwd: string, manifestPath: string, options?: {
+    trackCosts: boolean;
+    trackCoverage: boolean;
+    trackPerformance?: boolean;
+    performanceCostField?: string;
+    apiUrl?: string;
+  }): Promise<void>;
 };
 
 /**
@@ -269,8 +275,18 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
       return undefined;
     },
 
-    async initSession(cwd: string, manifestPath: string): Promise<void> {
-      send({ method: "initSession", cwd, manifestPath });
+    async initSession(
+      cwd: string,
+      manifestPath: string,
+      options?: {
+        trackCosts: boolean;
+        trackCoverage: boolean;
+        trackPerformance?: boolean;
+        performanceCostField?: string;
+        apiUrl?: string;
+      },
+    ): Promise<void> {
+      send({ method: "initSession", cwd, manifestPath, options });
     },
   };
 }
