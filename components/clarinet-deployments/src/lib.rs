@@ -44,8 +44,7 @@ use self::types::{
     TransactionPlanSpecification, TransactionsBatchSpecification, WalletSpecification,
 };
 
-/// Rewrite mainnet boot-contract principals in `source`, returning the remap
-/// to record on the transaction.
+/// The `remap-principals` a simnet plan records for a rewritten contract.
 ///
 /// Simnet deploys the boot contracts under both addresses, but its chain state
 /// is testnet-flavored: stacks-core's PoX handler keys off
@@ -53,14 +52,7 @@ use self::types::{
 /// locked any STX. Rewriting the principal at deployment time means the
 /// deployed code calls the `ST000...` contract directly, and recording it in
 /// the plan keeps the rewrite inspectable instead of hidden in the interpreter.
-///
-/// The map is empty when nothing was rewritten, so only contracts that
-/// actually reference a mainnet boot contract grow a `remap-principals` entry.
-fn apply_source_remap(source: &mut String) -> RemapPrincipals {
-    let Some(remapped) = remap_mainnet_boot_principals(source) else {
-        return BTreeMap::new();
-    };
-    *source = remapped;
+fn boot_remap_principals() -> RemapPrincipals {
     BTreeMap::from([(
         BOOT_MAINNET_PRINCIPAL.clone(),
         BOOT_TESTNET_PRINCIPAL.clone(),
@@ -69,14 +61,19 @@ fn apply_source_remap(source: &mut String) -> RemapPrincipals {
 
 /// The source to deploy for `tx`.
 ///
-/// A non-empty `remap_principals` means the generator rewrote this contract —
-/// which is also what distinguishes a project contract from a requirement,
-/// since requirements are deployed byte-identical to what is on chain.
-/// Re-applying the rewrite here is what makes a plan re-read from disk (where
+/// A non-empty `remap_principals` means this contract is due the boot rewrite.
+/// It is set by the plan generator, and by
+/// [`setup_session_with_deployment`] for project contracts whose plan predates
+/// the field — requirements never carry it, since they are deployed
+/// byte-identical to what is on chain.
+///
+/// The rewrite is re-derived from the source rather than replayed from the
+/// recorded pairs, which is what makes a plan re-read from disk (where
 /// `source` comes straight off the `.clar` file and no pre-built AST is passed
 /// along) deploy the same code the generator produced. It is idempotent, so
 /// the in-memory path, already rewritten before its AST was built, is
-/// unaffected.
+/// unaffected. Since the pairs are not replayed, a plan recording anything
+/// other than the boot pair is reported rather than silently reinterpreted.
 ///
 /// `mxs` breaks the tie when the two disagree: a plan can be generated without
 /// mainnet execution simulation and then deployed with it switched on (the CLI
@@ -97,6 +94,14 @@ fn source_for_emulated_publish(tx: &EmulatedContractPublishSpecification, mxs: b
         return tx.source.clone();
     }
 
+    if tx.remap_principals != boot_remap_principals() {
+        ueprint!(
+            "Warning: {} records a principal remap that is not the mainnet-to-testnet boot \
+             mapping. Only the boot mapping is applied; the recorded entries are ignored.",
+            tx.location.display()
+        );
+    }
+
     remap_mainnet_boot_principals(&tx.source).unwrap_or_else(|| tx.source.clone())
 }
 
@@ -113,7 +118,17 @@ pub fn setup_session_with_deployment(
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
-                if !enable_analysis || !manifest.contracts_settings.contains_key(&spec.location) {
+                // A plan written before `remap-principals` existed records
+                // nothing, which is indistinguishable from a requirement — so
+                // re-derive it for the project's own contracts. Without this, a
+                // plan loaded from disk silently deploys mainnet boot
+                // principals and the PoX lock goes missing again.
+                let is_project_contract = manifest.contracts_settings.contains_key(&spec.location);
+                if is_project_contract && spec.remap_principals.is_empty() {
+                    spec.remap_principals = boot_remap_principals();
+                }
+
+                if !enable_analysis || !is_project_contract {
                     spec.skip_analysis = true;
                 } else if let Ok(relative) = spec.location.strip_prefix(&manifest.root_dir) {
                     if !manifest
@@ -1142,11 +1157,19 @@ pub async fn generate_default_deployment_with_cache(
         // below, so the plan's source, the AST handed to the deployer and the
         // recorded remap all describe the same code. Simnet only, and never
         // under MXS, where the remote node holds the real mainnet contracts.
-        let remap_principals = if matches!(network, StacksNetwork::Simnet) && !simnet_remote_data {
-            apply_source_remap(&mut source)
-        } else {
-            BTreeMap::new()
-        };
+        // `clarinet check` generates a simnet plan for both environments; the
+        // on-chain pass must analyse what will actually be published on chain,
+        // where the mainnet boot addresses are the correct ones.
+        let mut remap_principals = BTreeMap::new();
+        if matches!(network, StacksNetwork::Simnet)
+            && environment == Environment::Simnet
+            && !simnet_remote_data
+        {
+            if let Some(remapped) = remap_mainnet_boot_principals(&source) {
+                source = remapped;
+                remap_principals = boot_remap_principals();
+            }
+        }
 
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
 
@@ -1528,10 +1551,11 @@ mod tests {
                 clarity_version: ClarityVersion::Clarity2,
                 location: PathBuf::from("/contracts/staker.clar"),
                 skip_analysis: false,
-                // What the generator would have recorded, obtained the same
-                // way it does rather than restated here.
                 remap_principals: if remapped {
-                    apply_source_remap(&mut CALLS_MAINNET_POX.to_string())
+                    BTreeMap::from([(
+                        PrincipalData::parse_standard_principal(BOOT_MAINNET_ADDRESS).unwrap(),
+                        PrincipalData::parse_standard_principal(BOOT_TESTNET_ADDRESS).unwrap(),
+                    )])
                 } else {
                     BTreeMap::new()
                 },
@@ -1578,30 +1602,6 @@ mod tests {
                     "a plan with no recorded remap must deploy its source verbatim (mxs={mxs})"
                 );
             }
-        }
-
-        #[test]
-        fn the_recorded_remap_is_the_boot_address_pair() {
-            let mut source = CALLS_MAINNET_POX.to_string();
-            let remap = apply_source_remap(&mut source);
-
-            assert_eq!(
-                remap
-                    .iter()
-                    .map(|(src, dst)| (src.to_address(), dst.to_address()))
-                    .collect::<Vec<_>>(),
-                vec![(
-                    BOOT_MAINNET_ADDRESS.to_string(),
-                    BOOT_TESTNET_ADDRESS.to_string()
-                )]
-            );
-        }
-
-        #[test]
-        fn no_remap_is_recorded_for_untouched_source() {
-            let mut source = CALLS_TESTNET_POX.to_string();
-            assert!(apply_source_remap(&mut source).is_empty());
-            assert_eq!(source, CALLS_TESTNET_POX);
         }
     }
 

@@ -30,7 +30,10 @@ use stacks_rpc_client::StacksRpc;
 
 mod bitcoin_deployment;
 
-use crate::types::{DeploymentSpecification, EpochSpec, TransactionSpecification};
+use crate::types::{
+    remap_principals_to_specifications, DeploymentSpecification, EpochSpec,
+    TransactionSpecification,
+};
 
 /// The sBTC contract-ID remappings a deployment starts with.
 ///
@@ -56,22 +59,18 @@ fn sbtc_contract_ids_to_remap(network: &StacksNetwork) -> HashSet<(String, Strin
 
 /// Replace every occurrence of each `from` string with its `to` counterpart.
 ///
-/// A blunt substring replacement, which is all the sBTC and requirement
-/// remappings need: their sources are whole contract IDs pulled from the plan,
-/// with no shorter ID that could match as a prefix.
+/// A blunt substring replacement. The sBTC and requirement *contract id* pairs
+/// are whole `address.name` strings, so nothing shorter can match as a prefix —
+/// but a requirement's `remap_principals` maps a bare issuer address, which
+/// this will happily rewrite inside comments and string literals too. That is
+/// deliberate: a bare-address remap has to reach every syntactic position a
+/// principal can appear in, which a token matcher cannot do.
 fn remap_contract_ids(source: &str, pairs: impl IntoIterator<Item = (String, String)>) -> String {
-    let mut source = source.to_string();
-    for (from, to) in pairs {
-        let mut matched_indices = source
-            .match_indices(&from)
-            .map(|(i, _)| i)
-            .collect::<Vec<usize>>();
-        matched_indices.reverse();
-        for index in matched_indices {
-            source.replace_range(index..index + from.len(), &to);
-        }
-    }
-    source
+    pairs
+        .into_iter()
+        .fold(source.to_string(), |source, (from, to)| {
+            source.replace(&from, &to)
+        })
 }
 
 /// Rewrite the contract references a non-mainnet deployment needs.
@@ -669,9 +668,8 @@ pub fn apply_on_chain_deployment(
 
                     let source = remap_deployment_source(
                         &tx.source,
-                        tx.remap_principals
-                            .iter()
-                            .map(|(src, dst)| (src.to_address(), dst.to_address()))
+                        remap_principals_to_specifications(&tx.remap_principals)
+                            .into_iter()
                             .chain(contracts_ids_to_remap.iter().cloned()),
                     );
 

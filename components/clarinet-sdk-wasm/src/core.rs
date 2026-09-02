@@ -723,8 +723,10 @@ impl SDK {
 
     #[wasm_bindgen(js_name=getContractSource)]
     pub fn get_contract_source(&mut self, contract: &str) -> Result<Option<String>, JsError> {
-        let contract_id =
-            Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)
+            .map_err(|e| JsError::new(&e))?;
         self.get_session_mut()
             .interpreter
             .get_contract_source(&contract_id)
@@ -733,8 +735,10 @@ impl SDK {
 
     #[wasm_bindgen(js_name=getContractAST)]
     pub fn get_contract_ast(&mut self, contract: &str) -> Result<IContractAST, JsError> {
-        let contract_id =
-            Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)
+            .map_err(|e| JsError::new(&e))?;
         let ast = self
             .get_session_mut()
             .get_contract_ast(&contract_id)
@@ -766,7 +770,9 @@ impl SDK {
 
     #[wasm_bindgen(js_name=getDataVar)]
     pub fn get_data_var(&mut self, contract: &str, var_name: &str) -> Result<String, String> {
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)?;
         let session = self.get_session_mut();
         session
             .interpreter
@@ -786,7 +792,9 @@ impl SDK {
         map_name: &str,
         map_key: Vec<u8>,
     ) -> Result<String, String> {
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)?;
         let session = self.get_session_mut();
         session
             .interpreter
@@ -799,7 +807,9 @@ impl SDK {
         contract: &str,
         method: &str,
     ) -> Result<&ContractInterfaceFunction, String> {
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)?;
         let contract_interface = self
             .contracts_interfaces
             .get(&contract_id)
@@ -875,8 +885,10 @@ impl SDK {
                 // Unreachable in practice: the same id was desugared to run
                 // the call above. Classify conservatively rather than claim a
                 // transaction happened on a path that cannot be reached.
-                let contract_id =
-                    Session::desugar_contract_id(&self.deployer, contract)?.to_string();
+                let contract_id = self
+                    .get_session()
+                    .resolve_contract_id(&self.deployer, contract)?
+                    .to_string();
                 self.costs_reports.push(CostsReport {
                     test_name,
                     contract_id,
@@ -1042,19 +1054,19 @@ impl SDK {
             // entry to record it in, so it is logged instead. Skipped under
             // MXS, where the remote node holds the real mainnet boot
             // contracts.
-            let mut source = args.content.clone();
-            if !session.interpreter.repl_settings.remote_data.enabled {
-                if let Some(remapped) = remap_mainnet_boot_principals(&source) {
-                    log!(
-                        "note: simnet is testnet-flavored: {} boot principals in {} were deployed \
-                         as {}",
-                        BOOT_MAINNET_ADDRESS,
-                        args.name,
-                        BOOT_TESTNET_ADDRESS
-                    );
-                    source = remapped;
-                }
+            let remapped = (!session.interpreter.repl_settings.remote_data.enabled)
+                .then(|| remap_mainnet_boot_principals(&args.content))
+                .flatten();
+            if remapped.is_some() {
+                log!(
+                    "note: simnet is testnet-flavored: {} boot principals in {} were deployed as \
+                     {}",
+                    BOOT_MAINNET_ADDRESS,
+                    args.name,
+                    BOOT_TESTNET_ADDRESS
+                );
             }
+            let source = remapped.unwrap_or_else(|| args.content.clone());
 
             let contract = ClarityContract {
                 code_source: ClarityCodeSource::ContractInMemory(source),

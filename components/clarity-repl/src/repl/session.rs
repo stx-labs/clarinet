@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
 use std::num::ParseIntError;
@@ -256,10 +256,6 @@ pub struct Session {
     coverage_hook: Option<CoverageHook>,
     logger_hook: Option<LoggerHook>,
     perf_hook: Option<PerfHook>,
-
-    /// Mainnet boot contracts whose call redirect has already been announced,
-    /// so a loop calling `pox-5` logs one line rather than one per call.
-    announced_boot_remaps: BTreeSet<QualifiedContractIdentifier>,
 }
 
 impl Session {
@@ -304,7 +300,6 @@ impl Session {
             coverage_hook: None,
             logger_hook: None,
             perf_hook: None,
-            announced_boot_remaps: BTreeSet::new(),
         }
     }
 
@@ -795,39 +790,35 @@ impl Session {
             .map_err(Vec::from)
     }
 
-    /// Redirect a call aimed at a mainnet boot contract to its testnet twin.
+    /// Resolve a user-supplied contract reference to the contract this session
+    /// will actually use.
     ///
-    /// Simnet deploys the boot contracts under both addresses, but its chain
-    /// state is testnet-flavored: stacks-core's PoX handler keys off
-    /// `GlobalContext::mainnet`, so `stack-stx` through `SP000....pox-N` never
-    /// locked any STX. Rewriting the target here — rather than switching
-    /// execution context underneath the caller — keeps the result, the trace
-    /// and the resulting chain state all naming the contract that actually
-    /// ran. The companion to this is the deployment-time source remap in
-    /// `clarinet-deployments`, which covers contract-to-contract calls.
+    /// Desugars the reference, then redirects a mainnet boot contract to its
+    /// testnet twin. Simnet deploys every boot contract under both addresses,
+    /// but its chain state is testnet-flavored: stacks-core's PoX handler keys
+    /// off `GlobalContext::mainnet`, so `stack-stx` through `SP000....pox-N`
+    /// never locked any STX.
+    ///
+    /// Every entry point that turns a `&str` into a contract id — calls *and*
+    /// reads alike — must go through here, so that what a caller reads back is
+    /// the contract its calls executed against. Rewriting only the call target
+    /// would leave `getContractSource` reporting the mainnet `pox-3`
+    /// (`REWARD_CYCLE_LENGTH u2100`) for a call that behaved per the testnet
+    /// one (`u1050`) — the reported-vs-executed split this redirect exists to
+    /// avoid.
     ///
     /// Skipped under mainnet execution simulation: there the remote node holds
     /// the real mainnet contracts and no testnet twin exists.
-    fn remap_mainnet_boot_call_target(
-        &mut self,
-        contract_id: QualifiedContractIdentifier,
-    ) -> QualifiedContractIdentifier {
+    pub fn resolve_contract_id(
+        &self,
+        default_deployer: &str,
+        contract: &str,
+    ) -> Result<QualifiedContractIdentifier, String> {
+        let contract_id = Self::desugar_contract_id(default_deployer, contract)?;
         if self.interpreter.repl_settings.remote_data.enabled {
-            return contract_id;
+            return Ok(contract_id);
         }
-        let Some(remapped) = boot::remap_mainnet_boot_contract_id(&contract_id) else {
-            return contract_id;
-        };
-
-        if self.announced_boot_remaps.insert(contract_id.clone()) {
-            uprint!(
-                "{} simnet is testnet-flavored: calls to {} run against {}",
-                yellow!("note:"),
-                contract_id,
-                remapped
-            );
-        }
-        remapped
+        Ok(boot::remap_mainnet_boot_contract_id(&contract_id).unwrap_or(contract_id))
     }
 
     /// Call `method` on `contract` as `sender`.
@@ -848,15 +839,16 @@ impl Session {
         let initial_tx_sender = self.get_tx_sender();
 
         // An unresolvable contract id never became a transaction at all.
-        let contract_id = Self::desugar_contract_id(&initial_tx_sender, contract).map_err(|e| {
-            ExecutionError::rejected(vec![Diagnostic {
-                level: Level::Error,
-                message: e,
-                spans: vec![],
-                suggestion: None,
-            }])
-        })?;
-        let contract_id = self.remap_mainnet_boot_call_target(contract_id);
+        let contract_id = self
+            .resolve_contract_id(&initial_tx_sender, contract)
+            .map_err(|e| {
+                ExecutionError::rejected(vec![Diagnostic {
+                    level: Level::Error,
+                    message: e,
+                    spans: vec![],
+                    suggestion: None,
+                }])
+            })?;
 
         self.set_tx_sender(sender);
 

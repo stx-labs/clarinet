@@ -224,7 +224,10 @@ fn is_contract_name_char(c: char) -> bool {
 /// outright rather than matched as a prefix.
 fn mainnet_boot_contract_name_at(s: &str) -> Option<&str> {
     let rest = s.strip_prefix(BOOT_MAINNET_ADDRESS)?.strip_prefix('.')?;
-    let name = &rest[..rest.len() - rest.trim_start_matches(is_contract_name_char).len()];
+    let end = rest
+        .find(|c| !is_contract_name_char(c))
+        .unwrap_or(rest.len());
+    let name = &rest[..end];
     BOOT_CONTRACTS_NAMES.contains(&name).then_some(name)
 }
 
@@ -246,10 +249,10 @@ fn mainnet_boot_contract_name_at(s: &str) -> Option<&str> {
 /// the source — diagnostics and coverage line/column data stay valid.
 ///
 /// Callers apply this to *user* sources only — manifest contracts (via
-/// `clarinet-deployments`) and `simnet.deployContract`. It deliberately does
-/// not live inside `Session::deploy_contract`, which also deploys the boot
-/// contracts themselves: rewriting those would point the mainnet boot set at
-/// the testnet one.
+/// `clarinet-deployments`) and `simnet.deployContract`. The boot contracts
+/// themselves are installed through `ClarityInterpreter::run` rather than
+/// `Session::deploy_contract`, so they never reach this function; none of
+/// them references another boot contract by its qualified id either.
 ///
 /// Idempotent: the output holds no mainnet boot literals, so a second pass
 /// returns `None`.
@@ -259,60 +262,65 @@ pub fn remap_mainnet_boot_principals(source: &str) -> Option<String> {
         return None;
     }
 
-    let bytes = source.as_bytes();
     let mut out = String::with_capacity(source.len());
     let mut remapped = false;
     let mut i = 0;
 
-    // `i` stays on a char boundary throughout: every arm advances either by a
-    // whole char or to an offset just past an ASCII delimiter.
-    while i < bytes.len() {
-        match bytes[i] {
-            // `;;` runs to the end of the line.
-            b';' if bytes.get(i + 1) == Some(&b';') => {
-                let end = source[i..]
-                    .find('\n')
-                    .map_or(bytes.len(), |eol| i + eol + 1);
-                out.push_str(&source[i..end]);
-                i = end;
+    // Every arm copies a slice and advances `i` to its end. The three
+    // delimiters are ASCII, and a UTF-8 continuation byte is never ASCII, so
+    // slicing at a delimiter can never split a multi-byte character.
+    while i < source.len() {
+        let rest = &source[i..];
+        let end = match rest.as_bytes()[0] {
+            // `;;` runs to the end of the line. A single `;` is not a comment,
+            // so it advances one byte — the default arm stops on `;`, so this
+            // arm has to consume it or the scan would stall.
+            b';' => {
+                if rest.as_bytes().get(1) == Some(&b';') {
+                    rest.find('\n').map_or(source.len(), |eol| i + eol + 1)
+                } else {
+                    i + 1
+                }
             }
-            // A string literal, `"..."` or the tail of `u"..."`.
+            // A string literal, `"..."` or the tail of `u"..."`. `\` escapes
+            // the next byte, so `\"` does not close it. Scanned with an
+            // explicit loop rather than a stateful `str::find` predicate,
+            // which would depend on the searcher calling it exactly once per
+            // char in order. `\`, `"` and every multi-byte lead/continuation
+            // byte are distinct, so stepping bytes is safe here.
             b'"' => {
-                out.push('"');
-                i += 1;
-                let mut escaped = false;
-                while let Some(c) = source[i..].chars().next() {
-                    out.push(c);
-                    i += c.len_utf8();
-                    match c {
-                        _ if escaped => escaped = false,
-                        '\\' => escaped = true,
-                        '"' => break,
-                        _ => {}
+                let bytes = rest.as_bytes();
+                let mut at = 1;
+                loop {
+                    match bytes.get(at) {
+                        None => break source.len(),
+                        Some(b'\\') => at += 2,
+                        Some(b'"') => break i + at + 1,
+                        Some(_) => at += 1,
                     }
                 }
             }
             // A principal literal is the only place a boot address is code.
             b'\'' => {
-                out.push('\'');
-                i += 1;
-                if let Some(name) = mainnet_boot_contract_name_at(&source[i..]) {
+                if let Some(name) = mainnet_boot_contract_name_at(&rest[1..]) {
+                    out.push('\'');
                     out.push_str(BOOT_TESTNET_ADDRESS);
                     out.push('.');
                     out.push_str(name);
-                    i += BOOT_MAINNET_ADDRESS.len() + 1 + name.len();
                     remapped = true;
+                    i += 1 + BOOT_MAINNET_ADDRESS.len() + 1 + name.len();
+                    continue;
                 }
+                i + 1
             }
-            _ => {
-                let c = source[i..]
-                    .chars()
-                    .next()
-                    .expect("i is within bytes and on a char boundary");
-                out.push(c);
-                i += c.len_utf8();
-            }
-        }
+            // Ordinary code: copy up to the next delimiter in one go.
+            _ => rest
+                .find([';', '"', '\''])
+                .map_or(source.len(), |next| i + next),
+        };
+
+        out.push_str(&source[i..end]);
+        i = end;
     }
 
     remapped.then_some(out)
@@ -588,6 +596,17 @@ mod remap_tests {
         assert_eq!(
             remapped(source),
             r#"(f "a\" 'SP000000000000000000002Q6VF78.pox b" 'ST000000000000000000002AMW42H.pox)"#
+        );
+    }
+
+    /// The scan stops on `;` to find comments, so a lone `;` — which Clarity
+    /// rejects, but which the scanner still has to walk past — must advance
+    /// rather than stall.
+    #[test]
+    fn does_not_stall_on_a_single_semicolon() {
+        assert_eq!(
+            remapped("(f) ; 'SP000000000000000000002Q6VF78.pox"),
+            "(f) ; 'ST000000000000000000002AMW42H.pox"
         );
     }
 

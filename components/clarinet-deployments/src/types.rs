@@ -714,7 +714,7 @@ pub struct RequirementPublishSpecification {
     #[serde(with = "standard_principal_data_serde")]
     pub remap_sender: StandardPrincipalData,
     #[serde(with = "remap_principals_serde")]
-    pub remap_principals: BTreeMap<StandardPrincipalData, StandardPrincipalData>,
+    pub remap_principals: RemapPrincipals,
     #[serde(with = "source_serde")]
     pub source: String,
     #[serde(with = "clarity_version_serde")]
@@ -880,7 +880,9 @@ fn parse_remap_principals(
 }
 
 /// Render a principal remap back into its plan-file form.
-fn remap_principals_to_specifications(remap: &RemapPrincipals) -> BTreeMap<String, String> {
+pub(crate) fn remap_principals_to_specifications(
+    remap: &RemapPrincipals,
+) -> BTreeMap<String, String> {
     remap
         .iter()
         .map(|(src, dst)| (src.to_address(), dst.to_address()))
@@ -984,7 +986,7 @@ pub struct EmulatedContractPublishSpecification {
     /// Principals rewritten in `source` before deployment. Empty unless the
     /// contract references a mainnet boot contract on simnet.
     #[serde(default, with = "remap_principals_serde")]
-    pub remap_principals: BTreeMap<StandardPrincipalData, StandardPrincipalData>,
+    pub remap_principals: RemapPrincipals,
 }
 
 impl EmulatedContractPublishSpecification {

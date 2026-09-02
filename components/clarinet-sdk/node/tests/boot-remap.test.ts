@@ -22,6 +22,11 @@ const address1 = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
 const initialSTXBalance = 100_000_000 * 1e6;
 const stacked = initialSTXBalance * 0.9;
 
+// A contract stacks its own balance, so it has to be funded first. Half the
+// wallet balance leaves room for the transfer itself.
+const funded = initialSTXBalance / 2;
+const toStack = stacked / 2;
+
 const deploymentPlanPath = path.join(
   process.cwd(),
   "tests/fixtures/deployments/default.simnet-plan.yaml",
@@ -61,6 +66,16 @@ function lockedAmount(simnet: Simnet, principal: string) {
   return simnet.execute(`(get locked (stx-account '${principal}))`).result;
 }
 
+/** Fund `contractName`, have it stack, and assert the STX actually locked. */
+function expectStackerLocks(simnet: Simnet, contractName: string) {
+  const stacker = `${deployerAddr}.${contractName}`;
+  simnet.transferSTX(funded, stacker, deployerAddr);
+
+  const result = simnet.callPublicFn(contractName, "stack", [Cl.uint(toStack)], deployerAddr);
+  expect(result.result.type).toBe("ok");
+  expect(lockedAmount(simnet, stacker)).toStrictEqual(Cl.uint(toStack));
+}
+
 describe("a manifest contract calling the mainnet pox address", () => {
   let simnet: Simnet;
 
@@ -75,13 +90,7 @@ describe("a manifest contract calling the mainnet pox address", () => {
   });
 
   it("locks stx", () => {
-    const stacker = `${deployerAddr}.mainnet-pox-stacker`;
-    simnet.transferSTX(initialSTXBalance / 2, stacker, deployerAddr);
-
-    const result = simnet.callPublicFn("mainnet-pox-stacker", "stack", [Cl.uint(stacked / 2)], deployerAddr);
-    expect(result.result.type).toBe("ok");
-
-    expect(lockedAmount(simnet, stacker)).toStrictEqual(Cl.uint(stacked / 2));
+    expectStackerLocks(simnet, "mainnet-pox-stacker");
   });
 
   it("records the remap in the generated deployment plan", () => {
@@ -104,17 +113,11 @@ describe("deployContract", () => {
   it.each([
     ["mainnet", MAINNET_BOOT],
     ["testnet", TESTNET_BOOT],
-  ])("locks stx for a contract spelling the %s pox address", (_name, bootAddress) => {
-    const contractName = `stacker-${_name}`;
+  ])("locks stx for a contract spelling the %s pox address", (label, bootAddress) => {
+    const contractName = `stacker-${label}`;
     simnet.deployContract(contractName, stackerSource(bootAddress), null, deployerAddr);
 
-    const stacker = `${deployerAddr}.${contractName}`;
-    simnet.transferSTX(initialSTXBalance / 2, stacker, deployerAddr);
-
-    const result = simnet.callPublicFn(contractName, "stack", [Cl.uint(stacked / 2)], deployerAddr);
-    expect(result.result.type).toBe("ok");
-
-    expect(lockedAmount(simnet, stacker)).toStrictEqual(Cl.uint(stacked / 2));
+    expectStackerLocks(simnet, contractName);
   });
 
   it("leaves sbtc, requirement and bare burn-address principals alone", () => {
@@ -154,7 +157,7 @@ describe("calling pox-3 directly", () => {
   it.each([
     ["mainnet", MAINNET_BOOT],
     ["testnet", TESTNET_BOOT],
-  ])("locks stx through the %s address", (_name, bootAddress) => {
+  ])("locks stx through the %s address", (_label, bootAddress) => {
     const stackStx = simnet.callPublicFn(
       `${bootAddress}.pox-3`,
       "stack-stx",
@@ -182,6 +185,20 @@ describe("calling pox-3 directly", () => {
         "unlock-height": Cl.uint(2100),
       }),
     );
+  });
+
+  // A call redirected without redirecting the reads would report the mainnet
+  // pox-3 (REWARD_CYCLE_LENGTH u2100) for a call that behaved per the testnet
+  // one (u1050) — reported state disagreeing with executed state.
+  it("resolves reads to the contract the calls execute against", () => {
+    const mainnetSource = simnet.getContractSource(`${MAINNET_BOOT}.pox-3`);
+    const testnetSource = simnet.getContractSource(`${TESTNET_BOOT}.pox-3`);
+    expect(mainnetSource).toStrictEqual(testnetSource);
+
+    // Sanity: the two on-disk boot sources really do differ, so the assertion
+    // above is meaningful rather than vacuous.
+    expect(testnetSource).toContain("(define-constant REWARD_CYCLE_LENGTH u1050)");
+    expect(mainnetSource).not.toContain("(define-constant REWARD_CYCLE_LENGTH u2100)");
   });
 
   it("shares one state between the two addresses", () => {

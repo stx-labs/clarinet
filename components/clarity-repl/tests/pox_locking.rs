@@ -21,14 +21,14 @@ const WALLET: &str = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
 const BALANCE: u64 = 100_000_000_000;
 const STACKED: u128 = 90_000_000_000;
 
-fn session_with_wallet(settings: SessionSettings) -> Session {
+fn session_with_wallet() -> Session {
     let mut session = Session::new(SessionSettings {
         initial_accounts: vec![Account {
             address: WALLET.to_owned(),
             balance: BALANCE,
             name: "wallet_1".to_owned(),
         }],
-        ..settings
+        ..Default::default()
     });
 
     session.update_epoch(StacksEpochId::Epoch24);
@@ -95,38 +95,30 @@ fn stack_stx(session: &mut Session, pox_deployer: &str) -> Value {
     snippet_value(result.result)
 }
 
-#[track_caller]
-fn assert_stack_stx_locks(pox_deployer: &str) {
-    let mut session = session_with_wallet(SessionSettings::default());
-
-    let value = stack_stx(&mut session, pox_deployer);
-    assert!(
-        matches!(&value, Value::Response(response) if response.committed),
-        "stack-stx on {pox_deployer}.pox-3 should succeed, got {value}"
-    );
-
-    assert_eq!(
-        locked_amount(&mut session, WALLET),
-        STACKED,
-        "a successful stack-stx on {pox_deployer}.pox-3 should lock STX"
-    );
-}
-
 #[test]
-fn stack_stx_locks_stx_with_testnet_boot_address() {
-    assert_stack_stx_locks(BOOT_TESTNET_ADDRESS);
-}
+fn stack_stx_locks_stx_through_either_boot_address() {
+    for pox_deployer in [BOOT_TESTNET_ADDRESS, BOOT_MAINNET_ADDRESS] {
+        let mut session = session_with_wallet();
 
-#[test]
-fn stack_stx_locks_stx_with_mainnet_boot_address() {
-    assert_stack_stx_locks(BOOT_MAINNET_ADDRESS);
+        let value = stack_stx(&mut session, pox_deployer);
+        assert!(
+            matches!(&value, Value::Response(response) if response.committed),
+            "stack-stx on {pox_deployer}.pox-3 should succeed, got {value}"
+        );
+
+        assert_eq!(
+            locked_amount(&mut session, WALLET),
+            STACKED,
+            "a successful stack-stx on {pox_deployer}.pox-3 should lock STX"
+        );
+    }
 }
 
 /// The redirect is a visible rewrite of the call target, not a hidden context
 /// switch: the lock lands on the contract the caller can read back.
 #[test]
 fn stacking_through_either_address_shares_one_state() {
-    let mut session = session_with_wallet(SessionSettings::default());
+    let mut session = session_with_wallet();
     stack_stx(&mut session, BOOT_MAINNET_ADDRESS);
 
     // A second `stack-stx`, this time spelled with the testnet address, must
@@ -156,56 +148,26 @@ fn mxs_does_not_redirect_the_mainnet_boot_address() {
         .expect_at_least(0)
         .create();
 
-    #[rustfmt::skip]
-    let info = indoc::indoc!(r#"
-        {
-            "peer_version": 402653196,
-            "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
-            "burn_block_height": 882262,
-            "stable_pox_consensus": "f517f5aced5be836f9fe10980ff06108a6a2acec",
-            "stable_burn_block_height": 882255,
-            "network_id": 1,
-            "parent_network_id": 3652501241,
-            "stacks_tip_height": 556946,
-            "stacks_tip": "70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
-            "stacks_tip_consensus_hash": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
-            "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
-            "unanchored_tip": null,
-            "unanchored_seq": null,
-            "tenure_height": 184037,
-            "is_fully_synced": true,
-            "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
-            "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
-            "stackerdbs": []
-        }
-    "#);
+    // Only the fields `Info` and `Block` actually deserialize; neither denies
+    // unknown fields, so a real node response is a superset of these.
     let _info = server
         .mock("GET", "/v2/info")
         .with_status(200)
         .with_header("content-type", "application/json")
-        .with_body(info)
+        .with_body(r#"{"network_id": 1, "stacks_tip_height": 556946}"#)
         .create();
 
-    #[rustfmt::skip]
-    let block = indoc::indoc!(r#"
-        {
-            "canonical": true,
-            "height": 556946,
-            "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
-            "block_time": 1735934294,
-            "block_time_iso": "2025-01-03T19:58:14.000Z",
-            "tenure_height": 184037,
-            "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
-            "parent_block_hash": "0x94c3d8f56ed2e1093f26089572af9cc5d5b097d461dcc184196f1ee2070de063",
-            "parent_index_block_hash": "0x1969bdddb9902162f5fdd2ff49cabb30300a9819c89bedd4c27fed82f8c9cf4b",
-            "burn_block_time": 1735451504,
-            "burn_block_time_iso": "2024-12-29T05:51:44.000Z",
-            "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
-            "burn_block_height": 882262,
-            "miner_txid": "0x5fb426cf9eb4577b545bd731634886d5bd5c9d40d573e2cdb95100f483913491",
-            "tx_count": 2
-        }
-    "#);
+    let block = serde_json::json!({
+        "height": 556946,
+        "burn_block_height": 882262,
+        "tenure_height": 184037,
+        "block_time": 1735934294,
+        "burn_block_time": 1735451504,
+        "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
+        "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
+        "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
+    })
+    .to_string();
     let _blocks = server
         .mock(
             "GET",

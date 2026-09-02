@@ -13,7 +13,7 @@ use std::path::Path;
 
 use clarinet_deployments::types::{DeploymentSpecification, TransactionSpecification};
 use clarinet_deployments::{
-    generate_default_deployment, initiate_session_from_manifest,
+    generate_default_deployment, initiate_session_from_manifest, setup_session_with_deployment,
     update_session_with_deployment_plan,
 };
 use clarinet_files::{ProjectManifest, StacksNetwork};
@@ -106,20 +106,17 @@ impl Project {
         &self.manifest.root_dir
     }
 
-    fn generate(&self) -> DeploymentSpecification {
-        let (deployment, _artifacts, _) = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(generate_default_deployment(
-                &self.manifest,
-                &StacksNetwork::Simnet,
-                false,
-                None,
-                None,
-                Environment::Simnet,
-            ))
-            .expect("simnet deployment plan should be generated");
+    async fn generate(&self) -> DeploymentSpecification {
+        let (deployment, _artifacts, _) = generate_default_deployment(
+            &self.manifest,
+            &StacksNetwork::Simnet,
+            false,
+            None,
+            None,
+            Environment::Simnet,
+        )
+        .await
+        .expect("simnet deployment plan should be generated");
         deployment
     }
 }
@@ -148,18 +145,22 @@ fn publish(deployment: &DeploymentSpecification) -> (String, Vec<(String, String
 }
 
 #[track_caller]
+fn snippet_value(result: EvaluationResult) -> Value {
+    match result {
+        EvaluationResult::Snippet(snippet) => snippet.result,
+        EvaluationResult::Contract(_) => panic!("expected a snippet result"),
+    }
+}
+
+#[track_caller]
 fn locked_amount(session: &mut Session, principal: &str) -> u128 {
     let result = session
         .eval(format!("(get locked (stx-account '{principal}))"), false)
         .expect("stx-account should evaluate")
         .into_inner();
-    match result.result {
-        EvaluationResult::Snippet(snippet) => snippet
-            .result
-            .expect_u128()
-            .expect("locked should be a uint"),
-        EvaluationResult::Contract(_) => panic!("expected a snippet result"),
-    }
+    snippet_value(result.result)
+        .expect_u128()
+        .expect("locked should be a uint")
 }
 
 /// Deploy `deployment` and have the stacker contract lock 90k STX.
@@ -167,10 +168,15 @@ fn locked_amount(session: &mut Session, principal: &str) -> u128 {
 fn stack_through_the_deployed_contract(
     manifest: &ProjectManifest,
     deployment: &DeploymentSpecification,
-) -> (Session, u128) {
+) -> u128 {
     let mut session = initiate_session_from_manifest(manifest);
     update_session_with_deployment_plan(&mut session, deployment, None);
+    stack_in_session(&mut session)
+}
 
+/// Fund the already-deployed stacker contract and have it stack.
+#[track_caller]
+fn stack_in_session(session: &mut Session) -> u128 {
     let stacker = format!("{DEPLOYER}.stacker");
     let stacked = 90_000_000_000_u128;
 
@@ -193,27 +199,23 @@ fn stack_through_the_deployed_contract(
         )
         .expect("stack should execute");
 
-    let value = match result.result {
-        EvaluationResult::Snippet(snippet) => snippet.result,
-        EvaluationResult::Contract(_) => panic!("expected a snippet result"),
-    };
+    let value = snippet_value(result.result);
     assert!(
         matches!(&value, Value::Response(response) if response.committed),
         "stack should succeed, got {value}"
     );
 
-    let locked = locked_amount(&mut session, &stacker);
-    (session, locked)
+    locked_amount(session, &stacker)
 }
 
 /// The behavior #2491 reported missing: a contract that names the mainnet PoX
 /// address must actually lock STX in simnet.
-#[test]
-fn deploying_a_mainnet_pox_caller_locks_stx() {
+#[tokio::test]
+async fn deploying_a_mainnet_pox_caller_locks_stx() {
     let project = Project::new("stacker", STACKER_SOURCE, "");
-    let deployment = project.generate();
+    let deployment = project.generate().await;
 
-    let (_, locked) = stack_through_the_deployed_contract(&project.manifest, &deployment);
+    let locked = stack_through_the_deployed_contract(&project.manifest, &deployment);
     assert_eq!(
         locked, 90_000_000_000,
         "stacking through {BOOT_MAINNET_ADDRESS}.pox-3 should lock the contract's STX"
@@ -223,10 +225,10 @@ fn deploying_a_mainnet_pox_caller_locks_stx() {
 /// The same lock must happen when the plan is round-tripped through disk,
 /// where the source is re-read raw from the `.clar` file and only the recorded
 /// `remap-principals` says what to rewrite.
-#[test]
-fn a_plan_reloaded_from_disk_still_locks_stx() {
+#[tokio::test]
+async fn a_plan_reloaded_from_disk_still_locks_stx() {
     let project = Project::new("stacker", STACKER_SOURCE, "");
-    let generated = project.generate();
+    let generated = project.generate().await;
 
     let plan_path = project.root().join("plan.yaml");
     fs::write(
@@ -253,14 +255,14 @@ fn a_plan_reloaded_from_disk_still_locks_stx() {
         "the remap must survive the round-trip through the plan file"
     );
 
-    let (_, locked) = stack_through_the_deployed_contract(&project.manifest, &reloaded);
+    let locked = stack_through_the_deployed_contract(&project.manifest, &reloaded);
     assert_eq!(locked, 90_000_000_000);
 }
 
-#[test]
-fn the_plan_records_and_applies_the_remap() {
+#[tokio::test]
+async fn the_plan_records_and_applies_the_remap() {
     let project = Project::new("stacker", STACKER_SOURCE, "");
-    let deployment = project.generate();
+    let deployment = project.generate().await;
     let (source, remap) = publish(&deployment);
 
     assert_eq!(
@@ -286,10 +288,10 @@ fn the_plan_records_and_applies_the_remap() {
 }
 
 /// The user-facing half of "visible": the remap shows up in the plan file.
-#[test]
-fn the_plan_file_shows_the_remap() {
+#[tokio::test]
+async fn the_plan_file_shows_the_remap() {
     let project = Project::new("stacker", STACKER_SOURCE, "");
-    let deployment = project.generate();
+    let deployment = project.generate().await;
 
     let plan = String::from_utf8(deployment.to_file_content(project.root()).unwrap()).unwrap();
     assert!(
@@ -302,11 +304,11 @@ fn the_plan_file_shows_the_remap() {
     );
 }
 
-#[test]
-fn source_using_the_testnet_address_is_untouched() {
+#[tokio::test]
+async fn source_using_the_testnet_address_is_untouched() {
     let testnet_source = STACKER_SOURCE.replace(BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS);
     let project = Project::new("stacker", &testnet_source, "");
-    let deployment = project.generate();
+    let deployment = project.generate().await;
     let (source, remap) = publish(&deployment);
 
     assert_eq!(source, testnet_source, "the source must be passed through");
@@ -317,14 +319,14 @@ fn source_using_the_testnet_address_is_untouched() {
 
     // And it still locks, which is what the mainnet spelling is being made to
     // match.
-    let (_, locked) = stack_through_the_deployed_contract(&project.manifest, &deployment);
+    let locked = stack_through_the_deployed_contract(&project.manifest, &deployment);
     assert_eq!(locked, 90_000_000_000);
 }
 
 /// sBTC lives at `SM3VDXK3...` and requirement contracts at their own
 /// deployers; neither has a testnet twin in simnet, so both are out of scope.
-#[test]
-fn sbtc_and_requirement_principals_are_not_remapped() {
+#[tokio::test]
+async fn sbtc_and_requirement_principals_are_not_remapped() {
     let source = formatdoc!(
         r#"
         (define-constant SBTC '{SBTC_MAINNET_ADDRESS}.sbtc-token)
@@ -334,7 +336,7 @@ fn sbtc_and_requirement_principals_are_not_remapped() {
     "#
     );
     let project = Project::new("refs", &source, "");
-    let deployment = project.generate();
+    let deployment = project.generate().await;
     let (deployed_source, remap) = publish(&deployment);
 
     assert_eq!(deployed_source, source);
@@ -344,10 +346,76 @@ fn sbtc_and_requirement_principals_are_not_remapped() {
     );
 }
 
+/// `clarinet check` generates a simnet plan for the on-chain environment too,
+/// to analyse the contract as it will be published. The mainnet addresses are
+/// the correct ones there, so that pass must not rewrite.
+#[tokio::test]
+async fn the_on_chain_environment_is_not_remapped() {
+    let project = Project::new("stacker", STACKER_SOURCE, "");
+    let (deployment, _artifacts, _) = generate_default_deployment(
+        &project.manifest,
+        &StacksNetwork::Simnet,
+        false,
+        None,
+        None,
+        Environment::OnChain,
+    )
+    .await
+    .expect("on-chain-environment plan should be generated");
+
+    let (source, remap) = publish(&deployment);
+    assert_eq!(
+        source, STACKER_SOURCE,
+        "the on-chain check pass must analyse the unrewritten source"
+    );
+    assert!(remap.is_empty(), "and must record no remap");
+}
+
+/// A plan written before `remap-principals` existed records nothing, which is
+/// shaped exactly like a requirement. Project contracts must still be
+/// rewritten, or loading such a plan silently reintroduces the bug.
+#[tokio::test]
+async fn a_plan_without_the_recorded_remap_still_locks_stx() {
+    let project = Project::new("stacker", STACKER_SOURCE, "");
+    let mut deployment = project.generate().await;
+
+    // Strip the field the way a pre-PR plan would have it, and reset the
+    // source to what re-reading the `.clar` file yields.
+    for batch in deployment.plan.batches.iter_mut() {
+        for tx in batch.transactions.iter_mut() {
+            if let TransactionSpecification::EmulatedContractPublish(spec) = tx {
+                spec.remap_principals.clear();
+                spec.source = STACKER_SOURCE.to_string();
+            }
+        }
+    }
+
+    // `setup_session_with_deployment` is the CLI's load-from-disk entry point.
+    let artifacts = setup_session_with_deployment(&project.manifest, &mut deployment, None, false);
+    assert!(artifacts.success, "the stale plan should still deploy");
+
+    let (_, remap) = publish(&deployment);
+    assert_eq!(
+        remap,
+        vec![(
+            BOOT_MAINNET_ADDRESS.to_string(),
+            BOOT_TESTNET_ADDRESS.to_string()
+        )],
+        "the marker must be re-derived for a project contract"
+    );
+
+    let mut session = artifacts.session;
+    assert_eq!(
+        stack_in_session(&mut session),
+        90_000_000_000,
+        "a plan predating the field must still lock STX"
+    );
+}
+
 /// MXS reads real mainnet state, where the mainnet addresses are the correct
 /// ones, so the plan must neither rewrite nor record anything.
-#[test]
-fn mxs_preserves_the_mainnet_principal() {
+#[tokio::test]
+async fn mxs_preserves_the_mainnet_principal() {
     let project = Project::new(
         "stacker",
         STACKER_SOURCE,
@@ -358,7 +426,7 @@ fn mxs_preserves_the_mainnet_principal() {
         "the fixture must actually have MXS enabled"
     );
 
-    let deployment = project.generate();
+    let deployment = project.generate().await;
     let (source, remap) = publish(&deployment);
 
     assert_eq!(
@@ -373,12 +441,20 @@ fn mxs_preserves_the_mainnet_principal() {
 
 /// Regenerating the plan must produce byte-identical output, otherwise
 /// `clarinet` would prompt to overwrite the plan on every run.
-#[test]
-fn regenerating_the_plan_is_stable() {
+#[tokio::test]
+async fn regenerating_the_plan_is_stable() {
     let project = Project::new("stacker", STACKER_SOURCE, "");
 
-    let first = project.generate().to_file_content(project.root()).unwrap();
-    let second = project.generate().to_file_content(project.root()).unwrap();
+    let first = project
+        .generate()
+        .await
+        .to_file_content(project.root())
+        .unwrap();
+    let second = project
+        .generate()
+        .await
+        .to_file_content(project.root())
+        .unwrap();
 
     assert_eq!(
         String::from_utf8(first).unwrap(),
@@ -389,13 +465,13 @@ fn regenerating_the_plan_is_stable() {
 
 /// Deploying the same plan twice into fresh sessions must give the same
 /// result — the rewrite carries no state between runs.
-#[test]
-fn redeploying_is_idempotent() {
+#[tokio::test]
+async fn redeploying_is_idempotent() {
     let project = Project::new("stacker", STACKER_SOURCE, "");
-    let deployment = project.generate();
+    let deployment = project.generate().await;
 
-    let (_, first) = stack_through_the_deployed_contract(&project.manifest, &deployment);
-    let (_, second) = stack_through_the_deployed_contract(&project.manifest, &deployment);
+    let first = stack_through_the_deployed_contract(&project.manifest, &deployment);
+    let second = stack_through_the_deployed_contract(&project.manifest, &deployment);
     assert_eq!(first, second);
     assert_eq!(first, 90_000_000_000);
 }
