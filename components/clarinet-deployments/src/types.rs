@@ -859,6 +859,34 @@ pub mod clarity_version_serde {
     }
 }
 
+/// A principal remap, as it appears in a plan file.
+pub(crate) type RemapPrincipals = BTreeMap<StandardPrincipalData, StandardPrincipalData>;
+
+/// Parse the `remap-principals` entry of a `*-publish` transaction.
+fn parse_remap_principals(
+    specs: Option<&BTreeMap<String, String>>,
+) -> Result<RemapPrincipals, String> {
+    let parse = |role, address: &str| {
+        PrincipalData::parse_standard_principal(address).map_err(|_| {
+            format!("unable to parse remap {role} '{address}' as a valid Stacks address")
+        })
+    };
+
+    specs
+        .into_iter()
+        .flatten()
+        .map(|(src, dst)| Ok((parse("source", src)?, parse("destination", dst)?)))
+        .collect()
+}
+
+/// Render a principal remap back into its plan-file form.
+fn remap_principals_to_specifications(remap: &RemapPrincipals) -> BTreeMap<String, String> {
+    remap
+        .iter()
+        .map(|(src, dst)| (src.to_address(), dst.to_address()))
+        .collect()
+}
+
 impl RequirementPublishSpecification {
     pub fn from_specifications(
         specs: &RequirementPublishSpecificationFile,
@@ -878,24 +906,7 @@ impl RequirementPublishSpecification {
             ));
         };
 
-        let mut remap_principals = BTreeMap::new();
-        if let Some(ref remap_principals_spec) = specs.remap_principals {
-            for (src_spec, dst_spec) in remap_principals_spec {
-                let Ok(src) = PrincipalData::parse_standard_principal(src_spec) else {
-                    return Err(format!(
-                        "unable to parse remap source '{}' as a valid Stacks address",
-                        specs.remap_sender
-                    ));
-                };
-                let Ok(dst) = PrincipalData::parse_standard_principal(dst_spec) else {
-                    return Err(format!(
-                        "unable to parse remap destination '{}' as a valid Stacks address",
-                        specs.remap_sender
-                    ));
-                };
-                remap_principals.insert(src, dst);
-            }
-        }
+        let remap_principals = parse_remap_principals(specs.remap_principals.as_ref())?;
 
         let location = paths::try_parse_path(&specs.path, Some(project_root_location))
             .ok_or(format!("unable to parse path '{}'", specs.path))?;
@@ -1005,23 +1016,7 @@ impl EmulatedContractPublishSpecification {
             None => paths::read_content_as_utf8(&location)?,
         };
         let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
-
-        let mut remap_principals = BTreeMap::new();
-        if let Some(ref remap_principals_spec) = specs.remap_principals {
-            for (src_spec, dst_spec) in remap_principals_spec {
-                let Ok(src) = PrincipalData::parse_standard_principal(src_spec) else {
-                    return Err(format!(
-                        "unable to parse remap source '{src_spec}' as a valid Stacks address"
-                    ));
-                };
-                let Ok(dst) = PrincipalData::parse_standard_principal(dst_spec) else {
-                    return Err(format!(
-                        "unable to parse remap destination '{dst_spec}' as a valid Stacks address"
-                    ));
-                };
-                remap_principals.insert(src, dst);
-            }
-        }
+        let remap_principals = parse_remap_principals(specs.remap_principals.as_ref())?;
 
         Ok(EmulatedContractPublishSpecification {
             contract_name,
@@ -1592,27 +1587,26 @@ impl TransactionPlanSpecification {
                                 emulated_sender: tx.emulated_sender.to_address(),
                                 path: rel_path,
                                 clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),
+                                // Omitted when empty, so only contracts that
+                                // were actually rewritten grow the field.
                                 remap_principals: (!tx.remap_principals.is_empty()).then(|| {
-                                    tx.remap_principals
-                                        .iter()
-                                        .map(|(src, dst)| (src.to_address(), dst.to_address()))
-                                        .collect()
+                                    remap_principals_to_specifications(&tx.remap_principals)
                                 }),
                             },
                         )
                     }
                     TransactionSpecification::RequirementPublish(tx) => {
-                        let mut remap_principals = BTreeMap::new();
-                        for (src, dst) in tx.remap_principals.iter() {
-                            remap_principals.insert(src.to_address(), dst.to_address());
-                        }
                         let rel_path = paths::get_relative_path(&tx.location, project_root)
                             .unwrap_or_else(|_| tx.location.to_string_lossy().into_owned());
                         TransactionSpecificationFile::RequirementPublish(
                             RequirementPublishSpecificationFile {
                                 contract_id: tx.contract_id.to_string(),
                                 remap_sender: tx.remap_sender.to_address(),
-                                remap_principals: Some(remap_principals),
+                                // Always emitted, even when empty, to keep
+                                // existing devnet/testnet plans byte-stable.
+                                remap_principals: Some(remap_principals_to_specifications(
+                                    &tx.remap_principals,
+                                )),
                                 path: rel_path,
                                 cost: tx.cost,
                                 clarity_version: Some(clarity_version_to_u8(tx.clarity_version)),

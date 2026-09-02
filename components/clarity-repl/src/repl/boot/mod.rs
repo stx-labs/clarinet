@@ -189,15 +189,6 @@ pub static BOOT_TESTNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
 pub static BOOT_MAINNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(BOOT_MAINNET_ADDRESS).unwrap());
 
-/// Whether `contract_id` is a boot contract at the *mainnet* boot address.
-///
-/// Only the fixed set in [`BOOT_CONTRACTS_NAMES`] counts. sBTC lives at
-/// `SM3VDXK3...` and has no testnet twin in simnet, so it is never a match.
-fn is_mainnet_boot_contract(contract_id: &QualifiedContractIdentifier) -> bool {
-    contract_id.issuer == *BOOT_MAINNET_PRINCIPAL
-        && BOOT_CONTRACTS_NAMES.contains(&contract_id.name.as_str())
-}
-
 /// The testnet twin of a mainnet boot contract, or `None` if `contract_id`
 /// isn't one.
 ///
@@ -205,10 +196,17 @@ fn is_mainnet_boot_contract(contract_id: &QualifiedContractIdentifier) -> bool {
 /// state is testnet-flavored: stacks-core's PoX handler keys off
 /// `GlobalContext::mainnet`, so only the `ST000...` contracts move consensus
 /// state. Redirecting to the twin makes a mainnet-addressed call behave.
+///
+/// Scoped to [`BOOT_CONTRACTS_NAMES`], the same rule
+/// [`remap_mainnet_boot_principals`] applies to source: sBTC lives at
+/// `SM3VDXK3...` and has no testnet twin in simnet, so it never matches.
 pub fn remap_mainnet_boot_contract_id(
     contract_id: &QualifiedContractIdentifier,
 ) -> Option<QualifiedContractIdentifier> {
-    is_mainnet_boot_contract(contract_id).then(|| {
+    let is_mainnet_boot = contract_id.issuer == *BOOT_MAINNET_PRINCIPAL
+        && BOOT_CONTRACTS_NAMES.contains(&contract_id.name.as_str());
+
+    is_mainnet_boot.then(|| {
         QualifiedContractIdentifier::new(BOOT_TESTNET_PRINCIPAL.clone(), contract_id.name.clone())
     })
 }

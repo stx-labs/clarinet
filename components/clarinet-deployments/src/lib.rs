@@ -14,7 +14,7 @@ use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
-use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{
     ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression, Value,
 };
@@ -35,7 +35,8 @@ use clarity_repl::utils::{remove_env_simnet, Environment};
 pub use types::CachedContractAST;
 use types::{
     ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,
-    EpochSpec, RequirementPublishSpecification, StxTransferSpecification, TransactionSpecification,
+    EpochSpec, RemapPrincipals, RequirementPublishSpecification, StxTransferSpecification,
+    TransactionSpecification,
 };
 
 use self::types::{
@@ -43,58 +44,47 @@ use self::types::{
     TransactionPlanSpecification, TransactionsBatchSpecification, WalletSpecification,
 };
 
-/// The remap a simnet `emulated-contract-publish` records when its source
-/// references a mainnet boot contract.
+/// Rewrite mainnet boot-contract principals in `source`, returning the remap
+/// to record on the transaction.
 ///
 /// Simnet deploys the boot contracts under both addresses, but its chain state
 /// is testnet-flavored: stacks-core's PoX handler keys off
 /// `GlobalContext::mainnet`, so `stack-stx` through `SP000....pox-N` never
 /// locked any STX. Rewriting the principal at deployment time means the
-/// deployed code calls the `ST000...` contract directly, and the rewrite is
-/// recorded in the plan rather than hidden inside the interpreter.
+/// deployed code calls the `ST000...` contract directly, and recording it in
+/// the plan keeps the rewrite inspectable instead of hidden in the interpreter.
 ///
-/// Only the boot contracts in `BOOT_CONTRACTS_NAMES` are in scope — sBTC and
-/// requirement contracts have no testnet twin in simnet.
-fn boot_remap_principals() -> BTreeMap<StandardPrincipalData, StandardPrincipalData> {
+/// The map is empty when nothing was rewritten, so only contracts that
+/// actually reference a mainnet boot contract grow a `remap-principals` entry.
+fn apply_source_remap(source: &mut String) -> RemapPrincipals {
+    let Some(remapped) = remap_mainnet_boot_principals(source) else {
+        return BTreeMap::new();
+    };
+    *source = remapped;
     BTreeMap::from([(
         BOOT_MAINNET_PRINCIPAL.clone(),
         BOOT_TESTNET_PRINCIPAL.clone(),
     )])
 }
 
-/// Rewrite `source` for a simnet deployment, returning the recorded remap.
-///
-/// Returns an empty map when there is nothing to rewrite, so the plan only
-/// grows a `remap-principals` entry for contracts that actually reference a
-/// mainnet boot contract.
-fn apply_source_remap(
-    source: &mut String,
-) -> BTreeMap<StandardPrincipalData, StandardPrincipalData> {
-    match remap_mainnet_boot_principals(source) {
-        Some(remapped) => {
-            *source = remapped;
-            boot_remap_principals()
-        }
-        None => BTreeMap::new(),
-    }
-}
-
 /// The source to deploy for `tx`.
 ///
-/// A plan generated without MXS records the boot remap, so re-applying it here
-/// is what makes a plan re-read from disk — where `source` comes straight off
-/// the `.clar` file and no pre-built AST is passed along — deploy the same code
-/// the generator produced. The rewrite is idempotent, so the in-memory path,
-/// whose source was already rewritten before its AST was built, is unaffected.
+/// A non-empty `remap_principals` means the generator rewrote this contract —
+/// which is also what distinguishes a project contract from a requirement,
+/// since requirements are deployed byte-identical to what is on chain.
+/// Re-applying the rewrite here is what makes a plan re-read from disk (where
+/// `source` comes straight off the `.clar` file and no pre-built AST is passed
+/// along) deploy the same code the generator produced. It is idempotent, so
+/// the in-memory path, already rewritten before its AST was built, is
+/// unaffected.
 ///
 /// `mxs` breaks the tie when the two disagree: a plan can be generated without
 /// mainnet execution simulation and then deployed with it switched on (the CLI
 /// can be told to use the on-disk plan verbatim). Mainnet addresses are the
 /// correct ones to keep in that case, so the recorded remap is skipped.
 fn source_for_emulated_publish(tx: &EmulatedContractPublishSpecification, mxs: bool) -> String {
-    let mut source = tx.source.clone();
     if tx.remap_principals.is_empty() {
-        return source;
+        return tx.source.clone();
     }
 
     if mxs {
@@ -104,11 +94,10 @@ fn source_for_emulated_publish(tx: &EmulatedContractPublishSpecification, mxs: b
              this.",
             tx.location.display()
         );
-        return source;
+        return tx.source.clone();
     }
 
-    apply_source_remap(&mut source);
-    source
+    remap_mainnet_boot_principals(&tx.source).unwrap_or_else(|| tx.source.clone())
 }
 
 pub fn setup_session_with_deployment(
@@ -1539,8 +1528,10 @@ mod tests {
                 clarity_version: ClarityVersion::Clarity2,
                 location: PathBuf::from("/contracts/staker.clar"),
                 skip_analysis: false,
+                // What the generator would have recorded, obtained the same
+                // way it does rather than restated here.
                 remap_principals: if remapped {
-                    boot_remap_principals()
+                    apply_source_remap(&mut CALLS_MAINNET_POX.to_string())
                 } else {
                     BTreeMap::new()
                 },
