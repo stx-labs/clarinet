@@ -1879,8 +1879,8 @@ mod tests {
         // 4.1 exists upstream but is not adopted here. If this fails, upstream
         // has moved again — adopt the pending epoch, or re-pin this and say why.
         assert_eq!(
-            StacksEpochId::latest(),
-            StacksEpochId::Epoch41,
+            StacksEpochId::ALL.last(),
+            Some(&StacksEpochId::Epoch41),
             "upstream added an epoch past the one clarinet knows is pending"
         );
 
