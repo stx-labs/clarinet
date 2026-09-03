@@ -11,14 +11,14 @@
   },
   "devDependencies": {
     "@types/mocha": "10.0.10",
-    "@types/node": "24.3.1",
-    "@types/vscode": "1.94.0",
+    "@types/node": "26.4.0",
+    "@types/vscode": "1.134.0",
     "@types/webpack-env": "1.18.8"
   },
   "dependencies": {
-    "@vscode/test-web": "0.0.80",
-    "chai": "6.0.1",
-    "mocha": "11.2.2",
-    "vscode-languageclient": "9.0.1"
+    "@vscode/test-web": "0.0.81",
+    "chai": "6.2.2",
+    "mocha": "11.8.0",
+    "vscode-languageclient": "10.1.0"
   }
 }
