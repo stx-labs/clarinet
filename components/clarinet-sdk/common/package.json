@@ -5,9 +5,9 @@
   "author": "Stacks Labs",
   "license": "GPL-3.0",
   "dependencies": {
-    "@stacks/transactions": "7.4.0"
+    "@stacks/transactions": "7.6.0"
   },
   "devDependencies": {
-    "@types/node": "24.0.14"
+    "@types/node": "26.4.0"
   }
 }
