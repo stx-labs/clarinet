@@ -88,8 +88,8 @@ importers:
         specifier: 26.4.0
         version: 26.4.0
       '@types/vscode':
-        specifier: 1.134.0
-        version: 1.134.0
+        specifier: 1.91.0
+        version: 1.91.0
       '@types/webpack-env':
         specifier: 1.18.8
         version: 1.18.8
@@ -1025,8 +1025,8 @@ packages:
   '@types/sarif@2.1.7':
     resolution: {integrity: sha512-kRz0VEkJqWLf1LLVN4pT1cg1Z9wAuvI6L97V3m2f5B76Tg8d413ddvLBPTEHAZJlnn4XSvu0FkZtViCQGVyrXQ==}
 
-  '@types/vscode@1.134.0':
-    resolution: {integrity: sha512-NDEu0hg4sF7+vvFsADsktqUJ6f80LHSZvVK2Ovo1XiQ0/VHck1O3zst+ZZyVA/uvz6vo6LcuoqU2q48YMqOwWw==}
+  '@types/vscode@1.91.0':
+    resolution: {integrity: sha512-PgPr+bUODjG3y+ozWUCyzttqR9EHny9sPAfJagddQjDwdtf66y2sDKJMnFZRuzBA2YtBGASqJGPil8VDUPvO6A==}
 
   '@types/webpack-env@1.18.8':
     resolution: {integrity: sha512-G9eAoJRMLjcvN4I08wB5I7YofOb/kaJNd5uoCMX+LbKXTPCF+ZIHuqTnFaK9Jz1rgs035f9JUPUhNFtqgucy/A==}
@@ -4189,7 +4189,7 @@ snapshots:
 
   '@types/sarif@2.1.7': {}
 
-  '@types/vscode@1.134.0': {}
+  '@types/vscode@1.91.0': {}
 
   '@types/webpack-env@1.18.8': {}
 

@@ -12,7 +12,7 @@
   "devDependencies": {
     "@types/mocha": "10.0.10",
     "@types/node": "26.4.0",
-    "@types/vscode": "1.134.0",
+    "@types/vscode": "1.91.0",
     "@types/webpack-env": "1.18.8"
   },
   "dependencies": {
