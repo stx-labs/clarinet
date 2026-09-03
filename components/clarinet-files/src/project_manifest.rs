@@ -400,8 +400,8 @@ impl ProjectManifest {
         if let Some(overrides) = project_manifest_file.project.override_boot_contracts_source {
             for (contract_name, contract_path) in overrides {
                 if !boot_contracts.contains(&contract_name) {
-                    eprintln!("Warning: {contract_name} custom boot contract was not included because it's not part of the set of default boot contracts");
-                    eprintln!("Available boot contracts: {boot_contracts:?}");
+                    clarity_repl::ueprint!("Warning: {contract_name} custom boot contract was not included because it's not part of the set of default boot contracts");
+                    clarity_repl::ueprint!("Available boot contracts: {boot_contracts:?}");
                     continue;
                 }
                 override_boot_contracts_source.insert(

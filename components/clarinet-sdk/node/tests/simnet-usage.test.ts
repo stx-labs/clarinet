@@ -15,8 +15,8 @@ let simnet: Simnet;
 
 // Boot contracts with valid interfaces deployed through Epoch31 (the highest epoch in Clarinet.toml):
 // 12 names × 2 addresses (genesis has no functions and deploys as a snippet)
-// + 2 sbtc contracts at Epoch30 = 26
-const bootContractsAtGenesis = 26;
+// + 3 sbtc contracts at Epoch30 = 27
+const bootContractsAtGenesis = 27;
 // After setEpoch("4.0") (Epoch40):
 //   costs-4 (Epoch33) x 2 addrs
 //   pox-5   (Epoch40) x 2 addrs
@@ -713,17 +713,17 @@ describe("the simnet can execute commands", () => {
     simnet.executeCommand("::mint_stx ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 1000");
     let result = simnet.executeCommand("::get_assets_maps");
     const expected = [
-      "+-------------------------------------------+-----------------+",
-      "| Address                                   | uSTX            |",
-      "|-------------------------------------------+-----------------|",
-      "| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM | 100000000001000 |",
-      "|-------------------------------------------+-----------------|",
-      "| ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 | 100000000000000 |",
-      "|-------------------------------------------+-----------------|",
-      "| ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG | 100000000000000 |",
-      "|-------------------------------------------+-----------------|",
-      "| STNHKEPYEPJ8ET55ZZ0M5A34J0R3N5FM2CMMMAZ6  | 100000000000000 |",
-      "+-------------------------------------------+-----------------+",
+      "+-------------------------------------------+------------------------+-----------------+",
+      "| Address                                   | .sbtc-token.sbtc-token | uSTX            |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM | 100000000000000        | 100000000001000 |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 | 1000000000             | 100000000000000 |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG | 1000000000             | 100000000000000 |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| STNHKEPYEPJ8ET55ZZ0M5A34J0R3N5FM2CMMMAZ6  | 1000000000             | 100000000000000 |",
+      "+-------------------------------------------+------------------------+-----------------+",
     ].join("\n");
     expect(result).toBe(expected);
   });

@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::fmt::Write;
 
 pub mod diagnostic_digest;
 #[cfg(not(target_arch = "wasm32"))]
@@ -17,7 +16,7 @@ use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{
-    ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
+    ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression, Value,
 };
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
@@ -25,11 +24,13 @@ use clarity_repl::repl::boot::{
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
     SBTC_TOKEN_MAINNET_ADDRESS,
 };
+use clarity_repl::repl::clarity_values::value_to_string;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
 };
+use clarity_repl::ueprint;
 use clarity_repl::utils::{remove_env_simnet, Environment};
 pub use types::CachedContractAST;
 use types::{
@@ -154,52 +155,118 @@ fn update_session_with_genesis_accounts(
     }
 }
 
-fn fund_genesis_account_with_sbtc(session: &mut Session, deployment: &DeploymentSpecification) {
-    if let Some(ref spec) = deployment.genesis {
-        let block_height = session.interpreter.get_burn_block_height() - 1;
-        let height = session.eval_clarity_string(&format!("u{block_height}"));
-        let hash = session.eval_clarity_string(&format!(
-            "(unwrap-panic (get-burn-block-info? header-hash u{block_height}))"
-        ));
-        let vout_index = session.eval_clarity_string("u1");
+/// `sbtc-deposit` is deployed as an sBTC boot contract from the epoch sBTC
+/// activates at. It is missing from sessions that never reach that epoch, and
+/// from remote-data sessions, whose sBTC state comes from the network instead.
+/// A hand-authored plan can also publish it before the boot set is installed,
+/// which is what the second lookup covers.
+fn is_sbtc_deposit_deployed(session: &Session) -> bool {
+    session
+        .boot_contracts
+        .contains_key(&SBTC_DEPOSIT_MAINNET_ADDRESS)
+        || session
+            .contracts
+            .contains_key(&SBTC_DEPOSIT_MAINNET_ADDRESS)
+}
 
-        for wallet in spec.wallets.iter() {
-            if wallet.sbtc_balance == 0 {
-                continue;
-            }
+/// A random 32-byte buffer, standing in for the Bitcoin txid of a deposit.
+fn random_txid() -> SymbolicExpression {
+    let bytes: [u8; 32] = std::array::from_fn(|_| rand::random());
+    SymbolicExpression::atom_value(
+        Value::buff_from(bytes.to_vec()).expect("32 bytes is a valid buffer"),
+    )
+}
 
-            let mut random_tx_id = String::with_capacity(64);
-            for _ in 0..32 {
-                write!(&mut random_tx_id, "{:02x}", rand::random::<u8>()).unwrap();
+/// The `(err ...)` a contract call returned, rendered as Clarity source, or
+/// `None` if the call committed.
+fn err_response(result: &ExecutionResult) -> Option<String> {
+    match &result.result {
+        EvaluationResult::Snippet(snippet) => match &snippet.result {
+            Value::Response(response) if !response.committed => {
+                Some(value_to_string(&snippet.result))
             }
-            let tx_id = session.eval_clarity_string(&format!("0x{random_tx_id}"));
-            let mut random_sweep_txid = String::with_capacity(64);
-            for _ in 0..32 {
-                write!(&mut random_sweep_txid, "{:02x}", rand::random::<u8>()).unwrap();
-            }
-            let sweep_tx_id = session.eval_clarity_string(&format!("0x{random_sweep_txid}"));
-            let amount = session.eval_clarity_string(&format!("u{}", wallet.sbtc_balance));
-            let recipient = session.eval_clarity_string(&format!("'{}", wallet.address));
+            _ => None,
+        },
+        EvaluationResult::Contract(_) => None,
+    }
+}
 
-            let args = vec![
-                tx_id,
-                vout_index.clone(),
-                amount,
-                recipient,
-                hash.clone(),
-                height.clone(),
-                sweep_tx_id,
-            ];
-            // Session setup, not something the sbtc address sent: like the
-            // boot contracts, it stays at nonce 0.
-            let _ = session.call_contract_fn(
-                &SBTC_DEPOSIT_MAINNET_ADDRESS.to_string(),
-                "complete-deposit-wrapper",
-                &args,
-                SBTC_MAINNET_ADDRESS,
-                false,
-                false,
-                CallKind::NonceFree,
+/// Mint the `sbtc_balance` configured for each genesis wallet, by calling
+/// `sbtc-deposit` the way the sBTC signers would.
+fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &DeploymentSpecification) {
+    let Some(spec) = deployment.genesis.as_ref() else {
+        return;
+    };
+
+    let mut funded_wallets = spec
+        .wallets
+        .iter()
+        .filter(|wallet| wallet.sbtc_balance > 0)
+        .peekable();
+    if funded_wallets.peek().is_none() {
+        return;
+    }
+
+    if !is_sbtc_deposit_deployed(session) {
+        let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-deposit");
+        ueprint!(
+            "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this \
+             session. The sBTC contracts require epoch {sbtc_epoch} or later.",
+            *SBTC_DEPOSIT_MAINNET_ADDRESS
+        );
+        return;
+    }
+
+    // The deposit is credited against the burn block below the current tip,
+    // whose header hash `complete-deposit-wrapper` checks for a Bitcoin fork.
+    let block_height = session.interpreter.get_burn_block_height() - 1;
+    let burn_hash = session.eval_clarity_string(&format!(
+        "(unwrap-panic (get-burn-block-info? header-hash u{block_height}))"
+    ));
+    let burn_height = SymbolicExpression::atom_value(Value::UInt(block_height.into()));
+    let vout_index = SymbolicExpression::atom_value(Value::UInt(1));
+    let deposit_contract = SBTC_DEPOSIT_MAINNET_ADDRESS.to_string();
+
+    for wallet in funded_wallets {
+        let args = vec![
+            random_txid(),
+            vout_index.clone(),
+            SymbolicExpression::atom_value(Value::UInt(wallet.sbtc_balance)),
+            SymbolicExpression::atom_value(Value::Principal(wallet.address.clone().into())),
+            burn_hash.clone(),
+            burn_height.clone(),
+            random_txid(),
+        ];
+        // Session setup, not something the sbtc address sent: like the
+        // boot contracts, it stays at nonce 0.
+        let result = session.call_contract_fn(
+            &deposit_contract,
+            "complete-deposit-wrapper",
+            &args,
+            SBTC_MAINNET_ADDRESS,
+            false,
+            false,
+            CallKind::NonceFree,
+        );
+
+        // A silent failure here is indistinguishable from a mint that never
+        // ran, so report both the runtime errors and an `(err ...)` response.
+        let reasons: Vec<String> = match &result {
+            Ok(execution_result) => err_response(execution_result)
+                .map(|err| format!("complete-deposit-wrapper returned {err}"))
+                .into_iter()
+                .collect(),
+            Err(error) => error
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.clone())
+                .collect(),
+        };
+        for reason in reasons {
+            ueprint!(
+                "Warning: unable to mint {} sBTC to {}: {reason}",
+                wallet.sbtc_balance,
+                wallet.address
             );
         }
     }
@@ -212,14 +279,29 @@ pub fn update_session_with_deployment_plan(
 ) -> ExecutionResultMap {
     update_session_with_genesis_accounts(session, deployment);
 
-    let mut should_mint_sbtc = false;
+    // A plan with nothing to deploy pins no epoch, which would otherwise leave
+    // the session on the datastore default (epoch 2.05) — before every boot
+    // contract that matters. An implicit empty batch routes that case through
+    // the same epoch fallback as a batch that carries no epoch of its own.
+    //
+    // Not for remote-data sessions: their state comes from the network, and
+    // `Session::new` deliberately deploys no boot contracts. Advancing the
+    // epoch would install them anyway, since `update_epoch` has no such guard.
+    let implicit_batch = TransactionsBatchSpecification {
+        id: 0,
+        transactions: vec![],
+        epoch: None,
+    };
+    let synthesize_batch =
+        deployment.plan.batches.is_empty() && !session.settings.repl_settings.remote_data.enabled;
+    let batches = match synthesize_batch {
+        true => std::slice::from_ref(&implicit_batch),
+        false => deployment.plan.batches.as_slice(),
+    };
 
     let mut contracts = BTreeMap::new();
-    for batch in deployment.plan.batches.iter() {
-        let epoch: StacksEpochId = match batch.epoch {
-            Some(epoch) => epoch.into(),
-            _ => DEFAULT_EPOCH,
-        };
+    for batch in batches {
+        let epoch: StacksEpochId = batch.epoch.map(Into::into).unwrap_or(DEFAULT_EPOCH);
         session.advance_chain_tip(1);
         session.update_epoch(epoch);
 
@@ -236,9 +318,6 @@ pub fn update_session_with_deployment_plan(
                         tx.emulated_sender.clone(),
                         tx.contract_name.clone(),
                     );
-                    if !should_mint_sbtc && contract_id == *SBTC_DEPOSIT_MAINNET_ADDRESS {
-                        should_mint_sbtc = true;
-                    }
 
                     // Skip deploying contracts that were already deployed as boot
                     // contracts (e.g. sbtc-token is deployed during boot so pox-5
@@ -261,9 +340,7 @@ pub fn update_session_with_deployment_plan(
         }
     }
 
-    if should_mint_sbtc {
-        fund_genesis_account_with_sbtc(session, deployment);
-    }
+    fund_genesis_accounts_with_sbtc(session, deployment);
 
     contracts
 }
@@ -324,7 +401,7 @@ fn handle_emulated_contract_call(
         CallKind::Transaction,
     );
     if let Err(errors) = &result {
-        println!("error: {:?}", errors.diagnostics.first().unwrap().message);
+        clarity_repl::ueprint!("error: {:?}", errors.diagnostics.first().unwrap().message);
     }
 
     session.set_tx_sender(&default_tx_sender);
@@ -525,7 +602,7 @@ pub async fn generate_default_deployment_with_cache(
             .collect()
     } else {
         if !manifest.project.override_boot_contracts_source.is_empty() {
-            eprintln!("Warning: Custom boot contracts are only supported on simnet. Ignoring override_boot_contracts_source configuration for {network:?} network.");
+            clarity_repl::ueprint!("Warning: Custom boot contracts are only supported on simnet. Ignoring override_boot_contracts_source configuration for {network:?} network.");
         }
         BTreeMap::new()
     };
@@ -793,8 +870,20 @@ pub async fn generate_default_deployment_with_cache(
                 continue;
             }
 
+            // On testnet, an sBTC requirement is published as a real transaction
+            // remapped to the sBTC testnet deployer, so it has to be retrieved
+            // like any other requirement: the boot copies seeded into
+            // `requirements_data` above carry no publish specification.
+            let cached_requirement = if matches!(network, StacksNetwork::Testnet)
+                && contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS
+            {
+                None
+            } else {
+                requirements_data.remove(&contract_id)
+            };
+
             // Did we already get the source in a prior cycle?
-            let (clarity_version, ast) = match requirements_data.remove(&contract_id) {
+            let (clarity_version, ast) = match cached_requirement {
                 Some(requirement_data) => requirement_data,
                 None => {
                     // Download the code
@@ -893,7 +982,9 @@ pub async fn generate_default_deployment_with_cache(
             match dependencies {
                 Ok(inferable_dependencies) => {
                     if inferable_dependencies.len() > 1 {
-                        println!("warning: inferable_dependencies contains more than one entry");
+                        clarity_repl::ueprint!(
+                            "warning: inferable_dependencies contains more than one entry"
+                        );
                     }
                     // We submitted a HashMap with one contract, so we have at most one result in the `inferable_dependencies` map.
                     // We will extract and keep the associated data (source, ast, deps).
@@ -977,8 +1068,10 @@ pub async fn generate_default_deployment_with_cache(
         }
     }
 
-    // Deploy sbtc-registry and sbtc-token as RequirementPublish on devnet so
-    // the stacks-node has them on-chain before the epoch 4.0 transition.
+    // Deploy the sBTC contracts as RequirementPublish on devnet so the
+    // stacks-node has them on-chain before the epoch 4.0 transition, and so the
+    // chains coordinator can mint the configured `sbtc_balance` through
+    // sbtc-deposit.
     if matches!(network, StacksNetwork::Devnet) {
         let sbtc_mainnet_principal =
             PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
@@ -988,17 +1081,21 @@ pub async fn generate_default_deployment_with_cache(
             default_deployer_address.clone(),
         );
 
-        for name in ["sbtc-registry", "sbtc-token"] {
-            let contract_id = QualifiedContractIdentifier::new(
-                sbtc_mainnet_principal.clone(),
-                ContractName::try_from(name).unwrap(),
-            );
+        // The sources are written to the requirements cache so the deployment
+        // plan can reload them from disk after a serialization round-trip.
+        let requirements_dir = manifest.project.cache_location.join("requirements");
+        std::fs::create_dir_all(&requirements_dir)
+            .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
+
+        // `SBTC_BOOT_CONTRACTS` is ordered by dependency, and so is the batch.
+        for (contract_id, _) in SBTC_BOOT_CONTRACTS.iter() {
+            let name = contract_id.name.as_str();
 
             // Skip if already scheduled as an explicit requirement.
             if transactions.values().any(|txs| {
                 txs.iter().any(|tx| matches!(
                     tx,
-                    TransactionSpecification::RequirementPublish(r) if r.contract_id == contract_id
+                    TransactionSpecification::RequirementPublish(r) if r.contract_id == *contract_id
                 ))
             }) {
                 continue;
@@ -1008,18 +1105,13 @@ pub async fn generate_default_deployment_with_cache(
                 .remove(name)
                 .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
 
-            // Write source to requirements cache so the deployment plan can
-            // reload it from disk after serialization round-trip.
-            let requirements_dir = manifest.project.cache_location.join("requirements");
-            std::fs::create_dir_all(&requirements_dir)
-                .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
             let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
             std::fs::write(&location, &source)
                 .map_err(|e| format!("unable to write {name} to requirements cache: {e}"))?;
 
             let tx =
                 TransactionSpecification::RequirementPublish(RequirementPublishSpecification {
-                    contract_id,
+                    contract_id: contract_id.clone(),
                     remap_sender: default_deployer_address.clone(),
                     remap_principals: remap_principals.clone(),
                     source: source.clone(),
