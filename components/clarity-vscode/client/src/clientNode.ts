@@ -32,6 +32,11 @@ class ClarityDebugTestLensProvider implements vscode.CodeLensProvider {
   private readonly _cache = new Map<string, boolean>();
 
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+    const enabled = vscode.workspace
+      .getConfiguration("clarity-lsp")
+      .get<boolean>("debugCodelens", false);
+    if (!enabled) return [];
+
     const text = document.getText();
     // Quick text-content filter before doing filesystem work.
     if (!CLARINET_USAGE_PATTERN.test(text)) return [];

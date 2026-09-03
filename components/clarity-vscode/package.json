@@ -71,6 +71,12 @@
             "default": "",
             "description": "Absolute path to the clarinet binary. Leave empty to auto-detect (checks ~/.cargo/bin, Homebrew, and system PATH)."
           },
+          "clarity-lsp.debugCodelens": {
+            "type": "boolean",
+            "scope": "window",
+            "default": false,
+            "description": "Show a 'Debug' CodeLens button above each test block in Clarinet TypeScript test files."
+          },
           "clarity-lsp.trace.server": {
             "type": "string",
             "scope": "window",
