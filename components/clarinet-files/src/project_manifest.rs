@@ -197,7 +197,7 @@ pub struct ProjectConfig {
     pub authors: Vec<String>,
     pub description: String,
     pub telemetry: bool,
-    pub requirements: Option<Vec<RequirementConfig>>,
+    pub requirements: Vec<RequirementConfig>,
     #[serde(rename = "cache_dir")]
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
@@ -221,7 +221,7 @@ impl Serialize for ProjectConfig {
         map.serialize_entry("authors", &self.authors)?;
         map.serialize_entry("telemetry", &self.telemetry)?;
         map.serialize_entry("cache_dir", &self.cache_location.to_string_lossy())?;
-        if self.requirements.is_some() {
+        if !self.requirements.is_empty() {
             map.serialize_entry("requirements", &self.requirements)?;
         }
         if !self.override_boot_contracts_source.is_empty() {
@@ -239,7 +239,7 @@ impl Serialize for ProjectConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct RequirementConfig {
-    /// Contract identifier (e.g., SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait)
+    /// Contract identifier of the required contract
     pub contract_id: String,
 }
 
@@ -416,7 +416,7 @@ impl ProjectManifest {
 
         let project = ProjectConfig {
             name: project_name,
-            requirements: None,
+            requirements: Vec::new(),
             description: project_manifest_file
                 .project
                 .description
@@ -441,16 +441,17 @@ impl ProjectManifest {
         let mut config_requirements: Vec<RequirementConfig> = Vec::new();
 
         if let Some(TomlValue::Array(requirements)) = project_manifest_file.project.requirements {
-            for link_settings in requirements.iter() {
-                if let TomlValue::Table(link_settings) = link_settings {
-                    let contract_id = match link_settings.get("contract_id") {
-                        Some(TomlValue::String(contract_id)) => contract_id.to_string(),
-                        _ => continue,
+            for item in requirements.iter() {
+                if let TomlValue::Table(table) = item {
+                    let Some(TomlValue::String(contract_id)) = table.get("contract_id") else {
+                        continue;
                     };
-                    config_requirements.push(RequirementConfig { contract_id });
+                    config_requirements.push(RequirementConfig {
+                        contract_id: contract_id.clone(),
+                    });
                 }
             }
-        };
+        }
 
         if let Some(TomlValue::Table(contracts)) = project_manifest_file.contracts {
             for (contract_name, contract_settings) in contracts.iter() {
@@ -502,7 +503,7 @@ impl ProjectManifest {
 
         config.contracts = config_contracts;
         config.contracts_settings = contracts_settings;
-        config.project.requirements = Some(config_requirements);
+        config.project.requirements = config_requirements;
         Ok(config)
     }
 
@@ -750,6 +751,35 @@ mod tests {
             .project
             .override_boot_contracts_source
             .contains_key("pox-x"));
+    }
+
+    #[test]
+    fn test_requirements_parsing() {
+        let manifest_str = r#"
+[project]
+name = "test-project"
+telemetry = false
+
+[[project.requirements]]
+contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+
+[[project.requirements]]
+contract_id = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.sip010-trait"
+"#;
+        let manifest_file: ProjectManifestFile = toml::from_str(manifest_str).unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        assert_eq!(manifest.project.requirements.len(), 2);
+        assert_eq!(
+            manifest.project.requirements[0].contract_id,
+            "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+        );
+        assert_eq!(
+            manifest.project.requirements[1].contract_id,
+            "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.sip010-trait"
+        );
     }
 
     #[test]

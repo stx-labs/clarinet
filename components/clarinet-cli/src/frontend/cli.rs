@@ -2051,7 +2051,7 @@ fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> Docume
     doc
 }
 
-/// Add a requirement to the [[project.requirements]] array in the document.
+/// Add an entry to the [[project.requirements]] array in the document.
 fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
     use toml_edit::{ArrayOfTables, Item, Table};
 
@@ -2080,13 +2080,13 @@ fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
     // Check for duplicates
     let already_exists = requirements
         .iter()
-        .filter_map(|req| req.get("contract_id")?.as_str())
+        .filter_map(|entry| entry.get("contract_id")?.as_str())
         .any(|id| id == contract_id);
 
     if !already_exists {
-        let mut new_req = Table::new();
-        new_req["contract_id"] = toml_edit::value(contract_id);
-        requirements.push(new_req);
+        let mut new_entry = Table::new();
+        new_entry["contract_id"] = toml_edit::value(contract_id);
+        requirements.push(new_entry);
     }
 }
 
@@ -2512,16 +2512,21 @@ mod tests {
         /// Helper to check if a requirement exists in the TOML
         fn has_requirement(content: &str, contract_id: &str) -> bool {
             let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
-            if let Some(project) = doc.get("project").and_then(|p| p.as_table()) {
-                if let Some(requirements) = project.get("requirements") {
-                    if let Some(arr) = requirements.as_array_of_tables() {
-                        return arr.iter().any(|req| {
-                            req.get("contract_id")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s == contract_id)
-                                .unwrap_or(false)
-                        });
-                    }
+            let Some(project) = doc.get("project").and_then(|p| p.as_table()) else {
+                return false;
+            };
+            if let Some(arr) = project
+                .get("requirements")
+                .and_then(|v| v.as_array_of_tables())
+            {
+                if arr.iter().any(|entry| {
+                    entry
+                        .get("contract_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s == contract_id)
+                        .unwrap_or(false)
+                }) {
+                    return true;
                 }
             }
             false

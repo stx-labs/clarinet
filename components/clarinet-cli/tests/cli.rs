@@ -188,7 +188,6 @@ fn test_requirement_add() {
         .project
         .requirements
         .iter()
-        .flatten()
         .any(|c| c.contract_id == requirement_name);
     assert!(found, "Requirement not found in manifest");
 }
