@@ -24,18 +24,18 @@ default-members = ["components/clarinet-cli"]
 opt-level = 3
 
 [workspace.package]
-version = "3.23.1"
+version = "3.23.2"
 
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "clarity-types" }
-libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "libsigner", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "pox-locking", default-features = false }
-stacks-codec = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stacks-codec" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stacks-common", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "b17d3a12e1a2d4540473fcca62aac8b9731334f3", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6eece30c6da8b9ff8581f201a1d4ecec735b1625", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6eece30c6da8b9ff8581f201a1d4ecec735b1625", package = "clarity-types" }
+libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6eece30c6da8b9ff8581f201a1d4ecec735b1625", package = "libsigner", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6eece30c6da8b9ff8581f201a1d4ecec735b1625", package = "pox-locking", default-features = false }
+stacks-codec = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6eece30c6da8b9ff8581f201a1d4ecec735b1625", package = "stacks-codec" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6eece30c6da8b9ff8581f201a1d4ecec735b1625", package = "stacks-common", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "6eece30c6da8b9ff8581f201a1d4ecec735b1625", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }

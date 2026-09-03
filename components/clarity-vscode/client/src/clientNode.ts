@@ -25,7 +25,7 @@ const TEST_PATTERN = /^\s*(?:it|test)\s*\(\s*(['"`])(.*?)\1/;
 // (they import from @stacks/clarinet-sdk or use the `simnet` global) or that
 // explicitly use the debug API.  This avoids the button appearing in plain
 // Vitest projects that happen to be open in the same workspace.
-const CLARINET_USAGE_PATTERN = /\b(?:clarinet-sdk|simnet|startDebugServer|connectDebugServer)\b/;
+const CLARINET_USAGE_PATTERN = /\b(?:clarinet-sdk|simnet)\b/;
 
 class ClarityDebugTestLensProvider implements vscode.CodeLensProvider {
   /** Cache: workspace root → whether a Clarinet.toml was found anywhere in it. */
@@ -188,7 +188,7 @@ export async function activate(context: ExtensionContext) {
     serverOptions,
     clientOpts,
   );
-  initClient(context, client);
+  await initClient(context, client);
 
   // CodeLens: "Debug" buttons in TypeScript test files.
   context.subscriptions.push(

@@ -67,7 +67,7 @@ js-sys = { workspace = true }
 hiro-system-kit = { path = "../hiro-system-kit", default-features = false }
 serde-wasm-bindgen = { workspace = true }
 wasm-bindgen = { workspace = true }
-web-sys = { workspace = true }
+web-sys = { workspace = true, features = ["console"] }
 
 [dev-dependencies]
 test-case = { workspace = true }

@@ -66,6 +66,15 @@ jobs:
       - name: Run clippy
         run: cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
 
+      # Clippy runs on every workspace crate in the graph, so `-p clarinet-sdk-wasm`
+      # covers clarity-repl, clarinet-files and clarinet-deployments too.
+      - name: Check for stdout macros in Wasm code
+        env:
+          CLIPPY_CONF_DIR: ${{ github.workspace }}/lints/wasm
+        run: >
+          cargo clippy --no-default-features --lib --target wasm32-unknown-unknown
+          -p clarinet-sdk-wasm -- -A clippy::all -D clippy::disallowed_macros
+
       - name: Install wasm-pack if not available
         run: |
           if ! command -v wasm-pack &> /dev/null; then

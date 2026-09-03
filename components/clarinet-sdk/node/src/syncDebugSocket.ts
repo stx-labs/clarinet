@@ -238,7 +238,7 @@ export async function connectSyncSocket(port: number): Promise<void> {
 
   worker.on("error", (err) => {
     s.dead = true;
-    s.cause = err;
+    s.cause = err instanceof Error ? err : new Error(String(err));
   });
   worker.on("exit", (code) => {
     s.dead = true;

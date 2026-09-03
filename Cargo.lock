@@ -647,7 +647,7 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "clarinet-cli"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "chrono",
  "clap",
@@ -688,14 +688,14 @@ dependencies = [
 
 [[package]]
 name = "clarinet-defaults"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "clarity",
 ]
 
 [[package]]
 name = "clarinet-deployments"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "base58",
  "base64 0.22.1",
@@ -722,12 +722,13 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "web-sys",
  "yaml_serde",
 ]
 
 [[package]]
 name = "clarinet-files"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "bitcoin",
  "clarinet-defaults",
@@ -747,7 +748,6 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -799,7 +799,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-events"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "clap",
  "clarinet-files",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "bytes",
  "chrono",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-static-cost"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "clarity",
  "clarity-types",
@@ -917,7 +917,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "lazy_static",
  "regex",
@@ -2490,7 +2490,7 @@ dependencies = [
 [[package]]
 name = "libsigner"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "clarity",
  "hashbrown 0.15.5",
@@ -2520,7 +2520,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "clarity",
  "serde",
@@ -2872,7 +2872,7 @@ dependencies = [
 
 [[package]]
 name = "observer"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "axum",
  "base58",
@@ -3063,7 +3063,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "clarity",
  "slog",
@@ -4240,7 +4240,7 @@ dependencies = [
 [[package]]
 name = "stacks-codec"
 version = "0.1.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "clarity-types",
  "serde",
@@ -4251,7 +4251,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4281,7 +4281,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-network"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "base58",
  "bitcoincore-rpc",
@@ -4323,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "3.23.1"
+version = "3.23.2"
 dependencies = [
  "clarinet-utils",
  "clarity",
@@ -4339,7 +4339,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=b17d3a12e1a2d4540473fcca62aac8b9731334f3#b17d3a12e1a2d4540473fcca62aac8b9731334f3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=6eece30c6da8b9ff8581f201a1d4ecec735b1625#6eece30c6da8b9ff8581f201a1d4ecec735b1625"
 dependencies = [
  "clarity",
  "ed25519-dalek",

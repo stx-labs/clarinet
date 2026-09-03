@@ -1,0 +1,10 @@
+# Applied only to wasm32 lint jobs, via CLIPPY_CONF_DIR.
+# On wasm32-unknown-unknown there is no stdout/stderr: these macros compile but are
+# silently discarded, so anything written with them vanishes in the SDK and the
+# VSCode extension.
+disallowed-macros = [
+  { path = "std::print", reason = "no-op on wasm32, use clarity_repl::uprint! instead" },
+  { path = "std::println", reason = "no-op on wasm32, use clarity_repl::uprint! instead" },
+  { path = "std::eprint", reason = "no-op on wasm32, use clarity_repl::ueprint! instead" },
+  { path = "std::eprintln", reason = "no-op on wasm32, use clarity_repl::ueprint! instead" },
+]

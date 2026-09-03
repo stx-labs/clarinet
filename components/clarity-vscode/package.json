@@ -12,7 +12,7 @@
     "url": "git+https://github.com/stx-labs/clarinet"
   },
   "license": "GPL-3.0-only",
-  "version": "3.23.1",
+  "version": "3.23.2",
   "private": true,
   "scripts": {
     "clean": "rimraf .vscode-test-web ./debug/dist ./client/dist ./server/dist ./server/src/clarity-lsp-*",
@@ -52,7 +52,7 @@
   "packageManager": "pnpm@11.1.3",
   "engines": {
     "node": ">=24",
-    "vscode": "^1.64.0"
+    "vscode": "^1.91.0"
   },
   "activationEvents": [
     "workspaceContains:Clarinet.toml"
@@ -86,7 +86,7 @@
               "verbose"
             ],
             "default": "verbose",
-            "description": "Traces the communication between VS Code and the web-extension language server."
+            "description": "Traces the communication between VS Code and the web-extension language server. Only takes effect while the \"Clarity Language Server Trace\" output channel is set to the Trace log level; otherwise tracing stays off."
           },
           "clarity-lsp.completion": {
             "type": "boolean",
@@ -282,22 +282,22 @@
     ]
   },
   "devDependencies": {
-    "@eslint/eslintrc": "3.3.5",
+    "@eslint/eslintrc": "3.3.6",
     "@eslint/js": "10.0.1",
-    "@rspack/cli": "2.0.3",
-    "@rspack/core": "2.0.3",
+    "@rspack/cli": "2.2.1",
+    "@rspack/core": "2.2.1",
     "@swc/cli": "0.8.1",
-    "@swc/core": "1.15.33",
-    "@typescript-eslint/eslint-plugin": "8.58.0",
-    "@typescript-eslint/parser": "8.58.0",
-    "@vscode/test-web": "0.0.80",
-    "@vscode/vsce": "3.9.1",
+    "@swc/core": "1.16.1",
+    "@typescript-eslint/eslint-plugin": "8.68.0",
+    "@typescript-eslint/parser": "8.68.0",
+    "@vscode/test-web": "0.0.81",
+    "@vscode/vsce": "3.9.2",
     "@wasm-tool/wasm-pack-plugin": "1.7.0",
-    "concurrently": "9.2.1",
-    "eslint": "10.1.0",
-    "ovsx": "0.10.12",
-    "playwright": "1.60.0",
+    "concurrently": "10.0.5",
+    "eslint": "10.9.1",
+    "ovsx": "1.1.1",
     "path-browserify": "1.0.1",
+    "playwright": "1.62.1",
     "regenerator-runtime": "0.14.1",
     "rimraf": "6.1.3",
     "typescript": "6.0.3"

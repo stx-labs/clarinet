@@ -15,8 +15,8 @@ let simnet: Simnet;
 
 // Boot contracts with valid interfaces deployed through Epoch31 (the highest epoch in Clarinet.toml):
 // 12 names × 2 addresses (genesis has no functions and deploys as a snippet)
-// + 2 sbtc contracts at Epoch30 = 26
-const bootContractsAtGenesis = 26;
+// + 3 sbtc contracts at Epoch30 = 27
+const bootContractsAtGenesis = 27;
 // After setEpoch("4.0") (Epoch40):
 //   costs-4 (Epoch33) x 2 addrs
 //   pox-5   (Epoch40) x 2 addrs
@@ -83,6 +83,60 @@ describe("basic simnet interactions", () => {
     const assets = simnet.getAssetsMap();
     expect(assets.get("STX")).toHaveLength(4);
     expect(assets.get("STX")?.get(address1)).toBe(100000000000000n);
+  });
+
+  it("expose account nonces", () => {
+    // Contract publishes in the deployment plan are transactions, so the
+    // deployer has already consumed nonces before the first test runs.
+    expect(simnet.getAccountNonce(deployerAddr)).toBeGreaterThan(0n);
+    expect(simnet.getAccountNonce(address1)).toBe(0n);
+  });
+
+  it("bumps the sender nonce for transactions but not read-only calls", () => {
+    const before = simnet.getAccountNonce(address1);
+
+    simnet.callReadOnlyFn("counter", "get-count", [], address1);
+    expect(simnet.getAccountNonce(address1)).toBe(before);
+
+    simnet.callPublicFn("counter", "increment", [], address1);
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
+
+    simnet.transferSTX(1000, address2, address1);
+    expect(simnet.getAccountNonce(address1)).toBe(before + 2n);
+
+    // address2 received STX but sent nothing, so it owes no nonce.
+    expect(simnet.getAccountNonce(address2)).toBe(0n);
+  });
+
+  it("bumps the nonce of a call that reverts", () => {
+    // `(err ...)` is a successful transaction returning a failure response:
+    // mainnet mines it and charges the nonce, and so does simnet. `withdraw`
+    // asserts the caller is the contract owner, which address1 is not.
+    const before = simnet.getAccountNonce(address1);
+
+    const { result } = simnet.callPublicFn("counter", "withdraw", [Cl.uint(1)], address1);
+    expect(result).toStrictEqual(Cl.error(Cl.uint(1)));
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
+  });
+
+  it("bumps the nonce once per transaction in a mined block", () => {
+    const before = simnet.getAccountNonce(address1);
+    const deployerBefore = simnet.getAccountNonce(deployerAddr);
+
+    simnet.mineBlock([
+      tx.callPublicFn("counter", "increment", [], address1),
+      tx.callPublicFn("counter", "increment", [], address1),
+      tx.transferSTX(1000, address2, address1),
+      tx.deployContract("mined-contract", "(define-read-only (n) u1)", null, deployerAddr),
+      tx.callPrivateFn("counter", "inner-increment", [], address1),
+    ]);
+
+    // Batching into one block does not merge the transactions: each still
+    // consumes its own nonce, as it would on mainnet.
+    expect(simnet.getAccountNonce(address1)).toBe(before + 4n);
+    // The deploy is charged to its own sender, not the block's first sender.
+    expect(simnet.getAccountNonce(deployerAddr)).toBe(deployerBefore + 1n);
   });
 
   it("can get and set epoch", () => {
@@ -274,15 +328,44 @@ describe("simnet can call contracts function", () => {
   });
 
   it("can not call a public function with callPrivateFn", () => {
+    const before = simnet.getAccountNonce(address1);
+
     expect(() => {
       simnet.callPrivateFn("counter", "increment", [], address1);
     }).toThrow(/^increment is not a private function$/);
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
   });
 
   it("can not call a private function with callPublicFn", () => {
+    // Mainnet mines a contract-call naming a non-public function and charges
+    // its nonce, so rejecting it here early must charge one too — otherwise
+    // this call and a call to a name the contract does not define, which fail
+    // identically on mainnet, would disagree.
+    const before = simnet.getAccountNonce(address1);
+
     expect(() => {
       simnet.callPublicFn("counter", "inner-increment", [], address1);
     }).toThrow(/^inner-increment is not a public function$/);
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 1n);
+
+    expect(() => {
+      simnet.callPublicFn("counter", "no-such-function", [], address1);
+    }).toThrow();
+
+    expect(simnet.getAccountNonce(address1)).toBe(before + 2n);
+  });
+
+  it("can not call a public function with callReadOnlyFn, and is charged nothing", () => {
+    const before = simnet.getAccountNonce(address1);
+
+    expect(() => {
+      simnet.callReadOnlyFn("counter", "increment", [], address1);
+    }).toThrow(/^increment is not a read-only function$/);
+
+    // A read-only call sends nothing, so no route through it is a transaction.
+    expect(simnet.getAccountNonce(address1)).toBe(before);
   });
 
   it("can get updated assets map", () => {
@@ -630,17 +713,17 @@ describe("the simnet can execute commands", () => {
     simnet.executeCommand("::mint_stx ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 1000");
     let result = simnet.executeCommand("::get_assets_maps");
     const expected = [
-      "+-------------------------------------------+-----------------+",
-      "| Address                                   | uSTX            |",
-      "|-------------------------------------------+-----------------|",
-      "| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM | 100000000001000 |",
-      "|-------------------------------------------+-----------------|",
-      "| ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 | 100000000000000 |",
-      "|-------------------------------------------+-----------------|",
-      "| ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG | 100000000000000 |",
-      "|-------------------------------------------+-----------------|",
-      "| STNHKEPYEPJ8ET55ZZ0M5A34J0R3N5FM2CMMMAZ6  | 100000000000000 |",
-      "+-------------------------------------------+-----------------+",
+      "+-------------------------------------------+------------------------+-----------------+",
+      "| Address                                   | .sbtc-token.sbtc-token | uSTX            |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM | 100000000000000        | 100000000001000 |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 | 1000000000             | 100000000000000 |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG | 1000000000             | 100000000000000 |",
+      "|-------------------------------------------+------------------------+-----------------|",
+      "| STNHKEPYEPJ8ET55ZZ0M5A34J0R3N5FM2CMMMAZ6  | 1000000000             | 100000000000000 |",
+      "+-------------------------------------------+------------------------+-----------------+",
     ].join("\n");
     expect(result).toBe(expected);
   });

@@ -1,9 +1,8 @@
 use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::functions::NativeFunctions;
-use clarity::vm::{
-    EvalHook, ExecutionResult, SymbolicExpression, SymbolicExpressionType, ValueRef,
-};
+use clarity::vm::hooks::EvalHook;
+use clarity::vm::{ExecutionResult, SymbolicExpression, SymbolicExpressionType, ValueRef};
 
 use crate::repl::boot::{
     BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL, SBTC_MAINNET_ADDRESS_PRINCIPAL,
