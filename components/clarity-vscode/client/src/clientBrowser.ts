@@ -33,9 +33,9 @@ export async function activate(context: ExtensionContext) {
   );
 
   await serverWorkerPromise;
-  client = new LanguageClient("clarity-lsp", "Clarity LSP", clientOpts, worker);
+  client = new LanguageClient("clarity-lsp", "Clarity LSP", worker, clientOpts);
 
-  initClient(context, client);
+  await initClient(context, client);
 }
 
 export function deactivate(): Thenable<void> | undefined {
