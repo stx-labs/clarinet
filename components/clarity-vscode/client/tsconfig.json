@@ -5,7 +5,6 @@
     "module": "preserve",
     "moduleResolution": "bundler",
     "types": ["node"],
-    "rootDir": "src",
     "sourceMap": true,
     "noImplicitAny": true,
     "strict": true
