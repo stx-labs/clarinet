@@ -61,6 +61,7 @@ fn epoch_to_peer_version(epoch: StacksEpochId) -> u8 {
         StacksEpochId::Epoch33 => PEER_VERSION_EPOCH_3_3,
         StacksEpochId::Epoch34 => PEER_VERSION_EPOCH_3_4,
         StacksEpochId::Epoch40 => PEER_VERSION_EPOCH_4_0,
+        StacksEpochId::Epoch41 => PEER_VERSION_EPOCH_4_1,
     }
 }
 
@@ -1287,7 +1288,7 @@ impl BurnStateDB for Datastore {
                     .map(|block| block.burn_block_height)
             }
             // Note: at-block removed at 3.4+
-            Epoch30 | Epoch31 | Epoch32 | Epoch33 | Epoch34 | Epoch40 => {
+            Epoch30 | Epoch31 | Epoch32 | Epoch33 | Epoch34 | Epoch40 | Epoch41 => {
                 Some(self.burn_chain_height)
             }
         }

@@ -26,6 +26,10 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Backs clarity-repl's `ueprint!` on wasm, so warnings reach the JS console.
+web-sys = { workspace = true, features = ["console"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace= true }

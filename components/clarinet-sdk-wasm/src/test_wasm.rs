@@ -1,4 +1,4 @@
-use clarity::types::StacksEpochId;
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::vm::Value as ClarityValue;
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use gloo_utils::format::JsValueSerdeExt;
@@ -13,8 +13,20 @@ async fn init_sdk() -> SDK {
     let js_noop = JsFunction::new_no_args("return");
     let mut sdk = SDK::new(js_noop, None);
     let _ = sdk.init_empty_session(JsValue::undefined()).await;
-    sdk.set_epoch(EpochString::new(&StacksEpochId::latest().to_string()));
+    // `DEFAULT_EPOCH`, not `StacksEpochId::latest()`: clarinet trails upstream
+    // until an epoch is adopted here, and `set_epoch` falls back to the default
+    // for one it does not know — which would make these tests assert against an
+    // epoch they did not actually select.
+    sdk.set_epoch(EpochString::new(&DEFAULT_EPOCH.to_string()));
     sdk
+}
+
+#[track_caller]
+fn assert_tx_result(tx: &TransactionRes, expected: ClarityValue) {
+    assert_eq!(
+        tx.result,
+        format!("0x{}", expected.serialize_to_hex().unwrap())
+    );
 }
 
 #[track_caller]
@@ -41,7 +53,7 @@ async fn it_can_set_epoch() {
     let mut sdk = init_sdk().await;
     // set_epoch("4.0") transitions from Epoch2_05, which advances the burn chain tip by 1.
     assert_eq!(sdk.block_height(), 1);
-    assert_eq!(sdk.current_epoch(), StacksEpochId::latest().to_string());
+    assert_eq!(sdk.current_epoch(), DEFAULT_EPOCH.to_string());
 }
 
 #[wasm_bindgen_test]
@@ -66,6 +78,220 @@ async fn it_can_call_a_private_function() {
         .unwrap();
     let expected = format!("0x{}", ClarityValue::UInt(2).serialize_to_hex().unwrap());
     assert_eq!(tx.result, expected);
+}
+
+#[wasm_bindgen_test]
+async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
+    const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    let mut sdk = init_sdk().await;
+
+    let call = |method: &str| {
+        CallFnArgs::new(
+            format!("{SENDER}.nonce-contract"),
+            method.into(),
+            vec![],
+            SENDER.into(),
+        )
+    };
+
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 0);
+
+    sdk.deploy_contract(&DeployContractArgs::new(
+        "nonce-contract".into(),
+        "(define-read-only (peek) u1)
+         (define-public (poke) (ok u1))
+         (define-private (hidden) u1)
+         (define-public (boom) (ok (/ u1 u0)))"
+            .into(),
+        ContractOptions::new(None),
+        SENDER.into(),
+    ))
+    .unwrap();
+
+    // The deploy is itself a transaction. Landing on exactly 1 also proves the
+    // boot contracts deployed by `init_sdk` consumed nothing.
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
+
+    // Assert results as well as nonces so calls cannot pass as no-ops.
+    assert_tx_result(
+        &sdk.call_read_only_fn(&call("peek")).unwrap(),
+        ClarityValue::UInt(1),
+    );
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        1,
+        "a read-only call sends nothing and must not consume a nonce"
+    );
+
+    assert_tx_result(
+        &sdk.call_public_fn(&call("poke")).unwrap(),
+        ClarityValue::okay(ClarityValue::UInt(1)).unwrap(),
+    );
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 2);
+
+    // simnet models a private call as a transaction, even though mainnet has no
+    // way to reach a private function from one.
+    assert_tx_result(
+        &sdk.call_private_fn(&call("hidden")).unwrap(),
+        ClarityValue::UInt(1),
+    );
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 3);
+
+    // Included runtime failures still consume a nonce.
+    let err = sdk
+        .call_public_fn(&call("boom"))
+        .expect_err("dividing by zero must surface as an error");
+    assert!(err.contains("DivisionByZero"), "got: {err}");
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        4,
+        "a failed-but-included contract call still consumes a nonce"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn it_charges_a_nonce_for_a_call_the_access_preflight_rejects() {
+    // Cached-interface and VM paths must agree on nonce consumption.
+    const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    let mut sdk = init_sdk().await;
+
+    let call = |method: &str| {
+        CallFnArgs::new(
+            format!("{SENDER}.access-contract"),
+            method.into(),
+            vec![],
+            SENDER.into(),
+        )
+    };
+
+    sdk.deploy_contract(&DeployContractArgs::new(
+        "access-contract".into(),
+        "(define-read-only (peek) u1)
+         (define-public (poke) (ok u1))
+         (define-private (hidden) u1)"
+            .into(),
+        ContractOptions::new(None),
+        SENDER.into(),
+    ))
+    .unwrap();
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
+
+    // Rejected by the preflight, because the interface says the access is wrong.
+    for (method, expected) in [
+        ("peek", "peek is not a public function"),
+        ("hidden", "hidden is not a public function"),
+    ] {
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        let err = sdk.call_public_fn(&call(method)).unwrap_err();
+        assert_eq!(err, expected);
+        assert_eq!(
+            sdk.get_account_nonce(SENDER).unwrap(),
+            before + 1,
+            "mainnet mines a call to a non-public function, so `{method}` owes a nonce"
+        );
+    }
+
+    // The same failure reached through the VM: no interface entry exists for a
+    // name the contract does not define, so the preflight has nothing to say.
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    sdk.call_public_fn(&call("no-such-fn"))
+        .expect_err("a call to an undefined function must fail");
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        before + 1,
+        "the VM route must charge the same nonce the preflight route does"
+    );
+
+    // simnet models a private call as a transaction, so its preflight follows
+    // the same rule.
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    let err = sdk.call_private_fn(&call("poke")).unwrap_err();
+    assert_eq!(err, "poke is not a private function");
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), before + 1);
+
+    // A read-only call sends nothing, so neither route charges anything.
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    let err = sdk.call_read_only_fn(&call("poke")).unwrap_err();
+    assert_eq!(err, "poke is not a read-only function");
+    sdk.call_read_only_fn(&call("no-such-fn"))
+        .expect_err("a read-only call to an undefined function must fail");
+    assert_eq!(
+        sdk.get_account_nonce(SENDER).unwrap(),
+        before,
+        "a read-only call is not a transaction by either route"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn it_gates_the_preflight_nonce_on_the_epoch_like_the_vm_does() {
+    // Calling a read-only or private function as a public function produces
+    // `RuntimeCheckErrorKind::NoSuchPublicFunction`. Such transactions are
+    // only included from epoch 2.1 onward. Verify that the cached-interface
+    // preflight applies the same epoch rule as the VM.
+    const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+
+    for (epoch, is_included) in [
+        ("2.0", false),
+        ("2.05", false),
+        ("2.1", true),
+        ("2.4", true),
+    ] {
+        let js_noop = JsFunction::new_no_args("return");
+        let mut sdk = SDK::new(js_noop, None);
+        let _ = sdk.init_empty_session(JsValue::undefined()).await;
+        sdk.set_epoch(EpochString::new(epoch));
+        // Ensure `set_epoch` did not fall back to the default epoch.
+        assert_eq!(sdk.current_epoch(), epoch, "epoch {epoch} was not selected");
+
+        sdk.deploy_contract(&DeployContractArgs::new(
+            "access-contract".into(),
+            "(define-read-only (peek) u1)
+             (define-public (poke) (ok u1))"
+                .into(),
+            ContractOptions::new(None),
+            SENDER.into(),
+        ))
+        .unwrap();
+
+        let call = |method: &str| {
+            CallFnArgs::new(
+                format!("{SENDER}.access-contract"),
+                method.into(),
+                vec![],
+                SENDER.into(),
+            )
+        };
+
+        // The cached interface rejects `peek` before it reaches the VM.
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        let err = sdk.call_public_fn(&call("peek")).unwrap_err();
+        assert_eq!(err, "peek is not a public function");
+        let preflight_delta = sdk.get_account_nonce(SENDER).unwrap() - before;
+
+        // An unknown function reaches the VM and produces the equivalent error.
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        sdk.call_public_fn(&call("no-such-fn"))
+            .expect_err("a call to an undefined function must fail");
+        let vm_delta = sdk.get_account_nonce(SENDER).unwrap() - before;
+
+        let expected = u64::from(is_included);
+        assert_eq!(
+            preflight_delta, expected,
+            "{epoch}: the preflight route disagrees with the mainnet gate"
+        );
+        assert_eq!(
+            vm_delta, expected,
+            "{epoch}: the VM route disagrees with the mainnet gate"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+async fn it_rejects_a_nonce_lookup_for_an_invalid_address() {
+    let mut sdk = init_sdk().await;
+
+    let err = sdk.get_account_nonce("not-an-address").unwrap_err();
+    assert!(err.contains("Invalid address"), "got: {err}");
 }
 
 #[wasm_bindgen_test]

@@ -1,3 +1,5 @@
+// CLI-only: reads `~/.clarinet/clarinetrc.toml`
+#[cfg(not(target_arch = "wasm32"))]
 pub mod clarinetrc;
 pub mod paths;
 

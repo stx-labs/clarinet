@@ -2,6 +2,7 @@ use std::hint::black_box;
 
 use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::vm::{EvaluationResult, ExecutionResult, SymbolicExpression, Value as ClarityValue};
+use clarity_repl::repl::session::CallKind;
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ContractDeployer, Epoch, Session, SessionSettings,
 };
@@ -86,6 +87,7 @@ fn call_fn(
             "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
             false,
             false,
+            CallKind::Transaction,
         )
         .unwrap();
 

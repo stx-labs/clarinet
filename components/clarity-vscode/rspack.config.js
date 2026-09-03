@@ -9,15 +9,17 @@ const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 const { name, publisher, version } = require("./package.json");
 
 const PRODUCTION = process.env.NODE_ENV === "production";
-const TEST = process.env.NODE_ENV === "test";
 
 /** @type RspackConfig["mode"] */
 const mode = PRODUCTION ? "production" : "none";
 /** @type RspackConfig["devtool"] */
 const devtool = PRODUCTION ? false : "source-map";
 
-let extensionURL = `https://${publisher}.vscode-unpkg.net/${publisher}/${name}/${version}/extension/`;
-if (TEST) extensionURL = "http://localhost:3001/static/devextensions/";
+// Where the browser server fetches its Wasm from at runtime. Non-production
+// builds are served by `@vscode/test-web` (`pnpm dev`, `pnpm test`).
+const extensionURL = PRODUCTION
+  ? `https://${publisher}.vscode-unpkg.net/${publisher}/${name}/${version}/extension/`
+  : "http://localhost:3000/static/devextensions/";
 
 const swcLoader = {
   test: /\.ts$/,
@@ -36,10 +38,15 @@ const swcLoader = {
   ],
 };
 
+// `.vscodeignore` allowlists exact files, so any extra chunk the bundler
+// emitted would silently be left out of the package. Never split chunks.
+const asyncChunks = false;
+
 const browserOutput = {
   filename: "[name].js",
   path: path.join(__dirname, "client", "dist"),
   library: { type: "commonjs" },
+  asyncChunks,
 };
 
 const browserResolve = {
@@ -90,6 +97,7 @@ const serverOutput = {
   filename: "[name].js",
   path: path.join(__dirname, "server", "dist"),
   library: { type: "var", name: "serverExportVar" },
+  asyncChunks,
 };
 
 /** @type RspackConfig */
@@ -107,21 +115,23 @@ const serverBrowserConfig = {
     }),
     new WasmPackPlugin({
       crateDirectory: path.resolve(__dirname, "../clarity-lsp"),
-      forceMode: "production",
       extraArgs: "--release --target=web",
       outDir: path.resolve(__dirname, "server/src/clarity-lsp-browser"),
       outName: "lsp-browser",
     }),
+    // `serverBrowser.ts` fetches the Wasm over HTTP rather than importing it.
+    // The only module-graph reference is `new URL()` in wasm-bindgen's unused
+    // init glue, which production tree-shaking removes, so copy the file
+    // explicitly instead of relying on it being emitted as an asset.
+    new rspack.CopyRspackPlugin({
+      patterns: ["./src/clarity-lsp-browser/lsp-browser_bg.wasm"],
+    }),
   ],
   module: {
-    rules: [
-      swcLoader,
-      {
-        test: /src\/clarity-lsp-browser\/lsp-browser_bg\.wasm$/,
-        type: "asset/resource",
-        generator: { filename: "lsp-browser_bg.wasm" },
-      },
-    ],
+    rules: [swcLoader],
+    // Don't turn that same `new URL()` into a second, hashed copy of the Wasm
+    // in non-production builds, where the glue survives.
+    parser: { javascript: { url: false } },
   },
 };
 
@@ -137,18 +147,12 @@ const serverNodeConfig = {
   plugins: [
     new WasmPackPlugin({
       crateDirectory: path.resolve(__dirname, "../clarity-lsp"),
-      forceMode: "production",
       extraArgs: "--release --target=nodejs",
       outDir: path.resolve(__dirname, "server/src/clarity-lsp-node"),
       outName: "lsp-node",
     }),
     new rspack.CopyRspackPlugin({
-      patterns: [
-        {
-          from: "./src/clarity-lsp-node/lsp-node_bg.wasm",
-          to: path.join(__dirname, "server", "dist"),
-        },
-      ],
+      patterns: ["./src/clarity-lsp-node/lsp-node_bg.wasm"],
     }),
   ],
   module: { rules: [swcLoader] },
@@ -165,6 +169,7 @@ const dapNodeConfig = {
     filename: "[name].js",
     path: path.join(__dirname, "debug", "dist"),
     library: { type: "var", name: "serverExportVar" },
+    asyncChunks,
   },
   module: { rules: [swcLoader] },
 };

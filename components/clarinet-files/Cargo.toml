@@ -6,7 +6,6 @@ description = "Clarinet manifests files helpers"
 license = "GPL-3.0"
 
 [dependencies]
-dirs = { workspace = true }
 libsecp256k1 = { workspace = true }
 rpassword = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -23,13 +22,13 @@ clarity-repl = { path = "../clarity-repl", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bitcoin = { workspace = true }
+dirs = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
-web-sys = { workspace = true, features = ["console"] }
 
 [features]
 json_schema = ["schemars", "clarity-repl/json_schema"]

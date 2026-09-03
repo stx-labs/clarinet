@@ -4,7 +4,8 @@ use std::io::Write;
 use clarity::vm::contexts::{ExecutionState, InvocationContext, LocalContext};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::errors::VmExecutionError;
-use clarity::vm::{EvalHook, SymbolicExpression, SymbolicExpressionType, ValueRef};
+use clarity::vm::hooks::EvalHook;
+use clarity::vm::{SymbolicExpression, SymbolicExpressionType, ValueRef};
 use clarity_types::types::QualifiedContractIdentifier;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,7 +26,7 @@ impl From<&str> for CostField {
             "write_length" | "writelength" => CostField::WriteLength,
             "write_count" | "writecount" => CostField::WriteCount,
             _ => {
-                eprintln!("Using 'runtime' cost field. {} is not one of runtime, read_length, read_count, write_length, write_count", s);
+                ueprint!("Using 'runtime' cost field. {} is not one of runtime, read_length, read_count, write_length, write_count", s);
                 CostField::Runtime
             }
         }

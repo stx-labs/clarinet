@@ -65,6 +65,9 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
             StacksEpochId::Epoch40 => EpochSpec::Epoch4_0,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
+            // Clarinet has no `EpochSpec` for 4.1 yet, so a manifest cannot name
+            // it and `DEFAULT_EPOCH` is still 4.0 — nothing can reach this arm.
+            StacksEpochId::Epoch41 => unreachable!("epoch 4.1 is not supported"),
         }
     }
 }
