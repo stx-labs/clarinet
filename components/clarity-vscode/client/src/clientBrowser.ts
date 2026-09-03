@@ -1,6 +1,8 @@
 import { ExtensionContext, Uri } from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
+import { INIT_WASM_METHOD } from "../../shared/lspWorkerProtocol";
+import type { InitWasmMessage } from "../../shared/lspWorkerProtocol";
 import { clientOpts, initClient } from "./common";
 
 let client: LanguageClient;
@@ -12,6 +14,19 @@ export async function activate(context: ExtensionContext) {
   );
 
   const worker = new Worker(serverMain.toString(true));
+
+  // VS Code starts this worker from a blob URL on an isolated origin, so it
+  // can't resolve the wasm module relatively to itself. `extensionUri` is the
+  // only reliable source for it: it points at whichever registry served the
+  // extension (Marketplace, Open VSX, or the local dev server).
+  const initWasm: InitWasmMessage = {
+    method: INIT_WASM_METHOD,
+    wasmURL: Uri.joinPath(
+      context.extensionUri,
+      "server/dist/lsp-browser_bg.wasm",
+    ).toString(true),
+  };
+  worker.postMessage(initWasm);
 
   let serverWorkerReady: ((value: unknown) => void) | null = null;
   let workerTimeout: ReturnType<typeof setTimeout> | null = null;

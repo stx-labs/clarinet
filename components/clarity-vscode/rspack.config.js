@@ -6,20 +6,12 @@ const path = require("path");
 const rspack = require("@rspack/core");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
-const { name, publisher, version } = require("./package.json");
-
 const PRODUCTION = process.env.NODE_ENV === "production";
 
 /** @type RspackConfig["mode"] */
 const mode = PRODUCTION ? "production" : "none";
 /** @type RspackConfig["devtool"] */
 const devtool = PRODUCTION ? false : "source-map";
-
-// Where the browser server fetches its Wasm from at runtime. Non-production
-// builds are served by `@vscode/test-web` (`pnpm dev`, `pnpm test`).
-const extensionURL = PRODUCTION
-  ? `https://${publisher}.vscode-unpkg.net/${publisher}/${name}/${version}/extension/`
-  : "http://localhost:3000/static/devextensions/";
 
 const swcLoader = {
   test: /\.ts$/,
@@ -110,9 +102,6 @@ const serverBrowserConfig = {
   output: serverOutput,
   resolve: { extensions: [".ts", ".js"] },
   plugins: [
-    new rspack.DefinePlugin({
-      __EXTENSION_URL__: JSON.stringify(extensionURL),
-    }),
     new WasmPackPlugin({
       crateDirectory: path.resolve(__dirname, "../clarity-lsp"),
       extraArgs: "--release --target=web",
@@ -128,10 +117,16 @@ const serverBrowserConfig = {
     }),
   ],
   module: {
-    rules: [swcLoader],
-    // Don't turn that same `new URL()` into a second, hashed copy of the Wasm
-    // in non-production builds, where the glue survives.
-    parser: { javascript: { url: false } },
+    rules: [
+      swcLoader,
+      {
+        // Don't turn that same `new URL()` into a second, hashed copy of the
+        // Wasm in non-production builds, where the glue survives. Scoped to the
+        // glue so the rest of the bundle keeps normal `new URL()` assets.
+        test: /clarity-lsp-browser[\\/]lsp-browser\.js$/,
+        parser: { url: false },
+      },
+    ],
   },
 };
 
