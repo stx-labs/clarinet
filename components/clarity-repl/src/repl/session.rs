@@ -1779,10 +1779,7 @@ mod tests {
         let diags = session
             .eval("(slice? \"blockstack\" u5 u10)".into(), false)
             .unwrap_err();
-        assert_eq!(
-            diags[0].message,
-            "use of unresolved function 'slice?'".to_string()
-        );
+        assert_eq!(diags[0].message, "use of unresolved function 'slice?'");
         session.update_epoch(StacksEpochId::Epoch21);
         let annotated = session
             .eval("(slice? \"blockstack\" u5 u10)".into(), false)

@@ -32,6 +32,8 @@ pub enum ParseError {
     MissingContentLength,
     /// Request contains invalid UTF8.
     Utf8(Utf8Error),
+    /// The peer closed the connection.
+    Eof,
 }
 
 impl Display for ParseError {
@@ -48,6 +50,7 @@ impl Display for ParseError {
                 write!(f, "missing required `Content-Length` header")
             }
             ParseError::Utf8(ref e) => write!(f, "request contains invalid UTF8: {e}"),
+            ParseError::Eof => write!(f, "DAP client disconnected"),
         }
     }
 }
