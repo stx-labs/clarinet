@@ -21,7 +21,8 @@ use serde::Serialize;
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
 use super::hooks::perf::{CostField, PerfHook};
-use super::interpreter::{ContractCallError, ExecutionError, NonceCharge};
+use super::interpreter::{ContractCallError, ExecutionError, NonceCharge, TransactionTerms};
+use super::post_conditions::PostConditionCheck;
 use super::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch,
     SessionSettings,
@@ -712,14 +713,43 @@ impl Session {
         &mut self,
         amount: u64,
         recipient: &str,
+        post_conditions: PostConditionCheck,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+        // stacks-core rejects TokenTransfer payloads with post-conditions
+        // before execution. Keep simnet aligned with mainnet/testnet here.
+        if post_conditions.has_conditions() {
+            return Err(vec![Diagnostic {
+                level: Level::Error,
+                message: "Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions".into(),
+                spans: vec![],
+                suggestion: None,
+            }]);
+        }
+
+        // TokenTransfer payloads do not run the post-condition checker. The
+        // mode is still part of the transaction wire and must be valid for the
+        // current epoch, but it has no effect when the condition list is empty.
+        let current_epoch = self.interpreter.datastore.get_current_epoch();
+        if let Err(message) = post_conditions.validate_for_epoch(current_epoch) {
+            return Err(vec![Diagnostic {
+                level: Level::Error,
+                message,
+                spans: vec![],
+                suggestion: None,
+            }]);
+        }
+
         let sender = self.interpreter.get_tx_sender();
         let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
 
         // An STX transfer is a transaction and consumes a nonce. `eval` also
         // backs bare snippets and function-argument evaluation, neither of
-        // which is one, so the charge is named here.
-        self.eval_with_inclusion(snippet, false, NonceCharge::Sender(sender.into()))
+        // which is one, so the terms are named here.
+        let terms = TransactionTerms {
+            charge: NonceCharge::Sender(sender.into()),
+            post_conditions: PostConditionCheck::Unchecked,
+        };
+        self.eval_with_inclusion(snippet, false, terms)
             .map_err(Vec::from)
     }
 
@@ -728,6 +758,7 @@ impl Session {
         contract: &ClarityContract,
         cost_track: bool,
         ast: Option<&ContractAST>,
+        post_conditions: PostConditionCheck,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         if contract.epoch.resolve() != current_epoch {
@@ -741,17 +772,6 @@ impl Session {
                 suggestion: None,
             };
             return Err(vec![diagnostic]);
-        }
-
-        let mut hooks: Vec<&mut dyn EvalHook> = vec![];
-        if let Some(ref mut coverage_hook) = self.coverage_hook {
-            hooks.push(coverage_hook);
-        }
-        if let Some(ref mut logger_hook) = self.logger_hook {
-            hooks.push(logger_hook);
-        }
-        if let Some(ref mut perf_hook) = self.perf_hook {
-            hooks.push(perf_hook);
         }
 
         if contract.clarity_version > ClarityVersion::default_for_epoch(contract.epoch.resolve()) {
@@ -770,15 +790,30 @@ impl Session {
         let contract_id =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
 
+        let initial_tx_sender = self.get_tx_sender();
+        self.set_tx_sender(&contract_id.issuer.to_string());
+
+        let mut hooks: Vec<&mut dyn EvalHook> = vec![];
+        if let Some(ref mut coverage_hook) = self.coverage_hook {
+            hooks.push(coverage_hook);
+        }
+        if let Some(ref mut logger_hook) = self.logger_hook {
+            hooks.push(logger_hook);
+        }
+        if let Some(ref mut perf_hook) = self.perf_hook {
+            hooks.push(perf_hook);
+        }
+
         // Boot contracts bypass this transaction path because they are genesis
         // state and consume no nonce.
-        let result = self.interpreter.run_transaction(
-            contract,
-            ast,
-            cost_track,
-            Some(hooks),
-            contract_id.issuer.clone().into(),
-        );
+        let terms = TransactionTerms {
+            charge: NonceCharge::Sender(contract_id.issuer.clone().into()),
+            post_conditions,
+        };
+        let result =
+            self.interpreter
+                .run_with_terms(contract, ast, cost_track, Some(hooks), &terms);
+        self.set_tx_sender(&initial_tx_sender);
 
         result
             .inspect(|result| {
@@ -804,6 +839,7 @@ impl Session {
         allow_private: bool,
         track_costs: bool,
         kind: CallKind,
+        post_conditions: PostConditionCheck,
     ) -> Result<ExecutionResult, ExecutionError> {
         let initial_tx_sender = self.get_tx_sender();
 
@@ -833,9 +869,14 @@ impl Session {
 
         // Taken from the interpreter rather than re-parsed, so the principal
         // charged is exactly the one the call runs as.
-        let charge = match kind {
-            CallKind::Transaction => NonceCharge::Sender(self.interpreter.get_tx_sender().into()),
-            CallKind::NonceFree => NonceCharge::Free,
+        let terms = TransactionTerms {
+            charge: match kind {
+                CallKind::Transaction => {
+                    NonceCharge::Sender(self.interpreter.get_tx_sender().into())
+                }
+                CallKind::NonceFree => NonceCharge::Free,
+            },
+            post_conditions,
         };
 
         let current_epoch = self.interpreter.datastore.get_current_epoch();
@@ -848,7 +889,7 @@ impl Session {
             track_costs,
             allow_private,
             hooks,
-            &charge,
+            &terms,
         );
         self.set_tx_sender(&initial_tx_sender);
         self.last_contract_call_trace = Some(tracer_hook.output.join("\n"));
@@ -866,6 +907,8 @@ impl Session {
                 ContractCallError::NoSuchFunction(_) => {
                     format!("Method '{method}' does not exist on contract '{contract_id_str}'")
                 }
+                // Already phrased for the user by the post-condition checker.
+                ContractCallError::PostConditionAborted(reason) => reason,
                 ContractCallError::Uncategorized(message) => {
                     format!("Error calling contract function '{method}': {message}")
                 }
@@ -888,16 +931,16 @@ impl Session {
         snippet: String,
         cost_track: bool,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
-        self.eval_with_inclusion(snippet, cost_track, NonceCharge::Free)
+        self.eval_with_inclusion(snippet, cost_track, TransactionTerms::default())
             .map_err(Vec::from)
     }
 
-    /// Evaluate a snippet while preserving failure inclusion and nonce policy.
+    /// Evaluate a snippet while preserving failure inclusion and transaction terms.
     fn eval_with_inclusion(
         &mut self,
         snippet: String,
         cost_track: bool,
-        charge: NonceCharge,
+        terms: TransactionTerms,
     ) -> Result<AnnotatedExecutionResult, ExecutionError> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
@@ -924,7 +967,7 @@ impl Session {
 
         let result =
             self.interpreter
-                .run_with_charge(&contract, None, cost_track, Some(hooks), &charge);
+                .run_with_terms(&contract, None, cost_track, Some(hooks), &terms);
 
         result.inspect(|result| {
             if let EvaluationResult::Contract(contract_result) = &result.result {
@@ -1660,6 +1703,10 @@ mod tests {
     use clarity::util::hash::hex_bytes;
     use clarity_types::types::TupleData;
     use indoc::{formatdoc, indoc};
+    use stacks_codec::transaction::{
+        FungibleConditionCode, PostConditionPrincipal, TransactionPostCondition,
+        TransactionPostConditionMode,
+    };
 
     use super::*;
     use crate::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
@@ -1856,8 +1903,8 @@ mod tests {
         // 4.1 exists upstream but is not adopted here. If this fails, upstream
         // has moved again — adopt the pending epoch, or re-pin this and say why.
         assert_eq!(
-            StacksEpochId::latest(),
-            StacksEpochId::Epoch41,
+            StacksEpochId::ALL.last(),
+            Some(&StacksEpochId::Epoch41),
             "upstream added an epoch past the one clarinet knows is pending"
         );
 
@@ -1943,7 +1990,7 @@ mod tests {
             skip_analysis: false,
         };
 
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         assert!(result.is_err(), "Expected error for clarity mismatch");
     }
 
@@ -1961,7 +2008,7 @@ mod tests {
             .clarity_version(ClarityVersion::Clarity2)
             .build();
 
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.len() == 1);
@@ -1995,7 +2042,7 @@ mod tests {
             .deployer(deployer)
             .code_source(source.to_string())
             .build();
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         let after = session.get_nonce(&addr).unwrap();
         (before, after, result)
     }
@@ -2016,7 +2063,9 @@ mod tests {
                 .name(&format!("counter-{expected_nonce}"))
                 .deployer(deployer)
                 .build();
-            session.deploy_contract(&contract, false, None).unwrap();
+            session
+                .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+                .unwrap();
 
             assert_eq!(session.get_nonce(&addr).unwrap(), expected_nonce);
         }
@@ -2037,7 +2086,9 @@ mod tests {
             .epoch(StacksEpochId::Epoch25)
             .clarity_version(ClarityVersion::Clarity2)
             .build();
-        assert!(session.deploy_contract(&contract, false, None).is_err());
+        assert!(session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .is_err());
 
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
     }
@@ -2063,7 +2114,9 @@ mod tests {
         session.update_epoch(DEFAULT_EPOCH);
 
         let contract = ClarityContractBuilder::new().deployer(sender).build();
-        session.deploy_contract(&contract, false, None).unwrap();
+        session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .unwrap();
         let after_deploy = session.get_nonce(&addr).unwrap();
         assert_eq!(after_deploy, 1, "the deploy itself is a transaction");
 
@@ -2081,6 +2134,7 @@ mod tests {
                     false,
                     false,
                     CallKind::NonceFree,
+                    PostConditionCheck::Unchecked,
                 )
                 .unwrap_or_else(|e| panic!("{method} should execute: {e:?}"));
 
@@ -2108,6 +2162,91 @@ mod tests {
         assert_eq!(session.get_nonce(&sender).unwrap(), before);
     }
 
+    /// Constrain `address` to sending exactly `amount` uSTX, denying anything
+    /// else it might move.
+    fn sends_exactly(address: &str, amount: u64) -> PostConditionCheck {
+        let PrincipalData::Standard(standard) = principal(address) else {
+            unreachable!("BUG: not a standard principal");
+        };
+
+        PostConditionCheck::Checked {
+            conditions: vec![TransactionPostCondition::STX(
+                PostConditionPrincipal::Standard(standard.into()),
+                FungibleConditionCode::SentEq,
+                amount,
+            )],
+            mode: TransactionPostConditionMode::Deny,
+            origin: principal(address),
+        }
+    }
+
+    /// A funded session whose tx-sender is `sender`, at an epoch that supports
+    /// every post-condition mode.
+    fn funded_session(sender: &str) -> Session {
+        let mut session = Session::new(SessionSettings::default());
+        session.update_epoch(StacksEpochId::Epoch34);
+        session
+            .interpreter
+            .mint_stx_balance(principal(sender), 1_000_000)
+            .unwrap();
+        session.set_tx_sender(sender);
+        session
+    }
+
+    #[test]
+    fn a_stx_transfer_with_post_conditions_is_rejected_before_execution() {
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+        let mut session = funded_session(sender);
+
+        let diagnostics = session
+            .stx_transfer(1000, recipient, sends_exactly(sender, 1000))
+            .expect_err("the transfer should be rejected");
+
+        assert!(diagnostics.last().is_some_and(|d| d.message
+            == "Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions"));
+
+        assert_eq!(
+            session.interpreter.get_balance_for_account(sender, "STX"),
+            1_000_000
+        );
+        assert_eq!(
+            session
+                .interpreter
+                .get_balance_for_account(recipient, "STX"),
+            0
+        );
+        assert_eq!(session.get_nonce(&principal(sender)).unwrap(), 0);
+    }
+
+    #[test]
+    fn an_epoch_unsupported_post_condition_is_rejected_before_execution() {
+        let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+        let mut session = funded_session(sender);
+        session.update_epoch(StacksEpochId::Epoch33);
+
+        let originator_mode = PostConditionCheck::Checked {
+            conditions: vec![],
+            mode: TransactionPostConditionMode::Originator,
+            origin: principal(sender),
+        };
+
+        let diagnostics = session
+            .stx_transfer(1000, recipient, originator_mode)
+            .expect_err("the transfer should be rejected");
+        assert!(diagnostics
+            .last()
+            .is_some_and(|d| d.message.contains("Invalid Stacks transaction")));
+
+        // Rejected rather than aborted: nothing ran, so no nonce was consumed.
+        assert_eq!(
+            session.interpreter.get_balance_for_account(sender, "STX"),
+            1_000_000
+        );
+        assert_eq!(session.get_nonce(&principal(sender)).unwrap(), 0);
+    }
+
     #[test]
     fn stx_transfer_bumps_the_sender_nonce() {
         let mut session = Session::new(SessionSettings::default());
@@ -2123,7 +2262,9 @@ mod tests {
 
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
 
-        session.stx_transfer(1000, recipient).unwrap();
+        session
+            .stx_transfer(1000, recipient, PostConditionCheck::Unchecked)
+            .unwrap();
 
         assert_eq!(session.get_nonce(&addr).unwrap(), 1);
         // The recipient sent nothing, so it owes no nonce.
@@ -2143,7 +2284,11 @@ mod tests {
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
 
         let result = session
-            .stx_transfer(1000, "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG")
+            .stx_transfer(
+                1000,
+                "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG",
+                PostConditionCheck::Unchecked,
+            )
             .expect("an underfunded transfer still executes");
         match result.execution_result.result {
             EvaluationResult::Snippet(res) => {
@@ -2177,6 +2322,7 @@ mod tests {
                 false,
                 false,
                 CallKind::NonceFree,
+                PostConditionCheck::Unchecked,
             )
             .expect_err("a call to a missing contract must fail");
 
@@ -2205,7 +2351,7 @@ mod tests {
         let sender_before = session.interpreter.get_balance_for_account(sender, "STX");
 
         let diagnostics = session
-            .stx_transfer(1000, recipient)
+            .stx_transfer(1000, recipient, PostConditionCheck::Unchecked)
             .expect_err("a transfer whose nonce cannot be recorded is not a success");
 
         let message = &diagnostics.last().expect("a diagnostic").message;
@@ -2242,7 +2388,9 @@ mod tests {
         session.update_epoch(DEFAULT_EPOCH);
 
         let contract = ClarityContractBuilder::new().deployer(sender).build();
-        session.deploy_contract(&contract, false, None).unwrap();
+        session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .unwrap();
         let contract_id = format!("{sender}.contract");
 
         // Only now, so the deploy above is unaffected.
@@ -2257,6 +2405,7 @@ mod tests {
                 false,
                 false,
                 CallKind::Transaction,
+                PostConditionCheck::Unchecked,
             )
             .expect_err("a call whose nonce cannot be recorded is not a success");
 
@@ -2270,6 +2419,7 @@ mod tests {
                 false,
                 false,
                 CallKind::NonceFree,
+                PostConditionCheck::Unchecked,
             )
             .expect("a read-only call charges nothing and still works");
         match result.result {
@@ -2360,7 +2510,8 @@ mod tests {
                 .clarity_version(ClarityVersion::default_for_epoch(epoch))
                 .code_source(source.to_string())
                 .build();
-            let result = session.deploy_contract(&contract, false, None);
+            let result =
+                session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
             let after = session.get_nonce(&addr).unwrap();
             assert!(
                 result.is_err(),
@@ -2465,7 +2616,7 @@ mod tests {
             skip_analysis: false,
         };
 
-        let _ = session.deploy_contract(&contract, false, None);
+        let _ = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
 
         // assert data-var is set to 0
         assert_eq!(
@@ -2532,7 +2683,7 @@ mod tests {
 
         // deploy default contract
         let contract = ClarityContractBuilder::default().build();
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         assert!(result.is_ok());
     }
 
@@ -2551,6 +2702,7 @@ mod tests {
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
         assert_execution_result_value(
             &result,
@@ -2615,6 +2767,7 @@ mod tests {
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
         assert_execution_result_value(&result, Value::okay(Value::Bool(true)).unwrap());
 
@@ -2627,6 +2780,7 @@ mod tests {
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
         assert_execution_result_value(&result, Value::UInt(1));
 
@@ -2639,6 +2793,7 @@ mod tests {
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
         assert!(result.is_ok());
     }
@@ -2651,7 +2806,7 @@ mod tests {
 
         // deploy default contract
         let contract = ClarityContractBuilder::default().build();
-        let _ = session.deploy_contract(&contract, false, None);
+        let _ = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
 
         let result = session.call_contract_fn(
             "contract",
@@ -2661,6 +2816,7 @@ mod tests {
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
         assert_execution_result_value(&result, Value::okay(Value::UInt(1)).unwrap());
 
@@ -2672,6 +2828,7 @@ mod tests {
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
         assert_execution_result_value(&result, Value::UInt(1));
     }
@@ -2725,7 +2882,9 @@ mod tests {
             .epoch(StacksEpochId::Epoch25)
             .build();
 
-        session.deploy_contract(&contract, false, None).unwrap();
+        session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .unwrap();
         session.advance_burn_chain_tip(10);
 
         let result = run_session_snippet(&mut session, "block-height");
@@ -2783,7 +2942,9 @@ mod tests {
             .epoch(StacksEpochId::Epoch30)
             .build();
 
-        session.deploy_contract(&contract, false, None).unwrap();
+        session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .unwrap();
         session.advance_burn_chain_tip(10);
 
         let result = run_session_snippet(&mut session, "stacks-block-height");
@@ -2816,7 +2977,9 @@ mod tests {
             .epoch(StacksEpochId::Epoch25)
             .build();
 
-        session.deploy_contract(&contract, false, None).unwrap();
+        session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .unwrap();
         session.advance_burn_chain_tip(10);
 
         session.update_epoch(StacksEpochId::Epoch30);
@@ -2861,7 +3024,7 @@ mod tests {
 
         // deploy a simple contract
         let contract = ClarityContractBuilder::default().build();
-        let _ = session.deploy_contract(&contract, false, None);
+        let _ = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
 
         // try to call a non-existent function
         let result = session.call_contract_fn(
@@ -2872,6 +3035,7 @@ mod tests {
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
 
         assert!(result.is_err());
@@ -2957,7 +3121,8 @@ mod tests {
             (test-mint)"#
         );
         let contract = ClarityContractBuilder::default().code_source(src).build();
-        let deploy_result = session.deploy_contract(&contract, false, None);
+        let deploy_result =
+            session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         assert!(deploy_result.is_ok());
         let ExecutionResult { result, .. } = deploy_result.unwrap().into_inner();
 
