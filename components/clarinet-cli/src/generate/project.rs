@@ -339,7 +339,10 @@ impl GetChangesForNewProject {
             # disable_postgres = false
             # disable_bitcoin_explorer = true
             # working_dir = "tmp/devnet"
-            # stacks_node_events_observers = ["host.docker.internal:8002"]
+            # stacks_node_events_observers = ["host.docker.internal:8002"] # Defaults to events_keys = ["*"]
+            # stacks_node_events_observers = [
+            #   {{ endpoint = "host.docker.internal:8787", events_keys = ["burn_blocks", "memtx"] }},
+            # ]
             # miner_mnemonic = "{DEFAULT_STACKS_MINER_MNEMONIC}"
             # miner_derivation_path = "{DEFAULT_DERIVATION_PATH}"
             # faucet_mnemonic = "{DEFAULT_FAUCET_MNEMONIC}"

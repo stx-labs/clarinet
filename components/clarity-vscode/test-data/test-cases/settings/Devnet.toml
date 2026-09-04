@@ -36,7 +36,10 @@ disable_stacks_api = false
 # disable_postgres = false
 # disable_bitcoin_explorer = true
 # working_dir = "tmp/devnet"
-# stacks_node_events_observers = ["host.docker.internal:8002"]
+# stacks_node_events_observers = ["host.docker.internal:8002"] # Defaults to events_keys = ["*"]
+# stacks_node_events_observers = [
+#   { endpoint = "host.docker.internal:8787", events_keys = ["burn_blocks", "memtx"] },
+# ]
 # miner_mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
 # miner_derivation_path = "m/44'/5757'/0'/0/0"
 # faucet_mnemonic = "shadow private easily thought say logic fault paddle word top book during ignore notable orange flight clock image wealth health outside kitten belt reform"
