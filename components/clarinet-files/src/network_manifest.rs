@@ -146,7 +146,7 @@ pub struct DevnetConfigFile {
     pub bitcoin_node_rpc_port: Option<u16>,
     pub stacks_node_p2p_port: Option<u16>,
     pub stacks_node_rpc_port: Option<u16>,
-    pub stacks_node_events_observers: Option<Vec<String>>,
+    pub stacks_node_events_observers: Option<Vec<StacksNodeEventObserver>>,
     pub stacks_node_wait_time_for_microblocks: Option<u32>,
     pub stacks_node_first_attempt_time_ms: Option<u32>,
     pub stacks_node_env_vars: Option<Vec<String>>,
@@ -208,6 +208,41 @@ pub struct DevnetConfigFile {
     pub epoch_4_0: Option<u64>,
     pub use_docker_gateway_routing: Option<bool>,
     pub docker_platform: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(from = "StacksNodeEventObserverFile")]
+pub struct StacksNodeEventObserver {
+    pub endpoint: String,
+    pub events_keys: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StacksNodeEventObserverFile {
+    Endpoint(String),
+    Config {
+        endpoint: String,
+        events_keys: Vec<String>,
+    },
+}
+
+impl From<StacksNodeEventObserverFile> for StacksNodeEventObserver {
+    fn from(observer: StacksNodeEventObserverFile) -> Self {
+        match observer {
+            StacksNodeEventObserverFile::Endpoint(endpoint) => Self {
+                endpoint,
+                events_keys: vec!["*".into()],
+            },
+            StacksNodeEventObserverFile::Config {
+                endpoint,
+                events_keys,
+            } => Self {
+                endpoint,
+                events_keys,
+            },
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -284,7 +319,7 @@ pub struct DevnetConfig {
     pub stacks_node_rpc_port: u16,
     pub stacks_node_wait_time_for_microblocks: u32,
     pub stacks_node_first_attempt_time_ms: u32,
-    pub stacks_node_events_observers: Vec<String>,
+    pub stacks_node_events_observers: Vec<StacksNodeEventObserver>,
     pub stacks_node_env_vars: Vec<String>,
     pub stacks_node_next_initiative_delay: u16,
     pub stacks_api_port: u16,
@@ -1262,7 +1297,52 @@ fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> St
 mod tests {
     use clarinet_defaults::DEFAULT_EPOCH;
 
-    use crate::{DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE};
+    use crate::{
+        DevnetConfigFile, StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE,
+        DEFAULT_STACKS_SIGNER_IMAGE,
+    };
+
+    #[test]
+    fn parses_legacy_stacks_node_event_observer() {
+        let config: DevnetConfigFile =
+            toml::from_str(r#"stacks_node_events_observers = ["host.docker.internal:8002"]"#)
+                .unwrap();
+
+        assert_eq!(
+            config.stacks_node_events_observers.unwrap(),
+            vec![StacksNodeEventObserver {
+                endpoint: "host.docker.internal:8002".into(),
+                events_keys: vec!["*".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_selective_stacks_node_event_observers() {
+        let config: DevnetConfigFile = toml::from_str(
+            r#"
+            stacks_node_events_observers = [
+                { endpoint = "host.docker.internal:8787", events_keys = ["burn_blocks", "memtx"] },
+                { endpoint = "host.docker.internal:8788", events_keys = [] },
+            ]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.stacks_node_events_observers.unwrap(),
+            vec![
+                StacksNodeEventObserver {
+                    endpoint: "host.docker.internal:8787".into(),
+                    events_keys: vec!["burn_blocks".into(), "memtx".into()],
+                },
+                StacksNodeEventObserver {
+                    endpoint: "host.docker.internal:8788".into(),
+                    events_keys: vec![],
+                },
+            ]
+        );
+    }
 
     #[test]
     fn test_default_stacks_docker_images_version() {
