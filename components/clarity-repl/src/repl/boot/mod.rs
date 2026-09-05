@@ -188,6 +188,143 @@ pub static BOOT_TESTNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(BOOT_TESTNET_ADDRESS).unwrap());
 pub static BOOT_MAINNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(BOOT_MAINNET_ADDRESS).unwrap());
+
+/// The testnet twin of a mainnet boot contract, or `None` if `contract_id`
+/// isn't one.
+///
+/// Simnet deploys every boot contract under both addresses, but its chain
+/// state is testnet-flavored: stacks-core's PoX handler keys off
+/// `GlobalContext::mainnet`, so only the `ST000...` contracts move consensus
+/// state. Redirecting to the twin makes a mainnet-addressed call behave.
+///
+/// Scoped to [`BOOT_CONTRACTS_NAMES`], the same rule
+/// [`remap_mainnet_boot_principals`] applies to source: sBTC lives at
+/// `SM3VDXK3...` and has no testnet twin in simnet, so it never matches.
+pub fn remap_mainnet_boot_contract_id(
+    contract_id: &QualifiedContractIdentifier,
+) -> Option<QualifiedContractIdentifier> {
+    let is_mainnet_boot = contract_id.issuer == *BOOT_MAINNET_PRINCIPAL
+        && BOOT_CONTRACTS_NAMES.contains(&contract_id.name.as_str());
+
+    is_mainnet_boot.then(|| {
+        QualifiedContractIdentifier::new(BOOT_TESTNET_PRINCIPAL.clone(), contract_id.name.clone())
+    })
+}
+
+/// Characters Clarity allows in a contract name.
+fn is_contract_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '-' || c == '_'
+}
+
+/// The boot contract name in a `SP000000000000000000002Q6VF78.<name>` prefix
+/// of `s`, or `None` if `s` doesn't start with one.
+///
+/// The name is read greedily, so `.pox-5` can never be truncated to the
+/// shorter boot name `.pox`, and a project's own `.pox-helper` is rejected
+/// outright rather than matched as a prefix.
+fn mainnet_boot_contract_name_at(s: &str) -> Option<&str> {
+    let rest = s.strip_prefix(BOOT_MAINNET_ADDRESS)?.strip_prefix('.')?;
+    let end = rest
+        .find(|c| !is_contract_name_char(c))
+        .unwrap_or(rest.len());
+    let name = &rest[..end];
+    BOOT_CONTRACTS_NAMES.contains(&name).then_some(name)
+}
+
+/// Rewrite every mainnet boot-contract principal literal in `source` to its
+/// testnet twin, returning `None` when there is nothing to rewrite.
+///
+/// Deliberately not a `str::replace`. Only full principal literals
+/// (`'SP000000000000000000002Q6VF78.<boot-name>`) match, so:
+///
+/// - the bare mainnet burn address `'SP000000000000000000002Q6VF78`, a real
+///   transfer target, is left alone — a contract name is required;
+/// - the name must be a [`BOOT_CONTRACTS_NAMES`] entry, which keeps sBTC and
+///   every requirement contract out of scope;
+/// - occurrences inside `;;` comments and string literals are skipped;
+/// - the leading `'` is required, which is what separates a principal literal
+///   from an address that merely appears in text.
+///
+/// Both addresses are 29 characters, so the rewrite preserves every span in
+/// the source — diagnostics and coverage line/column data stay valid.
+///
+/// Callers apply this to *user* sources only — manifest contracts (via
+/// `clarinet-deployments`) and `simnet.deployContract`. The boot contracts
+/// themselves are installed through `ClarityInterpreter::run` rather than
+/// `Session::deploy_contract`, so they never reach this function; none of
+/// them references another boot contract by its qualified id either.
+///
+/// Idempotent: the output holds no mainnet boot literals, so a second pass
+/// returns `None`.
+pub fn remap_mainnet_boot_principals(source: &str) -> Option<String> {
+    // Cheap reject for the overwhelmingly common case.
+    if !source.contains(BOOT_MAINNET_ADDRESS) {
+        return None;
+    }
+
+    let mut out = String::with_capacity(source.len());
+    let mut remapped = false;
+    let mut i = 0;
+
+    // Every arm copies a slice and advances `i` to its end. The three
+    // delimiters are ASCII, and a UTF-8 continuation byte is never ASCII, so
+    // slicing at a delimiter can never split a multi-byte character.
+    while i < source.len() {
+        let rest = &source[i..];
+        let end = match rest.as_bytes()[0] {
+            // `;;` runs to the end of the line. A single `;` is not a comment,
+            // so it advances one byte — the default arm stops on `;`, so this
+            // arm has to consume it or the scan would stall.
+            b';' => {
+                if rest.as_bytes().get(1) == Some(&b';') {
+                    rest.find('\n').map_or(source.len(), |eol| i + eol + 1)
+                } else {
+                    i + 1
+                }
+            }
+            // A string literal, `"..."` or the tail of `u"..."`. `\` escapes
+            // the next byte, so `\"` does not close it. Scanned with an
+            // explicit loop rather than a stateful `str::find` predicate,
+            // which would depend on the searcher calling it exactly once per
+            // char in order. `\`, `"` and every multi-byte lead/continuation
+            // byte are distinct, so stepping bytes is safe here.
+            b'"' => {
+                let bytes = rest.as_bytes();
+                let mut at = 1;
+                loop {
+                    match bytes.get(at) {
+                        None => break source.len(),
+                        Some(b'\\') => at += 2,
+                        Some(b'"') => break i + at + 1,
+                        Some(_) => at += 1,
+                    }
+                }
+            }
+            // A principal literal is the only place a boot address is code.
+            b'\'' => {
+                if let Some(name) = mainnet_boot_contract_name_at(&rest[1..]) {
+                    out.push('\'');
+                    out.push_str(BOOT_TESTNET_ADDRESS);
+                    out.push('.');
+                    out.push_str(name);
+                    remapped = true;
+                    i += 1 + BOOT_MAINNET_ADDRESS.len() + 1 + name.len();
+                    continue;
+                }
+                i + 1
+            }
+            // Ordinary code: copy up to the next delimiter in one go.
+            _ => rest
+                .find([';', '"', '\''])
+                .map_or(source.len(), |next| i + next),
+        };
+
+        out.push_str(&source[i..end]);
+        i = end;
+    }
+
+    remapped.then_some(out)
+}
 pub static BOOT_CONTRACTS_DATA: LazyLock<
     BTreeMap<QualifiedContractIdentifier, (ClarityContract, ContractAST)>,
 > = LazyLock::new(|| {
@@ -333,4 +470,208 @@ pub fn get_boot_contract_epoch_and_clarity_version(
         }
     };
     (epoch, clarity_version)
+}
+
+#[cfg(test)]
+mod remap_tests {
+    use super::*;
+
+    #[track_caller]
+    fn remapped(source: &str) -> String {
+        remap_mainnet_boot_principals(source)
+            .unwrap_or_else(|| panic!("expected a remap in:\n{source}"))
+    }
+
+    #[track_caller]
+    fn assert_untouched(source: &str) {
+        assert_eq!(
+            remap_mainnet_boot_principals(source),
+            None,
+            "expected no remap in:\n{source}"
+        );
+    }
+
+    #[test]
+    fn remaps_a_contract_call_target() {
+        assert_eq!(
+            remapped("(contract-call? 'SP000000000000000000002Q6VF78.pox-5 get-x)"),
+            "(contract-call? 'ST000000000000000000002AMW42H.pox-5 get-x)"
+        );
+    }
+
+    #[test]
+    fn remaps_every_boot_contract_name() {
+        for name in BOOT_CONTRACTS_NAMES {
+            assert_eq!(
+                remapped(&format!("'{BOOT_MAINNET_ADDRESS}.{name}")),
+                format!("'{BOOT_TESTNET_ADDRESS}.{name}"),
+                "boot contract {name} should be remapped"
+            );
+        }
+    }
+
+    #[test]
+    fn remaps_trait_references() {
+        assert_eq!(
+            remapped("(use-trait m 'SP000000000000000000002Q6VF78.pox-5.signer-manager-trait)"),
+            "(use-trait m 'ST000000000000000000002AMW42H.pox-5.signer-manager-trait)"
+        );
+    }
+
+    #[test]
+    fn remaps_every_occurrence() {
+        let source = "(define-constant A 'SP000000000000000000002Q6VF78.pox-4)\n\
+                      (define-constant B 'SP000000000000000000002Q6VF78.pox-5)";
+        assert_eq!(
+            remapped(source),
+            "(define-constant A 'ST000000000000000000002AMW42H.pox-4)\n\
+             (define-constant B 'ST000000000000000000002AMW42H.pox-5)"
+        );
+    }
+
+    /// The whole point of matching the name greedily: `pox` is also a boot
+    /// contract, so a prefix match would rewrite the address but leave `-5`
+    /// dangling off a `pox` lookup.
+    #[test]
+    fn does_not_confuse_pox_with_pox_5() {
+        assert_eq!(
+            remapped("'SP000000000000000000002Q6VF78.pox-5"),
+            "'ST000000000000000000002AMW42H.pox-5"
+        );
+        assert_eq!(
+            remapped("'SP000000000000000000002Q6VF78.pox"),
+            "'ST000000000000000000002AMW42H.pox"
+        );
+    }
+
+    /// `SP000000000000000000002Q6VF78` on its own is the mainnet burn address,
+    /// which contracts legitimately send funds to.
+    #[test]
+    fn leaves_the_bare_burn_address_alone() {
+        assert_untouched("(stx-transfer? u1 tx-sender 'SP000000000000000000002Q6VF78)");
+    }
+
+    #[test]
+    fn leaves_non_boot_contract_names_alone() {
+        assert_untouched("(contract-call? 'SP000000000000000000002Q6VF78.pox-helper go)");
+        assert_untouched("(contract-call? 'SP000000000000000000002Q6VF78.my-pox go)");
+    }
+
+    #[test]
+    fn leaves_string_literals_alone() {
+        assert_untouched(r#"(define-constant S "'SP000000000000000000002Q6VF78.pox-5")"#);
+        assert_untouched(r#"(define-constant S u"'SP000000000000000000002Q6VF78.pox-5")"#);
+    }
+
+    #[test]
+    fn leaves_comments_alone() {
+        assert_untouched(";; calls 'SP000000000000000000002Q6VF78.pox-5 on mainnet");
+        assert_untouched(";; trailing comment with no newline 'SP000000000000000000002Q6VF78.pox");
+    }
+
+    /// A string or comment must not swallow the code that follows it.
+    #[test]
+    fn resumes_after_comments_and_strings() {
+        let source = ";; 'SP000000000000000000002Q6VF78.pox-5\n\
+                      (contract-call? 'SP000000000000000000002Q6VF78.pox-5 go)";
+        assert_eq!(
+            remapped(source),
+            ";; 'SP000000000000000000002Q6VF78.pox-5\n\
+             (contract-call? 'ST000000000000000000002AMW42H.pox-5 go)"
+        );
+
+        let source =
+            r#"(f "'SP000000000000000000002Q6VF78.pox" 'SP000000000000000000002Q6VF78.pox)"#;
+        assert_eq!(
+            remapped(source),
+            r#"(f "'SP000000000000000000002Q6VF78.pox" 'ST000000000000000000002AMW42H.pox)"#
+        );
+    }
+
+    /// An escaped quote must not be read as closing the literal.
+    #[test]
+    fn handles_escaped_quotes_in_strings() {
+        let source =
+            r#"(f "a\" 'SP000000000000000000002Q6VF78.pox b" 'SP000000000000000000002Q6VF78.pox)"#;
+        assert_eq!(
+            remapped(source),
+            r#"(f "a\" 'SP000000000000000000002Q6VF78.pox b" 'ST000000000000000000002AMW42H.pox)"#
+        );
+    }
+
+    /// The scan stops on `;` to find comments, so a lone `;` — which Clarity
+    /// rejects, but which the scanner still has to walk past — must advance
+    /// rather than stall.
+    #[test]
+    fn does_not_stall_on_a_single_semicolon() {
+        assert_eq!(
+            remapped("(f) ; 'SP000000000000000000002Q6VF78.pox"),
+            "(f) ; 'ST000000000000000000002AMW42H.pox"
+        );
+    }
+
+    #[test]
+    fn leaves_the_testnet_address_alone() {
+        assert_untouched("(contract-call? 'ST000000000000000000002AMW42H.pox-5 go)");
+    }
+
+    #[test]
+    fn leaves_sbtc_and_requirement_principals_alone() {
+        assert_untouched(&format!(
+            "(contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token go)"
+        ));
+        assert_untouched(
+            "(contract-call? 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait go)",
+        );
+    }
+
+    #[test]
+    fn is_idempotent() {
+        let once = remapped("(contract-call? 'SP000000000000000000002Q6VF78.pox-5 go)");
+        assert_untouched(&once);
+    }
+
+    /// Same-length addresses keep every diagnostic span and coverage
+    /// line/column offset valid after the rewrite.
+    #[test]
+    fn preserves_source_length() {
+        assert_eq!(BOOT_MAINNET_ADDRESS.len(), BOOT_TESTNET_ADDRESS.len());
+
+        let source = "(contract-call? 'SP000000000000000000002Q6VF78.pox-5 go)";
+        assert_eq!(remapped(source).len(), source.len());
+    }
+
+    /// Clarity rejects non-ASCII outside `u"..."` literals, but the scanner
+    /// walks the whole file and must not split a multi-byte character.
+    #[test]
+    fn handles_multibyte_characters() {
+        let source = "u\"héllo\"\n'SP000000000000000000002Q6VF78.pox";
+        assert_eq!(
+            remapped(source),
+            "u\"héllo\"\n'ST000000000000000000002AMW42H.pox"
+        );
+    }
+
+    #[test]
+    fn remaps_contract_ids() {
+        let mainnet_pox =
+            QualifiedContractIdentifier::parse(&format!("{BOOT_MAINNET_ADDRESS}.pox-5")).unwrap();
+        let testnet_pox =
+            QualifiedContractIdentifier::parse(&format!("{BOOT_TESTNET_ADDRESS}.pox-5")).unwrap();
+
+        assert_eq!(
+            remap_mainnet_boot_contract_id(&mainnet_pox),
+            Some(testnet_pox.clone())
+        );
+        assert_eq!(remap_mainnet_boot_contract_id(&testnet_pox), None);
+
+        let not_boot =
+            QualifiedContractIdentifier::parse(&format!("{BOOT_MAINNET_ADDRESS}.pox-helper"))
+                .unwrap();
+        assert_eq!(remap_mainnet_boot_contract_id(&not_boot), None);
+
+        let sbtc =
+            QualifiedContractIdentifier::parse(&SBTC_TOKEN_MAINNET_ADDRESS.to_string()).unwrap();
+        assert_eq!(remap_mainnet_boot_contract_id(&sbtc), None);
+    }
 }

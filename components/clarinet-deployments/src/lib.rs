@@ -20,7 +20,8 @@ use clarity::vm::{
 };
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
-    get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_BOOT_CONTRACTS,
+    get_boot_contract_epoch_and_clarity_version, remap_mainnet_boot_principals,
+    BOOT_CONTRACTS_DATA, BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL, SBTC_BOOT_CONTRACTS,
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
 };
 use clarity_repl::repl::clarity_values::value_to_string;
@@ -35,13 +36,75 @@ use clarity_repl::utils::{remove_env_simnet, Environment};
 pub use types::CachedContractAST;
 use types::{
     ContractPublishSpecification, DeploymentGenerationArtifacts, EmulatedContractCallSpecification,
-    EpochSpec, RequirementPublishSpecification, StxTransferSpecification, TransactionSpecification,
+    EpochSpec, RemapPrincipals, RequirementPublishSpecification, StxTransferSpecification,
+    TransactionSpecification,
 };
 
 use self::types::{
     DeploymentSpecification, EmulatedContractPublishSpecification, GenesisSpecification,
     TransactionPlanSpecification, TransactionsBatchSpecification, WalletSpecification,
 };
+
+/// The `remap-principals` a simnet plan records for a rewritten contract.
+///
+/// Simnet deploys the boot contracts under both addresses, but its chain state
+/// is testnet-flavored: stacks-core's PoX handler keys off
+/// `GlobalContext::mainnet`, so `stack-stx` through `SP000....pox-N` never
+/// locked any STX. Rewriting the principal at deployment time means the
+/// deployed code calls the `ST000...` contract directly, and recording it in
+/// the plan keeps the rewrite inspectable instead of hidden in the interpreter.
+fn boot_remap_principals() -> RemapPrincipals {
+    BTreeMap::from([(
+        BOOT_MAINNET_PRINCIPAL.clone(),
+        BOOT_TESTNET_PRINCIPAL.clone(),
+    )])
+}
+
+/// The source to deploy for `tx`.
+///
+/// A non-empty `remap_principals` means this contract is due the boot rewrite.
+/// It is set by the plan generator, and by
+/// [`setup_session_with_deployment`] for project contracts whose plan predates
+/// the field — requirements never carry it, since they are deployed
+/// byte-identical to what is on chain.
+///
+/// The rewrite is re-derived from the source rather than replayed from the
+/// recorded pairs, which is what makes a plan re-read from disk (where
+/// `source` comes straight off the `.clar` file and no pre-built AST is passed
+/// along) deploy the same code the generator produced. It is idempotent, so
+/// the in-memory path, already rewritten before its AST was built, is
+/// unaffected. Since the pairs are not replayed, a plan recording anything
+/// other than the boot pair is reported rather than silently reinterpreted.
+///
+/// `mxs` breaks the tie when the two disagree: a plan can be generated without
+/// mainnet execution simulation and then deployed with it switched on (the CLI
+/// can be told to use the on-disk plan verbatim). Mainnet addresses are the
+/// correct ones to keep in that case, so the recorded remap is skipped.
+fn source_for_emulated_publish(tx: &EmulatedContractPublishSpecification, mxs: bool) -> String {
+    if tx.remap_principals.is_empty() {
+        return tx.source.clone();
+    }
+
+    if mxs {
+        ueprint!(
+            "Warning: {} records a boot-contract remap but mainnet execution simulation is \
+             enabled; keeping the mainnet principals. Regenerate the deployment plan to silence \
+             this.",
+            tx.location.display()
+        );
+        return tx.source.clone();
+    }
+
+    if tx.remap_principals != boot_remap_principals() {
+        ueprint!(
+            "Warning: {} records a principal remap that is not the mainnet-to-testnet boot \
+             mapping. Only the boot mapping is applied; the recorded entries are ignored.",
+            tx.location.display()
+        );
+    }
+
+    remap_mainnet_boot_principals(&tx.source).unwrap_or_else(|| tx.source.clone())
+}
 
 pub fn setup_session_with_deployment(
     manifest: &ProjectManifest,
@@ -56,7 +119,17 @@ pub fn setup_session_with_deployment(
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
-                if !enable_analysis || !manifest.contracts_settings.contains_key(&spec.location) {
+                // A plan written before `remap-principals` existed records
+                // nothing, which is indistinguishable from a requirement — so
+                // re-derive it for the project's own contracts. Without this, a
+                // plan loaded from disk silently deploys mainnet boot
+                // principals and the PoX lock goes missing again.
+                let is_project_contract = manifest.contracts_settings.contains_key(&spec.location);
+                if is_project_contract && spec.remap_principals.is_empty() {
+                    spec.remap_principals = boot_remap_principals();
+                }
+
+                if !enable_analysis || !is_project_contract {
                     spec.skip_analysis = true;
                 } else if let Ok(relative) = spec.location.strip_prefix(&manifest.root_dir) {
                     if !manifest
@@ -368,8 +441,11 @@ fn handle_emulated_contract_publish(
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.emulated_sender.to_string());
 
+    let source =
+        source_for_emulated_publish(tx, session.interpreter.repl_settings.remote_data.enabled);
+
     let contract = ClarityContract {
-        code_source: ClarityCodeSource::ContractInMemory(tx.source.clone()),
+        code_source: ClarityCodeSource::ContractInMemory(source),
         deployer: ContractDeployer::Address(tx.emulated_sender.to_string()),
         name: tx.contract_name.to_string(),
         clarity_version: tx.clarity_version,
@@ -799,6 +875,10 @@ pub async fn generate_default_deployment_with_cache(
                                 location: contract_location,
                                 clarity_version,
                                 skip_analysis: true,
+                                // Requirements are third-party mainnet code;
+                                // they are deployed byte-identical to what is
+                                // on chain and never remapped.
+                                remap_principals: BTreeMap::new(),
                             };
 
                             emulated_contracts_publish.insert(contract_id.clone(), data);
@@ -1085,6 +1165,24 @@ pub async fn generate_default_deployment_with_cache(
             }
         }
 
+        // Rewrite mainnet boot-contract principals before the AST is built
+        // below, so the plan's source, the AST handed to the deployer and the
+        // recorded remap all describe the same code. Simnet only, and never
+        // under MXS, where the remote node holds the real mainnet contracts.
+        // `clarinet check` generates a simnet plan for both environments; the
+        // on-chain pass must analyse what will actually be published on chain,
+        // where the mainnet boot addresses are the correct ones.
+        let mut remap_principals = BTreeMap::new();
+        if matches!(network, StacksNetwork::Simnet)
+            && environment == Environment::Simnet
+            && !simnet_remote_data
+        {
+            if let Some(remapped) = remap_mainnet_boot_principals(&source) {
+                source = remapped;
+                remap_principals = boot_remap_principals();
+            }
+        }
+
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
 
         let epoch = contract_config.epoch.resolve();
@@ -1113,6 +1211,7 @@ pub async fn generate_default_deployment_with_cache(
                     location: contract_location,
                     clarity_version: contract_config.clarity_version,
                     skip_analysis: false,
+                    remap_principals,
                 },
             )
         } else {
@@ -1440,9 +1539,82 @@ mod tests {
             clarity_version: ClarityVersion::Clarity2,
             location: PathBuf::from("/contracts/contract_1.clar"),
             skip_analysis: false,
+            remap_principals: BTreeMap::new(),
         };
 
         handle_emulated_contract_publish(session, &emulated_publish_spec, None, epoch)
+    }
+
+    mod boot_remap {
+        use clarity_repl::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
+
+        use super::*;
+
+        const CALLS_MAINNET_POX: &str =
+            "(define-public (go) (contract-call? 'SP000000000000000000002Q6VF78.pox-4 go))";
+        const CALLS_TESTNET_POX: &str =
+            "(define-public (go) (contract-call? 'ST000000000000000000002AMW42H.pox-4 go))";
+
+        fn spec(source: &str, remapped: bool) -> EmulatedContractPublishSpecification {
+            EmulatedContractPublishSpecification {
+                contract_name: ContractName::from_literal("staker"),
+                emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
+                source: source.to_string(),
+                clarity_version: ClarityVersion::Clarity2,
+                location: PathBuf::from("/contracts/staker.clar"),
+                skip_analysis: false,
+                remap_principals: if remapped {
+                    BTreeMap::from([(
+                        PrincipalData::parse_standard_principal(BOOT_MAINNET_ADDRESS).unwrap(),
+                        PrincipalData::parse_standard_principal(BOOT_TESTNET_ADDRESS).unwrap(),
+                    )])
+                } else {
+                    BTreeMap::new()
+                },
+            }
+        }
+
+        /// The load-from-disk path: raw source off the `.clar` file plus the
+        /// remap the plan recorded.
+        #[test]
+        fn a_recorded_remap_rewrites_raw_source() {
+            assert_eq!(
+                source_for_emulated_publish(&spec(CALLS_MAINNET_POX, true), false),
+                CALLS_TESTNET_POX
+            );
+        }
+
+        /// The in-memory path: the generator already rewrote the source, so
+        /// re-applying the recorded remap must be a no-op.
+        #[test]
+        fn re_applying_a_recorded_remap_is_a_no_op() {
+            assert_eq!(
+                source_for_emulated_publish(&spec(CALLS_TESTNET_POX, true), false),
+                CALLS_TESTNET_POX
+            );
+        }
+
+        /// A plan generated without MXS, then deployed with MXS switched on:
+        /// the remote node holds the real mainnet contracts, so the recorded
+        /// remap must be ignored rather than trusted.
+        #[test]
+        fn mxs_overrides_a_recorded_remap() {
+            assert_eq!(
+                source_for_emulated_publish(&spec(CALLS_MAINNET_POX, true), true),
+                CALLS_MAINNET_POX
+            );
+        }
+
+        #[test]
+        fn nothing_happens_without_a_recorded_remap() {
+            for mxs in [false, true] {
+                assert_eq!(
+                    source_for_emulated_publish(&spec(CALLS_MAINNET_POX, false), mxs),
+                    CALLS_MAINNET_POX,
+                    "a plan with no recorded remap must deploy its source verbatim (mxs={mxs})"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1662,6 +1834,7 @@ mod tests {
             clarity_version: ClarityVersion::Clarity2,
             location: PathBuf::from("/contracts/lint-test.clar"),
             skip_analysis: false,
+            remap_principals: BTreeMap::new(),
         };
 
         let result = handle_emulated_contract_publish(&mut session, &spec, None, epoch);
@@ -1698,6 +1871,7 @@ mod tests {
             clarity_version: ClarityVersion::Clarity2,
             location: PathBuf::from("/contracts/lint-test.clar"),
             skip_analysis: true,
+            remap_principals: BTreeMap::new(),
         };
 
         let result = handle_emulated_contract_publish(&mut session, &spec, None, epoch);
@@ -1740,6 +1914,7 @@ mod tests {
             clarity_version: ClarityVersion::Clarity2,
             location: PathBuf::from("/contracts/lint-test.clar"),
             skip_analysis: false, // Even with skip_analysis=false, disable_all() prevents lints
+            remap_principals: BTreeMap::new(),
         };
 
         let result = handle_emulated_contract_publish(&mut session, &spec, None, epoch);
@@ -1792,6 +1967,7 @@ mod tests {
                             clarity_version: ClarityVersion::Clarity2,
                             location: PathBuf::from("/contracts/lint-test.clar"),
                             skip_analysis: false,
+                            remap_principals: BTreeMap::new(),
                         },
                     )],
                     epoch: Some(EpochSpec::Epoch2_4),

@@ -825,6 +825,37 @@ impl Session {
             .map_err(Vec::from)
     }
 
+    /// Resolve a user-supplied contract reference to the contract this session
+    /// will actually use.
+    ///
+    /// Desugars the reference, then redirects a mainnet boot contract to its
+    /// testnet twin. Simnet deploys every boot contract under both addresses,
+    /// but its chain state is testnet-flavored: stacks-core's PoX handler keys
+    /// off `GlobalContext::mainnet`, so `stack-stx` through `SP000....pox-N`
+    /// never locked any STX.
+    ///
+    /// Every entry point that turns a `&str` into a contract id — calls *and*
+    /// reads alike — must go through here, so that what a caller reads back is
+    /// the contract its calls executed against. Rewriting only the call target
+    /// would leave `getContractSource` reporting the mainnet `pox-3`
+    /// (`REWARD_CYCLE_LENGTH u2100`) for a call that behaved per the testnet
+    /// one (`u1050`) — the reported-vs-executed split this redirect exists to
+    /// avoid.
+    ///
+    /// Skipped under mainnet execution simulation: there the remote node holds
+    /// the real mainnet contracts and no testnet twin exists.
+    pub fn resolve_contract_id(
+        &self,
+        default_deployer: &str,
+        contract: &str,
+    ) -> Result<QualifiedContractIdentifier, String> {
+        let contract_id = Self::desugar_contract_id(default_deployer, contract)?;
+        if self.interpreter.repl_settings.remote_data.enabled {
+            return Ok(contract_id);
+        }
+        Ok(boot::remap_mainnet_boot_contract_id(&contract_id).unwrap_or(contract_id))
+    }
+
     /// Call `method` on `contract` as `sender`.
     ///
     /// `kind` controls whether the call consumes a nonce. The nonce and call
@@ -844,14 +875,16 @@ impl Session {
         let initial_tx_sender = self.get_tx_sender();
 
         // An unresolvable contract id never became a transaction at all.
-        let contract_id = Self::desugar_contract_id(&initial_tx_sender, contract).map_err(|e| {
-            ExecutionError::rejected(vec![Diagnostic {
-                level: Level::Error,
-                message: e,
-                spans: vec![],
-                suggestion: None,
-            }])
-        })?;
+        let contract_id = self
+            .resolve_contract_id(&initial_tx_sender, contract)
+            .map_err(|e| {
+                ExecutionError::rejected(vec![Diagnostic {
+                    level: Level::Error,
+                    message: e,
+                    spans: vec![],
+                    suggestion: None,
+                }])
+            })?;
 
         self.set_tx_sender(sender);
 
