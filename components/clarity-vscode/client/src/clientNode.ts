@@ -27,7 +27,7 @@ export async function activate(context: ExtensionContext) {
     serverOptions,
     clientOpts,
   );
-  initClient(context, client);
+  await initClient(context, client);
 }
 
 export function deactivate(): Thenable<void> | undefined {

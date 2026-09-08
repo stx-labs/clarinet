@@ -25,6 +25,7 @@ use clarity_repl::repl::boot::{
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
 };
 use clarity_repl::repl::clarity_values::value_to_string;
+use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
@@ -319,6 +320,7 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
             false,
             false,
             CallKind::NonceFree,
+            PostConditionCheck::Unchecked,
         );
 
         // A silent failure here is indistinguishable from a mint that never
@@ -421,7 +423,11 @@ fn handle_stx_transfer(session: &mut Session, tx: &StxTransferSpecification) {
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.expected_sender.to_string());
 
-    let _ = session.stx_transfer(tx.mstx_amount, &tx.recipient.to_string());
+    let _ = session.stx_transfer(
+        tx.mstx_amount,
+        &tx.recipient.to_string(),
+        PostConditionCheck::Unchecked,
+    );
 
     session.set_tx_sender(&default_tx_sender);
 }
@@ -447,7 +453,12 @@ fn handle_emulated_contract_publish(
         skip_analysis: tx.skip_analysis,
     };
 
-    let result = session.deploy_contract(&contract, false, contract_ast);
+    let result = session.deploy_contract(
+        &contract,
+        false,
+        contract_ast,
+        PostConditionCheck::Unchecked,
+    );
 
     session.set_tx_sender(&default_tx_sender);
     result
@@ -474,6 +485,7 @@ fn handle_emulated_contract_call(
         true,
         false,
         CallKind::Transaction,
+        PostConditionCheck::Unchecked,
     );
     if let Err(errors) = &result {
         clarity_repl::ueprint!("error: {:?}", errors.diagnostics.first().unwrap().message);

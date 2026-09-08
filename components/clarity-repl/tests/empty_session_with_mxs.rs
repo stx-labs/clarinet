@@ -215,6 +215,7 @@ mod test_mxs_session_test {
     use clarity::types::StacksEpochId;
     use clarity::util::hash::hex_bytes;
     use clarity::vm::{ClarityVersion, Value};
+    use clarity_repl::repl::post_conditions::PostConditionCheck;
     use clarity_repl::repl::{self, ClarityContract};
 
     use crate::{eval_snippet, init_mainnet_session, init_testnet_session};
@@ -427,7 +428,7 @@ mod test_mxs_session_test {
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
             skip_analysis: false,
         };
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         assert!(result.is_ok());
 
         let snippet = format!("(contract-call? '{deployer}.gbh get-block-height)");
@@ -464,7 +465,7 @@ mod test_mxs_session_test {
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch24),
             skip_analysis: false,
         };
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         assert!(result.is_ok());
 
         // 107107 is a block in epoch 2.4
@@ -513,7 +514,7 @@ mod test_mxs_session_test {
             epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
             skip_analysis: false,
         };
-        let result = session.deploy_contract(&contract, false, None);
+        let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
         assert!(result.is_ok());
 
         // 107_107 is a block in epoch 2.4

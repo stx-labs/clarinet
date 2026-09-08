@@ -29,6 +29,6 @@
   "readme": "./README.md",
   "dependencies": {
     "@stacks/clarinet-sdk-wasm-browser": "workspace:*",
-    "@stacks/transactions": "7.4.0"
+    "@stacks/transactions": "7.6.0"
   }
 }
