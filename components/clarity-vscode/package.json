@@ -20,7 +20,7 @@
     "test:dap": "node --test debug/tests/*.test.mjs",
     "pretest": "NODE_ENV=test concurrently \"rspack build -c ./rspack.config.dev.js\" \"swc --config-file .runTests.swcrc ./client/tests/runTests.ts -o ./client/dist/tests/runTests.js\"",
     "test": "node client/dist/tests/runTests.js",
-    "lint": "eslint ./client/src ./server/src",
+    "lint": "eslint ./client/src ./server/src ./shared",
     "dev:watch": "rspack build -c ./rspack.config.dev.js -w",
     "dev:browser": "vscode-test-web --extensionDevelopmentPath=. ./test-data --open-devtools",
     "dev": "rspack build -c ./rspack.config.dev.js && concurrently \"pnpm:dev:*\"",
