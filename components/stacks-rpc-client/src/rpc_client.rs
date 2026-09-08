@@ -224,15 +224,19 @@ impl StacksRpc {
             self.url, principal, contract_name
         );
 
-        let res = self.client.get(request_url).send();
+        let response = self
+            .client
+            .get(request_url)
+            .send()
+            .map_err(|e| RpcError::Message(e.to_string()))?;
 
-        match res {
-            Ok(response) => match response.json() {
-                Ok(value) => Ok(value),
-                Err(e) => Err(RpcError::Message(e.to_string())),
-            },
-            Err(e) => Err(RpcError::Message(e.to_string())),
+        if !response.status().is_success() {
+            return Err(RpcError::StatusCode(response.status().as_u16()));
         }
+
+        response
+            .json()
+            .map_err(|e| RpcError::Message(e.to_string()))
     }
 
     pub fn call_read_only_fn(

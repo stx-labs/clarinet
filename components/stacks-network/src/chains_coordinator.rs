@@ -205,10 +205,9 @@ pub async fn start_chains_coordinator(
     let (deployment_events_tx, deployment_events_rx) = channel();
 
     // Set-up the background task in charge of serializing / signing / publishing the contracts.
-    // This tasks can take several seconds to minutes, depending on the complexity of the project.
-    // We start this process as soon as possible, as a background task.
-    // This thread becomes dormant once the encoding is done, and proceed to the actual deployment once
-    // the event DeploymentCommand::Start is received.
+    // It stays dormant until DeploymentCommand::Start is received (once the stacks-node is
+    // producing blocks), then reads the accounts nonces from the node, encodes the
+    // transactions and proceeds with the actual deployment.
     perform_protocol_deployment(
         &config.network_manifest,
         &config.deployment,
@@ -439,7 +438,9 @@ pub async fn start_chains_coordinator(
             ObserverEvent::StacksChainEvent(chain_event) => {
                 if should_deploy_protocol {
                     if let Some(block_identifier) = chain_event.get_latest_block_identifier() {
-                        if block_identifier.index == starting_block_height {
+                        // When booting from a snapshot, the first block observed is the
+                        // one right after the snapshot tip, hence `>=` rather than `==`.
+                        if block_identifier.index >= starting_block_height {
                             should_deploy_protocol = false;
                             if let Some(deployment_commands_tx) = deployment_commands_tx.take() {
                                 deployment_commands_tx
@@ -635,7 +636,6 @@ pub fn perform_protocol_deployment(
             deployment,
             deployment_event_tx,
             deployment_command_rx,
-            false,
             override_bitcoin_rpc_url,
             override_stacks_rpc_url,
         );

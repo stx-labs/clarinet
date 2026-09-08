@@ -27,6 +27,7 @@ use stacks_codec::transaction::{
 use stacks_common::address::{
     AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
 };
+use stacks_rpc_client::rpc_client::RpcError;
 use stacks_rpc_client::StacksRpc;
 
 mod bitcoin_deployment;
@@ -341,12 +342,59 @@ pub fn update_deployment_costs(
     Ok(())
 }
 
+/// How many times (one second apart) a node RPC call is retried while the
+/// deployment is being prepared. The node is expected to be running by then,
+/// but its RPC endpoint can lag behind the first block events by a few seconds.
+const NODE_RPC_RETRIES: usize = 30;
+
+/// Return the nonce to use for the next transaction issued by `address`.
+///
+/// The first nonce of each account is read from the node, so that accounts which
+/// already transacted (e.g. in a devnet snapshot) start from their actual nonce.
+/// Subsequent nonces are derived from the cache.
+fn next_nonce(
+    cached_nonces: &mut BTreeMap<String, u64>,
+    stacks_rpc: &StacksRpc,
+    address: &str,
+) -> Result<u64, String> {
+    let nonce = match cached_nonces.get(address) {
+        Some(nonce) => *nonce,
+        None => stacks_rpc
+            .call_with_retry(|rpc| rpc.get_nonce(address), NODE_RPC_RETRIES)
+            .map_err(|e| format!("unable to retrieve nonce for {address}: {e}"))?,
+    };
+    cached_nonces.insert(address.to_string(), nonce + 1);
+    Ok(nonce)
+}
+
+/// Whether `deployer.contract_name` already exists on the target node.
+///
+/// A 404 is a definitive "not published"; any other failure (node not reachable
+/// yet, transient error) is retried before giving up.
+fn is_contract_published(
+    stacks_rpc: &StacksRpc,
+    deployer: &str,
+    contract_name: &str,
+) -> Result<bool, String> {
+    stacks_rpc
+        .call_with_retry(
+            |rpc| match rpc.get_contract_source(deployer, contract_name) {
+                Ok(_) => Ok(true),
+                Err(RpcError::StatusCode(404)) => Ok(false),
+                Err(e) => Err(e),
+            },
+            NODE_RPC_RETRIES,
+        )
+        .map_err(|e| {
+            format!("unable to check whether {deployer}.{contract_name} is published: {e}")
+        })
+}
+
 pub fn apply_on_chain_deployment(
     network_manifest: NetworkManifest,
     deployment: DeploymentSpecification,
     deployment_event_tx: Sender<DeploymentEvent>,
     deployment_command_rx: Receiver<DeploymentCommand>,
-    fetch_initial_nonces: bool,
     override_bitcoin_rpc_url: Option<String>,
     override_stacks_rpc_url: Option<String>,
 ) {
@@ -364,11 +412,6 @@ pub fn apply_on_chain_deployment(
     let mut accounts_cached_nonces: BTreeMap<String, u64> = BTreeMap::new();
     let mut stx_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
     let mut btc_accounts_lookup: BTreeMap<String, &AccountConfig> = BTreeMap::new();
-    if !fetch_initial_nonces {
-        for account in network_manifest.accounts.values() {
-            accounts_cached_nonces.insert(account.stx_address.clone(), 0);
-        }
-    }
 
     for account in network_manifest.accounts.values() {
         stx_accounts_lookup.insert(account.stx_address.clone(), account);
@@ -393,6 +436,16 @@ pub fn apply_on_chain_deployment(
             .expect("unable to get bitcoin node rcp address")
     };
 
+    // Wait for the go-ahead before encoding anything: nonces and the set of
+    // already published requirements are read from the node, so it must be
+    // reachable. On devnet this is signalled once the chain is producing blocks.
+    let Ok(_cmd) = deployment_command_rx.recv() else {
+        let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(
+            "deployment aborted - broken channel".to_string(),
+        ));
+        return;
+    };
+
     // Phase 1: we traverse the deployment plan and encode all the transactions,
     // keeping the order.
     // Using a session to encode + coerce/check (todo) contract calls arguments.
@@ -407,12 +460,15 @@ pub fn apply_on_chain_deployment(
             let tracker = match transaction {
                 TransactionSpecification::StxTransfer(tx) => {
                     let issuer_address = tx.expected_sender.to_address();
-                    let nonce = match accounts_cached_nonces.get(&issuer_address) {
-                        Some(cached_nonce) => *cached_nonce,
-                        None => stacks_rpc
-                            .get_nonce(&issuer_address)
-                            .expect("Unable to retrieve account"),
-                    };
+                    let nonce =
+                        match next_nonce(&mut accounts_cached_nonces, &stacks_rpc, &issuer_address)
+                        {
+                            Ok(nonce) => nonce,
+                            Err(e) => {
+                                let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(e));
+                                return;
+                            }
+                        };
                     let account = stx_accounts_lookup.get(&issuer_address).unwrap();
 
                     let anchor_mode = match tx.anchor_block_only {
@@ -439,7 +495,6 @@ pub fn apply_on_chain_deployment(
                         }
                     };
 
-                    accounts_cached_nonces.insert(issuer_address.clone(), nonce + 1);
                     let name = format!(
                         "STX transfer ({}µSTX from {} to {})",
                         tx.mstx_amount, issuer_address, tx.recipient,
@@ -488,12 +543,15 @@ pub fn apply_on_chain_deployment(
                 }
                 TransactionSpecification::ContractCall(tx) => {
                     let issuer_address = tx.expected_sender.to_address();
-                    let nonce = match accounts_cached_nonces.get(&issuer_address) {
-                        Some(cached_nonce) => *cached_nonce,
-                        None => stacks_rpc
-                            .get_nonce(&issuer_address)
-                            .expect("Unable to retrieve account"),
-                    };
+                    let nonce =
+                        match next_nonce(&mut accounts_cached_nonces, &stacks_rpc, &issuer_address)
+                        {
+                            Ok(nonce) => nonce,
+                            Err(e) => {
+                                let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(e));
+                                return;
+                            }
+                        };
                     let account = stx_accounts_lookup.get(&issuer_address).unwrap();
 
                     let mut function_args = vec![];
@@ -542,7 +600,6 @@ pub fn apply_on_chain_deployment(
                         }
                     };
 
-                    accounts_cached_nonces.insert(issuer_address.clone(), nonce + 1);
                     let name = format!(
                         "Call ({} {} {})",
                         tx.contract_id,
@@ -559,12 +616,15 @@ pub fn apply_on_chain_deployment(
                 TransactionSpecification::ContractPublish(tx) => {
                     // Retrieve nonce for issuer
                     let issuer_address = tx.expected_sender.to_address();
-                    let nonce = match accounts_cached_nonces.get(&issuer_address) {
-                        Some(cached_nonce) => *cached_nonce,
-                        None => stacks_rpc
-                            .get_nonce(&issuer_address)
-                            .expect("Unable to retrieve account"),
-                    };
+                    let nonce =
+                        match next_nonce(&mut accounts_cached_nonces, &stacks_rpc, &issuer_address)
+                        {
+                            Ok(nonce) => nonce,
+                            Err(e) => {
+                                let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(e));
+                                return;
+                            }
+                        };
                     let account = stx_accounts_lookup.get(&issuer_address).unwrap();
                     let source = if matches!(
                         deployment.network,
@@ -607,7 +667,6 @@ pub fn apply_on_chain_deployment(
                         }
                     };
 
-                    accounts_cached_nonces.insert(issuer_address.clone(), nonce + 1);
                     let name = format!("Publish {}.{}", tx.expected_sender, tx.contract_name);
                     let check = TransactionCheck::ContractPublish(
                         tx.expected_sender.clone(),
@@ -631,25 +690,33 @@ pub fn apply_on_chain_deployment(
                     .to_string();
                     contracts_ids_to_remap.insert((old_contract_id, new_contract_id));
 
-                    // Testnet handling: don't re-deploy previously deployed contracts
-                    if matches!(deployment.network, StacksNetwork::Testnet) {
-                        let res = stacks_rpc.get_contract_source(
-                            &tx.remap_sender.to_address(),
-                            &tx.contract_id.name.to_string(),
-                        );
-                        if let Ok(_contract) = res {
-                            continue;
+                    // Don't re-deploy requirements already published on the target
+                    // network, e.g. by a previous run on testnet, or as part of the
+                    // devnet snapshot.
+                    match is_contract_published(
+                        &stacks_rpc,
+                        &tx.remap_sender.to_address(),
+                        &tx.contract_id.name,
+                    ) {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(e) => {
+                            let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(e));
+                            return;
                         }
                     }
 
                     // Retrieve nonce for issuer
                     let issuer_address = tx.remap_sender.to_address();
-                    let nonce = match accounts_cached_nonces.get(&issuer_address) {
-                        Some(cached_nonce) => *cached_nonce,
-                        None => stacks_rpc
-                            .get_nonce(&issuer_address)
-                            .expect("Unable to retrieve account"),
-                    };
+                    let nonce =
+                        match next_nonce(&mut accounts_cached_nonces, &stacks_rpc, &issuer_address)
+                        {
+                            Ok(nonce) => nonce,
+                            Err(e) => {
+                                let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(e));
+                                return;
+                            }
+                        };
                     let account = stx_accounts_lookup.get(&issuer_address).unwrap();
 
                     // Remapping principals - This is happening
@@ -695,7 +762,6 @@ pub fn apply_on_chain_deployment(
                         }
                     };
 
-                    accounts_cached_nonces.insert(issuer_address.clone(), nonce + 1);
                     let name = format!("Publish {}.{}", tx.remap_sender, tx.contract_id.name);
                     let check = TransactionCheck::ContractPublish(
                         tx.remap_sender.clone(),
@@ -718,13 +784,6 @@ pub fn apply_on_chain_deployment(
 
         batches.push_back((epoch, batch));
     }
-
-    let Ok(_cmd) = deployment_command_rx.recv() else {
-        let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(
-            "deployment aborted - broken channel".to_string(),
-        ));
-        return;
-    };
 
     // Phase 2: we submit all the transactions previously encoded,
     // and wait for their inclusion in a block before moving to the next batch.
