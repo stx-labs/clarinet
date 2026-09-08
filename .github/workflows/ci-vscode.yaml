@@ -60,6 +60,37 @@ jobs:
         working-directory: ./components/clarity-vscode
         run: pnpm run lint
 
+  dap_adapter:
+    name: DAP adapter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        working-directory: ./components/clarity-vscode
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm test` builds only the two browser bundles (rspack.config.dev.js),
+      # so debug/debug.ts is otherwise never compiled in CI. This step covers it.
+      - name: Build the debug adapter
+        working-directory: ./components/clarity-vscode
+        run: pnpm run build:dap
+
+      - name: Test the debug adapter
+        working-directory: ./components/clarity-vscode
+        run: pnpm run test:dap
+
   build_and_test:
     name: Build and test
     runs-on: ubuntu-latest

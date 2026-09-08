@@ -178,6 +178,16 @@ impl DebugState {
         }
     }
 
+    /// Reset execution state for a new call while preserving breakpoints and watchpoints.
+    /// Used by the DAP server when debugging successive calls from a test runner.
+    pub fn reset_for_new_call(&mut self, contract_id: &QualifiedContractIdentifier, snippet: &str) {
+        self.active_breakpoints.clear();
+        self.state = State::Continue;
+        self.stack.clear();
+        self.debug_cmd_contract = contract_id.clone();
+        self.debug_cmd_source = snippet.to_string();
+    }
+
     fn get_unique_id(&mut self) -> usize {
         self.unique_id += 1;
         self.unique_id
