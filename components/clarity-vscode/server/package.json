@@ -11,8 +11,10 @@
     "type": "git",
     "url": "https://github.com/stx-labs/clarinet"
   },
+  "devDependencies": {
+    "@types/node": "26.4.0"
+  },
   "dependencies": {
-    "node-fetch": "3.3.2",
     "vscode-languageserver": "10.1.1"
   },
   "scripts": {}

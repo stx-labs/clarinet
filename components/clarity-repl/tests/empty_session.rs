@@ -1,6 +1,7 @@
 use clarity::types::StacksEpochId;
 use clarity::util::hash::hex_bytes;
 use clarity::vm::{ClarityVersion, EvaluationResult, Value};
+use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::{self, ClarityContract, Session, SessionSettings};
 use indoc::indoc;
 
@@ -84,7 +85,7 @@ fn it_handles_clarity2_block_height_in_epoch3() {
         epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
         skip_analysis: false,
     };
-    let result = session.deploy_contract(&contract, false, None);
+    let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
     assert!(result.is_ok());
 
     let snippet = format!("(contract-call? '{deployer}.gbh get-block-height)");
@@ -124,7 +125,7 @@ fn it_handles_clarity2_get_block_info_in_epoch2() {
         epoch: repl::Epoch::Specific(StacksEpochId::Epoch24),
         skip_analysis: false,
     };
-    let result = session.deploy_contract(&contract, false, None);
+    let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
     assert!(result.is_ok());
 
     let snippet = format!("(contract-call? '{deployer}.gbh get-block-hash u9)");
@@ -172,7 +173,7 @@ fn it_handles_clarity2_get_block_info_in_epoch3() {
         epoch: repl::Epoch::Specific(StacksEpochId::Epoch32),
         skip_analysis: false,
     };
-    let result = session.deploy_contract(&contract, false, None);
+    let result = session.deploy_contract(&contract, false, None, PostConditionCheck::Unchecked);
     assert!(result.is_ok());
 
     let snippet = format!("(contract-call? '{deployer}.gbh get-block-hash u41)");

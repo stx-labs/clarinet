@@ -40,8 +40,9 @@
     "clean": "rimraf dist",
     "compile": "tsc -b ./tsconfig.json ./tsconfig.cjs.json",
     "build": "pnpm run clean && pnpm run compile && node ./scripts/prepare-esm-package.js",
-    "pretest": "tsc -b ./tsconfig.json",
+    "pretest": "tsc -b ./tsconfig.json && pnpm run test:types",
     "test": "vitest run",
+    "test:types": "tsc -p ./type-tests/tsconfig.json",
     "test:no-mxs": "vitest run --exclude=tests/remote-data.test.ts",
     "prepublishOnly": "node ../../../scripts/require-pnpm.mjs && pnpm run build"
   },
