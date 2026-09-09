@@ -10,7 +10,7 @@ const address2 = accounts.get("wallet_2")!;
   The test below is an example. Learn more in the documentation: https://docs.stacks.co/clarinet/testing-with-clarinet-sdk
 */
 
-it("Ensure that counter can be incremented multiples times per block, across multiple blocks", () => {
+it("Ensure that counter can be incremented multiple times per block, across multiple blocks", () => {
   const block1 = simnet.mineBlock([
     tx.callPublicFn("counter", "increment", [Cl.uint(1)], address1),
     tx.callPublicFn("counter", "increment", [Cl.uint(4)], address2),
