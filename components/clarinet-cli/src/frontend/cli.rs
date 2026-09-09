@@ -57,6 +57,7 @@ use crate::deployments::{
 };
 use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
+use crate::frontend::dap::{run_dap, run_dap_server};
 use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
 use crate::lsp::run_lsp;
@@ -124,7 +125,22 @@ enum Command {
     Formatter(Formatter),
     /// Step by step debugging and breakpoints from your code editor (VSCode, vim, emacs, etc)
     #[clap(name = "dap", bin_name = "dap")]
-    DAP,
+    DAP(DapCommand),
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+struct DapCommand {
+    /// TCP port for the DAP client (e.g. VSCode) to attach to.
+    /// When set, `clarinet dap` runs as a persistent server instead of using stdio.
+    #[clap(long = "dap-port")]
+    pub dap_port: Option<u16>,
+    /// TCP port for the test-runner SDK client to connect to.
+    /// Defaults to `--dap-port + 1` when `--dap-port` is set.
+    #[clap(long = "sdk-port")]
+    pub sdk_port: Option<u16>,
+    /// Path to Clarinet.toml. Defaults to auto-detecting the manifest.
+    #[clap(long = "manifest-path", alias = "manifest", short = 'm')]
+    pub manifest_path: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1439,13 +1455,33 @@ pub fn main() {
             devnet_start(cmd, clarinetrc)
         }
         Command::LSP => run_lsp(),
-        Command::DAP => match super::dap::run_dap() {
-            Ok(_) => (),
-            Err(e) => {
-                eprintln!("{}", red!(e));
-                process::exit(1);
+        Command::DAP(cmd) => {
+            let result = match (cmd.sdk_port, cmd.dap_port) {
+                (None, None) => run_dap(),
+                (sdk_port, dap_port) => {
+                    // Server mode: either SDK-only (--sdk-port) or full attach (--dap-port + --sdk-port).
+                    let sdk_port = sdk_port
+                        .or_else(|| dap_port.and_then(|p| p.checked_add(1)))
+                        .unwrap_or_else(|| {
+                            eprintln!("{}", red!("--dap-port 65535 is too large to derive an sdk-port automatically; use --sdk-port to specify one explicitly"));
+                            process::exit(1);
+                        });
+                    let manifest_path = cmd
+                        .manifest_path
+                        .map(PathBuf::from)
+                        .or_else(|| get_manifest_location(None))
+                        .unwrap_or_else(|| PathBuf::from("Clarinet.toml"));
+                    run_dap_server(dap_port, sdk_port, manifest_path)
+                }
+            };
+            match result {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("{}", red!(e));
+                    process::exit(1);
+                }
             }
-        },
+        }
         Command::Formatter(cmd) => {
             eprintln!(
                 "{}",

@@ -51,7 +51,7 @@
 (define-public (withdraw (amount uint))
   (begin
     (asserts! (is-eq tx-sender OWNER) (err u1))
-    (stx-transfer? amount (as-contract tx-sender) OWNER)
+    (as-contract (stx-transfer? amount tx-sender OWNER))
   )
 )
 

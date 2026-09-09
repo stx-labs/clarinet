@@ -22,7 +22,8 @@ use bollard::Docker;
 use clarinet_deployments::types::BurnchainEpochConfig;
 use clarinet_files::{
     DevnetConfig, DevnetConfigFile, NetworkManifest, ProjectManifest, StacksNetwork,
-    DEFAULT_DOCKER_PLATFORM, DEFAULT_POX_PREPARE_LENGTH, DEFAULT_POX_REWARD_LENGTH,
+    StacksNodeEventObserver, DEFAULT_DOCKER_PLATFORM, DEFAULT_POX_PREPARE_LENGTH,
+    DEFAULT_POX_REWARD_LENGTH,
 };
 use clarity::types::chainstate::StacksPrivateKey;
 use clarity::types::PrivateKey;
@@ -30,6 +31,7 @@ use futures::stream::TryStreamExt;
 use hiro_system_kit::slog;
 use indoc::formatdoc;
 use observer::utils::Context;
+use serde::Serialize;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
 use crate::command::run_docker_command;
@@ -38,6 +40,64 @@ use crate::event::{send_status_update, DevnetEvent, Status};
 const BITCOIND_DATA_DIR: &str = "/home/bitcoin/.bitcoin";
 
 const DOCKER_ERR_MSG: &str = "unable to get docker client";
+
+#[derive(Serialize)]
+struct StacksNodeEventObserversConfig<'a> {
+    events_observer: &'a [StacksNodeEventObserver],
+}
+
+fn serialize_stacks_node_event_observers(
+    observers: &[StacksNodeEventObserver],
+) -> Result<String, String> {
+    if observers.is_empty() {
+        return Ok(String::new());
+    }
+
+    toml::to_string(&StacksNodeEventObserversConfig {
+        events_observer: observers,
+    })
+    .map_err(|e| format!("unable to serialize Stacks node event observers: {e:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_selective_stacks_node_event_observers() {
+        let observers = vec![
+            StacksNodeEventObserver {
+                endpoint: "host.docker.internal:8787".into(),
+                events_keys: vec!["burn_blocks".into(), "memtx".into()],
+            },
+            StacksNodeEventObserver {
+                endpoint: "host.docker.internal:8788".into(),
+                events_keys: vec![
+                    "ST000000000000000000002AMW42H.token::mint".into(),
+                    "ST000000000000000000002AMW42H.token.asset".into(),
+                ],
+            },
+        ];
+
+        let serialized = serialize_stacks_node_event_observers(&observers).unwrap();
+        let config = stackslib::config::ConfigFile::from_str(&serialized).unwrap();
+        let parsed = config.events_observer.unwrap();
+
+        assert_eq!(parsed.len(), 2);
+        for observer in observers {
+            let parsed_observer = parsed
+                .iter()
+                .find(|candidate| candidate.endpoint == observer.endpoint)
+                .unwrap();
+            assert_eq!(parsed_observer.events_keys, observer.events_keys);
+        }
+    }
+
+    #[test]
+    fn omits_empty_stacks_node_event_observer_config() {
+        assert_eq!(serialize_stacks_node_event_observers(&[]).unwrap(), "");
+    }
+}
 
 #[derive(Debug)]
 pub struct DevnetOrchestrator {
@@ -953,15 +1013,9 @@ impl DevnetOrchestrator {
             ));
         }
 
-        for chains_coordinator in devnet_config.stacks_node_events_observers.iter() {
-            stacks_conf.push_str(&formatdoc!(
-                r#"
-                [[events_observer]]
-                endpoint = "{chains_coordinator}"
-                events_keys = ["*"]
-                "#,
-            ));
-        }
+        stacks_conf.push_str(&serialize_stacks_node_event_observers(
+            &devnet_config.stacks_node_events_observers,
+        )?);
 
         stacks_conf.push_str(&formatdoc!(
             r#"
