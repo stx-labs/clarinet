@@ -22,7 +22,6 @@ use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, Dep
 use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, BOOT_CONTRACTS_DATA, SBTC_BOOT_CONTRACTS,
     SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
-    SBTC_TOKEN_MAINNET_ADDRESS,
 };
 use clarity_repl::repl::clarity_values::value_to_string;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
@@ -792,8 +791,16 @@ pub async fn generate_default_deployment_with_cache(
         let Some(source) = sources.get(contract_location.to_string_lossy().as_ref()) else {
             continue;
         };
+        let source = if environment == Environment::OnChain {
+            match remove_env_simnet(source) {
+                Ok(Some(clean)) => clean,
+                _ => source.clone(),
+            }
+        } else {
+            source.clone()
+        };
         let contract = ClarityContract {
-            code_source: ClarityCodeSource::ContractInMemory(source.clone()),
+            code_source: ClarityCodeSource::ContractInMemory(source),
             deployer: ContractDeployer::Address(deployer_account.stx_address.clone()),
             name: name.clone(),
             clarity_version: contract_config.clarity_version,
@@ -806,39 +813,27 @@ pub async fn generate_default_deployment_with_cache(
 
     // Collect external contract references that aren't boot contracts or user contracts.
     // These become auto-detected requirements.
-    let auto_detected: Vec<QualifiedContractIdentifier> =
+    let (inferable, non_inferable) =
         match ASTDependencyDetector::detect_dependencies(&user_contract_asts, &requirements_data) {
-            Ok(dependencies) => dependencies.keys().cloned().collect(),
-            Err((inferable, non_inferable)) => {
-                let mut ids: Vec<QualifiedContractIdentifier> = inferable.keys().cloned().collect();
-                ids.extend(non_inferable);
-                ids
-            }
+            Ok(inferable) => (inferable, Vec::new()),
+            Err((inferable, non_inferable)) => (inferable, non_inferable),
         };
+    let auto_detected: BTreeSet<QualifiedContractIdentifier> = inferable
+        .values()
+        .flat_map(|dependencies| {
+            dependencies
+                .iter()
+                .map(|dependency| dependency.contract_id.clone())
+        })
+        .chain(non_inferable)
+        .filter(|contract_id| !boot_contracts_ids.contains(contract_id))
+        .collect();
 
     // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
     {
         let requirements = &manifest.project.requirements;
         let mut emulated_contracts_publish = HashMap::new();
         let mut requirements_publish = HashMap::new();
-
-        // Automatically add sbtc-deposit when sbtc-token is referenced (either
-        // explicitly or auto-detected) but sbtc-deposit is not.
-        let sbtc_token_str = SBTC_TOKEN_MAINNET_ADDRESS.to_string();
-        let sbtc_deposit_str = SBTC_DEPOSIT_MAINNET_ADDRESS.to_string();
-        let has_sbtc_token = requirements.iter().any(|r| r.contract_id == sbtc_token_str)
-            || auto_detected
-                .iter()
-                .any(|id| id.to_string() == sbtc_token_str);
-        let has_sbtc_deposit = requirements
-            .iter()
-            .any(|r| r.contract_id == sbtc_deposit_str)
-            || auto_detected
-                .iter()
-                .any(|id| id.to_string() == sbtc_deposit_str);
-        if has_sbtc_token && !has_sbtc_deposit {
-            queue.push_front(QualifiedContractIdentifier::parse(&sbtc_deposit_str).unwrap());
-        }
 
         // Seed queue with auto-detected deps not already in the explicit requirements.
         let explicit_ids: HashSet<QualifiedContractIdentifier> = requirements
@@ -886,15 +881,21 @@ pub async fn generate_default_deployment_with_cache(
             let (clarity_version, ast) = match cached_requirement {
                 Some(requirement_data) => requirement_data,
                 None => {
-                    // Download the code
+                    // Download the code. Missing inferred requirements are left
+                    // for the full contract analysis pass to diagnose.
                     let (source, epoch, clarity_version, contract_location) =
-                        requirements::retrieve_contract(
+                        match requirements::retrieve_contract(
                             &contract_id,
                             &manifest.project.cache_location,
                             &file_accessor,
                             api_base_url,
                         )
-                        .await?;
+                        .await
+                        {
+                            Ok(contract) => contract,
+                            Err(error) if explicit_ids.contains(&contract_id) => return Err(error),
+                            Err(_) => continue,
+                        };
 
                     contract_epochs.insert(contract_id.clone(), epoch);
 
