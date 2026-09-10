@@ -41,6 +41,29 @@ impl MockStacksRpc {
             .create()
     }
 
+    pub fn get_contract_source_mock(&mut self, deployer: &str, contract_name: &str) -> Mock {
+        self.client
+            .mock(
+                "GET",
+                format!("/v2/contracts/source/{deployer}/{contract_name}").as_str(),
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"source":"(define-read-only (noop) (ok true))","publish_height":1}"#)
+            .create()
+    }
+
+    pub fn contract_source_not_found_mock(&mut self, deployer: &str, contract_name: &str) -> Mock {
+        self.client
+            .mock(
+                "GET",
+                format!("/v2/contracts/source/{deployer}/{contract_name}").as_str(),
+            )
+            .with_status(404)
+            .with_body("No contract source data found")
+            .create()
+    }
+
     pub fn get_burn_block_mock(&mut self, burn_block_height: u64) -> Mock {
         self.client.mock("GET", format!("/extended/v2/burn-blocks/{burn_block_height}").as_str())
             .with_status(200)

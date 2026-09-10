@@ -181,15 +181,20 @@ impl StacksRpc {
     pub fn get_nonce(&self, address: &str) -> Result<u64, RpcError> {
         let request_url = format!("{}/v2/accounts/{addr}", self.url, addr = address,);
 
-        let res: Balance = self
+        let response = self
             .client
             .get(request_url)
             .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
+            .map_err(|e| RpcError::Message(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(RpcError::StatusCode(response.status().as_u16()));
+        }
+
+        let balance: Balance = response
             .json()
             .map_err(|e| RpcError::Message(e.to_string()))?;
-        let nonce = res.nonce;
-        Ok(nonce)
+        Ok(balance.nonce)
     }
 
     pub fn get_pox_info(&self) -> Result<PoxInfo, RpcError> {
@@ -214,11 +219,12 @@ impl StacksRpc {
             .map_err(|e| RpcError::Message(e.to_string()))
     }
 
+    /// `None` when the node has no contract at that identifier.
     pub fn get_contract_source(
         &self,
         principal: &str,
         contract_name: &str,
-    ) -> Result<Contract, RpcError> {
+    ) -> Result<Option<Contract>, RpcError> {
         let request_url = format!(
             "{}/v2/contracts/source/{}/{}",
             self.url, principal, contract_name
@@ -230,12 +236,16 @@ impl StacksRpc {
             .send()
             .map_err(|e| RpcError::Message(e.to_string()))?;
 
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
         if !response.status().is_success() {
             return Err(RpcError::StatusCode(response.status().as_u16()));
         }
 
         response
             .json()
+            .map(Some)
             .map_err(|e| RpcError::Message(e.to_string()))
     }
 
