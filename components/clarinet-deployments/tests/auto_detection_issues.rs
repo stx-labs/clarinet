@@ -233,6 +233,65 @@ async fn env_simnet_dependencies_stay_off_chain() {
     );
 }
 
+/// Loading an external callee's signature must reveal its trait argument dependencies.
+///
+/// The initial scan discovers `callee`, but cannot identify `implementation` as
+/// a dependency until it knows that `take` accepts a trait argument. Loading
+/// `callee` does not currently trigger another scan of the user contract, so the
+/// generated plan omits `implementation`.
+///
+/// Re-scan user contracts after loading requirements, repeating discovery and
+/// loading until no new dependencies are found. Track failed resolutions too,
+/// so an unavailable dependency cannot keep this process running indefinitely.
+#[tokio::test]
+async fn external_trait_argument_is_auto_detected_after_loading_callee() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // Neither external contract is explicitly declared. The type of the second
+    // contract literal is only known once the callee's source has been loaded.
+    write_project(
+        root,
+        &formatdoc!(
+            "
+            (define-public (go)
+              (contract-call? '{EXTERNAL_DEPLOYER}.callee take
+                '{EXTERNAL_DEPLOYER}.implementation))
+            "
+        ),
+        "",
+    );
+
+    let server = mock_contracts(&[
+        (
+            EXTERNAL_DEPLOYER,
+            "callee",
+            "(define-trait reader ((get-one () (response uint uint))))
+             (define-public (take (target <reader>))
+               (contract-call? target get-one))",
+        ),
+        (
+            EXTERNAL_DEPLOYER,
+            "implementation",
+            "(impl-trait .callee.reader)
+             (define-read-only (get-one) (ok u1))",
+        ),
+    ])
+    .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.callee")),
+        "the directly called external contract should be published; got {published:?}"
+    );
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.implementation")),
+        "loading the callee should reveal that its trait argument is another \
+         requirement to publish; got {published:?}"
+    );
+}
+
 /// Declaring an sBTC token requirement does not imply unrelated requirements.
 #[tokio::test]
 async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
