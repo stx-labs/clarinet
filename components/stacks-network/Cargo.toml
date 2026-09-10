@@ -16,7 +16,6 @@ yaml_serde = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3.20"
 tracing-appender = "0.2.0"
-ctrlc = "3.1.9"
 reqwest = { workspace = true, features = ["blocking"] }
 crossbeam-channel = { workspace = true }
 crossterm = { workspace = true }
@@ -41,17 +40,18 @@ clarinet-files = { path = "../clarinet-files" }
 clarinet-deployments = { path = "../clarinet-deployments" }
 hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
 observer = { path = "../observer" }
-libc = "0.2.173"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = { workspace = true, features = ["iterator"] }
+
+[target.'cfg(not(unix))'.dependencies]
+ctrlc = "3.1.9"
 
 [features]
 default = []
 stacks-signers = ["observer/stacks-signers"]
 
 [dev-dependencies]
-test-case = { workspace = true }
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 
 [lib]
