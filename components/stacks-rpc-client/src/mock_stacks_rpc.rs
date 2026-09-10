@@ -1,3 +1,5 @@
+use clarity::util::hash::bytes_to_hex;
+use clarity::vm::Value;
 use mockito::{Mock, ServerGuard};
 use serde_json::json;
 
@@ -41,11 +43,65 @@ impl MockStacksRpc {
             .create()
     }
 
+    pub fn get_contract_source_mock(&mut self, deployer: &str, contract_name: &str) -> Mock {
+        self.json_mock(
+            &format!("/v2/contracts/source/{deployer}/{contract_name}"),
+            200,
+            r#"{"source":"(define-read-only (noop) (ok true))","publish_height":1}"#,
+        )
+    }
+
+    fn json_mock(&mut self, path: &str, status: usize, body: &str) -> Mock {
+        self.client
+            .mock("GET", path)
+            .with_status(status)
+            .with_header("content-type", "application/json")
+            .with_body(body)
+            .create()
+    }
+
+    pub fn sbtc_balance_mock(&mut self, deployer: &str, balance: u128) -> Mock {
+        let result = Value::okay(Value::UInt(balance)).unwrap();
+        let encoded = bytes_to_hex(&result.serialize_to_vec().unwrap());
+        self.client
+            .mock(
+                "POST",
+                format!("/v2/contracts/call-read/{deployer}/sbtc-token/get-balance").as_str(),
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(r#"{{"okay":true,"result":"0x{encoded}"}}"#))
+            .create()
+    }
+
+    pub fn contract_source_not_found_mock(&mut self, deployer: &str, contract_name: &str) -> Mock {
+        self.json_mock(
+            &format!("/v2/contracts/source/{deployer}/{contract_name}"),
+            404,
+            "No contract source data found",
+        )
+    }
+
     pub fn get_burn_block_mock(&mut self, burn_block_height: u64) -> Mock {
         self.client.mock("GET", format!("/extended/v2/burn-blocks/{burn_block_height}").as_str())
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(format!(r#"{{"burn_block_time":1234567890,"burn_block_hash":"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef","burn_block_height":{burn_block_height}}}"#))
+            .create()
+    }
+
+    /// Matches only a body carrying `amount` as a serialized Clarity uint.
+    pub fn tx_carrying_amount_mock(&mut self, amount: u128, tx_id: &str) -> Mock {
+        let needle = Value::UInt(amount).serialize_to_vec().unwrap();
+        self.client
+            .mock("POST", "/v2/transactions")
+            .match_request(move |request| {
+                let body = request.body().unwrap();
+                body.windows(needle.len()).any(|window| window == needle)
+            })
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(r#""{tx_id}""#))
             .create()
     }
 

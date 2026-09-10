@@ -4,6 +4,7 @@ use clarity::codec::StacksMessageCodec;
 use clarity::util::hash::{bytes_to_hex, hex_bytes, to_hex};
 use clarity::vm::types::Value;
 use reqwest::blocking::Client;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 #[cfg(any(test, feature = "mock"))]
 use serde::Serialize;
@@ -15,6 +16,12 @@ pub enum RpcError {
     Generic,
     StatusCode(u16),
     Message(String),
+}
+
+impl From<reqwest::Error> for RpcError {
+    fn from(e: reqwest::Error) -> Self {
+        RpcError::Message(e.to_string())
+    }
 }
 
 impl std::fmt::Display for RpcError {
@@ -139,14 +146,7 @@ impl StacksRpc {
         let tx = transaction_payload.serialize_to_vec();
         let payload = json!({ "transaction_payload": to_hex(&tx) });
         let path = format!("{}/v2/fees/transaction", self.url);
-        let res: FeeEstimationReport = self
-            .client
-            .post(path)
-            .json(&payload)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
+        let res: FeeEstimationReport = self.client.post(path).json(&payload).send()?.json()?;
 
         Ok(res.estimations[priority].fee)
     }
@@ -162,8 +162,7 @@ impl StacksRpc {
             .post(path)
             .header("Content-Type", "application/octet-stream")
             .body(tx)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
+            .send()?;
 
         if !res.status().is_success() {
             let err = match res.text() {
@@ -178,60 +177,46 @@ impl StacksRpc {
         Ok(res)
     }
 
-    pub fn get_nonce(&self, address: &str) -> Result<u64, RpcError> {
-        let request_url = format!("{}/v2/accounts/{addr}", self.url, addr = address,);
+    fn get_json<T: DeserializeOwned>(&self, request_url: String) -> Result<T, RpcError> {
+        let response = self.client.get(request_url).send()?;
 
-        let res: Balance = self
-            .client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
+        if !response.status().is_success() {
+            return Err(RpcError::StatusCode(response.status().as_u16()));
+        }
+
+        response
             .json()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
-        let nonce = res.nonce;
-        Ok(nonce)
+            .map_err(|e| RpcError::Message(e.to_string()))
+    }
+
+    pub fn get_nonce(&self, address: &str) -> Result<u64, RpcError> {
+        let balance: Balance = self.get_json(format!("{}/v2/accounts/{address}", self.url))?;
+        Ok(balance.nonce)
     }
 
     pub fn get_pox_info(&self) -> Result<PoxInfo, RpcError> {
-        let request_url = format!("{}/v2/pox", self.url);
-
-        self.client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json::<PoxInfo>()
-            .map_err(|e| RpcError::Message(e.to_string()))
+        self.get_json(format!("{}/v2/pox", self.url))
     }
 
     pub fn get_info(&self) -> Result<NodeInfo, RpcError> {
-        let request_url = format!("{}/v2/info", self.url);
-
-        self.client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json::<NodeInfo>()
-            .map_err(|e| RpcError::Message(e.to_string()))
+        self.get_json(format!("{}/v2/info", self.url))
     }
 
+    /// `None` when the node has no contract at that identifier.
     pub fn get_contract_source(
         &self,
         principal: &str,
         contract_name: &str,
-    ) -> Result<Contract, RpcError> {
+    ) -> Result<Option<Contract>, RpcError> {
         let request_url = format!(
             "{}/v2/contracts/source/{}/{}",
             self.url, principal, contract_name
         );
 
-        let res = self.client.get(request_url).send();
-
-        match res {
-            Ok(response) => match response.json() {
-                Ok(value) => Ok(value),
-                Err(e) => Err(RpcError::Message(e.to_string())),
-            },
-            Err(e) => Err(RpcError::Message(e.to_string())),
+        match self.get_json(request_url) {
+            Ok(contract) => Ok(Some(contract)),
+            Err(RpcError::StatusCode(404)) => Ok(None),
+            Err(e) => Err(e),
         }
     }
 
@@ -259,8 +244,7 @@ impl StacksRpc {
                 "sender": sender,
                 "arguments": arguments,
             }))
-            .send()
-            .unwrap();
+            .send()?;
 
         if !res.status().is_success() {
             let error = match res.text() {
@@ -276,16 +260,15 @@ impl StacksRpc {
             result: String,
         }
 
-        let response: ReadOnlyCallResult = res.json().unwrap();
+        let response: ReadOnlyCallResult = res.json()?;
         if response.okay {
-            // Removing the 0x prefix
-            let raw_value = match response.result.strip_prefix("0x") {
-                Some(raw_value) => raw_value,
-                _ => panic!(),
-            };
-            let bytes = hex_bytes(raw_value).unwrap();
-            let mut cursor = Cursor::new(&bytes);
-            let value = Value::consensus_deserialize(&mut cursor).unwrap();
+            let raw_value = response
+                .result
+                .strip_prefix("0x")
+                .ok_or_else(|| RpcError::Message("result is not 0x-prefixed".into()))?;
+            let bytes = hex_bytes(raw_value).map_err(|e| RpcError::Message(e.to_string()))?;
+            let value = Value::consensus_deserialize(&mut Cursor::new(&bytes))
+                .map_err(|e| RpcError::Message(e.to_string()))?;
             Ok(value)
         } else {
             Err(RpcError::Generic)
@@ -293,13 +276,7 @@ impl StacksRpc {
     }
 
     pub fn get_burn_block(&self, height: u32) -> Result<BurnBlock, RpcError> {
-        let request_url = format!("{}/extended/v2/burn-blocks/{}", self.url, height);
-        self.client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json()
-            .map_err(|e| RpcError::Message(e.to_string()))
+        self.get_json(format!("{}/extended/v2/burn-blocks/{height}", self.url))
     }
 
     pub fn call_with_retry<T, F>(&self, mut func: F, retries: usize) -> Result<T, RpcError>

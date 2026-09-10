@@ -68,6 +68,7 @@ export const clientOpts: LanguageClientOptions = {
   progressOnInitialization: false,
   traceOutputChannel: vscode.window.createOutputChannel(
     "Clarity Language Server Trace",
+    { log: true },
   ),
   initializationOptions: JSON.stringify(getConfig()),
 };

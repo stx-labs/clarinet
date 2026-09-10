@@ -81,7 +81,7 @@ jobs:
       - name: Publish to VSCode Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_TOKEN }}
-        run: npx -y @vscode/vsce@3.9.1 publish --packagePath clarity.vsix --pat "$VSCE_PAT"
+        run: npx -y @vscode/vsce@3.9.2 publish --packagePath clarity.vsix --pat "$VSCE_PAT"
 
   publish-open-vsx:
     name: Publish to Open VSX
@@ -107,4 +107,4 @@ jobs:
       - name: Publish to Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
-        run: npx -y ovsx@0.10.12 publish --packagePath clarity.vsix --pat "$OVSX_PAT"
+        run: npx -y ovsx@1.1.1 publish --packagePath clarity.vsix --pat "$OVSX_PAT"

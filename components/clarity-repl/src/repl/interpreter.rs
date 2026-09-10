@@ -29,6 +29,7 @@ use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvaluationResult,
     ExecutionResult, ParsedContract, SnippetEvaluationResult,
 };
+use clarity_types::effects::AssetMap;
 use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
@@ -42,6 +43,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind};
 use crate::analysis::ast_dependency_detector::{ASTDependencyDetector, Dependency};
 use crate::analysis::{self, LintDiagnostic};
 use crate::repl::datastore::{ClarityDatastore, Datastore};
+use crate::repl::post_conditions::PostConditionCheck;
 use crate::repl::session::AnnotatedExecutionResult;
 use crate::repl::Settings;
 
@@ -122,8 +124,9 @@ impl NonceCharge {
             .map_err(|e| format!("failed to set nonce for {principal}: {e}"))
     }
 
-    /// Commit only the charge after an included execution failure.
-    /// `GlobalContext::execute` has already rolled back the nested execution.
+    /// Commit only the charge, for an included failure whose state changes the
+    /// caller has already discarded. Expects an open transaction holding
+    /// nothing but the charge.
     fn commit_alone(&self, global_context: &mut GlobalContext) -> Result<(), String> {
         self.apply(&mut global_context.database)?;
         global_context
@@ -131,6 +134,93 @@ impl NonceCharge {
             .map(|_| ())
             .map_err(|e| format!("failed to commit nonce: {e}"))
     }
+}
+
+/// Transaction-level obligations applied after executing a payload.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TransactionTerms {
+    /// The sender nonce this execution consumes.
+    pub charge: NonceCharge,
+    /// The constraint on this execution's asset movement.
+    pub post_conditions: PostConditionCheck,
+}
+
+impl TransactionTerms {
+    /// Commit a valid payload, or roll back a post-condition violation while
+    /// still charging the nonce of the included transaction.
+    fn settle(
+        &self,
+        global_context: &mut GlobalContext,
+        epoch: StacksEpochId,
+    ) -> Result<Settlement, String> {
+        // Preserve the pre-existing path when enforcement is disabled.
+        let violation = match &self.post_conditions {
+            PostConditionCheck::Unchecked => None,
+            checked => {
+                let asset_map = global_context
+                    .get_readonly_asset_map()
+                    .map_err(|e| format!("failed to read the asset map: {e}"))?;
+                checked
+                    .evaluate(asset_map, epoch)?
+                    .map(|reason| (reason, asset_map.clone()))
+            }
+        };
+
+        if let Some((reason, assets_modified)) = violation {
+            global_context
+                .roll_back()
+                .map_err(|e| format!("failed to roll back an aborted transaction: {e}"))?;
+            global_context.begin();
+            self.charge.commit_alone(global_context)?;
+            return Ok(Settlement::Aborted {
+                reason,
+                assets_modified: Box::new(assets_modified),
+            });
+        }
+
+        self.charge.apply(&mut global_context.database)?;
+        global_context
+            .commit()
+            .map(|_| Settlement::Committed)
+            .map_err(|e| format!("failed to commit: {e}"))
+    }
+}
+
+/// How an execution's database transaction was settled.
+#[derive(Debug)]
+enum Settlement {
+    /// The payload and the nonce both committed.
+    Committed,
+    /// The payload was rolled back and only its nonce committed.
+    Aborted {
+        reason: String,
+        assets_modified: Box<AssetMap>,
+    },
+}
+
+fn post_condition_abort(
+    output: Option<Value>,
+    assets_modified: AssetMap,
+    tx_events: Vec<StacksTransactionEvent>,
+    reason: String,
+) -> ClarityError {
+    ClarityError::AbortedByCallback {
+        output: output.map(Box::new),
+        assets_modified: Box::new(assets_modified),
+        tx_events,
+        reason,
+    }
+}
+
+/// Report a failed execution to the eval hooks, leaving them installed.
+fn notify_hooks_of_failure(global_context: &mut GlobalContext, error: &str) {
+    let Some(mut eval_hooks) = global_context.eval_hooks.take() else {
+        return;
+    };
+    for hook in eval_hooks.iter_mut() {
+        hook.did_complete(Err(error.to_string()));
+    }
+    global_context.eval_hooks = Some(eval_hooks);
 }
 
 /// A failed `ClarityInterpreter::run`.
@@ -193,6 +283,9 @@ impl std::error::Error for ContractCallFailure {}
 pub enum ContractCallError {
     NoSuchContract(String),
     NoSuchFunction(String),
+    /// A post-condition rejected the call's asset movement. The message is
+    /// already phrased for the user by the upstream checker.
+    PostConditionAborted(String),
     Uncategorized(String),
 }
 
@@ -264,6 +357,9 @@ impl std::fmt::Display for ContractCallError {
             ContractCallError::NoSuchFunction(function_name) => {
                 write!(f, "NoSuchFunction({function_name})")
             }
+            ContractCallError::PostConditionAborted(reason) => {
+                write!(f, "PostConditionAborted({reason})")
+            }
             ContractCallError::Uncategorized(message) => {
                 write!(f, "Uncategorized({message})")
             }
@@ -331,7 +427,7 @@ impl ClarityInterpreter {
     /// Execute `contract` without consuming anyone's nonce.
     ///
     /// For bare snippets and function-argument evaluation. A deploy or an STX
-    /// transfer is a transaction and must use [`Self::run_transaction`].
+    /// transfer is a transaction and must use [`Self::run_with_terms`].
     pub fn run(
         &mut self,
         contract: &ClarityContract,
@@ -339,42 +435,33 @@ impl ClarityInterpreter {
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
     ) -> Result<AnnotatedExecutionResult, ExecutionError> {
-        self.run_with_charge(
+        self.run_with_terms(
             contract,
             cached_ast,
             cost_track,
             eval_hooks,
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         )
     }
 
-    /// Execute `contract` as a transaction sent by `sender`, consuming one of
-    /// its nonces in the same commit as the execution's own state changes.
-    pub fn run_transaction(
+    /// Execute `contract` as a transaction, settling `terms` in the same
+    /// commit as the execution's own state changes.
+    pub fn run_with_terms(
         &mut self,
         contract: &ClarityContract,
         cached_ast: Option<&ContractAST>,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-        sender: PrincipalData,
+        terms: &TransactionTerms,
     ) -> Result<AnnotatedExecutionResult, ExecutionError> {
-        self.run_with_charge(
-            contract,
-            cached_ast,
-            cost_track,
-            eval_hooks,
-            &NonceCharge::Sender(sender),
-        )
-    }
+        // Reject unsupported post-conditions before execution.
+        if let Err(e) = terms
+            .post_conditions
+            .validate_for_epoch(contract.epoch.resolve())
+        {
+            return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)]));
+        }
 
-    pub(crate) fn run_with_charge(
-        &mut self,
-        contract: &ClarityContract,
-        cached_ast: Option<&ContractAST>,
-        cost_track: bool,
-        eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-        charge: &NonceCharge,
-    ) -> Result<AnnotatedExecutionResult, ExecutionError> {
         let (ast, mut diagnostics, success) = match cached_ast {
             Some(ast) => (ast.clone(), vec![], true),
             None => self.build_ast(contract),
@@ -390,7 +477,7 @@ impl ClarityInterpreter {
         // nonce for a transaction rejected during parsing.
         if !success {
             let inclusion = self.classify_parse_failure(contract);
-            return Err(self.fail_before_execution(diagnostics, inclusion, charge));
+            return Err(self.fail_before_execution(diagnostics, inclusion, terms));
         }
 
         let (analysis, lint_diagnostics) = match self.run_analysis(contract, &ast, &annotations) {
@@ -400,22 +487,22 @@ impl ClarityInterpreter {
                 return Err(self.fail_before_execution(
                     diagnostics,
                     analysis_failure.inclusion,
-                    charge,
+                    terms,
                 ));
             }
         };
 
-        let mut result =
-            match self.execute(contract, &ast, analysis, cost_track, eval_hooks, charge) {
-                Ok(result) => result,
-                Err(mut runtime_failure) => {
-                    diagnostics.append(&mut runtime_failure.diagnostics);
-                    return Err(ExecutionError {
-                        diagnostics,
-                        inclusion: runtime_failure.inclusion,
-                    });
-                }
-            };
+        let mut result = match self.execute(contract, &ast, analysis, cost_track, eval_hooks, terms)
+        {
+            Ok(result) => result,
+            Err(mut runtime_failure) => {
+                diagnostics.append(&mut runtime_failure.diagnostics);
+                return Err(ExecutionError {
+                    diagnostics,
+                    inclusion: runtime_failure.inclusion,
+                });
+            }
+        };
 
         result.diagnostics = diagnostics.to_vec();
         Ok(AnnotatedExecutionResult {
@@ -429,9 +516,11 @@ impl ClarityInterpreter {
         &mut self,
         mut diagnostics: Vec<Diagnostic>,
         inclusion: BlockInclusion,
-        charge: &NonceCharge,
+        terms: &TransactionTerms,
     ) -> ExecutionError {
-        if let (BlockInclusion::Included, NonceCharge::Sender(principal)) = (inclusion, charge) {
+        if let (BlockInclusion::Included, NonceCharge::Sender(principal)) =
+            (inclusion, &terms.charge)
+        {
             if let Err(e) = self.increment_nonce(&principal.clone()) {
                 diagnostics.push(runtime_diagnostic(e));
                 return ExecutionError::rejected(diagnostics);
@@ -752,7 +841,7 @@ impl ClarityInterpreter {
         analysis: ContractAnalysis,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-        charge: &NonceCharge,
+        terms: &TransactionTerms,
     ) -> Result<ExecutionResult, ExecutionError> {
         let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
         let snippet = contract.expect_in_memory_code_source();
@@ -867,12 +956,7 @@ impl ClarityInterpreter {
             Ok(value) => value,
             Err(e) => {
                 let err = format!("Runtime error while interpreting {contract_id}: {e:?}");
-                if let Some(mut eval_hooks) = global_context.eval_hooks.take() {
-                    for hook in eval_hooks.iter_mut() {
-                        hook.did_complete(Err(err.clone()));
-                    }
-                    global_context.eval_hooks = Some(eval_hooks);
-                }
+                notify_hooks_of_failure(&mut global_context, &err);
                 let inclusion =
                     BlockInclusion::from_runtime_error(ClarityError::Interpreter(e), epoch);
                 let mut diagnostics = vec![runtime_diagnostic(err)];
@@ -880,7 +964,7 @@ impl ClarityInterpreter {
                 // The nested execution was rolled back; an included failure
                 // commits only its nonce.
                 if inclusion.is_included() {
-                    if let Err(e) = charge.commit_alone(&mut global_context) {
+                    if let Err(e) = terms.charge.commit_alone(&mut global_context) {
                         diagnostics.push(runtime_diagnostic(e));
                         return Err(ExecutionError::rejected(diagnostics));
                     }
@@ -953,11 +1037,31 @@ impl ClarityInterpreter {
             EvaluationResult::Snippet(SnippetEvaluationResult { result })
         };
 
-        // Commit the nonce and execution state atomically.
-        if let Err(e) = charge.apply(&mut global_context.database) {
-            return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)]));
+        // Settle the nonce and execution state atomically.
+        match terms.settle(&mut global_context, epoch) {
+            Ok(Settlement::Committed) => {}
+            Ok(Settlement::Aborted {
+                reason,
+                assets_modified,
+            }) => {
+                notify_hooks_of_failure(&mut global_context, &reason);
+                let output = match &eval_result {
+                    EvaluationResult::Contract(_) => None,
+                    EvaluationResult::Snippet(result) => Some(result.result.clone()),
+                };
+                let clarity_error = post_condition_abort(
+                    output,
+                    *assets_modified,
+                    emitted_events.clone(),
+                    reason.clone(),
+                );
+                return Err(ExecutionError {
+                    diagnostics: vec![runtime_diagnostic(reason)],
+                    inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
+                });
+            }
+            Err(e) => return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)])),
         }
-        global_context.commit().unwrap();
 
         let (events, accounts_to_credit, accounts_to_debit) =
             Self::process_events(&mut emitted_events);
@@ -1009,9 +1113,17 @@ impl ClarityInterpreter {
         track_costs: bool,
         allow_private: bool,
         eval_hooks: Vec<&mut dyn EvalHook>,
-        charge: &NonceCharge,
+        terms: &TransactionTerms,
     ) -> Result<ExecutionResult, ContractCallFailure> {
         let tx_sender: PrincipalData = self.tx_sender.clone().into();
+
+        // Reject unsupported post-conditions before execution.
+        if let Err(e) = terms.post_conditions.validate_for_epoch(epoch) {
+            return Err(ContractCallFailure {
+                error: ContractCallError::Uncategorized(e),
+                inclusion: BlockInclusion::Rejected,
+            });
+        }
 
         // Failing to stand up the VM is a simnet problem, not a transaction
         // outcome — mainnet would never have accepted the transaction at all.
@@ -1061,12 +1173,7 @@ impl ClarityInterpreter {
 
         let value = result.map_err(|e| {
             let err = format!("Runtime error while interpreting {contract_id}: {e:?}");
-            if let Some(mut eval_hooks) = global_context.eval_hooks.take() {
-                for hook in eval_hooks.iter_mut() {
-                    hook.did_complete(Err(err.clone()));
-                }
-                global_context.eval_hooks = Some(eval_hooks);
-            }
+            notify_hooks_of_failure(&mut global_context, &err);
             ContractCallFailure::from_vm_error(e, err, contract_id, epoch)
         });
 
@@ -1087,7 +1194,7 @@ impl ClarityInterpreter {
                 // The nested call was rolled back; an included failure commits
                 // only its nonce.
                 if failure.inclusion.is_included() {
-                    if let Err(e) = charge.commit_alone(&mut global_context) {
+                    if let Err(e) = terms.charge.commit_alone(&mut global_context) {
                         return Err(ContractCallFailure {
                             error: ContractCallError::Uncategorized(e),
                             inclusion: BlockInclusion::Rejected,
@@ -1100,14 +1207,35 @@ impl ClarityInterpreter {
 
         let eval_result = EvaluationResult::Snippet(SnippetEvaluationResult { result: value });
 
-        // Commit the nonce and call state atomically.
-        if let Err(e) = charge.apply(&mut global_context.database) {
-            return Err(ContractCallFailure {
-                error: ContractCallError::Uncategorized(e),
-                inclusion: BlockInclusion::Rejected,
-            });
+        // Settle the nonce and call state atomically.
+        match terms.settle(&mut global_context, epoch) {
+            Ok(Settlement::Committed) => {}
+            Ok(Settlement::Aborted {
+                reason,
+                assets_modified,
+            }) => {
+                notify_hooks_of_failure(&mut global_context, &reason);
+                let clarity_error = post_condition_abort(
+                    match &eval_result {
+                        EvaluationResult::Snippet(result) => Some(result.result.clone()),
+                        EvaluationResult::Contract(_) => None,
+                    },
+                    *assets_modified,
+                    emitted_events.clone(),
+                    reason.clone(),
+                );
+                return Err(ContractCallFailure {
+                    error: ContractCallError::PostConditionAborted(reason),
+                    inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
+                });
+            }
+            Err(e) => {
+                return Err(ContractCallFailure {
+                    error: ContractCallError::Uncategorized(e),
+                    inclusion: BlockInclusion::Rejected,
+                })
+            }
         }
-        global_context.commit().unwrap();
 
         let (events, accounts_to_credit, accounts_to_debit) =
             Self::process_events(&mut emitted_events);
@@ -1524,6 +1652,36 @@ mod tests {
         )
     }
 
+    #[test]
+    fn post_condition_abort_uses_the_mainnet_error_shape() {
+        let output = Value::UInt(7);
+        let error = post_condition_abort(
+            Some(output.clone()),
+            AssetMap::new(),
+            vec![],
+            "condition failed".into(),
+        );
+
+        match &error {
+            ClarityError::AbortedByCallback {
+                output: actual_output,
+                assets_modified,
+                tx_events,
+                reason,
+            } => {
+                assert_eq!(actual_output.as_deref(), Some(&output));
+                assert_eq!(assets_modified.as_ref(), &AssetMap::new());
+                assert!(tx_events.is_empty());
+                assert_eq!(reason, "condition failed");
+            }
+            other => panic!("expected AbortedByCallback, got {other:?}"),
+        }
+        assert_eq!(
+            BlockInclusion::from_runtime_error(error, StacksEpochId::Epoch33),
+            BlockInclusion::Included
+        );
+    }
+
     #[track_caller]
     fn deploy_contract(
         interpreter: &mut ClarityInterpreter,
@@ -1537,7 +1695,14 @@ mod tests {
             .run_analysis(contract, &ast, &annotations)
             .unwrap();
 
-        let result = interpreter.execute(contract, &ast, analysis, false, None, &NonceCharge::Free);
+        let result = interpreter.execute(
+            contract,
+            &ast,
+            analysis,
+            false,
+            None,
+            &TransactionTerms::default(),
+        );
         assert!(result.is_ok());
         result
     }
@@ -2083,8 +2248,14 @@ mod tests {
             .run_analysis(&contract, &ast, &annotations)
             .unwrap();
 
-        let result =
-            interpreter.execute(&contract, &ast, analysis, false, None, &NonceCharge::Free);
+        let result = interpreter.execute(
+            &contract,
+            &ast,
+            analysis,
+            false,
+            None,
+            &TransactionTerms::default(),
+        );
         assert!(result.is_ok());
         let ExecutionResult {
             diagnostics,
@@ -2333,7 +2504,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
         assert_execution_result_value(
             result,
@@ -2357,7 +2528,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
         assert_execution_result_value(
             result,
@@ -2414,7 +2585,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
         assert_execution_result_value(
             result,
@@ -2480,7 +2651,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
         assert_execution_result_value(
             result,
@@ -2507,7 +2678,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
         assert_execution_result_value(
             result,
@@ -2685,7 +2856,7 @@ mod tests {
             false,
             allow_private,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         assert!(result.is_ok());
@@ -2715,7 +2886,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         let failure = result.expect_err("calling an undefined function must fail");
@@ -2739,7 +2910,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         let failure = result.expect_err("calling a missing contract must fail");
@@ -2776,7 +2947,7 @@ mod tests {
                     false,
                     false,
                     vec![],
-                    &NonceCharge::Free,
+                    &TransactionTerms::default(),
                 )
                 .expect_err("calling a missing contract must fail");
 
@@ -2813,7 +2984,7 @@ mod tests {
             false,
             allow_private,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         assert!(result.is_ok());
@@ -2844,7 +3015,7 @@ mod tests {
             false,
             allow_private,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         assert!(result.is_err());
@@ -2887,7 +3058,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         // this hash changes if the contract id or the block height at which it is deployed changes
@@ -2928,7 +3099,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         let value = get_evaluation_result(get_time).expect_tuple().unwrap();
@@ -2969,7 +3140,7 @@ mod tests {
             false,
             false,
             vec![],
-            &NonceCharge::Free,
+            &TransactionTerms::default(),
         );
 
         assert_execution_result_value(

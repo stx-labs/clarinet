@@ -36,6 +36,8 @@ fn deploy_basic_contract(sdk: &mut SDK) -> TransactionRes {
         "(define-private (two) (+ u1 u1))".into(),
         ContractOptions::new(None),
         "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(),
+        None,
+        None,
     );
     sdk.deploy_contract(&contract).unwrap()
 }
@@ -74,6 +76,8 @@ async fn it_can_call_a_private_function() {
             "two".into(),
             vec![],
             "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(),
+            None,
+            None,
         ))
         .unwrap();
     let expected = format!("0x{}", ClarityValue::UInt(2).serialize_to_hex().unwrap());
@@ -91,6 +95,8 @@ async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
             method.into(),
             vec![],
             SENDER.into(),
+            None,
+            None,
         )
     };
 
@@ -105,6 +111,8 @@ async fn it_bumps_the_sender_nonce_only_for_contract_call_transactions() {
             .into(),
         ContractOptions::new(None),
         SENDER.into(),
+        None,
+        None,
     ))
     .unwrap();
 
@@ -161,6 +169,8 @@ async fn it_charges_a_nonce_for_a_call_the_access_preflight_rejects() {
             method.into(),
             vec![],
             SENDER.into(),
+            None,
+            None,
         )
     };
 
@@ -172,6 +182,8 @@ async fn it_charges_a_nonce_for_a_call_the_access_preflight_rejects() {
             .into(),
         ContractOptions::new(None),
         SENDER.into(),
+        None,
+        None,
     ))
     .unwrap();
     assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
@@ -250,6 +262,8 @@ async fn it_gates_the_preflight_nonce_on_the_epoch_like_the_vm_does() {
                 .into(),
             ContractOptions::new(None),
             SENDER.into(),
+            None,
+            None,
         ))
         .unwrap();
 
@@ -259,6 +273,8 @@ async fn it_gates_the_preflight_nonce_on_the_epoch_like_the_vm_does() {
                 method.into(),
                 vec![],
                 SENDER.into(),
+                None,
+                None,
             )
         };
 
@@ -328,6 +344,8 @@ async fn it_handles_invalid_sender_address() {
         "two".into(),
         vec![],
         "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.basic-contract".into(), // Invalid: full contract address
+        None,
+        None,
     ));
 
     assert!(result.is_err());
@@ -343,6 +361,8 @@ async fn it_handles_contract_recipient_address() {
         1000,
         "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.basic-contract".into(), // valid: contract address
         "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(),
+        None,
+        None,
     ));
 
     // contract addresses are valid recipients
@@ -359,6 +379,8 @@ async fn it_handles_invalid_deployer_address() {
         "(define-private (two) (+ u1 u1))".into(),
         ContractOptions::new(None),
         "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.invalid-contract".into(), // Invalid: contract address
+        None,
+        None,
     );
 
     let result = sdk.deploy_contract(&contract);
@@ -378,6 +400,8 @@ async fn it_handles_contract_address_as_sender() {
         "two".into(),
         vec![],
         contract_address.into(), // Invalid: contract address instead of sender address
+        None,
+        None,
     ));
 
     assert!(result.is_err());
@@ -395,6 +419,8 @@ async fn it_handles_contract_address_as_recipient() {
         1000,
         contract_address.into(), // Valid: contract address instead of recipient address
         "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(),
+        None,
+        None,
     ));
 
     // we support contract addresses as recipients

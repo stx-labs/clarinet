@@ -2,6 +2,7 @@ import { assert } from "chai";
 import {
   Uri,
   Range,
+  extensions,
   workspace,
   window as vsWindow,
   languages,
@@ -14,6 +15,15 @@ const { workspaceFolders } = workspace;
 const { uri: workspaceUri } = workspaceFolders![0];
 
 const delay = (ms: number) => new Promise((r) => setTimeout(() => r(1), ms));
+
+before(async () => {
+  // the language client registers its document sync handlers while starting, and
+  // documents opened before that are only synced once they become visible. wait
+  // for activation so opening a contract below doesn't race the LSP handshake.
+  const extension = extensions.getExtension("stackslabs.clarity-stacks");
+  if (!extension) throw new Error("the clarity extension could not be found");
+  await extension.activate();
+});
 
 beforeEach(() => {
   const config = workspace.getConfiguration("clarity-lsp");
@@ -52,8 +62,8 @@ function getDiagnostics(uri: Uri) {
 
 describe("get diagnostics", function () {
   this.timeout(20_000);
-  afterEach(() => {
-    commands.executeCommand("workbench.action.closeActiveEditor");
+  afterEach(async () => {
+    await commands.executeCommand("workbench.action.closeActiveEditor");
   });
 
   const contractUri: Uri = Uri.joinPath(
