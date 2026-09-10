@@ -1113,7 +1113,8 @@ fn fund_genesis_account(
         let mut nb_of_founded_accounts = 0;
 
         for account in accounts_moved {
-            if account.sbtc_balance == 0 {
+            if account.sbtc_balance == 0 || holds_configured_sbtc(&stacks_rpc, &deployer, &account)
+            {
                 continue;
             }
             let txid = ClarityValue::buff_from(genesis_deposit_id("deposit", &account)).unwrap();
@@ -1157,6 +1158,32 @@ fn fund_genesis_account(
             "Funded {nb_of_founded_accounts} accounts with sBTC"
         )));
     });
+}
+
+/// Whether the account already holds the sBTC it is configured for, as it does when
+/// the snapshot funded it. An unreadable balance counts as not funded, so a node
+/// hiccup retries the deposit instead of skipping it, which the replayed id makes safe.
+fn holds_configured_sbtc(
+    stacks_rpc: &StacksRpc,
+    deployer: &AccountConfig,
+    account: &AccountConfig,
+) -> bool {
+    let Ok(recipient) = PrincipalData::parse(&account.stx_address) else {
+        return false;
+    };
+    let balance = stacks_rpc.call_read_only_fn(
+        &deployer.stx_address,
+        "sbtc-token",
+        "get-balance",
+        vec![ClarityValue::Principal(recipient)],
+        &deployer.stx_address,
+    );
+    match balance {
+        Ok(ClarityValue::Response(response)) if response.committed => {
+            matches!(*response.data, ClarityValue::UInt(held) if held >= account.sbtc_balance.into())
+        }
+        _ => false,
+    }
 }
 
 /// `sbtc-deposit` rejects a replay of `{txid, vout-index}`, so deriving the id from
@@ -1744,6 +1771,49 @@ mod test_rpc_client {
             }
         }
         events
+    }
+
+    /// An account the snapshot already funded must not be funded a second time.
+    #[test]
+    fn test_fund_genesis_account_skips_already_funded() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let deposit_contract_mock =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        // test_deployer is configured for 100_000_000 and already holds more.
+        let balance_mock = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 1_000_000_000);
+        let info_mock = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let burn_block_mock = stacks_rpc.get_burn_block_mock(100);
+        let nonce_mock = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        let boot_completed = Arc::new(AtomicBool::new(true));
+
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &boot_completed,
+        );
+
+        let received_events = collect_events(&devnet_event_rx, Duration::from_secs(3));
+
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("Funded 0 accounts")
+            )),
+            "an already-funded account should not be funded again"
+        );
+        deposit_contract_mock.assert();
+        balance_mock.assert();
+        info_mock.assert();
+        burn_block_mock.assert();
+        nonce_mock.assert();
     }
 
     /// A project without sBTC requirements must fund quietly, not error.

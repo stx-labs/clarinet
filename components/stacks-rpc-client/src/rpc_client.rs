@@ -274,7 +274,7 @@ impl StacksRpc {
                 "arguments": arguments,
             }))
             .send()
-            .unwrap();
+            .map_err(|e| RpcError::Message(e.to_string()))?;
 
         if !res.status().is_success() {
             let error = match res.text() {
@@ -290,16 +290,16 @@ impl StacksRpc {
             result: String,
         }
 
-        let response: ReadOnlyCallResult = res.json().unwrap();
+        let response: ReadOnlyCallResult =
+            res.json().map_err(|e| RpcError::Message(e.to_string()))?;
         if response.okay {
-            // Removing the 0x prefix
-            let raw_value = match response.result.strip_prefix("0x") {
-                Some(raw_value) => raw_value,
-                _ => panic!(),
-            };
-            let bytes = hex_bytes(raw_value).unwrap();
-            let mut cursor = Cursor::new(&bytes);
-            let value = Value::consensus_deserialize(&mut cursor).unwrap();
+            let raw_value = response
+                .result
+                .strip_prefix("0x")
+                .ok_or_else(|| RpcError::Message("result is not 0x-prefixed".into()))?;
+            let bytes = hex_bytes(raw_value).map_err(|e| RpcError::Message(e.to_string()))?;
+            let value = Value::consensus_deserialize(&mut Cursor::new(&bytes))
+                .map_err(|e| RpcError::Message(e.to_string()))?;
             Ok(value)
         } else {
             Err(RpcError::Generic)

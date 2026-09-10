@@ -53,6 +53,21 @@ impl MockStacksRpc {
             .create()
     }
 
+    /// `get-balance` answering `(ok balance)`: response-ok tag, uint tag, u128.
+    pub fn sbtc_balance_mock(&mut self, deployer: &str, balance: u128) -> Mock {
+        self.client
+            .mock(
+                "POST",
+                format!("/v2/contracts/call-read/{deployer}/sbtc-token/get-balance").as_str(),
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{"okay":true,"result":"0x0701{balance:032x}"}}"#
+            ))
+            .create()
+    }
+
     pub fn contract_source_not_found_mock(&mut self, deployer: &str, contract_name: &str) -> Mock {
         self.client
             .mock(

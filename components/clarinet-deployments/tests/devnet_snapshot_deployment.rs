@@ -30,7 +30,7 @@ use stacks_codec::transaction::{StacksTransaction, TransactionPayload};
 const DEPLOYER_MNEMONIC: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
 const DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 
-/// Nonce the deployer already has in the snapshot (sbtc-registry + sbtc-token).
+/// Deployer nonce carried by a snapshot that already published two requirements.
 const SNAPSHOT_DEPLOYER_NONCE: u64 = 2;
 
 const CONTRACT_SOURCE: &str = "(define-read-only (get-one) (ok u1))";
