@@ -753,6 +753,37 @@ mod tests {
             .contains_key("pox-x"));
     }
 
+    /// Empty requirements must survive a project config's JSON round trip.
+    ///
+    /// The custom serializer omits an empty requirements list, but changing the
+    /// field from `Option<Vec<_>>` to `Vec<_>` makes the derived deserializer
+    /// require it. A config loaded from a manifest without requirements therefore
+    /// fails to deserialize its own JSON with `missing field requirements`.
+    /// Add `#[serde(default)]` to `ProjectConfig::requirements` so an omitted
+    /// field deserializes as an empty vector.
+    #[test]
+    fn test_empty_requirements_json_roundtrip() {
+        let manifest_file: ProjectManifestFile = toml::from_str(
+            r#"
+[project]
+name = "test-project"
+telemetry = false
+"#,
+        )
+        .unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+        assert!(manifest.project.requirements.is_empty());
+
+        let json = serde_json::to_string(&manifest.project).unwrap();
+        let restored: ProjectConfig = serde_json::from_str(&json)
+            .expect("a project config without requirements must deserialize its own JSON");
+
+        assert!(restored.requirements.is_empty());
+        assert_eq!(restored.name, manifest.project.name);
+    }
+
     #[test]
     fn test_requirements_parsing() {
         let manifest_str = r#"
