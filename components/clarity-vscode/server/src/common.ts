@@ -16,6 +16,10 @@ import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
 
+function documentUri(params: unknown): string | undefined {
+  return (params as DidOpenTextDocumentParams | undefined)?.textDocument?.uri;
+}
+
 // fast and high-frequency, they would drown out everything else
 const ignoreMethodsLog: string[] = [
   DocumentSymbolRequest.method,
@@ -74,6 +78,27 @@ export function initConnection(
     }
   }
 
+  // document sync is full (see `capabilities.rs`): a newer didChange carries a
+  // snapshot that fully supersedes the queued one, so analyzing the queued
+  // snapshot is wasted work. A didOpen/didSave/didClose for the same document
+  // is a barrier, snapshots can't be merged across it
+  function replaceQueuedDidChange(params: unknown) {
+    const uri = documentUri(params);
+    if (!uri) return false;
+
+    // entry 0 is in flight
+    for (let i = notifications.length - 1; i > 0; i--) {
+      const [queuedMethod, queuedParams] = notifications[i];
+      if (documentUri(queuedParams) !== uri) continue;
+      if (queuedMethod !== DidChangeTextDocumentNotification.method) {
+        return false;
+      }
+      notifications[i][1] = params;
+      return true;
+    }
+    return false;
+  }
+
   connection.onNotification((method: string, params: unknown) => {
     // vscode.dev sends didOpen notification twice
     // including a notification with a read only github:// url
@@ -82,10 +107,15 @@ export function initConnection(
       method === DidOpenTextDocumentNotification.method ||
       method === DidCloseTextDocumentNotification.method
     ) {
-      const [protocol] = (
-        params as DidOpenTextDocumentParams
-      ).textDocument.uri.split("://");
+      const [protocol] = documentUri(params)?.split("://") ?? [];
       if (!VALID_PROTOCOLS.includes(protocol)) return;
+    }
+
+    if (
+      method === DidChangeTextDocumentNotification.method &&
+      replaceQueuedDidChange(params)
+    ) {
+      return;
     }
 
     notifications.push([method, params]);

@@ -2,7 +2,9 @@
  * Regression tests for the notification queue in `server/src/common.ts`:
  * notifications must reach the bridge one at a time, in the order they were
  * received, and exactly once - even when they pile up while a slow one
- * (`build_state` takes ~100ms) is in flight.
+ * (`build_state` takes ~100ms) is in flight. The only entries that may be
+ * dropped are queued didChanges a newer snapshot of the same document
+ * supersedes.
  *
  * The sources run unbuilt, on Node's type stripping: `pnpm run test:server`
  */
@@ -23,6 +25,7 @@ import type { Connection } from "vscode-languageserver";
 import { initConnection } from "../src/common.ts";
 
 const URI = "file:///contracts/counter.clar";
+const OTHER_URI = "file:///contracts/token.clar";
 const READ_ONLY_URI = "github://owner/repo";
 
 const didOpen = DidOpenTextDocumentNotification.method;
@@ -32,12 +35,13 @@ const didSave = DidSaveTextDocumentNotification.method;
 const hover = HoverRequest.method;
 
 type Handler = (method: string, params: unknown) => unknown;
+type NotificationParams = { textDocument: { uri: string; version?: number } };
 
 const tick = () => sleep(0);
 
 /** Wire `initConnection` to a fake connection and a hand-settled bridge. */
 function setup() {
-  const handled: string[] = [];
+  const calls: [string, NotificationParams][] = [];
   const inFlight: PromiseWithResolvers<void>[] = [];
   let onNotification!: Handler;
   let onRequest!: Handler;
@@ -54,8 +58,8 @@ function setup() {
   } as unknown as Connection;
 
   const bridge = {
-    onNotification(method: string) {
-      handled.push(method);
+    onNotification(method: string, params: NotificationParams) {
+      calls.push([method, params]);
       const call = Promise.withResolvers<void>();
       inFlight.push(call);
       return call.promise;
@@ -68,17 +72,32 @@ function setup() {
 
   initConnection(connection, bridge);
 
+  async function settle(err?: Error) {
+    const call = inFlight.shift();
+    assert.ok(call, "no bridge call in flight");
+    if (err) call.reject(err);
+    else call.resolve();
+    await tick();
+  }
+
   return {
-    handled,
-    async settle(err?: Error) {
-      const call = inFlight.shift();
-      assert.ok(call, "no bridge call in flight");
-      if (err) call.reject(err);
-      else call.resolve();
-      await tick();
+    // what the bridge was called with, in call order
+    get handled() {
+      return calls.map(([method]) => method);
     },
-    notify(method: string, uri = URI) {
-      onNotification(method, { textDocument: { uri } });
+    get handledUris() {
+      return calls.map(([, params]) => params.textDocument.uri);
+    },
+    get handledVersions() {
+      return calls.map(([, params]) => params.textDocument.version);
+    },
+    settle,
+    /** Settle bridge calls until the queue has drained. */
+    async drain() {
+      while (inFlight.length > 0) await settle();
+    },
+    notify(method: string, uri = URI, version?: number) {
+      onNotification(method, { textDocument: { uri, version } });
     },
     request(method: string) {
       return onRequest(method, {});
@@ -148,4 +167,98 @@ test("notifications for unsupported protocols are dropped", async () => {
   server.notify(didOpen);
   await tick();
   assert.deepEqual(server.handled, [didOpen]);
+});
+
+test("queued didChanges for one document collapse to the newest", async () => {
+  const server = setup();
+
+  server.notify(didChange, URI, 1);
+  await tick();
+
+  // a burst of keystrokes, all landing while version 1 is in the bridge
+  server.notify(didChange, URI, 2);
+  server.notify(didChange, URI, 3);
+  server.notify(didChange, URI, 4);
+
+  await server.drain();
+  assert.deepEqual(
+    server.handledVersions,
+    [1, 4],
+    "only the newest of the queued snapshots is worth analyzing",
+  );
+});
+
+test("a queued didChange never replaces the in-flight one", async () => {
+  const server = setup();
+
+  server.notify(didChange, URI, 1);
+  await tick();
+  assert.deepEqual(server.handledVersions, [1]);
+
+  // version 1 is already in the bridge, it can't be taken back
+  server.notify(didChange, URI, 2);
+  await server.drain();
+  assert.deepEqual(server.handledVersions, [1, 2]);
+});
+
+test("didChanges for different documents are all handled", async () => {
+  const server = setup();
+
+  server.notify(didChange, URI, 1);
+  await tick();
+  server.notify(didChange, OTHER_URI, 1);
+  server.notify(didChange, URI, 2);
+  // merges into the queued OTHER_URI entry, skipping over the URI one
+  server.notify(didChange, OTHER_URI, 2);
+
+  await server.drain();
+  assert.deepEqual(server.handledUris, [URI, OTHER_URI, URI]);
+  assert.deepEqual(server.handledVersions, [1, 2, 2]);
+});
+
+// a didChange may only be merged into an entry it can reach without crossing
+// another notification for that same document
+for (const barrier of [didOpen, didSave, didClose]) {
+  test(`a ${barrier} between two didChanges blocks the merge`, async () => {
+    const server = setup();
+
+    server.notify(didSave);
+    await tick();
+    server.notify(didChange, URI);
+    server.notify(barrier, URI);
+    server.notify(didChange, URI);
+
+    await server.drain();
+    assert.deepEqual(server.handled, [didSave, didChange, barrier, didChange]);
+  });
+}
+
+// the barrier only applies to the entries the didChange has to scan past, the
+// scan runs backwards and stops at the newest didChange for that document
+test("a didChange merges past a barrier queued before its own entry", async () => {
+  const server = setup();
+
+  server.notify(didSave);
+  await tick();
+  server.notify(didSave);
+  server.notify(didChange, URI, 1);
+  server.notify(didChange, URI, 2);
+
+  await server.drain();
+  assert.deepEqual(server.handled, [didSave, didSave, didChange]);
+  assert.deepEqual(server.handledVersions, [undefined, undefined, 2]);
+});
+
+test("a barrier on another document doesn't block the merge", async () => {
+  const server = setup();
+
+  server.notify(didSave);
+  await tick();
+  server.notify(didChange, URI, 1);
+  server.notify(didSave, OTHER_URI);
+  server.notify(didChange, URI, 2);
+
+  await server.drain();
+  assert.deepEqual(server.handled, [didSave, didChange, didSave]);
+  assert.deepEqual(server.handledVersions, [undefined, 2, undefined]);
 });
