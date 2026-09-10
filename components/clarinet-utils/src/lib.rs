@@ -3,7 +3,7 @@ mod precomputed;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
@@ -11,7 +11,13 @@ use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
 use bip39::{Error as MnemonicError, Language, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
-pub use precomputed::is_precomputed;
+pub use precomputed::{
+    DEFAULT_DEPLOYER_MNEMONIC, DEFAULT_DERIVATION_PATH, DEFAULT_FAUCET_MNEMONIC,
+    DEFAULT_STACKER_MNEMONIC, DEFAULT_STACKS_MINER_MNEMONIC, DEFAULT_WALLET_1_MNEMONIC,
+    DEFAULT_WALLET_2_MNEMONIC, DEFAULT_WALLET_3_MNEMONIC, DEFAULT_WALLET_4_MNEMONIC,
+    DEFAULT_WALLET_5_MNEMONIC, DEFAULT_WALLET_6_MNEMONIC, DEFAULT_WALLET_7_MNEMONIC,
+    DEFAULT_WALLET_8_MNEMONIC,
+};
 use rand::RngCore;
 
 /// Size of the AES-GCM nonce
@@ -66,31 +72,62 @@ pub fn random_mnemonic() -> Mnemonic {
     Mnemonic::from_entropy_in(Language::English, &entropy).unwrap()
 }
 
-type DerivedKeys = (Vec<u8>, PublicKey);
+pub(crate) type DerivedKeys = (Vec<u8>, PublicKey);
 
-/// Keys already derived in this process, keyed by `(phrase, password, path)`.
+/// `(phrase, password, derivation)`.
+type CacheKey = (String, String, String);
+
+/// Most callers derive the same handful of wallets over and over: the LSP
+/// rebuilds the whole `NetworkManifest` on every file save, and
+/// `clarinet deployments apply` re-derives the signing key for every
+/// transaction in the plan. The table in [`precomputed`] only covers the
+/// mnemonics Clarinet ships; this covers everything else, including custom
+/// wallets in a project's `Devnet.toml`.
 ///
-/// The same handful of wallets get derived over and over: the LSP rebuilds the
-/// whole `NetworkManifest` on every file save, and `clarinet deployments apply`
-/// re-derives the signing key for every transaction in the plan. The table in
-/// [`precomputed`] only covers the mnemonics Clarinet ships; this covers
-/// everything else, including custom wallets in a project's `Devnet.toml`.
-///
-/// Entries are bounded by the number of distinct wallets a process ever sees —
-/// a dozen or so — so there is nothing to evict.
+/// One path does not benefit and must not be allowed to grow the map without
+/// bound: an `[accounts.x]` table with no `mnemonic` gets a fresh
+/// `random_mnemonic()` on every manifest load, so it can never be hit again.
+/// [`CACHE_LIMIT`] keeps that from accumulating for the life of an LSP session.
 ///
 /// This does keep derived secrets alive for the lifetime of the process. That
 /// is already true of the plaintext mnemonics held in `NetworkManifest`, which
 /// outlive every caller here.
-static DERIVED_KEYS: LazyLock<Mutex<HashMap<(String, String, String), DerivedKeys>>> =
+static DERIVED_KEYS: LazyLock<Mutex<HashMap<CacheKey, DerivedKeys>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Comfortably above the ~13 wallets a devnet manifest declares, low enough
+/// that the randomly generated phrases described above cannot pile up.
+const CACHE_LIMIT: usize = 64;
+
+/// Insert, evicting an arbitrary entry first if the map is full.
+///
+/// Evicting rather than declining the insert matters: the phrases that fill
+/// the map are the unrepeatable random ones, so refusing new entries would let
+/// them permanently crowd out wallets that *are* looked up again.
+fn memoize(cache_key: CacheKey, keys: &DerivedKeys) {
+    let mut cache = derived_keys();
+    while cache.len() >= CACHE_LIMIT {
+        let Some(evict) = cache.keys().next().cloned() else {
+            break;
+        };
+        cache.remove(&evict);
+    }
+    cache.insert(cache_key, keys.clone());
+}
+
+/// A poisoned lock only means another thread panicked mid-lookup. This is a
+/// cache, so recover the map rather than propagating the failure.
+fn derived_keys() -> MutexGuard<'static, HashMap<CacheKey, DerivedKeys>> {
+    DERIVED_KEYS.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 pub fn get_bip32_keys_from_mnemonic(
     phrase: &str,
     password: &str,
     derivation: &str,
 ) -> Result<DerivedKeys, String> {
-    // A BIP39 passphrase changes the seed, so the table only applies without one.
+    // A BIP39 passphrase changes the seed, so the table only applies without
+    // one. Checking it first means a table hit allocates nothing.
     if password.is_empty() {
         if let Some(keys) = precomputed::lookup(phrase, derivation) {
             return Ok(keys);
@@ -103,19 +140,14 @@ pub fn get_bip32_keys_from_mnemonic(
         derivation.to_string(),
     );
 
-    // A poisoned lock only means some other thread panicked mid-lookup. This
-    // is a cache: fall back to deriving rather than propagating the failure.
-    if let Ok(cache) = DERIVED_KEYS.lock() {
-        if let Some(keys) = cache.get(&cache_key) {
-            return Ok(keys.clone());
-        }
+    if let Some(keys) = derived_keys().get(&cache_key) {
+        return Ok(keys.clone());
     }
 
+    // Deliberately not holding the guard across the derivation — it is ~0.8 ms,
+    // and concurrent derivations of different wallets should not serialize.
     let keys = derive_bip32_keys(phrase, password, derivation)?;
-
-    if let Ok(mut cache) = DERIVED_KEYS.lock() {
-        cache.insert(cache_key, keys.clone());
-    }
+    memoize(cache_key, &keys);
 
     Ok(keys)
 }
@@ -127,7 +159,7 @@ fn derive_bip32_keys(
     password: &str,
     derivation: &str,
 ) -> Result<DerivedKeys, String> {
-    let mnemonic = Mnemonic::parse_in(Language::English, phrase).map_err(|e| e.to_string())?;
+    let mnemonic = mnemonic_from_phrase(phrase)?;
     let seed_vec = mnemonic.to_seed(password);
     if seed_vec.len() != 64 {
         return Err("Seed must be 64 bytes".to_string());
@@ -345,6 +377,7 @@ pub fn decrypt_mnemonic_phrase(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::precomputed::is_precomputed;
 
     #[test]
     fn test_mnemonic_from_phrase_12() {
@@ -395,8 +428,8 @@ mod tests {
     /// A precomputed phrase must come back byte-identical to a live derivation.
     #[test]
     fn test_get_bip32_keys_uses_precomputed_table() {
-        const PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
-        const DERIVATION: &str = "m/44'/5757'/0'/0/0";
+        const PHRASE: &str = DEFAULT_DEPLOYER_MNEMONIC;
+        const DERIVATION: &str = DEFAULT_DERIVATION_PATH;
         assert!(is_precomputed(PHRASE, DERIVATION));
 
         let (cached_secret, cached_public) =
@@ -411,8 +444,8 @@ mod tests {
     /// answer for it.
     #[test]
     fn test_get_bip32_keys_bypasses_table_when_password_is_set() {
-        const PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
-        const DERIVATION: &str = "m/44'/5757'/0'/0/0";
+        const PHRASE: &str = DEFAULT_DEPLOYER_MNEMONIC;
+        const DERIVATION: &str = DEFAULT_DERIVATION_PATH;
 
         let (no_password, _) = get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
         let (with_password, _) =
@@ -441,11 +474,42 @@ mod tests {
         assert_eq!(first, fresh);
     }
 
+    /// A full memo must keep working. The phrases that fill it are the
+    /// unrepeatable random ones, so refusing new entries once full would let
+    /// them crowd out wallets that are actually looked up again.
+    #[test]
+    fn test_memo_still_caches_once_full() {
+        const DERIVATION: &str = "m/44'/5757'/0'/0/7";
+
+        // Fill past the limit with phrases nothing will ask for again, the way
+        // an `[accounts.x]` table with no `mnemonic` does on every load.
+        for _ in 0..CACHE_LIMIT + 4 {
+            let throwaway = random_mnemonic().to_string();
+            get_bip32_keys_from_mnemonic(&throwaway, "", DERIVATION).unwrap();
+        }
+        assert!(
+            derived_keys().len() <= CACHE_LIMIT,
+            "memo grew past its cap"
+        );
+
+        // A wallet first seen now must still land in the memo.
+        let phrase = random_mnemonic().to_string();
+        let first = get_bip32_keys_from_mnemonic(&phrase, "", DERIVATION).unwrap();
+        let key = (phrase.clone(), String::new(), DERIVATION.to_string());
+        assert_eq!(
+            derived_keys().get(&key),
+            Some(&first),
+            "a wallet seen after the memo filled up was not cached"
+        );
+    }
+
     /// Neither cache may swallow the errors the callers rely on.
     #[test]
     fn test_get_bip32_keys_still_rejects_invalid_input() {
         const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        assert!(get_bip32_keys_from_mnemonic("not a mnemonic", "", "m/44'/5757'/0'/0/0").is_err());
+        assert!(
+            get_bip32_keys_from_mnemonic("not a mnemonic", "", DEFAULT_DERIVATION_PATH).is_err()
+        );
         assert!(get_bip32_keys_from_mnemonic(PHRASE, "", "not a path").is_err());
     }
 
