@@ -56,6 +56,9 @@ use crate::orchestrator::{
 
 const SNAPSHOT_BURN_START_HEIGHT: u64 = 163;
 
+/// `sbtc-deposit` rejects anything smaller, so a shortfall below this cannot be minted.
+const SBTC_DUST_LIMIT: u128 = 546;
+
 #[derive(Deserialize)]
 pub struct NewTransaction {
     pub txid: String,
@@ -1106,12 +1109,23 @@ fn fund_accounts(
                 continue;
             }
         };
-        let Some(shortfall) = u128::from(account.sbtc_balance)
-            .checked_sub(held)
-            .filter(|shortfall| *shortfall > 0)
-        else {
+        let configured = u128::from(account.sbtc_balance);
+        let Some(shortfall) = configured.checked_sub(held).filter(|amount| *amount > 0) else {
+            if held > configured {
+                let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                    "{} already holds more sBTC than configured; devnet cannot lower it",
+                    account.stx_address
+                )));
+            }
             continue;
         };
+        if shortfall < SBTC_DUST_LIMIT {
+            let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                "{} is {shortfall} short of its configured sBTC, below the dust limit of {SBTC_DUST_LIMIT}",
+                account.stx_address
+            )));
+            continue;
+        }
         let args = vec![
             ClarityValue::buff_from(genesis_deposit_id("deposit", account)).unwrap(),
             ClarityValue::UInt(1),
@@ -1148,8 +1162,9 @@ fn fund_accounts(
     Ok(())
 }
 
-/// Funding mints only the shortfall, so a snapshot that funded at a different
-/// amount still converges on the configured one.
+/// Funding mints only the shortfall, topping an account up to at least its configured
+/// balance. An excess cannot be removed, and a shortfall under the dust limit cannot
+/// be minted; both are reported rather than applied.
 fn sbtc_balance_of(
     stacks_rpc: &StacksRpc,
     deployer: &AccountConfig,
@@ -1803,14 +1818,14 @@ mod test_rpc_client {
             &boot_completed,
         );
 
-        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_secs(3));
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(3));
 
         assert!(
             received_events.iter().any(|event| matches!(
                 event,
                 DevnetEvent::Log(msg) if msg.message.contains("Funded 0 accounts")
             )),
-            "an already-funded account should not be funded again"
+            "an already-funded account should not be funded again, got: {received_events:?}"
         );
         deposit_contract_mock.assert();
         balance_mock.assert();
@@ -1856,6 +1871,43 @@ mod test_rpc_client {
         balance_mock.assert();
         // Only matches a deposit of exactly the missing 60_000_000.
         shortfall_mock.assert();
+    }
+
+    /// A shortfall the deposit contract would reject as dust must not be broadcast.
+    #[test]
+    fn test_fund_genesis_account_skips_a_sub_dust_shortfall() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        // test_deployer is configured for 100_000_000 and is 100 short, under the 546 limit.
+        let _balance = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 99_999_900);
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let broadcast_mock = stacks_rpc.get_tx_mock("0xdeadbeef").expect(0);
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(5));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("below the dust limit")
+            )),
+            "the shortfall should be reported, got: {received_events:?}"
+        );
+        broadcast_mock.assert();
     }
 
     /// Minting blind would double an account the snapshot already funded.
