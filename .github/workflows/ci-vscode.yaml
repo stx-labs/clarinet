@@ -60,6 +60,11 @@ jobs:
         working-directory: ./components/clarity-vscode
         run: pnpm run lint
 
+      # runs the server sources directly, no Wasm bridge needed
+      - name: Test the language server
+        working-directory: ./components/clarity-vscode
+        run: pnpm run test:server
+
   dap_adapter:
     name: DAP adapter
     runs-on: ubuntu-latest
