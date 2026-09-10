@@ -18,6 +18,12 @@ pub enum RpcError {
     Message(String),
 }
 
+impl From<reqwest::Error> for RpcError {
+    fn from(e: reqwest::Error) -> Self {
+        RpcError::Message(e.to_string())
+    }
+}
+
 impl std::fmt::Display for RpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
@@ -140,14 +146,7 @@ impl StacksRpc {
         let tx = transaction_payload.serialize_to_vec();
         let payload = json!({ "transaction_payload": to_hex(&tx) });
         let path = format!("{}/v2/fees/transaction", self.url);
-        let res: FeeEstimationReport = self
-            .client
-            .post(path)
-            .json(&payload)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
+        let res: FeeEstimationReport = self.client.post(path).json(&payload).send()?.json()?;
 
         Ok(res.estimations[priority].fee)
     }
@@ -163,8 +162,7 @@ impl StacksRpc {
             .post(path)
             .header("Content-Type", "application/octet-stream")
             .body(tx)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
+            .send()?;
 
         if !res.status().is_success() {
             let err = match res.text() {
@@ -180,11 +178,7 @@ impl StacksRpc {
     }
 
     fn get_json<T: DeserializeOwned>(&self, request_url: String) -> Result<T, RpcError> {
-        let response = self
-            .client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
+        let response = self.client.get(request_url).send()?;
 
         if !response.status().is_success() {
             return Err(RpcError::StatusCode(response.status().as_u16()));
@@ -250,8 +244,7 @@ impl StacksRpc {
                 "sender": sender,
                 "arguments": arguments,
             }))
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
+            .send()?;
 
         if !res.status().is_success() {
             let error = match res.text() {
@@ -267,8 +260,7 @@ impl StacksRpc {
             result: String,
         }
 
-        let response: ReadOnlyCallResult =
-            res.json().map_err(|e| RpcError::Message(e.to_string()))?;
+        let response: ReadOnlyCallResult = res.json()?;
         if response.okay {
             let raw_value = response
                 .result

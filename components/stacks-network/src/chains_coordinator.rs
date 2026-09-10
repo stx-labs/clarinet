@@ -1030,6 +1030,9 @@ fn fund_genesis_account(
         .find(|account| account.label == "deployer")
         .cloned()
     else {
+        let _ = devnet_event_tx.send(DevnetEvent::warning(
+            "No deployer account: skipping sBTC funding".to_string(),
+        ));
         return;
     };
     let (_, _, deployer_secret_key) = clarinet_files::compute_addresses(
@@ -1096,13 +1099,27 @@ fn fund_accounts(
     let mut nb_of_founded_accounts = 0;
 
     for account in accounts {
-        if account.sbtc_balance == 0 || holds_configured_sbtc(stacks_rpc, deployer, account) {
+        if account.sbtc_balance == 0 {
             continue;
         }
+        let held = match sbtc_balance_of(stacks_rpc, deployer, account) {
+            Ok(held) => held,
+            Err(e) => {
+                // Skip rather than mint on top of a balance we could not read.
+                let _ = devnet_event_tx.send(DevnetEvent::error(e));
+                continue;
+            }
+        };
+        let Some(shortfall) = u128::from(account.sbtc_balance)
+            .checked_sub(held)
+            .filter(|shortfall| *shortfall > 0)
+        else {
+            continue;
+        };
         let args = vec![
             ClarityValue::buff_from(genesis_deposit_id("deposit", account)).unwrap(),
             ClarityValue::UInt(1),
-            ClarityValue::UInt(account.sbtc_balance.into()),
+            ClarityValue::UInt(shortfall),
             ClarityValue::Principal(PrincipalData::parse(&account.stx_address).unwrap()),
             burn_block_hash.clone(),
             burn_height.clone(),
@@ -1116,10 +1133,11 @@ fn fund_accounts(
             fee_rate * 1000,
             &hex_bytes(deployer_secret_key).unwrap(),
         );
-        deployer_nonce += 1;
-
         match stacks_rpc.post_transaction(&tx) {
-            Ok(_) => nb_of_founded_accounts += 1,
+            Ok(_) => {
+                deployer_nonce += 1;
+                nb_of_founded_accounts += 1;
+            }
             Err(e) => {
                 let _ = devnet_event_tx.send(DevnetEvent::error(format!(
                     "Unable to fund {}: {}",
@@ -1134,35 +1152,46 @@ fn fund_accounts(
     Ok(())
 }
 
-/// Whether the account already holds the sBTC it is configured for, as it does when
-/// the snapshot funded it. An unreadable balance counts as not funded, so a node
-/// hiccup retries the deposit instead of skipping it, which the replayed id makes safe.
-fn holds_configured_sbtc(
+/// The sBTC an account already holds, so funding can mint only the shortfall and stay
+/// correct when a snapshot funded it at a different amount.
+fn sbtc_balance_of(
     stacks_rpc: &StacksRpc,
     deployer: &AccountConfig,
     account: &AccountConfig,
-) -> bool {
-    let Ok(recipient) = PrincipalData::parse(&account.stx_address) else {
-        return false;
-    };
-    let balance = stacks_rpc.call_read_only_fn(
-        &deployer.stx_address,
-        "sbtc-token",
-        "get-balance",
-        vec![ClarityValue::Principal(recipient)],
-        &deployer.stx_address,
-    );
+) -> Result<u128, String> {
+    let recipient = PrincipalData::parse(&account.stx_address)
+        .map_err(|e| format!("invalid address {}: {e}", account.stx_address))?;
+    let balance = stacks_rpc
+        .call_with_retry(
+            |client| {
+                client.call_read_only_fn(
+                    &deployer.stx_address,
+                    "sbtc-token",
+                    "get-balance",
+                    vec![ClarityValue::Principal(recipient.clone())],
+                    &deployer.stx_address,
+                )
+            },
+            5,
+        )
+        .map_err(|e| {
+            format!(
+                "unable to read the sBTC balance of {}: {e}",
+                account.stx_address
+            )
+        })?;
     match balance {
-        Ok(ClarityValue::Response(response)) if response.committed => {
-            matches!(*response.data, ClarityValue::UInt(held) if held >= account.sbtc_balance.into())
-        }
-        _ => false,
+        ClarityValue::Response(response) if response.committed => match *response.data {
+            ClarityValue::UInt(held) => Ok(held),
+            _ => Err("sbtc-token returned a non-integer balance".to_string()),
+        },
+        _ => Err("sbtc-token returned an unexpected balance response".to_string()),
     }
 }
 
-/// `sbtc-deposit` rejects a replay of `{txid, vout-index}`, so deriving the id from the
-/// recipient and the configured amount makes re-funding an unchanged account a no-op
-/// while still letting a raised `sbtc_balance` through as a genuinely new deposit.
+/// Distinct per recipient and configured amount, so a re-run that mints the same
+/// shortfall replays and `sbtc-deposit` rejects it. The balance read above is the
+/// primary guard; this is the backstop.
 fn genesis_deposit_id(purpose: &str, account: &AccountConfig) -> Vec<u8> {
     let seed = format!(
         "clarinet-devnet-{purpose}-{}-{}",
@@ -1738,14 +1767,17 @@ mod test_rpc_client {
     }
 
     /// Drain the channel, since funding reports from a detached thread.
-    fn collect_events(rx: &Receiver<DevnetEvent>, timeout: Duration) -> Vec<DevnetEvent> {
-        let start = std::time::Instant::now();
+    fn collect_events(
+        rx: &Receiver<DevnetEvent>,
+        expected: usize,
+        timeout: Duration,
+    ) -> Vec<DevnetEvent> {
+        let deadline = std::time::Instant::now() + timeout;
         let mut events = Vec::new();
-        while start.elapsed() < timeout {
-            match rx.recv_timeout(Duration::from_millis(100)) {
+        while events.len() < expected {
+            match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
                 Ok(event) => events.push(event),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(_) => break,
             }
         }
         events
@@ -1778,7 +1810,7 @@ mod test_rpc_client {
             &boot_completed,
         );
 
-        let received_events = collect_events(&devnet_event_rx, Duration::from_secs(3));
+        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_secs(3));
 
         assert!(
             received_events.iter().any(|event| matches!(
@@ -1792,6 +1824,83 @@ mod test_rpc_client {
         info_mock.assert();
         burn_block_mock.assert();
         nonce_mock.assert();
+    }
+
+    /// Funding must top an account up to its configured balance, not mint the whole
+    /// amount again on top of what a snapshot already gave it.
+    #[test]
+    fn test_fund_genesis_account_mints_only_the_shortfall() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        // test_deployer is configured for 100_000_000 and already holds 40_000_000.
+        let balance_mock = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 40_000_000);
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let shortfall_mock = stacks_rpc.tx_carrying_amount_mock(60_000_000, "0xdeadbeef");
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_secs(3));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("Funded 1 accounts")
+            )),
+            "the account should be topped up"
+        );
+        balance_mock.assert();
+        // Only matches a deposit of exactly the missing 60_000_000.
+        shortfall_mock.assert();
+    }
+
+    /// An unreadable balance must skip the account. Minting blind would double the
+    /// balance of an account the snapshot already funded.
+    #[test]
+    fn test_fund_genesis_account_skips_when_balance_is_unreadable() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        // No balance mock: the read fails, so no deposit may be broadcast.
+        let broadcast_mock = stacks_rpc.get_tx_mock("0xdeadbeef").expect(0);
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(20));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("unable to read the sBTC balance")
+            )),
+            "the failure should be reported, got: {received_events:?}"
+        );
+        broadcast_mock.assert();
     }
 
     /// A project without sBTC requirements must fund quietly, not error.
@@ -1814,7 +1923,7 @@ mod test_rpc_client {
             &boot_completed,
         );
 
-        let received_events = collect_events(&devnet_event_rx, Duration::from_secs(2));
+        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_millis(500));
 
         assert_eq!(
             received_events.len(),
@@ -1855,7 +1964,7 @@ mod test_rpc_client {
             &boot_completed,
         );
 
-        let received_events = collect_events(&devnet_event_rx, Duration::from_secs(3));
+        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_secs(3));
 
         assert_eq!(received_events.len(), 1);
         assert!(received_events.iter().any(|event| {

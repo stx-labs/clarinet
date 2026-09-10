@@ -88,6 +88,22 @@ impl MockStacksRpc {
             .create()
     }
 
+    /// Accepts a broadcast only when its body carries `amount` as a serialized
+    /// Clarity uint, so a test can pin the value a contract call was given.
+    pub fn tx_carrying_amount_mock(&mut self, amount: u128, tx_id: &str) -> Mock {
+        let needle = Value::UInt(amount).serialize_to_vec().unwrap();
+        self.client
+            .mock("POST", "/v2/transactions")
+            .match_request(move |request| {
+                let body = request.body().unwrap();
+                body.windows(needle.len()).any(|window| window == needle)
+            })
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(r#""{tx_id}""#))
+            .create()
+    }
+
     pub fn get_tx_mock(&mut self, tx_id: &str) -> Mock {
         self.client
             .mock("POST", "/v2/transactions")

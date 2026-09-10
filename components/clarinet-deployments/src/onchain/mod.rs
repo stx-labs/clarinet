@@ -102,6 +102,14 @@ fn get_stacks_address(public_key: &PublicKey, network: &StacksNetwork) -> Stacks
     .unwrap()
 }
 
+fn anchor_mode(anchor_block_only: bool) -> TransactionAnchorMode {
+    if anchor_block_only {
+        TransactionAnchorMode::OnChainOnly
+    } else {
+        TransactionAnchorMode::Any
+    }
+}
+
 fn sign_transaction_payload(
     account: &AccountConfig,
     payload: TransactionPayload,
@@ -389,6 +397,16 @@ pub fn is_contract_published(
         })
 }
 
+/// Emulated transactions never reach the chain. Both this walk and
+/// `get_initial_transactions_trackers` skip them and index everything else alike.
+fn is_emulated(transaction: &TransactionSpecification) -> bool {
+    matches!(
+        transaction,
+        TransactionSpecification::EmulatedContractPublish(_)
+            | TransactionSpecification::EmulatedContractCall(_)
+    )
+}
+
 /// Encode and sign every transaction of the plan, in order, grouped by batch epoch.
 fn encode_transactions(
     deployment: &DeploymentSpecification,
@@ -421,11 +439,7 @@ fn encode_transactions(
         let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
         let mut batch = Vec::new();
         for transaction in batch_spec.transactions.iter() {
-            if matches!(
-                transaction,
-                TransactionSpecification::EmulatedContractPublish(_)
-                    | TransactionSpecification::EmulatedContractCall(_)
-            ) {
+            if is_emulated(transaction) {
                 continue;
             }
             // Every remaining transaction consumes an index, published or not, because
@@ -440,11 +454,6 @@ fn encode_transactions(
                     let nonce = next_nonce(&mut cached_nonces, stacks_rpc, &issuer_address)?;
                     let account = stx_accounts_lookup.get(issuer_address.as_str()).unwrap();
 
-                    let anchor_mode = match tx.anchor_block_only {
-                        true => TransactionAnchorMode::OnChainOnly,
-                        false => TransactionAnchorMode::Any,
-                    };
-
                     let transaction = encode_stx_transfer(
                         tx.recipient.clone(),
                         tx.mstx_amount,
@@ -452,7 +461,7 @@ fn encode_transactions(
                         account,
                         nonce,
                         tx.cost,
-                        anchor_mode,
+                        anchor_mode(tx.anchor_block_only),
                         network,
                     )
                     .map_err(|e| format!("unable to encode stx_transfer ({e})"))?;
@@ -530,11 +539,6 @@ fn encode_transactions(
                         })
                         .collect::<Result<Vec<_>, String>>()?;
 
-                    let anchor_mode = match tx.anchor_block_only {
-                        true => TransactionAnchorMode::OnChainOnly,
-                        false => TransactionAnchorMode::Any,
-                    };
-
                     let transaction = encode_contract_call(
                         &tx.contract_id,
                         tx.method.clone(),
@@ -542,7 +546,7 @@ fn encode_transactions(
                         account,
                         nonce,
                         tx.cost,
-                        anchor_mode,
+                        anchor_mode(tx.anchor_block_only),
                         network,
                     )
                     .map_err(|e| {
@@ -576,11 +580,6 @@ fn encode_transactions(
                             tx.source.clone()
                         };
 
-                    let anchor_mode = match tx.anchor_block_only {
-                        true => TransactionAnchorMode::OnChainOnly,
-                        false => TransactionAnchorMode::Any,
-                    };
-
                     let clarity_version = if epoch >= EpochSpec::Epoch2_1 {
                         Some(tx.clarity_version)
                     } else {
@@ -594,7 +593,7 @@ fn encode_transactions(
                         account,
                         nonce,
                         tx.cost,
-                        anchor_mode,
+                        anchor_mode(tx.anchor_block_only),
                         network,
                     )
                     .map_err(|e| {
