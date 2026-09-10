@@ -1098,9 +1098,6 @@ fn fund_accounts(
     let mut nb_of_founded_accounts = 0;
 
     for account in accounts {
-        if account.sbtc_balance == 0 {
-            continue;
-        }
         let held = match sbtc_balance_of(stacks_rpc, deployer, account) {
             Ok(held) => held,
             Err(e) => {
@@ -1871,6 +1868,46 @@ mod test_rpc_client {
         balance_mock.assert();
         // Only matches a deposit of exactly the missing 60_000_000.
         shortfall_mock.assert();
+    }
+
+    /// Lowering a target to zero is still a target: the excess must be reported.
+    #[test]
+    fn test_fund_genesis_account_reports_an_excess_against_a_zero_target() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        let _balance = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 1_000_000_000);
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let broadcast_mock = stacks_rpc.get_tx_mock("0xdeadbeef").expect(0);
+
+        let account = AccountConfig {
+            sbtc_balance: 0,
+            ..test_deployer()
+        };
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[account],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(5));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("cannot lower it")
+            )),
+            "the excess should be reported, got: {received_events:?}"
+        );
+        broadcast_mock.assert();
     }
 
     /// A shortfall the deposit contract would reject as dust must not be broadcast.
