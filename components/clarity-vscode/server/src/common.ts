@@ -1,7 +1,9 @@
 import {
   DidOpenTextDocumentParams,
+  DidChangeTextDocumentNotification,
   DidCloseTextDocumentNotification,
   DidOpenTextDocumentNotification,
+  DocumentSymbolRequest,
   InitializeRequest,
 } from "vscode-languageserver";
 import type { Connection } from "vscode-languageserver";
@@ -10,6 +12,12 @@ import type { Connection } from "vscode-languageserver";
 import { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
+
+// fast and high-frequency, they would drown out everything else
+const ignoreMethodsLog: string[] = [
+  DocumentSymbolRequest.method,
+  DidChangeTextDocumentNotification.method,
+];
 
 export function initConnection(
   connection: Connection,
@@ -28,14 +36,34 @@ export function initConnection(
     return bridge.onRequest(InitializeRequest.method, params);
   });
 
+  function startTimingsLog(method: string) {
+    if (
+      !initializationOptions.debug?.logRequestsTimings ||
+      ignoreMethodsLog.includes(method)
+    ) {
+      return null;
+    }
+
+    const id = Math.random().toString(16).slice(2, 18);
+    const start = performance.now();
+    return () => {
+      const ms = (performance.now() - start).toFixed(3);
+      console.log(`${method} (${id}): ${ms}ms`);
+    };
+  }
+
   const notifications: [string, unknown][] = [];
   async function consumeNotification() {
     const notification = notifications[notifications.length - 1];
     if (!notification) return;
+    const [method] = notification;
+    const logTimings = startTimingsLog(method);
     try {
       await bridge.onNotification(...notification);
     } catch (err) {
       console.warn(err);
+    } finally {
+      logTimings?.();
     }
     notifications.pop();
     if (notifications.length > 0) consumeNotification();
@@ -59,24 +87,16 @@ export function initConnection(
     if (notifications.length === 1) consumeNotification();
   });
 
-  const ignoreMethodsLog = ["textDocument/documentSymbol"];
-
   connection.onRequest((method: string, params: unknown) => {
     if (notifications.length > 0) return null;
 
-    if (
-      !initializationOptions.debug?.logRequestsTimings ||
-      ignoreMethodsLog.includes(method)
-    ) {
+    // the request bridge is synchronous, the call itself is the whole cost
+    const logTimings = startTimingsLog(method);
+    try {
       return bridge.onRequest(method, params);
+    } finally {
+      logTimings?.();
     }
-
-    const id = Math.random().toString(16).slice(2, 18);
-    const label = `${method} (${id})`;
-    console.time(label);
-    const r = bridge.onRequest(method, params);
-    console.timeEnd(label);
-    return r;
   });
 
   connection.listen();

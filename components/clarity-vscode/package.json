@@ -163,7 +163,7 @@
           "clarity-lsp.debug.logRequestsTimings": {
             "type": "boolean",
             "default": false,
-            "description": "Log LSP requests performances."
+            "description": "Log the time taken by LSP requests and notifications, including diagnostics."
           }
         }
       }
