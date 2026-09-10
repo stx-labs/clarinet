@@ -10,7 +10,8 @@ use std::{fs, str};
 use base58::FromBase58;
 use bitcoincore_rpc::bitcoin::Address;
 use clarinet_deployments::onchain::{
-    apply_on_chain_deployment, DeploymentCommand, DeploymentEvent, TransactionStatus,
+    apply_on_chain_deployment, is_contract_published, DeploymentCommand, DeploymentEvent,
+    TransactionStatus,
 };
 use clarinet_deployments::types::DeploymentSpecification;
 use clarinet_files::{
@@ -19,7 +20,7 @@ use clarinet_files::{
 };
 use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::PublicKey;
-use clarity::util::hash::{hex_bytes, Hash160};
+use clarity::util::hash::{hex_bytes, Hash160, Sha256Sum};
 use clarity::vm::types::{BuffData, PrincipalData, SequenceData, TupleData};
 use clarity::vm::{ClarityName, Value as ClarityValue};
 use hiro_system_kit::{self, slog, yellow};
@@ -53,8 +54,10 @@ use crate::orchestrator::{
     DEVNET_SNAPSHOT_READY_MARKER, EXCLUDED_STACKS_SNAPSHOT_FILES,
 };
 
-const SNAPSHOT_STACKS_START_HEIGHT: u64 = 63;
 const SNAPSHOT_BURN_START_HEIGHT: u64 = 163;
+
+/// `sbtc-deposit` rejects anything smaller, so a shortfall below this cannot be minted.
+const SBTC_DUST_LIMIT: u128 = 546;
 
 #[derive(Deserialize)]
 pub struct NewTransaction {
@@ -92,11 +95,6 @@ impl DevnetEventObserverConfig {
             .expect("deployer not found")
             .clone()
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct DevnetInitializationStatus {
-    pub should_deploy_protocol: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -180,19 +178,12 @@ pub async fn start_chains_coordinator(
     create_new_snapshot: bool,
     ctx: Context,
 ) -> Result<(), String> {
-    let mut should_deploy_protocol = true; // Will change when `stacks-network` components becomes compatible with Testnet / Mainnet setups
     let boot_completed = Arc::new(AtomicBool::new(false));
     let mut current_burn_height = if using_snapshot {
         SNAPSHOT_BURN_START_HEIGHT
     } else {
         0
     };
-    let starting_block_height = if using_snapshot {
-        SNAPSHOT_STACKS_START_HEIGHT
-    } else {
-        0
-    };
-
     let global_snapshot_dir = get_global_snapshot_dir();
     let project_snapshot_dir = get_project_snapshot_dir(&config.devnet_config);
     // Ensure directories exist
@@ -204,11 +195,6 @@ pub async fn start_chains_coordinator(
     let (deployment_commands_tx, deployments_command_rx) = channel();
     let (deployment_events_tx, deployment_events_rx) = channel();
 
-    // Set-up the background task in charge of serializing / signing / publishing the contracts.
-    // This tasks can take several seconds to minutes, depending on the complexity of the project.
-    // We start this process as soon as possible, as a background task.
-    // This thread becomes dormant once the encoding is done, and proceed to the actual deployment once
-    // the event DeploymentCommand::Start is received.
     perform_protocol_deployment(
         &config.network_manifest,
         &config.deployment,
@@ -224,6 +210,14 @@ pub async fn start_chains_coordinator(
         deployment_events_rx,
         &devnet_event_tx,
         Some(mining_command_tx.clone()),
+        &boot_completed,
+    );
+
+    fund_genesis_account(
+        &devnet_event_tx,
+        &config.services_map_hosts,
+        &config.accounts,
+        config.deployment_fee_rate,
         &boot_completed,
     );
 
@@ -288,7 +282,6 @@ pub async fn start_chains_coordinator(
         };
         Some(StacksObserverStartupContext {
             block_pool_seed: event_pool,
-            last_block_height_appended: starting_block_height,
         })
     } else {
         None
@@ -437,17 +430,14 @@ pub async fn start_chains_coordinator(
                 let _ = devnet_event_tx.send(DevnetEvent::BitcoinChainEvent(chain_update.clone()));
             }
             ObserverEvent::StacksChainEvent(chain_event) => {
-                if should_deploy_protocol {
-                    if let Some(block_identifier) = chain_event.get_latest_block_identifier() {
-                        if block_identifier.index == starting_block_height {
-                            should_deploy_protocol = false;
-                            if let Some(deployment_commands_tx) = deployment_commands_tx.take() {
-                                deployment_commands_tx
-                                    .send(DeploymentCommand::Start)
-                                    .map_err(|e| format!("unable to start deployment: {e}"))
-                                    .unwrap();
-                            }
-                        }
+                // Blocks seeded from a snapshot never surface here, so the first block
+                // event is the first block mined by this devnet: time to deploy.
+                if chain_event.get_latest_block_identifier().is_some() {
+                    if let Some(deployment_commands_tx) = deployment_commands_tx.take() {
+                        deployment_commands_tx
+                            .send(DeploymentCommand::Start)
+                            .map_err(|e| format!("unable to start deployment: {e}"))
+                            .unwrap();
                     }
                 }
 
@@ -483,29 +473,6 @@ pub async fn start_chains_coordinator(
                         continue;
                     }
                 };
-
-                // if the sbtc-deposit contract is detected, fund the accounts with sBTC
-                stacks_block_update
-                    .block
-                    .transactions
-                    .iter()
-                    .for_each(|tx| {
-                        if let StacksTransactionKind::ContractDeployment(data) = &tx.metadata.kind {
-                            let contract_identifier = data.contract_identifier.clone();
-                            let deployer = config.get_deployer();
-                            if contract_identifier
-                                == format!("{}.sbtc-deposit", deployer.stx_address)
-                            {
-                                fund_genesis_account(
-                                    &devnet_event_tx,
-                                    &config.services_map_hosts,
-                                    &config.accounts,
-                                    config.deployment_fee_rate,
-                                    &boot_completed,
-                                );
-                            }
-                        }
-                    });
 
                 let _ = devnet_event_tx.send(DevnetEvent::StacksChainEvent(chain_event));
 
@@ -635,7 +602,6 @@ pub fn perform_protocol_deployment(
             deployment,
             deployment_event_tx,
             deployment_command_rx,
-            false,
             override_bitcoin_rpc_url,
             override_stacks_rpc_url,
         );
@@ -659,8 +625,9 @@ pub fn relay_devnet_protocol_deployment(
                         break;
                     }
                 }
-                DeploymentEvent::Interrupted(_) => {
-                    // Terminate
+                DeploymentEvent::Interrupted(message) => {
+                    // Nothing else reports this, and boot will never complete.
+                    let _ = devnet_event_tx.send(DevnetEvent::error(message));
                     break;
                 }
                 DeploymentEvent::DeploymentCompleted => {
@@ -1058,11 +1025,16 @@ fn fund_genesis_account(
     fee_rate: u64,
     boot_completed: &Arc<AtomicBool>,
 ) {
-    let deployer = accounts
+    let Some(deployer) = accounts
         .iter()
         .find(|account| account.label == "deployer")
-        .unwrap()
-        .clone();
+        .cloned()
+    else {
+        let _ = devnet_event_tx.send(DevnetEvent::warning(
+            "No deployer account: skipping sBTC funding".to_string(),
+        ));
+        return;
+    };
     let (_, _, deployer_secret_key) = clarinet_files::compute_addresses(
         &deployer.mnemonic,
         &deployer.derivation,
@@ -1078,97 +1050,161 @@ fn fund_genesis_account(
         while !boot_completed_moved.load(Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
-        let node_rpc_url = format!("http://{stacks_api_host_moved}");
-        let stacks_rpc = StacksRpc::new(&node_rpc_url);
+        let stacks_rpc = StacksRpc::new(&format!("http://{stacks_api_host_moved}"));
+        if let Err(e) = fund_accounts(
+            &stacks_rpc,
+            &deployer,
+            &deployer_secret_key,
+            &accounts_moved,
+            fee_rate,
+            &devnet_event_tx_moved,
+        ) {
+            let _ = devnet_event_tx_moved.send(DevnetEvent::error(e));
+        }
+    });
+}
 
-        let info = match stacks_rpc.call_with_retry(|client| client.get_info(), 5) {
-            Ok(info) => info,
+fn fund_accounts(
+    stacks_rpc: &StacksRpc,
+    deployer: &AccountConfig,
+    deployer_secret_key: &str,
+    accounts: &[AccountConfig],
+    fee_rate: u64,
+    devnet_event_tx: &Sender<DevnetEvent>,
+) -> Result<(), String> {
+    // Deployed by this run or carried by the snapshot; absent without sBTC requirements.
+    if !is_contract_published(stacks_rpc, &deployer.stx_address, "sbtc-deposit")? {
+        return Ok(());
+    }
+
+    let info = stacks_rpc
+        .call_with_retry(|client| client.get_info(), 5)
+        .map_err(|e| format!("Failed to retrieve info: {e}"))?;
+    let burn_height_number = info.burn_block_height as u32;
+    let burn_height = ClarityValue::UInt(burn_height_number.into());
+
+    let burn_block = stacks_rpc
+        .call_with_retry(|client| client.get_burn_block(burn_height_number), 5)
+        .map_err(|e| format!("Failed to retrieve burn block: {e}"))?;
+    let burn_block_hash =
+        ClarityValue::buff_from(hex_bytes(&burn_block.burn_block_hash.replace("0x", "")).unwrap())
+            .unwrap();
+
+    let mut deployer_nonce = stacks_rpc
+        .call_with_retry(|client| client.get_nonce(&deployer.stx_address), 5)
+        .map_err(|e| format!("Failed to retrieve nonce: {e}"))?;
+
+    let contract_id = format!("{}.sbtc-deposit", deployer.stx_address);
+    let mut nb_of_founded_accounts = 0;
+
+    for account in accounts {
+        let held = match sbtc_balance_of(stacks_rpc, deployer, account) {
+            Ok(held) => held,
             Err(e) => {
-                let _ = devnet_event_tx_moved
-                    .send(DevnetEvent::error(format!("Failed to retrieve info: {e}")));
-                return;
-            }
-        };
-
-        let burn_height_number = info.burn_block_height as u32;
-        let burn_height = ClarityValue::UInt(burn_height_number.into());
-
-        let burn_block = match stacks_rpc
-            .call_with_retry(|client| client.get_burn_block(burn_height_number), 5)
-        {
-            Ok(b) => b,
-            Err(e) => {
-                let _ = devnet_event_tx_moved.send(DevnetEvent::error(format!(
-                    "Failed to retrieve burn block: {e}"
-                )));
-                return;
-            }
-        };
-
-        let mut deployer_nonce =
-            match stacks_rpc.call_with_retry(|client| client.get_nonce(&deployer.stx_address), 5) {
-                Ok(n) => n,
-                Err(e) => {
-                    let _ = devnet_event_tx_moved
-                        .send(DevnetEvent::error(format!("Failed to retrieve nonce: {e}")));
-                    return;
-                }
-            };
-
-        let burn_block_hash = ClarityValue::buff_from(
-            hex_bytes(&burn_block.burn_block_hash.replace("0x", "")).unwrap(),
-        )
-        .unwrap();
-
-        let contract_id = format!("{}.sbtc-deposit", deployer.stx_address);
-        let mut nb_of_founded_accounts = 0;
-
-        for account in accounts_moved {
-            if account.sbtc_balance == 0 {
+                // Skip rather than mint on top of a balance we could not read.
+                let _ = devnet_event_tx.send(DevnetEvent::error(e));
                 continue;
             }
-            let txid_buffer = std::array::from_fn::<_, 32, _>(|_| rand::random());
-            let txid = ClarityValue::buff_from(txid_buffer.to_vec()).unwrap();
-            let vout_index = ClarityValue::UInt(1);
-            let amount = ClarityValue::UInt(account.sbtc_balance.into());
-            let recipient =
-                ClarityValue::Principal(PrincipalData::parse(&account.stx_address).unwrap());
-            let sweep_txid_buffer = std::array::from_fn::<_, 32, _>(|_| rand::random());
-            let sweep_txid = ClarityValue::buff_from(sweep_txid_buffer.to_vec()).unwrap();
-            let args = vec![
-                txid,
-                vout_index,
-                amount,
-                recipient,
-                burn_block_hash.clone(),
-                burn_height.clone(),
-                sweep_txid,
-            ];
-            let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
-                contract_id.clone(),
-                "complete-deposit-wrapper".to_string(),
-                args,
-                deployer_nonce,
-                fee_rate * 1000,
-                &hex_bytes(&deployer_secret_key).unwrap(),
-            );
-            let funding_result = stacks_rpc.post_transaction(&tx);
-            deployer_nonce += 1;
-
-            match funding_result {
-                Ok(_) => nb_of_founded_accounts += 1,
-                Err(e) => {
-                    let _ = devnet_event_tx_moved.send(DevnetEvent::error(format!(
-                        "Unable to fund {}: {}",
-                        account.stx_address, e
-                    )));
-                }
+        };
+        let configured = u128::from(account.sbtc_balance);
+        let Some(shortfall) = configured.checked_sub(held).filter(|amount| *amount > 0) else {
+            if held > configured {
+                let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                    "{} already holds more sBTC than configured; devnet cannot lower it",
+                    account.stx_address
+                )));
+            }
+            continue;
+        };
+        if shortfall < SBTC_DUST_LIMIT {
+            let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                "{} is {shortfall} short of its configured sBTC, below the dust limit of {SBTC_DUST_LIMIT}",
+                account.stx_address
+            )));
+            continue;
+        }
+        let args = vec![
+            ClarityValue::buff_from(genesis_deposit_id("deposit", account)).unwrap(),
+            ClarityValue::UInt(1),
+            ClarityValue::UInt(shortfall),
+            ClarityValue::Principal(PrincipalData::parse(&account.stx_address).unwrap()),
+            burn_block_hash.clone(),
+            burn_height.clone(),
+            ClarityValue::buff_from(genesis_deposit_id("sweep", account)).unwrap(),
+        ];
+        let tx = stacks_rpc_client::crypto::build_contract_call_transaction(
+            contract_id.clone(),
+            "complete-deposit-wrapper".to_string(),
+            args,
+            deployer_nonce,
+            fee_rate * 1000,
+            &hex_bytes(deployer_secret_key).unwrap(),
+        );
+        match stacks_rpc.post_transaction(&tx) {
+            Ok(_) => {
+                deployer_nonce += 1;
+                nb_of_founded_accounts += 1;
+            }
+            Err(e) => {
+                let _ = devnet_event_tx.send(DevnetEvent::error(format!(
+                    "Unable to fund {}: {}",
+                    account.stx_address, e
+                )));
             }
         }
-        let _ = devnet_event_tx_moved.send(DevnetEvent::info(format!(
-            "Funded {nb_of_founded_accounts} accounts with sBTC"
-        )));
-    });
+    }
+    let _ = devnet_event_tx.send(DevnetEvent::info(format!(
+        "Funded {nb_of_founded_accounts} accounts with sBTC"
+    )));
+    Ok(())
+}
+
+/// Funding mints only the shortfall, topping an account up to at least its configured
+/// balance. An excess cannot be removed, and a shortfall under the dust limit cannot
+/// be minted; both are reported rather than applied.
+fn sbtc_balance_of(
+    stacks_rpc: &StacksRpc,
+    deployer: &AccountConfig,
+    account: &AccountConfig,
+) -> Result<u128, String> {
+    let recipient = PrincipalData::parse(&account.stx_address)
+        .map_err(|e| format!("invalid address {}: {e}", account.stx_address))?;
+    let balance = stacks_rpc
+        .call_with_retry(
+            |client| {
+                client.call_read_only_fn(
+                    &deployer.stx_address,
+                    "sbtc-token",
+                    "get-balance",
+                    vec![ClarityValue::Principal(recipient.clone())],
+                    &deployer.stx_address,
+                )
+            },
+            5,
+        )
+        .map_err(|e| {
+            format!(
+                "unable to read the sBTC balance of {}: {e}",
+                account.stx_address
+            )
+        })?;
+    match balance {
+        ClarityValue::Response(response) if response.committed => match *response.data {
+            ClarityValue::UInt(held) => Ok(held),
+            _ => Err("sbtc-token returned a non-integer balance".to_string()),
+        },
+        _ => Err("sbtc-token returned an unexpected balance response".to_string()),
+    }
+}
+
+/// Distinct per recipient and amount, so an identical re-run replays and
+/// `sbtc-deposit` rejects it. A backstop; the balance read above is the real guard.
+fn genesis_deposit_id(purpose: &str, account: &AccountConfig) -> Vec<u8> {
+    let seed = format!(
+        "clarinet-devnet-{purpose}-{}-{}",
+        account.stx_address, account.sbtc_balance
+    );
+    Sha256Sum::from_data(seed.as_bytes()).as_bytes().to_vec()
 }
 
 pub fn invalidate_bitcoin_chain_tip(
@@ -1709,54 +1745,293 @@ mod test_rpc_client {
 
     use super::*;
 
-    #[test]
-    fn test_fund_genesis_account() {
-        let mut stacks_rpc = MockStacksRpc::new();
-        let info_mock = stacks_rpc.get_info_mock(NodeInfo {
-            peer_version: 4207599116,
-            pox_consensus: "4f4de3d4ab3246299c039084a12c801c9dc70323".to_string(),
-            burn_block_height: 100,
-            stable_pox_consensus: "a2c4972bf818f554809e25fa637b780c77c20b62".to_string(),
-            stable_burn_block_height: 99,
-            server_version: "stacks-node 0.0.1".to_string(),
-            network_id: 2147483648,
-            parent_network_id: 3669344250,
-            stacks_tip_height: 47,
-            stacks_tip: "6bb0e4706fdfb9624a23d9144f2161c61d5c58816643b48ffdb735887bdbf5fa"
-                .to_string(),
-            stacks_tip_consensus_hash: "4f4de3d4ab3246299c039084a12c801c9dc70323".to_string(),
-            genesis_chainstate_hash:
-                "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b".to_string(),
-        });
-        let burn_block_mock = stacks_rpc.get_burn_block_mock(100);
-        let nonce_mock = stacks_rpc.get_nonce_mock("ST2JHG361ZXG51QTKY2NQCVBPPRRE2KZB1HR05NNC", 0);
-        let tx_mock = stacks_rpc
-            .get_tx_mock("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+    const TEST_DEPLOYER_ADDRESS: &str = "ST2JHG361ZXG51QTKY2NQCVBPPRRE2KZB1HR05NNC";
 
-        let deployer = AccountConfig {
+    fn test_deployer() -> AccountConfig {
+        AccountConfig {
             label: "deployer".to_string(),
             mnemonic: "cycle puppy glare enroll cost improve round trend wrist mushroom scorpion tower claim oppose clever elephant dinosaur eight problem before frozen dune wagon high".to_string(),
             encrypted_mnemonic: "".to_string(),
             derivation: DEFAULT_DERIVATION_PATH.to_string(),
             balance: 10000000,
             sbtc_balance: 100000000,
-            stx_address: "ST2JHG361ZXG51QTKY2NQCVBPPRRE2KZB1HR05NNC".to_string(),
+            stx_address: TEST_DEPLOYER_ADDRESS.to_string(),
             btc_address: "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7".to_string(),
             is_mainnet: false,
-        };
+        }
+    }
 
-        let fee_rate = 10;
-        let (devnet_event_tx, devnet_event_rx) = channel();
-        let services_map_hosts = ServicesMapHosts {
-            stacks_api_host: stacks_rpc.url.replace("http://", ""),
+    fn test_services_map_hosts(mock_url: &str) -> ServicesMapHosts {
+        ServicesMapHosts {
+            stacks_api_host: mock_url.replace("http://", ""),
             // only stacks_node is called
-            stacks_node_host: stacks_rpc.url.clone(),
+            stacks_node_host: mock_url.to_string(),
             bitcoin_node_host: "localhost".to_string(),
             bitcoin_explorer_host: "localhost".to_string(),
             stacks_explorer_host: "localhost".to_string(),
             postgres_host: "localhost".to_string(),
+        }
+    }
+
+    fn collect_events(
+        rx: &Receiver<DevnetEvent>,
+        expected: usize,
+        timeout: Duration,
+    ) -> Vec<DevnetEvent> {
+        let deadline = std::time::Instant::now() + timeout;
+        let mut events = Vec::new();
+        while events.len() < expected {
+            match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+                Ok(event) => events.push(event),
+                Err(_) => break,
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn test_fund_genesis_account_skips_already_funded() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let deposit_contract_mock =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        // test_deployer is configured for 100_000_000 and already holds more.
+        let balance_mock = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 1_000_000_000);
+        let info_mock = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let burn_block_mock = stacks_rpc.get_burn_block_mock(100);
+        let nonce_mock = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        let boot_completed = Arc::new(AtomicBool::new(true));
+
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &boot_completed,
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(3));
+
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("Funded 0 accounts")
+            )),
+            "an already-funded account should not be funded again, got: {received_events:?}"
+        );
+        deposit_contract_mock.assert();
+        balance_mock.assert();
+        info_mock.assert();
+        burn_block_mock.assert();
+        nonce_mock.assert();
+    }
+
+    /// Top up to the configured balance, rather than minting it again on top.
+    #[test]
+    fn test_fund_genesis_account_mints_only_the_shortfall() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        // test_deployer is configured for 100_000_000 and already holds 40_000_000.
+        let balance_mock = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 40_000_000);
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let shortfall_mock = stacks_rpc.tx_carrying_amount_mock(60_000_000, "0xdeadbeef");
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_secs(3));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("Funded 1 accounts")
+            )),
+            "the account should be topped up"
+        );
+        balance_mock.assert();
+        // Only matches a deposit of exactly the missing 60_000_000.
+        shortfall_mock.assert();
+    }
+
+    /// Lowering a target to zero is still a target: the excess must be reported.
+    #[test]
+    fn test_fund_genesis_account_reports_an_excess_against_a_zero_target() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        let _balance = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 1_000_000_000);
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let broadcast_mock = stacks_rpc.get_tx_mock("0xdeadbeef").expect(0);
+
+        let account = AccountConfig {
+            sbtc_balance: 0,
+            ..test_deployer()
         };
-        let accounts = vec![deployer];
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[account],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(5));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("cannot lower it")
+            )),
+            "the excess should be reported, got: {received_events:?}"
+        );
+        broadcast_mock.assert();
+    }
+
+    /// A shortfall the deposit contract would reject as dust must not be broadcast.
+    #[test]
+    fn test_fund_genesis_account_skips_a_sub_dust_shortfall() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        // test_deployer is configured for 100_000_000 and is 100 short, under the 546 limit.
+        let _balance = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 99_999_900);
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let broadcast_mock = stacks_rpc.get_tx_mock("0xdeadbeef").expect(0);
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(5));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("below the dust limit")
+            )),
+            "the shortfall should be reported, got: {received_events:?}"
+        );
+        broadcast_mock.assert();
+    }
+
+    /// Minting blind would double an account the snapshot already funded.
+    #[test]
+    fn test_fund_genesis_account_skips_when_balance_is_unreadable() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let _deposit_contract =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        let _info = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let _burn_block = stacks_rpc.get_burn_block_mock(100);
+        let _nonce = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        // No balance mock: the read fails, so no deposit may be broadcast.
+        let broadcast_mock = stacks_rpc.get_tx_mock("0xdeadbeef").expect(0);
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        fund_genesis_account(
+            &devnet_event_tx,
+            &test_services_map_hosts(&stacks_rpc.url),
+            &[test_deployer()],
+            10,
+            &Arc::new(AtomicBool::new(true)),
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 2, Duration::from_secs(20));
+        assert!(
+            received_events.iter().any(|event| matches!(
+                event,
+                DevnetEvent::Log(msg) if msg.message.contains("unable to read the sBTC balance")
+            )),
+            "the failure should be reported, got: {received_events:?}"
+        );
+        broadcast_mock.assert();
+    }
+
+    #[test]
+    fn test_fund_genesis_account_without_sbtc_contracts() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let missing_contract_mock =
+            stacks_rpc.contract_source_not_found_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        let services_map_hosts = test_services_map_hosts(&stacks_rpc.url);
+        let accounts = vec![test_deployer()];
+        let boot_completed = Arc::new(AtomicBool::new(true));
+
+        fund_genesis_account(
+            &devnet_event_tx,
+            &services_map_hosts,
+            &accounts,
+            10,
+            &boot_completed,
+        );
+
+        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_millis(500));
+
+        assert_eq!(
+            received_events.len(),
+            0,
+            "with no deposit contract on chain, funding should report nothing"
+        );
+        missing_contract_mock.assert();
+    }
+
+    #[test]
+    fn test_fund_genesis_account() {
+        let mut stacks_rpc = MockStacksRpc::new();
+        let info_mock = stacks_rpc.get_info_mock(NodeInfo {
+            burn_block_height: 100,
+            stacks_tip_height: 47,
+            ..Default::default()
+        });
+        let burn_block_mock = stacks_rpc.get_burn_block_mock(100);
+        let nonce_mock = stacks_rpc.get_nonce_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let balance_mock = stacks_rpc.sbtc_balance_mock(TEST_DEPLOYER_ADDRESS, 0);
+        let deposit_contract_mock =
+            stacks_rpc.get_contract_source_mock(TEST_DEPLOYER_ADDRESS, "sbtc-deposit");
+        let tx_mock = stacks_rpc
+            .get_tx_mock("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+
+        let fee_rate = 10;
+        let (devnet_event_tx, devnet_event_rx) = channel();
+        let services_map_hosts = test_services_map_hosts(&stacks_rpc.url);
+        let accounts = vec![test_deployer()];
 
         let boot_completed = Arc::new(AtomicBool::new(true));
 
@@ -1768,21 +2043,7 @@ mod test_rpc_client {
             &boot_completed,
         );
 
-        let timeout = Duration::from_secs(3);
-        let start = std::time::Instant::now();
-
-        let mut received_events = Vec::new();
-        while start.elapsed() < timeout {
-            match devnet_event_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(event) => {
-                    received_events.push(event);
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    break;
-                }
-            }
-        }
+        let received_events = collect_events(&devnet_event_rx, 1, Duration::from_secs(3));
 
         assert_eq!(received_events.len(), 1);
         assert!(received_events.iter().any(|event| {
@@ -1794,6 +2055,8 @@ mod test_rpc_client {
         }));
 
         info_mock.assert();
+        deposit_contract_mock.assert();
+        balance_mock.assert();
         nonce_mock.assert();
         burn_block_mock.assert();
         tx_mock.assert();
