@@ -33,6 +33,7 @@ pub fn run_dap() -> Result<(), String> {
                 &mut deployment,
                 Some(&artifacts.asts),
                 false,
+                Environment::Simnet,
             )
             .session;
 
@@ -112,6 +113,7 @@ fn make_session(
         &mut deployment,
         Some(&artifacts.asts),
         false,
+        Environment::Simnet,
     )
     .session;
 

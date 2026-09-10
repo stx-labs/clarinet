@@ -66,7 +66,9 @@ fn boot_remap_principals() -> RemapPrincipals {
 /// It is set by the plan generator, and by
 /// [`setup_session_with_deployment`] for project contracts whose plan predates
 /// the field — requirements never carry it, since they are deployed
-/// byte-identical to what is on chain.
+/// byte-identical to what is on chain. Both setters gate on simnet execution,
+/// so an on-chain `clarinet check` pass reaches this function with an empty
+/// marker and deploys its source verbatim.
 ///
 /// The rewrite is re-derived from the source rather than replayed from the
 /// recorded pairs, which is what makes a plan re-read from disk (where
@@ -106,12 +108,27 @@ fn source_for_emulated_publish(tx: &EmulatedContractPublishSpecification, mxs: b
     remap_mainnet_boot_principals(&tx.source).unwrap_or_else(|| tx.source.clone())
 }
 
+/// Prepare a session from an already-built deployment plan.
+///
+/// `environment` selects which code the plan describes, and must match the one
+/// the plan was generated for. `clarinet check` runs both: the simnet pass
+/// analyses what simnet will execute, the on-chain pass what will really be
+/// published. Only the former is due the boot rewrite — see
+/// the `backfill_legacy_boot_remap` gate below.
 pub fn setup_session_with_deployment(
     manifest: &ProjectManifest,
     deployment: &mut DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
     enable_analysis: bool,
+    environment: Environment,
 ) -> DeploymentGenerationArtifacts {
+    // A plan written before `remap-principals` existed records nothing, which
+    // is indistinguishable from a requirement. Re-deriving the marker is gated
+    // exactly like the generator's own rewrite, so a plan loaded from disk and
+    // a freshly generated one describe the same code.
+    let backfill_legacy_boot_remap =
+        environment == Environment::Simnet && !manifest.repl_settings.remote_data.enabled;
+
     // Mark contracts that should skip analysis:
     // - All contracts when analysis is globally disabled
     // - Contracts not in the project manifest (requirements)
@@ -119,13 +136,19 @@ pub fn setup_session_with_deployment(
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
-                // A plan written before `remap-principals` existed records
-                // nothing, which is indistinguishable from a requirement — so
-                // re-derive it for the project's own contracts. Without this, a
-                // plan loaded from disk silently deploys mainnet boot
-                // principals and the PoX lock goes missing again.
                 let is_project_contract = manifest.contracts_settings.contains_key(&spec.location);
-                if is_project_contract && spec.remap_principals.is_empty() {
+
+                // Without this, a plan loaded from disk silently deploys
+                // mainnet boot principals and the PoX lock goes missing again.
+                // Requirements are excluded (they deploy byte-identical to
+                // chain), and so is a source that references no mainnet boot
+                // contract — marking it would claim a rewrite that
+                // `source_for_emulated_publish` would then not perform.
+                if backfill_legacy_boot_remap
+                    && is_project_contract
+                    && spec.remap_principals.is_empty()
+                    && remap_mainnet_boot_principals(&spec.source).is_some()
+                {
                     spec.remap_principals = boot_remap_principals();
                 }
 

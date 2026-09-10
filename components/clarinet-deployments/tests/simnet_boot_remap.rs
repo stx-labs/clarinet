@@ -183,7 +183,11 @@ fn stack_in_session(session: &mut Session) -> u128 {
     // The contract stacks its own balance, so it needs one first.
     session.set_tx_sender(DEPLOYER);
     session
-        .stx_transfer(100_000_000_000, &stacker)
+        .stx_transfer(
+            100_000_000_000,
+            &stacker,
+            clarity_repl::repl::post_conditions::PostConditionCheck::Unchecked,
+        )
         .expect("funding the stacker contract should succeed");
 
     let amount = session.eval_clarity_string(&format!("u{stacked}"));
@@ -196,6 +200,7 @@ fn stack_in_session(session: &mut Session) -> u128 {
             false,
             false,
             clarity_repl::repl::session::CallKind::Transaction,
+            clarity_repl::repl::post_conditions::PostConditionCheck::Unchecked,
         )
         .expect("stack should execute");
 
@@ -371,16 +376,10 @@ async fn the_on_chain_environment_is_not_remapped() {
     assert!(remap.is_empty(), "and must record no remap");
 }
 
-/// A plan written before `remap-principals` existed records nothing, which is
-/// shaped exactly like a requirement. Project contracts must still be
-/// rewritten, or loading such a plan silently reintroduces the bug.
-#[tokio::test]
-async fn a_plan_without_the_recorded_remap_still_locks_stx() {
-    let project = Project::new("stacker", STACKER_SOURCE, "");
-    let mut deployment = project.generate().await;
-
-    // Strip the field the way a pre-PR plan would have it, and reset the
-    // source to what re-reading the `.clar` file yields.
+/// Age `deployment` into a plan written before `remap-principals` existed:
+/// drop the marker, and reset the source to what re-reading the `.clar` file
+/// yields.
+fn make_legacy_plan(deployment: &mut DeploymentSpecification) {
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(spec) = tx {
@@ -389,9 +388,26 @@ async fn a_plan_without_the_recorded_remap_still_locks_stx() {
             }
         }
     }
+}
+
+/// A plan written before `remap-principals` existed records nothing, which is
+/// shaped exactly like a requirement. Project contracts must still be
+/// rewritten, or loading such a plan silently reintroduces the bug.
+#[tokio::test]
+async fn a_plan_without_the_recorded_remap_still_locks_stx() {
+    let project = Project::new("stacker", STACKER_SOURCE, "");
+    let mut deployment = project.generate().await;
+
+    make_legacy_plan(&mut deployment);
 
     // `setup_session_with_deployment` is the CLI's load-from-disk entry point.
-    let artifacts = setup_session_with_deployment(&project.manifest, &mut deployment, None, false);
+    let artifacts = setup_session_with_deployment(
+        &project.manifest,
+        &mut deployment,
+        None,
+        false,
+        Environment::Simnet,
+    );
     assert!(artifacts.success, "the stale plan should still deploy");
 
     let (_, remap) = publish(&deployment);
@@ -409,6 +425,80 @@ async fn a_plan_without_the_recorded_remap_still_locks_stx() {
         stack_in_session(&mut session),
         90_000_000_000,
         "a plan predating the field must still lock STX"
+    );
+}
+
+/// The `clarinet check` on-chain pass loads the same plan through the same
+/// entry point, but must analyse the source that will really be published,
+/// where the mainnet boot address is the correct one. Backfilling the marker
+/// there would rewrite it back to `ST000...` and defeat the generator's own
+/// environment guard.
+#[tokio::test]
+async fn a_legacy_plan_is_not_backfilled_for_the_on_chain_pass() {
+    let project = Project::new("stacker", STACKER_SOURCE, "");
+    let mut deployment = project.generate().await;
+    make_legacy_plan(&mut deployment);
+
+    let artifacts = setup_session_with_deployment(
+        &project.manifest,
+        &mut deployment,
+        None,
+        false,
+        Environment::OnChain,
+    );
+    assert!(artifacts.success, "the on-chain pass should still deploy");
+
+    let (source, remap) = publish(&deployment);
+    assert!(
+        remap.is_empty(),
+        "the on-chain pass must not re-derive the marker"
+    );
+    assert_eq!(
+        source, STACKER_SOURCE,
+        "and must leave the plan's source alone"
+    );
+
+    // The contract that was actually published still names the mainnet
+    // address, so it locks nothing — which is the point. Simnet semantics
+    // must not leak into the pass that analyses on-chain code.
+    let mut session = artifacts.session;
+    assert_eq!(
+        stack_in_session(&mut session),
+        0,
+        "the on-chain pass must publish the unrewritten source"
+    );
+}
+
+/// The backfill re-derives the marker the same way the generator sets it, so a
+/// contract that never names a mainnet boot address must not be marked. A
+/// marker claiming a rewrite that never happens is what makes the recorded
+/// field untrustworthy.
+#[tokio::test]
+async fn a_contract_without_a_boot_reference_is_never_marked() {
+    const PLAIN_SOURCE: &str = "(define-read-only (answer) u42)\n";
+
+    let project = Project::new("plain", PLAIN_SOURCE, "");
+    let mut deployment = project.generate().await;
+
+    let (_, generated_remap) = publish(&deployment);
+    assert!(
+        generated_remap.is_empty(),
+        "the generator must not mark a contract with no boot reference"
+    );
+
+    let artifacts = setup_session_with_deployment(
+        &project.manifest,
+        &mut deployment,
+        None,
+        false,
+        Environment::Simnet,
+    );
+    assert!(artifacts.success, "the plan should deploy");
+
+    let (_, remap) = publish(&deployment);
+    assert!(
+        remap.is_empty(),
+        "and neither must the legacy-plan backfill"
     );
 }
 

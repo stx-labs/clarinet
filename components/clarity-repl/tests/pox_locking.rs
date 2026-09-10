@@ -13,6 +13,7 @@ use clarity::types::StacksEpochId;
 use clarity::vm::types::TupleData;
 use clarity::vm::{ClarityName, EvaluationResult, SymbolicExpression, Value};
 use clarity_repl::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
+use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::CallKind;
 use clarity_repl::repl::settings::{Account, ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{Session, SessionSettings};
@@ -90,6 +91,7 @@ fn stack_stx(session: &mut Session, pox_deployer: &str) -> Value {
             false,
             false,
             CallKind::Transaction,
+            PostConditionCheck::Unchecked,
         )
         .expect("stack-stx should execute");
     snippet_value(result.result)
@@ -223,6 +225,7 @@ fn mxs_does_not_redirect_the_mainnet_boot_address() {
         false,
         false,
         CallKind::Transaction,
+        PostConditionCheck::Unchecked,
     );
 
     mainnet_lookup.assert();

@@ -31,8 +31,7 @@ use stacks_rpc_client::StacksRpc;
 mod bitcoin_deployment;
 
 use crate::types::{
-    remap_principals_to_specifications, DeploymentSpecification, EpochSpec,
-    TransactionSpecification,
+    remap_principal_pairs, DeploymentSpecification, EpochSpec, TransactionSpecification,
 };
 
 /// The sBTC contract-ID remappings a deployment starts with.
@@ -668,8 +667,7 @@ pub fn apply_on_chain_deployment(
 
                     let source = remap_deployment_source(
                         &tx.source,
-                        remap_principals_to_specifications(&tx.remap_principals)
-                            .into_iter()
+                        remap_principal_pairs(&tx.remap_principals)
                             .chain(contracts_ids_to_remap.iter().cloned()),
                     );
 

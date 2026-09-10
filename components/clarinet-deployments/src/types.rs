@@ -860,7 +860,11 @@ pub mod clarity_version_serde {
 }
 
 /// A principal remap, as it appears in a plan file.
-pub(crate) type RemapPrincipals = BTreeMap<StandardPrincipalData, StandardPrincipalData>;
+///
+/// Public because it is the type of the `remap_principals` field on both
+/// publish specifications; `pub(crate)` left downstream crates reading the
+/// underlying `BTreeMap` with no name for it.
+pub type RemapPrincipals = BTreeMap<StandardPrincipalData, StandardPrincipalData>;
 
 /// Parse the `remap-principals` entry of a `*-publish` transaction.
 fn parse_remap_principals(
@@ -879,14 +883,20 @@ fn parse_remap_principals(
         .collect()
 }
 
+/// A principal remap as `(from, to)` address pairs.
+pub(crate) fn remap_principal_pairs(
+    remap: &RemapPrincipals,
+) -> impl Iterator<Item = (String, String)> + '_ {
+    remap
+        .iter()
+        .map(|(src, dst)| (src.to_address(), dst.to_address()))
+}
+
 /// Render a principal remap back into its plan-file form.
 pub(crate) fn remap_principals_to_specifications(
     remap: &RemapPrincipals,
 ) -> BTreeMap<String, String> {
-    remap
-        .iter()
-        .map(|(src, dst)| (src.to_address(), dst.to_address()))
-        .collect()
+    remap_principal_pairs(remap).collect()
 }
 
 impl RequirementPublishSpecification {

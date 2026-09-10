@@ -1751,6 +1751,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                         &mut deployment,
                         None,
                         enable_analysis,
+                        environment,
                     );
                     Ok((deployment, None, artifacts))
                 }
@@ -1769,6 +1770,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                             &mut deployment,
                             Some(&ast_artifacts.asts),
                             enable_analysis,
+                            environment,
                         );
                         for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
                             // Merge parser's diags with analysis' diags.
@@ -1797,6 +1799,7 @@ pub fn load_deployment_and_artifacts_or_exit(
                         &mut deployment,
                         None,
                         enable_analysis,
+                        environment,
                     );
                     (
                         deployment,
