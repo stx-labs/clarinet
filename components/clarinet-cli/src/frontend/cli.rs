@@ -993,7 +993,6 @@ pub fn main() {
                         deployment,
                         event_tx,
                         command_rx,
-                        true,
                         None,
                         None,
                     );

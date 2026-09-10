@@ -19,6 +19,6 @@
     "@vscode/test-web": "0.0.81",
     "chai": "6.2.2",
     "mocha": "11.8.0",
-    "vscode-languageclient": "10.1.0"
+    "vscode-languageclient": "10.1.1"
   }
 }

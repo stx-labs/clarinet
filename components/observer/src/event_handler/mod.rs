@@ -149,7 +149,6 @@ pub struct BitcoinBlockDataCached {
 #[derive(Debug, Clone, Default)]
 pub struct StacksObserverStartupContext {
     pub block_pool_seed: Vec<StacksBlockData>,
-    pub last_block_height_appended: u64,
 }
 
 /// Spawns a thread to observe blockchain events.
