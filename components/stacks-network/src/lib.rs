@@ -154,8 +154,10 @@ async fn do_run_devnet(
             "Default snapshot can not be used".to_string(),
         ));
     }
-    // Check for and potentially copy snapshot data
-    if config.start_local_devnet_services && !config.no_snapshot && diff.is_ok() {
+    // Check for and potentially copy snapshot data.
+    // --create-new-snapshot always runs from genesis so we never load an existing snapshot.
+    let use_snapshot = !config.no_snapshot && !config.create_new_snapshot;
+    if config.start_local_devnet_services && use_snapshot && diff.is_ok() {
         let global_snapshot_dir = orchestrator::get_global_snapshot_dir();
 
         // First, try to extract embedded snapshot if it exists and we don't have snapshot yet
@@ -244,7 +246,7 @@ async fn do_run_devnet(
                 observer_command_rx,
                 moved_mining_command_tx,
                 mining_command_rx,
-                !config.no_snapshot,
+                use_snapshot,
                 config.create_new_snapshot,
                 ctx_moved,
             );
@@ -269,14 +271,14 @@ async fn do_run_devnet(
                         moved_orchestrator_event_tx,
                         terminator_rx,
                         &ctx_moved,
-                        config.no_snapshot,
+                        !use_snapshot,
                         config.save_container_logs,
                     );
                     let rt = hiro_system_kit::create_basic_runtime();
                     rt.block_on(future)
                 } else {
-                    let future = devnet
-                        .initialize_bitcoin_node(&moved_orchestrator_event_tx, config.no_snapshot);
+                    let future =
+                        devnet.initialize_bitcoin_node(&moved_orchestrator_event_tx, !use_snapshot);
                     let rt = hiro_system_kit::create_basic_runtime();
                     rt.block_on(future)
                 };
