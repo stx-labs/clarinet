@@ -1302,6 +1302,30 @@ mod tests {
         DEFAULT_STACKS_SIGNER_IMAGE,
     };
 
+    /// Every devnet wallet is derived on each `NetworkManifest` load, which the
+    /// LSP does on every file save. `clarinet-utils` bakes their keys in so the
+    /// PBKDF2 rounds are skipped; if a default mnemonic or the derivation path
+    /// changes here, that table goes stale and the cost comes back silently.
+    #[test]
+    fn devnet_default_mnemonics_are_precomputed() {
+        use crate::{
+            DEFAULT_DERIVATION_PATH, DEFAULT_FAUCET_MNEMONIC, DEFAULT_STACKER_MNEMONIC,
+            DEFAULT_STACKS_MINER_MNEMONIC,
+        };
+
+        for (label, mnemonic) in [
+            ("miner", DEFAULT_STACKS_MINER_MNEMONIC),
+            ("faucet", DEFAULT_FAUCET_MNEMONIC),
+            ("stacker", DEFAULT_STACKER_MNEMONIC),
+        ] {
+            assert!(
+                clarinet_utils::is_precomputed(mnemonic, DEFAULT_DERIVATION_PATH),
+                "the default devnet {label} mnemonic is missing from the \
+                 clarinet-utils precomputed table"
+            );
+        }
+    }
+
     #[test]
     fn parses_legacy_stacks_node_event_observer() {
         let config: DevnetConfigFile =

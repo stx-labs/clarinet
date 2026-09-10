@@ -792,6 +792,7 @@ dependencies = [
  "bip32",
  "bip39",
  "bs58",
+ "divan",
  "libsecp256k1",
  "rand 0.9.4",
 ]

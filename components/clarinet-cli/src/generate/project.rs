@@ -559,3 +559,61 @@ impl GetChangesForNewProject {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use clarinet_files::DEFAULT_DERIVATION_PATH;
+
+    use super::*;
+
+    fn generated_devnet_toml() -> String {
+        let changes =
+            GetChangesForNewProject::new("/tmp".into(), "bench-guard".into(), false, false)
+                .run()
+                .expect("project generation failed");
+
+        changes
+            .into_iter()
+            .find_map(|change| match change {
+                Changes::AddFile(file) if file.path.ends_with("settings/Devnet.toml") => {
+                    Some(file.content)
+                }
+                _ => None,
+            })
+            .expect("generated project has no settings/Devnet.toml")
+    }
+
+    /// A default project derives 10 wallets on every session start, and the
+    /// LSP re-derives them on every file save. `clarinet-utils` bakes their
+    /// keys in so the PBKDF2 rounds are skipped — but only for these exact
+    /// phrases. Editing the template below without updating that table would
+    /// quietly hand ~10 ms back to every session.
+    #[test]
+    fn generated_wallets_are_precomputed() {
+        let manifest: toml::Value =
+            toml::from_str(&generated_devnet_toml()).expect("generated Devnet.toml is not valid");
+
+        let Some(toml::Value::Table(accounts)) = manifest.get("accounts") else {
+            panic!("generated Devnet.toml has no [accounts] table");
+        };
+        assert_eq!(accounts.len(), 10, "unexpected number of default accounts");
+
+        for (label, settings) in accounts {
+            let toml::Value::Table(settings) = settings else {
+                panic!("[accounts.{label}] is not a table");
+            };
+            let Some(toml::Value::String(mnemonic)) = settings.get("mnemonic") else {
+                panic!("[accounts.{label}] has no mnemonic");
+            };
+            let derivation = match settings.get("derivation") {
+                Some(toml::Value::String(path)) => path.as_str(),
+                _ => DEFAULT_DERIVATION_PATH,
+            };
+            assert!(
+                clarinet_utils::is_precomputed(mnemonic, derivation),
+                "the generated {label} mnemonic is missing from the \
+                 clarinet-utils precomputed table"
+            );
+        }
+    }
+}
