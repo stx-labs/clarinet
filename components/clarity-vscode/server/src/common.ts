@@ -11,6 +11,7 @@ import type {
 } from "vscode-languageserver";
 
 // this type is the same for the browser and node but node isn't always built in dev
+// it has to stay a type-only import, `server/tests` loads this file unbuilt
 import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
@@ -54,10 +55,9 @@ export function initConnection(
     };
   }
 
-  // notifications are handled one at a time, in the order they arrive.
-  // the entry being handled stays at the front of the queue until it's done:
-  // both the scheduling in `onNotification` and the `onRequest` guard rely on
-  // a non-empty queue to know that the bridge is busy
+  // the in-flight entry stays at the front of the queue: both the scheduling
+  // in `onNotification` and the `onRequest` guard read a non-empty queue as
+  // "the bridge is busy"
   const notifications: [string, unknown][] = [];
   async function consumeNotifications() {
     while (notifications.length > 0) {
@@ -68,7 +68,7 @@ export function initConnection(
       } catch (err) {
         console.warn(err);
       } finally {
-        // dequeue whatever happened, an entry left behind would stall the queue
+        // dequeue even on failure, a leftover entry would stall the queue
         notifications.shift();
         logTimings?.();
       }
