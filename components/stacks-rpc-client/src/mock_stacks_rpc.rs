@@ -44,14 +44,19 @@ impl MockStacksRpc {
     }
 
     pub fn get_contract_source_mock(&mut self, deployer: &str, contract_name: &str) -> Mock {
+        self.json_mock(
+            &format!("/v2/contracts/source/{deployer}/{contract_name}"),
+            200,
+            r#"{"source":"(define-read-only (noop) (ok true))","publish_height":1}"#,
+        )
+    }
+
+    fn json_mock(&mut self, path: &str, status: usize, body: &str) -> Mock {
         self.client
-            .mock(
-                "GET",
-                format!("/v2/contracts/source/{deployer}/{contract_name}").as_str(),
-            )
-            .with_status(200)
+            .mock("GET", path)
+            .with_status(status)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"source":"(define-read-only (noop) (ok true))","publish_height":1}"#)
+            .with_body(body)
             .create()
     }
 
@@ -70,14 +75,11 @@ impl MockStacksRpc {
     }
 
     pub fn contract_source_not_found_mock(&mut self, deployer: &str, contract_name: &str) -> Mock {
-        self.client
-            .mock(
-                "GET",
-                format!("/v2/contracts/source/{deployer}/{contract_name}").as_str(),
-            )
-            .with_status(404)
-            .with_body("No contract source data found")
-            .create()
+        self.json_mock(
+            &format!("/v2/contracts/source/{deployer}/{contract_name}"),
+            404,
+            "No contract source data found",
+        )
     }
 
     pub fn get_burn_block_mock(&mut self, burn_block_height: u64) -> Mock {
@@ -88,8 +90,7 @@ impl MockStacksRpc {
             .create()
     }
 
-    /// Accepts a broadcast only when its body carries `amount` as a serialized
-    /// Clarity uint, so a test can pin the value a contract call was given.
+    /// Matches only a body carrying `amount` as a serialized Clarity uint.
     pub fn tx_carrying_amount_mock(&mut self, amount: u128, tx_id: &str) -> Mock {
         let needle = Value::UInt(amount).serialize_to_vec().unwrap();
         self.client

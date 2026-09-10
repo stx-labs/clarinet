@@ -349,12 +349,10 @@ pub fn update_deployment_costs(
     Ok(())
 }
 
-/// Polls (one second apart) before giving up on the node. On devnet its RPC can
-/// lag a few seconds behind the first block events.
+/// One second apart. Devnet's RPC can lag the first block events by a few seconds.
 const NODE_RPC_RETRIES: usize = 30;
 
-/// The node just answered `/v2/info`, so the reads that follow only have to
-/// absorb a transient blip.
+/// The node has already answered, so these only absorb a transient blip.
 const NODE_READ_RETRIES: usize = 3;
 
 fn wait_for_node(stacks_rpc: &StacksRpc) -> Result<(), String> {
@@ -364,8 +362,8 @@ fn wait_for_node(stacks_rpc: &StacksRpc) -> Result<(), String> {
         .map_err(|e| format!("unable to reach the stacks node at {}: {e}", stacks_rpc.url))
 }
 
-/// The first nonce of each account is read from the node, so accounts that
-/// already transacted, as in a devnet snapshot, start from their actual nonce.
+/// Read from the node first, so accounts that already transacted in a snapshot
+/// start from their real nonce.
 fn next_nonce(
     cached_nonces: &mut BTreeMap<String, u64>,
     stacks_rpc: &StacksRpc,
@@ -397,8 +395,8 @@ pub fn is_contract_published(
         })
 }
 
-/// Emulated transactions never reach the chain. Both this walk and
-/// `get_initial_transactions_trackers` skip them and index everything else alike.
+/// `get_initial_transactions_trackers` must skip exactly these too: the dashboard
+/// pairs its rows with `TransactionTracker::index`.
 fn is_emulated(transaction: &TransactionSpecification) -> bool {
     matches!(
         transaction,
@@ -407,7 +405,6 @@ fn is_emulated(transaction: &TransactionSpecification) -> bool {
     )
 }
 
-/// Encode and sign every transaction of the plan, in order, grouped by batch epoch.
 fn encode_transactions(
     deployment: &DeploymentSpecification,
     network_manifest: &NetworkManifest,
@@ -442,9 +439,6 @@ fn encode_transactions(
             if is_emulated(transaction) {
                 continue;
             }
-            // Every remaining transaction consumes an index, published or not, because
-            // `get_initial_transactions_trackers` numbers them all and the dashboard
-            // indexes its rows by it.
             let index = next_index;
             next_index += 1;
 
@@ -473,7 +467,7 @@ fn encode_transactions(
                     let check = TransactionCheck::NonceCheck(tx.expected_sender.clone(), nonce);
                     TransactionTracker {
                         index,
-                        name: name.clone(),
+                        name,
                         status: TransactionStatus::Encoded(transaction, check),
                     }
                 }
@@ -565,7 +559,7 @@ fn encode_transactions(
                     let check = TransactionCheck::NonceCheck(tx.expected_sender.clone(), nonce);
                     TransactionTracker {
                         index,
-                        name: name.clone(),
+                        name,
                         status: TransactionStatus::Encoded(transaction, check),
                     }
                 }
@@ -610,7 +604,7 @@ fn encode_transactions(
                     );
                     TransactionTracker {
                         index,
-                        name: name.clone(),
+                        name,
                         status: TransactionStatus::Encoded(transaction, check),
                     }
                 }
@@ -626,7 +620,6 @@ fn encode_transactions(
                     .to_string();
                     contracts_ids_to_remap.insert((old_contract_id, new_contract_id));
 
-                    // Already published by a previous testnet run, or by the snapshot.
                     let issuer_address = tx.remap_sender.to_address();
                     if is_contract_published(stacks_rpc, &issuer_address, &tx.contract_id.name)? {
                         continue;
@@ -663,7 +656,7 @@ fn encode_transactions(
                     );
                     TransactionTracker {
                         index,
-                        name: name.clone(),
+                        name,
                         status: TransactionStatus::Encoded(transaction, check),
                     }
                 }
@@ -705,8 +698,7 @@ pub fn apply_on_chain_deployment(
         .or_else(|| deployment.bitcoin_node.clone())
         .expect("unable to get bitcoin node rcp address");
 
-    // Encoding reads nonces and published contracts from the node, so it cannot
-    // start before the node is up. On devnet, Start signals the chain is mining.
+    // Encoding reads from the node, so it cannot start before the node is up.
     let Ok(_cmd) = deployment_command_rx.recv() else {
         let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(
             "deployment aborted - broken channel".to_string(),
@@ -917,25 +909,23 @@ pub fn apply_on_chain_deployment(
 pub fn get_initial_transactions_trackers(
     deployment: &DeploymentSpecification,
 ) -> Vec<TransactionTracker> {
-    let mut index = 0;
-    let mut trackers = vec![];
-    for batch_spec in deployment.plan.batches.iter() {
-        for transaction in batch_spec.transactions.iter() {
-            let tracker = match transaction {
-                TransactionSpecification::ContractCall(tx) => TransactionTracker {
-                    index,
-                    name: format!("Contract call {}::{}", tx.contract_id, tx.method),
-                    status: TransactionStatus::Queued,
-                },
-                TransactionSpecification::ContractPublish(tx) => TransactionTracker {
-                    index,
-                    name: format!(
-                        "Contract publish {}.{}",
-                        tx.expected_sender.to_address(),
-                        tx.contract_name
-                    ),
-                    status: TransactionStatus::Queued,
-                },
+    deployment
+        .plan
+        .batches
+        .iter()
+        .flat_map(|batch_spec| batch_spec.transactions.iter())
+        .filter(|transaction| !is_emulated(transaction))
+        .enumerate()
+        .map(|(index, transaction)| {
+            let name = match transaction {
+                TransactionSpecification::ContractCall(tx) => {
+                    format!("Contract call {}::{}", tx.contract_id, tx.method)
+                }
+                TransactionSpecification::ContractPublish(tx) => format!(
+                    "Contract publish {}.{}",
+                    tx.expected_sender.to_address(),
+                    tx.contract_name
+                ),
                 TransactionSpecification::RequirementPublish(tx) => {
                     if !matches!(
                         deployment.network,
@@ -943,42 +933,32 @@ pub fn get_initial_transactions_trackers(
                     ) {
                         panic!("Deployment specification malformed - requirements publish not supported on mainnet");
                     }
-                    TransactionTracker {
-                        index,
-                        name: format!(
-                            "Contract publish {}.{}",
-                            tx.remap_sender.to_address(),
-                            tx.contract_id.name
-                        ),
-                        status: TransactionStatus::Queued,
-                    }
+                    format!(
+                        "Contract publish {}.{}",
+                        tx.remap_sender.to_address(),
+                        tx.contract_id.name
+                    )
                 }
-                TransactionSpecification::BtcTransfer(tx) => TransactionTracker {
-                    index,
-                    name: format!(
-                        "BTC transfer {} send {} satoshis to {}",
-                        tx.expected_sender, tx.sats_amount, tx.recipient
-                    ),
-                    status: TransactionStatus::Queued,
-                },
-                TransactionSpecification::StxTransfer(tx) => TransactionTracker {
-                    index,
-                    name: format!(
-                        "STX transfer {} send {} µSTC to {}",
-                        tx.expected_sender.to_address(),
-                        tx.mstx_amount,
-                        tx.recipient,
-                    ),
-                    status: TransactionStatus::Queued,
-                },
+                TransactionSpecification::BtcTransfer(tx) => format!(
+                    "BTC transfer {} send {} satoshis to {}",
+                    tx.expected_sender, tx.sats_amount, tx.recipient
+                ),
+                TransactionSpecification::StxTransfer(tx) => format!(
+                    "STX transfer {} send {} µSTC to {}",
+                    tx.expected_sender.to_address(),
+                    tx.mstx_amount,
+                    tx.recipient,
+                ),
                 TransactionSpecification::EmulatedContractPublish(_)
-                | TransactionSpecification::EmulatedContractCall(_) => continue,
+                | TransactionSpecification::EmulatedContractCall(_) => unreachable!(),
             };
-            trackers.push(tracker);
-            index += 1;
-        }
-    }
-    trackers
+            TransactionTracker {
+                index,
+                name,
+                status: TransactionStatus::Queued,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

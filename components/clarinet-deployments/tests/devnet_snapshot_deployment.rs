@@ -1,9 +1,5 @@
-//! Regression coverage for deploying on a devnet that boots from a snapshot.
-//!
-//! The snapshot already holds transactions from the deployer (the sBTC
-//! requirement contracts), so `apply_on_chain_deployment` must read nonces from
-//! the node instead of assuming they start at zero, and must not republish
-//! requirements that already exist on chain.
+//! The snapshot already holds deployer transactions, so the deployment must read
+//! nonces from the node and must not republish what is already on chain.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{channel, RecvTimeoutError};
@@ -91,8 +87,6 @@ fn contract_publish(contract_name: &str) -> TransactionSpecification {
     })
 }
 
-/// The clarity-starter plan: three sBTC requirements at epoch 3.0, then the
-/// project's own contract at epoch 4.0.
 fn deployment(stacks_node_url: &str) -> DeploymentSpecification {
     DeploymentSpecification {
         id: 0,
@@ -132,8 +126,7 @@ fn json_mock(server: &mut ServerGuard, path: &str, status: usize, body: impl AsR
         .with_body(body)
 }
 
-/// A node whose chain is already past every epoch, as when booting from the
-/// epoch 4.0 snapshot. Polled repeatedly while waiting for epochs and confirmations.
+/// Past every epoch, as after an epoch 4.0 snapshot. Polled repeatedly.
 fn mock_node_info(server: &mut ServerGuard) -> Mock {
     let info = NodeInfo {
         burn_block_height: 200,
@@ -247,7 +240,6 @@ fn snapshot_deployment_skips_published_requirements_and_uses_node_nonces() {
     let _sbtc_deposit_published = mock_published_contract(&mut server, "sbtc-deposit");
     let _counter_published = mock_published_contract(&mut server, "counter");
 
-    // The two remaining transactions continue from the deployer's on-chain nonce.
     let sbtc_deposit_broadcast =
         mock_broadcast(&mut server, "sbtc-deposit", SNAPSHOT_DEPLOYER_NONCE);
     let counter_broadcast = mock_broadcast(&mut server, "counter", SNAPSHOT_DEPLOYER_NONCE + 1);

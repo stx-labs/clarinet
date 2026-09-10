@@ -192,7 +192,6 @@ pub async fn start_chains_coordinator(
     let (deployment_commands_tx, deployments_command_rx) = channel();
     let (deployment_events_tx, deployment_events_rx) = channel();
 
-    // Dormant until DeploymentCommand::Start, since encoding reads nonces from the node.
     perform_protocol_deployment(
         &config.network_manifest,
         &config.deployment,
@@ -211,8 +210,6 @@ pub async fn start_chains_coordinator(
         &boot_completed,
     );
 
-    // Funds against whatever sBTC contracts are on chain once boot completes, whether
-    // this run deployed them or the snapshot already carried them.
     fund_genesis_account(
         &devnet_event_tx,
         &config.services_map_hosts,
@@ -1072,8 +1069,7 @@ fn fund_accounts(
     fee_rate: u64,
     devnet_event_tx: &Sender<DevnetEvent>,
 ) -> Result<(), String> {
-    // The contract may come from this run or from the snapshot, and a project
-    // without sBTC requirements never has it. Ask the chain.
+    // Deployed by this run or carried by the snapshot; absent without sBTC requirements.
     if !is_contract_published(stacks_rpc, &deployer.stx_address, "sbtc-deposit")? {
         return Ok(());
     }
@@ -1152,8 +1148,8 @@ fn fund_accounts(
     Ok(())
 }
 
-/// The sBTC an account already holds, so funding can mint only the shortfall and stay
-/// correct when a snapshot funded it at a different amount.
+/// Funding mints only the shortfall, so a snapshot that funded at a different
+/// amount still converges on the configured one.
 fn sbtc_balance_of(
     stacks_rpc: &StacksRpc,
     deployer: &AccountConfig,
@@ -1189,9 +1185,8 @@ fn sbtc_balance_of(
     }
 }
 
-/// Distinct per recipient and configured amount, so a re-run that mints the same
-/// shortfall replays and `sbtc-deposit` rejects it. The balance read above is the
-/// primary guard; this is the backstop.
+/// Distinct per recipient and amount, so an identical re-run replays and
+/// `sbtc-deposit` rejects it. A backstop; the balance read above is the real guard.
 fn genesis_deposit_id(purpose: &str, account: &AccountConfig) -> Vec<u8> {
     let seed = format!(
         "clarinet-devnet-{purpose}-{}-{}",
@@ -1766,7 +1761,6 @@ mod test_rpc_client {
         }
     }
 
-    /// Drain the channel, since funding reports from a detached thread.
     fn collect_events(
         rx: &Receiver<DevnetEvent>,
         expected: usize,
@@ -1783,7 +1777,6 @@ mod test_rpc_client {
         events
     }
 
-    /// An account the snapshot already funded must not be funded a second time.
     #[test]
     fn test_fund_genesis_account_skips_already_funded() {
         let mut stacks_rpc = MockStacksRpc::new();
@@ -1826,8 +1819,7 @@ mod test_rpc_client {
         nonce_mock.assert();
     }
 
-    /// Funding must top an account up to its configured balance, not mint the whole
-    /// amount again on top of what a snapshot already gave it.
+    /// Top up to the configured balance, rather than minting it again on top.
     #[test]
     fn test_fund_genesis_account_mints_only_the_shortfall() {
         let mut stacks_rpc = MockStacksRpc::new();
@@ -1866,8 +1858,7 @@ mod test_rpc_client {
         shortfall_mock.assert();
     }
 
-    /// An unreadable balance must skip the account. Minting blind would double the
-    /// balance of an account the snapshot already funded.
+    /// Minting blind would double an account the snapshot already funded.
     #[test]
     fn test_fund_genesis_account_skips_when_balance_is_unreadable() {
         let mut stacks_rpc = MockStacksRpc::new();
@@ -1903,7 +1894,6 @@ mod test_rpc_client {
         broadcast_mock.assert();
     }
 
-    /// A project without sBTC requirements must fund quietly, not error.
     #[test]
     fn test_fund_genesis_account_without_sbtc_contracts() {
         let mut stacks_rpc = MockStacksRpc::new();
