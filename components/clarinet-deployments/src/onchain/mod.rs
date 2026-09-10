@@ -373,7 +373,7 @@ fn next_nonce(
     Ok(nonce)
 }
 
-fn is_contract_published(
+pub fn is_contract_published(
     stacks_rpc: &StacksRpc,
     deployer: &str,
     contract_name: &str,
@@ -397,6 +397,8 @@ fn encode_transactions(
     bitcoin_node_url: &str,
     deployment_event_tx: &Sender<DeploymentEvent>,
 ) -> Result<VecDeque<(EpochSpec, Vec<TransactionTracker>)>, String> {
+    wait_for_node(stacks_rpc)?;
+
     let network = &deployment.network;
     let stx_accounts_lookup: BTreeMap<&str, &AccountConfig> = network_manifest
         .accounts
@@ -413,12 +415,25 @@ fn encode_transactions(
     let mut session: Option<Session> = None;
     let mut contracts_ids_to_remap = boot_contract_ids_to_remap(network);
     let mut batches = VecDeque::new();
-    let mut index = 0;
+    let mut next_index = 0;
 
     for batch_spec in deployment.plan.batches.iter() {
         let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
         let mut batch = Vec::new();
         for transaction in batch_spec.transactions.iter() {
+            if matches!(
+                transaction,
+                TransactionSpecification::EmulatedContractPublish(_)
+                    | TransactionSpecification::EmulatedContractCall(_)
+            ) {
+                continue;
+            }
+            // Every remaining transaction consumes an index, published or not, because
+            // `get_initial_transactions_trackers` numbers them all and the dashboard
+            // indexes its rows by it.
+            let index = next_index;
+            next_index += 1;
+
             let tracker = match transaction {
                 TransactionSpecification::StxTransfer(tx) => {
                     let issuer_address = tx.expected_sender.to_address();
@@ -488,8 +503,6 @@ fn encode_transactions(
                         tx,
                         &secret_key,
                     );
-                    // Counted by `get_initial_transactions_trackers`; keep indexes aligned.
-                    index += 1;
                     continue;
                 }
                 TransactionSpecification::ContractCall(tx) => {
@@ -617,9 +630,6 @@ fn encode_transactions(
                     // Already published by a previous testnet run, or by the snapshot.
                     let issuer_address = tx.remap_sender.to_address();
                     if is_contract_published(stacks_rpc, &issuer_address, &tx.contract_id.name)? {
-                        // `get_initial_transactions_trackers` numbers every requirement
-                        // and the dashboard indexes rows by it, so keep counting.
-                        index += 1;
                         continue;
                     }
 
@@ -627,28 +637,14 @@ fn encode_transactions(
                     let account = stx_accounts_lookup.get(issuer_address.as_str()).unwrap();
 
                     // Remapping principals - This is happening
-                    let mut source = tx.source.clone();
-                    for (src_principal, dst_principal) in tx
+                    let source = tx
                         .remap_principals
                         .iter()
                         .map(|(src, dst)| (src.to_address(), dst.to_address()))
-                        .chain(
-                            contracts_ids_to_remap
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone())),
-                        )
-                    {
-                        let src = src_principal;
-                        let dst = dst_principal;
-                        let mut matched_indices = source
-                            .match_indices(&src)
-                            .map(|(i, _)| i)
-                            .collect::<Vec<usize>>();
-                        matched_indices.reverse();
-                        for index in matched_indices {
-                            source.replace_range(index..index + src.len(), &dst);
-                        }
-                    }
+                        .chain(contracts_ids_to_remap.iter().cloned())
+                        .fold(tx.source.clone(), |source, (src, dst)| {
+                            source.replace(&src, &dst)
+                        });
 
                     let transaction = encode_contract_publish(
                         &tx.contract_id.name,
@@ -673,12 +669,11 @@ fn encode_transactions(
                     }
                 }
                 TransactionSpecification::EmulatedContractPublish(_)
-                | TransactionSpecification::EmulatedContractCall(_) => continue,
+                | TransactionSpecification::EmulatedContractCall(_) => unreachable!(),
             };
 
             batch.push(tracker.clone());
             let _ = deployment_event_tx.send(DeploymentEvent::TransactionUpdate(tracker));
-            index += 1;
         }
 
         batches.push_back((epoch, batch));
@@ -701,25 +696,15 @@ pub fn apply_on_chain_deployment(
         10
     };
 
-    let stacks_node_url = if let Some(url) = override_stacks_rpc_url {
-        url
-    } else {
-        deployment
-            .stacks_node
-            .clone()
-            .expect("unable to get stacks node rcp address")
-    };
+    let stacks_node_url = override_stacks_rpc_url
+        .or_else(|| deployment.stacks_node.clone())
+        .expect("unable to get stacks node rcp address");
 
     let stacks_rpc = StacksRpc::new(&stacks_node_url);
 
-    let bitcoin_node_url = if let Some(url) = override_bitcoin_rpc_url {
-        url
-    } else {
-        deployment
-            .bitcoin_node
-            .clone()
-            .expect("unable to get bitcoin node rcp address")
-    };
+    let bitcoin_node_url = override_bitcoin_rpc_url
+        .or_else(|| deployment.bitcoin_node.clone())
+        .expect("unable to get bitcoin node rcp address");
 
     // Encoding reads nonces and published contracts from the node, so it cannot
     // start before the node is up. On devnet, Start signals the chain is mining.
@@ -730,15 +715,13 @@ pub fn apply_on_chain_deployment(
         return;
     };
 
-    let batches = match wait_for_node(&stacks_rpc).and_then(|()| {
-        encode_transactions(
-            &deployment,
-            &network_manifest,
-            &stacks_rpc,
-            &bitcoin_node_url,
-            &deployment_event_tx,
-        )
-    }) {
+    let batches = match encode_transactions(
+        &deployment,
+        &network_manifest,
+        &stacks_rpc,
+        &bitcoin_node_url,
+        &deployment_event_tx,
+    ) {
         Ok(batches) => batches,
         Err(e) => {
             let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(e));

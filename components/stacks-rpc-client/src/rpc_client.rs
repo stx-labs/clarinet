@@ -4,6 +4,7 @@ use clarity::codec::StacksMessageCodec;
 use clarity::util::hash::{bytes_to_hex, hex_bytes, to_hex};
 use clarity::vm::types::Value;
 use reqwest::blocking::Client;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 #[cfg(any(test, feature = "mock"))]
 use serde::Serialize;
@@ -178,9 +179,7 @@ impl StacksRpc {
         Ok(res)
     }
 
-    pub fn get_nonce(&self, address: &str) -> Result<u64, RpcError> {
-        let request_url = format!("{}/v2/accounts/{addr}", self.url, addr = address,);
-
+    fn get_json<T: DeserializeOwned>(&self, request_url: String) -> Result<T, RpcError> {
         let response = self
             .client
             .get(request_url)
@@ -191,32 +190,22 @@ impl StacksRpc {
             return Err(RpcError::StatusCode(response.status().as_u16()));
         }
 
-        let balance: Balance = response
+        response
             .json()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
+            .map_err(|e| RpcError::Message(e.to_string()))
+    }
+
+    pub fn get_nonce(&self, address: &str) -> Result<u64, RpcError> {
+        let balance: Balance = self.get_json(format!("{}/v2/accounts/{address}", self.url))?;
         Ok(balance.nonce)
     }
 
     pub fn get_pox_info(&self) -> Result<PoxInfo, RpcError> {
-        let request_url = format!("{}/v2/pox", self.url);
-
-        self.client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json::<PoxInfo>()
-            .map_err(|e| RpcError::Message(e.to_string()))
+        self.get_json(format!("{}/v2/pox", self.url))
     }
 
     pub fn get_info(&self) -> Result<NodeInfo, RpcError> {
-        let request_url = format!("{}/v2/info", self.url);
-
-        self.client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json::<NodeInfo>()
-            .map_err(|e| RpcError::Message(e.to_string()))
+        self.get_json(format!("{}/v2/info", self.url))
     }
 
     /// `None` when the node has no contract at that identifier.
@@ -230,23 +219,11 @@ impl StacksRpc {
             self.url, principal, contract_name
         );
 
-        let response = self
-            .client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
+        match self.get_json(request_url) {
+            Ok(contract) => Ok(Some(contract)),
+            Err(RpcError::StatusCode(404)) => Ok(None),
+            Err(e) => Err(e),
         }
-        if !response.status().is_success() {
-            return Err(RpcError::StatusCode(response.status().as_u16()));
-        }
-
-        response
-            .json()
-            .map(Some)
-            .map_err(|e| RpcError::Message(e.to_string()))
     }
 
     pub fn call_read_only_fn(
@@ -307,13 +284,7 @@ impl StacksRpc {
     }
 
     pub fn get_burn_block(&self, height: u32) -> Result<BurnBlock, RpcError> {
-        let request_url = format!("{}/extended/v2/burn-blocks/{}", self.url, height);
-        self.client
-            .get(request_url)
-            .send()
-            .map_err(|e| RpcError::Message(e.to_string()))?
-            .json()
-            .map_err(|e| RpcError::Message(e.to_string()))
+        self.get_json(format!("{}/extended/v2/burn-blocks/{height}", self.url))
     }
 
     pub fn call_with_retry<T, F>(&self, mut func: F, retries: usize) -> Result<T, RpcError>

@@ -26,6 +26,7 @@ use indoc::formatdoc;
 use mockito::{Mock, Server, ServerGuard};
 use serde_json::json;
 use stacks_codec::transaction::{StacksTransaction, TransactionPayload};
+use stacks_rpc_client::rpc_client::NodeInfo;
 
 const DEPLOYER_MNEMONIC: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
 const DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
@@ -134,21 +135,12 @@ fn json_mock(server: &mut ServerGuard, path: &str, status: usize, body: impl AsR
 /// A node whose chain is already past every epoch, as when booting from the
 /// epoch 4.0 snapshot. Polled repeatedly while waiting for epochs and confirmations.
 fn mock_node_info(server: &mut ServerGuard) -> Mock {
-    let info = json!({
-        "peer_version": 4207599116u64,
-        "pox_consensus": "4f4de3d4ab3246299c039084a12c801c9dc70323",
-        "burn_block_height": 200,
-        "stable_pox_consensus": "a2c4972bf818f554809e25fa637b780c77c20b62",
-        "stable_burn_block_height": 199,
-        "server_version": "stacks-node 0.0.1",
-        "network_id": 2147483648u64,
-        "parent_network_id": 3669344250u64,
-        "stacks_tip_height": 70,
-        "stacks_tip": "6bb0e4706fdfb9624a23d9144f2161c61d5c58816643b48ffdb735887bdbf5fa",
-        "stacks_tip_consensus_hash": "4f4de3d4ab3246299c039084a12c801c9dc70323",
-        "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
-    });
-    json_mock(server, "/v2/info", 200, info.to_string())
+    let info = NodeInfo {
+        burn_block_height: 200,
+        stacks_tip_height: 70,
+        ..Default::default()
+    };
+    json_mock(server, "/v2/info", 200, json!(info).to_string())
         .expect_at_least(1)
         .create()
 }

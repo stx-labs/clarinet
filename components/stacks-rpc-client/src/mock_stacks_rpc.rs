@@ -1,3 +1,5 @@
+use clarity::util::hash::bytes_to_hex;
+use clarity::vm::Value;
 use mockito::{Mock, ServerGuard};
 use serde_json::json;
 
@@ -53,8 +55,9 @@ impl MockStacksRpc {
             .create()
     }
 
-    /// `get-balance` answering `(ok balance)`: response-ok tag, uint tag, u128.
     pub fn sbtc_balance_mock(&mut self, deployer: &str, balance: u128) -> Mock {
+        let result = Value::okay(Value::UInt(balance)).unwrap();
+        let encoded = bytes_to_hex(&result.serialize_to_vec().unwrap());
         self.client
             .mock(
                 "POST",
@@ -62,9 +65,7 @@ impl MockStacksRpc {
             )
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(format!(
-                r#"{{"okay":true,"result":"0x0701{balance:032x}"}}"#
-            ))
+            .with_body(format!(r#"{{"okay":true,"result":"0x{encoded}"}}"#))
             .create()
     }
 
