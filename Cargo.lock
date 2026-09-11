@@ -836,6 +836,7 @@ dependencies = [
  "clarinet-deployments",
  "clarinet-files",
  "clarinet-format",
+ "clarinet-utils",
  "clarity",
  "clarity-repl",
  "clarity-static-cost",

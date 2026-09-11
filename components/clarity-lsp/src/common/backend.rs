@@ -683,9 +683,10 @@ mod lsp_tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
+    use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC;
     use clarity::vm::ClarityVersion;
     use clarity_repl::utils::Environment;
-    use indoc::indoc;
+    use indoc::{formatdoc, indoc};
     use ls_types::{
         DocumentRangeFormattingParams, FormattingOptions, Position, Range, TextDocumentIdentifier,
         WorkDoneProgressParams,
@@ -820,17 +821,16 @@ mod lsp_tests {
             "#}
             .to_string();
 
-            let network_manifest = indoc! {r#"
+            let network_manifest = formatdoc! {r#"
                 [network]
                 name = "devnet"
                 deployment_fee_rate = 10
 
                 [accounts.deployer]
-                mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
+                mnemonic = "{DEFAULT_DEPLOYER_MNEMONIC}"
                 balance = 100_000_000_000_000
                 sbtc_balance = 1_000_000_000
-            "#}
-            .to_string();
+            "#};
 
             Self {
                 project_manifest,

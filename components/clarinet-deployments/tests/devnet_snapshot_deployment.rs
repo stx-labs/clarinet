@@ -14,6 +14,7 @@ use clarinet_deployments::types::{
     TransactionsBatchSpecification,
 };
 use clarinet_files::{NetworkManifest, NetworkManifestFile, StacksNetwork};
+use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC as DEPLOYER_MNEMONIC;
 use clarity::codec::StacksMessageCodec;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityVersion, ContractName};
@@ -24,7 +25,6 @@ use serde_json::json;
 use stacks_codec::transaction::{StacksTransaction, TransactionPayload};
 use stacks_rpc_client::rpc_client::NodeInfo;
 
-const DEPLOYER_MNEMONIC: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
 const DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 
 /// Deployer nonce carried by a snapshot that already published two requirements.

@@ -26,8 +26,8 @@ use crate::DerivedKeys;
 /// Every mnemonic Clarinet ships is used at this path. A custom `derivation`
 /// in a manifest misses the table and is derived normally.
 ///
-/// Re-exported by `clarinet-files`, which is where the rest of the workspace
-/// reads it from.
+/// Also re-exported by `clarinet-files` for consumers that already depend on
+/// it; both paths resolve to this constant.
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
 /// The accounts `clarinet new` writes into `settings/Devnet.toml`.
@@ -51,23 +51,34 @@ pub const DEFAULT_FAUCET_MNEMONIC: &str = "shadow private easily thought say log
 pub const DEFAULT_STACKS_MINER_MNEMONIC: &str = "fragile loan twenty basic net assault jazz absorb diet talk art shock innocent float punch travel gadget embrace caught blossom hockey surround initial reduce";
 pub const DEFAULT_STACKER_MNEMONIC: &str = "empty lens any direct brother then drop fury rule pole win claim scissors list rescue horn rent inform relief jump sword weekend half legend";
 
-/// Every phrase in the table, so tests can assert the two stay in step
-/// without the table itself being public.
-#[cfg(test)]
-const ALL_MNEMONICS: [&str; 12] = [
-    DEFAULT_DEPLOYER_MNEMONIC,
-    DEFAULT_WALLET_1_MNEMONIC,
-    DEFAULT_WALLET_2_MNEMONIC,
-    DEFAULT_WALLET_3_MNEMONIC,
-    DEFAULT_WALLET_4_MNEMONIC,
-    DEFAULT_WALLET_5_MNEMONIC,
-    DEFAULT_WALLET_6_MNEMONIC,
-    DEFAULT_WALLET_7_MNEMONIC,
-    DEFAULT_WALLET_8_MNEMONIC,
-    DEFAULT_FAUCET_MNEMONIC,
-    DEFAULT_STACKS_MINER_MNEMONIC,
-    DEFAULT_STACKER_MNEMONIC,
+/// The accounts a generated `settings/Devnet.toml` declares, in order.
+///
+/// `clarinet-cli` interpolates the phrases into its template by name — inline
+/// format args need a plain identifier — and asserts against this list that it
+/// emitted exactly these accounts. Going through the list rather than a local
+/// copy is what makes an account added with an off-table phrase fail.
+pub const DEFAULT_DEVNET_ACCOUNTS: [(&str, &str); 10] = [
+    ("deployer", DEFAULT_DEPLOYER_MNEMONIC),
+    ("wallet_1", DEFAULT_WALLET_1_MNEMONIC),
+    ("wallet_2", DEFAULT_WALLET_2_MNEMONIC),
+    ("wallet_3", DEFAULT_WALLET_3_MNEMONIC),
+    ("wallet_4", DEFAULT_WALLET_4_MNEMONIC),
+    ("wallet_5", DEFAULT_WALLET_5_MNEMONIC),
+    ("wallet_6", DEFAULT_WALLET_6_MNEMONIC),
+    ("wallet_7", DEFAULT_WALLET_7_MNEMONIC),
+    ("wallet_8", DEFAULT_WALLET_8_MNEMONIC),
+    ("faucet", DEFAULT_FAUCET_MNEMONIC),
 ];
+
+/// Every phrase the workspace ships: the generated accounts plus the two
+/// devnet infrastructure wallets, which never appear in a manifest.
+#[cfg(test)]
+fn all_shipped_mnemonics() -> impl Iterator<Item = &'static str> {
+    DEFAULT_DEVNET_ACCOUNTS
+        .iter()
+        .map(|(_, mnemonic)| *mnemonic)
+        .chain([DEFAULT_STACKS_MINER_MNEMONIC, DEFAULT_STACKER_MNEMONIC])
+}
 
 struct Entry {
     phrase: &'static str,
@@ -219,12 +230,13 @@ mod tests {
         }
     }
 
-    /// Sharing the phrase constants makes drift impossible in one direction
-    /// only: a new constant could still be declared and never added here.
+    /// Every phrase the workspace ships must have baked keys, or it silently
+    /// costs a PBKDF2 derivation per session. Sharing the constants makes the
+    /// phrases themselves impossible to drift; this covers the table.
     #[test]
     fn every_shipped_mnemonic_is_in_the_table() {
-        assert_eq!(ALL_MNEMONICS.len(), ENTRIES.len());
-        for mnemonic in ALL_MNEMONICS {
+        assert_eq!(all_shipped_mnemonics().count(), ENTRIES.len());
+        for mnemonic in all_shipped_mnemonics() {
             assert!(
                 is_precomputed(mnemonic, DEFAULT_DERIVATION_PATH),
                 "shipped mnemonic missing from the table: \"{mnemonic}\""

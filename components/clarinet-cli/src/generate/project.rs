@@ -570,6 +570,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use clarinet_files::{compute_addresses, StacksNetwork};
+    use clarinet_utils::DEFAULT_DEVNET_ACCOUNTS;
 
     use super::*;
 
@@ -584,34 +585,10 @@ mod tests {
         derivation: Option<String>,
     }
 
-    /// Accounts the template is expected to emit, and the constant each one
-    /// interpolates.
-    const EXPECTED_ACCOUNTS: [(&str, &str); 10] = [
-        ("deployer", DEFAULT_DEPLOYER_MNEMONIC),
-        ("wallet_1", DEFAULT_WALLET_1_MNEMONIC),
-        ("wallet_2", DEFAULT_WALLET_2_MNEMONIC),
-        ("wallet_3", DEFAULT_WALLET_3_MNEMONIC),
-        ("wallet_4", DEFAULT_WALLET_4_MNEMONIC),
-        ("wallet_5", DEFAULT_WALLET_5_MNEMONIC),
-        ("wallet_6", DEFAULT_WALLET_6_MNEMONIC),
-        ("wallet_7", DEFAULT_WALLET_7_MNEMONIC),
-        ("wallet_8", DEFAULT_WALLET_8_MNEMONIC),
-        ("faucet", DEFAULT_FAUCET_MNEMONIC),
-    ];
-
-    /// The generated wallets interpolate `clarinet-utils` constants, and
-    /// `clarinet-utils` asserts every one of those has precomputed keys — so
-    /// content cannot drift. What this guards is the *set*: a wallet added with
-    /// a fresh literal phrase, or a custom derivation path, would quietly miss
-    /// the table and cost a ~1.4 ms PBKDF2 derivation per session.
-    #[test]
-    fn generated_wallets_use_the_shared_mnemonics() {
-        let changes =
-            GetChangesForNewProject::new("/tmp".into(), "drift-guard".into(), false, false)
-                .run()
-                .expect("project generation failed");
-
-        let devnet_toml = changes
+    fn generated_devnet_toml() -> String {
+        GetChangesForNewProject::new("/tmp".into(), "drift-guard".into(), false, false)
+            .run()
+            .expect("project generation failed")
             .into_iter()
             .find_map(|change| match change {
                 Changes::AddFile(file) if file.path.ends_with("settings/Devnet.toml") => {
@@ -619,12 +596,23 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("generated project has no settings/Devnet.toml");
+            .expect("generated project has no settings/Devnet.toml")
+    }
 
+    /// The template interpolates `clarinet-utils` constants, so a phrase cannot
+    /// drift. What this guards is the *set* of accounts: comparing against
+    /// `DEFAULT_DEVNET_ACCOUNTS` rather than a local copy means an account
+    /// added with an off-table phrase cannot be satisfied by editing this test
+    /// — it has to join the shared list, where `clarinet-utils` asserts it has
+    /// precomputed keys. Otherwise it would silently cost a PBKDF2 derivation
+    /// per session, on every LSP file save.
+    #[test]
+    fn generated_wallets_use_the_shared_mnemonics() {
+        let devnet_toml = generated_devnet_toml();
         let generated: GeneratedDevnet =
             toml::from_str(&devnet_toml).expect("generated Devnet.toml is not valid");
 
-        let expected: BTreeMap<&str, &str> = EXPECTED_ACCOUNTS.into_iter().collect();
+        let expected: BTreeMap<&str, &str> = DEFAULT_DEVNET_ACCOUNTS.into_iter().collect();
         let actual: BTreeMap<&str, &str> = generated
             .accounts
             .iter()
@@ -633,45 +621,74 @@ mod tests {
         assert_eq!(actual, expected);
 
         for (label, account) in &generated.accounts {
-            let derivation = account.derivation.as_deref();
             assert!(
-                derivation.is_none() || derivation == Some(DEFAULT_DERIVATION_PATH),
+                matches!(
+                    account.derivation.as_deref(),
+                    None | Some(DEFAULT_DERIVATION_PATH)
+                ),
                 "account {label} overrides the derivation path, which misses the \
                  precomputed table"
             );
         }
-
-        verify_documented_addresses(&devnet_toml);
     }
 
     /// Each account block documents its derived key and addresses in comments
-    /// that developers copy into tests. The mnemonics now live in
-    /// `clarinet-utils`, so nothing else would notice if one were rotated and
-    /// these literals left behind.
-    fn verify_documented_addresses(devnet_toml: &str) {
+    /// that developers copy into tests. The mnemonics live in `clarinet-utils`
+    /// now, so nothing else would notice if one were rotated and these literals
+    /// left behind.
+    ///
+    /// The comments are stripped by TOML parsing, so this scans the raw text —
+    /// but it takes the mnemonic from the parsed document rather than
+    /// re-extracting it, so a template quoting change cannot silently turn this
+    /// into a no-op.
+    #[test]
+    fn generated_devnet_documents_correct_addresses() {
+        let devnet_toml = generated_devnet_toml();
+        let generated: GeneratedDevnet =
+            toml::from_str(&devnet_toml).expect("generated Devnet.toml is not valid");
         let networks = StacksNetwork::Devnet.get_networks();
-        let mut checked = 0;
 
+        let mut checked = BTreeMap::new();
         for block in devnet_toml.split("[accounts.").skip(1) {
-            let field = |prefix: &str| {
+            let label = block
+                .lines()
+                .next()
+                .and_then(|l| l.split(']').next())
+                .expect("account block has no label");
+            let mnemonic = &generated
+                .accounts
+                .get(label)
+                .unwrap_or_else(|| panic!("block {label} is not in the parsed document"))
+                .mnemonic;
+
+            let documented = |prefix: &str| {
                 block
                     .lines()
                     .find_map(|line| line.trim().strip_prefix(prefix))
                     .map(str::trim)
-                    .unwrap_or_else(|| panic!("account block is missing {prefix}"))
+                    .unwrap_or_else(|| panic!("account {label} is missing {prefix}"))
             };
-            let label = block.lines().next().unwrap().trim_end_matches(']');
-            let mnemonic = field("mnemonic = ").trim_matches('"');
-
             let (stx_address, btc_address, secret_key) =
                 compute_addresses(mnemonic, DEFAULT_DERIVATION_PATH, &networks);
 
-            assert_eq!(field("# secret_key: "), secret_key, "{label} secret_key");
-            assert_eq!(field("# stx_address: "), stx_address, "{label} stx_address");
-            assert_eq!(field("# btc_address: "), btc_address, "{label} btc_address");
-            checked += 1;
+            assert_eq!(
+                documented("# secret_key: "),
+                secret_key,
+                "{label} secret_key"
+            );
+            assert_eq!(
+                documented("# stx_address: "),
+                stx_address,
+                "{label} stx_address"
+            );
+            assert_eq!(
+                documented("# btc_address: "),
+                btc_address,
+                "{label} btc_address"
+            );
+            checked.insert(label, ());
         }
 
-        assert_eq!(checked, EXPECTED_ACCOUNTS.len());
+        assert_eq!(checked.len(), generated.accounts.len());
     }
 }

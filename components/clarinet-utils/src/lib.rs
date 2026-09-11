@@ -12,11 +12,11 @@ use bip32::{DerivationPath, XPrv};
 use bip39::{Error as MnemonicError, Language, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
 pub use precomputed::{
-    DEFAULT_DEPLOYER_MNEMONIC, DEFAULT_DERIVATION_PATH, DEFAULT_FAUCET_MNEMONIC,
-    DEFAULT_STACKER_MNEMONIC, DEFAULT_STACKS_MINER_MNEMONIC, DEFAULT_WALLET_1_MNEMONIC,
-    DEFAULT_WALLET_2_MNEMONIC, DEFAULT_WALLET_3_MNEMONIC, DEFAULT_WALLET_4_MNEMONIC,
-    DEFAULT_WALLET_5_MNEMONIC, DEFAULT_WALLET_6_MNEMONIC, DEFAULT_WALLET_7_MNEMONIC,
-    DEFAULT_WALLET_8_MNEMONIC,
+    DEFAULT_DEPLOYER_MNEMONIC, DEFAULT_DERIVATION_PATH, DEFAULT_DEVNET_ACCOUNTS,
+    DEFAULT_FAUCET_MNEMONIC, DEFAULT_STACKER_MNEMONIC, DEFAULT_STACKS_MINER_MNEMONIC,
+    DEFAULT_WALLET_1_MNEMONIC, DEFAULT_WALLET_2_MNEMONIC, DEFAULT_WALLET_3_MNEMONIC,
+    DEFAULT_WALLET_4_MNEMONIC, DEFAULT_WALLET_5_MNEMONIC, DEFAULT_WALLET_6_MNEMONIC,
+    DEFAULT_WALLET_7_MNEMONIC, DEFAULT_WALLET_8_MNEMONIC,
 };
 use rand::RngCore;
 
@@ -98,25 +98,31 @@ type CacheKey = (String, String);
 static DERIVED_KEYS: LazyLock<Mutex<HashMap<CacheKey, DerivedKeys>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Comfortably above the ~13 wallets a devnet manifest declares, low enough
-/// that the randomly generated phrases described above cannot pile up.
-const CACHE_LIMIT: usize = 64;
+/// Bounds the map without being reachable by a real manifest. Sized well
+/// above any plausible account count on purpose: if the cap were close to it,
+/// a project declaring more wallets than the cap would evict and re-derive the
+/// overflow on *every* load, permanently — trading a bounded ~400 KB for
+/// hundreds of milliseconds. At this size an entry (~380 B) is only ever
+/// evicted by the unrepeatable random phrases the cap exists for.
+const CACHE_LIMIT: usize = 1024;
 
 /// Insert, evicting an arbitrary entry first if the map is full.
 ///
 /// Evicting rather than declining the insert matters: the phrases that fill
 /// the map are the unrepeatable random ones, so refusing new entries would let
 /// them permanently crowd out wallets that *are* looked up again. Which entry
-/// goes is arbitrary — tracking recency would only pay off in a session that
-/// both exceeds the cap and reuses an evicted wallet, and re-deriving one
-/// wallet costs less than the bookkeeping would.
+/// goes is arbitrary, which is only tolerable because [`CACHE_LIMIT`] is far
+/// above any real account count — a useful entry is picked with probability
+/// `real_wallets / CACHE_LIMIT`, and evicting one costs a single re-derivation.
+///
+/// This is the sole insertion point and it evicts first, so the map is never
+/// above the cap on entry and at most one entry is ever removed.
 fn memoize(cache_key: CacheKey, keys: &DerivedKeys) {
     let mut cache = derived_keys();
-    while cache.len() >= CACHE_LIMIT {
-        let Some(evict) = cache.keys().next().cloned() else {
-            break;
-        };
-        cache.remove(&evict);
+    if cache.len() >= CACHE_LIMIT {
+        if let Some(evict) = cache.keys().next().cloned() {
+            cache.remove(&evict);
+        }
     }
     cache.insert(cache_key, keys.clone());
 }
@@ -170,12 +176,7 @@ fn derive_bip32_keys(
     derivation: &str,
 ) -> Result<DerivedKeys, String> {
     let mnemonic = mnemonic_from_phrase(phrase)?;
-    let seed_vec = mnemonic.to_seed(password);
-    if seed_vec.len() != 64 {
-        return Err("Seed must be 64 bytes".to_string());
-    }
-    let mut seed = [0u8; 64];
-    seed.copy_from_slice(&seed_vec);
+    let seed = mnemonic.to_seed(password);
     let derivation_path = DerivationPath::from_str(derivation).map_err(|e| e.to_string())?;
     let xprv = XPrv::derive_from_path(seed, &derivation_path).map_err(|e| e.to_string())?;
     let secret_bytes = xprv.private_key().to_bytes();
@@ -389,9 +390,6 @@ mod tests {
     use super::*;
     use crate::precomputed::is_precomputed;
 
-    /// Serializes the tests that drive `DERIVED_KEYS` to its cap.
-    static CACHE_TESTS: Mutex<()> = Mutex::new(());
-
     #[test]
     fn test_mnemonic_from_phrase_12() {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -507,21 +505,20 @@ mod tests {
     /// A full memo must keep working. The phrases that fill it are the
     /// unrepeatable random ones, so refusing new entries once full would let
     /// them crowd out wallets that are actually looked up again.
+    ///
+    /// Exercises `memoize` directly rather than deriving `CACHE_LIMIT` keys:
+    /// filling the map through the public entry point would cost over a
+    /// thousand PBKDF2 derivations, and eviction is a property of `memoize`.
     #[test]
     fn test_memo_still_caches_once_full() {
         const DERIVATION: &str = "m/44'/5757'/0'/0/7";
-        // The default harness runs tests as threads in one process, and this is
-        // the only test that pushes the map to its cap, where inserts start
-        // evicting. Hold the guard so it cannot evict a sibling's entry, or
-        // have its own evicted, mid-assertion. (`cargo tst` uses nextest, which
-        // gives each test its own process; plain `cargo test` does not.)
-        let _serialized = CACHE_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let keys = derive_bip32_keys(DEFAULT_DEPLOYER_MNEMONIC, "", DERIVATION).unwrap();
 
-        // Fill past the limit with phrases nothing will ask for again, the way
-        // an `[accounts.x]` table with no `mnemonic` does on every load.
-        for _ in 0..CACHE_LIMIT + 4 {
-            let throwaway = random_mnemonic().to_string();
-            get_bip32_keys_from_mnemonic(&throwaway, "", DERIVATION).unwrap();
+        for i in 0..CACHE_LIMIT + 4 {
+            memoize(
+                (format!("filler phrase {i}"), DERIVATION.to_string()),
+                &keys,
+            );
         }
         assert!(
             derived_keys().len() <= CACHE_LIMIT,
@@ -529,12 +526,14 @@ mod tests {
         );
 
         // A wallet first seen now must still land in the memo.
-        let phrase = random_mnemonic().to_string();
-        let first = get_bip32_keys_from_mnemonic(&phrase, "", DERIVATION).unwrap();
-        let key = (phrase.clone(), DERIVATION.to_string());
+        let key = (
+            "a phrase seen after the cap".to_string(),
+            DERIVATION.to_string(),
+        );
+        memoize(key.clone(), &keys);
         assert_eq!(
             derived_keys().get(&key),
-            Some(&first),
+            Some(&keys),
             "a wallet seen after the memo filled up was not cached"
         );
     }

@@ -12,9 +12,8 @@ use std::hint::black_box;
 use std::str::FromStr;
 
 use bip32::{DerivationPath, XPrv};
-use bip39::{Language, Mnemonic};
 use clarinet_utils::{
-    get_bip32_keys_from_mnemonic, random_mnemonic, DEFAULT_DEPLOYER_MNEMONIC,
+    get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_mnemonic, DEFAULT_DEPLOYER_MNEMONIC,
     DEFAULT_DERIVATION_PATH,
 };
 use libsecp256k1::{PublicKey, SecretKey};
@@ -45,13 +44,21 @@ fn precomputed() -> (Vec<u8>, PublicKey) {
 }
 
 /// A custom mnemonic on its second and later use: resolved from the memo.
+///
+/// Uses a 24-word phrase at a non-default path — it misses the table and lands
+/// in the memo, and the key length is most of a memo hit, so a 12-word
+/// `random_mnemonic()` would understate it against the `precomputed` row.
 #[divan::bench]
 fn memoized(bencher: divan::Bencher) {
-    let phrase = random_mnemonic().to_string();
-    get_bip32_keys_from_mnemonic(&phrase, "", DEFAULT_DERIVATION_PATH).unwrap();
+    const OFF_TABLE_PATH: &str = "m/44'/5757'/0'/0/9";
+    get_bip32_keys_from_mnemonic(DEFAULT_DEPLOYER_MNEMONIC, "", OFF_TABLE_PATH).unwrap();
     bencher.bench(|| {
-        get_bip32_keys_from_mnemonic(black_box(&phrase), "", black_box(DEFAULT_DERIVATION_PATH))
-            .unwrap()
+        get_bip32_keys_from_mnemonic(
+            black_box(DEFAULT_DEPLOYER_MNEMONIC),
+            "",
+            black_box(OFF_TABLE_PATH),
+        )
+        .unwrap()
     });
 }
 
@@ -61,7 +68,7 @@ mod stages {
     /// `to_seed` already returns `[u8; 64]`, so no copy is needed to feed
     /// `XPrv::derive_from_path`.
     fn seed_and_path() -> ([u8; 64], DerivationPath) {
-        let mnemonic = Mnemonic::parse_in(Language::English, DEFAULT_DEPLOYER_MNEMONIC).unwrap();
+        let mnemonic = mnemonic_from_phrase(DEFAULT_DEPLOYER_MNEMONIC).unwrap();
         (
             mnemonic.to_seed(""),
             DerivationPath::from_str(DEFAULT_DERIVATION_PATH).unwrap(),
@@ -70,7 +77,7 @@ mod stages {
 
     #[divan::bench]
     fn to_seed(bencher: divan::Bencher) {
-        let mnemonic = Mnemonic::parse_in(Language::English, DEFAULT_DEPLOYER_MNEMONIC).unwrap();
+        let mnemonic = mnemonic_from_phrase(DEFAULT_DEPLOYER_MNEMONIC).unwrap();
         bencher.bench(|| black_box(&mnemonic).to_seed(""));
     }
 
