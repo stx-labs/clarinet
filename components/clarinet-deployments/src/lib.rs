@@ -170,6 +170,16 @@ pub fn setup_session_with_deployment(
                     spec.remap_principals = boot_remap_principals();
                 }
 
+                // The marker means "simnet executes this", so the on-chain
+                // pass has to drop it: a saved `default.simnet-plan.yaml`
+                // already carries it, and `clarinet check` loads that same
+                // file for both environments. Leaving it would rewrite
+                // `SP000...` to `ST000...` at publish time and analyse simnet
+                // code in the pass that exists to analyse what really ships.
+                if environment == Environment::OnChain {
+                    spec.remap_principals.clear();
+                }
+
                 if !enable_analysis || !is_project_contract {
                     spec.skip_analysis = true;
                 } else if let Ok(relative) = spec.location.strip_prefix(&manifest.root_dir) {

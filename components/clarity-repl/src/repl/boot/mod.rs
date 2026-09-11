@@ -231,17 +231,6 @@ pub static BOOT_TESTNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
 pub static BOOT_MAINNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(BOOT_MAINNET_ADDRESS).unwrap());
 
-/// The testnet twin of a mainnet boot contract, or `None` if `contract_id`
-/// isn't one.
-///
-/// Simnet deploys every boot contract under both addresses, but its chain
-/// state is testnet-flavored: stacks-core's PoX handler keys off
-/// `GlobalContext::mainnet`, so only the `ST000...` contracts move consensus
-/// state. Redirecting to the twin makes a mainnet-addressed call behave.
-///
-/// Scoped to [`BOOT_CONTRACTS_NAMES`], the same rule
-/// [`remap_mainnet_boot_principals`] applies to source: sBTC lives at
-/// `SM3VDXK3...` and has no testnet twin in simnet, so it never matches.
 /// The testnet twin of the mainnet boot contract named by `(address, name)`.
 ///
 /// The `StacksAddress` counterpart of [`remap_mainnet_boot_contract_id`], for
@@ -258,6 +247,17 @@ pub fn remap_mainnet_boot_stacks_address(
     is_mainnet_boot.then(|| BOOT_TESTNET_STACKS_ADDRESS.clone())
 }
 
+/// The testnet twin of a mainnet boot contract, or `None` if `contract_id`
+/// isn't one.
+///
+/// Simnet deploys every boot contract under both addresses, but its chain
+/// state is testnet-flavored: stacks-core's PoX handler keys off
+/// `GlobalContext::mainnet`, so only the `ST000...` contracts move consensus
+/// state. Redirecting to the twin makes a mainnet-addressed call behave.
+///
+/// Scoped to [`BOOT_CONTRACTS_NAMES`], the same rule
+/// [`remap_mainnet_boot_principals`] applies to source: sBTC lives at
+/// `SM3VDXK3...` and has no testnet twin in simnet, so it never matches.
 pub fn remap_mainnet_boot_contract_id(
     contract_id: &QualifiedContractIdentifier,
 ) -> Option<QualifiedContractIdentifier> {

@@ -502,6 +502,52 @@ async fn a_contract_without_a_boot_reference_is_never_marked() {
     );
 }
 
+/// A *saved* plan already carries the marker, and `clarinet check` loads the
+/// same `default.simnet-plan.yaml` for both environments. The on-chain pass
+/// has to drop it, or it analyses the rewritten simnet source instead of the
+/// source that will really be published.
+#[tokio::test]
+async fn a_saved_marker_is_dropped_for_the_on_chain_pass() {
+    let project = Project::new("stacker", STACKER_SOURCE, "");
+    let mut deployment = project.generate().await;
+
+    // The generated plan records the marker; only the source is re-read raw,
+    // as loading from disk would.
+    let (_, generated_remap) = publish(&deployment);
+    assert!(
+        !generated_remap.is_empty(),
+        "the fixture must carry a marker"
+    );
+    for batch in deployment.plan.batches.iter_mut() {
+        for tx in batch.transactions.iter_mut() {
+            if let TransactionSpecification::EmulatedContractPublish(spec) = tx {
+                spec.source = STACKER_SOURCE.to_string();
+            }
+        }
+    }
+
+    let artifacts = setup_session_with_deployment(
+        &project.manifest,
+        &mut deployment,
+        None,
+        false,
+        Environment::OnChain,
+    );
+    assert!(artifacts.success, "the on-chain pass should still deploy");
+
+    let (source, remap) = publish(&deployment);
+    assert!(remap.is_empty(), "the on-chain pass must drop the marker");
+    assert_eq!(
+        source, STACKER_SOURCE,
+        "and must leave the source unrewritten"
+    );
+
+    // The contract that was published still names the mainnet address, which
+    // is the whole point of the on-chain pass.
+    let mut session = artifacts.session;
+    assert_eq!(stack_in_session(&mut session), 0);
+}
+
 /// A caller that supplies pre-built ASTs just generated the plan, so the
 /// generator has already decided. Backfilling there would make publish time
 /// rewrite a source whose AST was built before the rewrite, and it is the AST
