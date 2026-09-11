@@ -72,10 +72,12 @@ pub fn random_mnemonic() -> Mnemonic {
     Mnemonic::from_entropy_in(Language::English, &entropy).unwrap()
 }
 
-pub(crate) type DerivedKeys = (Vec<u8>, PublicKey);
+/// The 32-byte secret key and its secp256k1 public key.
+pub type DerivedKeys = (Vec<u8>, PublicKey);
 
-/// `(phrase, password, derivation)`.
-type CacheKey = (String, String, String);
+/// `(phrase, derivation)`. Passphrase-bearing derivations are never memoized,
+/// so no passphrase is ever stored here — see [`get_bip32_keys_from_mnemonic`].
+type CacheKey = (String, String);
 
 /// Most callers derive the same handful of wallets over and over: the LSP
 /// rebuilds the whole `NetworkManifest` on every file save, and
@@ -91,7 +93,8 @@ type CacheKey = (String, String, String);
 ///
 /// This does keep derived secrets alive for the lifetime of the process. That
 /// is already true of the plaintext mnemonics held in `NetworkManifest`, which
-/// outlive every caller here.
+/// outlive every caller here — but it is *not* true of a BIP39 passphrase,
+/// which is why those are excluded entirely rather than merely keyed on.
 static DERIVED_KEYS: LazyLock<Mutex<HashMap<CacheKey, DerivedKeys>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -103,7 +106,10 @@ const CACHE_LIMIT: usize = 64;
 ///
 /// Evicting rather than declining the insert matters: the phrases that fill
 /// the map are the unrepeatable random ones, so refusing new entries would let
-/// them permanently crowd out wallets that *are* looked up again.
+/// them permanently crowd out wallets that *are* looked up again. Which entry
+/// goes is arbitrary — tracking recency would only pay off in a session that
+/// both exceeds the cap and reuses an evicted wallet, and re-deriving one
+/// wallet costs less than the bookkeeping would.
 fn memoize(cache_key: CacheKey, keys: &DerivedKeys) {
     let mut cache = derived_keys();
     while cache.len() >= CACHE_LIMIT {
@@ -126,26 +132,30 @@ pub fn get_bip32_keys_from_mnemonic(
     password: &str,
     derivation: &str,
 ) -> Result<DerivedKeys, String> {
-    // A BIP39 passphrase changes the seed, so the table only applies without
-    // one. Checking it first means a table hit allocates nothing.
-    if password.is_empty() {
-        if let Some(keys) = precomputed::lookup(phrase, derivation) {
-            return Ok(keys);
-        }
+    // A BIP39 passphrase changes the seed, so neither cache can answer for one.
+    // Returning early rather than keying on the passphrase keeps it out of
+    // process memory: unlike the mnemonic, a passphrase is a user secret that
+    // `NetworkManifest` never holds, and nothing in the workspace passes one
+    // today, so there is nothing to trade away.
+    if !password.is_empty() {
+        return derive_bip32_keys(phrase, password, derivation);
     }
 
-    let cache_key = (
-        phrase.to_string(),
-        password.to_string(),
-        derivation.to_string(),
-    );
+    // Checked first, so a table hit allocates nothing.
+    if let Some(keys) = precomputed::lookup(phrase, derivation) {
+        return Ok(keys);
+    }
 
+    let cache_key = (phrase.to_string(), derivation.to_string());
     if let Some(keys) = derived_keys().get(&cache_key) {
         return Ok(keys.clone());
     }
 
     // Deliberately not holding the guard across the derivation — it is ~0.8 ms,
-    // and concurrent derivations of different wallets should not serialize.
+    // and derivations of *different* wallets should not serialize behind each
+    // other. Two threads racing on the same new wallet will therefore both
+    // derive it and the second insert wins; that costs one extra derivation,
+    // once, which is cheaper than the per-key coordination to avoid it.
     let keys = derive_bip32_keys(phrase, password, derivation)?;
     memoize(cache_key, &keys);
 
@@ -440,6 +450,26 @@ mod tests {
         assert_eq!(cached_public, derived_public);
     }
 
+    /// A passphrase is a user secret that `NetworkManifest` never holds, so it
+    /// must not end up in the process-wide memo.
+    #[test]
+    fn test_passphrase_bearing_derivations_are_not_memoized() {
+        let phrase = random_mnemonic().to_string();
+        let before = derived_keys().len();
+
+        get_bip32_keys_from_mnemonic(&phrase, "hunter2", DEFAULT_DERIVATION_PATH).unwrap();
+
+        assert_eq!(
+            derived_keys().len(),
+            before,
+            "a passphrase-bearing derivation was memoized"
+        );
+        assert!(
+            !derived_keys().keys().any(|(cached, _)| cached == &phrase),
+            "the phrase of a passphrase-bearing derivation was retained"
+        );
+    }
+
     /// A BIP39 passphrase produces a different seed, so the table must not
     /// answer for it.
     #[test]
@@ -495,7 +525,7 @@ mod tests {
         // A wallet first seen now must still land in the memo.
         let phrase = random_mnemonic().to_string();
         let first = get_bip32_keys_from_mnemonic(&phrase, "", DERIVATION).unwrap();
-        let key = (phrase.clone(), String::new(), DERIVATION.to_string());
+        let key = (phrase.clone(), DERIVATION.to_string());
         assert_eq!(
             derived_keys().get(&key),
             Some(&first),
