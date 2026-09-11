@@ -136,8 +136,16 @@ pub fn setup_session_with_deployment(
     // session follows: `remote_data.enabled` says the session is remote, not
     // that it is mainnet, and a testnet-backed one is testnet-flavored exactly
     // like simnet.
-    let backfill_legacy_boot_remap =
-        environment == Environment::Simnet && !session.interpreter.is_mainnet();
+    //
+    // Restricted to plans with no pre-built AST, which is exactly the
+    // load-from-disk case this exists for. A caller that passes `contracts_asts`
+    // just generated the plan, so the generator has already decided — and
+    // marking a contract here would make publish time rewrite a source whose
+    // AST was built before the rewrite. `run_with_terms` executes the AST, so
+    // that would leave the two disagreeing.
+    let backfill_legacy_boot_remap = environment == Environment::Simnet
+        && contracts_asts.is_none()
+        && !session.interpreter.is_mainnet();
 
     // Mark contracts that should skip analysis:
     // - All contracts when analysis is globally disabled

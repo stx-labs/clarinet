@@ -502,6 +502,41 @@ async fn a_contract_without_a_boot_reference_is_never_marked() {
     );
 }
 
+/// A caller that supplies pre-built ASTs just generated the plan, so the
+/// generator has already decided. Backfilling there would make publish time
+/// rewrite a source whose AST was built before the rewrite, and it is the AST
+/// that executes — so the two would disagree.
+#[tokio::test]
+async fn a_plan_with_prebuilt_asts_is_not_backfilled() {
+    let project = Project::new("stacker", STACKER_SOURCE, "");
+    let mut deployment = project.generate().await;
+
+    // Build the ASTs the CLI would hand over, then age the plan so the
+    // backfill would fire if it were not gated on their absence.
+    let artifacts = setup_session_with_deployment(
+        &project.manifest,
+        &mut deployment.clone(),
+        None,
+        false,
+        Environment::Simnet,
+    );
+    make_legacy_plan(&mut deployment);
+
+    let _ = setup_session_with_deployment(
+        &project.manifest,
+        &mut deployment,
+        Some(&artifacts.asts),
+        false,
+        Environment::Simnet,
+    );
+
+    let (_, remap) = publish(&deployment);
+    assert!(
+        remap.is_empty(),
+        "a plan carrying its own ASTs must not gain a marker the ASTs predate"
+    );
+}
+
 /// MXS reads real mainnet state, where the mainnet addresses are the correct
 /// ones, so the plan must neither rewrite nor record anything.
 #[tokio::test]

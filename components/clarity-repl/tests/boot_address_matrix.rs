@@ -15,6 +15,9 @@ use clarity_repl::repl::boot::{
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{Session, SessionSettings};
 
+/// Default deployer from the generated Devnet settings.
+const DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+
 fn session(epoch: StacksEpochId) -> Session {
     let mut session = Session::new(SessionSettings::default());
     session.update_epoch(epoch);
@@ -238,6 +241,67 @@ fn a_testnet_remote_session_still_remaps_user_snippets() {
             "(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-3 get-pox-info)"
         )),
         format!("(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-3 get-pox-info)"),
+    );
+}
+
+/// Minting has to credit the same contract a call executes against, or the
+/// balance lands on the dead twin where nothing can observe it. `cost-voting`
+/// is the boot contract with an FT.
+#[test]
+fn minting_a_boot_asset_credits_the_redirected_contract() {
+    let session = session(StacksEpochId::Epoch24);
+
+    let asset = session
+        .resolve_asset_identifier(
+            DEPLOYER,
+            &format!("{BOOT_MAINNET_ADDRESS}.cost-voting.cost-vote-token"),
+        )
+        .expect("a boot asset identifier should parse");
+
+    assert_eq!(
+        asset.contract_identifier.to_string(),
+        format!("{BOOT_TESTNET_ADDRESS}.cost-voting"),
+    );
+    assert_eq!(asset.asset_name.to_string(), "cost-vote-token");
+}
+
+/// sBTC has no twin, so its assets must be credited exactly as written.
+#[test]
+fn minting_an_sbtc_asset_is_not_redirected() {
+    let session = session(StacksEpochId::Epoch31);
+
+    let asset = session
+        .resolve_asset_identifier(
+            DEPLOYER,
+            &format!("{SBTC_MAINNET_ADDRESS}.sbtc-token.sbtc-token"),
+        )
+        .expect("an sBTC asset identifier should parse");
+
+    assert_eq!(
+        asset.contract_identifier.to_string(),
+        format!("{SBTC_MAINNET_ADDRESS}.sbtc-token"),
+    );
+}
+
+/// `::get_costs` evaluates user Clarity through its own branch, ahead of the
+/// bare-snippet arm, so it needs the rewrite too — as do `::read`, `::debug`,
+/// `::trace` and `::perf`.
+#[test]
+fn console_commands_apply_the_remap_too() {
+    let mut session = session(StacksEpochId::Epoch24);
+
+    let (_, output) = session.process_console_input(&format!(
+        "::get_costs (get reward-cycle-length (unwrap-panic (contract-call? '{BOOT_MAINNET_ADDRESS}.pox-3 get-pox-info)))"
+    ));
+    let rendered = output.join("\n");
+
+    assert!(
+        rendered.contains("1050"),
+        "::get_costs should reach the testnet pox-3, got:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("2100"),
+        "::get_costs must not reach the mainnet twin, got:\n{rendered}"
     );
 }
 

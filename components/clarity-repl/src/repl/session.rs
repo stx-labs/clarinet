@@ -361,8 +361,7 @@ impl Session {
             }
 
             snippet => {
-                let snippet = self.remap_user_snippet(snippet.to_string());
-                let _ = self.run_snippet(&mut output, self.show_costs, &snippet);
+                let _ = self.run_snippet(&mut output, self.show_costs, snippet);
                 return (false, output);
             }
         }
@@ -476,8 +475,9 @@ impl Session {
         cost_track: bool,
         cmd: &str,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+        let cmd = self.remap_user_snippet(cmd.to_string());
         let (mut result, cost, execution_result) =
-            match self.formatted_interpretation(cmd.to_string(), None, cost_track, None) {
+            match self.formatted_interpretation(cmd.clone(), None, cost_track, None) {
                 Ok((mut output, result)) => {
                     if let EvaluationResult::Contract(contract_result) = result.result.clone() {
                         self.contract_successfully_stored(&mut output, &contract_result.contract);
@@ -603,6 +603,9 @@ impl Session {
             return output.push("Usage: ::debug <expr>".red().to_string());
         };
 
+        // The rewrite is length-preserving, so the debugger's source mapping
+        // stays valid — and it must debug the code that actually runs.
+        let snippet = &self.remap_user_snippet(snippet.to_string());
         let mut debugger = CLIDebugger::new(&QualifiedContractIdentifier::transient(), snippet);
 
         let mut result = match self.formatted_interpretation(
@@ -629,6 +632,7 @@ impl Session {
         let Some((_, snippet)) = cmd.split_once(' ') else {
             return output.push("Usage: ::trace <expr>".red().to_string());
         };
+        let snippet = &self.remap_user_snippet(snippet.to_string());
 
         let mut tracer = TracerHook::new();
 
@@ -661,7 +665,7 @@ impl Session {
         }
 
         let cost_field_str = parts[1];
-        let snippet = parts[2..].join(" ");
+        let snippet = self.remap_user_snippet(parts[2..].join(" "));
 
         let cost_field = CostField::from(cost_field_str);
 
@@ -1632,6 +1636,28 @@ impl Session {
         })
     }
 
+    /// Resolve a user-supplied asset identifier to the asset this session will
+    /// actually move.
+    ///
+    /// The asset counterpart of [`Session::resolve_contract_id`]: minting
+    /// `SP000....cost-voting.cost-vote-token` has to credit the same contract
+    /// that a call through that spelling executes against, or the balance is
+    /// credited to the dead twin and no call can observe it.
+    pub fn resolve_asset_identifier(
+        &self,
+        default_deployer: &str,
+        identifier: &str,
+    ) -> Result<AssetIdentifier, AssetIdentifierParseError> {
+        let mut asset = Self::parse_asset_identifier(default_deployer, identifier)?;
+        if !self.interpreter.is_mainnet() {
+            if let Some(remapped) = boot::remap_mainnet_boot_contract_id(&asset.contract_identifier)
+            {
+                asset.contract_identifier = remapped;
+            }
+        }
+        Ok(asset)
+    }
+
     fn mint_ft(&mut self, command: &str) -> String {
         let args: Vec<_> = command.split(' ').collect();
 
@@ -1641,7 +1667,7 @@ impl Session {
                 .to_string();
         }
 
-        let asset_identifier = match Self::parse_asset_identifier(&self.get_tx_sender(), args[1]) {
+        let asset_identifier = match self.resolve_asset_identifier(&self.get_tx_sender(), args[1]) {
             Ok(asset_identifier) => asset_identifier,
             Err(err) => {
                 return format!("Unable to parse the asset identifier: {err:?}")

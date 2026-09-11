@@ -1166,6 +1166,15 @@ impl SDK {
                 skip_analysis: false,
             };
 
+            // Top-level `contract-call?`s run at deploy time and can move boot
+            // assets, so conditions follow the source rewrite above — same gate
+            // as `Session::call_contract_fn`.
+            let post_conditions = if session.interpreter.is_mainnet() {
+                post_conditions
+            } else {
+                post_conditions.remap_mainnet_boot_principals()
+            };
+
             match session.deploy_contract(&contract, track_costs, None, post_conditions) {
                 Ok(res) => res,
                 Err(diagnostics) => {
@@ -1389,7 +1398,8 @@ impl SDK {
         let session = self.get_session_mut();
 
         let default_deployer = session.get_tx_sender();
-        let asset_identifier = Session::parse_asset_identifier(&default_deployer, &token)
+        let asset_identifier = session
+            .resolve_asset_identifier(&default_deployer, &token)
             .map_err(|e| format!("Expected 'contract_id.asset_name', got '{token}': {e}"))?;
 
         session.interpreter.mint_ft_balance(
