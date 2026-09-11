@@ -16,15 +16,15 @@ use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{
-    ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression, Value,
+    ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
 };
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, remap_mainnet_boot_principals,
     BOOT_CONTRACTS_DATA, BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL, SBTC_BOOT_CONTRACTS,
-    SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
+    SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_ASSET_IDENTIFIER,
+    SBTC_TOKEN_MAINNET_ADDRESS,
 };
-use clarity_repl::repl::clarity_values::value_to_string;
 use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
@@ -275,44 +275,18 @@ fn update_session_with_genesis_accounts(
     }
 }
 
-/// `sbtc-deposit` is deployed as an sBTC boot contract from the epoch sBTC
-/// activates at. It is missing from sessions that never reach that epoch, and
-/// from remote-data sessions, whose sBTC state comes from the network instead.
-/// A hand-authored plan can also publish it before the boot set is installed,
-/// which is what the second lookup covers.
-fn is_sbtc_deposit_deployed(session: &Session) -> bool {
+/// `sbtc-token` is a boot contract from the sBTC activation epoch onward, so it
+/// is absent below that epoch and in remote-data sessions. The second lookup
+/// covers a plan that publishes it at the sBTC address itself.
+fn is_sbtc_token_deployed(session: &Session) -> bool {
     session
         .boot_contracts
-        .contains_key(&SBTC_DEPOSIT_MAINNET_ADDRESS)
-        || session
-            .contracts
-            .contains_key(&SBTC_DEPOSIT_MAINNET_ADDRESS)
+        .contains_key(&SBTC_TOKEN_MAINNET_ADDRESS)
+        || session.contracts.contains_key(&SBTC_TOKEN_MAINNET_ADDRESS)
 }
 
-/// A random 32-byte buffer, standing in for the Bitcoin txid of a deposit.
-fn random_txid() -> SymbolicExpression {
-    let bytes: [u8; 32] = std::array::from_fn(|_| rand::random());
-    SymbolicExpression::atom_value(
-        Value::buff_from(bytes.to_vec()).expect("32 bytes is a valid buffer"),
-    )
-}
-
-/// The `(err ...)` a contract call returned, rendered as Clarity source, or
-/// `None` if the call committed.
-fn err_response(result: &ExecutionResult) -> Option<String> {
-    match &result.result {
-        EvaluationResult::Snippet(snippet) => match &snippet.result {
-            Value::Response(response) if !response.committed => {
-                Some(value_to_string(&snippet.result))
-            }
-            _ => None,
-        },
-        EvaluationResult::Contract(_) => None,
-    }
-}
-
-/// Mint the `sbtc_balance` configured for each genesis wallet, by calling
-/// `sbtc-deposit` the way the sBTC signers would.
+/// Credit the `sbtc_balance` configured for each genesis wallet, writing the
+/// balance and total supply straight into the datastore like genesis STX.
 fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &DeploymentSpecification) {
     let Some(spec) = deployment.genesis.as_ref() else {
         return;
@@ -327,63 +301,22 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
         return;
     }
 
-    if !is_sbtc_deposit_deployed(session) {
-        let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-deposit");
+    if !is_sbtc_token_deployed(session) {
+        let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-token");
         ueprint!(
             "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this \
              session. The sBTC contracts require epoch {sbtc_epoch} or later.",
-            *SBTC_DEPOSIT_MAINNET_ADDRESS
+            *SBTC_TOKEN_MAINNET_ADDRESS
         );
         return;
     }
 
-    // The deposit is credited against the burn block below the current tip,
-    // whose header hash `complete-deposit-wrapper` checks for a Bitcoin fork.
-    let block_height = session.interpreter.get_burn_block_height() - 1;
-    let burn_hash = session.eval_clarity_string(&format!(
-        "(unwrap-panic (get-burn-block-info? header-hash u{block_height}))"
-    ));
-    let burn_height = SymbolicExpression::atom_value(Value::UInt(block_height.into()));
-    let vout_index = SymbolicExpression::atom_value(Value::UInt(1));
-    let deposit_contract = SBTC_DEPOSIT_MAINNET_ADDRESS.to_string();
-
     for wallet in funded_wallets {
-        let args = vec![
-            random_txid(),
-            vout_index.clone(),
-            SymbolicExpression::atom_value(Value::UInt(wallet.sbtc_balance)),
-            SymbolicExpression::atom_value(Value::Principal(wallet.address.clone().into())),
-            burn_hash.clone(),
-            burn_height.clone(),
-            random_txid(),
-        ];
-        // Session setup, not something the sbtc address sent: like the
-        // boot contracts, it stays at nonce 0.
-        let result = session.call_contract_fn(
-            &deposit_contract,
-            "complete-deposit-wrapper",
-            &args,
-            SBTC_MAINNET_ADDRESS,
-            false,
-            false,
-            CallKind::NonceFree,
-            PostConditionCheck::Unchecked,
-        );
-
-        // A silent failure here is indistinguishable from a mint that never
-        // ran, so report both the runtime errors and an `(err ...)` response.
-        let reasons: Vec<String> = match &result {
-            Ok(execution_result) => err_response(execution_result)
-                .map(|err| format!("complete-deposit-wrapper returned {err}"))
-                .into_iter()
-                .collect(),
-            Err(error) => error
-                .diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.message.clone())
-                .collect(),
-        };
-        for reason in reasons {
+        if let Err(reason) = session.interpreter.mint_ft_balance(
+            &SBTC_TOKEN_ASSET_IDENTIFIER,
+            &wallet.address.clone().into(),
+            wallet.sbtc_balance,
+        ) {
             ueprint!(
                 "Warning: unable to mint {} sBTC to {}: {reason}",
                 wallet.sbtc_balance,

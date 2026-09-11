@@ -1407,7 +1407,7 @@ impl SDK {
             &PrincipalData::Standard(StandardPrincipalData::from(
                 StacksAddress::from_string(&recipient).unwrap(),
             )),
-            amount,
+            amount.into(),
         )
     }
 

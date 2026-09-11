@@ -1,13 +1,15 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["es2022", "WebWorker"],
+    "lib": ["es2024", "WebWorker"],
     "module": "preserve",
     "moduleResolution": "bundler",
     "types": ["node"],
     "strict": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src"],
+  "include": ["src", "tests"],
   "exclude": ["node_modules", ".vscode-test-web"]
 }
