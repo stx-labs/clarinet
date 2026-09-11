@@ -186,21 +186,64 @@ fn eval_itself_leaves_a_mainnet_boot_principal_alone() {
     );
 }
 
-// A shared cache directory, so repeated runs don't hammer the Hiro API.
-// Namespaced by the nextest run id like the other remote-data tests.
-fn shared_cache_dir() -> std::path::PathBuf {
-    let run_id = std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| "default".to_string());
-    std::env::temp_dir().join(format!("clarinet-test-mxs-cache-{run_id}"))
+/// A node that reports `network_id`, which is what decides whether a remote
+/// session is mainnet-flavored. Mocked rather than live so the assertion is
+/// deterministic and adds no pressure to the shared Hiro API rate limit.
+fn mock_node(network_id: u32) -> (mockito::ServerGuard, ApiUrl) {
+    let mut server = mockito::Server::new();
+
+    // Anything not mocked answers 404 rather than mockito's default 501,
+    // which the client would treat as retryable and sleep over.
+    server
+        .mock("GET", mockito::Matcher::Any)
+        .with_status(404)
+        .expect_at_least(0)
+        .create();
+
+    server
+        .mock("GET", "/v2/info")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(format!(
+            r#"{{"network_id": {network_id}, "stacks_tip_height": 556946}}"#
+        ))
+        .create();
+
+    // `Session::new` resolves the block at `initial_height`; `fetch_block`
+    // unwraps, so it has to be served.
+    let block = serde_json::json!({
+        "height": 556946,
+        "burn_block_height": 882262,
+        "tenure_height": 184037,
+        "block_time": 1735934294,
+        "burn_block_time": 1735451504,
+        "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
+        "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
+        "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
+    })
+    .to_string();
+    server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"^/extended/v2/blocks/.*$".to_string()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(block)
+        .expect_at_least(0)
+        .create();
+
+    let url = ApiUrl(server.url());
+    (server, url)
 }
 
-fn remote_session(api_url: &str, initial_height: u32) -> Session {
+fn remote_session(api_url: ApiUrl) -> Session {
     Session::new(SessionSettings {
-        cache_location: Some(shared_cache_dir()),
         repl_settings: clarity_repl::repl::Settings {
             remote_data: RemoteDataSettings {
                 enabled: true,
-                api_url: ApiUrl(api_url.to_string()),
-                initial_height: Some(initial_height),
+                api_url,
+                initial_height: Some(556946),
                 use_mainnet_wallets: false,
             },
             ..Default::default()
@@ -213,11 +256,9 @@ fn remote_session(api_url: &str, initial_height: u32) -> Session {
 /// so the mainnet addresses are the correct ones and nothing is rewritten.
 #[test]
 fn a_mainnet_remote_session_leaves_user_snippets_alone() {
-    let session = remote_session("https://api.hiro.so", 556946);
-    assert!(
-        session.interpreter.is_mainnet(),
-        "the fixture must really resolve to mainnet"
-    );
+    let (_server, url) = mock_node(1);
+    let session = remote_session(url);
+    assert!(session.interpreter.is_mainnet(), "network_id 1 is mainnet");
 
     let snippet = format!("(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-3 get-pox-info)");
     assert_eq!(session.remap_user_snippet(snippet.clone()), snippet);
@@ -230,10 +271,11 @@ fn a_mainnet_remote_session_leaves_user_snippets_alone() {
 /// asked the testnet API for a contract that does not exist there.
 #[test]
 fn a_testnet_remote_session_still_remaps_user_snippets() {
-    let session = remote_session("https://api.testnet.hiro.so", 80000);
+    let (_server, url) = mock_node(2_147_483_648);
+    let session = remote_session(url);
     assert!(
         !session.interpreter.is_mainnet(),
-        "a testnet-backed remote session is not mainnet"
+        "a testnet network_id is not mainnet"
     );
 
     assert_eq!(
