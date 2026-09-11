@@ -12,6 +12,7 @@ use std::path::Path;
 use clarinet_deployments::generate_default_deployment;
 use clarinet_deployments::types::TransactionSpecification;
 use clarinet_files::{ProjectManifest, StacksNetwork};
+use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC as TEST_MNEMONIC;
 use clarity_repl::utils::Environment;
 use indoc::formatdoc;
 use mockito::{Server, ServerGuard};
@@ -28,9 +29,6 @@ const SBTC_TESTNET_DEPLOYER: &str = "SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1";
 
 /// A contract that is not sBTC, used to check the remap is not over-broad.
 const OTHER_DEPLOYER: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9";
-
-/// Well-known Clarinet test mnemonic, matching the generated settings files.
-const TEST_MNEMONIC: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
 
 /// Stand-in for the real requirement source. The remap keys off the issuer
 /// address, not the body, so a dependency-free contract keeps the test fast.

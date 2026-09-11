@@ -18,6 +18,7 @@ clarinet-deployments = { path = "../clarinet-deployments" }
 clarity-static-cost = { path = "../clarity-static-cost" }
 
 [dev-dependencies]
+clarinet-utils = { path = "../clarinet-utils" }
 divan = { workspace = true }
 indoc = { workspace = true }
 tokio = { workspace = true }

@@ -3,6 +3,10 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use clarinet_utils::{get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_mnemonic};
+pub use clarinet_utils::{
+    DEFAULT_DERIVATION_PATH, DEFAULT_FAUCET_MNEMONIC, DEFAULT_STACKER_MNEMONIC,
+    DEFAULT_STACKS_MINER_MNEMONIC,
+};
 use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
@@ -13,8 +17,6 @@ use toml::value::Value;
 
 use super::FileAccessor;
 use crate::paths;
-
-pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/5757'/0'/0/0";
 
 pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.1-alpine";
 pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.1-alpine";
@@ -27,9 +29,6 @@ pub const DEFAULT_BITCOIN_EXPLORER_IMAGE: &str = "quay.io/hirosystems/bitcoin-ex
 
 pub const DEFAULT_STACKS_EXPLORER_IMAGE: &str = "ghcr.io/stx-labs/explorer:latest";
 
-pub const DEFAULT_STACKS_MINER_MNEMONIC: &str = "fragile loan twenty basic net assault jazz absorb diet talk art shock innocent float punch travel gadget embrace caught blossom hockey surround initial reduce";
-pub const DEFAULT_FAUCET_MNEMONIC: &str = "shadow private easily thought say logic fault paddle word top book during ignore notable orange flight clock image wealth health outside kitten belt reform";
-pub const DEFAULT_STACKER_MNEMONIC: &str = "empty lens any direct brother then drop fury rule pole win claim scissors list rescue horn rent inform relief jump sword weekend half legend";
 pub const DEFAULT_DOCKER_PLATFORM: &str = "linux/amd64";
 
 /// Normalize a user-provided docker_host value to include a scheme prefix.
@@ -1301,30 +1300,6 @@ mod tests {
         DevnetConfigFile, StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE,
         DEFAULT_STACKS_SIGNER_IMAGE,
     };
-
-    /// Every devnet wallet is derived on each `NetworkManifest` load, which the
-    /// LSP does on every file save. `clarinet-utils` bakes their keys in so the
-    /// PBKDF2 rounds are skipped; if a default mnemonic or the derivation path
-    /// changes here, that table goes stale and the cost comes back silently.
-    #[test]
-    fn devnet_default_mnemonics_are_precomputed() {
-        use crate::{
-            DEFAULT_DERIVATION_PATH, DEFAULT_FAUCET_MNEMONIC, DEFAULT_STACKER_MNEMONIC,
-            DEFAULT_STACKS_MINER_MNEMONIC,
-        };
-
-        for (label, mnemonic) in [
-            ("miner", DEFAULT_STACKS_MINER_MNEMONIC),
-            ("faucet", DEFAULT_FAUCET_MNEMONIC),
-            ("stacker", DEFAULT_STACKER_MNEMONIC),
-        ] {
-            assert!(
-                clarinet_utils::is_precomputed(mnemonic, DEFAULT_DERIVATION_PATH),
-                "the default devnet {label} mnemonic is missing from the \
-                 clarinet-utils precomputed table"
-            );
-        }
-    }
 
     #[test]
     fn parses_legacy_stacks_node_event_observer() {
