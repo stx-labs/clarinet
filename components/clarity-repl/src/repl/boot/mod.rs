@@ -310,11 +310,13 @@ fn mainnet_boot_contract_name_at(s: &str) -> Option<&str> {
 /// Both addresses are 29 characters, so the rewrite preserves every span in
 /// the source — diagnostics and coverage line/column data stay valid.
 ///
-/// Callers apply this to *user* sources only — manifest contracts (via
-/// `clarinet-deployments`) and `simnet.deployContract`. The boot contracts
-/// themselves are installed through `ClarityInterpreter::run` rather than
-/// `Session::deploy_contract`, so they never reach this function; none of
-/// them references another boot contract by its qualified id either.
+/// Applied to *user* sources — manifest contracts (via `clarinet-deployments`)
+/// and `simnet.deployContract` — and to the **testnet copy** of a custom boot
+/// contract override, which has to reference testnet boot contracts the way
+/// the built-in testnet bodies do. Never to the mainnet copy of a boot
+/// contract, which would point the mainnet boot set at the testnet one. The
+/// embedded boot sources do not reference each other by qualified id, so only
+/// overrides need it.
 ///
 /// Idempotent: the output holds no mainnet boot literals, so a second pass
 /// returns `None`.
@@ -446,8 +448,20 @@ pub fn get_boot_contracts_data_with_overrides(
             get_boot_contract_epoch_and_clarity_version(contract_name.as_str());
 
         for deployer in [&*BOOT_TESTNET_PRINCIPAL, &*BOOT_MAINNET_PRINCIPAL] {
+            // The built-in testnet boot set references testnet boot contracts
+            // (`pox-testnet.clar`, `make_pox_5_testnet`); an override has to
+            // match, or a call redirected into the testnet override would
+            // reach the dead mainnet twin from inside it. The mainnet copy
+            // stays verbatim.
+            let source = if deployer == &*BOOT_TESTNET_PRINCIPAL {
+                remap_mainnet_boot_principals(custom_source)
+                    .unwrap_or_else(|| custom_source.clone())
+            } else {
+                custom_source.clone()
+            };
+
             let boot_contract = ClarityContract {
-                code_source: ClarityCodeSource::ContractInMemory(custom_source.clone()),
+                code_source: ClarityCodeSource::ContractInMemory(source),
                 deployer: ContractDeployer::Address(deployer.to_address()),
                 name: contract_name.clone(),
                 epoch: Epoch::Specific(epoch),

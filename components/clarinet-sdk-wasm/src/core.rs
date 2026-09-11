@@ -1148,8 +1148,8 @@ impl SDK {
                 .flatten();
             if remapped.is_some() {
                 log!(
-                    "note: simnet is testnet-flavored: {} boot principals in {} were deployed as \
-                     {}",
+                    "note: this session is testnet-flavored: {} boot principals in {} were \
+                     deployed as {}",
                     BOOT_MAINNET_ADDRESS,
                     args.name,
                     BOOT_TESTNET_ADDRESS
