@@ -11,8 +11,7 @@ use clarity::util::secp256k1::{MessageSignature, Secp256k1PrivateKey, Secp256k1P
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, ContractName, EvaluationResult, Value};
 use clarity_repl::repl::boot::{
-    BOOT_CONTRACTS_NAMES, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_CONTRACTS_NAMES,
-    SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
+    remap_mainnet_boot_principals, SBTC_CONTRACTS_NAMES, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
 };
 use clarity_repl::repl::{Session, SessionSettings};
 use libsecp256k1::PublicKey;
@@ -31,45 +30,59 @@ use stacks_rpc_client::StacksRpc;
 
 mod bitcoin_deployment;
 
-use crate::types::{DeploymentSpecification, EpochSpec, TransactionSpecification};
+use crate::types::{
+    remap_principal_pairs, DeploymentSpecification, EpochSpec, TransactionSpecification,
+};
 
-/// Return the initial contract-ID remappings for `network`.
-/// Devnet sBTC mappings are added later from its requirement transactions.
-fn boot_contract_ids_to_remap(network: &StacksNetwork) -> HashSet<(String, String)> {
-    let mut contract_ids = HashSet::new();
-
-    for contract_name in BOOT_CONTRACTS_NAMES {
-        contract_ids.insert((
-            format!("{BOOT_MAINNET_ADDRESS}.{contract_name}"),
-            format!("{BOOT_TESTNET_ADDRESS}.{contract_name}"),
-        ));
+/// The sBTC contract-ID remappings a deployment starts with.
+///
+/// Testnet only: it is the one network with sBTC deployed at a known second
+/// address. Devnet's sBTC mappings are added later from its requirement
+/// transactions, and the mainnet boot principals are handled separately by
+/// [`remap_deployment_source`].
+fn sbtc_contract_ids_to_remap(network: &StacksNetwork) -> HashSet<(String, String)> {
+    if !matches!(network, StacksNetwork::Testnet) {
+        return HashSet::new();
     }
 
-    if matches!(network, StacksNetwork::Testnet) {
-        for contract_name in SBTC_CONTRACTS_NAMES {
-            contract_ids.insert((
+    SBTC_CONTRACTS_NAMES
+        .iter()
+        .map(|contract_name| {
+            (
                 format!("{SBTC_MAINNET_ADDRESS}.{contract_name}"),
                 format!("{SBTC_TESTNET_ADDRESS}.{contract_name}"),
-            ));
-        }
-    }
-
-    contract_ids
+            )
+        })
+        .collect()
 }
 
-fn remap_contract_ids(source: &str, contract_ids: &HashSet<(String, String)>) -> String {
-    let mut source = source.to_string();
-    for (old_contract_id, new_contract_id) in contract_ids {
-        let mut matched_indices = source
-            .match_indices(old_contract_id)
-            .map(|(i, _)| i)
-            .collect::<Vec<usize>>();
-        matched_indices.reverse();
-        for index in matched_indices {
-            source.replace_range(index..index + old_contract_id.len(), new_contract_id);
-        }
-    }
-    source
+/// Replace every occurrence of each `from` string with its `to` counterpart.
+///
+/// A blunt substring replacement. The sBTC and requirement *contract id* pairs
+/// are whole `address.name` strings, so nothing shorter can match as a prefix —
+/// but a requirement's `remap_principals` maps a bare issuer address, which
+/// this will happily rewrite inside comments and string literals too. That is
+/// deliberate: a bare-address remap has to reach every syntactic position a
+/// principal can appear in, which a token matcher cannot do.
+fn remap_contract_ids(source: &str, pairs: impl IntoIterator<Item = (String, String)>) -> String {
+    pairs
+        .into_iter()
+        .fold(source.to_string(), |source, (from, to)| {
+            source.replace(&from, &to)
+        })
+}
+
+/// Rewrite the contract references a non-mainnet deployment needs.
+///
+/// The mainnet boot principals go through the same helper simnet uses, so that
+/// mapping has one definition; `pairs` carries the sBTC and requirement
+/// remappings, which are specific to the plan being deployed.
+fn remap_deployment_source(
+    source: &str,
+    pairs: impl IntoIterator<Item = (String, String)>,
+) -> String {
+    let boot_remapped = remap_mainnet_boot_principals(source);
+    remap_contract_ids(boot_remapped.as_deref().unwrap_or(source), pairs)
 }
 
 fn get_btc_secret_key(account: &AccountConfig) -> bitcoincore_rpc::bitcoin::secp256k1::SecretKey {
@@ -428,7 +441,7 @@ fn encode_transactions(
     let mut cached_nonces = BTreeMap::new();
     // Only needed to coerce contract-call arguments, and costly to build.
     let mut session: Option<Session> = None;
-    let mut contracts_ids_to_remap = boot_contract_ids_to_remap(network);
+    let mut contracts_ids_to_remap = sbtc_contract_ids_to_remap(network);
     let mut batches = VecDeque::new();
     let mut next_index = 0;
 
@@ -569,7 +582,10 @@ fn encode_transactions(
                     let account = stx_accounts_lookup.get(issuer_address.as_str()).unwrap();
                     let source =
                         if matches!(network, StacksNetwork::Devnet | StacksNetwork::Testnet) {
-                            remap_contract_ids(&tx.source, &contracts_ids_to_remap)
+                            remap_deployment_source(
+                                &tx.source,
+                                contracts_ids_to_remap.iter().cloned(),
+                            )
                         } else {
                             tx.source.clone()
                         };
@@ -628,15 +644,11 @@ fn encode_transactions(
                     let nonce = next_nonce(&mut cached_nonces, stacks_rpc, &issuer_address)?;
                     let account = stx_accounts_lookup.get(issuer_address.as_str()).unwrap();
 
-                    // Remapping principals - This is happening
-                    let source = tx
-                        .remap_principals
-                        .iter()
-                        .map(|(src, dst)| (src.to_address(), dst.to_address()))
-                        .chain(contracts_ids_to_remap.iter().cloned())
-                        .fold(tx.source.clone(), |source, (src, dst)| {
-                            source.replace(&src, &dst)
-                        });
+                    let source = remap_deployment_source(
+                        &tx.source,
+                        remap_principal_pairs(&tx.remap_principals)
+                            .chain(contracts_ids_to_remap.iter().cloned()),
+                    );
 
                     let transaction = encode_contract_publish(
                         &tx.contract_id.name,
@@ -963,6 +975,8 @@ pub fn get_initial_transactions_trackers(
 
 #[cfg(test)]
 mod tests {
+    use clarity_repl::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
+
     use super::*;
 
     #[test]
@@ -976,10 +990,8 @@ mod tests {
              (contract-call? 'SP000000000000000000002Q6VF78.unrelated get-name)"
         );
 
-        let remapped = remap_contract_ids(
-            &source,
-            &boot_contract_ids_to_remap(&StacksNetwork::Testnet),
-        );
+        let remapped =
+            remap_deployment_source(&source, sbtc_contract_ids_to_remap(&StacksNetwork::Testnet));
 
         assert_eq!(
             remapped,
@@ -1012,19 +1024,69 @@ mod tests {
     fn boot_contract_references_are_rewritten_on_every_non_mainnet_network() {
         for network in [StacksNetwork::Devnet, StacksNetwork::Testnet] {
             let source = format!("(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-4 get-pox-info)");
-            let remapped = remap_contract_ids(&source, &boot_contract_ids_to_remap(&network));
+            let remapped = remap_deployment_source(&source, sbtc_contract_ids_to_remap(&network));
 
             assert_eq!(
                 remapped,
                 format!("(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-4 get-pox-info)"),
                 "boot contracts live at the testnet boot address on {network:?}"
             );
+
+            // Sharing simnet's helper means these deployments also stop
+            // rewriting boot IDs that are not principal literals.
+            let quoted = format!(r#"(define-constant S "{BOOT_MAINNET_ADDRESS}.pox-4")"#);
+            assert_eq!(
+                remap_deployment_source(&quoted, sbtc_contract_ids_to_remap(&network)),
+                quoted,
+                "a boot ID inside a string literal is not a contract reference"
+            );
         }
+    }
+
+    /// Mainnet publishes source verbatim. The network gate lives at the call
+    /// site — the `ContractPublish` arm only calls `remap_deployment_source`
+    /// for devnet and testnet — so what is pinned here is the other half:
+    /// mainnet contributes no pairs of its own.
+    #[test]
+    fn mainnet_contributes_no_remap_pairs() {
+        assert!(
+            sbtc_contract_ids_to_remap(&StacksNetwork::Mainnet).is_empty(),
+            "mainnet sBTC is already at its real address"
+        );
+    }
+
+    /// The whole per-network picture for a source naming both a boot contract
+    /// and sBTC at their mainnet addresses.
+    #[test]
+    fn boot_and_sbtc_rewrites_per_network() {
+        let source = format!(
+            "(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-4 get-pox-info)\n\
+             (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-name)"
+        );
+
+        // Testnet: boot moves to its twin, sBTC moves to the testnet deployer.
+        assert_eq!(
+            remap_deployment_source(&source, sbtc_contract_ids_to_remap(&StacksNetwork::Testnet)),
+            format!(
+                "(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-4 get-pox-info)\n\
+                 (contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-token get-name)"
+            ),
+        );
+
+        // Devnet: boot moves; sBTC is left for the requirement arm, which
+        // inserts its pair as it walks the plan.
+        assert_eq!(
+            remap_deployment_source(&source, sbtc_contract_ids_to_remap(&StacksNetwork::Devnet)),
+            format!(
+                "(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-4 get-pox-info)\n\
+                 (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-name)"
+            ),
+        );
     }
 
     #[test]
     fn sbtc_contract_references_are_not_rewritten_for_devnet_deployments() {
-        let contract_ids = boot_contract_ids_to_remap(&StacksNetwork::Devnet);
+        let contract_ids = sbtc_contract_ids_to_remap(&StacksNetwork::Devnet);
 
         for contract_name in SBTC_CONTRACTS_NAMES {
             let source_id = format!("{SBTC_MAINNET_ADDRESS}.{contract_name}");
@@ -1038,7 +1100,7 @@ mod tests {
     #[test]
     fn devnet_sbtc_mapping_has_a_single_destination() {
         // The requirement mapping must be the only destination for this source.
-        let mut contract_ids = boot_contract_ids_to_remap(&StacksNetwork::Devnet);
+        let mut contract_ids = sbtc_contract_ids_to_remap(&StacksNetwork::Devnet);
         let (source_id, deployer_id) = devnet_requirement_mapping("sbtc-token");
         contract_ids.insert((source_id.clone(), deployer_id.clone()));
 
@@ -1053,7 +1115,7 @@ mod tests {
 
         let source = format!("(contract-call? '{source_id} get-name)");
         assert_eq!(
-            remap_contract_ids(&source, &contract_ids),
+            remap_contract_ids(&source, contract_ids.iter().cloned()),
             format!("(contract-call? '{deployer_id} get-name)"),
             "devnet must rewrite sBTC references to the locally deployed contract"
         );
@@ -1062,7 +1124,7 @@ mod tests {
     #[test]
     fn testnet_sbtc_mapping_is_unchanged_by_the_requirement_arm() {
         // The requirement arm re-inserts the same Testnet pair.
-        let mut contract_ids = boot_contract_ids_to_remap(&StacksNetwork::Testnet);
+        let mut contract_ids = sbtc_contract_ids_to_remap(&StacksNetwork::Testnet);
         let before = contract_ids.len();
 
         let source_id = format!("{SBTC_MAINNET_ADDRESS}.sbtc-token");

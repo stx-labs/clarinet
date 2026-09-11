@@ -475,8 +475,9 @@ impl Session {
         cost_track: bool,
         cmd: &str,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+        let cmd = self.remap_user_snippet(cmd.to_string());
         let (mut result, cost, execution_result) =
-            match self.formatted_interpretation(cmd.to_string(), None, cost_track, None) {
+            match self.formatted_interpretation(cmd.clone(), None, cost_track, None) {
                 Ok((mut output, result)) => {
                     if let EvaluationResult::Contract(contract_result) = result.result.clone() {
                         self.contract_successfully_stored(&mut output, &contract_result.contract);
@@ -602,6 +603,9 @@ impl Session {
             return output.push("Usage: ::debug <expr>".red().to_string());
         };
 
+        // The rewrite is length-preserving, so the debugger's source mapping
+        // stays valid — and it must debug the code that actually runs.
+        let snippet = &self.remap_user_snippet(snippet.to_string());
         let mut debugger = CLIDebugger::new(&QualifiedContractIdentifier::transient(), snippet);
 
         let mut result = match self.formatted_interpretation(
@@ -628,6 +632,7 @@ impl Session {
         let Some((_, snippet)) = cmd.split_once(' ') else {
             return output.push("Usage: ::trace <expr>".red().to_string());
         };
+        let snippet = &self.remap_user_snippet(snippet.to_string());
 
         let mut tracer = TracerHook::new();
 
@@ -660,7 +665,7 @@ impl Session {
         }
 
         let cost_field_str = parts[1];
-        let snippet = parts[2..].join(" ");
+        let snippet = self.remap_user_snippet(parts[2..].join(" "));
 
         let cost_field = CostField::from(cost_field_str);
 
@@ -825,6 +830,60 @@ impl Session {
             .map_err(Vec::from)
     }
 
+    /// Resolve a user-supplied contract reference to the contract this session
+    /// will actually use.
+    ///
+    /// Desugars the reference, then redirects a mainnet boot contract to its
+    /// testnet twin. Simnet deploys every boot contract under both addresses,
+    /// but its chain state is testnet-flavored: stacks-core's PoX handler keys
+    /// off `GlobalContext::mainnet`, so `stack-stx` through `SP000....pox-N`
+    /// never locked any STX.
+    ///
+    /// Every entry point that turns a `&str` into a contract id — calls *and*
+    /// reads alike — must go through here, so that what a caller reads back is
+    /// the contract its calls executed against. Rewriting only the call target
+    /// would leave `getContractSource` reporting the mainnet `pox-3`
+    /// (`REWARD_CYCLE_LENGTH u2100`) for a call that behaved per the testnet
+    /// one (`u1050`) — the reported-vs-executed split this redirect exists to
+    /// avoid.
+    ///
+    /// Skipped only against a *mainnet* remote node, which holds the real
+    /// mainnet contracts and has no testnet twin. A remote session backed by
+    /// testnet is testnet-flavored like simnet, so it needs the same redirect
+    /// — `SP000....pox-N` does not exist on testnet at all.
+    pub fn resolve_contract_id(
+        &self,
+        default_deployer: &str,
+        contract: &str,
+    ) -> Result<QualifiedContractIdentifier, String> {
+        let contract_id = Self::desugar_contract_id(default_deployer, contract)?;
+        if self.interpreter.is_mainnet() {
+            return Ok(contract_id);
+        }
+        Ok(boot::remap_mainnet_boot_contract_id(&contract_id).unwrap_or(contract_id))
+    }
+
+    /// Rewrite a user-typed snippet so mainnet boot references reach the
+    /// contract simnet actually executes.
+    ///
+    /// The source-level counterpart of [`Session::resolve_contract_id`], for
+    /// the surfaces that take Clarity *code* rather than a contract id: the
+    /// console and the SDK's `runSnippet` / `execute`. Without it,
+    /// `(contract-call? 'SP000....pox-3 ...)` typed at the console reaches the
+    /// dead mainnet twin and reports mainnet constants.
+    ///
+    /// Deliberately **not** applied inside [`Session::eval`].
+    /// `clarinet-deployments::onchain` evaluates plan values through `eval` to
+    /// coerce contract-call arguments for real devnet, testnet and mainnet
+    /// deployments, where a mainnet boot principal is a value that has to
+    /// survive untouched.
+    pub fn remap_user_snippet(&self, snippet: String) -> String {
+        if self.interpreter.is_mainnet() {
+            return snippet;
+        }
+        boot::remap_mainnet_boot_principals(&snippet).unwrap_or(snippet)
+    }
+
     /// Call `method` on `contract` as `sender`.
     ///
     /// `kind` controls whether the call consumes a nonce. The nonce and call
@@ -843,15 +902,26 @@ impl Session {
     ) -> Result<ExecutionResult, ExecutionError> {
         let initial_tx_sender = self.get_tx_sender();
 
+        // The redirect below moves boot asset movement onto the testnet twin,
+        // so conditions naming the mainnet spelling have to move with it or
+        // they could never match. Gated identically to `resolve_contract_id`.
+        let post_conditions = if self.interpreter.is_mainnet() {
+            post_conditions
+        } else {
+            post_conditions.remap_mainnet_boot_principals()
+        };
+
         // An unresolvable contract id never became a transaction at all.
-        let contract_id = Self::desugar_contract_id(&initial_tx_sender, contract).map_err(|e| {
-            ExecutionError::rejected(vec![Diagnostic {
-                level: Level::Error,
-                message: e,
-                spans: vec![],
-                suggestion: None,
-            }])
-        })?;
+        let contract_id = self
+            .resolve_contract_id(&initial_tx_sender, contract)
+            .map_err(|e| {
+                ExecutionError::rejected(vec![Diagnostic {
+                    level: Level::Error,
+                    message: e,
+                    spans: vec![],
+                    suggestion: None,
+                }])
+            })?;
 
         self.set_tx_sender(sender);
 
@@ -1566,6 +1636,28 @@ impl Session {
         })
     }
 
+    /// Resolve a user-supplied asset identifier to the asset this session will
+    /// actually move.
+    ///
+    /// The asset counterpart of [`Session::resolve_contract_id`]: minting
+    /// `SP000....cost-voting.cost-vote-token` has to credit the same contract
+    /// that a call through that spelling executes against, or the balance is
+    /// credited to the dead twin and no call can observe it.
+    pub fn resolve_asset_identifier(
+        &self,
+        default_deployer: &str,
+        identifier: &str,
+    ) -> Result<AssetIdentifier, AssetIdentifierParseError> {
+        let mut asset = Self::parse_asset_identifier(default_deployer, identifier)?;
+        if !self.interpreter.is_mainnet() {
+            if let Some(remapped) = boot::remap_mainnet_boot_contract_id(&asset.contract_identifier)
+            {
+                asset.contract_identifier = remapped;
+            }
+        }
+        Ok(asset)
+    }
+
     fn mint_ft(&mut self, command: &str) -> String {
         let args: Vec<_> = command.split(' ').collect();
 
@@ -1575,7 +1667,7 @@ impl Session {
                 .to_string();
         }
 
-        let asset_identifier = match Self::parse_asset_identifier(&self.get_tx_sender(), args[1]) {
+        let asset_identifier = match self.resolve_asset_identifier(&self.get_tx_sender(), args[1]) {
             Ok(asset_identifier) => asset_identifier,
             Err(err) => {
                 return format!("Unable to parse the asset identifier: {err:?}")

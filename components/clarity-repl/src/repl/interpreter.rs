@@ -787,15 +787,25 @@ impl ClarityInterpreter {
         .transpose()
     }
 
+    /// Whether this session's chain state is mainnet-flavored.
+    ///
+    /// Only a remote session backed by a *mainnet* node is. Plain simnet and a
+    /// remote session backed by testnet are both testnet-flavored, which is
+    /// what `GlobalContext::mainnet` — and therefore stacks-core's PoX handler
+    /// — sees. `remote_data.enabled` is *not* a substitute: it only says the
+    /// session is remote, not which chain it follows.
+    pub fn is_mainnet(&self) -> bool {
+        self.remote_network_info
+            .as_ref()
+            .is_some_and(|data| data.is_mainnet)
+    }
+
     pub fn get_global_context(
         &'_ mut self,
         epoch: StacksEpochId,
         cost_track: bool,
     ) -> Result<GlobalContext<'_, '_>, String> {
-        let is_mainnet = self
-            .remote_network_info
-            .as_ref()
-            .is_some_and(|data| data.is_mainnet);
+        let is_mainnet = self.is_mainnet();
         let chain_id = if is_mainnet {
             CHAIN_ID_MAINNET
         } else {

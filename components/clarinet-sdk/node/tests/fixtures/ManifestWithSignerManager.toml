@@ -1,0 +1,14 @@
+# a minimal pox-5 signer manager, used to exercise the SIP-044 staking
+# allowance end to end
+
+[project]
+name = 'fixtures'
+description = 'sample project to test clarinet-sdk'
+telemetry = false
+cache_dir = './.cache'
+requirements = []
+
+[contracts.signer-manager]
+path = 'contracts/signer-manager.clar'
+clarity_version = 3
+epoch = 4.0

@@ -2,8 +2,12 @@ use clarity::types::StacksEpochId;
 use clarity::util::hash::hex_bytes;
 use clarity_types::effects::AssetMap;
 use clarity_types::types::PrincipalData;
-use stacks_codec::transaction::{TransactionPostCondition, TransactionPostConditionMode};
+use stacks_codec::transaction::{
+    AssetInfo, PostConditionPrincipal, TransactionPostCondition, TransactionPostConditionMode,
+};
 use stacks_codec::StacksMessageCodec;
+
+use super::boot::remap_mainnet_boot_stacks_address;
 
 /// Default to rejecting asset movement that no condition covers.
 pub const DEFAULT_POST_CONDITION_MODE: TransactionPostConditionMode =
@@ -41,6 +45,35 @@ impl PostConditionCheck {
     /// Whether this check contains any declared post-conditions.
     pub fn has_conditions(&self) -> bool {
         matches!(self, Self::Checked { conditions, .. } if !conditions.is_empty())
+    }
+
+    /// Move any mainnet boot principal in these conditions onto its testnet
+    /// twin, matching the redirect the session applies to the call itself.
+    ///
+    /// Without this the two spellings are not equivalent. `bns` issues an NFT
+    /// and `cost-voting` an FT, so a call written against `SP000....bns` with
+    /// a post-condition on `SP000....bns::names` executes `ST000....bns`, the
+    /// asset moves under `ST000....bns::names`, and the condition can never
+    /// match — a correct post-condition would abort the transaction.
+    ///
+    /// Only the boot contracts move: sBTC is deployed at its mainnet address
+    /// and has no twin, so `sbtc-token` asset identifiers are left alone.
+    pub fn remap_mainnet_boot_principals(self) -> Self {
+        let Self::Checked {
+            conditions,
+            mode,
+            origin,
+        } = self
+        else {
+            return self;
+        };
+
+        let conditions = conditions.into_iter().map(remap_condition).collect();
+        Self::Checked {
+            conditions,
+            mode,
+            origin,
+        }
     }
 
     /// Decode consensus-serialized post-conditions.
@@ -116,6 +149,138 @@ impl PostConditionCheck {
             conditions, mode, origin, asset_map, epoch,
         )
         .map_err(|e| format!("failed to evaluate post-conditions: {e}"))
+    }
+}
+
+/// Redirect a post-condition principal naming a mainnet boot contract.
+fn remap_principal(principal: PostConditionPrincipal) -> PostConditionPrincipal {
+    match principal {
+        PostConditionPrincipal::Contract(address, name) => {
+            let address = remap_mainnet_boot_stacks_address(&address, &name).unwrap_or(address);
+            PostConditionPrincipal::Contract(address, name)
+        }
+        // A standard principal carries no contract name, so it can never name
+        // a boot contract; `Origin` is resolved against the sender.
+        other => other,
+    }
+}
+
+/// Redirect an asset identifier naming a mainnet boot contract.
+fn remap_asset(asset: AssetInfo) -> AssetInfo {
+    let AssetInfo {
+        contract_address,
+        contract_name,
+        asset_name,
+    } = asset;
+
+    let contract_address = remap_mainnet_boot_stacks_address(&contract_address, &contract_name)
+        .unwrap_or(contract_address);
+
+    AssetInfo {
+        contract_address,
+        contract_name,
+        asset_name,
+    }
+}
+
+fn remap_condition(condition: TransactionPostCondition) -> TransactionPostCondition {
+    use TransactionPostCondition::*;
+
+    match condition {
+        STX(principal, code, amount) => STX(remap_principal(principal), code, amount),
+        Fungible(principal, asset, code, amount) => {
+            Fungible(remap_principal(principal), remap_asset(asset), code, amount)
+        }
+        Nonfungible(principal, asset, value, code) => {
+            Nonfungible(remap_principal(principal), remap_asset(asset), value, code)
+        }
+        Staking(principal, code, amount) => Staking(remap_principal(principal), code, amount),
+        Pox(principal, code) => Pox(remap_principal(principal), code),
+    }
+}
+
+#[cfg(test)]
+mod boot_remap_tests {
+    use clarity::types::chainstate::StacksAddress;
+    use clarity_types::types::Value;
+    use clarity_types::{ClarityName, ContractName};
+    use stacks_codec::transaction::NonfungibleConditionCode;
+
+    use super::*;
+    use crate::repl::boot::{
+        BOOT_MAINNET_STACKS_ADDRESS, BOOT_TESTNET_STACKS_ADDRESS, SBTC_MAINNET_ADDRESS,
+    };
+
+    fn asset(address: StacksAddress, contract: &str, asset_name: &str) -> AssetInfo {
+        AssetInfo {
+            contract_address: address,
+            contract_name: ContractName::try_from(contract).unwrap(),
+            asset_name: ClarityName::try_from(asset_name).unwrap(),
+        }
+    }
+
+    fn nft(address: StacksAddress, contract: &str, asset_name: &str) -> PostConditionCheck {
+        PostConditionCheck::Checked {
+            conditions: vec![TransactionPostCondition::Nonfungible(
+                PostConditionPrincipal::Contract(
+                    address.clone(),
+                    ContractName::try_from(contract).unwrap(),
+                ),
+                asset(address, contract, asset_name),
+                Value::UInt(1),
+                NonfungibleConditionCode::Sent,
+            )],
+            mode: TransactionPostConditionMode::Deny,
+            origin: PrincipalData::parse("ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5").unwrap(),
+        }
+    }
+
+    /// `bns` issues the `names` NFT, so a condition spelled with the mainnet
+    /// boot address has to follow the call onto the testnet twin.
+    #[test]
+    fn a_boot_asset_condition_moves_to_the_testnet_twin() {
+        let remapped = nft(BOOT_MAINNET_STACKS_ADDRESS.clone(), "bns", "names")
+            .remap_mainnet_boot_principals();
+
+        assert_eq!(
+            remapped,
+            nft(BOOT_TESTNET_STACKS_ADDRESS.clone(), "bns", "names"),
+            "both the condition principal and the asset identifier move"
+        );
+    }
+
+    /// sBTC is deployed at its mainnet address and has no twin, so its assets
+    /// must be left exactly as written.
+    #[test]
+    fn an_sbtc_asset_condition_is_untouched() {
+        let sbtc = StacksAddress::from(
+            PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap(),
+        );
+        let check = nft(sbtc, "sbtc-token", "sbtc-token");
+
+        assert_eq!(check.clone().remap_mainnet_boot_principals(), check);
+    }
+
+    /// A contract name that is not a boot contract must not be rewritten just
+    /// because the address matches — the burn address is a real principal.
+    #[test]
+    fn a_non_boot_contract_at_the_burn_address_is_untouched() {
+        let check = nft(
+            BOOT_MAINNET_STACKS_ADDRESS.clone(),
+            "not-a-boot-contract",
+            "thing",
+        );
+
+        assert_eq!(check.clone().remap_mainnet_boot_principals(), check);
+    }
+
+    /// `Unchecked` has nothing to walk.
+    #[test]
+    fn unchecked_is_a_no_op() {
+        assert_eq!(
+            PostConditionCheck::Unchecked.remap_mainnet_boot_principals(),
+            PostConditionCheck::Unchecked
+        );
     }
 }
 
