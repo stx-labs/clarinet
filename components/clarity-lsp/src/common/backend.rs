@@ -94,6 +94,58 @@ async fn resolve_manifest_location(
     }
 }
 
+async fn process_standalone_contract(
+    contract_location: PathBuf,
+    editor_state: &mut EditorStateInput,
+    file_accessor: Option<&dyn FileAccessor>,
+    reload: bool,
+) -> Result<LspNotificationResponse, String> {
+    let is_active =
+        editor_state.try_read(|es| es.active_contracts.contains_key(&contract_location))?;
+    if reload || !is_active {
+        let source = match file_accessor {
+            None => paths::read_content_as_utf8(&contract_location),
+            Some(file_accessor) => {
+                file_accessor
+                    .read_file(contract_location.to_string_lossy().into_owned())
+                    .await
+            }
+        }?;
+
+        editor_state.try_write(|es| {
+            if is_active {
+                es.update_active_contract(&contract_location, &source, true)
+            } else {
+                es.insert_standalone_contract(contract_location.clone(), source);
+                Ok(())
+            }
+        })??;
+    }
+
+    let aggregated_diagnostics = editor_state.try_read(|es| {
+        let diagnostics = es
+            .active_contracts
+            .get(&contract_location)
+            .and_then(|contract| contract.diagnostic.clone())
+            .map(LintDiagnostic::from)
+            .into_iter()
+            .collect();
+        vec![(contract_location.clone(), diagnostics)]
+    })?;
+    let env_simnet_diagnostics = editor_state.try_read(|es| {
+        es.get_env_simnet_diagnostics()
+            .into_iter()
+            .filter(|(path, _)| path == &contract_location)
+            .collect()
+    })?;
+
+    Ok(LspNotificationResponse {
+        aggregated_diagnostics,
+        env_simnet_diagnostics,
+        notification: None,
+    })
+}
+
 #[derive(Debug, Clone)]
 // The `Owned` variant contains the full `EditorState` (several HashMaps,
 // now including an AST cache). Boxing it would force an extra indirection
@@ -201,7 +253,18 @@ pub async fn process_notification(
 
         LspNotification::ContractOpened(contract_location) => {
             let manifest_location =
-                resolve_manifest_location(&contract_location, file_accessor).await?;
+                match resolve_manifest_location(&contract_location, file_accessor).await {
+                    Ok(manifest_location) => manifest_location,
+                    Err(_) => {
+                        return process_standalone_contract(
+                            contract_location,
+                            editor_state,
+                            file_accessor,
+                            false,
+                        )
+                        .await;
+                    }
+                };
 
             // store the contract in the active_contracts map
             if !editor_state.try_read(|es| es.active_contracts.contains_key(&contract_location))? {
@@ -258,10 +321,13 @@ pub async fn process_notification(
                                     get_boot_contract_epoch_and_clarity_version(contract_name);
                                 version
                             } else {
-                                return Err(format!(
-                                    "No Clarinet.toml is associated to the contract {}",
-                                    contract_location.display()
-                                ));
+                                return process_standalone_contract(
+                                    contract_location,
+                                    editor_state,
+                                    file_accessor,
+                                    false,
+                                )
+                                .await;
                             }
                         }
                     }
@@ -300,8 +366,19 @@ pub async fn process_notification(
             let existing_manifest = editor_state
                 .try_write(|es| es.clear_protocol_associated_with_contract(&contract_location))?;
             let manifest_location = match existing_manifest {
-                Some(m) => m,
-                None => resolve_manifest_location(&contract_location, file_accessor).await?,
+                Some(manifest_location) => manifest_location,
+                None => match resolve_manifest_location(&contract_location, file_accessor).await {
+                    Ok(manifest_location) => manifest_location,
+                    Err(_) => {
+                        return process_standalone_contract(
+                            contract_location,
+                            editor_state,
+                            file_accessor,
+                            true,
+                        )
+                        .await;
+                    }
+                },
             };
             build_and_commit(
                 editor_state,
@@ -677,6 +754,10 @@ pub fn process_mutating_request(
         )),
     }
 }
+
+#[cfg(test)]
+#[path = "backend_standalone_tests.rs"]
+mod standalone_tests;
 
 #[cfg(test)]
 mod lsp_tests {
