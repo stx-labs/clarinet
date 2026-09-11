@@ -736,6 +736,7 @@ dependencies = [
  "clarity",
  "clarity-repl",
  "dirs",
+ "indoc",
  "js-sys",
  "libsecp256k1",
  "rpassword",
