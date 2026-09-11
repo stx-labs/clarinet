@@ -930,12 +930,12 @@ pub async fn build_state(
             new_cache_entries.extend(entries);
         }
 
-        let mut session = base_sessions
+        let prepared = base_sessions
             .entry(manifest_location.to_path_buf())
             .or_default()
             .prepared_session(session_settings_from_manifest(&manifest), &deployment);
-        let contracts =
-            resume_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
+        let (session, contracts) =
+            resume_session_with_deployment_plan(prepared, &deployment, Some(&artifacts.asts));
         for (contract_id, mut result) in contracts.into_iter() {
             let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
                 continue;

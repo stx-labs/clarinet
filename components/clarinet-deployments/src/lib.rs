@@ -277,20 +277,20 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
     }
 }
 
-/// A plan with nothing to deploy pins no epoch, which would otherwise leave
-/// the session on the datastore default (epoch 2.05) — before every boot
-/// contract that matters. An implicit empty batch routes that case through
-/// the same epoch fallback as a batch that carries no epoch of its own.
-///
-/// Not for remote-data sessions: their state comes from the network, and
-/// `Session::new` deliberately deploys no boot contracts. Advancing the
-/// epoch would install them anyway, since `update_epoch` has no such guard.
 static IMPLICIT_BATCH: TransactionsBatchSpecification = TransactionsBatchSpecification {
     id: 0,
     transactions: Vec::new(),
     epoch: None,
 };
 
+/// A plan with nothing to deploy pins no epoch, which would otherwise leave
+/// the session on the datastore default (epoch 2.05) — before every boot
+/// contract that matters. [`IMPLICIT_BATCH`] routes that case through the same
+/// epoch fallback as a batch that carries no epoch of its own.
+///
+/// Not for remote-data sessions: their state comes from the network, and
+/// `Session::new` deliberately deploys no boot contracts. Advancing the
+/// epoch would install them anyway, since `update_epoch` has no such guard.
 fn plan_batches(
     remote_data_enabled: bool,
     deployment: &DeploymentSpecification,
@@ -310,7 +310,7 @@ fn batch_epoch(batch: &TransactionsBatchSpecification) -> StacksEpochId {
 /// accounts, the first chain tip, and the boot contracts that batch's epoch
 /// installs. Depends on no contract source, which is what [`BaseSessionCache`]
 /// exploits.
-pub(crate) fn prepare_session_for_deployment_plan(
+fn prepare_session_for_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
 ) {
@@ -320,6 +320,24 @@ pub(crate) fn prepare_session_for_deployment_plan(
     if let Some(batch) = plan_batches(remote_data_enabled, deployment).first() {
         session.advance_chain_tip(1);
         session.update_epoch(batch_epoch(batch));
+    }
+}
+
+/// A session already advanced by `prepare_session_for_deployment_plan`, and the
+/// only way to reach [`resume_session_with_deployment_plan`].
+///
+/// `resume` skips the first batch's epoch advance because `prepare` performed
+/// it. Handing it a session that never went through `prepare` would leave the
+/// session on the datastore default epoch with no boot contracts, so the two
+/// are paired here rather than in a doc comment: [`BaseSessionCache`] is the
+/// sole constructor, and `resume` consumes the value.
+pub struct PreparedSession(Session);
+
+impl std::ops::Deref for PreparedSession {
+    type Target = Session;
+
+    fn deref(&self) -> &Session {
+        &self.0
     }
 }
 
@@ -357,12 +375,14 @@ impl BaseSessionKey {
 #[derive(Clone, Default)]
 pub struct BaseSessionCache {
     entry: Option<(BaseSessionKey, Session)>,
+    hits: u32,
 }
 
 impl fmt::Debug for BaseSessionCache {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BaseSessionCache")
             .field("cached", &self.entry.is_some())
+            .field("hits", &self.hits)
             .finish()
     }
 }
@@ -374,23 +394,44 @@ impl BaseSessionCache {
         &mut self,
         settings: SessionSettings,
         deployment: &DeploymentSpecification,
-    ) -> Session {
+    ) -> PreparedSession {
         let key = BaseSessionKey::new(settings.clone(), deployment);
 
         if let Some((_, session)) = self.entry.as_ref().filter(|(cached, _)| *cached == key) {
-            return session.clone();
+            self.hits += 1;
+            return PreparedSession(session.clone());
         }
 
         let mut session = Session::new(settings);
         prepare_session_for_deployment_plan(&mut session, deployment);
         self.entry = Some((key, session.clone()));
-        session
+        PreparedSession(session)
+    }
+
+    /// How many times this cache has answered without rebuilding. Counted
+    /// rather than derived so a caller can tell "reused the base session" from
+    /// "silently re-interpreted the whole boot contract set" — the two are
+    /// otherwise indistinguishable after the fact, and differ by ~50 ms.
+    pub fn hits(&self) -> u32 {
+        self.hits
     }
 }
 
-/// Execute `deployment` against a session already advanced by
-/// [`BaseSessionCache::prepared_session`].
+/// Execute `deployment` against a session [`BaseSessionCache`] has prepared,
+/// returning it alongside the per-contract results.
 pub fn resume_session_with_deployment_plan(
+    prepared: PreparedSession,
+    deployment: &DeploymentSpecification,
+    contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
+) -> (Session, ExecutionResultMap) {
+    let mut session = prepared.0;
+    let contracts = run_deployment_plan(&mut session, deployment, contracts_asts);
+    (session, contracts)
+}
+
+/// Execute every batch of `deployment`, skipping the first batch's tip and
+/// epoch advance because `prepare_session_for_deployment_plan` performed it.
+fn run_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
@@ -403,7 +444,6 @@ pub fn resume_session_with_deployment_plan(
     let mut contracts = BTreeMap::new();
     for (index, batch) in batches.iter().enumerate() {
         let epoch = batch_epoch(batch);
-        // The first batch's tip and epoch are `prepare_session_for_deployment_plan`'s.
         if index > 0 {
             session.advance_chain_tip(1);
             session.update_epoch(epoch);
@@ -455,7 +495,7 @@ pub fn update_session_with_deployment_plan(
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> ExecutionResultMap {
     prepare_session_for_deployment_plan(session, deployment);
-    resume_session_with_deployment_plan(session, deployment, contracts_asts)
+    run_deployment_plan(session, deployment, contracts_asts)
 }
 
 fn handle_stx_transfer(session: &mut Session, tx: &StxTransferSpecification) {
@@ -2125,8 +2165,8 @@ mod tests {
         let deployment = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
         let mut cache = BaseSessionCache::default();
 
-        let mut first = cache.prepared_session(SessionSettings::default(), &deployment);
-        resume_session_with_deployment_plan(&mut first, &deployment, None);
+        let first = cache.prepared_session(SessionSettings::default(), &deployment);
+        resume_session_with_deployment_plan(first, &deployment, None);
 
         let second = cache.prepared_session(SessionSettings::default(), &deployment);
         assert_eq!(deployer_balance(&second), 4_200);

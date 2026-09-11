@@ -1488,6 +1488,67 @@ mod lsp_tests {
         );
     }
 
+    /// Regression test: repeated saves must reuse the cached base session.
+    ///
+    /// `ContractSaved` calls `clear_protocol_associated_with_contract` before
+    /// rebuilding, and `build_and_commit` moves `base_sessions` out of the
+    /// editor state and back. Either step is an easy place to drop the cache
+    /// by accident — and nothing else would notice, because a dropped entry is
+    /// rebuilt within the same save and looks identical afterwards. Asserting
+    /// on the hit count is what distinguishes "reused" from "silently
+    /// re-interpreted the whole boot contract set" (~50 ms per save); a count
+    /// of builds would not, since dropping the entry resets it too.
+    #[tokio::test]
+    async fn test_saves_reuse_the_cached_base_session() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+        "#};
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("first save failed");
+
+        // Save the path the first save indexed, not the one it was handed, so
+        // the next two take the `clear_protocol_associated_with_contract`
+        // branch — the one that resets protocol state before rebuilding.
+        let indexed = editor_state_input
+            .try_read(|es| es.contracts_lookup.keys().next().cloned())
+            .unwrap()
+            .expect("first save should index the contract");
+
+        for save in 2..=3 {
+            process_notification(
+                LspNotification::ContractSaved(indexed.clone()),
+                &mut editor_state_input,
+                Some(&file_accessor),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("save {save} failed: {e}"));
+        }
+
+        let (entries, hits) = editor_state_input
+            .try_read(|es| {
+                (
+                    es.base_sessions.len(),
+                    es.base_sessions.values().map(|c| c.hits()).sum::<u32>(),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(entries, 1, "the manifest owns exactly one base session");
+        assert_eq!(
+            hits, 2,
+            "saves 2 and 3 change no setting, wallet or epoch, so both must \
+             reuse the base session built by save 1"
+        );
+    }
+
     /// Regression test: in a multi-manifest LSP session, rebuilding one
     /// manifest must not clear AST cache entries that belong to a
     /// different manifest. `build_and_commit` clones the cache before
