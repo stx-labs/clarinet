@@ -1,13 +1,17 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["es2022", "WebWorker"],
+    "lib": ["es2024", "WebWorker"],
     "module": "preserve",
     "moduleResolution": "bundler",
     "types": ["node"],
     "strict": true,
-    "sourceMap": true
+    "sourceMap": true,
+    // rspack emits with swc, this config only ever type checks. the tests
+    // import `../src/common.ts` by its real extension, as node runs it
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src"],
+  "include": ["src", "tests"],
   "exclude": ["node_modules", ".vscode-test-web"]
 }

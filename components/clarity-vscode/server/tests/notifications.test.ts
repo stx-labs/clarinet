@@ -28,11 +28,18 @@ import type { Connection } from "vscode-languageserver";
 import { initConnection } from "../src/common.ts";
 
 const URI = "file:///contracts/counter.clar";
+const READ_ONLY_URI = "github://owner/repo";
+
+const didOpen = DidOpenTextDocumentNotification.method;
+const didChange = DidChangeTextDocumentNotification.method;
+const didClose = DidCloseTextDocumentNotification.method;
+const didSave = DidSaveTextDocumentNotification.method;
+const hover = HoverRequest.method;
 
 type Handler = (method: string, params: unknown) => unknown;
 
 /** Let the queue make whatever progress it can. */
-const settled = () => sleep(0);
+const tick = () => sleep(0);
 
 /**
  * Wire `initConnection` to a fake connection and to a bridge whose
@@ -78,7 +85,7 @@ function setup() {
       assert.ok(call, "no bridge call in flight");
       if (err) call.reject(err);
       else call.resolve();
-      await settled();
+      await tick();
     },
     notify(method: string, uri = URI) {
       onNotification(method, { textDocument: { uri } });
@@ -92,47 +99,37 @@ function setup() {
 test("notifications queued during a slow one are all handled, in order", async () => {
   const server = setup();
 
-  server.notify(DidSaveTextDocumentNotification.method);
-  await settled();
-  assert.deepEqual(server.handled, [DidSaveTextDocumentNotification.method]);
+  server.notify(didSave);
+  await tick();
+  assert.deepEqual(server.handled, [didSave]);
 
   // both land while didSave is still in the bridge
-  server.notify(DidChangeTextDocumentNotification.method);
-  server.notify(DidCloseTextDocumentNotification.method);
-  await settled();
+  server.notify(didChange);
+  server.notify(didClose);
+  await tick();
   assert.deepEqual(
     server.handled,
-    [DidSaveTextDocumentNotification.method],
+    [didSave],
     "the bridge must not be called again while one call is in flight",
   );
 
   await server.settle();
-  assert.deepEqual(server.handled, [
-    DidSaveTextDocumentNotification.method,
-    DidChangeTextDocumentNotification.method,
-  ]);
+  assert.deepEqual(server.handled, [didSave, didChange]);
 
   await server.settle();
-  assert.deepEqual(server.handled, [
-    DidSaveTextDocumentNotification.method,
-    DidChangeTextDocumentNotification.method,
-    DidCloseTextDocumentNotification.method,
-  ]);
+  assert.deepEqual(server.handled, [didSave, didChange, didClose]);
 });
 
 test("a notification the bridge rejects doesn't stall the queue", async (t) => {
   const server = setup();
   t.mock.method(console, "warn", () => {});
 
-  server.notify(DidOpenTextDocumentNotification.method);
-  await settled();
-  server.notify(DidSaveTextDocumentNotification.method);
+  server.notify(didOpen);
+  await tick();
+  server.notify(didSave);
 
   await server.settle(new Error("bridge failure"));
-  assert.deepEqual(server.handled, [
-    DidOpenTextDocumentNotification.method,
-    DidSaveTextDocumentNotification.method,
-  ]);
+  assert.deepEqual(server.handled, [didOpen, didSave]);
 });
 
 // declining requests while the bridge is busy is pre-existing policy, pinned
@@ -140,27 +137,26 @@ test("a notification the bridge rejects doesn't stall the queue", async (t) => {
 test("requests are declined while the queue is busy, served once it drains", async () => {
   const server = setup();
 
-  const hover = `handled:${HoverRequest.method}`;
-  assert.equal(server.request(HoverRequest.method), hover);
+  assert.equal(server.request(hover), `handled:${hover}`);
 
-  server.notify(DidSaveTextDocumentNotification.method);
-  await settled();
-  assert.equal(server.request(HoverRequest.method), null);
+  server.notify(didSave);
+  await tick();
+  assert.equal(server.request(hover), null);
 
   await server.settle();
-  assert.equal(server.request(HoverRequest.method), hover);
+  assert.equal(server.request(hover), `handled:${hover}`);
 });
 
 test("notifications for unsupported protocols are dropped", async () => {
   const server = setup();
 
-  server.notify(DidOpenTextDocumentNotification.method, "github://owner/repo");
-  server.notify(DidCloseTextDocumentNotification.method, "github://owner/repo");
-  await settled();
+  server.notify(didOpen, READ_ONLY_URI);
+  server.notify(didClose, READ_ONLY_URI);
+  await tick();
   assert.deepEqual(server.handled, []);
 
   // dropping them must not leave the queue thinking it's busy
-  server.notify(DidOpenTextDocumentNotification.method);
-  await settled();
-  assert.deepEqual(server.handled, [DidOpenTextDocumentNotification.method]);
+  server.notify(didOpen);
+  await tick();
+  assert.deepEqual(server.handled, [didOpen]);
 });

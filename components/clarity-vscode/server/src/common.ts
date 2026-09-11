@@ -12,6 +12,7 @@ import type {
 
 // this type is the same for the browser and node but node isn't always built in dev
 // it has to stay a type-only import, `server/tests` loads this file unbuilt
+// and a value import would fail to resolve there
 import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
