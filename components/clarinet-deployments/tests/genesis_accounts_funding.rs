@@ -189,10 +189,10 @@ fn can_read_the_funded_sbtc_balance_and_supply_from_clarity() {
     assert_eq!(supply.match_atom_value(), Some(&expected));
 }
 
-/// Funding writes through the Clarity database, which owns the epoch key the
-/// session also tracks. Minting must not leave the two disagreeing.
+/// sBTC funding is the last thing the plan does, so the epoch it ran at is
+/// still recorded when it returns. It has to be the session's own epoch.
 #[test]
-fn funding_sbtc_leaves_the_session_epoch_alone() {
+fn funding_sbtc_runs_at_the_session_epoch() {
     use clarity::vm::database::ClarityBackingStore;
 
     let mut session = funded_session(10_000_000_000);

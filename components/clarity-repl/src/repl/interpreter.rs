@@ -2,7 +2,6 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::errors::RuntimeCheckErrorKind;
@@ -1375,7 +1374,8 @@ impl ClarityInterpreter {
         amount: u64,
     ) -> Result<String, String> {
         let final_balance = {
-            let mut global_context = self.get_global_context(DEFAULT_EPOCH, false)?;
+            let epoch = self.datastore.get_current_epoch();
+            let mut global_context = self.get_global_context(epoch, false)?;
 
             global_context.begin();
             let mut cur_balance = global_context
@@ -1622,6 +1622,7 @@ impl ClarityInterpreter {
 
 #[cfg(test)]
 mod tests {
+    use clarinet_defaults::DEFAULT_EPOCH;
     use clarity::types::chainstate::StacksAddress;
     use clarity::types::Address;
     use clarity::util::hash::hex_bytes;
@@ -1641,6 +1642,31 @@ mod tests {
             settings.unwrap_or_default(),
             None,
         )
+    }
+
+    /// `credit` consolidates locked STX against the v2/v3/v4 unlock heights,
+    /// and those are gated on the epoch the mint runs at. Pinning a fixed
+    /// epoch would apply the wrong unlock rules to a session below it.
+    #[test]
+    fn minting_stx_runs_at_the_session_epoch() {
+        use clarity::vm::database::ClarityBackingStore;
+
+        let mut interpreter = get_interpreter(None);
+        let epoch = StacksEpochId::Epoch25;
+        assert_ne!(epoch, DEFAULT_EPOCH, "epoch must differ to be meaningful");
+        interpreter
+            .datastore
+            .set_current_epoch(&mut interpreter.clarity_datastore, epoch);
+
+        let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
+        interpreter.mint_stx_balance(recipient, 1_000).unwrap();
+
+        assert_eq!(
+            interpreter
+                .clarity_datastore
+                .get_data("vm-epoch::epoch-version"),
+            Ok(Some(format!("{:08x}", epoch as u32)))
+        );
     }
 
     #[test]
