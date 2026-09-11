@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
 use std::num::ParseIntError;
+use std::rc::Rc;
 
 use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
@@ -248,7 +249,12 @@ pub enum CallKind {
 #[derive(Clone)]
 pub struct Session {
     pub settings: SessionSettings,
-    pub boot_contracts: ExecutionResultMap,
+    /// Shared, not owned: the boot set is ~36 MB of sources, ASTs and analyses
+    /// that no clone ever mutates except through `update_epoch`, which forks it
+    /// only when an epoch transition actually installs something. Cloning a
+    /// session is a routine operation — the LSP does it once per save — and a
+    /// deep copy here dominated it.
+    pub boot_contracts: Rc<ExecutionResultMap>,
     pub contracts: BTreeMap<QualifiedContractIdentifier, ParsedContract>,
     pub interpreter: ClarityInterpreter,
     pub show_costs: bool,
@@ -282,13 +288,13 @@ impl Session {
         }
 
         set_up_accounts(&settings.initial_accounts, &mut interpreter);
-        let boot_contracts = if with_boot_contracts {
+        let boot_contracts = Rc::new(if with_boot_contracts {
             // Deploy all boot contracts whose epoch <= the interpreter's current epoch.
             let initial_epoch = interpreter.datastore.get_current_epoch();
             deploy_boot_contracts(&settings, &mut interpreter, Some(initial_epoch))
         } else {
             BTreeMap::new()
-        };
+        });
 
         Self {
             interpreter,
@@ -1350,7 +1356,11 @@ impl Session {
             &mut self.interpreter,
             &self.boot_contracts,
         );
-        self.boot_contracts.extend(newly_deployed);
+        // Guarded so a no-op transition doesn't fork the map away from the
+        // sessions sharing it.
+        if !newly_deployed.is_empty() {
+            Rc::make_mut(&mut self.boot_contracts).extend(newly_deployed);
+        }
     }
 
     pub fn encode(&mut self, cmd: &str) -> String {
@@ -3260,6 +3270,40 @@ mod tests {
         assert_eq!(
             count, 27,
             "Expected 27 boot contracts with interface at Epoch31, missing: {missing:?}"
+        );
+    }
+
+    /// Clones share one `Rc` boot set, so an epoch transition has to fork it
+    /// before extending. Without the fork a session would observe boot
+    /// contracts installed by an unrelated clone; with an unconditional fork
+    /// the sharing that makes `Session::clone` cheap would be lost.
+    #[test]
+    fn update_epoch_forks_the_boot_set_it_shares_with_a_clone() {
+        let mut base = Session::new(SessionSettings::default());
+        base.advance_chain_tip(1);
+        base.update_epoch(StacksEpochId::Epoch24);
+        let at_epoch24 = base.boot_contracts.len();
+
+        let mut clone = base.clone();
+        clone.advance_chain_tip(1);
+        clone.update_epoch(StacksEpochId::Epoch31);
+
+        assert!(
+            clone.boot_contracts.len() > at_epoch24,
+            "Epoch31 installs boot contracts Epoch24 does not"
+        );
+        assert_eq!(
+            base.boot_contracts.len(),
+            at_epoch24,
+            "a clone advancing its epoch must not add boot contracts to the session it came from"
+        );
+
+        // A transition that installs nothing must leave the two sharing.
+        let mut idle = base.clone();
+        idle.update_epoch(StacksEpochId::Epoch24);
+        assert!(
+            Rc::ptr_eq(&idle.boot_contracts, &base.boot_contracts),
+            "a no-op epoch transition must not fork the shared boot set"
         );
     }
 
