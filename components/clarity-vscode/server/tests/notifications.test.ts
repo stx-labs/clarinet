@@ -1,15 +1,10 @@
 /**
- * Regression tests for the notification queue in `server/src/common.ts`.
- * Notifications must reach the bridge one at a time, in the order they were
+ * Regression tests for the notification queue in `server/src/common.ts`:
+ * notifications must reach the bridge one at a time, in the order they were
  * received, and exactly once - even when they pile up while a slow one
  * (`build_state` takes ~100ms) is in flight.
  *
- *   pnpm run test:server
- *
- * The sources run as-is, on Node's type stripping, so no build is needed.
- * `server/package.json` can't be marked `"type": "module"` - the rspack
- * bundles it also contains are CommonJS - hence the `--disable-warning`
- * flag in the script, Node warns about reparsing every typeless `.ts`.
+ * The sources run unbuilt, on Node's type stripping: `pnpm run test:server`
  */
 
 import assert from "node:assert/strict";
@@ -38,13 +33,9 @@ const hover = HoverRequest.method;
 
 type Handler = (method: string, params: unknown) => unknown;
 
-/** Let the queue make whatever progress it can. */
 const tick = () => sleep(0);
 
-/**
- * Wire `initConnection` to a fake connection and to a bridge whose
- * notifications only settle when the test says so.
- */
+/** Wire `initConnection` to a fake connection and a hand-settled bridge. */
 function setup() {
   const handled: string[] = [];
   const inFlight: PromiseWithResolvers<void>[] = [];
@@ -79,7 +70,6 @@ function setup() {
 
   return {
     handled,
-    /** Let the oldest bridge call still in flight return. */
     async settle(err?: Error) {
       const call = inFlight.shift();
       assert.ok(call, "no bridge call in flight");
@@ -132,8 +122,7 @@ test("a notification the bridge rejects doesn't stall the queue", async (t) => {
   assert.deepEqual(server.handled, [didOpen, didSave]);
 });
 
-// declining requests while the bridge is busy is pre-existing policy, pinned
-// here because it's the queue length that decides it
+// pre-existing policy, pinned here because the queue length is what decides it
 test("requests are declined while the queue is busy, served once it drains", async () => {
   const server = setup();
 

@@ -11,8 +11,7 @@ import type {
 } from "vscode-languageserver";
 
 // this type is the same for the browser and node but node isn't always built in dev
-// it has to stay a type-only import, `server/tests` loads this file unbuilt
-// and a value import would fail to resolve there
+// it has to stay type-only, `server/tests` loads this file unbuilt
 import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
@@ -56,9 +55,8 @@ export function initConnection(
     };
   }
 
-  // the in-flight entry stays at the front of the queue: both the scheduling
-  // in `onNotification` and the `onRequest` guard read a non-empty queue as
-  // "the bridge is busy"
+  // the in-flight entry stays at the front of the queue, `onNotification` and
+  // `onRequest` read a non-empty queue as "the bridge is busy"
   const notifications: [string, unknown][] = [];
   async function consumeNotifications() {
     while (notifications.length > 0) {

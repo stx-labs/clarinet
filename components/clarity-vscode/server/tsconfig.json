@@ -7,8 +7,6 @@
     "types": ["node"],
     "strict": true,
     "sourceMap": true,
-    // rspack emits with swc, this config only ever type checks. the tests
-    // import `../src/common.ts` by its real extension, as node runs it
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
