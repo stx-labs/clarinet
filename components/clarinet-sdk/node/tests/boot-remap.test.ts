@@ -15,6 +15,7 @@ import { Simnet, initSimnet } from "..";
 // See https://github.com/stx-labs/clarinet/issues/2491
 const MAINNET_BOOT = "SP000000000000000000002Q6VF78";
 const TESTNET_BOOT = "ST000000000000000000002AMW42H";
+const SBTC_MAINNET = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
 
 const deployerAddr = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 const address1 = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
@@ -207,5 +208,37 @@ describe("calling pox-3 directly", () => {
     // The second attempt, spelled the other way, must see the first lock.
     const again = simnet.callPublicFn(`${TESTNET_BOOT}.pox-3`, "stack-stx", stackStxArgs, address1);
     expect(again.result.type).toBe("err");
+  });
+
+  // `execute` and `runSnippet` evaluate raw Clarity rather than taking a
+  // contract id, so they need the source-level rewrite. Without it a snippet
+  // reaches the dead mainnet twin and reports its constants.
+  it("applies the remap to execute()", () => {
+    const read = (deployer: string) =>
+      simnet.execute(
+        `(get reward-cycle-length (unwrap-panic (contract-call? '${deployer}.pox-3 get-pox-info)))`,
+      ).result;
+
+    expect(read(TESTNET_BOOT)).toStrictEqual(Cl.uint(1050));
+    expect(read(MAINNET_BOOT)).toStrictEqual(Cl.uint(1050));
+  });
+
+  it("applies the remap to runSnippet()", () => {
+    const snippet = (deployer: string) =>
+      simnet.runSnippet(
+        `(get reward-cycle-length (unwrap-panic (contract-call? '${deployer}.pox-3 get-pox-info)))`,
+      );
+
+    expect(snippet(MAINNET_BOOT)).toStrictEqual(snippet(TESTNET_BOOT));
+  });
+
+  // sBTC is deployed at its mainnet address and only there, so a snippet
+  // naming it must be left exactly as written. This fixture sits in epoch 2.4,
+  // before sBTC is deployed, so the call fails — but the address quoted back
+  // in the error is the proof that nothing rewrote it.
+  it("leaves sBTC principals alone in a snippet", () => {
+    expect(() =>
+      simnet.execute(`(contract-call? '${SBTC_MAINNET}.sbtc-token get-name)`),
+    ).toThrowError(new RegExp(SBTC_MAINNET));
   });
 });

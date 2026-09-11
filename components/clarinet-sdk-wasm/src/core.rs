@@ -1282,6 +1282,7 @@ impl SDK {
     #[wasm_bindgen(js_name=runSnippet)]
     pub fn run_snippet(&mut self, snippet: String) -> String {
         let session = self.get_session_mut();
+        let snippet = session.remap_user_snippet(snippet);
         match session.eval(snippet.clone(), false) {
             Ok(res) => match res.into_inner().result {
                 EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
@@ -1302,6 +1303,7 @@ impl SDK {
     #[wasm_bindgen(js_name=execute)]
     pub fn execute(&mut self, snippet: String) -> Result<TransactionRes, String> {
         let session = self.get_session_mut();
+        let snippet = session.remap_user_snippet(snippet);
         match session.eval(snippet.clone(), false) {
             Ok(res) => Ok(execution_result_to_transaction_res(&res)),
             Err(diagnostics) => {

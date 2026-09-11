@@ -1043,6 +1043,47 @@ mod tests {
         }
     }
 
+    /// Mainnet publishes source verbatim. The network gate lives at the call
+    /// site — the `ContractPublish` arm only calls `remap_deployment_source`
+    /// for devnet and testnet — so what is pinned here is the other half:
+    /// mainnet contributes no pairs of its own.
+    #[test]
+    fn mainnet_contributes_no_remap_pairs() {
+        assert!(
+            sbtc_contract_ids_to_remap(&StacksNetwork::Mainnet).is_empty(),
+            "mainnet sBTC is already at its real address"
+        );
+    }
+
+    /// The whole per-network picture for a source naming both a boot contract
+    /// and sBTC at their mainnet addresses.
+    #[test]
+    fn boot_and_sbtc_rewrites_per_network() {
+        let source = format!(
+            "(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-4 get-pox-info)\n\
+             (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-name)"
+        );
+
+        // Testnet: boot moves to its twin, sBTC moves to the testnet deployer.
+        assert_eq!(
+            remap_deployment_source(&source, sbtc_contract_ids_to_remap(&StacksNetwork::Testnet)),
+            format!(
+                "(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-4 get-pox-info)\n\
+                 (contract-call? '{SBTC_TESTNET_ADDRESS}.sbtc-token get-name)"
+            ),
+        );
+
+        // Devnet: boot moves; sBTC is left for the requirement arm, which
+        // inserts its pair as it walks the plan.
+        assert_eq!(
+            remap_deployment_source(&source, sbtc_contract_ids_to_remap(&StacksNetwork::Devnet)),
+            format!(
+                "(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-4 get-pox-info)\n\
+                 (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-name)"
+            ),
+        );
+    }
+
     #[test]
     fn sbtc_contract_references_are_not_rewritten_for_devnet_deployments() {
         let contract_ids = sbtc_contract_ids_to_remap(&StacksNetwork::Devnet);

@@ -361,7 +361,8 @@ impl Session {
             }
 
             snippet => {
-                let _ = self.run_snippet(&mut output, self.show_costs, snippet);
+                let snippet = self.remap_user_snippet(snippet.to_string());
+                let _ = self.run_snippet(&mut output, self.show_costs, &snippet);
                 return (false, output);
             }
         }
@@ -854,6 +855,27 @@ impl Session {
             return Ok(contract_id);
         }
         Ok(boot::remap_mainnet_boot_contract_id(&contract_id).unwrap_or(contract_id))
+    }
+
+    /// Rewrite a user-typed snippet so mainnet boot references reach the
+    /// contract simnet actually executes.
+    ///
+    /// The source-level counterpart of [`Session::resolve_contract_id`], for
+    /// the surfaces that take Clarity *code* rather than a contract id: the
+    /// console and the SDK's `runSnippet` / `execute`. Without it,
+    /// `(contract-call? 'SP000....pox-3 ...)` typed at the console reaches the
+    /// dead mainnet twin and reports mainnet constants.
+    ///
+    /// Deliberately **not** applied inside [`Session::eval`].
+    /// `clarinet-deployments::onchain` evaluates plan values through `eval` to
+    /// coerce contract-call arguments for real devnet, testnet and mainnet
+    /// deployments, where a mainnet boot principal is a value that has to
+    /// survive untouched.
+    pub fn remap_user_snippet(&self, snippet: String) -> String {
+        if self.interpreter.repl_settings.remote_data.enabled {
+            return snippet;
+        }
+        boot::remap_mainnet_boot_principals(&snippet).unwrap_or(snippet)
     }
 
     /// Call `method` on `contract` as `sender`.
