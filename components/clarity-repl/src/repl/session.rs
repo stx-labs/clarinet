@@ -843,15 +843,17 @@ impl Session {
     /// one (`u1050`) — the reported-vs-executed split this redirect exists to
     /// avoid.
     ///
-    /// Skipped under mainnet execution simulation: there the remote node holds
-    /// the real mainnet contracts and no testnet twin exists.
+    /// Skipped only against a *mainnet* remote node, which holds the real
+    /// mainnet contracts and has no testnet twin. A remote session backed by
+    /// testnet is testnet-flavored like simnet, so it needs the same redirect
+    /// — `SP000....pox-N` does not exist on testnet at all.
     pub fn resolve_contract_id(
         &self,
         default_deployer: &str,
         contract: &str,
     ) -> Result<QualifiedContractIdentifier, String> {
         let contract_id = Self::desugar_contract_id(default_deployer, contract)?;
-        if self.interpreter.repl_settings.remote_data.enabled {
+        if self.interpreter.is_mainnet() {
             return Ok(contract_id);
         }
         Ok(boot::remap_mainnet_boot_contract_id(&contract_id).unwrap_or(contract_id))
@@ -872,7 +874,7 @@ impl Session {
     /// deployments, where a mainnet boot principal is a value that has to
     /// survive untouched.
     pub fn remap_user_snippet(&self, snippet: String) -> String {
-        if self.interpreter.repl_settings.remote_data.enabled {
+        if self.interpreter.is_mainnet() {
             return snippet;
         }
         boot::remap_mainnet_boot_principals(&snippet).unwrap_or(snippet)
@@ -895,6 +897,15 @@ impl Session {
         post_conditions: PostConditionCheck,
     ) -> Result<ExecutionResult, ExecutionError> {
         let initial_tx_sender = self.get_tx_sender();
+
+        // The redirect below moves boot asset movement onto the testnet twin,
+        // so conditions naming the mainnet spelling have to move with it or
+        // they could never match. Gated identically to `resolve_contract_id`.
+        let post_conditions = if self.interpreter.is_mainnet() {
+            post_conditions
+        } else {
+            post_conditions.remap_mainnet_boot_principals()
+        };
 
         // An unresolvable contract id never became a transaction at all.
         let contract_id = self

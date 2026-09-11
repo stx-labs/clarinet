@@ -183,26 +183,62 @@ fn eval_itself_leaves_a_mainnet_boot_principal_alone() {
     );
 }
 
-/// Under mainnet execution simulation the remote node holds the real mainnet
-/// contracts, so the mainnet addresses are the correct ones and nothing is
-/// rewritten.
-#[test]
-fn mxs_leaves_user_snippets_alone() {
-    let session = Session::new(SessionSettings {
+// A shared cache directory, so repeated runs don't hammer the Hiro API.
+// Namespaced by the nextest run id like the other remote-data tests.
+fn shared_cache_dir() -> std::path::PathBuf {
+    let run_id = std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| "default".to_string());
+    std::env::temp_dir().join(format!("clarinet-test-mxs-cache-{run_id}"))
+}
+
+fn remote_session(api_url: &str, initial_height: u32) -> Session {
+    Session::new(SessionSettings {
+        cache_location: Some(shared_cache_dir()),
         repl_settings: clarity_repl::repl::Settings {
             remote_data: RemoteDataSettings {
                 enabled: true,
-                api_url: ApiUrl("https://api.hiro.so".to_string()),
-                initial_height: Some(556946),
+                api_url: ApiUrl(api_url.to_string()),
+                initial_height: Some(initial_height),
                 use_mainnet_wallets: false,
             },
             ..Default::default()
         },
         ..Default::default()
-    });
+    })
+}
+
+/// Against a *mainnet* node the remote chain holds the real mainnet contracts,
+/// so the mainnet addresses are the correct ones and nothing is rewritten.
+#[test]
+fn a_mainnet_remote_session_leaves_user_snippets_alone() {
+    let session = remote_session("https://api.hiro.so", 556946);
+    assert!(
+        session.interpreter.is_mainnet(),
+        "the fixture must really resolve to mainnet"
+    );
 
     let snippet = format!("(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-3 get-pox-info)");
     assert_eq!(session.remap_user_snippet(snippet.clone()), snippet);
+}
+
+/// A *testnet*-backed remote session is testnet-flavored exactly like plain
+/// simnet — `GlobalContext::mainnet` is false and the chain only has the
+/// `ST000...` boot contracts — so it needs the same rewrite. Gating on
+/// `remote_data.enabled` instead of the resolved network got this wrong and
+/// asked the testnet API for a contract that does not exist there.
+#[test]
+fn a_testnet_remote_session_still_remaps_user_snippets() {
+    let session = remote_session("https://api.testnet.hiro.so", 80000);
+    assert!(
+        !session.interpreter.is_mainnet(),
+        "a testnet-backed remote session is not mainnet"
+    );
+
+    assert_eq!(
+        session.remap_user_snippet(format!(
+            "(contract-call? '{BOOT_MAINNET_ADDRESS}.pox-3 get-pox-info)"
+        )),
+        format!("(contract-call? '{BOOT_TESTNET_ADDRESS}.pox-3 get-pox-info)"),
+    );
 }
 
 /// The console composes the same two steps, so the wiring is what is checked

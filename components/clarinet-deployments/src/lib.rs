@@ -122,12 +122,22 @@ pub fn setup_session_with_deployment(
     enable_analysis: bool,
     environment: Environment,
 ) -> DeploymentGenerationArtifacts {
+    let mut session = initiate_session_from_manifest(manifest);
+    if !enable_analysis {
+        session.interpreter.repl_settings.analysis.disable_all();
+    }
+
     // A plan written before `remap-principals` existed records nothing, which
     // is indistinguishable from a requirement. Re-deriving the marker is gated
     // exactly like the generator's own rewrite, so a plan loaded from disk and
     // a freshly generated one describe the same code.
+    //
+    // The session is built first because only it knows which chain a remote
+    // session follows: `remote_data.enabled` says the session is remote, not
+    // that it is mainnet, and a testnet-backed one is testnet-flavored exactly
+    // like simnet.
     let backfill_legacy_boot_remap =
-        environment == Environment::Simnet && !manifest.repl_settings.remote_data.enabled;
+        environment == Environment::Simnet && !session.interpreter.is_mainnet();
 
     // Mark contracts that should skip analysis:
     // - All contracts when analysis is globally disabled
@@ -167,10 +177,6 @@ pub fn setup_session_with_deployment(
         }
     }
 
-    let mut session = initiate_session_from_manifest(manifest);
-    if !enable_analysis {
-        session.interpreter.repl_settings.analysis.disable_all();
-    }
     let contracts = update_session_with_deployment_plan(&mut session, deployment, contracts_asts);
 
     let deps = BTreeMap::new();
@@ -464,8 +470,7 @@ fn handle_emulated_contract_publish(
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.emulated_sender.to_string());
 
-    let source =
-        source_for_emulated_publish(tx, session.interpreter.repl_settings.remote_data.enabled);
+    let source = source_for_emulated_publish(tx, session.interpreter.is_mainnet());
 
     let contract = ClarityContract {
         code_source: ClarityCodeSource::ContractInMemory(source),

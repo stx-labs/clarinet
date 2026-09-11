@@ -1139,10 +1139,11 @@ impl SDK {
             // `clarinet-deployments` records for manifest contracts has to be
             // applied here too — otherwise the same source would behave
             // differently depending on how it was deployed. There is no plan
-            // entry to record it in, so it is logged instead. Skipped under
-            // MXS, where the remote node holds the real mainnet boot
-            // contracts.
-            let remapped = (!session.interpreter.repl_settings.remote_data.enabled)
+            // entry to record it in, so it is logged instead. Skipped only
+            // against a mainnet remote node, which holds the real mainnet boot
+            // contracts; a testnet-backed remote session is testnet-flavored
+            // and needs the rewrite like simnet does.
+            let remapped = (!session.interpreter.is_mainnet())
                 .then(|| remap_mainnet_boot_principals(&args.content))
                 .flatten();
             if remapped.is_some() {

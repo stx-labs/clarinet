@@ -72,9 +72,11 @@ pub static SBTC_TOKEN_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use clarity::types::chainstate::StacksAddress;
 use clarity::types::StacksEpochId;
+use clarity::util::hash::Hash160;
 use clarity::vm::ast::ContractAST;
-use clarity::vm::ClarityVersion;
+use clarity::vm::{ClarityVersion, ContractName};
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 
 use crate::repl::{
@@ -209,6 +211,21 @@ pub const BOOT_CONTRACTS_NAMES: &[&str] = &[
     "pox-5",
 ];
 
+/// The boot addresses as `StacksAddress`, which is how post-conditions spell
+/// a contract principal.
+pub static BOOT_MAINNET_STACKS_ADDRESS: LazyLock<StacksAddress> =
+    LazyLock::new(|| stacks_address_of(&BOOT_MAINNET_PRINCIPAL));
+
+pub static BOOT_TESTNET_STACKS_ADDRESS: LazyLock<StacksAddress> =
+    LazyLock::new(|| stacks_address_of(&BOOT_TESTNET_PRINCIPAL));
+
+/// Re-spell a principal as the `StacksAddress` the wire format uses. Derived
+/// from the parsed principal so the two spellings cannot drift apart.
+fn stacks_address_of(principal: &StandardPrincipalData) -> StacksAddress {
+    let (version, bytes) = principal.clone().destruct();
+    StacksAddress::new(version, Hash160(bytes)).expect("a boot principal has a valid version")
+}
+
 pub static BOOT_TESTNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(BOOT_TESTNET_ADDRESS).unwrap());
 pub static BOOT_MAINNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
@@ -225,6 +242,22 @@ pub static BOOT_MAINNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
 /// Scoped to [`BOOT_CONTRACTS_NAMES`], the same rule
 /// [`remap_mainnet_boot_principals`] applies to source: sBTC lives at
 /// `SM3VDXK3...` and has no testnet twin in simnet, so it never matches.
+/// The testnet twin of the mainnet boot contract named by `(address, name)`.
+///
+/// The `StacksAddress` counterpart of [`remap_mainnet_boot_contract_id`], for
+/// post-condition principals and asset identifiers: the transaction wire
+/// format carries those as an address plus a contract name rather than as a
+/// contract id.
+pub fn remap_mainnet_boot_stacks_address(
+    address: &StacksAddress,
+    name: &ContractName,
+) -> Option<StacksAddress> {
+    let is_mainnet_boot =
+        address == &*BOOT_MAINNET_STACKS_ADDRESS && BOOT_CONTRACTS_NAMES.contains(&name.as_str());
+
+    is_mainnet_boot.then(|| BOOT_TESTNET_STACKS_ADDRESS.clone())
+}
+
 pub fn remap_mainnet_boot_contract_id(
     contract_id: &QualifiedContractIdentifier,
 ) -> Option<QualifiedContractIdentifier> {
