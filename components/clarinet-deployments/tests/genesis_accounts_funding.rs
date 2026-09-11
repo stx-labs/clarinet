@@ -189,6 +189,29 @@ fn can_read_the_funded_sbtc_balance_and_supply_from_clarity() {
     assert_eq!(supply.match_atom_value(), Some(&expected));
 }
 
+/// A deliberate difference from devnet, which still submits a real deposit and
+/// so still rejects anything under the 546 sat Bitcoin dust limit. On simnet a
+/// balance is just a starting balance, so it is credited as configured.
+#[test]
+fn funds_an_sbtc_balance_below_the_bitcoin_dust_limit() {
+    let mut session = funded_session(500);
+
+    let sbtcs = session.get_assets_maps();
+    let sbtcs = sbtcs
+        .get(".sbtc-token.sbtc-token")
+        .expect("sBTC should be minted");
+    assert_eq!(sbtcs.get(&WALLET_1.to_string()), Some(&500));
+
+    let supply = session.eval_clarity_string(&format!(
+        "(contract-call? '{} get-total-supply)",
+        *SBTC_TOKEN_MAINNET_ADDRESS
+    ));
+    assert_eq!(
+        supply.match_atom_value(),
+        Some(&Value::okay(Value::UInt(500)).unwrap())
+    );
+}
+
 /// sBTC funding is the last thing the plan does, so the epoch it ran at is
 /// still recorded when it returns. It has to be the session's own epoch.
 #[test]

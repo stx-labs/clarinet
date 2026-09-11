@@ -1644,6 +1644,59 @@ mod tests {
         )
     }
 
+    /// `mint_ft_balance` takes the full `u128` range, so a second mint can
+    /// exceed what the balance can hold. It must fail without writing.
+    #[test]
+    fn minting_ft_past_u128_leaves_the_balance_untouched() {
+        let mut interpreter = get_interpreter(None);
+        let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
+        let token_name = "ctb";
+
+        let contract = ClarityContractBuilder::default()
+            .code_source(format!("(define-fungible-token {token_name})"))
+            .build();
+        deploy_contract(&mut interpreter, &contract).expect("the fixture deploys");
+        let asset_identifier = AssetIdentifier {
+            contract_identifier: contract
+                .expect_resolved_contract_identifier(Some(&interpreter.get_tx_sender())),
+            asset_name: ClarityName::try_from(token_name).unwrap(),
+        };
+
+        interpreter
+            .mint_ft_balance(&asset_identifier, &recipient, u128::MAX)
+            .expect("the first mint fits");
+
+        let error = interpreter
+            .mint_ft_balance(&asset_identifier, &recipient, 1)
+            .expect_err("the second mint overflows");
+        assert!(error.contains("balance overflow"), "{error}");
+
+        // Neither the datastore nor the tracked asset map moved.
+        assert_eq!(
+            interpreter
+                .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared()),
+            u128::MAX
+        );
+        let mut global_context = interpreter
+            .get_global_context(DEFAULT_EPOCH, false)
+            .unwrap();
+        global_context.begin();
+        let metadata = global_context
+            .database
+            .load_ft(&asset_identifier.contract_identifier, token_name)
+            .unwrap();
+        let balance = global_context
+            .database
+            .get_ft_balance(
+                &asset_identifier.contract_identifier,
+                token_name,
+                &recipient,
+                Some(&metadata),
+            )
+            .unwrap();
+        assert_eq!(balance, u128::MAX);
+    }
+
     /// `credit` consolidates locked STX against the v2/v3/v4 unlock heights,
     /// and those are gated on the epoch the mint runs at. Pinning a fixed
     /// epoch would apply the wrong unlock rules to a session below it.
