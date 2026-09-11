@@ -285,23 +285,20 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
 /// Not for remote-data sessions: their state comes from the network, and
 /// `Session::new` deliberately deploys no boot contracts. Advancing the
 /// epoch would install them anyway, since `update_epoch` has no such guard.
-fn plan_batches<'a>(
-    remote_data_enabled: bool,
-    deployment: &'a DeploymentSpecification,
-    implicit: &'a TransactionsBatchSpecification,
-) -> &'a [TransactionsBatchSpecification] {
-    let synthesize_batch = deployment.plan.batches.is_empty() && !remote_data_enabled;
-    match synthesize_batch {
-        true => std::slice::from_ref(implicit),
-        false => deployment.plan.batches.as_slice(),
-    }
-}
+static IMPLICIT_BATCH: TransactionsBatchSpecification = TransactionsBatchSpecification {
+    id: 0,
+    transactions: Vec::new(),
+    epoch: None,
+};
 
-fn implicit_batch() -> TransactionsBatchSpecification {
-    TransactionsBatchSpecification {
-        id: 0,
-        transactions: vec![],
-        epoch: None,
+fn plan_batches(
+    remote_data_enabled: bool,
+    deployment: &DeploymentSpecification,
+) -> &[TransactionsBatchSpecification] {
+    if deployment.plan.batches.is_empty() && !remote_data_enabled {
+        std::slice::from_ref(&IMPLICIT_BATCH)
+    } else {
+        &deployment.plan.batches
     }
 }
 
@@ -311,28 +308,22 @@ fn batch_epoch(batch: &TransactionsBatchSpecification) -> StacksEpochId {
 
 /// Bring `session` to the state the plan's first batch executes in: genesis
 /// accounts, the first chain tip, and the boot contracts that batch's epoch
-/// installs.
-///
-/// Split out of [`update_session_with_deployment_plan`] because it depends only
-/// on the session settings, the genesis spec and the first batch's epoch — not
-/// on any contract source. A caller that replays the same plan over and over
-/// (the LSP, once per save) can therefore build this once and clone it, which
-/// is far cheaper than re-interpreting the whole boot contract set each time.
-pub fn prepare_session_for_deployment_plan(
+/// installs. Depends on no contract source, which is what [`BaseSessionCache`]
+/// exploits.
+pub(crate) fn prepare_session_for_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
 ) {
     update_session_with_genesis_accounts(session, deployment);
 
     let remote_data_enabled = session.settings.repl_settings.remote_data.enabled;
-    let implicit = implicit_batch();
-    if let Some(batch) = plan_batches(remote_data_enabled, deployment, &implicit).first() {
+    if let Some(batch) = plan_batches(remote_data_enabled, deployment).first() {
         session.advance_chain_tip(1);
         session.update_epoch(batch_epoch(batch));
     }
 }
 
-/// Everything [`prepare_session_for_deployment_plan`] reads. Equal keys mean
+/// Everything `prepare_session_for_deployment_plan` reads. Equal keys mean
 /// equal base sessions, which is what makes [`BaseSessionCache`] sound.
 #[derive(Clone, PartialEq)]
 struct BaseSessionKey {
@@ -343,14 +334,10 @@ struct BaseSessionKey {
 
 impl BaseSessionKey {
     fn new(settings: SessionSettings, deployment: &DeploymentSpecification) -> Self {
-        let implicit = implicit_batch();
-        let first_batch_epoch = plan_batches(
-            settings.repl_settings.remote_data.enabled,
-            deployment,
-            &implicit,
-        )
-        .first()
-        .map(batch_epoch);
+        let first_batch_epoch =
+            plan_batches(settings.repl_settings.remote_data.enabled, deployment)
+                .first()
+                .map(batch_epoch);
         Self {
             settings,
             genesis: deployment.genesis.clone(),
@@ -359,7 +346,7 @@ impl BaseSessionKey {
     }
 }
 
-/// Holds the session [`prepare_session_for_deployment_plan`] produces so a
+/// Holds the session `prepare_session_for_deployment_plan` produces so a
 /// caller replaying the same plan can clone it instead of rebuilding it.
 ///
 /// Interpreting the boot contract set dominates that setup — on a 50-contract
@@ -390,10 +377,8 @@ impl BaseSessionCache {
     ) -> Session {
         let key = BaseSessionKey::new(settings.clone(), deployment);
 
-        if let Some((cached_key, session)) = &self.entry {
-            if *cached_key == key {
-                return session.clone();
-            }
+        if let Some((_, session)) = self.entry.as_ref().filter(|(cached, _)| *cached == key) {
+            return session.clone();
         }
 
         let mut session = Session::new(settings);
@@ -404,17 +389,15 @@ impl BaseSessionCache {
 }
 
 /// Execute `deployment` against a session already advanced by
-/// [`prepare_session_for_deployment_plan`].
+/// [`BaseSessionCache::prepared_session`].
 pub fn resume_session_with_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> ExecutionResultMap {
-    let implicit = implicit_batch();
     let batches = plan_batches(
         session.settings.repl_settings.remote_data.enabled,
         deployment,
-        &implicit,
     );
 
     let mut contracts = BTreeMap::new();
@@ -1261,8 +1244,6 @@ pub async fn generate_default_deployment_with_cache(
 
     // Only ever used for `interpreter.build_ast`, which parses against `&mut ()`
     // and reads no datastore state, so the boot contract set would be dead weight.
-    // Callers that need a booted session build their own via
-    // `initiate_session_from_manifest` / `setup_session_with_deployment`.
     let session = Session::new_without_boot_contracts(settings);
 
     let mut contract_data = BTreeMap::new();

@@ -270,22 +270,15 @@ pub struct EditorState {
     /// Parsed ASTs keyed by (contract path, environment). Reused by
     /// `build_state` to skip re-parsing files whose source hasn't changed.
     pub ast_cache: HashMap<(PathBuf, Environment), CachedContractAST>,
-    /// Genesis accounts + boot contracts per (manifest, environment). Contract
-    /// edits never invalidate these, so a save clones one instead of
-    /// re-interpreting the whole boot set.
-    pub base_sessions: HashMap<(PathBuf, Environment), BaseSessionCache>,
+    /// Genesis accounts + boot contracts per manifest. Only contract sources
+    /// differ between environments and the base session reads none of them, so
+    /// unlike `ast_cache` this is not keyed by `Environment`.
+    pub base_sessions: HashMap<PathBuf, BaseSessionCache>,
 }
 
 impl EditorState {
     pub fn new() -> EditorState {
-        EditorState {
-            protocols: HashMap::new(),
-            contracts_lookup: HashMap::new(),
-            active_contracts: HashMap::new(),
-            settings: InitializationOptions::default(),
-            ast_cache: HashMap::new(),
-            base_sessions: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn index_protocol(&mut self, manifest_location: PathBuf, protocol: ProtocolState) {
@@ -885,11 +878,9 @@ pub async fn build_state(
     // On any error we just drop it — the caller's original cache is
     // untouched, so no restore step is needed.
     mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
-    // Borrowed rather than moved like `cached_asts`: a `Session` is expensive
-    // enough to clone that handing one in and one back per notification would
-    // cost more than the rebuild it saves. The caller takes it out of
-    // `EditorState` and puts it back on every path, error included.
-    base_sessions: &mut HashMap<(PathBuf, Environment), BaseSessionCache>,
+    // Borrowed, not moved like `cached_asts`: a `Session` is too expensive to
+    // clone for safety the way the AST cache does.
+    base_sessions: &mut HashMap<PathBuf, BaseSessionCache>,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -940,7 +931,7 @@ pub async fn build_state(
         }
 
         let mut session = base_sessions
-            .entry((manifest_location.to_path_buf(), environment))
+            .entry(manifest_location.to_path_buf())
             .or_default()
             .prepared_session(session_settings_from_manifest(&manifest), &deployment);
         let contracts =

@@ -85,20 +85,13 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     }
 }
 
-/// Necessary conditions for an `#[env(...)]` annotation: [`AnnotationKind`]
-/// strips a literal `#[` prefix and matches the name before `(` against
-/// `env`, so a source missing either substring cannot carry one. Two
-/// substring scans are far cheaper than the parse they let us skip.
-///
-/// [`AnnotationKind`]: crate::analysis::annotation::AnnotationKind
-fn may_contain_env_annotation(source: &str) -> bool {
-    source.contains("#[") && source.contains("env")
-}
-
 /// Returns the spans of all `#[env(simnet)]` annotated blocks in the source.
 /// Each span covers from the annotation comment through the annotated expression.
 pub fn get_env_simnet_spans(source: &str) -> Result<Vec<Span>, String> {
-    if !may_contain_env_annotation(source) {
+    // `AnnotationKind` strips a literal `#[` and matches the name before `(`
+    // against `env`, so a source missing either substring cannot carry one —
+    // and two substring scans are far cheaper than the parse they skip.
+    if !(source.contains("#[") && source.contains("env")) {
         return Ok(Vec::new());
     }
 
