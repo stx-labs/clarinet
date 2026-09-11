@@ -53,17 +53,24 @@ where
     // `mem::take` would be cheaper, but then a `build_state` error would
     // require manually restoring the cache. We eat the clone for safety.
     let cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
+    // Sessions are too expensive to clone for safety the way the AST cache is,
+    // so this one really is moved out — and put back below on every path.
+    let mut base_sessions = editor_state.try_write(|es| std::mem::take(&mut es.base_sessions))?;
 
     let mut protocol_state = ProtocolState::new();
-    let new_cache_entries = match build_state(
+    let built = build_state(
         &manifest_location,
         &mut protocol_state,
         file_accessor,
         static_cost_analysis,
         cached_asts,
+        &mut base_sessions,
     )
-    .await
-    {
+    .await;
+
+    editor_state.try_write(|es| es.base_sessions = base_sessions)?;
+
+    let new_cache_entries = match built {
         Ok(entries) => entries,
         Err(e) => return Ok(LspNotificationResponse::error(&e)),
     };
