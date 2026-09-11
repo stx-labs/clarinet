@@ -27,6 +27,10 @@ pub struct UnnecessaryTuple<'a> {
     /// Pointers to `SymbolicExpression` nodes that are direct arguments to
     /// `merge` — single-field tuples are required there, so we skip warnings.
     merge_args: HashSet<*const SymbolicExpression>,
+    /// Whether the current expression is part of a value passed to `print`.
+    /// Printed values are an off-chain interface whose tuple shape may be
+    /// prescribed by a protocol or consumer.
+    inside_print: bool,
 }
 
 impl<'a> UnnecessaryTuple<'a> {
@@ -38,6 +42,7 @@ impl<'a> UnnecessaryTuple<'a> {
             annotations,
             active_annotation: None,
             merge_args: HashSet::new(),
+            inside_print: false,
         }
     }
 
@@ -300,12 +305,29 @@ impl<'a> ASTVisitor<'a> for UnnecessaryTuple<'a> {
         result
     }
 
+    fn traverse_print(
+        &mut self,
+        expr: &'a SymbolicExpression,
+        value: &'a SymbolicExpression,
+    ) -> bool {
+        // Preserve traversal so this visitor can still inspect other expression
+        // kinds in a printed value, while suppressing tuple diagnostics for the
+        // entire payload. Saving the previous value also handles nested `print`s.
+        let was_inside_print = self.inside_print;
+        self.inside_print = true;
+
+        let result = self.traverse_expr(value) && self.visit_print(expr, value);
+
+        self.inside_print = was_inside_print;
+        result
+    }
+
     fn visit_tuple(
         &mut self,
         expr: &'a SymbolicExpression,
         values: &HashMap<Option<&'a ClarityName>, &'a SymbolicExpression>,
     ) -> bool {
-        if self.merge_args.contains(&std::ptr::from_ref(expr)) {
+        if self.inside_print || self.merge_args.contains(&std::ptr::from_ref(expr)) {
             return true;
         }
         self.set_active_annotation(&expr.span);
@@ -629,6 +651,100 @@ mod tests {
             .diagnostic
             .message
             .contains(&UnnecessaryTuple::value_message()));
+    }
+
+    // ── print ─────────────────────────────────────────────────
+
+    #[test]
+    fn no_warn_single_field_tuple_in_print() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func)
+                (print (tuple (event u1)))
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_nested_single_field_tuples_in_print() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func (use-first bool))
+                (print
+                    (if use-first
+                        { event: { id: u1 } }
+                        { event: { id: u2 } }
+                    )
+                )
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn no_warn_after_nested_print_inside_print() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func)
+                (print
+                    (begin
+                        (print { inner: u1 })
+                        { outer: u2 }
+                    )
+                )
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn warn_single_field_tuple_outside_print() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func)
+                (begin
+                    (print { event: { id: u1 } })
+                    { result: u1 }
+                )
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
+        let span = &result.lint_diagnostics[0].diagnostic.spans[0];
+        assert_eq!(span.start_line, 4);
+        assert_eq!(span.start_column, 9);
+    }
+
+    #[test]
+    fn warn_enclosing_single_field_tuple_around_print() {
+        #[rustfmt::skip]
+        let snippet = indoc!(r#"
+            (define-private (my-func)
+                { payload: (print { event: u1 }) }
+            )
+        "#).to_string();
+
+        let (_, result) = run_snippet(snippet);
+        assert_eq!(result.lint_diagnostics.len(), 1);
+        assert!(result.lint_diagnostics[0]
+            .diagnostic
+            .message
+            .contains(&UnnecessaryTuple::value_message()));
+        let span = &result.lint_diagnostics[0].diagnostic.spans[0];
+        assert_eq!(span.start_line, 2);
+        assert_eq!(span.start_column, 5);
     }
 
     // ── NFT ───────────────────────────────────────────────────
