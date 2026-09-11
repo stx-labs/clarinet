@@ -6,17 +6,14 @@ use clarinet_deployments::types::*;
 use clarinet_deployments::update_session_with_deployment_plan;
 use clarinet_files::StacksNetwork;
 use clarity::types::chainstate::StacksAddress;
-use clarity::types::Address;
+use clarity::types::{Address, StacksEpochId};
 use clarity::vm::types::StandardPrincipalData;
-use clarity::vm::{ClarityVersion, ContractName};
-use clarity_repl::repl::boot::SBTC_CONTRACTS_NAMES;
+use clarity::vm::{ClarityVersion, ContractName, Value};
+use clarity_repl::repl::boot::{
+    SBTC_CONTRACTS_NAMES, SBTC_MAINNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_MAINNET_ADDRESS,
+};
 use clarity_repl::repl::{Session, SessionSettings};
 
-static SBTC_DEPLOYER: LazyLock<StandardPrincipalData> = LazyLock::new(|| {
-    StandardPrincipalData::from(
-        StacksAddress::from_string("SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4").unwrap(),
-    )
-});
 static WALLET_1: LazyLock<StandardPrincipalData> = LazyLock::new(|| {
     StandardPrincipalData::from(
         StacksAddress::from_string("ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5").unwrap(),
@@ -64,6 +61,15 @@ fn epoch_3_0_batch() -> TransactionsBatchSpecification {
     }
 }
 
+/// A session at epoch 3.0, funded from a one-wallet genesis spec.
+fn funded_session(sbtc_balance: u128) -> Session {
+    let mut session = Session::new(SessionSettings::default());
+    let genesis = genesis_with_sbtc_balance(sbtc_balance);
+    let deployment = build_test_deployement_plan(vec![epoch_3_0_batch()], Some(genesis));
+    update_session_with_deployment_plan(&mut session, &deployment, None);
+    session
+}
+
 #[test]
 fn fund_genesis_account_with_stx() {
     let mut session = Session::new(SessionSettings::default());
@@ -101,10 +107,7 @@ fn does_not_fund_sbtc_before_epoch_3_0() {
 /// A wallet with `sbtc_balance = 0` must not show up in the sBTC asset map.
 #[test]
 fn does_not_fund_sbtc_when_the_balance_is_zero() {
-    let mut session = Session::new(SessionSettings::default());
-    let genesis = genesis_with_sbtc_balance(0);
-    let deployment = build_test_deployement_plan(vec![epoch_3_0_batch()], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None);
+    let session = funded_session(0);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -113,14 +116,10 @@ fn does_not_fund_sbtc_when_the_balance_is_zero() {
 
 /// The property that matters: a plan carrying *no* sBTC transaction — what a
 /// stock `clarinet new` project generates — still funds the genesis wallets,
-/// because `sbtc-deposit` is a boot contract.
+/// because `sbtc-token` is a boot contract.
 #[test]
 fn can_fund_initial_sbtc_balance_without_any_sbtc_transaction() {
-    let mut session = Session::new(SessionSettings::default());
-
-    let genesis = genesis_with_sbtc_balance(10_000_000_000);
-    let deployment = build_test_deployement_plan(vec![epoch_3_0_batch()], Some(genesis));
-    update_session_with_deployment_plan(&mut session, &deployment, None);
+    let session = funded_session(10_000_000_000);
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 2);
@@ -148,7 +147,7 @@ fn can_fund_initial_sbtc_balance_with_explicit_sbtc_requirements() {
                     source: "(define-read-only (unused) u1)".to_string(),
                     clarity_version: ClarityVersion::Clarity3,
                     location: PathBuf::from(format!("./requirements/{contract_name}.clar")),
-                    emulated_sender: SBTC_DEPLOYER.clone(),
+                    emulated_sender: SBTC_MAINNET_ADDRESS_PRINCIPAL.clone(),
                     skip_analysis: true,
                 },
             )
@@ -170,4 +169,39 @@ fn can_fund_initial_sbtc_balance_with_explicit_sbtc_requirements() {
         .get(".sbtc-token.sbtc-token")
         .expect("sBTC should be minted");
     assert_eq!(sbtcs.get(&WALLET_1.to_string()), Some(&10_000_000_000));
+}
+
+/// The balance is written to the datastore, so it has to be visible to Clarity
+/// itself and not just to the session's asset map.
+#[test]
+fn can_read_the_funded_sbtc_balance_and_supply_from_clarity() {
+    let mut session = funded_session(10_000_000_000);
+
+    let token = format!("'{}", *SBTC_TOKEN_MAINNET_ADDRESS);
+    let balance = session.eval_clarity_string(&format!(
+        "(contract-call? {token} get-balance '{})",
+        *WALLET_1
+    ));
+    let supply = session.eval_clarity_string(&format!("(contract-call? {token} get-total-supply)"));
+
+    let expected = Value::okay(Value::UInt(10_000_000_000)).unwrap();
+    assert_eq!(balance.match_atom_value(), Some(&expected));
+    assert_eq!(supply.match_atom_value(), Some(&expected));
+}
+
+/// Funding writes through the Clarity database, which owns the epoch key the
+/// session also tracks. Minting must not leave the two disagreeing.
+#[test]
+fn funding_sbtc_leaves_the_session_epoch_alone() {
+    use clarity::vm::database::ClarityBackingStore;
+
+    let mut session = funded_session(10_000_000_000);
+    let epoch = session.interpreter.datastore.get_current_epoch();
+    let clarity_db_epoch = session
+        .interpreter
+        .clarity_datastore
+        .get_data("vm-epoch::epoch-version");
+
+    assert_eq!(epoch, StacksEpochId::Epoch30);
+    assert_eq!(clarity_db_epoch, Ok(Some(format!("{:08x}", epoch as u32))));
 }

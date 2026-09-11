@@ -1404,47 +1404,42 @@ impl ClarityInterpreter {
         &mut self,
         asset_identifier: &AssetIdentifier,
         recipient: &PrincipalData,
-        amount: u64,
+        amount: u128,
     ) -> Result<String, String> {
-        let contract_identifier = asset_identifier.contract_identifier.clone();
-        let token_name = asset_identifier.asset_name.to_string();
+        let contract_identifier = &asset_identifier.contract_identifier;
+        let token_name: &str = &asset_identifier.asset_name;
         let final_balance = {
-            let mut global_context = self.get_global_context(DEFAULT_EPOCH, false)?;
+            let epoch = self.datastore.get_current_epoch();
+            let mut global_context = self.get_global_context(epoch, false)?;
 
             global_context.begin();
 
             let metadata = global_context
                 .database
-                .load_ft(&contract_identifier, &token_name)
+                .load_ft(contract_identifier, token_name)
                 .map_err(|e| {
                     format!("failed to load_ft for {contract_identifier}.{token_name}: {e:?}")
                 })?;
 
             let cur_balance = global_context
                 .database
-                .get_ft_balance(&contract_identifier, &token_name, recipient, Some(&metadata))
+                .get_ft_balance(contract_identifier, token_name, recipient, Some(&metadata))
                 .map_err(|e| format!("failed to get_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
+
+            let final_balance = cur_balance.checked_add(amount).ok_or_else(|| {
+                format!("balance overflow for {contract_identifier}.{token_name} {recipient}")
+            })?;
 
             global_context.database.set_ft_balance(
-                &contract_identifier,
-                &token_name,
+                contract_identifier,
+                token_name,
                 recipient,
-                cur_balance + amount as u128,
+                final_balance,
             ).map_err(|e| format!("failed to set_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
-
-            let final_balance = global_context
-                .database
-                .get_ft_balance(&contract_identifier, &token_name, recipient, Some(&metadata))
-                .map_err(|e| format!("failed to get_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
 
             global_context
                 .database
-                .checked_increase_token_supply(
-                    &contract_identifier,
-                    &token_name,
-                    amount as u128,
-                    &metadata,
-                )
+                .checked_increase_token_supply(contract_identifier, token_name, amount, &metadata)
                 .map_err(|e| format!("failed to increase token supply for {contract_identifier}.{token_name}: {e:?}"))?;
 
             global_context
@@ -1452,11 +1447,7 @@ impl ClarityInterpreter {
                 .map_err(|e| format!("failed to commit ctx: {e:?}"))?;
             final_balance
         };
-        self.credit_token(
-            recipient.to_string(),
-            asset_identifier.sugared(),
-            amount.into(),
-        );
+        self.credit_token(recipient.to_string(), asset_identifier.sugared(), amount);
         Ok(format!("→ {recipient}: {final_balance} {token_name}"))
     }
 

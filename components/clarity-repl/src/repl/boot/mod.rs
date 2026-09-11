@@ -42,7 +42,7 @@ const BOOT_CODE_SIGNERS_VOTING: &str = std::include_str!("signers-voting.clar");
 /// (from SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4).
 /// Deployed as boot dependencies so pox-5 can resolve its `contract-call?`
 /// and `with-ft` references to sbtc-token, and so genesis `sbtc_balance`
-/// can be minted through sbtc-deposit.
+/// can be credited to sbtc-token.
 const SBTC_REGISTRY_SOURCE: &str = std::include_str!("sbtc-registry.clar");
 const SBTC_TOKEN_SOURCE: &str = std::include_str!("sbtc-token.clar");
 const SBTC_DEPOSIT_SOURCE: &str = std::include_str!("sbtc-deposit.clar");
@@ -59,14 +59,16 @@ pub static SBTC_TESTNET_ADDRESS_PRINCIPAL: LazyLock<StandardPrincipalData> =
 pub static SBTC_MAINNET_ADDRESS_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap());
 
-pub static SBTC_DEPOSIT_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
-    LazyLock::new(|| {
-        QualifiedContractIdentifier::parse(&format!("{SBTC_MAINNET_ADDRESS}.sbtc-deposit")).unwrap()
-    });
-
 pub static SBTC_TOKEN_MAINNET_ADDRESS: LazyLock<QualifiedContractIdentifier> =
     LazyLock::new(|| {
         QualifiedContractIdentifier::parse(&format!("{SBTC_MAINNET_ADDRESS}.sbtc-token")).unwrap()
+    });
+
+/// The `sbtc-token` fungible token defined by [`SBTC_TOKEN_MAINNET_ADDRESS`].
+pub static SBTC_TOKEN_ASSET_IDENTIFIER: LazyLock<AssetIdentifier> =
+    LazyLock::new(|| AssetIdentifier {
+        contract_identifier: SBTC_TOKEN_MAINNET_ADDRESS.clone(),
+        asset_name: ClarityName::try_from("sbtc-token").unwrap(),
     });
 
 use std::collections::BTreeMap;
@@ -74,8 +76,10 @@ use std::sync::LazyLock;
 
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
-use clarity::vm::ClarityVersion;
-use clarity_types::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::{ClarityName, ClarityVersion};
+use clarity_types::types::{
+    AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
+};
 
 use crate::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch, Settings,
@@ -267,7 +271,7 @@ pub fn get_boot_contracts_data_with_overrides(
 /// Pre-parsed sBTC contracts deployed at the mainnet sBTC address (SM3VDXK3...).
 /// - sbtc-registry deployed first (required by sbtc-token and sbtc-deposit)
 /// - sbtc-token next before the regular boot contracts (required by pox-5)
-/// - sbtc-deposit last (calls into both, and mints the genesis sBTC balances)
+/// - sbtc-deposit last (calls into both)
 ///
 /// The Vec preserves that deployment order.
 pub static SBTC_BOOT_CONTRACTS: LazyLock<
