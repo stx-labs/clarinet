@@ -1,5 +1,9 @@
+mod precomputed;
+
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::{LazyLock, Mutex};
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
@@ -7,6 +11,7 @@ use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
 use bip39::{Error as MnemonicError, Language, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
+pub use precomputed::is_precomputed;
 use rand::RngCore;
 
 /// Size of the AES-GCM nonce
@@ -61,11 +66,67 @@ pub fn random_mnemonic() -> Mnemonic {
     Mnemonic::from_entropy_in(Language::English, &entropy).unwrap()
 }
 
+type DerivedKeys = (Vec<u8>, PublicKey);
+
+/// Keys already derived in this process, keyed by `(phrase, password, path)`.
+///
+/// The same handful of wallets get derived over and over: the LSP rebuilds the
+/// whole `NetworkManifest` on every file save, and `clarinet deployments apply`
+/// re-derives the signing key for every transaction in the plan. The table in
+/// [`precomputed`] only covers the mnemonics Clarinet ships; this covers
+/// everything else, including custom wallets in a project's `Devnet.toml`.
+///
+/// Entries are bounded by the number of distinct wallets a process ever sees —
+/// a dozen or so — so there is nothing to evict.
+///
+/// This does keep derived secrets alive for the lifetime of the process. That
+/// is already true of the plaintext mnemonics held in `NetworkManifest`, which
+/// outlive every caller here.
+static DERIVED_KEYS: LazyLock<Mutex<HashMap<(String, String, String), DerivedKeys>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 pub fn get_bip32_keys_from_mnemonic(
     phrase: &str,
     password: &str,
     derivation: &str,
-) -> Result<(Vec<u8>, PublicKey), String> {
+) -> Result<DerivedKeys, String> {
+    // A BIP39 passphrase changes the seed, so the table only applies without one.
+    if password.is_empty() {
+        if let Some(keys) = precomputed::lookup(phrase, derivation) {
+            return Ok(keys);
+        }
+    }
+
+    let cache_key = (
+        phrase.to_string(),
+        password.to_string(),
+        derivation.to_string(),
+    );
+
+    // A poisoned lock only means some other thread panicked mid-lookup. This
+    // is a cache: fall back to deriving rather than propagating the failure.
+    if let Ok(cache) = DERIVED_KEYS.lock() {
+        if let Some(keys) = cache.get(&cache_key) {
+            return Ok(keys.clone());
+        }
+    }
+
+    let keys = derive_bip32_keys(phrase, password, derivation)?;
+
+    if let Ok(mut cache) = DERIVED_KEYS.lock() {
+        cache.insert(cache_key, keys.clone());
+    }
+
+    Ok(keys)
+}
+
+/// The derivation itself, with no caching. ~0.8 ms native / ~1.4 ms in the
+/// wasm build, dominated by the 2048 PBKDF2-HMAC-SHA512 rounds of `to_seed`.
+fn derive_bip32_keys(
+    phrase: &str,
+    password: &str,
+    derivation: &str,
+) -> Result<DerivedKeys, String> {
     let mnemonic = Mnemonic::parse_in(Language::English, phrase).map_err(|e| e.to_string())?;
     let seed_vec = mnemonic.to_seed(password);
     if seed_vec.len() != 64 {
@@ -329,6 +390,63 @@ mod tests {
         let (secret, pubkey) = result.unwrap();
         assert_eq!(secret.len(), 32);
         assert_eq!(pubkey.serialize_compressed().len(), 33);
+    }
+
+    /// A precomputed phrase must come back byte-identical to a live derivation.
+    #[test]
+    fn test_get_bip32_keys_uses_precomputed_table() {
+        const PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
+        const DERIVATION: &str = "m/44'/5757'/0'/0/0";
+        assert!(is_precomputed(PHRASE, DERIVATION));
+
+        let (cached_secret, cached_public) =
+            get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
+        let (derived_secret, derived_public) = derive_bip32_keys(PHRASE, "", DERIVATION).unwrap();
+
+        assert_eq!(cached_secret, derived_secret);
+        assert_eq!(cached_public, derived_public);
+    }
+
+    /// A BIP39 passphrase produces a different seed, so the table must not
+    /// answer for it.
+    #[test]
+    fn test_get_bip32_keys_bypasses_table_when_password_is_set() {
+        const PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
+        const DERIVATION: &str = "m/44'/5757'/0'/0/0";
+
+        let (no_password, _) = get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
+        let (with_password, _) =
+            get_bip32_keys_from_mnemonic(PHRASE, "hunter2", DERIVATION).unwrap();
+
+        assert_ne!(no_password, with_password);
+        assert_eq!(
+            with_password,
+            derive_bip32_keys(PHRASE, "hunter2", DERIVATION).unwrap().0
+        );
+    }
+
+    /// A mnemonic outside the table must be memoized, and the memoized value
+    /// must match a fresh derivation.
+    #[test]
+    fn test_get_bip32_keys_memoizes_unknown_mnemonics() {
+        const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        const DERIVATION: &str = "m/44'/5757'/0'/0/3";
+        assert!(!is_precomputed(PHRASE, DERIVATION));
+
+        let first = get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
+        let second = get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
+        let fresh = derive_bip32_keys(PHRASE, "", DERIVATION).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first, fresh);
+    }
+
+    /// Neither cache may swallow the errors the callers rely on.
+    #[test]
+    fn test_get_bip32_keys_still_rejects_invalid_input() {
+        const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        assert!(get_bip32_keys_from_mnemonic("not a mnemonic", "", "m/44'/5757'/0'/0/0").is_err());
+        assert!(get_bip32_keys_from_mnemonic(PHRASE, "", "not a path").is_err());
     }
 
     #[test]
