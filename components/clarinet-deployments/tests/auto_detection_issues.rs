@@ -206,6 +206,58 @@ async fn unresolvable_reference_does_not_abort_the_plan() {
     );
 }
 
+/// An unresolvable dependency of a loaded requirement must not loop forever.
+///
+/// `callee` is auto-detected and retrieved, but the contract it calls cannot be.
+/// Resolution must stop retrying the missing contract (and re-enqueueing
+/// `callee`) instead of spinning indefinitely.
+#[tokio::test]
+async fn unresolvable_dependency_of_requirement_terminates() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &format!("(define-public (go) (contract-call? '{EXTERNAL_DEPLOYER}.callee get-one))\n"),
+        "",
+    );
+
+    let callee_source =
+        format!("(define-read-only (get-one) (contract-call? '{EXTERNAL_DEPLOYER}.missing nope))");
+    let mut server = mock_contracts(&[(EXTERNAL_DEPLOYER, "callee", callee_source.as_str())]).await;
+    server
+        .mock(
+            "GET",
+            format!("/extended/v1/contract/{EXTERNAL_DEPLOYER}.missing").as_str(),
+        )
+        .with_status(404)
+        .create_async()
+        .await;
+
+    let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        generate_default_deployment(
+            &manifest,
+            &StacksNetwork::Testnet,
+            false,
+            None,
+            Some(&server.url()),
+            Environment::OnChain,
+        ),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "resolution must terminate instead of re-enqueueing an unresolvable dependency"
+    );
+    assert!(
+        result.unwrap().is_ok(),
+        "an unresolvable dependency of a loaded requirement must not abort the plan"
+    );
+}
+
 /// Simnet-only references are excluded from on-chain deployment plans.
 #[tokio::test]
 async fn env_simnet_dependencies_stay_off_chain() {
@@ -289,6 +341,65 @@ async fn external_trait_argument_is_auto_detected_after_loading_callee() {
         published.contains(&format!("{EXTERNAL_DEPLOYER}.implementation")),
         "loading the callee should reveal that its trait argument is another \
          requirement to publish; got {published:?}"
+    );
+}
+
+/// Loading an explicitly declared callee's signature must also trigger a rescan.
+///
+/// Here `callee` is listed in `[[project.requirements]]`, so it is filtered out
+/// of auto-detection and its trait argument `implementation` is only revealed
+/// once the callee has been loaded. Discovery must not stop just because no new
+/// dependency was auto-detected on the first pass.
+#[tokio::test]
+async fn trait_argument_is_auto_detected_after_loading_explicit_callee() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &formatdoc!(
+            "
+            (define-public (go)
+              (contract-call? '{EXTERNAL_DEPLOYER}.callee take
+                '{EXTERNAL_DEPLOYER}.implementation))
+            "
+        ),
+        &formatdoc!(
+            r#"
+
+            [[project.requirements]]
+            contract_id = "{EXTERNAL_DEPLOYER}.callee"
+            "#
+        ),
+    );
+
+    let server = mock_contracts(&[
+        (
+            EXTERNAL_DEPLOYER,
+            "callee",
+            "(define-trait reader ((get-one () (response uint uint))))
+             (define-public (take (target <reader>))
+               (contract-call? target get-one))",
+        ),
+        (
+            EXTERNAL_DEPLOYER,
+            "implementation",
+            "(impl-trait .callee.reader)
+             (define-read-only (get-one) (ok u1))",
+        ),
+    ])
+    .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.callee")),
+        "the declared requirement should be published; got {published:?}"
+    );
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.implementation")),
+        "loading the explicitly declared callee should reveal its trait \
+         argument as another requirement to publish; got {published:?}"
     );
 }
 

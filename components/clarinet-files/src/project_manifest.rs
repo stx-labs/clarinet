@@ -197,6 +197,9 @@ pub struct ProjectConfig {
     pub authors: Vec<String>,
     pub description: String,
     pub telemetry: bool,
+    // The custom `Serialize` impl omits an empty requirements list, so a config
+    // without requirements must deserialize its own JSON without the field.
+    #[serde(default)]
     pub requirements: Vec<RequirementConfig>,
     #[serde(rename = "cache_dir")]
     pub cache_location: PathBuf,
@@ -786,17 +789,17 @@ telemetry = false
 
     #[test]
     fn test_requirements_parsing() {
-        let manifest_str = r#"
-[project]
-name = "test-project"
-telemetry = false
+        let manifest_str = indoc::indoc! {r#"
+            [project]
+            name = "test-project"
+            telemetry = false
 
-[[project.requirements]]
-contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            [[project.requirements]]
+            contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
 
-[[project.requirements]]
-contract_id = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.sip010-trait"
-"#;
+            [[project.requirements]]
+            contract_id = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.sip010-trait"
+        "#};
         let manifest_file: ProjectManifestFile = toml::from_str(manifest_str).unwrap();
         let location = PathBuf::from("/tmp/clarinet.toml");
         let manifest =
