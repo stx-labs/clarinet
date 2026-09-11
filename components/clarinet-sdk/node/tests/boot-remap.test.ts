@@ -1,8 +1,10 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { Cl } from "@stacks/transactions";
+import { getPublicKeyFromPrivate } from "@stacks/encryption";
+import { Cl, Pc, signMessageHashRsv } from "@stacks/transactions";
 
 // test the built package and not the source code
 // makes it simpler to handle wasm build
@@ -240,5 +242,104 @@ describe("calling pox-3 directly", () => {
     expect(() =>
       simnet.execute(`(contract-call? '${SBTC_MAINNET}.sbtc-token get-name)`),
     ).toThrowError(new RegExp(SBTC_MAINNET));
+  });
+});
+
+// The behaviour #2491 actually reported. Stacking through the mainnet PoX
+// address returned `ok` while locking nothing, so no stacking entry was
+// recorded — and a SIP-044 `(with-staking N)` allowance had nothing to check
+// against. The clause was inert and any declared amount passed, which is how a
+// contract could ship with an allowance that could never be satisfied.
+//
+// pox-5 is the only version that can show this: Staking post-conditions are
+// epoch-4.0-only, pox-4 is defunct by then, and pox-3 never records stacking.
+describe("SIP-044 staking allowance", () => {
+  // wallet_1's key, reused as the signer key.
+  const SIGNER_PRIV_KEY = "7287ba251d44a4d3fd9276c88ce34c5c52a038955511cccaf77e61068649c17801";
+  const signerManager = `${deployerAddr}.signer-manager`;
+  const STACKED = 50_000_000_000;
+
+  let simnet: Simnet;
+
+  beforeEach(async () => {
+    simnet = await initSimnet("tests/fixtures/ManifestWithSignerManager.toml");
+  });
+
+  /// Grant and register the signer key, which `stake` requires. Both calls
+  /// have to originate from the signer-manager contract itself.
+  function registerSigner() {
+    const signerPubKey = getPublicKeyFromPrivate(SIGNER_PRIV_KEY);
+    const authId = crypto.randomInt(0, 0xffffffff);
+
+    const { result } = simnet.callReadOnlyFn(
+      `${MAINNET_BOOT}.pox-5`,
+      "get-signer-grant-message-hash",
+      [Cl.principal(signerManager), Cl.uint(authId)],
+      address1,
+    );
+    const messageHash = (result as { value: string }).value;
+    const signature = signMessageHashRsv({ messageHash, privateKey: SIGNER_PRIV_KEY });
+
+    const grant = simnet.callPublicFn(
+      "signer-manager",
+      "grant",
+      [Cl.bufferFromHex(signerPubKey), Cl.uint(authId), Cl.bufferFromHex(signature)],
+      address1,
+    );
+    expect(grant.result.type).toBe("ok");
+
+    const register = simnet.callPublicFn(
+      "signer-manager",
+      "register",
+      [Cl.contractPrincipal(deployerAddr, "signer-manager"), Cl.bufferFromHex(signerPubKey)],
+      address1,
+    );
+    expect(register.result.type).toBe("ok");
+  }
+
+  const stakeArgs = () => [
+    Cl.contractPrincipal(deployerAddr, "signer-manager"),
+    Cl.uint(STACKED),
+    Cl.uint(1),
+    Cl.uint(simnet.burnBlockHeight),
+    Cl.none(),
+  ];
+
+  const locked = () =>
+    simnet.execute(`(get locked (stx-account '${address1}))`).result;
+
+  describe.each([
+    ["mainnet", `${MAINNET_BOOT}.pox-5`],
+    ["testnet", `${TESTNET_BOOT}.pox-5`],
+  ])("through the %s address", (_label, poxContract) => {
+    it("aborts when the declared allowance is below the amount staked", () => {
+      registerSigner();
+
+      // This is the assertion that fails without the remap: the mainnet-
+      // addressed call never reached the PoX handler, so the allowance had no
+      // stacking entry to check and the transaction committed regardless.
+      expect(() =>
+        simnet.callPublicFn(poxContract, "stake", stakeArgs(), address1, {
+          postConditions: [
+            Pc.principal(address1)
+              .willSendLte(STACKED - 1)
+              .ustxToLock(),
+          ],
+        }),
+      ).toThrow(/Post-condition check failure/);
+
+      expect(locked()).toStrictEqual(Cl.uint(0));
+    });
+
+    it("commits when the declared allowance covers the amount staked", () => {
+      registerSigner();
+
+      const stake = simnet.callPublicFn(poxContract, "stake", stakeArgs(), address1, {
+        postConditions: [Pc.principal(address1).willSendLte(STACKED).ustxToLock()],
+      });
+
+      expect(stake.result.type).toBe("ok");
+      expect(locked()).toStrictEqual(Cl.uint(STACKED));
+    });
   });
 });
