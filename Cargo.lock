@@ -711,7 +711,6 @@ dependencies = [
  "libsecp256k1",
  "mockito",
  "pretty_assertions",
- "rand 0.9.4",
  "reqwest",
  "serde",
  "serde_json",

@@ -1588,7 +1588,7 @@ impl Session {
             return "Unable to parse the recipient address".red().to_string();
         };
 
-        let Ok(amount) = args[3].parse::<u64>() else {
+        let Ok(amount) = args[3].parse::<u128>() else {
             return "Unable to parse the amount".red().to_string();
         };
 
