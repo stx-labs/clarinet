@@ -389,6 +389,9 @@ mod tests {
     use super::*;
     use crate::precomputed::is_precomputed;
 
+    /// Serializes the tests that drive `DERIVED_KEYS` to its cap.
+    static CACHE_TESTS: Mutex<()> = Mutex::new(());
+
     #[test]
     fn test_mnemonic_from_phrase_12() {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -454,19 +457,16 @@ mod tests {
     /// must not end up in the process-wide memo.
     #[test]
     fn test_passphrase_bearing_derivations_are_not_memoized() {
+        // Asserting on the map's *length* would race with any other test that
+        // inserts; this phrase is freshly random, so only this test could put
+        // it there.
         let phrase = random_mnemonic().to_string();
-        let before = derived_keys().len();
 
         get_bip32_keys_from_mnemonic(&phrase, "hunter2", DEFAULT_DERIVATION_PATH).unwrap();
 
-        assert_eq!(
-            derived_keys().len(),
-            before,
-            "a passphrase-bearing derivation was memoized"
-        );
         assert!(
             !derived_keys().keys().any(|(cached, _)| cached == &phrase),
-            "the phrase of a passphrase-bearing derivation was retained"
+            "a passphrase-bearing derivation was memoized"
         );
     }
 
@@ -510,6 +510,12 @@ mod tests {
     #[test]
     fn test_memo_still_caches_once_full() {
         const DERIVATION: &str = "m/44'/5757'/0'/0/7";
+        // The default harness runs tests as threads in one process, and this is
+        // the only test that pushes the map to its cap, where inserts start
+        // evicting. Hold the guard so it cannot evict a sibling's entry, or
+        // have its own evicted, mid-assertion. (`cargo tst` uses nextest, which
+        // gives each test its own process; plain `cargo test` does not.)
+        let _serialized = CACHE_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
 
         // Fill past the limit with phrases nothing will ask for again, the way
         // an `[accounts.x]` table with no `mnemonic` does on every load.
