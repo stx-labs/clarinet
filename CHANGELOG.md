@@ -1,3 +1,40 @@
+# [3.24.0](https://github.com/stx-labs/clarinet/compare/v3.23.2...v3.24.0) (2026-09-10)
+
+##### New Features
+
+* **simnet:**
+  *  Post-conditions in simnet (#2517) (1f102919)
+  *  Track account nonces in simnet (#2498) (e054f82c)
+* **clarity-vscode:**  
+  *  SDK debug adapter (#2483) (50ee217c)
+  *  Log LSP notification timings (#2532) (08f1a6c7)
+*  Add keyed events to event observer config (#2523) (4bb1877d)
+
+##### Bug Fixes
+
+* **devnet:**  
+  *  Deploy contracts and fund sBTC when booting from a snapshot (#2529) (0f65c856)
+  *  Epoch 4 snapshotting  (#2507) (f26cc288)
+  *  sBTC funding (#2513) (45340efd)
+  *  Update pox-5 Clarity contract (#2510) (30cdeb66)
+* **clarity-vscode:**
+  *  Load the browser LSP Wasm from extensionUri (#2522) (fb76bb55, 58f4c6da)
+  *  Package browser Wasm, stop emitting async chunks (#2520) (d357dba6)
+
+##### Refactors
+
+*  Better universal print macros (#2512) (60edfd44)
+
+##### Chores
+
+* **deps:**
+  *  Bump vscode-languageclient to 10.1.1 (#2533) (2277f9b2)
+  *  Drop node-fetch (#2524) (fe0a7d3f)
+  *  Remove a couple unused dependencies (#2526) (11e41e01)
+  *  Upgrade sdk dependencies (#2519) (70d91f5a)
+  *  Upgrade npm dependencies (#2521) (9a30e3d4)
+
+
 # [3.23.2](https://github.com/stx-labs/clarinet/compare/v3.23.1...v3.23.2) (2026-08-26)
 
 ##### Bug Fixes
