@@ -236,8 +236,7 @@ fn batch_epoch(batch: &TransactionsBatchSpecification) -> StacksEpochId {
     batch.epoch.map(Into::into).unwrap_or(DEFAULT_EPOCH)
 }
 
-/// Advances `session` to the state the plan's first batch executes in. Reads no
-/// contract source, which is what [`BaseSessionCache`] exploits.
+/// Reads no contract source, which is what [`BaseSessionCache`] exploits.
 fn prepare_session_for_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
@@ -300,8 +299,6 @@ impl fmt::Debug for BaseSessionCache {
 }
 
 impl BaseSessionCache {
-    /// A session ready for [`resume_session_with_deployment_plan`], reusing the
-    /// cached base whenever `settings` and `deployment` still agree with it.
     pub fn prepared_session(
         &mut self,
         settings: SessionSettings,
@@ -320,15 +317,12 @@ impl BaseSessionCache {
         PreparedSession(session)
     }
 
-    /// Times this cache answered without rebuilding — the only signal that
-    /// distinguishes a reuse from a silent ~50 ms rebuild.
+    /// The only signal distinguishing a reuse from a silent ~50 ms rebuild.
     pub fn hits(&self) -> u32 {
         self.hits
     }
 }
 
-/// Execute `deployment` against a session [`BaseSessionCache`] has prepared,
-/// returning it alongside the per-contract results.
 pub fn resume_session_with_deployment_plan(
     prepared: PreparedSession,
     deployment: &DeploymentSpecification,
@@ -2097,8 +2091,8 @@ mod tests {
         );
     }
 
-    /// A clone shares its `current_chain_tip` cell with the cached base, so
-    /// spending one session must not leave the next clone mid-plan.
+    /// Running a plan consumes the session it was handed, so the cache must hold
+    /// a copy rather than the one it gave out.
     #[test]
     fn base_session_cache_is_not_consumed_by_its_clones() {
         let deployment = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);

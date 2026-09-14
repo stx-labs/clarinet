@@ -275,8 +275,6 @@ impl BaseSessionCaches {
     /// Editing moves between a couple of projects at most.
     const CAPACITY: usize = 2;
 
-    /// The cache for `manifest_location`, created if absent, evicting the least
-    /// recently used entry.
     pub fn get_mut(&mut self, manifest_location: &Path) -> &mut BaseSessionCache {
         let entry = match self
             .entries
@@ -295,7 +293,6 @@ impl BaseSessionCaches {
         &mut self.entries.last_mut().expect("just pushed").1
     }
 
-    /// Hits across every retained manifest.
     pub fn hits(&self) -> u32 {
         self.entries.iter().map(|(_, cache)| cache.hits()).sum()
     }
