@@ -258,6 +258,14 @@ pub struct PreparedSession(Session);
 
 /// Everything `prepare_session_for_deployment_plan` reads: equal keys mean equal
 /// base sessions.
+///
+/// One input is deliberately left out: the datastore seeds its genesis block
+/// time from `Utc::now()`, so a reused base replays the plan at the simulated
+/// time of the save that built it rather than the current one. Keying on it
+/// would defeat the cache — every key would differ — and the only observable
+/// difference is a contract reading block time during its own deployment, where
+/// a frozen clock is the more reproducible of the two. Callers that need a live
+/// clock per run must build their own session rather than take one from here.
 #[derive(Clone, PartialEq)]
 struct BaseSessionKey {
     settings: SessionSettings,
@@ -304,6 +312,17 @@ impl BaseSessionCache {
         settings: SessionSettings,
         deployment: &DeploymentSpecification,
     ) -> PreparedSession {
+        // Remote-data sessions are never cached. `Session::new` resolves
+        // `initial_height: None` against the live tip and seeds the datastore
+        // from the network, and neither input is visible to the key — the
+        // setting stays `None` whatever the tip was. Reusing one would pin the
+        // first save's chain tip for the rest of the editor session. Dropping
+        // the entry also releases the boot set a pre-remote build left behind.
+        if settings.repl_settings.remote_data.enabled {
+            self.entry = None;
+            return PreparedSession(Self::prepare(settings, deployment));
+        }
+
         let key = BaseSessionKey::new(settings, deployment);
 
         if let Some((_, session)) = self.entry.as_ref().filter(|(cached, _)| *cached == key) {
@@ -311,10 +330,15 @@ impl BaseSessionCache {
             return PreparedSession(session.clone());
         }
 
-        let mut session = Session::new(key.settings.clone());
-        prepare_session_for_deployment_plan(&mut session, deployment);
+        let session = Self::prepare(key.settings.clone(), deployment);
         self.entry = Some((key, session.clone()));
         PreparedSession(session)
+    }
+
+    fn prepare(settings: SessionSettings, deployment: &DeploymentSpecification) -> Session {
+        let mut session = Session::new(settings);
+        prepare_session_for_deployment_plan(&mut session, deployment);
+        session
     }
 
     /// The only signal distinguishing a reuse from a silent ~50 ms rebuild.
@@ -1479,7 +1503,9 @@ mod tests {
     use clarity::vm::types::TupleData;
     use clarity::vm::{ClarityName, ClarityVersion, Value};
     use clarity_repl::repl::clarity_values::to_raw_value;
+    use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
     use clarity_repl::repl::SessionSettings;
+    use indoc::indoc;
 
     use super::*;
 
@@ -2179,6 +2205,150 @@ mod tests {
         assert!(
             late_session.0.boot_contracts.len() > early_session.0.boot_contracts.len(),
             "a later epoch installs more boot contracts, so the base cannot be reused"
+        );
+    }
+
+    /// The three responses `Session::new` needs to stand up a remote datastore.
+    /// Copied from clarity-repl's `HttpClient` tests; only `stacks_tip_height`
+    /// and the heights derived from it matter here.
+    const REMOTE_INFO: &str = indoc! {r#"
+        {
+            "peer_version": 402653196,
+            "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+            "burn_block_height": 882262,
+            "stable_pox_consensus": "f517f5aced5be836f9fe10980ff06108a6a2acec",
+            "stable_burn_block_height": 882255,
+            "network_id": 1,
+            "parent_network_id": 3652501241,
+            "stacks_tip_height": 556946,
+            "stacks_tip": "70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
+            "stacks_tip_consensus_hash": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+            "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
+            "unanchored_tip": null,
+            "unanchored_seq": null,
+            "tenure_height": 184037,
+            "is_fully_synced": true,
+            "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
+            "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
+            "stackerdbs": []
+        }
+    "#};
+
+    const REMOTE_BLOCK: &str = indoc! {r#"
+        {
+            "canonical": true,
+            "height": 556946,
+            "hash": "0x70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
+            "block_time": 1738667305,
+            "block_time_iso": "2025-02-04T11:08:25.000Z",
+            "tenure_height": 184037,
+            "index_block_hash": "0xa246be7256de49aa6923074a53507a839b2ba356f8809f8e7448c87b5c1891e9",
+            "parent_block_hash": "0x06dd38d5315c133b08cefdedb5c51f2e91fd8a0474e07b3d1a740c19bc21842e",
+            "parent_index_block_hash": "0x1d39f5eb45aa0e78cc256ea6ed180dcb9e8c87bea11ecf8102ef9bced5f3f73b",
+            "burn_block_time": 1738666756,
+            "burn_block_time_iso": "2025-02-04T10:59:16.000Z",
+            "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
+            "burn_block_height": 882262,
+            "miner_txid": "0x2ca4c7f6d36f32f3c2f1c5ebae3816690a9ba2258c38ef6a4494d315873a0448",
+            "tx_count": 1,
+            "execution_cost_read_count": 0,
+            "execution_cost_read_length": 0,
+            "execution_cost_runtime": 0,
+            "execution_cost_write_count": 0,
+            "execution_cost_write_length": 0
+        }
+    "#};
+
+    const REMOTE_SORTITION: &str = indoc! {r#"
+        [{
+            "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
+            "burn_block_height": 882262,
+            "burn_header_timestamp": 1738666756,
+            "sortition_id": "0x6e79b604db6d97b9289f04f446e78ec871a6b16972b02674bc3ea2bdec200fb9",
+            "parent_sortition_id": "0x8b2dedebf5b8c72c1e8ede00abd1f417d755ac7f513dbf3c3d007494404115d3",
+            "consensus_hash": "0x0ce291b675bb0148b435a884e250aafc3fd6bc86",
+            "was_sortition": true,
+            "miner_pk_hash160": "0x37e79a837b4071a1fc6c1b49208e7d2141a25905",
+            "stacks_parent_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
+            "last_sortition_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
+            "committed_block_hash": "0xbf7e26ee22b18461dfed70cc114372a0f8a61249de2f20b120e6fe63da5a45e4"
+        }]
+    "#};
+
+    fn remote_settings(api_url: &str) -> SessionSettings {
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.remote_data = RemoteDataSettings {
+            enabled: true,
+            api_url: ApiUrl(api_url.to_string()),
+            // The case that matters: an unpinned height is whatever the API
+            // reports *now*, and `BaseSessionKey` only ever sees this `None`.
+            initial_height: None,
+            use_mainnet_wallets: false,
+        };
+        settings
+    }
+
+    /// No genesis and no batches, so `prepare_session_for_deployment_plan` is
+    /// inert and the only network traffic is `Session::new`'s own.
+    fn remote_deployment() -> DeploymentSpecification {
+        let mut deployment = contractless_deployment(genesis_with_balance(0), EpochSpec::Epoch3_1);
+        deployment.genesis = None;
+        deployment.plan.batches.clear();
+        deployment
+    }
+
+    /// A remote-data session resolves its chain tip and datastore contents from
+    /// the network inside `Session::new`, and neither reaches `BaseSessionKey` —
+    /// the `initial_height` setting reads `None` however the tip resolved. Serving
+    /// one from the cache would pin whichever tip the first save saw, so these
+    /// must rebuild every time and leave no entry behind.
+    #[test]
+    fn remote_data_sessions_are_never_cached() {
+        let mut server = mockito::Server::new();
+        let info = server
+            .mock("GET", "/v2/info")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(REMOTE_INFO)
+            .expect(2)
+            .create();
+        let _block = server
+            .mock("GET", "/extended/v2/blocks/556946")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(REMOTE_BLOCK)
+            .create();
+        let _sortition = server
+            .mock("GET", "/v3/sortitions/burn_height/882262")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(REMOTE_SORTITION)
+            .create();
+
+        let mut cache = BaseSessionCache::default();
+
+        // Prime it locally first, so the remote calls have an entry to drop
+        // rather than an already-empty cache to leave alone.
+        let local = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        cache.prepared_session(SessionSettings::default(), &local);
+        assert!(cache.entry.is_some(), "a local session is cached");
+
+        let remote = remote_deployment();
+        let settings = remote_settings(&server.url());
+        cache.prepared_session(settings.clone(), &remote);
+        cache.prepared_session(settings, &remote);
+
+        // Both calls re-resolved the tip against the API instead of inheriting
+        // the first one's — exactly what skipping the cache buys.
+        info.assert();
+        assert_eq!(
+            cache.hits(),
+            0,
+            "a remote session is never served from the cache"
+        );
+        assert!(
+            cache.entry.is_none(),
+            "and evicts the local entry rather than pinning its boot set"
         );
     }
 }

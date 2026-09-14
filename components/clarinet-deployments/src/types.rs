@@ -222,6 +222,13 @@ pub struct DeploymentGenerationArtifacts {
     pub lint_diags: HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>>,
     pub analysis: HashMap<QualifiedContractIdentifier, ContractAnalysis>,
     pub results_values: HashMap<QualifiedContractIdentifier, Option<Value>>,
+    /// Which session this is depends on who built the artifacts, so nothing
+    /// should evaluate against it without checking. `setup_session_with_deployment`
+    /// returns the fully deployed session — that is the one the console and the
+    /// DAP load. `generate_default_deployment` returns a parse-only session with
+    /// no boot contracts and no plan applied: it exists solely to own the
+    /// `build_ast` calls that produced `asts`, and every caller today reads
+    /// `asts`/`diags`/`success` from those artifacts and discards this field.
     pub session: Session,
     pub success: bool,
     /// Cache entries shaped for direct reuse by the LSP. `Some(...)` only
