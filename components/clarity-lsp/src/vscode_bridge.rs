@@ -40,6 +40,10 @@ pub struct LspVscodeBridge {
 
 #[wasm_bindgen]
 impl LspVscodeBridge {
+    // `EditorState` caches `Session`s, which hold `Rc`s, so it is neither `Send`
+    // nor `Sync`. Harmless here — wasm is single-threaded — and the `Arc` is what
+    // `EditorStateInput::RwLock` takes, shared with the native bridge.
+    #[allow(clippy::arc_with_non_send_sync)]
     #[wasm_bindgen(constructor)]
     pub fn new(
         client_diagnostic_tx: JsFunction,
