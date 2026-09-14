@@ -907,10 +907,7 @@ pub async fn generate_default_deployment_with_cache(
         let sbtc_mainnet_principal =
             PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
         let mut remap_principals = BTreeMap::new();
-        remap_principals.insert(
-            sbtc_mainnet_principal.clone(),
-            default_deployer_address.clone(),
-        );
+        remap_principals.insert(sbtc_mainnet_principal, default_deployer_address.clone());
 
         // The sources are written to the requirements cache so the deployment
         // plan can reload them from disk after a serialization round-trip.

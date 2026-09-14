@@ -228,7 +228,7 @@ impl ClarityDatastore {
             store: HashMap::new(),
             metadata: HashMap::new(),
             height_at_chain_tip: HashMap::from([(id.clone(), height)]),
-            chain_tip_at_height: HashMap::from([(height, id.clone())]),
+            chain_tip_at_height: HashMap::from([(height, id)]),
 
             remote_network_info: None,
             remote_block_info_cache: Rc::new(RefCell::new(HashMap::new())),
@@ -261,7 +261,7 @@ impl ClarityDatastore {
             store: HashMap::new(),
             metadata: HashMap::new(),
             height_at_chain_tip: HashMap::from([(id.clone(), height)]),
-            chain_tip_at_height: HashMap::from([(height, id.clone())]),
+            chain_tip_at_height: HashMap::from([(height, id)]),
             remote_network_info: Some(remote_network_info),
             remote_block_info_cache: Rc::new(RefCell::new(block_cache)),
             remote_sortition_cache: Rc::new(RefCell::new(sortition_cache)),
@@ -405,16 +405,20 @@ impl ClarityDatastore {
             StoreType::Contract,
             ContractDataVarName::ContractSrc.as_str(),
         );
-        let contract_src =
-            self.get_metadata(contract_id, &contract_src_key)?
-                .ok_or_else(|| VmInternalError::Expect(format!(
+        let contract_src = self
+            .get_metadata(contract_id, &contract_src_key)?
+            .ok_or_else(|| {
+                VmInternalError::Expect(format!(
                     "No contract source found for contract: {contract_id}",
-                )))?;
+                ))
+            })?;
 
         let mut contract_context = context_str
-            .ok_or_else(|| VmInternalError::Expect(format!(
-                "No contract context found for contract: {contract_id}",
-            )))
+            .ok_or_else(|| {
+                VmInternalError::Expect(format!(
+                    "No contract context found for contract: {contract_id}",
+                ))
+            })
             .and_then(|s| {
                 serde_json::from_str::<ContractContextResponse>(&s).map_err(|e| {
                     VmInternalError::Expect(format!("Failed to parse contract context: {e}"))
@@ -425,9 +429,11 @@ impl ClarityDatastore {
 
         let analysis = self
             .get_metadata(contract_id, AnalysisDatabase::storage_key())?
-            .ok_or_else(|| VmInternalError::Expect(format!(
-                "No analysis metadata found for contract: {contract_id}",
-            )))
+            .ok_or_else(|| {
+                VmInternalError::Expect(format!(
+                    "No analysis metadata found for contract: {contract_id}",
+                ))
+            })
             .and_then(|s| {
                 serde_json::from_str::<ContractAnalysis>(&s).map_err(|e| {
                     VmInternalError::Expect(format!("Failed to parse analysis metadata: {e}"))
@@ -730,7 +736,7 @@ impl Datastore {
 
         let stacks_block = StacksBlockInfo {
             block_header_hash: BlockHeaderHash(bytes),
-            burn_block_header_hash: burn_block_hashes.header_hash.clone(),
+            burn_block_header_hash: burn_block_hashes.header_hash,
             stacks_block_time: genesis_time + SECONDS_BETWEEN_STACKS_BLOCKS,
         };
 
@@ -744,7 +750,7 @@ impl Datastore {
         )]);
         let tenure_height_at_stacks_height = HashMap::from([(0, 0)]);
         let stacks_height_at_tenure_height = HashMap::from([(0, 0)]);
-        let burn_blocks = HashMap::from([(burn_block_header_hash.clone(), burn_block.clone())]);
+        let burn_blocks = HashMap::from([(burn_block_header_hash.clone(), burn_block)]);
         let stacks_blocks = HashMap::from([(id.clone(), stacks_block)]);
 
         Datastore {

@@ -327,8 +327,8 @@ fn run_sdk_request_loop(
                 // Reject requests for a different project so callers get a clear
                 // error rather than silently using the wrong manifest.
                 {
-                    let req_canon =
-                        std::fs::canonicalize(&resolved_path).unwrap_or_else(|_| resolved_path.clone());
+                    let req_canon = std::fs::canonicalize(&resolved_path)
+                        .unwrap_or_else(|_| resolved_path.clone());
                     let srv_canon = std::fs::canonicalize(manifest_path)
                         .unwrap_or_else(|_| manifest_path.clone());
                     if req_canon != srv_canon {

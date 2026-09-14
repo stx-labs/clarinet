@@ -597,7 +597,7 @@ mod tests {
             Err(EncryptionError::MissingData)
         ));
 
-        let mut buf = encrypted.clone();
+        let mut buf = encrypted;
         buf.truncate(AES_GCM_NONCE_SIZE + 1);
         assert!(matches!(
             decrypt(&buf, password, strength),

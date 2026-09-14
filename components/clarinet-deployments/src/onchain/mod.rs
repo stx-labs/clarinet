@@ -1067,7 +1067,7 @@ mod tests {
 
         let source_id = format!("{SBTC_MAINNET_ADDRESS}.sbtc-token");
         let testnet_id = format!("{SBTC_TESTNET_ADDRESS}.sbtc-token");
-        contract_ids.insert((source_id.clone(), testnet_id.clone()));
+        contract_ids.insert((source_id.clone(), testnet_id));
 
         assert_eq!(
             contract_ids.len(),

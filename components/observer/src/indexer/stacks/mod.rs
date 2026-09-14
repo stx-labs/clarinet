@@ -191,7 +191,7 @@ impl NewEvent {
             let data: STXTransferEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::STXTransferEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::STXTransferEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -218,7 +218,7 @@ impl NewEvent {
             let data: NFTTransferEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::NFTTransferEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::NFTTransferEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -263,7 +263,7 @@ impl NewEvent {
             let data: DataMapInsertEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::DataMapInsertEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::DataMapInsertEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -272,7 +272,7 @@ impl NewEvent {
             let data: DataMapUpdateEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::DataMapUpdateEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::DataMapUpdateEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -281,7 +281,7 @@ impl NewEvent {
             let data: DataMapDeleteEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::DataMapDeleteEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::DataMapDeleteEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -290,7 +290,7 @@ impl NewEvent {
             let data: SmartContractEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::SmartContractEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::SmartContractEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },

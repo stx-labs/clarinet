@@ -1481,7 +1481,7 @@ impl Session {
                     };
                     formatted_methods.push(format!("({method_name}{formatted_args})"));
                 }
-                let formatted_spec = formatted_methods.join("\n").to_string();
+                let formatted_spec = formatted_methods.join("\n");
 
                 [contract_id_str, formatted_spec]
             })
@@ -3125,10 +3125,7 @@ mod tests {
 
         let contract_identifier_str =
             if let EvaluationResult::Contract(contract_evaluation_result) = result {
-                contract_evaluation_result
-                    .contract
-                    .contract_identifier
-                    .clone()
+                contract_evaluation_result.contract.contract_identifier
             } else {
                 panic!("didn't get EvaluationResult::Contract");
             };
@@ -3182,7 +3179,7 @@ mod tests {
         // if any of the expected failures succeeded, this will fail
         let balance = session
             .interpreter
-            .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared());
+            .get_balance_for_account(&recipient, &asset_identifier.sugared());
         assert_eq!(balance, 11100);
     }
 
