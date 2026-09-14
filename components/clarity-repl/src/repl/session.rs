@@ -249,11 +249,8 @@ pub enum CallKind {
 #[derive(Clone)]
 pub struct Session {
     pub settings: SessionSettings,
-    /// Shared, not owned: the boot set is ~36 MB of sources, ASTs and analyses
-    /// that no clone ever mutates except through `update_epoch`, which forks it
-    /// only when an epoch transition actually installs something. Cloning a
-    /// session is a routine operation — the LSP does it once per save — and a
-    /// deep copy here dominated it.
+    /// Shared, not owned: ~36 MB of sources, ASTs and analyses that only
+    /// `update_epoch` mutates, against a clone per LSP save.
     pub boot_contracts: Rc<ExecutionResultMap>,
     pub contracts: BTreeMap<QualifiedContractIdentifier, ParsedContract>,
     pub interpreter: ClarityInterpreter,
@@ -3273,10 +3270,8 @@ mod tests {
         );
     }
 
-    /// Clones share one `Rc` boot set, so an epoch transition has to fork it
-    /// before extending. Without the fork a session would observe boot
-    /// contracts installed by an unrelated clone; with an unconditional fork
-    /// the sharing that makes `Session::clone` cheap would be lost.
+    /// An unguarded fork would leak boot contracts between clones; an
+    /// unconditional one would lose the sharing that makes `clone` cheap.
     #[test]
     fn update_epoch_forks_the_boot_set_it_shares_with_a_clone() {
         let mut base = Session::new(SessionSettings::default());

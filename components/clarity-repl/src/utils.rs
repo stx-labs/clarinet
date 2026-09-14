@@ -85,20 +85,15 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     }
 }
 
-/// Whether `source` could carry an `#[env(...)]` annotation, decided without
-/// parsing it. Mirrors what `AnnotationKind` accepts: a literal `#[`, then a
-/// name that trims to `env` before the opening `(`.
+/// Whether `source` could carry an `#[env(...)]` annotation, without parsing it.
+/// Mirrors [`AnnotationKind`]: a literal `#[`, then a name that trims to `env`
+/// before the opening `(`.
 ///
-/// Only an over-approximation is safe. A source this rejects is never parsed,
-/// so it never reports a parse failure either — and [`remove_env_simnet`] is
-/// what stops simnet-only code reaching an on-chain network, so a source it
-/// cannot strip has to be the caller's error rather than a silent no-op.
-/// Rejecting only sources that cannot carry the annotation at all keeps that
-/// error tied to the annotation instead of to whether the file happens to
-/// mention `env` somewhere unrelated.
+/// Must over-approximate: a rejected source is never parsed, so it never reports
+/// a parse error either, and [`remove_env_simnet`] must not silently no-op on a
+/// source it cannot strip before an on-chain broadcast.
 fn might_carry_env_annotation(source: &str) -> bool {
-    source.match_indices("#[").any(|(index, matched)| {
-        let rest = &source[index + matched.len()..];
+    source.split("#[").skip(1).any(|rest| {
         rest.find('(')
             .is_some_and(|open| rest[..open].trim() == "env")
     })
@@ -106,10 +101,6 @@ fn might_carry_env_annotation(source: &str) -> bool {
 
 /// Returns the spans of all `#[env(simnet)]` annotated blocks in the source.
 /// Each span covers from the annotation comment through the annotated expression.
-///
-/// Sources that cannot carry the annotation are reported as having no spans
-/// without being parsed — see [`might_carry_env_annotation`], which owns that
-/// judgement and the reason it has to stay conservative.
 pub fn get_env_simnet_spans(source: &str) -> Result<Vec<Span>, String> {
     if !might_carry_env_annotation(source) {
         return Ok(Vec::new());
@@ -206,9 +197,7 @@ mod tests {
     /// Unbalanced parens: `parse_collect_diagnostics` reports failure.
     const UNPARSEABLE: &str = "(define-public (broken";
 
-    /// A source that cannot be parsed cannot be stripped either, and callers
-    /// broadcasting on-chain depend on hearing about that rather than
-    /// silently publishing whatever the annotation was hiding.
+    /// An unstrippable source must surface as an error, not a silent pass.
     #[test]
     fn unparseable_source_carrying_the_annotation_is_an_error() {
         let source = format!(";; #[env(simnet)]\n{UNPARSEABLE}");
@@ -216,9 +205,8 @@ mod tests {
         assert!(remove_env_simnet(&source).is_err());
     }
 
-    /// The skip has to key on the annotation's shape, not on loose substrings:
-    /// `#[allow(...)]` and the word "env" both appear here without any
-    /// `#[env(...)]` to strip, so there is nothing to report.
+    /// The skip keys on the annotation's shape, not on the substrings `#[` and
+    /// `env` — both appear here with no `#[env(...)]` to strip.
     #[test]
     fn unparseable_source_without_the_annotation_is_not_an_error() {
         let source = format!(";; reads env vars\n;; #[allow(unchecked_data)]\n{UNPARSEABLE}");

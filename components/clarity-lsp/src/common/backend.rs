@@ -53,8 +53,8 @@ where
     // `mem::take` would be cheaper, but then a `build_state` error would
     // require manually restoring the cache. We eat the clone for safety.
     let cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
-    // Sessions are too expensive to clone for safety the way the AST cache is,
-    // so this one really is moved out — and put back below on every path.
+    // Moved out, not cloned like the AST cache — a `Session` is too expensive —
+    // and put back below on every path.
     let mut base_sessions = editor_state.try_write(|es| std::mem::take(&mut es.base_sessions))?;
 
     let mut protocol_state = ProtocolState::new();
@@ -1488,16 +1488,10 @@ mod lsp_tests {
         );
     }
 
-    /// Regression test: repeated saves must reuse the cached base session.
-    ///
-    /// `ContractSaved` calls `clear_protocol_associated_with_contract` before
-    /// rebuilding, and `build_and_commit` moves `base_sessions` out of the
-    /// editor state and back. Either step is an easy place to drop the cache
-    /// by accident — and nothing else would notice, because a dropped entry is
-    /// rebuilt within the same save and looks identical afterwards. Asserting
-    /// on the hit count is what distinguishes "reused" from "silently
-    /// re-interpreted the whole boot contract set" (~50 ms per save); a count
-    /// of builds would not, since dropping the entry resets it too.
+    /// `ContractSaved` clears protocol state and `build_and_commit` moves
+    /// `base_sessions` out and back — either can drop the cache unnoticed, since
+    /// a dropped entry is rebuilt within the same save. Only the hit count tells
+    /// a reuse from a silent ~50 ms rebuild.
     #[tokio::test]
     async fn test_saves_reuse_the_cached_base_session() {
         let source = indoc! {r#"
@@ -1514,9 +1508,8 @@ mod lsp_tests {
         .await
         .expect("first save failed");
 
-        // Save the path the first save indexed, not the one it was handed, so
-        // the next two take the `clear_protocol_associated_with_contract`
-        // branch — the one that resets protocol state before rebuilding.
+        // Use the path the first save indexed, so the next two take the
+        // `clear_protocol_associated_with_contract` branch.
         let indexed = editor_state_input
             .try_read(|es| es.contracts_lookup.keys().next().cloned())
             .unwrap()
@@ -1533,7 +1526,7 @@ mod lsp_tests {
         }
 
         let (entries, hits) = editor_state_input
-            .try_read(|es| (es.base_sessions.len(), es.base_sessions.hits()))
+            .try_read(|es| (es.base_sessions.entries.len(), es.base_sessions.hits()))
             .unwrap();
 
         assert_eq!(entries, 1, "the manifest owns exactly one base session");

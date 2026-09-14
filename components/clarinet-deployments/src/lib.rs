@@ -283,14 +283,11 @@ static IMPLICIT_BATCH: TransactionsBatchSpecification = TransactionsBatchSpecifi
     epoch: None,
 };
 
-/// A plan with nothing to deploy pins no epoch, which would otherwise leave
-/// the session on the datastore default (epoch 2.05) — before every boot
-/// contract that matters. [`IMPLICIT_BATCH`] routes that case through the same
-/// epoch fallback as a batch that carries no epoch of its own.
-///
-/// Not for remote-data sessions: their state comes from the network, and
-/// `Session::new` deliberately deploys no boot contracts. Advancing the
-/// epoch would install them anyway, since `update_epoch` has no such guard.
+/// An empty plan pins no epoch, leaving the session on the datastore default
+/// (2.05) — before every boot contract that matters; [`IMPLICIT_BATCH`] routes
+/// it through the same epoch fallback. Excluded for remote-data sessions: their
+/// state comes from the network, and `update_epoch` would install the boot
+/// contracts `Session::new` deliberately skipped.
 fn plan_batches(
     remote_data_enabled: bool,
     deployment: &DeploymentSpecification,
@@ -306,10 +303,8 @@ fn batch_epoch(batch: &TransactionsBatchSpecification) -> StacksEpochId {
     batch.epoch.map(Into::into).unwrap_or(DEFAULT_EPOCH)
 }
 
-/// Bring `session` to the state the plan's first batch executes in: genesis
-/// accounts, the first chain tip, and the boot contracts that batch's epoch
-/// installs. Depends on no contract source, which is what [`BaseSessionCache`]
-/// exploits.
+/// Advances `session` to the state the plan's first batch executes in. Reads no
+/// contract source, which is what [`BaseSessionCache`] exploits.
 fn prepare_session_for_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
@@ -323,26 +318,14 @@ fn prepare_session_for_deployment_plan(
     }
 }
 
-/// A session already advanced by `prepare_session_for_deployment_plan`, and the
-/// only way to reach [`resume_session_with_deployment_plan`].
-///
-/// `resume` skips the first batch's epoch advance because `prepare` performed
-/// it. Handing it a session that never went through `prepare` would leave the
-/// session on the datastore default epoch with no boot contracts, so the two
-/// are paired here rather than in a doc comment: [`BaseSessionCache`] is the
-/// sole constructor, and `resume` consumes the value.
+/// A session advanced by [`prepare_session_for_deployment_plan`]. Only
+/// [`BaseSessionCache`] can build one, so [`resume_session_with_deployment_plan`]
+/// — which skips the first batch's epoch advance because `prepare` did it —
+/// cannot be handed a session that skipped that step.
 pub struct PreparedSession(Session);
 
-impl std::ops::Deref for PreparedSession {
-    type Target = Session;
-
-    fn deref(&self) -> &Session {
-        &self.0
-    }
-}
-
-/// Everything `prepare_session_for_deployment_plan` reads. Equal keys mean
-/// equal base sessions, which is what makes [`BaseSessionCache`] sound.
+/// Everything `prepare_session_for_deployment_plan` reads: equal keys mean equal
+/// base sessions.
 #[derive(Clone, PartialEq)]
 struct BaseSessionKey {
     settings: SessionSettings,
@@ -364,14 +347,10 @@ impl BaseSessionKey {
     }
 }
 
-/// Holds the session `prepare_session_for_deployment_plan` produces so a
-/// caller replaying the same plan can clone it instead of rebuilding it.
-///
-/// Interpreting the boot contract set dominates that setup — on a 50-contract
-/// project it is ~50 ms against ~6 ms to clone the finished session — and none
-/// of it depends on contract sources, so an edit never invalidates it. What
-/// does invalidate it is a change to the session settings, the genesis spec or
-/// the epoch the first batch pins, all of which the key covers.
+/// Caches the session `prepare_session_for_deployment_plan` produces: cloning it
+/// costs ~6 ms against ~50 ms to re-interpret the boot contract set on a
+/// 50-contract project. No contract source feeds into it, so an edit never
+/// invalidates it.
 #[derive(Clone, Default)]
 pub struct BaseSessionCache {
     entry: Option<(BaseSessionKey, Session)>,
@@ -395,23 +374,21 @@ impl BaseSessionCache {
         settings: SessionSettings,
         deployment: &DeploymentSpecification,
     ) -> PreparedSession {
-        let key = BaseSessionKey::new(settings.clone(), deployment);
+        let key = BaseSessionKey::new(settings, deployment);
 
         if let Some((_, session)) = self.entry.as_ref().filter(|(cached, _)| *cached == key) {
             self.hits += 1;
             return PreparedSession(session.clone());
         }
 
-        let mut session = Session::new(settings);
+        let mut session = Session::new(key.settings.clone());
         prepare_session_for_deployment_plan(&mut session, deployment);
         self.entry = Some((key, session.clone()));
         PreparedSession(session)
     }
 
-    /// How many times this cache has answered without rebuilding. Counted
-    /// rather than derived so a caller can tell "reused the base session" from
-    /// "silently re-interpreted the whole boot contract set" — the two are
-    /// otherwise indistinguishable after the fact, and differ by ~50 ms.
+    /// Times this cache answered without rebuilding — the only signal that
+    /// distinguishes a reuse from a silent ~50 ms rebuild.
     pub fn hits(&self) -> u32 {
         self.hits
     }
@@ -2138,8 +2115,11 @@ mod tests {
         }
     }
 
-    fn deployer_balance(session: &Session) -> u128 {
-        session.interpreter.get_balance_for_account(DEPLOYER, "STX")
+    fn deployer_balance(session: &PreparedSession) -> u128 {
+        session
+            .0
+            .interpreter
+            .get_balance_for_account(DEPLOYER, "STX")
     }
 
     #[test]
@@ -2152,8 +2132,8 @@ mod tests {
 
         assert_eq!(deployer_balance(&hit), deployer_balance(&miss));
         assert_eq!(
-            hit.boot_contracts.keys().collect::<Vec<_>>(),
-            miss.boot_contracts.keys().collect::<Vec<_>>(),
+            hit.0.boot_contracts.keys().collect::<Vec<_>>(),
+            miss.0.boot_contracts.keys().collect::<Vec<_>>(),
             "a cached base must carry the same boot set as a fresh one"
         );
     }
@@ -2171,7 +2151,7 @@ mod tests {
         let second = cache.prepared_session(SessionSettings::default(), &deployment);
         assert_eq!(deployer_balance(&second), 4_200);
         assert_eq!(
-            second.interpreter.datastore.get_current_epoch(),
+            second.0.interpreter.datastore.get_current_epoch(),
             StacksEpochId::Epoch31
         );
     }
@@ -2204,11 +2184,11 @@ mod tests {
         let late_session = cache.prepared_session(SessionSettings::default(), &late);
 
         assert_eq!(
-            late_session.interpreter.datastore.get_current_epoch(),
+            late_session.0.interpreter.datastore.get_current_epoch(),
             StacksEpochId::Epoch31
         );
         assert!(
-            late_session.boot_contracts.len() > early_session.boot_contracts.len(),
+            late_session.0.boot_contracts.len() > early_session.0.boot_contracts.len(),
             "a later epoch installs more boot contracts, so the base cannot be reused"
         );
     }

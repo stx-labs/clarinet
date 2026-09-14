@@ -261,60 +261,38 @@ pub struct ContractMetadata {
     pub deployer: ContractDeployer,
 }
 
-/// The [`BaseSessionCache`] of each of the last [`CAPACITY`] manifests built.
-///
-/// Capped because an entry is expensive to hold and nothing else would ever
-/// drop one: `clear_protocol` runs on every save, so it cannot double as the
-/// eviction hook, and there is no notification for "this manifest is done".
-/// Every manifest also builds its own boot contract set — `Session::new`
-/// produces a fresh `Rc` per session, so retained manifests hold a copy each
-/// rather than sharing one — which is tens of megabytes apiece in a wasm heap
-/// that never returns memory.
-///
-/// [`CAPACITY`]: Self::CAPACITY
+/// Per-manifest [`BaseSessionCache`], capped at `CAPACITY`: each entry holds its
+/// own boot contract set (tens of MB in a wasm heap that never returns memory),
+/// and no LSP notification says when a manifest is done, so nothing else would
+/// ever drop one.
 #[derive(Clone, Default, Debug)]
 pub struct BaseSessionCaches {
     /// Least recently used first.
-    entries: Vec<(PathBuf, BaseSessionCache)>,
+    pub(crate) entries: Vec<(PathBuf, BaseSessionCache)>,
 }
 
 impl BaseSessionCaches {
-    /// Manifests kept at once. Editing moves between a couple of projects at
-    /// most, and evicting one only costs it the rebuild that every save paid
-    /// before the cache existed.
+    /// Editing moves between a couple of projects at most.
     const CAPACITY: usize = 2;
 
-    /// The cache for `manifest_location`, created if absent, evicting the
-    /// least recently used entry to stay within [`Self::CAPACITY`].
+    /// The cache for `manifest_location`, created if absent, evicting the least
+    /// recently used entry.
     pub fn get_mut(&mut self, manifest_location: &Path) -> &mut BaseSessionCache {
-        match self
+        let entry = match self
             .entries
             .iter()
             .position(|(path, _)| path == manifest_location)
         {
-            Some(index) => {
-                let entry = self.entries.remove(index);
-                self.entries.push(entry);
-            }
-            None => {
-                if self.entries.len() >= Self::CAPACITY {
-                    self.entries.remove(0);
-                }
-                let entry = (manifest_location.to_path_buf(), BaseSessionCache::default());
-                self.entries.push(entry);
-            }
+            Some(index) => self.entries.remove(index),
+            None => (manifest_location.to_path_buf(), BaseSessionCache::default()),
+        };
+
+        if self.entries.len() >= Self::CAPACITY {
+            self.entries.remove(0);
         }
+        self.entries.push(entry);
 
-        // Both arms push the entry we want, so it is the most recent one.
         &mut self.entries.last_mut().expect("just pushed").1
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 
     /// Hits across every retained manifest.
@@ -332,9 +310,8 @@ pub struct EditorState {
     /// Parsed ASTs keyed by (contract path, environment). Reused by
     /// `build_state` to skip re-parsing files whose source hasn't changed.
     pub ast_cache: HashMap<(PathBuf, Environment), CachedContractAST>,
-    /// Genesis accounts + boot contracts per manifest. Only contract sources
-    /// differ between environments and the base session reads none of them, so
-    /// unlike `ast_cache` this is not keyed by `Environment`.
+    /// Genesis accounts + boot contracts per manifest. Unlike `ast_cache` it is
+    /// not keyed by `Environment`: environments differ only in contract sources.
     pub base_sessions: BaseSessionCaches,
 }
 
@@ -940,8 +917,6 @@ pub async fn build_state(
     // On any error we just drop it — the caller's original cache is
     // untouched, so no restore step is needed.
     mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
-    // Borrowed, not moved like `cached_asts`: a `Session` is too expensive to
-    // clone for safety the way the AST cache does.
     base_sessions: &mut BaseSessionCaches,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
@@ -1291,9 +1266,6 @@ mod tests {
         PathBuf::from(format!("/{name}/Clarinet.toml"))
     }
 
-    /// The cap is the whole point of the type: without it a long-lived editor
-    /// session retains a booted `Session`, boot contract set included, for
-    /// every manifest it has ever built.
     #[test]
     fn base_session_caches_evict_the_least_recently_used_manifest() {
         let mut caches = BaseSessionCaches::default();
@@ -1301,7 +1273,7 @@ mod tests {
             caches.get_mut(&manifest(name));
         }
 
-        assert_eq!(caches.len(), BaseSessionCaches::CAPACITY);
+        assert_eq!(caches.entries.len(), BaseSessionCaches::CAPACITY);
         assert_eq!(
             caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
             vec![&manifest("b"), &manifest("c")],
@@ -1309,8 +1281,6 @@ mod tests {
         );
     }
 
-    /// Eviction is by use, not by insertion: alternating between two projects
-    /// must not evict the one being alternated back to.
     #[test]
     fn base_session_caches_keep_the_manifest_most_recently_used() {
         let mut caches = BaseSessionCaches::default();
@@ -1332,6 +1302,6 @@ mod tests {
         caches.get_mut(&manifest("a"));
         caches.get_mut(&manifest("a"));
 
-        assert_eq!(caches.len(), 1, "one manifest owns one entry");
+        assert_eq!(caches.entries.len(), 1, "one manifest owns one entry");
     }
 }
