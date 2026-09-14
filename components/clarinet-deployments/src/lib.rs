@@ -2115,11 +2115,37 @@ mod tests {
         }
     }
 
+    /// `contractless_deployment` chunked into `batches` batches at one epoch, as
+    /// a project past `tx_chain_limit` is.
+    fn multi_batch_deployment(
+        genesis: GenesisSpecification,
+        epoch: EpochSpec,
+        batches: usize,
+    ) -> DeploymentSpecification {
+        let mut deployment = contractless_deployment(genesis, epoch);
+        deployment
+            .plan
+            .batches
+            .extend((1..batches).map(|id| TransactionsBatchSpecification {
+                id,
+                transactions: vec![],
+                epoch: Some(epoch),
+            }));
+        deployment
+    }
+
     fn deployer_balance(session: &PreparedSession) -> u128 {
         session
             .0
             .interpreter
             .get_balance_for_account(DEPLOYER, "STX")
+    }
+
+    fn stacks_height(session: &Session) -> u32 {
+        session
+            .interpreter
+            .datastore
+            .get_current_stacks_block_height()
     }
 
     #[test]
@@ -2153,6 +2179,42 @@ mod tests {
         assert_eq!(
             second.0.interpreter.datastore.get_current_epoch(),
             StacksEpochId::Epoch31
+        );
+    }
+
+    /// `prepare` performs the first batch's tip advance and `run_deployment_plan`
+    /// skips it for batch 0 only, so an N-batch plan must advance the tip exactly
+    /// N-1 further times. One batch cannot tell a correct skip from a missing
+    /// advance; three can. Spending the base first also pins that a reused one
+    /// restarts where it was cached rather than where the last run ended.
+    #[test]
+    fn cached_multi_batch_plan_advances_the_tip_once_per_batch() {
+        const BATCHES: usize = 3;
+        let deployment =
+            multi_batch_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1, BATCHES);
+        let mut cache = BaseSessionCache::default();
+
+        let first = cache.prepared_session(SessionSettings::default(), &deployment);
+        let base_height = stacks_height(&first.0);
+        let (spent, _) = resume_session_with_deployment_plan(first, &deployment, None);
+        assert_eq!(
+            stacks_height(&spent),
+            base_height + BATCHES as u32 - 1,
+            "every batch past the first advances the tip exactly once"
+        );
+
+        let second = cache.prepared_session(SessionSettings::default(), &deployment);
+        assert_eq!(
+            stacks_height(&second.0),
+            base_height,
+            "a reused base must restart where it was cached"
+        );
+
+        let (cached, _) = resume_session_with_deployment_plan(second, &deployment, None);
+        assert_eq!(stacks_height(&cached), stacks_height(&spent));
+        assert_eq!(
+            cached.interpreter.get_balance_for_account(DEPLOYER, "STX"),
+            4_200
         );
     }
 
