@@ -323,7 +323,7 @@ impl ClarityDatastore {
         self.local_accounts = local_accounts;
     }
 
-    fn is_key_from_local_account(&mut self, key: &str) -> bool {
+    fn is_key_from_local_account(&self, key: &str) -> bool {
         let parts: Vec<&str> = key.split("::").collect();
         if let Ok(principal) = PrincipalData::parse(parts[1]) {
             let standard_principal = match principal {

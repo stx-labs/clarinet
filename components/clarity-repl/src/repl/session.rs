@@ -433,11 +433,7 @@ impl Session {
         QualifiedContractIdentifier::parse(&contract_id).map_err(|e| e.to_string())
     }
     #[cfg(not(target_arch = "wasm32"))]
-    fn contract_successfully_stored(
-        &mut self,
-        output: &mut Vec<String>,
-        contract: &ParsedContract,
-    ) {
+    fn contract_successfully_stored(&self, output: &mut Vec<String>, contract: &ParsedContract) {
         // Handle the successful storage of the contract
         let snippet = green!(
             "→ {} contract successfully stored.",

@@ -76,7 +76,7 @@ impl<'a> CallChecker<'a> {
     }
 
     fn generate_diagnostic(
-        &mut self,
+        &self,
         expr: &SymbolicExpression,
         name: &str,
         expected: usize,
