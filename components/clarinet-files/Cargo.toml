@@ -36,3 +36,6 @@ json_schema = ["schemars", "clarity-repl/json_schema"]
 [lib]
 name = "clarinet_files"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

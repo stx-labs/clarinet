@@ -70,3 +70,6 @@ wasm-opt = ['-O4']
 debug-js-glue = false
 demangle-name-section = true
 dwarf-debug-info = false
+
+[lints]
+workspace = true

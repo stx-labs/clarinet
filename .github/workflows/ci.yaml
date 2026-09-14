@@ -91,12 +91,7 @@ jobs:
         run: cargo fmt-stacks --check
 
       - name: Run clippy
-        run: >-
-          cargo clippy --workspace --tests --exclude clarinet-sdk-wasm --
-          -D clippy::or_fun_call
-          -D clippy::redundant_clone
-          -D clippy::needless_pass_by_ref_mut
-          -D clippy::needless_collect
+        run: cargo clippy --workspace --tests --exclude clarinet-sdk-wasm
 
   cargo_test:
     name: Run cargo tests
