@@ -219,7 +219,7 @@ impl ClarityDatastore {
         let id = StacksBlockId(height_to_hashed_bytes(height));
         let fs_cache_location = remote_network_info
             .and_then(|r| r.cache_location)
-            .unwrap_or(PathBuf::from("./.cache"))
+            .unwrap_or_else(|| PathBuf::from("./.cache"))
             .join("datastore");
 
         Self {
@@ -249,8 +249,8 @@ impl ClarityDatastore {
         let sortition_cache = HashMap::from([(block.burn_block_hash, sortition)]);
         let fs_cache_location = remote_network_info
             .cache_location
-            .as_ref()
-            .unwrap_or(&PathBuf::from("./.cache"))
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("./.cache"))
             .join("datastore");
 
         let id = block.index_block_hash;
@@ -407,12 +407,12 @@ impl ClarityDatastore {
         );
         let contract_src =
             self.get_metadata(contract_id, &contract_src_key)?
-                .ok_or(VmInternalError::Expect(format!(
+                .ok_or_else(|| VmInternalError::Expect(format!(
                     "No contract source found for contract: {contract_id}",
                 )))?;
 
         let mut contract_context = context_str
-            .ok_or(VmInternalError::Expect(format!(
+            .ok_or_else(|| VmInternalError::Expect(format!(
                 "No contract context found for contract: {contract_id}",
             )))
             .and_then(|s| {
@@ -425,7 +425,7 @@ impl ClarityDatastore {
 
         let analysis = self
             .get_metadata(contract_id, AnalysisDatabase::storage_key())?
-            .ok_or(VmInternalError::Expect(format!(
+            .ok_or_else(|| VmInternalError::Expect(format!(
                 "No analysis metadata found for contract: {contract_id}",
             )))
             .and_then(|s| {
@@ -1013,7 +1013,7 @@ impl Datastore {
             clarity_datastore
                 .chain_tip_at_height
                 .entry(self.stacks_chain_height)
-                .or_insert(id.clone());
+                .or_insert_with(|| id.clone());
             clarity_datastore.open_chain_tip = id.clone();
             *clarity_datastore.current_chain_tip.borrow_mut() = id;
         }

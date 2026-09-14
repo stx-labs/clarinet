@@ -64,7 +64,7 @@ jobs:
             ${{ runner.os }}-${{ github.job }}-
 
       - name: Run clippy
-        run: cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
+        run: cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown -- -D clippy::or_fun_call
 
       # Clippy runs on every workspace crate in the graph, so `-p clarinet-sdk-wasm`
       # covers clarity-repl, clarinet-files and clarinet-deployments too.

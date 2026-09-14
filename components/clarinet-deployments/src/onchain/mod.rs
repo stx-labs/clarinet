@@ -433,7 +433,7 @@ fn encode_transactions(
     let mut next_index = 0;
 
     for batch_spec in deployment.plan.batches.iter() {
-        let epoch = batch_spec.epoch.unwrap_or(DEFAULT_EPOCH.into());
+        let epoch = batch_spec.epoch.unwrap_or_else(|| DEFAULT_EPOCH.into());
         let mut batch = Vec::new();
         for transaction in batch_spec.transactions.iter() {
             if is_emulated(transaction) {

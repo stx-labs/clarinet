@@ -420,7 +420,7 @@ impl ProjectManifest {
             description: project_manifest_file
                 .project
                 .description
-                .unwrap_or("".into()),
+                .unwrap_or_default(),
             authors: project_manifest_file.project.authors.unwrap_or_default(),
             telemetry: project_manifest_file.project.telemetry.unwrap_or(false),
             cache_location,

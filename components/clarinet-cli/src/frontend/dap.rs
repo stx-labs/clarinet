@@ -102,7 +102,7 @@ fn make_session(
         .contracts
         .iter()
         .map(|(contract_id, (_, location))| {
-            let abs = std::fs::canonicalize(location).unwrap_or(location.clone());
+            let abs = std::fs::canonicalize(location).unwrap_or_else(|_| location.clone());
             (contract_id.clone(), abs)
         })
         .collect();
@@ -328,7 +328,7 @@ fn run_sdk_request_loop(
                 // error rather than silently using the wrong manifest.
                 {
                     let req_canon =
-                        std::fs::canonicalize(&resolved_path).unwrap_or(resolved_path.clone());
+                        std::fs::canonicalize(&resolved_path).unwrap_or_else(|_| resolved_path.clone());
                     let srv_canon = std::fs::canonicalize(manifest_path)
                         .unwrap_or_else(|_| manifest_path.clone());
                     if req_canon != srv_canon {

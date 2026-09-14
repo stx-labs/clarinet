@@ -1032,7 +1032,7 @@ impl ClarityInterpreter {
                 contract: parsed_contract,
             })
         } else {
-            let result = value.unwrap_or(Value::none());
+            let result = value.unwrap_or_else(Value::none);
             EvaluationResult::Snippet(SnippetEvaluationResult { result })
         };
 

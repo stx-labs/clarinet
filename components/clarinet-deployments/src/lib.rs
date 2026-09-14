@@ -497,20 +497,27 @@ pub async fn generate_default_deployment_with_cache(
             let stacks_node = network_manifest
                 .network
                 .stacks_node_rpc_address
-                .unwrap_or("https://api.testnet.hiro.so".to_string());
-            let bitcoin_node = network_manifest.network.bitcoin_node_rpc_address.unwrap_or(
-                "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332".to_string(),
-            );
+                .unwrap_or_else(|| "https://api.testnet.hiro.so".to_string());
+            let bitcoin_node = network_manifest
+                .network
+                .bitcoin_node_rpc_address
+                .unwrap_or_else(|| {
+                    "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332"
+                        .to_string()
+                });
             (Some(stacks_node), Some(bitcoin_node))
         }
         StacksNetwork::Mainnet => {
             let stacks_node = network_manifest
                 .network
                 .stacks_node_rpc_address
-                .unwrap_or("https://api.hiro.so".to_string());
-            let bitcoin_node = network_manifest.network.bitcoin_node_rpc_address.unwrap_or(
-                "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332".to_string(),
-            );
+                .unwrap_or_else(|| "https://api.hiro.so".to_string());
+            let bitcoin_node = network_manifest
+                .network
+                .bitcoin_node_rpc_address
+                .unwrap_or_else(|| {
+                    "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332".to_string()
+                });
             (Some(stacks_node), Some(bitcoin_node))
         }
     };
@@ -1004,9 +1011,7 @@ pub async fn generate_default_deployment_with_cache(
         let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
         let mut source = sources
             .get(contract_location.to_string_lossy().as_ref())
-            .ok_or(format!(
-                "Invalid Clarinet.toml, source file not found for: {name}"
-            ))?
+            .ok_or_else(|| format!("Invalid Clarinet.toml, source file not found for: {name}"))?
             .clone();
 
         if environment == Environment::OnChain {

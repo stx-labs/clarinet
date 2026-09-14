@@ -387,12 +387,12 @@ impl Session {
             cmd if cmd.starts_with("::mint_stx") => self.mint_stx(cmd),
             cmd if cmd.starts_with("::mint_ft") => self.mint_ft(cmd),
             cmd if cmd.starts_with("::set_tx_sender") => self.parse_and_set_tx_sender(cmd),
-            cmd if cmd.starts_with("::get_assets_maps") => {
-                self.get_accounts().unwrap_or("No account found".into())
-            }
-            cmd if cmd.starts_with("::get_contracts") => {
-                self.get_contracts().unwrap_or("No contract found".into())
-            }
+            cmd if cmd.starts_with("::get_assets_maps") => self
+                .get_accounts()
+                .unwrap_or_else(|| "No account found".into()),
+            cmd if cmd.starts_with("::get_contracts") => self
+                .get_contracts()
+                .unwrap_or_else(|| "No contract found".into()),
             cmd if cmd.starts_with("::get_burn_block_height") => self.get_burn_block_height(),
             cmd if cmd.starts_with("::get_stacks_block_height") => self.get_block_height(),
             cmd if cmd.starts_with("::get_block_height") => self.get_block_height(),
@@ -549,7 +549,7 @@ impl Session {
         let result = self.eval_with_hooks(snippet.to_string(), eval_hooks, cost_track);
         let mut output = Vec::<String>::new();
         let formatted_lines: Vec<String> = snippet.lines().map(|l| l.to_string()).collect();
-        let contract_name = name.unwrap_or("<stdin>".to_string());
+        let contract_name = name.unwrap_or_else(|| "<stdin>".to_string());
 
         match result {
             Ok(result) => {
