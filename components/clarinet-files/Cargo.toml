@@ -33,6 +33,9 @@ wasm-bindgen-futures = { workspace = true }
 [features]
 json_schema = ["schemars", "clarity-repl/json_schema"]
 
+[dev-dependencies]
+indoc = { workspace = true }
+
 [lib]
 name = "clarinet_files"
 path = "src/lib.rs"
