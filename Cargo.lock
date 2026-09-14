@@ -711,7 +711,6 @@ dependencies = [
  "libsecp256k1",
  "mockito",
  "pretty_assertions",
- "rand 0.9.4",
  "reqwest",
  "serde",
  "serde_json",
@@ -792,6 +791,7 @@ dependencies = [
  "bip32",
  "bip39",
  "bs58",
+ "divan",
  "libsecp256k1",
  "rand 0.9.4",
 ]
@@ -836,6 +836,7 @@ dependencies = [
  "clarinet-deployments",
  "clarinet-files",
  "clarinet-format",
+ "clarinet-utils",
  "clarity",
  "clarity-repl",
  "clarity-static-cost",

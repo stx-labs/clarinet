@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 use clarinet_deployments::{generate_default_deployment_with_cache, CachedContractAST};
 use clarinet_files::{FileAccessor, FileAccessorResult, ProjectManifest, StacksNetwork};
+use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC;
 use clarity_repl::utils::Environment;
 use divan::Bencher;
 use indoc::{formatdoc, indoc};
@@ -127,16 +128,21 @@ const CONTRACT_FUNCTIONS: &str = indoc! {r#"
 /// lost in per-call fixed overhead.
 const FUNCTIONS_PER_CONTRACT: usize = 6;
 
-const DEVNET_TOML: &str = indoc! {r#"
-    [network]
-    name = "devnet"
-    deployment_fee_rate = 10
+/// The deployer wallet has precomputed keys in `clarinet-utils`; using the
+/// shared constant keeps it that way, so this bench keeps measuring the AST
+/// cache rather than an accidental PBKDF2 derivation.
+fn devnet_toml() -> String {
+    formatdoc! {r#"
+        [network]
+        name = "devnet"
+        deployment_fee_rate = 10
 
-    [accounts.deployer]
-    mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
-    balance = 100_000_000_000_000
-    sbtc_balance = 1_000_000_000
-"#};
+        [accounts.deployer]
+        mnemonic = "{DEFAULT_DEPLOYER_MNEMONIC}"
+        balance = 100_000_000_000_000
+        sbtc_balance = 1_000_000_000
+    "#}
+}
 
 fn build_manifest(n: usize) -> String {
     let mut out = String::from(indoc! {r#"
@@ -185,7 +191,7 @@ impl BenchFileAccessor {
     fn new(n: usize, modified_index: Option<usize>) -> Self {
         let mut files = HashMap::new();
         files.insert(MANIFEST_PATH.to_string(), build_manifest(n));
-        files.insert(DEVNET_PATH.to_string(), DEVNET_TOML.to_string());
+        files.insert(DEVNET_PATH.to_string(), devnet_toml());
         for i in 0..n {
             let salt = if Some(i) == modified_index {
                 "_modified"

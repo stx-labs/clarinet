@@ -8,13 +8,11 @@ use std::path::Path;
 use clarinet_deployments::generate_default_deployment;
 use clarinet_deployments::types::TransactionSpecification;
 use clarinet_files::{ProjectManifest, StacksNetwork};
+use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC as TEST_MNEMONIC;
 use clarity_repl::repl::boot::{SBTC_CONTRACTS_NAMES, SBTC_MAINNET_ADDRESS};
 use clarity_repl::utils::Environment;
 use indoc::formatdoc;
 use tempfile::TempDir;
-
-/// Well-known Clarinet test mnemonic, matching the generated settings files.
-const TEST_MNEMONIC: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
 
 /// Write a project with a single contract and no requirements, the way
 /// `clarinet new` followed by `clarinet contract new` would.

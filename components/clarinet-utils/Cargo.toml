@@ -17,3 +17,10 @@ rand.workspace = true
 [lib]
 name = "clarinet_utils"
 path = "src/lib.rs"
+
+[dev-dependencies]
+divan = { workspace = true }
+
+[[bench]]
+name = "bip32"
+harness = false

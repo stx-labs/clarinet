@@ -1,15 +1,18 @@
 import {
-  DidOpenTextDocumentParams,
   DidChangeTextDocumentNotification,
   DidCloseTextDocumentNotification,
   DidOpenTextDocumentNotification,
   DocumentSymbolRequest,
   InitializeRequest,
 } from "vscode-languageserver";
-import type { Connection } from "vscode-languageserver";
+import type {
+  Connection,
+  DidOpenTextDocumentParams,
+} from "vscode-languageserver";
 
 // this type is the same for the browser and node but node isn't always built in dev
-import { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
+// it has to stay type-only, `server/tests` loads this file unbuilt
+import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
 
@@ -52,21 +55,23 @@ export function initConnection(
     };
   }
 
+  // the in-flight entry stays at the front of the queue, `onNotification` and
+  // `onRequest` read a non-empty queue as "the bridge is busy"
   const notifications: [string, unknown][] = [];
-  async function consumeNotification() {
-    const notification = notifications[notifications.length - 1];
-    if (!notification) return;
-    const [method] = notification;
-    const logTimings = startTimingsLog(method);
-    try {
-      await bridge.onNotification(...notification);
-    } catch (err) {
-      console.warn(err);
-    } finally {
-      logTimings?.();
+  async function consumeNotifications() {
+    while (notifications.length > 0) {
+      const [method, params] = notifications[0];
+      const logTimings = startTimingsLog(method);
+      try {
+        await bridge.onNotification(method, params);
+      } catch (err) {
+        console.warn(err);
+      } finally {
+        // dequeue even on failure, a leftover entry would stall the queue
+        notifications.shift();
+        logTimings?.();
+      }
     }
-    notifications.pop();
-    if (notifications.length > 0) consumeNotification();
   }
 
   connection.onNotification((method: string, params: unknown) => {
@@ -84,7 +89,7 @@ export function initConnection(
     }
 
     notifications.push([method, params]);
-    if (notifications.length === 1) consumeNotification();
+    if (notifications.length === 1) consumeNotifications();
   });
 
   connection.onRequest((method: string, params: unknown) => {

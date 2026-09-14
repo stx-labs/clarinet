@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 describe("example tests", () => {
   it("ensures simnet is well initialise", () => {
     // swappool and it's dependencies makes for 7 contracts
-    // + the 34 boot contracts
-    expect(simnet.getContractsInterfaces()).toHaveLength(34 + 7);
+    // + the 30 boot contracts
+    expect(simnet.getContractsInterfaces()).toHaveLength(30 + 7);
   });
 });

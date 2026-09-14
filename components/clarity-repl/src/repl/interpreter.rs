@@ -2,7 +2,6 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::errors::RuntimeCheckErrorKind;
@@ -1375,7 +1374,8 @@ impl ClarityInterpreter {
         amount: u64,
     ) -> Result<String, String> {
         let final_balance = {
-            let mut global_context = self.get_global_context(DEFAULT_EPOCH, false)?;
+            let epoch = self.datastore.get_current_epoch();
+            let mut global_context = self.get_global_context(epoch, false)?;
 
             global_context.begin();
             let mut cur_balance = global_context
@@ -1404,47 +1404,42 @@ impl ClarityInterpreter {
         &mut self,
         asset_identifier: &AssetIdentifier,
         recipient: &PrincipalData,
-        amount: u64,
+        amount: u128,
     ) -> Result<String, String> {
-        let contract_identifier = asset_identifier.contract_identifier.clone();
-        let token_name = asset_identifier.asset_name.to_string();
+        let contract_identifier = &asset_identifier.contract_identifier;
+        let token_name: &str = &asset_identifier.asset_name;
         let final_balance = {
-            let mut global_context = self.get_global_context(DEFAULT_EPOCH, false)?;
+            let epoch = self.datastore.get_current_epoch();
+            let mut global_context = self.get_global_context(epoch, false)?;
 
             global_context.begin();
 
             let metadata = global_context
                 .database
-                .load_ft(&contract_identifier, &token_name)
+                .load_ft(contract_identifier, token_name)
                 .map_err(|e| {
                     format!("failed to load_ft for {contract_identifier}.{token_name}: {e:?}")
                 })?;
 
             let cur_balance = global_context
                 .database
-                .get_ft_balance(&contract_identifier, &token_name, recipient, Some(&metadata))
+                .get_ft_balance(contract_identifier, token_name, recipient, Some(&metadata))
                 .map_err(|e| format!("failed to get_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
+
+            let final_balance = cur_balance.checked_add(amount).ok_or_else(|| {
+                format!("balance overflow for {contract_identifier}.{token_name} {recipient}")
+            })?;
 
             global_context.database.set_ft_balance(
-                &contract_identifier,
-                &token_name,
+                contract_identifier,
+                token_name,
                 recipient,
-                cur_balance + amount as u128,
+                final_balance,
             ).map_err(|e| format!("failed to set_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
-
-            let final_balance = global_context
-                .database
-                .get_ft_balance(&contract_identifier, &token_name, recipient, Some(&metadata))
-                .map_err(|e| format!("failed to get_ft_balance for {contract_identifier}.{token_name} {recipient}: {e:?}"))?;
 
             global_context
                 .database
-                .checked_increase_token_supply(
-                    &contract_identifier,
-                    &token_name,
-                    amount as u128,
-                    &metadata,
-                )
+                .checked_increase_token_supply(contract_identifier, token_name, amount, &metadata)
                 .map_err(|e| format!("failed to increase token supply for {contract_identifier}.{token_name}: {e:?}"))?;
 
             global_context
@@ -1452,11 +1447,7 @@ impl ClarityInterpreter {
                 .map_err(|e| format!("failed to commit ctx: {e:?}"))?;
             final_balance
         };
-        self.credit_token(
-            recipient.to_string(),
-            asset_identifier.sugared(),
-            amount.into(),
-        );
+        self.credit_token(recipient.to_string(), asset_identifier.sugared(), amount);
         Ok(format!("→ {recipient}: {final_balance} {token_name}"))
     }
 
@@ -1631,6 +1622,7 @@ impl ClarityInterpreter {
 
 #[cfg(test)]
 mod tests {
+    use clarinet_defaults::DEFAULT_EPOCH;
     use clarity::types::chainstate::StacksAddress;
     use clarity::types::Address;
     use clarity::util::hash::hex_bytes;
@@ -1650,6 +1642,84 @@ mod tests {
             settings.unwrap_or_default(),
             None,
         )
+    }
+
+    /// `mint_ft_balance` takes the full `u128` range, so a second mint can
+    /// exceed what the balance can hold. It must fail without writing.
+    #[test]
+    fn minting_ft_past_u128_leaves_the_balance_untouched() {
+        let mut interpreter = get_interpreter(None);
+        let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
+        let token_name = "ctb";
+
+        let contract = ClarityContractBuilder::default()
+            .code_source(format!("(define-fungible-token {token_name})"))
+            .build();
+        deploy_contract(&mut interpreter, &contract).expect("the fixture deploys");
+        let asset_identifier = AssetIdentifier {
+            contract_identifier: contract
+                .expect_resolved_contract_identifier(Some(&interpreter.get_tx_sender())),
+            asset_name: ClarityName::try_from(token_name).unwrap(),
+        };
+
+        interpreter
+            .mint_ft_balance(&asset_identifier, &recipient, u128::MAX)
+            .expect("the first mint fits");
+
+        let error = interpreter
+            .mint_ft_balance(&asset_identifier, &recipient, 1)
+            .expect_err("the second mint overflows");
+        assert!(error.contains("balance overflow"), "{error}");
+
+        // Neither the datastore nor the tracked asset map moved.
+        assert_eq!(
+            interpreter
+                .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared()),
+            u128::MAX
+        );
+        let mut global_context = interpreter
+            .get_global_context(DEFAULT_EPOCH, false)
+            .unwrap();
+        global_context.begin();
+        let metadata = global_context
+            .database
+            .load_ft(&asset_identifier.contract_identifier, token_name)
+            .unwrap();
+        let balance = global_context
+            .database
+            .get_ft_balance(
+                &asset_identifier.contract_identifier,
+                token_name,
+                &recipient,
+                Some(&metadata),
+            )
+            .unwrap();
+        assert_eq!(balance, u128::MAX);
+    }
+
+    /// `credit` consolidates locked STX against the v2/v3/v4 unlock heights,
+    /// and those are gated on the epoch the mint runs at. Pinning a fixed
+    /// epoch would apply the wrong unlock rules to a session below it.
+    #[test]
+    fn minting_stx_runs_at_the_session_epoch() {
+        use clarity::vm::database::ClarityBackingStore;
+
+        let mut interpreter = get_interpreter(None);
+        let epoch = StacksEpochId::Epoch25;
+        assert_ne!(epoch, DEFAULT_EPOCH, "epoch must differ to be meaningful");
+        interpreter
+            .datastore
+            .set_current_epoch(&mut interpreter.clarity_datastore, epoch);
+
+        let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
+        interpreter.mint_stx_balance(recipient, 1_000).unwrap();
+
+        assert_eq!(
+            interpreter
+                .clarity_datastore
+                .get_data("vm-epoch::epoch-version"),
+            Ok(Some(format!("{:08x}", epoch as u32)))
+        );
     }
 
     #[test]
