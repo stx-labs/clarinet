@@ -1695,7 +1695,7 @@ pub fn get_standardized_stacks_receipt(
 }
 
 fn get_mutated_ids(asset_class_id: &str) -> (String, String) {
-    let contract_id = asset_class_id.split("::").collect::<Vec<_>>()[0];
+    let contract_id = asset_class_id.split("::").next().unwrap();
     (asset_class_id.into(), contract_id.into())
 }
 

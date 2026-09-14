@@ -410,8 +410,7 @@ mod tests {
     fn test_random_mnemonic_12() {
         let mnemonic = random_mnemonic();
         let phrase = mnemonic.to_string();
-        let words: Vec<&str> = phrase.split_whitespace().collect();
-        assert_eq!(words.len(), 12);
+        assert_eq!(phrase.split_whitespace().count(), 12);
     }
 
     #[test]
