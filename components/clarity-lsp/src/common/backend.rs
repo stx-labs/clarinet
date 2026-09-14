@@ -1533,12 +1533,7 @@ mod lsp_tests {
         }
 
         let (entries, hits) = editor_state_input
-            .try_read(|es| {
-                (
-                    es.base_sessions.len(),
-                    es.base_sessions.values().map(|c| c.hits()).sum::<u32>(),
-                )
-            })
+            .try_read(|es| (es.base_sessions.len(), es.base_sessions.hits()))
             .unwrap();
 
         assert_eq!(entries, 1, "the manifest owns exactly one base session");
