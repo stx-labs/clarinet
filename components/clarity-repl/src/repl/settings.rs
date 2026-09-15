@@ -46,7 +46,7 @@ pub struct Account {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SessionSettings {
     pub include_costs: bool,
     pub initial_accounts: Vec<Account>,
@@ -103,7 +103,7 @@ pub enum LogPrintEvents {
     None,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Settings {
     pub analysis: analysis::Settings,
     pub remote_data: RemoteDataSettings,
@@ -157,7 +157,7 @@ pub struct RemoteDataSettingsFile {
     use_mainnet_wallets: Option<bool>,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
 pub struct RemoteDataSettings {
     pub enabled: bool,
     #[serde(default)]

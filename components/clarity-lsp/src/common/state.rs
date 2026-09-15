@@ -6,8 +6,7 @@ use std::vec;
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 pub use clarinet_deployments::CachedContractAST;
 use clarinet_deployments::{
-    generate_default_deployment_with_cache, initiate_session_from_manifest,
-    update_session_with_deployment_plan,
+    generate_default_deployment_with_cache, session_settings_from_manifest, BaseSessionCache,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
@@ -261,6 +260,43 @@ pub struct ContractMetadata {
     pub deployer: ContractDeployer,
 }
 
+/// Per-manifest [`BaseSessionCache`], capped at `CAPACITY`: each entry holds its
+/// own boot contract set (tens of MB in a wasm heap that never returns memory),
+/// and no LSP notification says when a manifest is done, so nothing else would
+/// ever drop one.
+#[derive(Clone, Default, Debug)]
+pub struct BaseSessionCaches {
+    /// Least recently used first.
+    pub(crate) entries: Vec<(PathBuf, BaseSessionCache)>,
+}
+
+impl BaseSessionCaches {
+    /// Editing moves between a couple of projects at most.
+    const CAPACITY: usize = 2;
+
+    pub fn get_mut(&mut self, manifest_location: &Path) -> &mut BaseSessionCache {
+        let entry = match self
+            .entries
+            .iter()
+            .position(|(path, _)| path == manifest_location)
+        {
+            Some(index) => self.entries.remove(index),
+            None => (manifest_location.to_path_buf(), BaseSessionCache::default()),
+        };
+
+        if self.entries.len() >= Self::CAPACITY {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+
+        &mut self.entries.last_mut().expect("just pushed").1
+    }
+
+    pub fn hits(&self) -> u32 {
+        self.entries.iter().map(|(_, cache)| cache.hits()).sum()
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct EditorState {
     pub protocols: HashMap<PathBuf, ProtocolState>,
@@ -270,17 +306,14 @@ pub struct EditorState {
     /// Parsed ASTs keyed by (contract path, environment). Reused by
     /// `build_state` to skip re-parsing files whose source hasn't changed.
     pub ast_cache: HashMap<(PathBuf, Environment), CachedContractAST>,
+    /// Genesis accounts + boot contracts per manifest. Unlike `ast_cache` it is
+    /// not keyed by `Environment`: environments differ only in contract sources.
+    pub base_sessions: BaseSessionCaches,
 }
 
 impl EditorState {
     pub fn new() -> EditorState {
-        EditorState {
-            protocols: HashMap::new(),
-            contracts_lookup: HashMap::new(),
-            active_contracts: HashMap::new(),
-            settings: InitializationOptions::default(),
-            ast_cache: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn index_protocol(&mut self, manifest_location: PathBuf, protocol: ProtocolState) {
@@ -880,6 +913,7 @@ pub async fn build_state(
     // On any error we just drop it — the caller's original cache is
     // untouched, so no restore step is needed.
     mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
+    base_sessions: &mut BaseSessionCaches,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -929,9 +963,13 @@ pub async fn build_state(
             new_cache_entries.extend(entries);
         }
 
-        let mut session = initiate_session_from_manifest(&manifest);
-        let contracts =
-            update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
+        let (session, contracts) = base_sessions
+            .get_mut(manifest_location)
+            .run_deployment_plan(
+                session_settings_from_manifest(&manifest),
+                &deployment,
+                Some(&artifacts.asts),
+            );
         for (contract_id, mut result) in contracts.into_iter() {
             let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
                 continue;
@@ -1216,4 +1254,52 @@ async fn get_cost_analysis(
             clarity_repl::uprint!("[LSP] Cost analysis failed with error: {e:?}");
         })
         .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(name: &str) -> PathBuf {
+        PathBuf::from(format!("/{name}/Clarinet.toml"))
+    }
+
+    #[test]
+    fn base_session_caches_evict_the_least_recently_used_manifest() {
+        let mut caches = BaseSessionCaches::default();
+        for name in ["a", "b", "c"] {
+            caches.get_mut(&manifest(name));
+        }
+
+        assert_eq!(caches.entries.len(), BaseSessionCaches::CAPACITY);
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("b"), &manifest("c")],
+            "the first manifest built is the first evicted"
+        );
+    }
+
+    #[test]
+    fn base_session_caches_keep_the_manifest_most_recently_used() {
+        let mut caches = BaseSessionCaches::default();
+        caches.get_mut(&manifest("a"));
+        caches.get_mut(&manifest("b"));
+        caches.get_mut(&manifest("a"));
+        caches.get_mut(&manifest("c"));
+
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("a"), &manifest("c")],
+            "'b' went unused longest, so it is the one to go"
+        );
+    }
+
+    #[test]
+    fn base_session_caches_reuse_the_entry_of_a_known_manifest() {
+        let mut caches = BaseSessionCaches::default();
+        caches.get_mut(&manifest("a"));
+        caches.get_mut(&manifest("a"));
+
+        assert_eq!(caches.entries.len(), 1, "one manifest owns one entry");
+    }
 }

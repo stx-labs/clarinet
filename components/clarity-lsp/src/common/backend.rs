@@ -53,22 +53,32 @@ where
     // `mem::take` would be cheaper, but then a `build_state` error would
     // require manually restoring the cache. We eat the clone for safety.
     let cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
+    // Cloned for the same reason, and it is nearly free: `Session::clone` shares
+    // the boot set through an `Rc` rather than copying it, which puts a whole
+    // cache at ~150 µs against a ~34 ms save. Taking it instead would leave the
+    // editor state holding an empty cache for the duration of the build, to be
+    // restored on a path that a panic, a cancelled future or a failed lock all
+    // skip.
+    let mut base_sessions = editor_state.try_read(|es| es.base_sessions.clone())?;
 
     let mut protocol_state = ProtocolState::new();
-    let new_cache_entries = match build_state(
+    let built = build_state(
         &manifest_location,
         &mut protocol_state,
         file_accessor,
         static_cost_analysis,
         cached_asts,
+        &mut base_sessions,
     )
-    .await
-    {
+    .await;
+
+    let new_cache_entries = match built {
         Ok(entries) => entries,
         Err(e) => return Ok(LspNotificationResponse::error(&e)),
     };
 
     editor_state.try_write(|es| {
+        es.base_sessions = base_sessions;
         es.index_protocol(manifest_location, protocol_state);
         es.ast_cache.extend(new_cache_entries);
         post_commit(es);
@@ -838,6 +848,15 @@ mod lsp_tests {
                 contract,
             }
         }
+
+        /// The same project behind a `Clarinet.toml` that does not parse — the
+        /// cheapest way to make `build_state` fail.
+        fn with_unparsable_manifest(contract: String) -> Self {
+            Self {
+                project_manifest: "[project".to_string(),
+                ..Self::new(contract)
+            }
+        }
     }
 
     impl FileAccessor for TestFileAccessor {
@@ -1478,6 +1497,108 @@ mod lsp_tests {
             diag_count(&second),
             first_count,
             "cache hit should replay parser diagnostics, not drop them"
+        );
+    }
+
+    /// `ContractSaved` clears protocol state and `build_and_commit` moves
+    /// `base_sessions` out and back — either can drop the cache unnoticed, since
+    /// a dropped entry is rebuilt within the same save. Only the hit count tells
+    /// a reuse from a silent ~50 ms rebuild.
+    #[tokio::test]
+    async fn test_saves_reuse_the_cached_base_session() {
+        let source = indoc! {r#"
+            (define-data-var count uint u0)
+        "#};
+        let file_accessor = TestFileAccessor::new(source.to_string());
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&file_accessor),
+        )
+        .await
+        .expect("first save failed");
+
+        // Use the path the first save indexed, so the next two take the
+        // `clear_protocol_associated_with_contract` branch.
+        let indexed = editor_state_input
+            .try_read(|es| es.contracts_lookup.keys().next().cloned())
+            .unwrap()
+            .expect("first save should index the contract");
+
+        for save in 2..=3 {
+            process_notification(
+                LspNotification::ContractSaved(indexed.clone()),
+                &mut editor_state_input,
+                Some(&file_accessor),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("save {save} failed: {e}"));
+        }
+
+        let (entries, hits) = editor_state_input
+            .try_read(|es| (es.base_sessions.entries.len(), es.base_sessions.hits()))
+            .unwrap();
+
+        assert_eq!(entries, 1, "the manifest owns exactly one base session");
+        assert_eq!(
+            hits, 2,
+            "saves 2 and 3 change no setting, wallet or epoch, so both must \
+             reuse the base session built by save 1"
+        );
+    }
+
+    /// A failed build must leave the cache alone: `build_and_commit` works on a
+    /// clone and only commits it on success. Losing it costs only a rebuild —
+    /// silent otherwise — so nothing else would catch a regression here.
+    #[tokio::test]
+    async fn test_a_failed_build_leaves_the_base_session_cache_intact() {
+        let source = "(define-data-var count uint u0)\n".to_string();
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&TestFileAccessor::new(source.clone())),
+        )
+        .await
+        .expect("first save failed");
+
+        let indexed = editor_state_input
+            .try_read(|es| es.contracts_lookup.keys().next().cloned())
+            .unwrap()
+            .expect("first save should index the contract");
+        assert_eq!(
+            editor_state_input
+                .try_read(|es| es.base_sessions.entries.len())
+                .unwrap(),
+            1,
+            "the first save must cache a base session, or there is nothing to lose"
+        );
+
+        let response = process_notification(
+            LspNotification::ContractSaved(indexed),
+            &mut editor_state_input,
+            Some(&TestFileAccessor::with_unparsable_manifest(source)),
+        )
+        .await
+        .expect("a build failure is reported in the response, not returned as Err");
+
+        // Without this the test would pass on a save that quietly succeeded,
+        // never exercising the path it exists to cover.
+        assert!(
+            matches!(response.notification, Some((MessageType::ERROR, _))),
+            "expected the second save to fail, got {:?}",
+            response.notification
+        );
+
+        assert_eq!(
+            editor_state_input
+                .try_read(|es| es.base_sessions.entries.len())
+                .unwrap(),
+            1,
+            "a failed build must not damage the cache it was handed"
         );
     }
 
