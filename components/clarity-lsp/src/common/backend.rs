@@ -845,6 +845,16 @@ mod lsp_tests {
                 contract,
             }
         }
+
+        /// The same project behind a `Clarinet.toml` that does not parse. The
+        /// cheapest way to make `build_state` fail *after* `build_and_commit` has
+        /// already moved `base_sessions` out of the editor state.
+        fn with_unparsable_manifest(contract: String) -> Self {
+            Self {
+                project_manifest: "[project".to_string(),
+                ..Self::new(contract)
+            }
+        }
     }
 
     impl FileAccessor for TestFileAccessor {
@@ -1534,6 +1544,59 @@ mod lsp_tests {
             hits, 2,
             "saves 2 and 3 change no setting, wallet or epoch, so both must \
              reuse the base session built by save 1"
+        );
+    }
+
+    /// `base_sessions` is moved out with `mem::take`, so the put-back has to sit
+    /// above `build_and_commit`'s early return. Losing it costs only a rebuild —
+    /// silent otherwise — so nothing else would catch the ordering drifting.
+    #[tokio::test]
+    async fn test_a_failed_build_puts_the_base_session_cache_back() {
+        let source = "(define-data-var count uint u0)\n".to_string();
+        let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
+
+        process_notification(
+            LspNotification::ContractSaved(PathBuf::from("test.clar")),
+            &mut editor_state_input,
+            Some(&TestFileAccessor::new(source.clone())),
+        )
+        .await
+        .expect("first save failed");
+
+        let indexed = editor_state_input
+            .try_read(|es| es.contracts_lookup.keys().next().cloned())
+            .unwrap()
+            .expect("first save should index the contract");
+        assert_eq!(
+            editor_state_input
+                .try_read(|es| es.base_sessions.entries.len())
+                .unwrap(),
+            1,
+            "the first save must cache a base session, or there is nothing to lose"
+        );
+
+        let response = process_notification(
+            LspNotification::ContractSaved(indexed),
+            &mut editor_state_input,
+            Some(&TestFileAccessor::with_unparsable_manifest(source)),
+        )
+        .await
+        .expect("a build failure is reported in the response, not returned as Err");
+
+        // Without this the test would pass on a save that quietly succeeded,
+        // never exercising the path it exists to cover.
+        assert!(
+            matches!(response.notification, Some((MessageType::ERROR, _))),
+            "expected the second save to fail, got {:?}",
+            response.notification
+        );
+
+        assert_eq!(
+            editor_state_input
+                .try_read(|es| es.base_sessions.entries.len())
+                .unwrap(),
+            1,
+            "a failed build must still restore the base session it moved out"
         );
     }
 
