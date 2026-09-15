@@ -6,8 +6,7 @@ use std::vec;
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 pub use clarinet_deployments::CachedContractAST;
 use clarinet_deployments::{
-    generate_default_deployment_with_cache, resume_session_with_deployment_plan,
-    session_settings_from_manifest, BaseSessionCache,
+    generate_default_deployment_with_cache, session_settings_from_manifest, BaseSessionCache,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
@@ -964,11 +963,13 @@ pub async fn build_state(
             new_cache_entries.extend(entries);
         }
 
-        let prepared = base_sessions
+        let (session, contracts) = base_sessions
             .get_mut(manifest_location)
-            .prepared_session(session_settings_from_manifest(&manifest), &deployment);
-        let (session, contracts) =
-            resume_session_with_deployment_plan(prepared, &deployment, Some(&artifacts.asts));
+            .run_deployment_plan(
+                session_settings_from_manifest(&manifest),
+                &deployment,
+                Some(&artifacts.asts),
+            );
         for (contract_id, mut result) in contracts.into_iter() {
             let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
                 continue;

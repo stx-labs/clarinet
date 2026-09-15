@@ -250,11 +250,17 @@ fn prepare_session_for_deployment_plan(
     }
 }
 
-/// A session advanced by [`prepare_session_for_deployment_plan`]. Only
-/// [`BaseSessionCache`] can build one, so [`resume_session_with_deployment_plan`]
-/// — which skips the first batch's epoch advance because `prepare` did it —
-/// cannot be handed a session that skipped that step.
-pub struct PreparedSession(Session);
+/// A session advanced by [`prepare_session_for_deployment_plan`] *for a specific
+/// deployment*. Both halves matter: [`resume_session_with_deployment_plan`] skips
+/// the first batch's tip and epoch advance on the grounds that `prepare` already
+/// performed it, so a session that skipped `prepare` leaves the plan with no boot
+/// contracts, and a session prepared for a *different* plan silently runs this one
+/// at the other's epoch and genesis state.
+///
+/// Neither is reachable from outside this module: the type is private, and
+/// [`BaseSessionCache::run_deployment_plan`] is the only way in — it names the
+/// deployment once and hands it to both halves itself.
+struct PreparedSession(Session);
 
 /// Everything `prepare_session_for_deployment_plan` reads: equal keys mean equal
 /// base sessions.
@@ -307,7 +313,22 @@ impl fmt::Debug for BaseSessionCache {
 }
 
 impl BaseSessionCache {
-    pub fn prepared_session(
+    /// Run `deployment` from a cached base, building one if nothing matches.
+    ///
+    /// The single entry point on purpose: naming the deployment once is what
+    /// makes it impossible to prepare against one plan and run another. See
+    /// [`PreparedSession`] for what that would otherwise cost.
+    pub fn run_deployment_plan(
+        &mut self,
+        settings: SessionSettings,
+        deployment: &DeploymentSpecification,
+        contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
+    ) -> (Session, ExecutionResultMap) {
+        let prepared = self.prepared_session(settings, deployment);
+        resume_session_with_deployment_plan(prepared, deployment, contracts_asts)
+    }
+
+    fn prepared_session(
         &mut self,
         settings: SessionSettings,
         deployment: &DeploymentSpecification,
@@ -347,7 +368,7 @@ impl BaseSessionCache {
     }
 }
 
-pub fn resume_session_with_deployment_plan(
+fn resume_session_with_deployment_plan(
     prepared: PreparedSession,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
@@ -2205,6 +2226,36 @@ mod tests {
         assert!(
             late_session.0.boot_contracts.len() > early_session.0.boot_contracts.len(),
             "a later epoch installs more boot contracts, so the base cannot be reused"
+        );
+    }
+
+    /// The mismatch `PreparedSession` exists to prevent, run through the public
+    /// entry point: two plans pinning different epochs share one cache, and each
+    /// must execute at its own. Inheriting the other's base would leave the second
+    /// plan running at the first's epoch with the first's boot set — silently,
+    /// since nothing about a session says which plan prepared it.
+    #[test]
+    fn a_second_plan_does_not_inherit_the_first_plans_epoch() {
+        let mut cache = BaseSessionCache::default();
+
+        let early = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch2_1);
+        let (early_session, _) =
+            cache.run_deployment_plan(SessionSettings::default(), &early, None);
+
+        let late = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        let (late_session, _) = cache.run_deployment_plan(SessionSettings::default(), &late, None);
+
+        assert_eq!(
+            early_session.interpreter.datastore.get_current_epoch(),
+            StacksEpochId::Epoch21
+        );
+        assert_eq!(
+            late_session.interpreter.datastore.get_current_epoch(),
+            StacksEpochId::Epoch31
+        );
+        assert!(
+            late_session.boot_contracts.len() > early_session.boot_contracts.len(),
+            "each plan carries the boot set of its own epoch"
         );
     }
 
