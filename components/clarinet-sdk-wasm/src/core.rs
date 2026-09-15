@@ -19,6 +19,9 @@ use clarity::vm::analysis::contract_interface_builder::{
 };
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
+use clarity_repl::repl::boot::{
+    remap_mainnet_boot_principals, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS,
+};
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
 use clarity_repl::repl::interpreter::BlockInclusion;
@@ -787,8 +790,10 @@ impl SDK {
 
     #[wasm_bindgen(js_name=getContractSource)]
     pub fn get_contract_source(&mut self, contract: &str) -> Result<Option<String>, JsError> {
-        let contract_id =
-            Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)
+            .map_err(|e| JsError::new(&e))?;
         self.get_session_mut()
             .interpreter
             .get_contract_source(&contract_id)
@@ -797,8 +802,10 @@ impl SDK {
 
     #[wasm_bindgen(js_name=getContractAST)]
     pub fn get_contract_ast(&mut self, contract: &str) -> Result<IContractAST, JsError> {
-        let contract_id =
-            Session::desugar_contract_id(&self.deployer, contract).map_err(|e| JsError::new(&e))?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)
+            .map_err(|e| JsError::new(&e))?;
         let ast = self
             .get_session_mut()
             .get_contract_ast(&contract_id)
@@ -830,7 +837,9 @@ impl SDK {
 
     #[wasm_bindgen(js_name=getDataVar)]
     pub fn get_data_var(&mut self, contract: &str, var_name: &str) -> Result<String, String> {
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)?;
         let session = self.get_session_mut();
         session
             .interpreter
@@ -850,7 +859,9 @@ impl SDK {
         map_name: &str,
         map_key: Vec<u8>,
     ) -> Result<String, String> {
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)?;
         let session = self.get_session_mut();
         session
             .interpreter
@@ -863,7 +874,9 @@ impl SDK {
         contract: &str,
         method: &str,
     ) -> Result<&ContractInterfaceFunction, String> {
-        let contract_id = Session::desugar_contract_id(&self.deployer, contract)?;
+        let contract_id = self
+            .get_session()
+            .resolve_contract_id(&self.deployer, contract)?;
         let contract_interface = self
             .contracts_interfaces
             .get(&contract_id)
@@ -948,8 +961,10 @@ impl SDK {
                 // Unreachable in practice: the same id was desugared to run
                 // the call above. Classify conservatively rather than claim a
                 // transaction happened on a path that cannot be reached.
-                let contract_id =
-                    Session::desugar_contract_id(&self.deployer, contract)?.to_string();
+                let contract_id = self
+                    .get_session()
+                    .resolve_contract_id(&self.deployer, contract)?
+                    .to_string();
                 self.costs_reports.push(CostsReport {
                     test_name,
                     contract_id,
@@ -1122,13 +1137,44 @@ impl SDK {
                 current_epoch,
             );
 
+            // `deployContract` bypasses the deployment plan, so the remap that
+            // `clarinet-deployments` records for manifest contracts has to be
+            // applied here too — otherwise the same source would behave
+            // differently depending on how it was deployed. There is no plan
+            // entry to record it in, so it is logged instead. Skipped only
+            // against a mainnet remote node, which holds the real mainnet boot
+            // contracts; a testnet-backed remote session is testnet-flavored
+            // and needs the rewrite like simnet does.
+            let remapped = (!session.interpreter.is_mainnet())
+                .then(|| remap_mainnet_boot_principals(&args.content))
+                .flatten();
+            if remapped.is_some() {
+                log!(
+                    "note: this session is testnet-flavored: {} boot principals in {} were \
+                     deployed as {}",
+                    BOOT_MAINNET_ADDRESS,
+                    args.name,
+                    BOOT_TESTNET_ADDRESS
+                );
+            }
+            let source = remapped.unwrap_or_else(|| args.content.clone());
+
             let contract = ClarityContract {
-                code_source: ClarityCodeSource::ContractInMemory(args.content.clone()),
+                code_source: ClarityCodeSource::ContractInMemory(source),
                 name: args.name.clone(),
                 deployer: ContractDeployer::Address(args.sender.to_string()),
                 clarity_version,
                 epoch: Epoch::Specific(current_epoch),
                 skip_analysis: false,
+            };
+
+            // Top-level `contract-call?`s run at deploy time and can move boot
+            // assets, so conditions follow the source rewrite above — same gate
+            // as `Session::call_contract_fn`.
+            let post_conditions = if session.interpreter.is_mainnet() {
+                post_conditions
+            } else {
+                post_conditions.remap_mainnet_boot_principals()
             };
 
             match session.deploy_contract(&contract, track_costs, None, post_conditions) {
@@ -1248,6 +1294,7 @@ impl SDK {
     #[wasm_bindgen(js_name=runSnippet)]
     pub fn run_snippet(&mut self, snippet: String) -> String {
         let session = self.get_session_mut();
+        let snippet = session.remap_user_snippet(snippet);
         match session.eval(snippet, false) {
             Ok(res) => match res.into_inner().result {
                 EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
@@ -1268,6 +1315,7 @@ impl SDK {
     #[wasm_bindgen(js_name=execute)]
     pub fn execute(&mut self, snippet: String) -> Result<TransactionRes, String> {
         let session = self.get_session_mut();
+        let snippet = session.remap_user_snippet(snippet);
         match session.eval(snippet, false) {
             Ok(res) => Ok(execution_result_to_transaction_res(&res)),
             Err(diagnostics) => {
@@ -1352,7 +1400,8 @@ impl SDK {
         let session = self.get_session_mut();
 
         let default_deployer = session.get_tx_sender();
-        let asset_identifier = Session::parse_asset_identifier(&default_deployer, &token)
+        let asset_identifier = session
+            .resolve_asset_identifier(&default_deployer, &token)
             .map_err(|e| format!("Expected 'contract_id.asset_name', got '{token}': {e}"))?;
 
         session.interpreter.mint_ft_balance(
