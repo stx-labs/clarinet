@@ -849,9 +849,8 @@ mod lsp_tests {
             }
         }
 
-        /// The same project behind a `Clarinet.toml` that does not parse. The
-        /// cheapest way to make `build_state` fail *after* `build_and_commit` has
-        /// already moved `base_sessions` out of the editor state.
+        /// The same project behind a `Clarinet.toml` that does not parse — the
+        /// cheapest way to make `build_state` fail.
         fn with_unparsable_manifest(contract: String) -> Self {
             Self {
                 project_manifest: "[project".to_string(),
@@ -1554,7 +1553,7 @@ mod lsp_tests {
     /// clone and only commits it on success. Losing it costs only a rebuild —
     /// silent otherwise — so nothing else would catch a regression here.
     #[tokio::test]
-    async fn test_a_failed_build_puts_the_base_session_cache_back() {
+    async fn test_a_failed_build_leaves_the_base_session_cache_intact() {
         let source = "(define-data-var count uint u0)\n".to_string();
         let mut editor_state_input = EditorStateInput::Owned(EditorState::new());
 
@@ -1599,7 +1598,7 @@ mod lsp_tests {
                 .try_read(|es| es.base_sessions.entries.len())
                 .unwrap(),
             1,
-            "a failed build must still restore the base session it moved out"
+            "a failed build must not damage the cache it was handed"
         );
     }
 
