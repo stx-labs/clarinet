@@ -833,22 +833,22 @@ impl NetworkManifest {
             let miner_mnemonic = devnet_config
                 .miner_mnemonic
                 .take()
-                .unwrap_or(DEFAULT_STACKS_MINER_MNEMONIC.to_string());
+                .unwrap_or_else(|| DEFAULT_STACKS_MINER_MNEMONIC.to_string());
             let miner_derivation_path = devnet_config
                 .miner_derivation_path
                 .take()
-                .unwrap_or(DEFAULT_DERIVATION_PATH.to_string());
+                .unwrap_or_else(|| DEFAULT_DERIVATION_PATH.to_string());
             let (miner_stx_address, miner_btc_address, miner_secret_key_hex) =
                 compute_addresses(&miner_mnemonic, &miner_derivation_path, networks);
 
             let faucet_mnemonic = devnet_config
                 .faucet_mnemonic
                 .take()
-                .unwrap_or(DEFAULT_FAUCET_MNEMONIC.to_string());
+                .unwrap_or_else(|| DEFAULT_FAUCET_MNEMONIC.to_string());
             let faucet_derivation_path = devnet_config
                 .faucet_derivation_path
                 .take()
-                .unwrap_or(DEFAULT_DERIVATION_PATH.to_string());
+                .unwrap_or_else(|| DEFAULT_DERIVATION_PATH.to_string());
             let (faucet_stx_address, faucet_btc_address, faucet_secret_key_hex) =
                 compute_addresses(&faucet_mnemonic, &faucet_derivation_path, networks);
 
@@ -873,11 +873,11 @@ impl NetworkManifest {
             let stacker_mnemonic = devnet_config
                 .stacker_mnemonic
                 .take()
-                .unwrap_or(DEFAULT_STACKER_MNEMONIC.to_string());
+                .unwrap_or_else(|| DEFAULT_STACKER_MNEMONIC.to_string());
             let stacker_derivation_path = devnet_config
                 .stacker_derivation_path
                 .take()
-                .unwrap_or(DEFAULT_DERIVATION_PATH.to_string());
+                .unwrap_or_else(|| DEFAULT_DERIVATION_PATH.to_string());
             let (stx_address, btc_address, _) =
                 compute_addresses(&stacker_mnemonic, &stacker_derivation_path, networks);
 
@@ -938,7 +938,7 @@ impl NetworkManifest {
             }
 
             let config = DevnetConfig {
-                name: devnet_config.name.take().unwrap_or("devnet".into()),
+                name: devnet_config.name.take().unwrap_or_else(|| "devnet".into()),
                 network_id: devnet_config.network_id,
                 orchestrator_ingestion_port: devnet_config.orchestrator_port.unwrap_or(20445),
                 orchestrator_control_port: devnet_config.orchestrator_control_port.unwrap_or(20446),
@@ -947,11 +947,11 @@ impl NetworkManifest {
                 bitcoin_node_username: devnet_config
                     .bitcoin_node_username
                     .take()
-                    .unwrap_or("devnet".to_string()),
+                    .unwrap_or_else(|| "devnet".to_string()),
                 bitcoin_node_password: devnet_config
                     .bitcoin_node_password
                     .take()
-                    .unwrap_or("devnet".to_string()),
+                    .unwrap_or_else(|| "devnet".to_string()),
                 bitcoin_controller_block_time: devnet_config
                     .bitcoin_controller_block_time
                     .unwrap_or(60_000),
@@ -982,7 +982,7 @@ impl NetworkManifest {
                 miner_coinbase_recipient: devnet_config
                     .miner_coinbase_recipient
                     .unwrap_or(miner_stx_address),
-                miner_wallet_name: devnet_config.miner_wallet_name.unwrap_or("".to_string()),
+                miner_wallet_name: devnet_config.miner_wallet_name.unwrap_or_default(),
                 pre_nakamoto_mock_signing: devnet_config
                     .pre_nakamoto_mock_signing
                     .unwrap_or_default(),
@@ -1001,44 +1001,44 @@ impl NetworkManifest {
                 postgres_username: devnet_config
                     .postgres_username
                     .take()
-                    .unwrap_or("postgres".to_string()),
+                    .unwrap_or_else(|| "postgres".to_string()),
                 postgres_password: devnet_config
                     .postgres_password
                     .take()
-                    .unwrap_or("postgres".to_string()),
+                    .unwrap_or_else(|| "postgres".to_string()),
                 stacks_api_postgres_database: devnet_config
                     .stacks_api_postgres_database
                     .take()
-                    .unwrap_or("stacks_api".to_string()),
+                    .unwrap_or_else(|| "stacks_api".to_string()),
                 execute_script: devnet_config.execute_script.take().unwrap_or_default(),
                 bitcoin_node_image_url: devnet_config
                     .bitcoin_node_image_url
                     .take()
-                    .unwrap_or(DEFAULT_BITCOIN_NODE_IMAGE.to_string()),
+                    .unwrap_or_else(|| DEFAULT_BITCOIN_NODE_IMAGE.to_string()),
                 stacks_node_image_url: devnet_config
                     .stacks_node_image_url
                     .take()
-                    .unwrap_or(DEFAULT_STACKS_NODE_IMAGE.to_string()),
+                    .unwrap_or_else(|| DEFAULT_STACKS_NODE_IMAGE.to_string()),
                 stacks_signer_image_url: devnet_config
                     .stacks_signer_image_url
                     .take()
-                    .unwrap_or(DEFAULT_STACKS_SIGNER_IMAGE.to_string()),
+                    .unwrap_or_else(|| DEFAULT_STACKS_SIGNER_IMAGE.to_string()),
                 stacks_api_image_url: devnet_config
                     .stacks_api_image_url
                     .take()
-                    .unwrap_or(DEFAULT_STACKS_API_IMAGE.to_string()),
+                    .unwrap_or_else(|| DEFAULT_STACKS_API_IMAGE.to_string()),
                 postgres_image_url: devnet_config
                     .postgres_image_url
                     .take()
-                    .unwrap_or(DEFAULT_POSTGRES_IMAGE.to_string()),
+                    .unwrap_or_else(|| DEFAULT_POSTGRES_IMAGE.to_string()),
                 stacks_explorer_image_url: devnet_config
                     .stacks_explorer_image_url
                     .take()
-                    .unwrap_or(DEFAULT_STACKS_EXPLORER_IMAGE.to_string()),
+                    .unwrap_or_else(|| DEFAULT_STACKS_EXPLORER_IMAGE.to_string()),
                 bitcoin_explorer_image_url: devnet_config
                     .bitcoin_explorer_image_url
                     .take()
-                    .unwrap_or(DEFAULT_BITCOIN_EXPLORER_IMAGE.to_string()),
+                    .unwrap_or_else(|| DEFAULT_BITCOIN_EXPLORER_IMAGE.to_string()),
                 pox_stacking_orders: stacking_orders,
                 disable_bitcoin_explorer: devnet_config.disable_bitcoin_explorer.unwrap_or(false),
                 disable_stacks_api: devnet_config.disable_stacks_api.unwrap_or(false),
@@ -1046,7 +1046,9 @@ impl NetworkManifest {
                 disable_stacks_explorer: devnet_config.disable_stacks_explorer.unwrap_or(false),
                 bind_containers_volumes: devnet_config.bind_containers_volumes.unwrap_or(true),
                 docker_host: devnet_config.docker_host.map(normalize_docker_host),
-                components_host: devnet_config.components_host.unwrap_or("127.0.0.1".into()),
+                components_host: devnet_config
+                    .components_host
+                    .unwrap_or_else(|| "127.0.0.1".into()),
                 epoch_2_0: devnet_config.epoch_2_0.unwrap_or(DEFAULT_EPOCH_2_0),
                 epoch_2_05: devnet_config.epoch_2_05.unwrap_or(DEFAULT_EPOCH_2_05),
                 epoch_2_1: devnet_config.epoch_2_1.unwrap_or(DEFAULT_EPOCH_2_1),
@@ -1072,7 +1074,7 @@ impl NetworkManifest {
                             .map(|key| StacksPrivateKey::from_hex(&key).unwrap())
                             .collect::<Vec<clarity::util::secp256k1::Secp256k1PrivateKey>>()
                     })
-                    .unwrap_or(DEFAULT_PRIVATE_KEYS.to_vec()),
+                    .unwrap_or_else(|| DEFAULT_PRIVATE_KEYS.to_vec()),
                 stacks_signers_env_vars: devnet_config
                     .stacks_signers_env_vars
                     .take()

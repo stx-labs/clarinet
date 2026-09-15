@@ -219,7 +219,7 @@ impl ClarityDatastore {
         let id = StacksBlockId(height_to_hashed_bytes(height));
         let fs_cache_location = remote_network_info
             .and_then(|r| r.cache_location)
-            .unwrap_or(PathBuf::from("./.cache"))
+            .unwrap_or_else(|| PathBuf::from("./.cache"))
             .join("datastore");
 
         Self {
@@ -228,7 +228,7 @@ impl ClarityDatastore {
             store: HashMap::new(),
             metadata: HashMap::new(),
             height_at_chain_tip: HashMap::from([(id.clone(), height)]),
-            chain_tip_at_height: HashMap::from([(height, id.clone())]),
+            chain_tip_at_height: HashMap::from([(height, id)]),
 
             remote_network_info: None,
             remote_block_info_cache: Rc::new(RefCell::new(HashMap::new())),
@@ -249,8 +249,8 @@ impl ClarityDatastore {
         let sortition_cache = HashMap::from([(block.burn_block_hash, sortition)]);
         let fs_cache_location = remote_network_info
             .cache_location
-            .as_ref()
-            .unwrap_or(&PathBuf::from("./.cache"))
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("./.cache"))
             .join("datastore");
 
         let id = block.index_block_hash;
@@ -261,7 +261,7 @@ impl ClarityDatastore {
             store: HashMap::new(),
             metadata: HashMap::new(),
             height_at_chain_tip: HashMap::from([(id.clone(), height)]),
-            chain_tip_at_height: HashMap::from([(height, id.clone())]),
+            chain_tip_at_height: HashMap::from([(height, id)]),
             remote_network_info: Some(remote_network_info),
             remote_block_info_cache: Rc::new(RefCell::new(block_cache)),
             remote_sortition_cache: Rc::new(RefCell::new(sortition_cache)),
@@ -323,7 +323,7 @@ impl ClarityDatastore {
         self.local_accounts = local_accounts;
     }
 
-    fn is_key_from_local_account(&mut self, key: &str) -> bool {
+    fn is_key_from_local_account(&self, key: &str) -> bool {
         let parts: Vec<&str> = key.split("::").collect();
         if let Ok(principal) = PrincipalData::parse(parts[1]) {
             let standard_principal = match principal {
@@ -405,16 +405,20 @@ impl ClarityDatastore {
             StoreType::Contract,
             ContractDataVarName::ContractSrc.as_str(),
         );
-        let contract_src =
-            self.get_metadata(contract_id, &contract_src_key)?
-                .ok_or(VmInternalError::Expect(format!(
+        let contract_src = self
+            .get_metadata(contract_id, &contract_src_key)?
+            .ok_or_else(|| {
+                VmInternalError::Expect(format!(
                     "No contract source found for contract: {contract_id}",
-                )))?;
+                ))
+            })?;
 
         let mut contract_context = context_str
-            .ok_or(VmInternalError::Expect(format!(
-                "No contract context found for contract: {contract_id}",
-            )))
+            .ok_or_else(|| {
+                VmInternalError::Expect(format!(
+                    "No contract context found for contract: {contract_id}",
+                ))
+            })
             .and_then(|s| {
                 serde_json::from_str::<ContractContextResponse>(&s).map_err(|e| {
                     VmInternalError::Expect(format!("Failed to parse contract context: {e}"))
@@ -425,9 +429,11 @@ impl ClarityDatastore {
 
         let analysis = self
             .get_metadata(contract_id, AnalysisDatabase::storage_key())?
-            .ok_or(VmInternalError::Expect(format!(
-                "No analysis metadata found for contract: {contract_id}",
-            )))
+            .ok_or_else(|| {
+                VmInternalError::Expect(format!(
+                    "No analysis metadata found for contract: {contract_id}",
+                ))
+            })
             .and_then(|s| {
                 serde_json::from_str::<ContractAnalysis>(&s).map_err(|e| {
                     VmInternalError::Expect(format!("Failed to parse analysis metadata: {e}"))
@@ -730,7 +736,7 @@ impl Datastore {
 
         let stacks_block = StacksBlockInfo {
             block_header_hash: BlockHeaderHash(bytes),
-            burn_block_header_hash: burn_block_hashes.header_hash.clone(),
+            burn_block_header_hash: burn_block_hashes.header_hash,
             stacks_block_time: genesis_time + SECONDS_BETWEEN_STACKS_BLOCKS,
         };
 
@@ -744,7 +750,7 @@ impl Datastore {
         )]);
         let tenure_height_at_stacks_height = HashMap::from([(0, 0)]);
         let stacks_height_at_tenure_height = HashMap::from([(0, 0)]);
-        let burn_blocks = HashMap::from([(burn_block_header_hash.clone(), burn_block.clone())]);
+        let burn_blocks = HashMap::from([(burn_block_header_hash.clone(), burn_block)]);
         let stacks_blocks = HashMap::from([(id.clone(), stacks_block)]);
 
         Datastore {
@@ -1013,7 +1019,7 @@ impl Datastore {
             clarity_datastore
                 .chain_tip_at_height
                 .entry(self.stacks_chain_height)
-                .or_insert(id.clone());
+                .or_insert_with(|| id.clone());
             clarity_datastore.open_chain_tip = id.clone();
             *clarity_datastore.current_chain_tip.borrow_mut() = id;
         }

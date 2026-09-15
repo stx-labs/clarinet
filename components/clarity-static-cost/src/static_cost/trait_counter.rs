@@ -523,7 +523,7 @@ impl TraitCountVisitor for TraitCountCollector {
             self.function_context_stack.push(fn_name.clone());
         }
 
-        let child_context = context.with_fn_name(fn_name.clone());
+        let child_context = context.with_fn_name(fn_name);
 
         for child in &node.children {
             self.visit(child, &child_context);

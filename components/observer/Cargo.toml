@@ -34,3 +34,6 @@ test-case = { workspace = true }
 [lib]
 name = "observer"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

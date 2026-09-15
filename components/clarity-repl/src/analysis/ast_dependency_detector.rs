@@ -960,7 +960,7 @@ impl GraphWalker {
     }
 
     fn get_cycling_dependencies(
-        &mut self,
+        &self,
         graph: &Graph,
         sorted_indexes: &[usize],
     ) -> Option<Vec<usize>> {

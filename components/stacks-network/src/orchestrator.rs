@@ -1602,7 +1602,7 @@ impl DevnetOrchestrator {
         let platform = devnet_config
             .docker_platform
             .clone()
-            .unwrap_or(DEFAULT_DOCKER_PLATFORM.to_string());
+            .unwrap_or_else(|| DEFAULT_DOCKER_PLATFORM.to_string());
         self.pull_image(
             &devnet_config.stacks_explorer_image_url.clone(),
             platform.clone(),
@@ -1698,7 +1698,7 @@ impl DevnetOrchestrator {
         let platform = devnet_config
             .docker_platform
             .clone()
-            .unwrap_or(DEFAULT_DOCKER_PLATFORM.to_string());
+            .unwrap_or_else(|| DEFAULT_DOCKER_PLATFORM.to_string());
         self.pull_image(
             &devnet_config.bitcoin_explorer_image_url.clone(),
             platform.clone(),

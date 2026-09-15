@@ -1032,7 +1032,7 @@ impl ClarityInterpreter {
                 contract: parsed_contract,
             })
         } else {
-            let result = value.unwrap_or(Value::none());
+            let result = value.unwrap_or_else(Value::none);
             EvaluationResult::Snippet(SnippetEvaluationResult { result })
         };
 
@@ -2175,10 +2175,7 @@ mod tests {
 
         let contract_identifier_string =
             if let EvaluationResult::Contract(contract_evaluation_result) = result {
-                contract_evaluation_result
-                    .contract
-                    .contract_identifier
-                    .clone()
+                contract_evaluation_result.contract.contract_identifier
             } else {
                 panic!("didn't get EvaluationResult::Contract");
             };
@@ -2192,7 +2189,7 @@ mod tests {
 
         let amount = 1000;
 
-        let result = interpreter.mint_ft_balance(&asset_identifier, &recipient.clone(), amount);
+        let result = interpreter.mint_ft_balance(&asset_identifier, &recipient, amount);
         assert!(result.is_ok());
 
         // in the contract we minted 100, burned 10, then transferred 10 to as-contract
@@ -3177,7 +3174,7 @@ mod tests {
             .data_map
             .get("previous")
             .and_then(|v| v.clone().expect_optional().unwrap())
-            .and_then(|v| v.clone().expect_u128().ok())
+            .and_then(|v| v.expect_u128().ok())
             .expect("previous to be (some uint)");
         let current = value
             .data_map

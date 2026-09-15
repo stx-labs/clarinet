@@ -376,37 +376,45 @@ pub fn standardize_bitcoin_block(
             if input.is_coinbase() {
                 continue;
             }
-            let prevout = input.prevout.as_ref().ok_or((
-                format!(
-                    "error retrieving prevout for transaction {}, input #{} (block #{})",
-                    tx.txid, index, block.height
-                ),
-                true,
-            ))?;
+            let prevout = input.prevout.as_ref().ok_or_else(|| {
+                (
+                    format!(
+                        "error retrieving prevout for transaction {}, input #{} (block #{})",
+                        tx.txid, index, block.height
+                    ),
+                    true,
+                )
+            })?;
 
-            let txid = input.txid.as_ref().ok_or((
-                format!(
-                    "error retrieving txid for transaction {}, input #{} (block #{})",
-                    tx.txid, index, block.height
-                ),
-                true,
-            ))?;
+            let txid = input.txid.as_ref().ok_or_else(|| {
+                (
+                    format!(
+                        "error retrieving txid for transaction {}, input #{} (block #{})",
+                        tx.txid, index, block.height
+                    ),
+                    true,
+                )
+            })?;
 
-            let vout = input.vout.ok_or((
-                format!(
-                    "error retrieving vout for transaction {}, input #{} (block #{})",
-                    tx.txid, index, block.height
-                ),
-                true,
-            ))?;
+            let vout = input.vout.ok_or_else(|| {
+                (
+                    format!(
+                        "error retrieving vout for transaction {}, input #{} (block #{})",
+                        tx.txid, index, block.height
+                    ),
+                    true,
+                )
+            })?;
 
-            let script_sig = input.script_sig.ok_or((
-                format!(
-                    "error retrieving script_sig for transaction {}, input #{} (block #{})",
-                    tx.txid, index, block.height
-                ),
-                true,
-            ))?;
+            let script_sig = input.script_sig.ok_or_else(|| {
+                (
+                    format!(
+                        "error retrieving script_sig for transaction {}, input #{} (block #{})",
+                        tx.txid, index, block.height
+                    ),
+                    true,
+                )
+            })?;
 
             sats_in += prevout.value.to_sat();
 
@@ -467,7 +475,7 @@ pub fn standardize_bitcoin_block(
                 "0x{}",
                 block
                     .previousblockhash
-                    .unwrap_or(BlockHash::all_zeros().to_string())
+                    .unwrap_or_else(|| BlockHash::all_zeros().to_string())
             ),
             index: match block_height {
                 0 => 0,
@@ -542,7 +550,7 @@ fn try_parse_stacks_operation(
 
             let output_1 = outputs
                 .get(1)
-                .ok_or("expected output 1 not found".to_string())
+                .ok_or_else(|| "expected output 1 not found".to_string())
                 .ok()?;
             let script_1 = output_1
                 .script_pub_key
@@ -555,7 +563,7 @@ fn try_parse_stacks_operation(
 
             let output_2 = outputs
                 .get(2)
-                .ok_or("expected output 2 not found".to_string())
+                .ok_or_else(|| "expected output 2 not found".to_string())
                 .ok()?;
             let script_2 = output_2
                 .script_pub_key
