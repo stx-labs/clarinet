@@ -420,7 +420,7 @@ impl ProjectManifest {
             description: project_manifest_file
                 .project
                 .description
-                .unwrap_or("".into()),
+                .unwrap_or_default(),
             authors: project_manifest_file.project.authors.unwrap_or_default(),
             telemetry: project_manifest_file.project.telemetry.unwrap_or(false),
             cache_location,
@@ -685,7 +685,7 @@ mod tests {
             "pox-4" = "./custom-boot-contracts/pox-4.clar"
             "costs" = "./custom-boot-contracts/costs.clar"
         };
-        let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
+        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
         let location = PathBuf::from("/tmp/clarinet.toml");
 
         let manifest =
@@ -721,7 +721,7 @@ mod tests {
             "pox-x" = "./custom-boot-contracts/pox-x.clar"
             "costs" = "./custom-boot-contracts/costs.clar"
         };
-        let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
+        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
         let location = PathBuf::from("/tmp/clarinet.toml");
 
         let manifest =
@@ -761,7 +761,7 @@ mod tests {
             [project.override_boot_contracts_source]
             "pox-x" = "./custom-boot-contracts/pox-x.clar"
         };
-        let manifest_file: ProjectManifestFile = manifest_toml.clone().try_into().unwrap();
+        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
         let location = PathBuf::from("/tmp/clarinet.toml");
 
         let manifest =

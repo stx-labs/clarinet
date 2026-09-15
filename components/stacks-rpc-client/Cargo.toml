@@ -21,3 +21,6 @@ mockito = { workspace = true, default-features = false, optional = true }
 
 [features]
 mock = ["mockito"]
+
+[lints]
+workspace = true

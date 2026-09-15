@@ -21,3 +21,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "clarity-events"
 path = "src/bin.rs"
+
+[lints]
+workspace = true

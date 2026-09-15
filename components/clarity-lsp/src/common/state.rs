@@ -287,7 +287,7 @@ impl EditorState {
         // Get the project directory (parent of Clarinet.toml)
         let base_location = manifest_location
             .parent()
-            .unwrap_or(Path::new("."))
+            .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
 
         for (contract_location, contract_state) in protocol.contracts.iter() {

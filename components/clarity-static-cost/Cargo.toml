@@ -27,3 +27,6 @@ indoc = { workspace = true }
 name = "clarity_static_cost"
 path = "src/lib.rs"
 crate-type = ["lib"]
+
+[lints]
+workspace = true

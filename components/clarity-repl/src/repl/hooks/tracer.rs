@@ -272,7 +272,7 @@ impl EvalHook for TracerHook {
                     // If this was the last argument, print the pending call and pop the stack
                     if rest.is_empty() {
                         let pending = self.pending_call_string.pop().unwrap();
-                        self.add_to_output(pending.clone());
+                        self.add_to_output(pending);
                         self.pending_args.pop();
                     } else {
                         arg_stack.remove(0);

@@ -387,12 +387,12 @@ impl Session {
             cmd if cmd.starts_with("::mint_stx") => self.mint_stx(cmd),
             cmd if cmd.starts_with("::mint_ft") => self.mint_ft(cmd),
             cmd if cmd.starts_with("::set_tx_sender") => self.parse_and_set_tx_sender(cmd),
-            cmd if cmd.starts_with("::get_assets_maps") => {
-                self.get_accounts().unwrap_or("No account found".into())
-            }
-            cmd if cmd.starts_with("::get_contracts") => {
-                self.get_contracts().unwrap_or("No contract found".into())
-            }
+            cmd if cmd.starts_with("::get_assets_maps") => self
+                .get_accounts()
+                .unwrap_or_else(|| "No account found".into()),
+            cmd if cmd.starts_with("::get_contracts") => self
+                .get_contracts()
+                .unwrap_or_else(|| "No contract found".into()),
             cmd if cmd.starts_with("::get_burn_block_height") => self.get_burn_block_height(),
             cmd if cmd.starts_with("::get_stacks_block_height") => self.get_block_height(),
             cmd if cmd.starts_with("::get_block_height") => self.get_block_height(),
@@ -433,11 +433,7 @@ impl Session {
         QualifiedContractIdentifier::parse(&contract_id).map_err(|e| e.to_string())
     }
     #[cfg(not(target_arch = "wasm32"))]
-    fn contract_successfully_stored(
-        &mut self,
-        output: &mut Vec<String>,
-        contract: &ParsedContract,
-    ) {
+    fn contract_successfully_stored(&self, output: &mut Vec<String>, contract: &ParsedContract) {
         // Handle the successful storage of the contract
         let snippet = green!(
             "→ {} contract successfully stored.",
@@ -477,7 +473,7 @@ impl Session {
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         let cmd = self.remap_user_snippet(cmd.to_string());
         let (mut result, cost, execution_result) =
-            match self.formatted_interpretation(cmd.clone(), None, cost_track, None) {
+            match self.formatted_interpretation(cmd, None, cost_track, None) {
                 Ok((mut output, result)) => {
                     if let EvaluationResult::Contract(contract_result) = result.result.clone() {
                         self.contract_successfully_stored(&mut output, &contract_result.contract);
@@ -550,7 +546,7 @@ impl Session {
         let result = self.eval_with_hooks(snippet.to_string(), eval_hooks, cost_track);
         let mut output = Vec::<String>::new();
         let formatted_lines: Vec<String> = snippet.lines().map(|l| l.to_string()).collect();
-        let contract_name = name.unwrap_or("<stdin>".to_string());
+        let contract_name = name.unwrap_or_else(|| "<stdin>".to_string());
 
         match result {
             Ok(result) => {
@@ -1551,7 +1547,7 @@ impl Session {
                     };
                     formatted_methods.push(format!("({method_name}{formatted_args})"));
                 }
-                let formatted_spec = formatted_methods.join("\n").to_string();
+                let formatted_spec = formatted_methods.join("\n");
 
                 [contract_id_str, formatted_spec]
             })
@@ -3217,10 +3213,7 @@ mod tests {
 
         let contract_identifier_str =
             if let EvaluationResult::Contract(contract_evaluation_result) = result {
-                contract_evaluation_result
-                    .contract
-                    .contract_identifier
-                    .clone()
+                contract_evaluation_result.contract.contract_identifier
             } else {
                 panic!("didn't get EvaluationResult::Contract");
             };
@@ -3274,7 +3267,7 @@ mod tests {
         // if any of the expected failures succeeded, this will fail
         let balance = session
             .interpreter
-            .get_balance_for_account(&recipient.to_string(), &asset_identifier.sugared());
+            .get_balance_for_account(&recipient, &asset_identifier.sugared());
         assert_eq!(balance, 11100);
     }
 

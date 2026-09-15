@@ -33,3 +33,6 @@ debug = ["log", "slog/max_level_trace", "slog/release_max_level_debug"]
 release = ["log", "slog/max_level_info", "slog/release_max_level_info"]
 release_debug = ["log", "slog/max_level_trace", "slog/release_max_level_debug"]
 full_log_level_prefix = []
+
+[lints]
+workspace = true

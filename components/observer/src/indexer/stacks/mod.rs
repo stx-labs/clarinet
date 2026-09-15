@@ -191,7 +191,7 @@ impl NewEvent {
             let data: STXTransferEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::STXTransferEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::STXTransferEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -218,7 +218,7 @@ impl NewEvent {
             let data: NFTTransferEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::NFTTransferEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::NFTTransferEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -263,7 +263,7 @@ impl NewEvent {
             let data: DataMapInsertEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::DataMapInsertEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::DataMapInsertEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -272,7 +272,7 @@ impl NewEvent {
             let data: DataMapUpdateEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::DataMapUpdateEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::DataMapUpdateEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -281,7 +281,7 @@ impl NewEvent {
             let data: DataMapDeleteEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::DataMapDeleteEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::DataMapDeleteEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -290,7 +290,7 @@ impl NewEvent {
             let data: SmartContractEventData =
                 serde_json::from_value(event_data.clone()).expect("Unable to decode event_data");
             return Ok(StacksTransactionEvent {
-                event_payload: StacksTransactionEventPayload::SmartContractEvent(data.clone()),
+                event_payload: StacksTransactionEventPayload::SmartContractEvent(data),
                 position: StacksTransactionEventPosition {
                     index: self.event_index,
                 },
@@ -353,7 +353,7 @@ pub fn standardize_stacks_serialized_block_header(
     let hash = block_header
         .index_block_hash
         .take()
-        .ok_or("unable to retrieve index_block_hash".to_string())?;
+        .ok_or_else(|| "unable to retrieve index_block_hash".to_string())?;
     let block_identifier = BlockIdentifier {
         hash,
         index: block_header.block_height,
@@ -361,7 +361,7 @@ pub fn standardize_stacks_serialized_block_header(
     let parent_hash = block_header
         .parent_index_block_hash
         .take()
-        .ok_or("unable to retrieve parent_index_block_hash".to_string())?;
+        .ok_or_else(|| "unable to retrieve parent_index_block_hash".to_string())?;
 
     let parent_height = block_identifier.index.saturating_sub(1);
     let parent_block_identifier = BlockIdentifier {
@@ -410,7 +410,7 @@ pub fn standardize_stacks_block(
         events
             .entry(&event.txid)
             .and_modify(|events| events.push(event))
-            .or_insert(vec![&event]);
+            .or_insert_with(|| vec![&event]);
     }
 
     let mut transactions = vec![];
@@ -598,7 +598,7 @@ pub fn standardize_stacks_microblock_trail(
         events
             .entry(&event.txid)
             .and_modify(|events| events.push(event))
-            .or_insert(vec![&event]);
+            .or_insert_with(|| vec![&event]);
     }
     let mut microblocks_set: BTreeMap<
         (BlockIdentifier, BlockIdentifier),
@@ -664,7 +664,7 @@ pub fn standardize_stacks_microblock_trail(
         microblocks_set
             .entry((microblock_identifier, parent_microblock_identifier))
             .and_modify(|transactions| transactions.push(transaction.clone()))
-            .or_insert(vec![transaction]);
+            .or_insert_with(|| vec![transaction]);
     }
 
     let mut microblocks = vec![];
@@ -1695,7 +1695,7 @@ pub fn get_standardized_stacks_receipt(
 }
 
 fn get_mutated_ids(asset_class_id: &str) -> (String, String) {
-    let contract_id = asset_class_id.split("::").collect::<Vec<_>>()[0];
+    let contract_id = asset_class_id.split("::").next().unwrap();
     (asset_class_id.into(), contract_id.into())
 }
 

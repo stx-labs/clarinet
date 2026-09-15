@@ -584,7 +584,7 @@ impl SDK {
             contracts_locations,
             session,
         };
-        self.cache.insert(manifest.location.clone(), cache.clone());
+        self.cache.insert(manifest.location, cache.clone());
         Ok(cache)
     }
 
@@ -751,7 +751,9 @@ impl SDK {
 
     #[wasm_bindgen(js_name=setEpoch)]
     pub fn set_epoch(&mut self, epoch: EpochString) {
-        let epoch_str = epoch.as_string().unwrap_or(DEFAULT_EPOCH.to_string());
+        let epoch_str = epoch
+            .as_string()
+            .unwrap_or_else(|| DEFAULT_EPOCH.to_string());
         let epoch = epoch_from_str(&epoch_str).unwrap_or_else(|| {
             log!("Invalid epoch {epoch_str}. Using default epoch");
             DEFAULT_EPOCH
@@ -1293,7 +1295,7 @@ impl SDK {
     pub fn run_snippet(&mut self, snippet: String) -> String {
         let session = self.get_session_mut();
         let snippet = session.remap_user_snippet(snippet);
-        match session.eval(snippet.clone(), false) {
+        match session.eval(snippet, false) {
             Ok(res) => match res.into_inner().result {
                 EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
                 EvaluationResult::Contract(_) => unreachable!(
@@ -1314,7 +1316,7 @@ impl SDK {
     pub fn execute(&mut self, snippet: String) -> Result<TransactionRes, String> {
         let session = self.get_session_mut();
         let snippet = session.remap_user_snippet(snippet);
-        match session.eval(snippet.clone(), false) {
+        match session.eval(snippet, false) {
             Ok(res) => Ok(execution_result_to_transaction_res(&res)),
             Err(diagnostics) => {
                 let message = diagnostics

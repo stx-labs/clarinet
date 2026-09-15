@@ -162,7 +162,7 @@ pub fn start_event_observer(
 ) -> Result<(), Box<dyn Error>> {
     let context_cloned = ctx.clone();
     let event_observer_config_moved = config.clone();
-    let observer_commands_tx_moved = observer_commands_tx.clone();
+    let observer_commands_tx_moved = observer_commands_tx;
 
     let _ = std::thread::Builder::new()
         .name("Event observer".to_string())

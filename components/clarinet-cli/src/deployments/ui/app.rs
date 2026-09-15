@@ -22,9 +22,9 @@ impl<'a> App<'a> {
         }
     }
 
-    pub fn on_tick(&mut self) {}
+    pub fn on_tick(&self) {}
 
-    pub fn reset(&mut self) {}
+    pub fn reset(&self) {}
 
     pub fn display_contract_status_update(&mut self, update: TransactionTracker) {
         self.transactions.items.remove(update.index);

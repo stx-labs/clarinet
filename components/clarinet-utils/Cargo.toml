@@ -24,3 +24,6 @@ divan = { workspace = true }
 [[bench]]
 name = "bip32"
 harness = false
+
+[lints]
+workspace = true
