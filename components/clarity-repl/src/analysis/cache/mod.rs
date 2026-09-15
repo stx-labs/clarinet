@@ -51,35 +51,43 @@ impl<'a> AnalysisCache<'a> {
     }
 
     pub fn get_constants(&mut self) -> &ConstantMap<'a> {
-        self.constants.get_or_insert(ConstantMapBuilder::build(
-            self.contract_analysis.clarity_version,
-            self.contract_analysis,
-            self.annotations,
-        ))
+        self.constants.get_or_insert_with(|| {
+            ConstantMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            )
+        })
     }
 
     pub fn get_bindings(&mut self) -> &BindingMap<'a> {
-        self.bindings.get_or_insert(BindingMapBuilder::build(
-            self.contract_analysis.clarity_version,
-            self.contract_analysis,
-            self.annotations,
-        ))
+        self.bindings.get_or_insert_with(|| {
+            BindingMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            )
+        })
     }
 
     pub fn get_data_vars(&mut self) -> &DataVarMap<'a> {
-        self.data_vars.get_or_insert(DataVarMapBuilder::build(
-            self.contract_analysis.clarity_version,
-            self.contract_analysis,
-            self.annotations,
-        ))
+        self.data_vars.get_or_insert_with(|| {
+            DataVarMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            )
+        })
     }
 
     fn get_functions(&mut self) -> &FnMaps<'a> {
-        self.functions.get_or_insert(FnMapBuilder::build(
-            self.contract_analysis.clarity_version,
-            self.contract_analysis,
-            self.annotations,
-        ))
+        self.functions.get_or_insert_with(|| {
+            FnMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            )
+        })
     }
 
     pub fn get_public_fns(&mut self) -> &FnMap<'a> {
@@ -95,19 +103,23 @@ impl<'a> AnalysisCache<'a> {
     }
 
     pub fn get_maps(&mut self) -> &MapDefinitionMap<'a> {
-        self.maps.get_or_insert(MapDefinitionMapBuilder::build(
-            self.contract_analysis.clarity_version,
-            self.contract_analysis,
-            self.annotations,
-        ))
+        self.maps.get_or_insert_with(|| {
+            MapDefinitionMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            )
+        })
     }
 
     fn get_tokens(&mut self) -> &TokenMaps<'a> {
-        self.tokens.get_or_insert(TokenMapBuilder::build(
-            self.contract_analysis.clarity_version,
-            self.contract_analysis,
-            self.annotations,
-        ))
+        self.tokens.get_or_insert_with(|| {
+            TokenMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            )
+        })
     }
 
     pub fn get_fts(&mut self) -> &TokenMap<'a> {
@@ -119,11 +131,13 @@ impl<'a> AnalysisCache<'a> {
     }
 
     fn get_traits(&mut self) -> &TraitMaps<'a> {
-        self.traits.get_or_insert(TraitMapBuilder::build(
-            self.contract_analysis.clarity_version,
-            self.contract_analysis,
-            self.annotations,
-        ))
+        self.traits.get_or_insert_with(|| {
+            TraitMapBuilder::build(
+                self.contract_analysis.clarity_version,
+                self.contract_analysis,
+                self.annotations,
+            )
+        })
     }
 
     pub fn get_declared_traits(&mut self) -> &DeclaredTraitMap<'a> {

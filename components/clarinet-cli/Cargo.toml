@@ -78,3 +78,6 @@ path = "src/bin.rs"
 [features]
 default = ["telemetry"]
 telemetry = ["segment", "mac_address"]
+
+[lints]
+workspace = true

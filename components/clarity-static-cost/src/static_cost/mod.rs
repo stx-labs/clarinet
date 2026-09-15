@@ -114,7 +114,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
     ) {
         let cost = get_cost_for_special_function(native_function, args, epoch, user_args, env);
         let cost_with_lookup_min = add_lookup_cost(cost.min.clone(), epoch);
-        let cost_with_lookup_max = add_lookup_cost(cost.max.clone(), epoch);
+        let cost_with_lookup_max = add_lookup_cost(cost.max, epoch);
         return Ok(StaticCost {
             min: cost_with_lookup_min,
             max: cost_with_lookup_max,
@@ -154,7 +154,7 @@ pub(crate) fn calculate_function_cost_from_native_function(
         }) => {
             let cost = get_cost_for_special_function(native_function, args, epoch, user_args, env);
             let cost_with_lookup_min = add_lookup_cost(cost.min.clone(), epoch);
-            let cost_with_lookup_max = add_lookup_cost(cost.max.clone(), epoch);
+            let cost_with_lookup_max = add_lookup_cost(cost.max, epoch);
             Ok(StaticCost {
                 min: cost_with_lookup_min,
                 max: cost_with_lookup_max,

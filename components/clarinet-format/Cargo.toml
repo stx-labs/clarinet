@@ -20,3 +20,6 @@ harness = false
 name = "clarinet_format"
 path = "src/lib.rs"
 crate-type = ["lib"]
+
+[lints]
+workspace = true

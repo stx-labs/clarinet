@@ -106,7 +106,7 @@ impl CLIDebugger {
 
     // Print the source of the current expr (if it has a valid span).
     fn print_source(
-        &mut self,
+        &self,
         env: &mut ExecutionState,
         invoke_ctx: &InvocationContext,
         expr: &SymbolicExpression,

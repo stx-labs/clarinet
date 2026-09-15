@@ -68,7 +68,7 @@ impl<'a> App<'a> {
         }
     }
 
-    pub fn on_tick(&mut self) {}
+    pub fn on_tick(&self) {}
 
     pub fn reset(&mut self) {
         self.tabs = TabsState::new();

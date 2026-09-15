@@ -20,7 +20,7 @@ pub fn generate_test_bitcoin_block(
     let parent_block_identifier = match parent {
         Some(parent) => {
             assert_eq!(parent.block_identifier.index, parent_height);
-            parent.block_identifier.clone()
+            parent.block_identifier
         }
         _ => {
             let mut parent_hash = if parent_height == 1 {
