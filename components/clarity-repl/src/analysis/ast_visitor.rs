@@ -32,6 +32,11 @@ pub static DEFAULT_NAME: LazyLock<ClarityName> =
 pub static DEFAULT_EXPR: LazyLock<SymbolicExpression> =
     LazyLock::new(|| SymbolicExpression::atom(DEFAULT_NAME.clone()));
 
+static DEFAULT_TRAIT_IDENTIFIER: LazyLock<TraitIdentifier> = LazyLock::new(|| TraitIdentifier {
+    contract_identifier: QualifiedContractIdentifier::transient(),
+    name: DEFAULT_NAME.clone(),
+});
+
 pub trait ASTVisitor<'a> {
     fn get_clarity_version(&self) -> &ClarityVersion;
 
@@ -151,20 +156,14 @@ pub trait ASTVisitor<'a> {
                             args.get(1)
                                 .unwrap_or(&DEFAULT_EXPR)
                                 .match_field()
-                                .unwrap_or(&TraitIdentifier {
-                                    contract_identifier: QualifiedContractIdentifier::transient(),
-                                    name: DEFAULT_NAME.clone(),
-                                }),
+                                .unwrap_or(&DEFAULT_TRAIT_IDENTIFIER),
                         ),
                         DefineFunctions::ImplTrait => self.traverse_impl_trait(
                             expr,
                             args.get(0)
                                 .unwrap_or(&DEFAULT_EXPR)
                                 .match_field()
-                                .unwrap_or(&TraitIdentifier {
-                                    contract_identifier: QualifiedContractIdentifier::transient(),
-                                    name: DEFAULT_NAME.clone(),
-                                }),
+                                .unwrap_or(&DEFAULT_TRAIT_IDENTIFIER),
                         ),
                     };
                 } else if let Some(native_function) = NativeFunctions::lookup_by_name_at_version(

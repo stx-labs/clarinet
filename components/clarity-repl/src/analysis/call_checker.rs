@@ -76,7 +76,7 @@ impl<'a> CallChecker<'a> {
     }
 
     fn generate_diagnostic(
-        &mut self,
+        &self,
         expr: &SymbolicExpression,
         name: &str,
         expected: usize,
@@ -248,7 +248,6 @@ mod tests {
                     format_err!(
                         "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
                     )
-                    .to_string()
                 );
                 assert_eq!(output[1], format!("{} checker:6:9", blue!("-->")));
                 assert_eq!(output[2], "    (ok (foo u1 u2))");
@@ -279,7 +278,6 @@ mod tests {
                     format_err!(
                         "incorrect number of arguments in call to 'foo' (expected 1 got 0)"
                     )
-                    .to_string()
                 );
                 assert_eq!(output[1], format!("{} checker:6:9", blue!("-->")));
                 assert_eq!(output[2], "    (ok (foo))");
@@ -310,7 +308,6 @@ mod tests {
                     format_err!(
                         "incorrect number of arguments in call to 'foo' (expected 1 got 2)"
                     )
-                    .to_string()
                 );
                 assert_eq!(output[1], format!("{} checker:6:9", blue!("-->")));
                 assert_eq!(output[2], "    (ok (foo u1 u2))");
@@ -359,7 +356,6 @@ mod tests {
                 format_err!(
                     "incorrect number of arguments in call to 'map-set' (expected 3 got 4)"
                 )
-                .to_string()
             );
             assert_eq!(err_output[1], format!("{} checker:4:5", blue!("-->")));
         } else {
@@ -381,7 +377,6 @@ mod tests {
                 format_err!(
                     "incorrect number of arguments in call to 'map-insert' (expected 3 got 4)"
                 )
-                .to_string()
             );
             assert_eq!(err_output[1], format!("{} checker:4:5", blue!("-->")));
         } else {
@@ -403,7 +398,6 @@ mod tests {
                 format_err!(
                     "incorrect number of arguments in call to 'map-delete' (expected 2 got 3)"
                 )
-                .to_string()
             );
             assert_eq!(err_output[1], format!("{} checker:4:5", blue!("-->")));
         } else {

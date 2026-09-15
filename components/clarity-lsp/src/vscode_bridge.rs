@@ -55,7 +55,7 @@ impl LspVscodeBridge {
         LspVscodeBridge {
             client_diagnostic_tx,
             client_notification_tx,
-            backend_to_client_tx: backend_to_client_tx.clone(),
+            backend_to_client_tx,
             editor_state_lock: Arc::new(RwLock::new(EditorState::new())),
         }
     }
@@ -77,7 +77,7 @@ impl LspVscodeBridge {
                 let uri = &params.text_document.uri;
 
                 if let Some(contract_location) = get_contract_location(uri) {
-                    LspNotification::ContractOpened(contract_location.clone())
+                    LspNotification::ContractOpened(contract_location)
                 } else if let Some(manifest_location) = get_manifest_location(uri) {
                     LspNotification::ManifestOpened(manifest_location)
                 } else {

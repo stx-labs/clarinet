@@ -475,7 +475,7 @@ fn run_cost_analysis_test(
         // Initialize costs contract (costs-1, needed as base)
         temp_env
             .initialize_versioned_contract(
-                costs_contract_id.clone(),
+                costs_contract_id,
                 clarity_version,
                 BOOT_CODE_COSTS,
                 None,
@@ -485,7 +485,7 @@ fn run_cost_analysis_test(
         // Initialize costs-4 contract (required for epoch 33)
         temp_env
             .initialize_versioned_contract(
-                costs_4_contract_id.clone(),
+                costs_4_contract_id,
                 clarity_version,
                 BOOT_CODE_COSTS_4,
                 None,
@@ -495,7 +495,7 @@ fn run_cost_analysis_test(
         // Initialize cost-voting contract (required for cost tracker to read confirmed-proposal-count)
         temp_env
             .initialize_versioned_contract(
-                cost_voting_contract_id.clone(),
+                cost_voting_contract_id,
                 clarity_version,
                 &BOOT_CODE_COST_VOTING_TESTNET.to_string(),
                 None,
@@ -1295,7 +1295,7 @@ fn test_contract_call_includes_callee_cost() {
 
     // Deploy callee first, then caller
     owned_env
-        .initialize_versioned_contract(callee_id.clone(), clarity_version, callee_src, None)
+        .initialize_versioned_contract(callee_id, clarity_version, callee_src, None)
         .expect("Failed to deploy counter contract");
     owned_env
         .initialize_versioned_contract(caller_id.clone(), clarity_version, caller_src, None)
@@ -2025,11 +2025,11 @@ fn test_trait_resolution_with_implementations() {
         ClarityName::from_literal("pool-trait"),
     );
     let mut trait_impls: TraitImplementations = HashMap::new();
-    trait_impls.insert(pool_trait_id, vec![pool_id.clone()]);
+    trait_impls.insert(pool_trait_id, vec![pool_id]);
 
     owned_env.begin();
     let result_with_impls = {
-        let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
+        let contract_context = ContractContext::new(caller_id, clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
         static_cost_from_ast(
             &caller_ast,
@@ -2180,11 +2180,11 @@ fn test_trait_resolution_skips_failing_implementation() {
         ClarityName::from_literal("pool-trait"),
     );
     let mut trait_impls: TraitImplementations = HashMap::new();
-    trait_impls.insert(pool_trait_id, vec![pool_id.clone(), ghost_id]);
+    trait_impls.insert(pool_trait_id, vec![pool_id, ghost_id]);
 
     owned_env.begin();
     let result = {
-        let contract_context = ContractContext::new(caller_id.clone(), clarity_version);
+        let contract_context = ContractContext::new(caller_id, clarity_version);
         let (mut env, invoke_ctx) = owned_env.get_exec_environment(None, None, &contract_context);
         static_cost_from_ast(
             &caller_ast,
@@ -2375,11 +2375,11 @@ fn test_static_cost_resolves_external_trait_implementations() {
     // scanning impl-trait declarations from all deployed contract ASTs)
     let nft_trait_id = TraitIdentifier::new(
         trait_contract_id.issuer.clone(),
-        trait_contract_id.name.clone(),
+        trait_contract_id.name,
         ClarityName::from_literal("nft-trait"),
     );
     let mut trait_impls: TraitImplementations = HashMap::new();
-    trait_impls.insert(nft_trait_id, vec![impl_contract_id.clone()]);
+    trait_impls.insert(nft_trait_id, vec![impl_contract_id]);
 
     owned_env.begin();
     let result_with_impls = {
@@ -2546,11 +2546,11 @@ fn test_static_cost_handles_mutual_trait_impl_cycle() {
     // scanning their impl-trait declarations.
     let trait_id = TraitIdentifier::new(
         trait_contract_id.issuer.clone(),
-        trait_contract_id.name.clone(),
+        trait_contract_id.name,
         ClarityName::from_literal("t"),
     );
     let mut trait_impls: TraitImplementations = HashMap::new();
-    trait_impls.insert(trait_id, vec![a_id.clone(), b_id.clone()]);
+    trait_impls.insert(trait_id, vec![a_id.clone(), b_id]);
 
     // Analyze A. Without cycle protection this never returns.
     owned_env.begin();

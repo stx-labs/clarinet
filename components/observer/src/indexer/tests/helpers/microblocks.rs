@@ -26,7 +26,7 @@ pub fn generate_test_microblock(
                     parent_microblock.block_identifier.index,
                     microblock_height - 1
                 );
-                parent_microblock.block_identifier.clone()
+                parent_microblock.block_identifier
             }
             _ => {
                 let mut parent_hash = vec![

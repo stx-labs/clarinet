@@ -31,7 +31,7 @@ pub fn generate_test_stacks_block(
             );
             (
                 microblock_parent.metadata.anchor_block_identifier.clone(),
-                Some(microblock_parent.block_identifier.clone()),
+                Some(microblock_parent.block_identifier),
             )
         }
         _ => {

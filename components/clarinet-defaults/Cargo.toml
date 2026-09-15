@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 clarity = { workspace = true, default-features = false, features = ["developer-mode"] }
+
+[lints]
+workspace = true

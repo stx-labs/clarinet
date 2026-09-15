@@ -329,7 +329,7 @@ impl DebugState {
     }
 
     fn evaluate(
-        &mut self,
+        &self,
         env: &mut ExecutionState,
         invoke_ctx: &InvocationContext,
         context: &LocalContext,

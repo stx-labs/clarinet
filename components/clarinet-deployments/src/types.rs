@@ -692,7 +692,7 @@ impl ContractPublishSpecification {
         };
 
         let location = paths::try_parse_path(&specs.path, Some(project_root_location))
-            .ok_or(format!("unable to parse path '{}'", specs.path))?;
+            .ok_or_else(|| format!("unable to parse path '{}'", specs.path))?;
 
         let source = paths::read_content_as_utf8(&location)?;
         let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
@@ -900,7 +900,7 @@ impl RequirementPublishSpecification {
         }
 
         let location = paths::try_parse_path(&specs.path, Some(project_root_location))
-            .ok_or(format!("unable to parse path '{}'", specs.path))?;
+            .ok_or_else(|| format!("unable to parse path '{}'", specs.path))?;
 
         let source = paths::read_content_as_utf8(&location)?;
         let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
@@ -996,7 +996,7 @@ impl EmulatedContractPublishSpecification {
         };
 
         let location = paths::try_parse_path(&specs.path, Some(project_root))
-            .ok_or(format!("unable to parse path '{}'", specs.path))?;
+            .ok_or_else(|| format!("unable to parse path '{}'", specs.path))?;
 
         let source = match source {
             Some(source) => source,
@@ -1509,7 +1509,7 @@ impl WalletSpecification {
         let sbtc_balance = specs
             .sbtc_balance
             .clone()
-            .unwrap_or("1000000000".to_string())
+            .unwrap_or_else(|| "1000000000".to_string())
             .parse::<u128>()
             .map_err(|_| format!("unable to parse {}'s sbtc_balance as a u128", specs.name))?;
 

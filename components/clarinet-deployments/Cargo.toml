@@ -43,3 +43,6 @@ stacks-rpc-client = { path = "../stacks-rpc-client" }
 [lib]
 name = "clarinet_deployments"
 path = "src/lib.rs"
+
+[lints]
+workspace = true
