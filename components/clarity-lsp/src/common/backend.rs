@@ -53,9 +53,13 @@ where
     // `mem::take` would be cheaper, but then a `build_state` error would
     // require manually restoring the cache. We eat the clone for safety.
     let cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
-    // Moved out, not cloned like the AST cache — a `Session` is too expensive —
-    // and put back below on every path.
-    let mut base_sessions = editor_state.try_write(|es| std::mem::take(&mut es.base_sessions))?;
+    // Cloned for the same reason, and it is nearly free: `Session::clone` shares
+    // the boot set through an `Rc` rather than copying it, which puts a whole
+    // cache at ~150 µs against a ~34 ms save. Taking it instead would leave the
+    // editor state holding an empty cache for the duration of the build, to be
+    // restored on a path that a panic, a cancelled future or a failed lock all
+    // skip.
+    let mut base_sessions = editor_state.try_read(|es| es.base_sessions.clone())?;
 
     let mut protocol_state = ProtocolState::new();
     let built = build_state(
@@ -68,14 +72,13 @@ where
     )
     .await;
 
-    editor_state.try_write(|es| es.base_sessions = base_sessions)?;
-
     let new_cache_entries = match built {
         Ok(entries) => entries,
         Err(e) => return Ok(LspNotificationResponse::error(&e)),
     };
 
     editor_state.try_write(|es| {
+        es.base_sessions = base_sessions;
         es.index_protocol(manifest_location, protocol_state);
         es.ast_cache.extend(new_cache_entries);
         post_commit(es);
@@ -1547,9 +1550,9 @@ mod lsp_tests {
         );
     }
 
-    /// `base_sessions` is moved out with `mem::take`, so the put-back has to sit
-    /// above `build_and_commit`'s early return. Losing it costs only a rebuild —
-    /// silent otherwise — so nothing else would catch the ordering drifting.
+    /// A failed build must leave the cache alone: `build_and_commit` works on a
+    /// clone and only commits it on success. Losing it costs only a rebuild —
+    /// silent otherwise — so nothing else would catch a regression here.
     #[tokio::test]
     async fn test_a_failed_build_puts_the_base_session_cache_back() {
         let source = "(define-data-var count uint u0)\n".to_string();
