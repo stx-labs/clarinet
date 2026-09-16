@@ -80,6 +80,10 @@ use clarity::vm::{ClarityName, ClarityVersion};
 use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
+use stacks_common::address::{
+    C32_ADDRESS_VERSION_MAINNET_MULTISIG, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
+    C32_ADDRESS_VERSION_TESTNET_MULTISIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
+};
 
 use crate::repl::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch, Settings,
@@ -119,20 +123,23 @@ static BOOT_CODE_COST_VOTING_TESTNET: LazyLock<String> = LazyLock::new(make_test
 /// below into a no-op.
 const POX_5_ADMIN_MAINNET: &str = "SP72DMR3MJKS7RVBY33JVV7EEJSQ1PYDVKDP10FX";
 
-/// Re-encode a mainnet address with the testnet version byte, keeping the same
-/// hash160. Deriving the twin leaves [`POX_5_ADMIN_MAINNET`] as the only
-/// literal to maintain, and it is not a prefix swap: the checksum covers the
-/// version byte, so the trailing characters change too (...KDP10FX ->
+/// Re-encode a mainnet address with the matching testnet version byte, keeping
+/// the same hash160. Deriving the twin leaves [`POX_5_ADMIN_MAINNET`] as the
+/// only literal to maintain, and it is not a prefix swap: the checksum covers
+/// the version byte, so the trailing characters change too (...KDP10FX ->
 /// ...HE5T2XC).
-///
-/// The version is taken from [`BOOT_TESTNET_PRINCIPAL`] because
-/// `stacks_common::address` is not in this crate's dependency graph.
 fn to_testnet_address(mainnet_address: &str) -> String {
-    let (_, bytes) = PrincipalData::parse_standard_principal(mainnet_address)
+    let (version, bytes) = PrincipalData::parse_standard_principal(mainnet_address)
         .expect("a hardcoded boot principal must parse")
         .destruct();
 
-    StandardPrincipalData::new(BOOT_TESTNET_PRINCIPAL.version(), bytes)
+    let testnet_version = match version {
+        C32_ADDRESS_VERSION_MAINNET_SINGLESIG => C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
+        C32_ADDRESS_VERSION_MAINNET_MULTISIG => C32_ADDRESS_VERSION_TESTNET_MULTISIG,
+        _ => panic!("expected a mainnet address, got version {version}"),
+    };
+
+    StandardPrincipalData::new(testnet_version, bytes)
         .expect("the testnet version byte is in range")
         .to_address()
 }
@@ -394,6 +401,18 @@ mod pox_5_tests {
         assert_eq!(
             to_testnet_address(BOOT_MAINNET_ADDRESS),
             BOOT_TESTNET_ADDRESS
+        );
+    }
+
+    /// `SBTC_MAINNET_ADDRESS` is used here only as a handy multisig sample —
+    /// the twin below is not sBTC's testnet deployer, which has a different
+    /// hash160 entirely. A multisig input must land on the testnet multisig
+    /// version (`SN`), not the singlesig `ST` every other caller uses.
+    #[test]
+    fn to_testnet_address_preserves_the_multisig_kind() {
+        assert_eq!(
+            to_testnet_address(SBTC_MAINNET_ADDRESS),
+            "SN3VDXK3WZZSA84XXFKAFAF15NNZX32CTSJV6BTWG"
         );
     }
 }
