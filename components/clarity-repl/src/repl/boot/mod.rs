@@ -115,16 +115,20 @@ static BOOT_CODE_POX_3_TESTNET: LazyLock<String> =
     LazyLock::new(|| format!("{POX_TESTNET}\n{POX_3_BODY}"));
 static BOOT_CODE_COST_VOTING_TESTNET: LazyLock<String> = LazyLock::new(make_testnet_cost_voting);
 
-/// The mainnet admin principal baked into pox-5's source. `bond-admin` and
-/// `pause-admin` are both initialised to it.
+/// The mainnet admin principal baked into pox-5's source, shared by
+/// `bond-admin` and `pause-admin`. Kept in step with `pox-5.clar` by hand:
+/// #2510 changed it there and left this behind, silently turning the rewrite
+/// below into a no-op.
 const POX_5_ADMIN_MAINNET: &str = "SP72DMR3MJKS7RVBY33JVV7EEJSQ1PYDVKDP10FX";
 
-/// Re-encode a mainnet address with the testnet version byte, keeping the
-/// same hash160 — the relationship `SP000...` and `ST000...` already have.
+/// Re-encode a mainnet address with the testnet version byte, keeping the same
+/// hash160. Deriving the twin leaves [`POX_5_ADMIN_MAINNET`] as the only
+/// literal to maintain, and it is not a prefix swap: the checksum covers the
+/// version byte, so the trailing characters change too (...KDP10FX ->
+/// ...HE5T2XC).
 ///
-/// The version is read off [`BOOT_TESTNET_PRINCIPAL`] rather than named
-/// directly because `stacks_common::address` is not in this crate's
-/// dependency graph.
+/// The version is taken from [`BOOT_TESTNET_PRINCIPAL`] because
+/// `stacks_common::address` is not in this crate's dependency graph.
 fn to_testnet_address(mainnet_address: &str) -> String {
     let (_, bytes) = PrincipalData::parse_standard_principal(mainnet_address)
         .expect("a hardcoded boot principal must parse")
@@ -135,16 +139,9 @@ fn to_testnet_address(mainnet_address: &str) -> String {
         .to_address()
 }
 
-/// Build the testnet pox-5 body by moving the admin principals onto the
-/// testnet version byte.
-///
-/// `bond-admin` and `pause-admin` share one address, so a single replacement
-/// covers both. The sBTC contract reference keeps its mainnet address
-/// (SM3VDXK3...), because on simnet sbtc-token is only deployed there.
-///
-/// The address has to be kept in step with `pox-5.clar` by hand: #2510 changed
-/// it and left the constant behind, which turned this into a silent no-op.
-/// `pox_5_testnet_rewrites_the_admin_principals` is what catches that.
+/// Only the admin principals move: the sBTC contract reference keeps its
+/// mainnet address (SM3VDXK3...), because on simnet sbtc-token is only
+/// deployed there.
 fn make_pox_5_testnet() -> String {
     POX_5_BODY.replace(
         POX_5_ADMIN_MAINNET,
@@ -552,52 +549,30 @@ pub fn get_boot_contract_epoch_and_clarity_version(
 mod pox_5_tests {
     use super::*;
 
-    /// #2510 moved pox-5's admins off the burn address and left
-    /// `POX_5_BOND_ADMIN_MAINNET` pointing at the old one, so the testnet
-    /// body was byte-identical to the mainnet one for several releases. Pin
-    /// both halves of the rewrite so it cannot go quiet again.
     #[test]
     fn pox_5_testnet_rewrites_the_admin_principals() {
         assert_eq!(
             POX_5_BODY.matches(POX_5_ADMIN_MAINNET).count(),
             2,
-            "pox-5.clar should set bond-admin and pause-admin to              {POX_5_ADMIN_MAINNET}; if it changed, update POX_5_ADMIN_MAINNET"
+            "pox-5.clar should set bond-admin and pause-admin to \
+             {POX_5_ADMIN_MAINNET}; if it changed, update POX_5_ADMIN_MAINNET"
         );
 
         let testnet = make_pox_5_testnet();
-        assert_ne!(
-            testnet, POX_5_BODY,
-            "the testnet body must differ from the mainnet one"
-        );
-
-        // Same hash160, testnet version byte — and therefore a different
-        // c32 checksum, so this is not a prefix swap.
         let admin = to_testnet_address(POX_5_ADMIN_MAINNET);
         assert_eq!(admin, "ST72DMR3MJKS7RVBY33JVV7EEJSQ1PYDVHE5T2XC");
-        assert_eq!(
-            testnet.matches(admin.as_str()).count(),
-            2,
-            "both admins should move to the testnet address"
-        );
-        assert!(
-            !testnet.contains(POX_5_ADMIN_MAINNET),
-            "no mainnet-version admin should survive"
-        );
+        assert_eq!(testnet.matches(admin.as_str()).count(), 2);
+        assert!(!testnet.contains(POX_5_ADMIN_MAINNET));
     }
 
-    /// sbtc-token is deployed only at its mainnet address on simnet, so the
-    /// admin rewrite must not drag the sBTC reference along with it.
     #[test]
     fn pox_5_testnet_keeps_the_sbtc_reference() {
         assert_eq!(
             make_pox_5_testnet().matches(SBTC_MAINNET_ADDRESS).count(),
-            POX_5_BODY.matches(SBTC_MAINNET_ADDRESS).count(),
-            "every sbtc-token reference should keep the mainnet address"
+            POX_5_BODY.matches(SBTC_MAINNET_ADDRESS).count()
         );
     }
 
-    /// The burn-address pair is the relationship `to_testnet_address`
-    /// reproduces, so it doubles as a check on the version byte.
     #[test]
     fn to_testnet_address_matches_the_known_boot_pair() {
         assert_eq!(
