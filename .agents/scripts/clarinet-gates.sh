@@ -198,8 +198,15 @@ while IFS= read -r f; do
       js_deps=true
       ;;
   esac
+  # Only the files carrying JsonSchema derives can change the generated schema,
+  # which is rooted at `schema_for!(ProjectManifestFile)` and describes
+  # Clarinet.toml alone. network_manifest.rs (Devnet.toml) and the rest of the
+  # crate cannot affect it. Re-derive this list with:
+  #   grep -l JsonSchema components/clarinet-files/src/*.rs
   case $f in
-    components/clarinet-files/src/*) manifest=true ;;
+    components/clarinet-files/src/schema.rs | components/clarinet-files/src/project_manifest.rs)
+      manifest=true
+      ;;
   esac
   # A here-string rather than a pipe, so the flags above survive the loop.
 done <<<"$files"
