@@ -42,7 +42,9 @@ echo $! > "$P.pid"
 
 Record the PID: without it step 7 cannot tell "the peer found nothing" apart from "the peer is still running", and a short review would silently skip it.
 
-The script works out which harness is hosting you and sends the review to a *different* vendor — codex when you are Claude Code, claude when you are Codex — with the repo's agent instructions suppressed so the peer is not primed by the same context you have.
+The script works out which harness is hosting you and sends the review to a *different vendor* — codex when you are Claude Code, claude when you are Codex — with the repo's agent instructions suppressed so the peer is not primed by the same context you have. It matches on the vendor rather than the CLI, because `pi` drives whichever provider it is pointed at.
+
+`PEER_PREFER=pi` routes to a local model instead: nothing leaves the machine, and it still works when the cloud peer is rate-limited. Its findings are weaker, not stronger — verify them exactly as step 7 says.
 
 It is non-blocking by contract: on a missing CLI, a missing login or a timeout it exits 0 and writes nothing. Collect it in step 7 by testing for the file. Never wait on it before doing your own work, and never let its absence change the rest of the review.
 
