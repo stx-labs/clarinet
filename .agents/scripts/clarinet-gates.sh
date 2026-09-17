@@ -46,8 +46,7 @@ base_ref() {
 }
 
 target=${1:-}
-diff_cmd=(git diff)
-description=
+worktree_target=false
 # Set for a pull-request target: the gates below need the branch checked out.
 # Matched by regex rather than a case glob, so a hex SHA like 1f102919 is not
 # mistaken for PR 1.
@@ -70,6 +69,7 @@ case $target in
     if [[ -n $(git status --porcelain) ]]; then
       diff_cmd=(git diff HEAD)
       description="uncommitted work (staged + unstaged, vs HEAD)"
+      worktree_target=true
     elif [[ $(git rev-parse --abbrev-ref HEAD) != "$default_branch" ]] && ref=$(base_ref); then
       base=$(git merge-base "$ref" HEAD)
       diff_cmd=(git diff "$base" HEAD)
@@ -82,6 +82,7 @@ case $target in
   --unstaged)
     diff_cmd=(git diff)
     description="unstaged changes"
+    worktree_target=true
     ;;
   --staged)
     diff_cmd=(git diff --cached)
@@ -90,22 +91,30 @@ case $target in
   --worktree)
     diff_cmd=(git diff HEAD)
     description="uncommitted work (staged + unstaged, vs HEAD)"
+    worktree_target=true
+    ;;
+  *...*)
+    # `a...b` is merge-base(a,b)..b. Treating it as `git diff a b` would render
+    # every commit a has that b lacks as a reversal in the review diff.
+    a=${target%%...*}
+    b=${target##*...}
+    base=$(git merge-base "$a" "${b:-HEAD}")
+    diff_cmd=(git diff "$base" "${b:-HEAD}")
+    description="range $target (merge-base ${base:0:8})"
     ;;
   *..*)
     a=${target%%..*}
     b=${target##*..}
-    b=${b#.}
     diff_cmd=(git diff "$a" "${b:-HEAD}")
     description="range $target"
     ;;
   *)
     if git rev-parse --quiet --verify "refs/heads/$target" >/dev/null ||
       git rev-parse --quiet --verify "refs/remotes/$target" >/dev/null; then
-      ref=$(base_ref) || skip_ref=1
-      if [[ -n ${skip_ref:-} ]]; then
+      ref=$(base_ref) || {
         echo "clarinet-gates: no local or remote ref for default branch '$default_branch'" >&2
         exit 1
-      fi
+      }
       base=$(git merge-base "$ref" "$target")
       diff_cmd=(git diff "$base" "$target")
       description="branch $target vs $ref (base ${base:0:8})"
@@ -121,14 +130,19 @@ esac
 
 # Newline-delimited rather than an array: macOS ships bash 3.2, which has no
 # `mapfile` and errors on an empty array under `set -u`.
-files=$("${diff_cmd[@]}" --name-only)
+# Deduplicated: `gh pr diff --name-only` lists a renamed file under both its
+# old and new name, and a file that is both renamed and type-changed twice.
+files=$("${diff_cmd[@]}" --name-only | sort -u) || {
+  echo "clarinet-gates: \`${diff_cmd[*]}\` failed" >&2
+  exit 1
+}
 
 # `git diff` cannot see files git has never been told about, so a brand-new
 # source file would be reviewed by nobody and gated by nothing. Fold untracked
 # files into the list for working-tree targets only — a commit or a range has
 # no untracked component.
 untracked=
-if [[ ${diff_cmd[*]} == "git diff HEAD" || ${diff_cmd[*]} == "git diff" ]]; then
+if $worktree_target; then
   untracked=$(git ls-files --others --exclude-standard)
   [[ -z $untracked ]] || files=$(printf '%s\n%s' "$files" "$untracked" | sed '/^$/d' | sort -u)
 fi
@@ -168,7 +182,11 @@ while IFS= read -r f; do
     # .clar boot sources are include_str!'d into clarity-repl, and a manifest
     # or lockfile change can break the build on its own. Both need the compile
     # and test gates, not just the audit.
-    *.rs | *.clar | Cargo.toml | Cargo.lock | components/*/Cargo.toml) rust=true ;;
+    Cargo.toml | Cargo.lock | components/*/Cargo.toml)
+      rust=true
+      rust_deps=true
+      ;;
+    *.rs | *.clar) rust=true ;;
   esac
   # Only a Rust or manifest change to a crate can break that crate's build, so
   # a TypeScript-only edit under components/ must not pull in a cargo gate.
@@ -189,9 +207,6 @@ while IFS= read -r f; do
   esac
   case $f in
     components/clarity-vscode/*) vscode=true ;;
-  esac
-  case $f in
-    Cargo.toml | Cargo.lock | components/*/Cargo.toml) rust_deps=true ;;
   esac
   case $f in
     pnpm-lock.yaml | pnpm-workspace.yaml | package.json | */pnpm-lock.yaml | */package.json)
@@ -225,7 +240,7 @@ if $manifest; then echo "  manifest    — clarinet-files types (manifest schema
 echo
 echo "GATES:"
 echo "# Run in order, cheapest first. Stop at the first failure."
-if [[ -n $pr ]]; then
+if [[ -n $pr ]] && [[ $(gh pr view "$pr" --json headRefName --jq .headRefName 2>/dev/null) != "$(git rev-parse --abbrev-ref HEAD)" ]]; then
   echo "# PR #$pr is not checked out here — these gates test the working tree, not the PR."
   echo "#   gh pr checkout $pr   (in a worktree) to make them meaningful."
 fi

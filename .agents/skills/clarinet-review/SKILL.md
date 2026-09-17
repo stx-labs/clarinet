@@ -29,12 +29,15 @@ If `FILES` is empty, stop and ask what to review.
 Start this **before** anything else below: it takes minutes, while the rest takes seconds, so it runs while you work.
 
 ```bash
-rm -f /tmp/clarinet-peer.json /tmp/clarinet-peer.pid
-<the DIFF command from step 1> > /tmp/clarinet-review.diff
-.agents/scripts/clarinet-peer-review.sh /tmp/clarinet-review.diff \
+# Keyed to the worktree: this repo is worked in several at once, and a fixed
+# path would have two concurrent reviews overwrite each other's result.
+P="${TMPDIR:-/tmp}/clarinet-peer-$(basename "$(git rev-parse --show-toplevel)")"
+rm -f "$P.json" "$P.pid"
+<the DIFF command from step 1> > "$P.diff"
+.agents/scripts/clarinet-peer-review.sh "$P.diff" \
   .agents/skills/clarinet-review/references/clarinet-risk-map.md \
-  /tmp/clarinet-peer.json &
-echo $! > /tmp/clarinet-peer.pid
+  "$P.json" &
+echo $! > "$P.pid"
 ```
 
 Record the PID: without it step 7 cannot tell "the peer found nothing" apart from "the peer is still running", and a short review would silently skip it.
@@ -97,12 +100,12 @@ Present one merged view, most severe first:
 
   ```bash
   for _ in $(seq 1 120); do
-    [ -f /tmp/clarinet-peer.pid ] && kill -0 "$(cat /tmp/clarinet-peer.pid)" 2>/dev/null || break
+    [ -f "$P.pid" ] && kill -0 "$(cat "$P.pid")" 2>/dev/null || break
     sleep 5
   done
   ```
 
-  The peer's own timeout bounds it, and this loop caps the wait at ten minutes regardless. Then: if `/tmp/clarinet-peer.json` exists, read it and merge, labelling each as peer-sourced and naming the vendor. Verify each one against the code before repeating it: the peer never ran the gates and cannot see the repo's instructions, so it is the most likely source of a confident-sounding false positive. Drop what does not survive. If the file is absent, say in one line that no peer ran and why, and move on.
+  The peer's own timeout bounds it, and this loop caps the wait at ten minutes regardless. Then: if `$P.json` exists, read it and merge, labelling each as peer-sourced and naming the vendor. Verify each one against the code before repeating it: the peer never ran the gates and cannot see the repo's instructions, so it is the most likely source of a confident-sounding false positive. Drop what does not survive. If the file is absent, say in one line that no peer ran and why, and move on.
 
 If your harness has a structured findings report (Claude Code's `ReportFindings`), it is called at most once per review: if step 6 already used it, put the remaining findings in the response text; if not, use it for the merged list. Otherwise just write them out.
 

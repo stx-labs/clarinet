@@ -41,11 +41,11 @@ cargo build
 # Run all Rust tests (uses cargo-nextest)
 cargo tst
 
-# Run single test
-cargo tst -p <crate-name> -- <test-name>
+# Run one crate's tests (the `tst` alias hardcodes --workspace, so -p does not filter)
+cargo nextest run -p <crate-name> --locked -- <test-name>
 
-# Run clippy
-cargo clippy --workspace --exclude clarinet-sdk-wasm
+# Run clippy (--tests matches CI; without it, test code is not linted)
+cargo clippy --workspace --tests --exclude clarinet-sdk-wasm
 
 # Format code
 cargo fmt-stacks

@@ -36,17 +36,40 @@ log() { printf '[peer] %s\n' "$*" >&2; }
 skip() { log "$*"; exit 0; }
 
 PEER_TIMEOUT="${PEER_TIMEOUT:-600}"
+# Whole seconds only: timeout(1) accepts suffixes and perl's alarm does not
+# (it reads "10m" as 10), so an unvalidated value means two different timeouts
+# on two machines — or none at all.
+case $PEER_TIMEOUT in
+  '' | *[!0-9]*)
+    log "warning: PEER_TIMEOUT='$PEER_TIMEOUT' is not whole seconds; using 600"
+    PEER_TIMEOUT=600
+    ;;
+esac
 
 HOST=""
 DRY_RUN=false
 if [ "${1:-}" = "--host" ]; then
   HOST="${2:-}"
   shift 2
+  # Unvalidated, a typo picks the host's own vendor as its "peer" — exactly what
+  # the unattested-host refusal below exists to prevent.
+  case $HOST in
+    claude | codex) ;;
+    *) skip "unknown --host '$HOST'; expected claude or codex" ;;
+  esac
 fi
 if [ "${1:-}" = "--dry-run" ]; then
   DRY_RUN=true
   shift
 fi
+
+# Callers treat the presence of OUT as the sole success signal, so clear it
+# before anything can skip — including the host/peer resolution below, whose
+# skips are the most likely of all in practice.
+case "${1:-}" in
+  --dry-run | '') ;;
+  *) [ -z "${3:-}" ] || rm -f "$3" ;;
+esac
 
 # --- who is the host? ------------------------------------------------------
 # The host attests itself when it can; env detection is the fallback. An
@@ -115,8 +138,11 @@ build_argv() {
   case "$PEER" in
     codex)
       # Prompt on stdin; last message to $RAW; repo agent docs suppressed.
+      # No --json: the script reads only -o, and JSON mode swallows codex's own
+      # error output (an out-of-credits failure arrives as exit 1 and nothing
+      # else), which leaves the caller unable to say why the peer did not run.
       ARGV=(codex exec - --cd "$PWD" --skip-git-repo-check -s read-only
-        --json -o "$RAW"
+        -o "$RAW"
         -c "model_reasoning_effort=\"$PEER_EFFORT\""
         -c "project_doc_max_bytes=0")
       [ -z "${PEER_MODEL:-}" ] || ARGV+=(-m "$PEER_MODEL")
@@ -147,10 +173,6 @@ BRIEF_FILE="${2:-}"
 OUT="${3:-}"
 [ -n "$DIFF_FILE" ] && [ -n "$BRIEF_FILE" ] && [ -n "$OUT" ] ||
   skip "usage: clarinet-peer-review.sh [--host claude|codex] <diff-file> <brief-file> <out-file>"
-# Callers treat the presence of OUT as the sole success signal, so a result
-# from an earlier run must never survive into this one.
-rm -f "$OUT"
-
 [ -s "$DIFF_FILE" ] || skip "empty diff; nothing to review"
 [ -f "$BRIEF_FILE" ] || skip "brief not found: $BRIEF_FILE"
 
@@ -159,9 +181,11 @@ rm -f "$OUT"
 # with "File exists" on every later call.
 PROMPT="$(mktemp "${TMPDIR:-/tmp}/clarinet-peer-prompt-XXXXXX")" ||
   skip "could not create a temp file; continuing without a peer"
+trap 'rm -f "$PROMPT" "${RAW:-}" "${RAW:-}.clean" "${ERRLOG:-}" "$OUT.part"' EXIT
 RAW="$(mktemp "${TMPDIR:-/tmp}/clarinet-peer-raw-XXXXXX")" ||
   skip "could not create a temp file; continuing without a peer"
-trap 'rm -f "$PROMPT" "$RAW" "$RAW.clean" "$OUT.part"' EXIT
+ERRLOG="$(mktemp "${TMPDIR:-/tmp}/clarinet-peer-err-XXXXXX")" ||
+  skip "could not create a temp file; continuing without a peer"
 
 {
   cat "$BRIEF_FILE"
@@ -175,10 +199,11 @@ Review ONLY the diff below, adversarially. You are a second opinion on a change
 another reviewer has already passed; assume they missed something.
 
 Ground rules:
-- This repository's CI already checks formatting, clippy on every target
-  (including wasm32), a lint banning stdout macros in wasm-reachable crates,
-  and the full test suite. All of them pass on this change. Do not report
-  anything those would catch.
+- This repository's CI enforces formatting, clippy on every target (including
+  wasm32), a lint banning stdout macros in wasm-reachable crates, and the full
+  test suite. Do not report anything those would catch. (Whether they have been
+  run on this particular change is the caller's to state, not an assumption you
+  should make either way.)
 - You may read repository files for context. You cannot modify anything.
 - Report only defects whose consequences justify acting. No style opinions.
 
@@ -199,40 +224,32 @@ log "host $HOST -> peer $PEER: sending ~$(wc -l <"$DIFF_FILE" | tr -d ' ') diff 
 
 # --- run -------------------------------------------------------------------
 build_argv
-TO_BIN="$(command -v gtimeout || command -v timeout || true)"
+# Stock macOS ships neither timeout(1) nor gtimeout, and without one the timeout
+# silently never arms — a hung peer then hangs its caller forever, the exact
+# outcome the non-blocking contract exists to prevent. perl is always present
+# there, and `alarm` gives the same bounded-exec semantics in one line.
+if command -v gtimeout >/dev/null 2>&1; then
+  TO_CMD=(gtimeout -k 10)
+elif command -v timeout >/dev/null 2>&1; then
+  TO_CMD=(timeout -k 10)
+else
+  TO_CMD=(perl -e 'alarm shift; exec @ARGV' --)
+fi
 
 # codex writes its answer to $RAW via -o; claude prints it to stdout.
 STDOUT_TARGET=/dev/null
 [ "$PEER" != claude ] || STDOUT_TARGET="$RAW"
 
-# Stock macOS ships neither timeout(1) nor gtimeout, so without a fallback the
-# timeout silently never arms and a hung peer hangs its caller forever — the
-# exact outcome the non-blocking contract exists to prevent.
-run_peer() {
-  if [ -n "$TO_BIN" ]; then
-    "$TO_BIN" "$PEER_TIMEOUT" "${ARGV[@]}" <"$PROMPT" >"$STDOUT_TARGET" 2>/dev/null
-    return $?
-  fi
-
-  "${ARGV[@]}" <"$PROMPT" >"$STDOUT_TARGET" 2>/dev/null &
-  local pid=$! waited=0
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$waited" -ge "$PEER_TIMEOUT" ]; then
-      kill -TERM "$pid" 2>/dev/null
-      sleep 2
-      kill -KILL "$pid" 2>/dev/null
-      wait "$pid" 2>/dev/null
-      return 124
-    fi
-    sleep 1
-    waited=$((waited + 1))
-  done
-  wait "$pid"
-}
-
-run_peer
+"${TO_CMD[@]}" "$PEER_TIMEOUT" "${ARGV[@]}" <"$PROMPT" >"$STDOUT_TARGET" 2>"$ERRLOG"
 status=$?
-[ $status -eq 0 ] || skip "peer '$PEER' failed (exit $status) or timed out after ${PEER_TIMEOUT}s; continuing without it"
+if [ $status -ne 0 ]; then
+  reason=$(grep -iE 'error|denied|credit|quota|rate.?limit|unauthor|expired' "$ERRLOG" 2>/dev/null | tail -1)
+  [ -n "$reason" ] || reason=$(tail -1 "$ERRLOG" 2>/dev/null)
+  case $status in
+    124 | 142) skip "peer '$PEER' timed out after ${PEER_TIMEOUT}s; continuing without it" ;;
+    *) skip "peer '$PEER' failed (exit $status): ${reason:-no diagnostic on stderr}; continuing without it" ;;
+  esac
+fi
 [ -s "$RAW" ] || skip "peer '$PEER' returned nothing; continuing without it"
 
 # --- normalize -------------------------------------------------------------
@@ -249,10 +266,13 @@ sed -e 's/^```json[[:space:]]*$//' -e 's/^```[[:space:]]*$//' "$RAW" >"$RAW.clea
 
 # Build in a sibling temp file and rename: OUT must never be observable in a
 # partial state, because its mere presence is what tells the caller to read it.
-if jq -e 'select(type == "object" and has("findings"))' <"$RAW.clean" >"$OUT.part" 2>/dev/null ||
-  jq -ers '[.. | objects | select(has("findings"))] | first | select(. != null)' \
-    <"$RAW.clean" >"$OUT.part" 2>/dev/null; then
-  mv -f "$OUT.part" "$OUT"
+#
+# `-s` matters: without it a reply holding two JSON documents writes both,
+# concatenated, into a file the caller would then trust. `..` reaches the root,
+# so this single expression also covers a plain top-level {"findings": [...]}.
+if jq -es '[.. | objects | select(has("findings"))] | first | select(. != null)' \
+  <"$RAW.clean" >"$OUT.part" 2>/dev/null; then
+  mv -f "$OUT.part" "$OUT" || skip "could not publish the peer reply to $OUT"
 else
   rm -f "$OUT.part"
   skip "peer '$PEER' reply was not schema-shaped JSON; continuing without it"

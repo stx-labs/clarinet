@@ -2,7 +2,7 @@
 
 **Only what survives a green CI.**
 
-The gates in step 4 compile every surface, run the tests, and lint the banned stdout macros. Whatever they catch is theirs to report — don't re-hunt it by hand, and don't list it here. This file exists for defects that a clean gate run still lets through.
+This repo's CI gates compile every surface, run the tests, and lint the banned stdout macros. Whatever they catch is theirs to report — don't re-hunt it by hand, and don't list it here. This file exists for defects that a clean gate run still lets through.
 
 It is deliberately short, and it is meant to grow from evidence rather than from anticipation. The recording protocol is at the bottom; read it before adding anything.
 
@@ -12,7 +12,7 @@ These three follow from how the repo is built, so they apply to any change, not 
 
 ### 1. The three surfaces can drift apart
 
-CLAUDE.md's own framing: three tools — CLI, TypeScript SDK, VSCode extension — built on one set of Rust components. The gates prove each surface *compiles*. Nothing proves they *agree*.
+The repo's own framing: three tools — CLI, TypeScript SDK, VSCode extension — built on one set of Rust components. The gates prove each surface *compiles*. Nothing proves they *agree*.
 
 For a change in a shared crate, ask:
 

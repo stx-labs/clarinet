@@ -18,7 +18,7 @@ Pass the user's target argument through verbatim, with no argument at all when t
 .agents/scripts/clarinet-gates.sh <target>
 ```
 
-That prints four sections: `TARGET` (what got resolved), `FILES`, `SURFACES` (which of native / SDK-wasm / LSP-wasm / TS the change reaches), and `GATES` (the CI commands that apply). Keep the `GATES` list — step 4 runs it.
+That prints four sections: `TARGET` (what got resolved), `FILES`, `SURFACES` (which build surfaces the change reaches), and `GATES` (the CI commands that apply). Keep the `GATES` list — step 4 runs it.
 
 If `FILES` is empty, stop and ask what to simplify rather than guessing.
 
@@ -63,7 +63,7 @@ Two things it says that matter most during a simplify pass:
 
 ### Comments
 
-Keep them to the minimum. A comment earns its place by explaining *why*, never by restating the code. Delete the ones the simplification made redundant. A doc comment on a new helper stating its non-obvious contract is welcome.
+`rust-conventions` covers the rule; the simplify-specific part is to **delete the comments the simplification made redundant**.
 
 ## 4. Verify
 
@@ -71,10 +71,7 @@ Run the `GATES` from step 1 in the order printed, stopping at the first failure.
 
 When a gate fails, fix the specific cause or revert that one simplification. Never weaken an assertion, loosen a type, or delete a test to make a gate pass. If the target reaches `sdk-ts`, note that its gate needs `pnpm run build:sdk-wasm` first and takes minutes — run it, don't skip it.
 
-Two gotchas worth knowing when a gate fails:
-
-- The `tst` alias hardcodes `--workspace`, so `cargo tst -p <crate>` does **not** filter. Narrow with `cargo nextest run -p <crate> --locked`.
-- Devnet snapshot tests read `~/.clarinet/cache/devnet`, and a stale marker file there blocks re-extraction. Wipe that directory before trusting a snapshot-test failure.
+One gotcha the conventions do not cover: devnet snapshot tests read `~/.clarinet/cache/devnet`, and a stale marker file there blocks re-extraction. Wipe that directory before trusting a snapshot-test failure.
 
 ## 5. Report
 
@@ -83,4 +80,3 @@ Two gotchas worth knowing when a gate fails:
 - Gate results, one line per gate.
 - If the target was a past commit, the reminder that the fixes are sitting in the working tree.
 
-Do not report a line-count delta as if it were the result.

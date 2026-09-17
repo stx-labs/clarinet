@@ -42,7 +42,6 @@ Two rewrites this codebase has actually made, worth recognising:
 | A literal sBTC principal or contract id | `clarity_repl::repl::boot::{SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS, SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_TOKEN_MAINNET_ADDRESS, SBTC_CONTRACTS_NAMES, SBTC_BOOT_CONTRACTS}` |
 | Ad-hoc formatting of a Clarity `Value` | `clarity_repl::repl::clarity_values::value_to_string` |
 | A hand-rolled HTTP mock in an RPC test | `stacks_rpc_client::mock_stacks_rpc` (the crate's `mock` feature) |
-| A version literal for a new external crate | root `[workspace.dependencies]`, kept alphabetical, then `{ workspace = true }` |
 
 Epoch and Clarity-version literals age badly — they move with each Stacks release, and a baked-in one turns a correct message into a wrong one without any gate noticing. Derive them.
 

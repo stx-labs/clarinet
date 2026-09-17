@@ -29,8 +29,9 @@ Codex therefore finds these skills with no configuration at all.
 Claude Code looks in `.claude/skills`, so that directory holds symlinks:
 
 ```
-.claude/skills/clarinet-review   -> ../../.agents/skills/clarinet-review
-.claude/skills/clarinet-simplify -> ../../.agents/skills/clarinet-simplify
+.claude/skills/clarinet-review    -> ../../.agents/skills/clarinet-review
+.claude/skills/clarinet-simplify  -> ../../.agents/skills/clarinet-simplify
+.claude/skills/rust-conventions   -> ../../.agents/skills/rust-conventions
 ```
 
 One canonical copy, discovered by both. A third harness needs either its own

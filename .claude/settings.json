@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r \".tool_input.file_path // empty\" | { read -r f; case \"$f\" in *.rs) jq -nc \"{hookSpecificOutput:{hookEventName:\\\"PreToolUse\\\",additionalContext:\\\"This repo has Rust conventions at .agents/skills/rust-conventions/SKILL.md — read it before editing if you have not already this session. Most-missed rules: no println!/eprintln! in wasm-reachable crates (use clarity_repl::uprint!/ueprint!); derive epoch and Clarity-version defaults from clarinet_defaults rather than writing literals; indoc! for multi-line strings; strum derives for enum boilerplate.\\\"}}\" ;; esac; }"
+            "command": "case \"$(jq -r '.tool_input.file_path // empty')\" in *.rs) jq -nc --arg c \"Rust here has wasm32 and reuse constraints that a generic Rust reviewer will miss. Read .agents/skills/rust-conventions/SKILL.md before editing, if you have not already this session.\" '{hookSpecificOutput:{hookEventName:\"PreToolUse\",additionalContext:$c}}' ;; esac"
           }
         ]
       }
