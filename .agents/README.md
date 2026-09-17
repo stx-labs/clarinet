@@ -10,8 +10,15 @@ independent of any one coding agent.
 │   └── clarinet-peer-review.sh  adversarial review by a different model vendor than the host
 └── skills/
     ├── clarinet-review/         correctness review (report-only)
-    └── clarinet-simplify/       quality pass (applies fixes)
+    ├── clarinet-simplify/       quality pass (applies fixes)
+    └── rust-conventions/        how to write Rust here (reference, no workflow)
 ```
+
+`rust-conventions` is the single source for the repo's Rust rules. It is a
+reference rather than a procedure: the other two skills point at it instead of
+carrying their own copy, and `CLAUDE.md` points at it rather than inlining it.
+A skill is the only form of this that both harnesses read natively — `@` imports
+are Claude-only and `AGENTS.md` is Codex-only.
 
 ## Why `.agents/` and not `.claude/`
 

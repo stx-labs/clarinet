@@ -65,6 +65,11 @@ Read `references/clarinet-risk-map.md` and work its classes against the diff. Co
 
 The map holds only defects that survive a green CI: the three surfaces drifting apart, code that compiles for wasm32 but cannot work there, and tests that never run. It is short on purpose. If something in the diff worries you and no class covers it, that is a normal outcome — judge it on its merits and say so plainly; the map is a floor, not a checklist that bounds the review.
 
+For Rust diffs, the `rust-conventions` skill (`.agents/skills/rust-conventions/SKILL.md`) is the authority on what the house style actually is. Use it to separate the two kinds of deviation, because they are not equally reportable:
+
+- **Reportable** — a rule with a consequence behind it: a hardcoded epoch that will go stale, a constant re-derived instead of imported, a platform gate that a shared crate needs, a test placed where it will never run.
+- **Not reportable** — a preference with no consequence: a manual loop that reads fine, a type alias someone would have named differently. `cargo fmt-stacks` and clippy own formatting, and neither this skill nor that one turns taste into a finding.
+
 Do not re-derive anything a gate in step 4 already reports.
 
 ## 6. Delegate the general review

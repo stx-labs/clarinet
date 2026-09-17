@@ -52,36 +52,14 @@ A harness-provided pass defaults to the current diff, so when step 1 resolved so
 
 The generic pass cannot know any of the following. Check each against the diff.
 
-### Reuse what the repo already has
+### Follow the repo's Rust conventions
 
-| Instead of | Use |
-| --- | --- |
-| A literal `StacksEpochId::…` / `ClarityVersion::…` default | `clarinet_defaults::{DEFAULT_EPOCH, DEFAULT_CLARITY_VERSION}` |
-| A hardcoded epoch in a message or comparison | `clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version(name)` |
-| A literal sBTC principal or contract id | `clarity_repl::repl::boot::{SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS, SBTC_DEPOSIT_MAINNET_ADDRESS, SBTC_TOKEN_MAINNET_ADDRESS, SBTC_CONTRACTS_NAMES, SBTC_BOOT_CONTRACTS}` |
-| Ad-hoc formatting of a Clarity `Value` | `clarity_repl::repl::clarity_values::value_to_string` |
-| `println!` / `eprintln!` / `print!` / `eprint!` | `clarity_repl::uprint!` / `ueprint!` (see the surfaces note below) |
-| A hand-rolled HTTP mock in an RPC test | `stacks_rpc_client::mock_stacks_rpc` (the crate's `mock` feature) |
-| A version literal for a new external crate | root `[workspace.dependencies]`, kept alphabetical, then `{ workspace = true }` |
+Read the `rust-conventions` skill (`.agents/skills/rust-conventions/SKILL.md`) and apply it to the diff. It is the single source for the style rules, the constants and helpers to reuse instead of re-deriving, the platform rules for the crates that compile to both native and wasm32, and the test gotchas — all of which a generic quality pass has no way to know.
 
-Epoch and Clarity-version literals age badly — they move with each Stacks release, and a baked-in one turns a correct message into a wrong one without any gate noticing. Derive them.
+Two things it says that matter most during a simplify pass:
 
-### Rust idioms
-
-`CLAUDE.md` has the authoritative list; follow it rather than a second copy here. Two additions that are specific to this codebase:
-
-- A closure returning an iterator, invoked twice just to test emptiness → bind it once and use `.peekable()` + `.peek()`.
-- Repeated `format!`-then-`eval_clarity_string` round trips where one Clarity expression would do.
-
-### Keep the three surfaces in mind
-
-Everything under `clarity-repl`, `clarinet-files`, `clarinet-deployments`, `clarinet-utils`, `clarinet-defaults`, `clarinet-format`, `clarity-static-cost` and `hiro-system-kit` compiles for the CLI *and* for wasm32. That constrains the simplification:
-
-- **Never** collapse a `#[cfg(target_arch = "wasm32")]` / `cfg(not(...))` pair to "the obvious one". There are ~100 of these gates on purpose.
-- `println!` and friends compile on wasm32 and are then silently discarded, so output vanishes in the SDK and the extension. `lints/wasm/clippy.toml` bans them, and the `disallowed_macros` gate in step 4 is what catches it.
-- Native-only crates (`bitcoin`, `dirs`, `bitcoincore-rpc`, `libsecp256k1`, `stacks-rpc-client`) are declared under `cfg(not(target_arch = "wasm32"))`. Moving code that uses them into an ungated shared path breaks the wasm build.
-- `clarity-repl`'s default feature is `dap`; the SDK and LSP build it with `--no-default-features`. Code touching `tokio`, `debug_types` or the DAP server must stay behind `#[cfg(feature = "dap")]`.
-- Logic duplicated between `clarinet-cli` and `clarinet-sdk-wasm` (or `clarity-lsp`) belongs in whichever shared crate both already depend on — that is the highest-value DRY fix in this repo, and also the riskiest, so verify all three surfaces after it.
+- **Reuse before you rewrite.** Epoch and Clarity-version literals, sBTC principals, Clarity value formatting and RPC mocks all have canonical sources; a simplification that leaves a literal in place has missed the point.
+- **Never simplify away a platform gate.** Collapsing a `cfg(target_arch)` pair or moving native-only code into a shared path is the one way a quality pass can break the build on a surface you did not run.
 
 ### Comments
 

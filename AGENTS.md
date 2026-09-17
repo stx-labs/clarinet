@@ -1,0 +1,112 @@
+# AGENTS.md
+
+Guidance for coding agents working in this repository. `CLAUDE.md` is a symlink
+to this file, so Claude Code, Codex and anything else reading either name get
+the same instructions.
+
+# Project Overview
+
+Clarinet is a development toolkit for building, testing, and deploying Clarity smart contracts on the Stacks blockchain. It provides a CLI, REPL, testing framework, debugger, and local devnet environment.
+
+This repository contains three tools that are built on top of the same Rust components:
+- CLI
+- TypeScript SDK
+- VSCode Extension (LSP wrapper)
+
+# Architecture
+
+## Core Rust Components
+
+- `clarity-repl` - Interactive REPL with DAP debugger support
+- `clarity-lsp` - Language Server Protocol for IDE integration
+- `clarinet-files` - Manifest parsing (Clarinet.toml, project structure)
+- `clarinet-deployments` - Contract deployment orchestration
+- `clarinet-format` - Clarity code formatter
+- `stacks-network` - Local devnet orchestration (Docker-based)
+- `stacks-rpc-client` - Stacks node HTTP client
+- `stacks-codec` - Stacks wire format encoding/decoding
+- `clarinet-utils` - Cryptographic utilities
+- `hiro-system-kit` - Cross-platform system helpers
+
+## CLI
+
+- `clarinet-cli` - Main CLI binary. Default member of `./cargo.toml`
+
+### Commands
+
+```bash
+# Build
+cargo build
+
+# Run all Rust tests (uses cargo-nextest)
+cargo tst
+
+# Run single test
+cargo tst -p <crate-name> -- <test-name>
+
+# Run clippy
+cargo clippy --workspace --exclude clarinet-sdk-wasm
+
+# Format code
+cargo fmt-stacks
+
+# Check formatting
+cargo fmt-stacks --check
+```
+
+## SDK (Wasm + TypeScript)
+
+- `clarinet-sdk-wasm` - Rust core built on top of the core components and CLI, compiled to WebAssembly
+- `clarinet-sdk` - TypeScript wrapper around `clarinet-sdk-wasm`
+
+Exposes some of the CLI features thanks to Wasm, and contains the Clarity unit testing framework.
+The pnpm workspace is configured in `./pnpm-workspace.yaml`
+
+### Commands
+
+```bash
+# Compile the Wasm bindgen (required before SDK tests)
+pnpm run build:sdk-wasm
+
+# Build the SDK
+pnpm run build:sdk
+
+# Run all SDK tests
+pnpm --filter ./components/clarinet-sdk/node run test
+
+# Run tests matching a pattern
+pnpm --filter ./components/clarinet-sdk/node run test -- tests/<filename>.test.ts -t <test name pattern>
+
+# Run clippy
+cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
+```
+
+## VSCode extension
+
+- `clarity-vscode` - TypeScript/WASM extension for Microsoft Visual Studio Code
+
+A wrapper around the `clarity-lsp`, compiled to Wasm to produced a self-contained VSCode extension binary.
+It has it's own `package.json` in `./components/clarity-vscode/package.json`
+
+## Build Commands
+
+The commands have to run in the `components/clarity-vscode`
+```bash
+# Build the extension
+pnpm run vsce:package
+
+# Run end-to-end tests
+pnpm test
+```
+
+## Key Dependencies
+
+Clarity interpreter and Stacks libraries come from `stacks-network/stacks-core` git dependency (see `Cargo.toml` for current revision).
+
+## Conventions
+
+- Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary) for commit messages
+- PRs merge via "squash and merge"
+- Rust style, the helpers to reuse, and the wasm32 platform rules live in
+  `.agents/skills/rust-conventions/SKILL.md`
+
