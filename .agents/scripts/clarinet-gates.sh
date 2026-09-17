@@ -45,6 +45,13 @@ base_ref() {
   fi
 }
 
+merge_base_of() {
+  git merge-base "$1" "$2" || {
+    echo "clarinet-gates: '$1' and '$2' share no history" >&2
+    exit 1
+  }
+}
+
 target=${1:-}
 worktree_target=false
 # Set for a pull-request target: the gates below need the branch checked out.
@@ -70,8 +77,14 @@ case $target in
       diff_cmd=(git diff HEAD)
       description="uncommitted work (staged + unstaged, vs HEAD)"
       worktree_target=true
-    elif [[ $(git rev-parse --abbrev-ref HEAD) != "$default_branch" ]] && ref=$(base_ref); then
-      base=$(git merge-base "$ref" HEAD)
+    elif [[ $(git rev-parse --abbrev-ref HEAD) != "$default_branch" ]]; then
+      # Erroring beats falling through to HEAD~1: reporting a one-commit review
+      # as a branch review is the outcome base_ref exists to prevent.
+      ref=$(base_ref) || {
+        echo "clarinet-gates: no local or remote ref for default branch '$default_branch'" >&2
+        exit 1
+      }
+      base=$(merge_base_of "$ref" HEAD)
       diff_cmd=(git diff "$base" HEAD)
       description="branch $(git rev-parse --abbrev-ref HEAD) vs $ref (base ${base:0:8})"
     else
@@ -98,7 +111,7 @@ case $target in
     # every commit a has that b lacks as a reversal in the review diff.
     a=${target%%...*}
     b=${target##*...}
-    base=$(git merge-base "$a" "${b:-HEAD}")
+    base=$(merge_base_of "$a" "${b:-HEAD}")
     diff_cmd=(git diff "$base" "${b:-HEAD}")
     description="range $target (merge-base ${base:0:8})"
     ;;
@@ -115,7 +128,7 @@ case $target in
         echo "clarinet-gates: no local or remote ref for default branch '$default_branch'" >&2
         exit 1
       }
-      base=$(git merge-base "$ref" "$target")
+      base=$(merge_base_of "$ref" "$target")
       diff_cmd=(git diff "$base" "$target")
       description="branch $target vs $ref (base ${base:0:8})"
     elif git rev-parse --quiet --verify "$target^{commit}" >/dev/null; then
