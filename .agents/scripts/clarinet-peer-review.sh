@@ -93,15 +93,16 @@ pick_peer() {
   return 1
 }
 
-PEER="$(pick_peer)" || {
-  if [ "$HOST" = unknown ]; then
-    skip "no peer CLI found (looked for codex, claude); no peer review"
-  fi
-  skip "no peer CLI other than the host ($HOST) is installed; no peer review"
-}
-
+# An unattested host cannot be excluded from the candidates, so any peer picked
+# here might be the host's own vendor reviewing its own work — the one outcome
+# this whole script exists to prevent. Refuse rather than guess: a review with no
+# peer is honest, a review whose "independent" peer was the author is not.
+# Pass --host explicitly to proceed on a harness this cannot detect.
 [ "$HOST" != unknown ] ||
-  log "warning: host harness not detected; peer '$PEER' may be the same vendor, so independence is not attested"
+  skip "host harness not detected, so no peer can be attested as a different vendor; pass --host claude|codex to force one"
+
+PEER="$(pick_peer)" ||
+  skip "no peer CLI other than the host ($HOST) is installed; no peer review"
 
 case "$PEER" in
   codex) PEER_EFFORT="${PEER_EFFORT:-xhigh}" ;;
