@@ -129,14 +129,15 @@ pub fn setup_session_with_deployment(
     }
 
     // A plan written before `remap-principals` existed records nothing, which
-    // is indistinguishable from a requirement. Re-deriving the marker is gated
-    // exactly like the generator's own rewrite, so a plan loaded from disk and
-    // a freshly generated one describe the same code.
+    // is indistinguishable from a requirement, so the marker is re-derived
+    // here and a plan loaded from disk describes the same code a freshly
+    // generated one would.
     //
-    // The session is built first because only it knows which chain a remote
-    // session follows: `remote_data.enabled` says the session is remote, not
-    // that it is mainnet, and a testnet-backed one is testnet-flavored exactly
-    // like simnet.
+    // The gate is deliberately narrower than the generator's, which skips the
+    // rewrite for any remote-data session. The session is built first because
+    // only it knows which chain a remote session follows: `remote_data.enabled`
+    // says the session is remote, not that it is mainnet, and a testnet-backed
+    // one is testnet-flavored exactly like simnet.
     //
     // Restricted to plans with no pre-built AST, which is exactly the
     // load-from-disk case this exists for. A caller that passes `contracts_asts`

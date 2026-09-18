@@ -17,15 +17,13 @@ use clarinet_deployments::{
     update_session_with_deployment_plan,
 };
 use clarinet_files::{ProjectManifest, StacksNetwork};
+use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC as TEST_MNEMONIC;
 use clarity::vm::{EvaluationResult, Value};
 use clarity_repl::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS};
 use clarity_repl::repl::Session;
 use clarity_repl::utils::Environment;
 use indoc::formatdoc;
 use tempfile::TempDir;
-
-/// Well-known Clarinet test mnemonic, matching the generated settings files.
-const TEST_MNEMONIC: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
 
 /// `deployer`, derived from `TEST_MNEMONIC`.
 const DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";

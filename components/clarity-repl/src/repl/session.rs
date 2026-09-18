@@ -1431,6 +1431,13 @@ impl Session {
             return "Usage: ::encode <expr>".red().to_string();
         };
 
+        // `::encode` serializes what the expression evaluates to, so it has to
+        // evaluate the code simnet actually runs — otherwise it encodes the
+        // dead mainnet twin's values.
+        // The rewrite is length-preserving, so the diagnostic spans below stay
+        // valid.
+        let snippet = &self.remap_user_snippet(snippet.to_string());
+
         let result = self.eval(snippet.to_string(), false);
         match result {
             Ok(annotated) => {

@@ -12,8 +12,10 @@ use clarity::vm::{EvaluationResult, Value};
 use clarity_repl::repl::boot::{
     BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
 };
-use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{Session, SessionSettings};
+
+mod common;
+use common::{mock_node, remote_session};
 
 /// Default deployer from the generated Devnet settings.
 const DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
@@ -186,72 +188,6 @@ fn eval_itself_leaves_a_mainnet_boot_principal_alone() {
     );
 }
 
-/// A node that reports `network_id`, which is what decides whether a remote
-/// session is mainnet-flavored. Mocked rather than live so the assertion is
-/// deterministic and adds no pressure to the shared Hiro API rate limit.
-fn mock_node(network_id: u32) -> (mockito::ServerGuard, ApiUrl) {
-    let mut server = mockito::Server::new();
-
-    // Anything not mocked answers 404 rather than mockito's default 501,
-    // which the client would treat as retryable and sleep over.
-    server
-        .mock("GET", mockito::Matcher::Any)
-        .with_status(404)
-        .expect_at_least(0)
-        .create();
-
-    server
-        .mock("GET", "/v2/info")
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(format!(
-            r#"{{"network_id": {network_id}, "stacks_tip_height": 556946}}"#
-        ))
-        .create();
-
-    // `Session::new` resolves the block at `initial_height`; `fetch_block`
-    // unwraps, so it has to be served.
-    let block = serde_json::json!({
-        "height": 556946,
-        "burn_block_height": 882262,
-        "tenure_height": 184037,
-        "block_time": 1735934294,
-        "burn_block_time": 1735451504,
-        "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
-        "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
-        "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
-    })
-    .to_string();
-    server
-        .mock(
-            "GET",
-            mockito::Matcher::Regex(r"^/extended/v2/blocks/.*$".to_string()),
-        )
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(block)
-        .expect_at_least(0)
-        .create();
-
-    let url = ApiUrl(server.url());
-    (server, url)
-}
-
-fn remote_session(api_url: ApiUrl) -> Session {
-    Session::new(SessionSettings {
-        repl_settings: clarity_repl::repl::Settings {
-            remote_data: RemoteDataSettings {
-                enabled: true,
-                api_url,
-                initial_height: Some(556946),
-                use_mainnet_wallets: false,
-            },
-            ..Default::default()
-        },
-        ..Default::default()
-    })
-}
-
 /// Against a *mainnet* node the remote chain holds the real mainnet contracts,
 /// so the mainnet addresses are the correct ones and nothing is rewritten.
 #[test]
@@ -345,6 +281,21 @@ fn console_commands_apply_the_remap_too() {
         !rendered.contains("2100"),
         "::get_costs must not reach the mainnet twin, got:\n{rendered}"
     );
+}
+
+/// `::encode` serializes what the expression evaluates to, so reaching the
+/// mainnet twin would hand back a hex string for a value simnet never
+/// produces.
+#[test]
+fn encode_serializes_the_redirected_value() {
+    let mut session = session(StacksEpochId::Epoch24);
+
+    let encoded = session.encode(&format!(
+        "::encode (get reward-cycle-length (unwrap-panic (contract-call? '{BOOT_MAINNET_ADDRESS}.pox-3 get-pox-info)))"
+    ));
+
+    assert_eq!(encoded, session.encode("::encode u1050"));
+    assert_ne!(encoded, session.encode("::encode u2100"));
 }
 
 /// The console composes the same two steps, so the wiring is what is checked

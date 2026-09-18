@@ -76,7 +76,6 @@ use std::sync::LazyLock;
 
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::StacksEpochId;
-use clarity::util::hash::Hash160;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::{ClarityName, ClarityVersion, ContractName};
 use clarity_types::types::{
@@ -222,17 +221,10 @@ pub const BOOT_CONTRACTS_NAMES: &[&str] = &[
 /// The boot addresses as `StacksAddress`, which is how post-conditions spell
 /// a contract principal.
 pub static BOOT_MAINNET_STACKS_ADDRESS: LazyLock<StacksAddress> =
-    LazyLock::new(|| stacks_address_of(&BOOT_MAINNET_PRINCIPAL));
+    LazyLock::new(|| StacksAddress::from(BOOT_MAINNET_PRINCIPAL.clone()));
 
 pub static BOOT_TESTNET_STACKS_ADDRESS: LazyLock<StacksAddress> =
-    LazyLock::new(|| stacks_address_of(&BOOT_TESTNET_PRINCIPAL));
-
-/// Re-spell a principal as the `StacksAddress` the wire format uses. Derived
-/// from the parsed principal so the two spellings cannot drift apart.
-fn stacks_address_of(principal: &StandardPrincipalData) -> StacksAddress {
-    let (version, bytes) = principal.clone().destruct();
-    StacksAddress::new(version, Hash160(bytes)).expect("a boot principal has a valid version")
-}
+    LazyLock::new(|| StacksAddress::from(BOOT_TESTNET_PRINCIPAL.clone()));
 
 pub static BOOT_TESTNET_PRINCIPAL: LazyLock<StandardPrincipalData> =
     LazyLock::new(|| PrincipalData::parse_standard_principal(BOOT_TESTNET_ADDRESS).unwrap());
