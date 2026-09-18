@@ -301,14 +301,17 @@ pub async fn start_chains_coordinator(
     let devnet_event_tx_moved = devnet_event_tx.clone();
     let devnet_config = config.clone();
     let _ = hiro_system_kit::thread_named("Bitcoin mining").spawn(move || {
-        let future =
-            handle_bitcoin_mining(mining_command_rx, &devnet_config, &devnet_event_tx_moved);
-        hiro_system_kit::nestable_block_on(future);
+        hiro_system_kit::create_basic_runtime().block_on(handle_bitcoin_mining(
+            mining_command_rx,
+            &devnet_config,
+            &devnet_event_tx_moved,
+        ));
     });
 
     // Loop over events being received from Bitcoin and Stacks,
     // and orchestrate the 2 chains + protocol.
     let mut deployment_commands_tx = Some(deployment_commands_tx);
+    let bitcoin_rpc = bitcoin_rpc_client();
 
     let mut sel = crossbeam_channel::Select::new();
     let chains_coordinator_commands_oper = sel.recv(&chains_coordinator_commands_rx);
@@ -559,6 +562,7 @@ pub async fn start_chains_coordinator(
                         std::thread::sleep(std::time::Duration::from_millis(4000));
                     }
                     let res = mine_bitcoin_block(
+                        &bitcoin_rpc,
                         &config.services_map_hosts.bitcoin_node_host,
                         config.devnet_config.bitcoin_node_username.as_str(),
                         config.devnet_config.bitcoin_node_password.as_str(),
@@ -1215,17 +1219,29 @@ pub fn invalidate_bitcoin_chain_tip(
     unimplemented!()
 }
 
+/// Builds the http client used to talk to bitcoind's JSON-RPC.
+///
+/// Idle connection reuse is disabled on purpose: the runtimes driving these calls
+/// block on sync channels between requests, so a pooled connection would sit
+/// unpolled and go stale. That leaves the client itself stateless enough to hold
+/// onto, which keeps the call sites honest about where it comes from.
+pub fn bitcoin_rpc_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("Unable to build http client")
+}
+
 pub async fn mine_bitcoin_block(
+    client: &reqwest::Client,
     bitcoin_node_host: &str,
     bitcoin_node_username: &str,
     bitcoin_node_password: &str,
     miner_btc_address: &str,
 ) -> Result<(), String> {
     let miner_address = Address::from_str(miner_btc_address).unwrap();
-    let _ = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .expect("Unable to build http client")
+    let _ = client
         .post(format!("http://{bitcoin_node_host}"))
         .basic_auth(bitcoin_node_username, Some(bitcoin_node_password))
         .header("Content-Type", "application/json")
@@ -1251,6 +1267,7 @@ async fn handle_bitcoin_mining(
     devnet_event_tx: &Sender<DevnetEvent>,
 ) {
     let stop_miner = Arc::new(AtomicBool::new(false));
+    let bitcoin_rpc = bitcoin_rpc_client();
     loop {
         let command = match mining_command_rx.recv() {
             Ok(cmd) => cmd,
@@ -1265,34 +1282,38 @@ async fn handle_bitcoin_mining(
                 let stop_miner_reader = stop_miner.clone();
                 let devnet_event_tx_moved = devnet_event_tx.clone();
                 let config_moved = config.clone();
-                let _ =
-                    hiro_system_kit::thread_named("Bitcoin mining runloop").spawn(move || loop {
+                let _ = hiro_system_kit::thread_named("Bitcoin mining runloop").spawn(move || {
+                    let rt = hiro_system_kit::create_basic_runtime();
+                    let bitcoin_rpc = bitcoin_rpc_client();
+                    loop {
                         std::thread::sleep(std::time::Duration::from_millis(
                             config_moved
                                 .devnet_config
                                 .bitcoin_controller_block_time
                                 .into(),
                         ));
-                        let future = mine_bitcoin_block(
+                        let res = rt.block_on(mine_bitcoin_block(
+                            &bitcoin_rpc,
                             &config_moved.services_map_hosts.bitcoin_node_host,
                             &config_moved.devnet_config.bitcoin_node_username,
                             &config_moved.devnet_config.bitcoin_node_password,
                             &config_moved.devnet_config.miner_btc_address,
-                        );
-                        let res = hiro_system_kit::nestable_block_on(future);
+                        ));
                         if stop_miner_reader.load(Ordering::SeqCst) {
                             break;
                         }
                         if let Err(e) = res {
                             let _ = devnet_event_tx_moved.send(DevnetEvent::error(e));
                         }
-                    });
+                    }
+                });
             }
             BitcoinMiningCommand::Pause => {
                 stop_miner.store(true, Ordering::SeqCst);
             }
             BitcoinMiningCommand::Mine => {
                 let res = mine_bitcoin_block(
+                    &bitcoin_rpc,
                     &config.services_map_hosts.bitcoin_node_host,
                     config.devnet_config.bitcoin_node_username.as_str(),
                     config.devnet_config.bitcoin_node_password.as_str(),

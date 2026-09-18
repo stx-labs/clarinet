@@ -39,14 +39,6 @@ pub enum ChainsCoordinatorCommand {
     Terminate,
 }
 
-pub fn block_on<F, R>(future: F) -> R
-where
-    F: std::future::Future<Output = R>,
-{
-    let rt = hiro_system_kit::create_basic_runtime();
-    rt.block_on(future)
-}
-
 /// Sets up signal handlers for SIGINT and SIGTERM on Unix systems
 /// On Unix: Handles both SIGINT (Ctrl+C) and SIGTERM (kill) gracefully
 /// On Windows: Handles Ctrl+C via ctrlc crate
@@ -236,7 +228,7 @@ async fn do_run_devnet(
     let ctx_moved = config.ctx.clone();
     let chains_coordinator_handle = hiro_system_kit::thread_named("Chains coordinator")
         .spawn(move || {
-            let future = start_chains_coordinator(
+            hiro_system_kit::create_basic_runtime().block_on(start_chains_coordinator(
                 observer_config,
                 chains_coordinator_tx,
                 chains_coordinator_commands_rx,
@@ -249,9 +241,7 @@ async fn do_run_devnet(
                 use_snapshot,
                 config.create_new_snapshot,
                 ctx_moved,
-            );
-            let rt = hiro_system_kit::create_basic_runtime();
-            rt.block_on(future)
+            ))
         })
         .expect("unable to retrieve join handle");
 
@@ -266,21 +256,19 @@ async fn do_run_devnet(
         hiro_system_kit::thread_named("Initializing bitcoin node")
             .spawn(move || {
                 let moved_orchestrator_event_tx = orchestrator_event_tx.clone();
+                let rt = hiro_system_kit::create_basic_runtime();
                 let res = if config.start_local_devnet_services {
-                    let future = devnet.start(
+                    rt.block_on(devnet.start(
                         moved_orchestrator_event_tx,
                         terminator_rx,
                         &ctx_moved,
                         !use_snapshot,
                         config.save_container_logs,
-                    );
-                    let rt = hiro_system_kit::create_basic_runtime();
-                    rt.block_on(future)
+                    ))
                 } else {
-                    let future =
-                        devnet.initialize_bitcoin_node(&moved_orchestrator_event_tx, !use_snapshot);
-                    let rt = hiro_system_kit::create_basic_runtime();
-                    rt.block_on(future)
+                    rt.block_on(
+                        devnet.initialize_bitcoin_node(&moved_orchestrator_event_tx, !use_snapshot),
+                    )
                 };
                 if let Err(ref e) = res {
                     let _ = orchestrator_event_tx.send(DevnetEvent::FatalError(e.clone()));

@@ -28,6 +28,26 @@ pub enum LspResponse {
     Request(LspRequestResponse),
 }
 
+/// Runs [`start_language_server`] on a dedicated thread owning its own runtime.
+///
+/// The server loop blocks on crossbeam channels, so it can't share a runtime
+/// thread with the JSON-RPC transport.
+pub fn spawn_language_server(
+    notification_rx: MultiplexableReceiver<LspNotification>,
+    request_rx: MultiplexableReceiver<LspRequest>,
+    response_tx: Sender<LspResponse>,
+) {
+    hiro_system_kit::thread_named("LSP server")
+        .spawn(move || {
+            hiro_system_kit::create_basic_runtime().block_on(start_language_server(
+                notification_rx,
+                request_rx,
+                response_tx,
+            ));
+        })
+        .expect("unable to spawn LSP server thread");
+}
+
 pub async fn start_language_server(
     notification_rx: MultiplexableReceiver<LspNotification>,
     request_rx: MultiplexableReceiver<LspRequest>,

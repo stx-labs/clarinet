@@ -1,27 +1,14 @@
-use std::future::Future;
+use tokio::runtime::{Builder, Runtime};
 
-pub fn create_basic_runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
+/// The runtime Clarinet's blocking entry points drive their futures on: a
+/// single-threaded scheduler with the io and time drivers enabled.
+///
+/// Meant to be owned by the thread that blocks on it — either the main thread
+/// or a dedicated `thread_named` worker — and built once per thread.
+pub fn create_basic_runtime() -> Runtime {
+    Builder::new_current_thread()
+        .enable_all()
         .max_blocking_threads(32)
         .build()
-        .unwrap()
+        .expect("failed to build tokio runtime")
 }
-
-pub fn nestable_block_on<F: Future>(future: F) -> F::Output {
-    let (handle, _rt) = match tokio::runtime::Handle::try_current() {
-        Ok(h) => (h, None),
-        Err(_) => {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            (rt.handle().clone(), Some(rt))
-        }
-    };
-    handle.block_on(future)
-}
-
-// pub fn spawn_async_thread_named<F: Future>(name: &str, f: F) -> io::Result<JoinHandle<F::Output>> {
-//     thread_named(name).spawn(move || {
-//         nestable_block_on(f)
-//     })
-// }
