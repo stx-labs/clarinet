@@ -85,9 +85,27 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> serde_json::Value {
     }
 }
 
+/// Whether `source` could carry an `#[env(...)]` annotation, without parsing it.
+/// Mirrors [`AnnotationKind`]: a literal `#[`, then a name that trims to `env`
+/// before the opening `(`.
+///
+/// Must over-approximate: a rejected source is never parsed, so it never reports
+/// a parse error either, and [`remove_env_simnet`] must not silently no-op on a
+/// source it cannot strip before an on-chain broadcast.
+fn might_carry_env_annotation(source: &str) -> bool {
+    source.split("#[").skip(1).any(|rest| {
+        rest.find('(')
+            .is_some_and(|open| rest[..open].trim() == "env")
+    })
+}
+
 /// Returns the spans of all `#[env(simnet)]` annotated blocks in the source.
 /// Each span covers from the annotation comment through the annotated expression.
 pub fn get_env_simnet_spans(source: &str) -> Result<Vec<Span>, String> {
+    if !might_carry_env_annotation(source) {
+        return Ok(Vec::new());
+    }
+
     let (pre_expressions, _diagnostics, success) = parser::v2::parse_collect_diagnostics(
         source,
         StackDepthLimits::for_epoch(StacksEpochId::latest()),
@@ -175,6 +193,37 @@ mod tests {
     use indoc::indoc;
 
     use super::*;
+
+    /// Unbalanced parens: `parse_collect_diagnostics` reports failure.
+    const UNPARSEABLE: &str = "(define-public (broken";
+
+    /// An unstrippable source must surface as an error, not a silent pass.
+    #[test]
+    fn unparseable_source_carrying_the_annotation_is_an_error() {
+        let source = format!(";; #[env(simnet)]\n{UNPARSEABLE}");
+        assert!(get_env_simnet_spans(&source).is_err());
+        assert!(remove_env_simnet(&source).is_err());
+    }
+
+    /// The skip keys on the annotation's shape, not on the substrings `#[` and
+    /// `env` — both appear here with no `#[env(...)]` to strip.
+    #[test]
+    fn unparseable_source_without_the_annotation_is_not_an_error() {
+        let source = format!(";; reads env vars\n;; #[allow(unchecked_data)]\n{UNPARSEABLE}");
+        assert_eq!(get_env_simnet_spans(&source), Ok(Vec::new()));
+        assert_eq!(remove_env_simnet(&source), Ok(None));
+    }
+
+    #[test]
+    fn env_annotation_is_recognized_around_whitespace() {
+        assert!(might_carry_env_annotation(";; #[env(simnet)]"));
+        assert!(might_carry_env_annotation(";; #[ env (simnet) ]"));
+
+        assert!(!might_carry_env_annotation(";; #[allow(unchecked_data)]"));
+        assert!(!might_carry_env_annotation(";; #[environment(simnet)]"));
+        assert!(!might_carry_env_annotation(";; env of the #[ and (\n"));
+        assert!(!might_carry_env_annotation("(define-data-var env uint u0)"));
+    }
 
     #[test]
     fn can_remove_env_simnet() {
