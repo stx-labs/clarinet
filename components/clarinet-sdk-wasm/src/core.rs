@@ -530,18 +530,18 @@ impl SDK {
 
         for (contract_id, result) in session
             .boot_contracts
-            .clone()
-            .into_iter()
-            .chain(executed_contracts)
+            .iter()
+            .chain(executed_contracts.iter())
         {
             match result {
                 Ok(execution_result) => {
-                    if let Some((id, iface)) = contract_interface_from_result(&execution_result) {
+                    if let Some((id, iface)) = contract_interface_from_result(execution_result) {
                         contracts_interfaces.insert(id, iface);
                     }
                 }
                 Err(diagnostics) => {
-                    let contract_diagnostics = HashMap::from([(contract_id, diagnostics)]);
+                    let contract_diagnostics =
+                        HashMap::from([(contract_id.clone(), diagnostics.clone())]);
                     let diags_digest =
                         DiagnosticsDigest::new(&contract_diagnostics, &HashMap::new(), &deployment);
                     if diags_digest.errors > 0 {

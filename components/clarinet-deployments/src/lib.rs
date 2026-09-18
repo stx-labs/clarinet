@@ -6,6 +6,7 @@ pub mod onchain;
 pub mod requirements;
 pub mod types;
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use clarinet_defaults::DEFAULT_EPOCH;
@@ -119,8 +120,8 @@ pub fn setup_session_with_deployment(
     }
 }
 
-pub fn initiate_session_from_manifest(manifest: &ProjectManifest) -> Session {
-    let settings = SessionSettings {
+pub fn session_settings_from_manifest(manifest: &ProjectManifest) -> SessionSettings {
+    SessionSettings {
         repl_settings: manifest.repl_settings.clone(),
         disk_cache_enabled: true,
         cache_location: Some(manifest.project.cache_location.clone()),
@@ -131,8 +132,11 @@ pub fn initiate_session_from_manifest(manifest: &ProjectManifest) -> Session {
             .map(|(name, entry)| (name.clone(), entry.source.clone()))
             .collect(),
         ..Default::default()
-    };
-    Session::new(settings)
+    }
+}
+
+pub fn initiate_session_from_manifest(manifest: &ProjectManifest) -> Session {
+    Session::new(session_settings_from_manifest(manifest))
 }
 
 fn update_session_with_genesis_accounts(
@@ -206,38 +210,199 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
     }
 }
 
-pub fn update_session_with_deployment_plan(
+static IMPLICIT_BATCH: TransactionsBatchSpecification = TransactionsBatchSpecification {
+    id: 0,
+    transactions: Vec::new(),
+    epoch: None,
+};
+
+/// An empty plan pins no epoch, leaving the session on the datastore default
+/// (2.05) — before every boot contract that matters; [`IMPLICIT_BATCH`] routes
+/// it through the same epoch fallback. Excluded for remote-data sessions: their
+/// state comes from the network, and `update_epoch` would install the boot
+/// contracts `Session::new` deliberately skipped.
+fn plan_batches(
+    remote_data_enabled: bool,
+    deployment: &DeploymentSpecification,
+) -> &[TransactionsBatchSpecification] {
+    if deployment.plan.batches.is_empty() && !remote_data_enabled {
+        std::slice::from_ref(&IMPLICIT_BATCH)
+    } else {
+        &deployment.plan.batches
+    }
+}
+
+fn batch_epoch(batch: &TransactionsBatchSpecification) -> StacksEpochId {
+    batch.epoch.map(Into::into).unwrap_or(DEFAULT_EPOCH)
+}
+
+/// Reads no contract source, which is what [`BaseSessionCache`] exploits.
+fn prepare_session_for_deployment_plan(
+    session: &mut Session,
+    deployment: &DeploymentSpecification,
+) {
+    update_session_with_genesis_accounts(session, deployment);
+
+    let remote_data_enabled = session.settings.repl_settings.remote_data.enabled;
+    if let Some(batch) = plan_batches(remote_data_enabled, deployment).first() {
+        session.advance_chain_tip(1);
+        session.update_epoch(batch_epoch(batch));
+    }
+}
+
+/// A session advanced by [`prepare_session_for_deployment_plan`] *for a specific
+/// deployment*. Both halves matter: [`resume_session_with_deployment_plan`] skips
+/// the first batch's tip and epoch advance on the grounds that `prepare` already
+/// performed it, so a session that skipped `prepare` leaves the plan with no boot
+/// contracts, and a session prepared for a *different* plan silently runs this one
+/// at the other's epoch and genesis state.
+///
+/// Neither is reachable from outside this module: the type is private, and
+/// [`BaseSessionCache::run_deployment_plan`] is the only way in — it names the
+/// deployment once and hands it to both halves itself.
+struct PreparedSession(Session);
+
+/// Everything `prepare_session_for_deployment_plan` reads: equal keys mean equal
+/// base sessions.
+///
+/// One input is deliberately left out: the datastore seeds its genesis block
+/// time from `Utc::now()`, so a reused base replays the plan at the simulated
+/// time of the save that built it rather than the current one. Keying on it
+/// would defeat the cache — every key would differ — and the only observable
+/// difference is a contract reading block time during its own deployment, where
+/// a frozen clock is the more reproducible of the two. Callers that need a live
+/// clock per run must build their own session rather than take one from here.
+#[derive(Clone, PartialEq)]
+struct BaseSessionKey {
+    settings: SessionSettings,
+    genesis: Option<GenesisSpecification>,
+    first_batch_epoch: Option<StacksEpochId>,
+}
+
+impl BaseSessionKey {
+    fn new(settings: SessionSettings, deployment: &DeploymentSpecification) -> Self {
+        let first_batch_epoch =
+            plan_batches(settings.repl_settings.remote_data.enabled, deployment)
+                .first()
+                .map(batch_epoch);
+        Self {
+            settings,
+            genesis: deployment.genesis.clone(),
+            first_batch_epoch,
+        }
+    }
+}
+
+/// Caches the session `prepare_session_for_deployment_plan` produces: cloning it
+/// costs ~6 ms against ~50 ms to re-interpret the boot contract set on a
+/// 50-contract project. No contract source feeds into it, so an edit never
+/// invalidates it.
+#[derive(Clone, Default)]
+pub struct BaseSessionCache {
+    entry: Option<(BaseSessionKey, Session)>,
+    hits: u32,
+}
+
+impl fmt::Debug for BaseSessionCache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BaseSessionCache")
+            .field("cached", &self.entry.is_some())
+            .field("hits", &self.hits)
+            .finish()
+    }
+}
+
+impl BaseSessionCache {
+    /// Run `deployment` from a cached base, building one if nothing matches.
+    ///
+    /// The single entry point on purpose: naming the deployment once is what
+    /// makes it impossible to prepare against one plan and run another. See
+    /// [`PreparedSession`] for what that would otherwise cost.
+    pub fn run_deployment_plan(
+        &mut self,
+        settings: SessionSettings,
+        deployment: &DeploymentSpecification,
+        contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
+    ) -> (Session, ExecutionResultMap) {
+        let prepared = self.prepared_session(settings, deployment);
+        resume_session_with_deployment_plan(prepared, deployment, contracts_asts)
+    }
+
+    fn prepared_session(
+        &mut self,
+        settings: SessionSettings,
+        deployment: &DeploymentSpecification,
+    ) -> PreparedSession {
+        // Remote-data sessions are never cached. `Session::new` resolves
+        // `initial_height: None` against the live tip and seeds the datastore
+        // from the network, and neither input is visible to the key — the
+        // setting stays `None` whatever the tip was. Reusing one would pin the
+        // first save's chain tip for the rest of the editor session. Dropping
+        // the entry also releases the boot set a pre-remote build left behind.
+        if settings.repl_settings.remote_data.enabled {
+            self.entry = None;
+            return PreparedSession(Self::prepare(settings, deployment));
+        }
+
+        let key = BaseSessionKey::new(settings, deployment);
+
+        if let Some((_, session)) = self.entry.as_ref().filter(|(cached, _)| *cached == key) {
+            self.hits += 1;
+            return PreparedSession(session.clone());
+        }
+
+        let session = Self::prepare(key.settings.clone(), deployment);
+        self.entry = Some((key, session.clone()));
+        PreparedSession(session)
+    }
+
+    fn prepare(settings: SessionSettings, deployment: &DeploymentSpecification) -> Session {
+        let mut session = Session::new(settings);
+        prepare_session_for_deployment_plan(&mut session, deployment);
+        session
+    }
+
+    /// Holds nothing worth keeping. True for a remote-data manifest, which never
+    /// caches a base session, so callers that ration slots can skip storing it.
+    pub fn is_empty(&self) -> bool {
+        self.entry.is_none()
+    }
+
+    /// The only signal distinguishing a reuse from a silent ~50 ms rebuild.
+    pub fn hits(&self) -> u32 {
+        self.hits
+    }
+}
+
+fn resume_session_with_deployment_plan(
+    prepared: PreparedSession,
+    deployment: &DeploymentSpecification,
+    contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
+) -> (Session, ExecutionResultMap) {
+    let mut session = prepared.0;
+    let contracts = run_deployment_plan(&mut session, deployment, contracts_asts);
+    (session, contracts)
+}
+
+/// Execute every batch of `deployment`, skipping the first batch's tip and
+/// epoch advance because `prepare_session_for_deployment_plan` performed it.
+fn run_deployment_plan(
     session: &mut Session,
     deployment: &DeploymentSpecification,
     contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
 ) -> ExecutionResultMap {
-    update_session_with_genesis_accounts(session, deployment);
-
-    // A plan with nothing to deploy pins no epoch, which would otherwise leave
-    // the session on the datastore default (epoch 2.05) — before every boot
-    // contract that matters. An implicit empty batch routes that case through
-    // the same epoch fallback as a batch that carries no epoch of its own.
-    //
-    // Not for remote-data sessions: their state comes from the network, and
-    // `Session::new` deliberately deploys no boot contracts. Advancing the
-    // epoch would install them anyway, since `update_epoch` has no such guard.
-    let implicit_batch = TransactionsBatchSpecification {
-        id: 0,
-        transactions: vec![],
-        epoch: None,
-    };
-    let synthesize_batch =
-        deployment.plan.batches.is_empty() && !session.settings.repl_settings.remote_data.enabled;
-    let batches = match synthesize_batch {
-        true => std::slice::from_ref(&implicit_batch),
-        false => deployment.plan.batches.as_slice(),
-    };
+    let batches = plan_batches(
+        session.settings.repl_settings.remote_data.enabled,
+        deployment,
+    );
 
     let mut contracts = BTreeMap::new();
-    for batch in batches {
-        let epoch: StacksEpochId = batch.epoch.map(Into::into).unwrap_or(DEFAULT_EPOCH);
-        session.advance_chain_tip(1);
-        session.update_epoch(epoch);
+    for (index, batch) in batches.iter().enumerate() {
+        let epoch = batch_epoch(batch);
+        if index > 0 {
+            session.advance_chain_tip(1);
+            session.update_epoch(epoch);
+        }
 
         for transaction in batch.transactions.iter() {
             match transaction {
@@ -277,6 +442,15 @@ pub fn update_session_with_deployment_plan(
     fund_genesis_accounts_with_sbtc(session, deployment);
 
     contracts
+}
+
+pub fn update_session_with_deployment_plan(
+    session: &mut Session,
+    deployment: &DeploymentSpecification,
+    contracts_asts: Option<&BTreeMap<QualifiedContractIdentifier, ContractAST>>,
+) -> ExecutionResultMap {
+    prepare_session_for_deployment_plan(session, deployment);
+    run_deployment_plan(session, deployment, contracts_asts)
 }
 
 fn handle_stx_transfer(session: &mut Session, tx: &StxTransferSpecification) {
@@ -1065,7 +1239,9 @@ pub async fn generate_default_deployment_with_cache(
         contracts.insert(contract_id, contract_spec);
     }
 
-    let session = Session::new(settings);
+    // Only ever used for `interpreter.build_ast`, which parses against `&mut ()`
+    // and reads no datastore state, so the boot contract set would be dead weight.
+    let session = Session::new_without_boot_contracts(settings);
 
     let mut contract_data = BTreeMap::new();
     // `Some` iff the caller opted into caching. On any early return /
@@ -1356,7 +1532,9 @@ mod tests {
     use clarity::vm::types::TupleData;
     use clarity::vm::{ClarityName, ClarityVersion, Value};
     use clarity_repl::repl::clarity_values::to_raw_value;
+    use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
     use clarity_repl::repl::SessionSettings;
+    use indoc::indoc;
 
     use super::*;
 
@@ -1882,6 +2060,348 @@ mod tests {
         assert!(
             input.is_empty(),
             "committed entries must not leak back into the input cache"
+        );
+    }
+
+    fn genesis_with_balance(balance: u128) -> GenesisSpecification {
+        GenesisSpecification {
+            wallets: vec![WalletSpecification {
+                name: "deployer".to_string(),
+                address: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
+                balance,
+                sbtc_balance: 0,
+            }],
+            contracts: vec![],
+        }
+    }
+
+    fn contractless_deployment(
+        genesis: GenesisSpecification,
+        epoch: EpochSpec,
+    ) -> DeploymentSpecification {
+        DeploymentSpecification {
+            id: 0,
+            name: "test".to_string(),
+            network: StacksNetwork::Simnet,
+            stacks_node: None,
+            bitcoin_node: None,
+            genesis: Some(genesis),
+            plan: TransactionPlanSpecification {
+                batches: vec![TransactionsBatchSpecification {
+                    id: 0,
+                    transactions: vec![],
+                    epoch: Some(epoch),
+                }],
+            },
+            contracts: BTreeMap::new(),
+        }
+    }
+
+    /// `contractless_deployment` chunked into `batches` batches at one epoch, as
+    /// a project past `tx_chain_limit` is.
+    fn multi_batch_deployment(
+        genesis: GenesisSpecification,
+        epoch: EpochSpec,
+        batches: usize,
+    ) -> DeploymentSpecification {
+        let mut deployment = contractless_deployment(genesis, epoch);
+        deployment
+            .plan
+            .batches
+            .extend((1..batches).map(|id| TransactionsBatchSpecification {
+                id,
+                transactions: vec![],
+                epoch: Some(epoch),
+            }));
+        deployment
+    }
+
+    fn deployer_balance(session: &Session) -> u128 {
+        session.interpreter.get_balance_for_account(DEPLOYER, "STX")
+    }
+
+    fn stacks_height(session: &Session) -> u32 {
+        session
+            .interpreter
+            .datastore
+            .get_current_stacks_block_height()
+    }
+
+    #[test]
+    fn base_session_cache_hit_matches_a_fresh_build() {
+        let deployment = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        let mut cache = BaseSessionCache::default();
+
+        let miss = cache.prepared_session(SessionSettings::default(), &deployment);
+        let hit = cache.prepared_session(SessionSettings::default(), &deployment);
+
+        assert_eq!(deployer_balance(&hit.0), deployer_balance(&miss.0));
+        assert_eq!(
+            hit.0.boot_contracts.keys().collect::<Vec<_>>(),
+            miss.0.boot_contracts.keys().collect::<Vec<_>>(),
+            "a cached base must carry the same boot set as a fresh one"
+        );
+    }
+
+    /// Running a plan consumes the session it was handed, so the cache must hold
+    /// a copy rather than the one it gave out.
+    #[test]
+    fn base_session_cache_is_not_consumed_by_its_clones() {
+        let deployment = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        let mut cache = BaseSessionCache::default();
+
+        let first = cache.prepared_session(SessionSettings::default(), &deployment);
+        resume_session_with_deployment_plan(first, &deployment, None);
+
+        let second = cache.prepared_session(SessionSettings::default(), &deployment);
+        assert_eq!(deployer_balance(&second.0), 4_200);
+        assert_eq!(
+            second.0.interpreter.datastore.get_current_epoch(),
+            StacksEpochId::Epoch31
+        );
+    }
+
+    /// `prepare` performs the first batch's tip advance and `run_deployment_plan`
+    /// skips it for batch 0 only, so an N-batch plan must advance the tip exactly
+    /// N-1 further times. One batch cannot tell a correct skip from a missing
+    /// advance; three can. Spending the base first also pins that a reused one
+    /// restarts where it was cached rather than where the last run ended.
+    #[test]
+    fn cached_multi_batch_plan_advances_the_tip_once_per_batch() {
+        const BATCHES: usize = 3;
+        let deployment =
+            multi_batch_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1, BATCHES);
+        let mut cache = BaseSessionCache::default();
+
+        let first = cache.prepared_session(SessionSettings::default(), &deployment);
+        let base_height = stacks_height(&first.0);
+        let (spent, _) = resume_session_with_deployment_plan(first, &deployment, None);
+        assert_eq!(
+            stacks_height(&spent),
+            base_height + BATCHES as u32 - 1,
+            "every batch past the first advances the tip exactly once"
+        );
+
+        let second = cache.prepared_session(SessionSettings::default(), &deployment);
+        assert_eq!(
+            stacks_height(&second.0),
+            base_height,
+            "a reused base must restart where it was cached"
+        );
+
+        let (cached, _) = resume_session_with_deployment_plan(second, &deployment, None);
+        assert_eq!(stacks_height(&cached), stacks_height(&spent));
+        assert_eq!(deployer_balance(&cached), 4_200);
+    }
+
+    #[test]
+    fn base_session_cache_rebuilds_when_genesis_changes() {
+        let mut cache = BaseSessionCache::default();
+
+        let first = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        let stale = cache.prepared_session(SessionSettings::default(), &first);
+        assert_eq!(deployer_balance(&stale.0), 4_200);
+
+        let second = contractless_deployment(genesis_with_balance(9_900), EpochSpec::Epoch3_1);
+        let fresh = cache.prepared_session(SessionSettings::default(), &second);
+        assert_eq!(
+            deployer_balance(&fresh.0),
+            9_900,
+            "a changed genesis balance must invalidate the cached base"
+        );
+    }
+
+    #[test]
+    fn base_session_cache_rebuilds_when_the_first_batch_epoch_changes() {
+        let mut cache = BaseSessionCache::default();
+
+        let early = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch2_1);
+        let early_session = cache.prepared_session(SessionSettings::default(), &early);
+
+        let late = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        let late_session = cache.prepared_session(SessionSettings::default(), &late);
+
+        assert_eq!(
+            late_session.0.interpreter.datastore.get_current_epoch(),
+            StacksEpochId::Epoch31
+        );
+        assert!(
+            late_session.0.boot_contracts.len() > early_session.0.boot_contracts.len(),
+            "a later epoch installs more boot contracts, so the base cannot be reused"
+        );
+    }
+
+    /// The mismatch `PreparedSession` exists to prevent, run through the public
+    /// entry point: two plans pinning different epochs share one cache, and each
+    /// must execute at its own. Inheriting the other's base would leave the second
+    /// plan running at the first's epoch with the first's boot set — silently,
+    /// since nothing about a session says which plan prepared it.
+    #[test]
+    fn a_second_plan_does_not_inherit_the_first_plans_epoch() {
+        let mut cache = BaseSessionCache::default();
+
+        let early = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch2_1);
+        let (early_session, _) =
+            cache.run_deployment_plan(SessionSettings::default(), &early, None);
+
+        let late = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        let (late_session, _) = cache.run_deployment_plan(SessionSettings::default(), &late, None);
+
+        assert_eq!(
+            early_session.interpreter.datastore.get_current_epoch(),
+            StacksEpochId::Epoch21
+        );
+        assert_eq!(
+            late_session.interpreter.datastore.get_current_epoch(),
+            StacksEpochId::Epoch31
+        );
+        assert!(
+            late_session.boot_contracts.len() > early_session.boot_contracts.len(),
+            "each plan carries the boot set of its own epoch"
+        );
+    }
+
+    /// The three responses `Session::new` needs to stand up a remote datastore.
+    /// Copied from clarity-repl's `HttpClient` tests; only `stacks_tip_height`
+    /// and the heights derived from it matter here.
+    const REMOTE_INFO: &str = indoc! {r#"
+        {
+            "peer_version": 402653196,
+            "pox_consensus": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+            "burn_block_height": 882262,
+            "stable_pox_consensus": "f517f5aced5be836f9fe10980ff06108a6a2acec",
+            "stable_burn_block_height": 882255,
+            "network_id": 1,
+            "parent_network_id": 3652501241,
+            "stacks_tip_height": 556946,
+            "stacks_tip": "70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
+            "stacks_tip_consensus_hash": "0ce291b675bb0148b435a884e250aafc3fd6bc86",
+            "genesis_chainstate_hash": "74237aa39aa50a83de11a4f53e9d3bb7d43461d1de9873f402e5453ae60bc59b",
+            "unanchored_tip": null,
+            "unanchored_seq": null,
+            "tenure_height": 184037,
+            "is_fully_synced": true,
+            "node_public_key": "02e0ce39375d699d164f90cc815427943c5acccca02069e394f9ed28d2c2bca317",
+            "node_public_key_hash": "d5b1f3c7f9b2ffa8ac610170d1352550d240197c",
+            "stackerdbs": []
+        }
+    "#};
+
+    const REMOTE_BLOCK: &str = indoc! {r#"
+        {
+            "canonical": true,
+            "height": 556946,
+            "hash": "0x70526983b920b31d5e0d65750033a4dc2f328f31a3ffeb1f8780bfb164d50502",
+            "block_time": 1738667305,
+            "block_time_iso": "2025-02-04T11:08:25.000Z",
+            "tenure_height": 184037,
+            "index_block_hash": "0xa246be7256de49aa6923074a53507a839b2ba356f8809f8e7448c87b5c1891e9",
+            "parent_block_hash": "0x06dd38d5315c133b08cefdedb5c51f2e91fd8a0474e07b3d1a740c19bc21842e",
+            "parent_index_block_hash": "0x1d39f5eb45aa0e78cc256ea6ed180dcb9e8c87bea11ecf8102ef9bced5f3f73b",
+            "burn_block_time": 1738666756,
+            "burn_block_time_iso": "2025-02-04T10:59:16.000Z",
+            "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
+            "burn_block_height": 882262,
+            "miner_txid": "0x2ca4c7f6d36f32f3c2f1c5ebae3816690a9ba2258c38ef6a4494d315873a0448",
+            "tx_count": 1,
+            "execution_cost_read_count": 0,
+            "execution_cost_read_length": 0,
+            "execution_cost_runtime": 0,
+            "execution_cost_write_count": 0,
+            "execution_cost_write_length": 0
+        }
+    "#};
+
+    const REMOTE_SORTITION: &str = indoc! {r#"
+        [{
+            "burn_block_hash": "0x000000000000000000012f34a6727bf7dc9ceae203022cb14a3b37fe8de0e6ad",
+            "burn_block_height": 882262,
+            "burn_header_timestamp": 1738666756,
+            "sortition_id": "0x6e79b604db6d97b9289f04f446e78ec871a6b16972b02674bc3ea2bdec200fb9",
+            "parent_sortition_id": "0x8b2dedebf5b8c72c1e8ede00abd1f417d755ac7f513dbf3c3d007494404115d3",
+            "consensus_hash": "0x0ce291b675bb0148b435a884e250aafc3fd6bc86",
+            "was_sortition": true,
+            "miner_pk_hash160": "0x37e79a837b4071a1fc6c1b49208e7d2141a25905",
+            "stacks_parent_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
+            "last_sortition_ch": "0xcd18600459e4da24ede6662cc4df6bcece61b5f9",
+            "committed_block_hash": "0xbf7e26ee22b18461dfed70cc114372a0f8a61249de2f20b120e6fe63da5a45e4"
+        }]
+    "#};
+
+    fn remote_settings(api_url: &str) -> SessionSettings {
+        let mut settings = SessionSettings::default();
+        settings.repl_settings.remote_data = RemoteDataSettings {
+            enabled: true,
+            api_url: ApiUrl(api_url.to_string()),
+            // The case that matters: an unpinned height is whatever the API
+            // reports *now*, and `BaseSessionKey` only ever sees this `None`.
+            initial_height: None,
+            use_mainnet_wallets: false,
+        };
+        settings
+    }
+
+    /// No genesis and no batches, so `prepare_session_for_deployment_plan` is
+    /// inert and the only network traffic is `Session::new`'s own.
+    fn remote_deployment() -> DeploymentSpecification {
+        let mut deployment = contractless_deployment(genesis_with_balance(0), EpochSpec::Epoch3_1);
+        deployment.genesis = None;
+        deployment.plan.batches.clear();
+        deployment
+    }
+
+    /// A remote-data session resolves its chain tip and datastore contents from
+    /// the network inside `Session::new`, and neither reaches `BaseSessionKey` —
+    /// the `initial_height` setting reads `None` however the tip resolved. Serving
+    /// one from the cache would pin whichever tip the first save saw, so these
+    /// must rebuild every time and leave no entry behind.
+    #[test]
+    fn remote_data_sessions_are_never_cached() {
+        let mut server = mockito::Server::new();
+        let info = server
+            .mock("GET", "/v2/info")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(REMOTE_INFO)
+            .expect(2)
+            .create();
+        let _block = server
+            .mock("GET", "/extended/v2/blocks/556946")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(REMOTE_BLOCK)
+            .create();
+        let _sortition = server
+            .mock("GET", "/v3/sortitions/burn_height/882262")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(REMOTE_SORTITION)
+            .create();
+
+        let mut cache = BaseSessionCache::default();
+
+        // Prime it locally first, so the remote calls have an entry to drop
+        // rather than an already-empty cache to leave alone.
+        let local = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
+        cache.prepared_session(SessionSettings::default(), &local);
+        assert!(cache.entry.is_some(), "a local session is cached");
+
+        let remote = remote_deployment();
+        let settings = remote_settings(&server.url());
+        cache.prepared_session(settings.clone(), &remote);
+        cache.prepared_session(settings, &remote);
+
+        // Both calls re-resolved the tip against the API instead of inheriting
+        // the first one's — exactly what skipping the cache buys.
+        info.assert();
+        assert_eq!(
+            cache.hits(),
+            0,
+            "a remote session is never served from the cache"
+        );
+        assert!(
+            cache.entry.is_none(),
+            "and evicts the local entry rather than pinning its boot set"
         );
     }
 }
