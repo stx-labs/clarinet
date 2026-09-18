@@ -12,10 +12,12 @@ use tower_lsp_server::{LspService, Server};
 use self::native_bridge::LspNativeBridge;
 
 pub fn run_lsp() {
-    let result = hiro_system_kit::create_basic_runtime().block_on(do_run_lsp());
-    if result.is_err() {
+    if hiro_system_kit::create_basic_runtime()
+        .block_on(do_run_lsp())
+        .is_err()
+    {
         std::process::exit(1)
-    };
+    }
 }
 
 async fn do_run_lsp() -> Result<(), String> {

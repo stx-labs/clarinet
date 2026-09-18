@@ -48,7 +48,7 @@ pub fn spawn_language_server(
         .expect("unable to spawn LSP server thread");
 }
 
-pub async fn start_language_server(
+async fn start_language_server(
     notification_rx: MultiplexableReceiver<LspNotification>,
     request_rx: MultiplexableReceiver<LspRequest>,
     response_tx: Sender<LspResponse>,
