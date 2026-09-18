@@ -48,11 +48,17 @@ It owns the language-agnostic dimensions — reuse, simplification, efficiency, 
 
 A harness-provided pass defaults to the current diff, so when step 1 resolved something else, name the target explicitly.
 
-### Settle its contradictions before a fix lands
+### Weigh its findings before a fix lands
 
-Those dimensions are judged independently, so two of them will sometimes reach **opposite conclusions about the same mechanism** — one proposing an abstraction another says is unwarranted. That is not a duplicate to dedup; dedup keeps whichever arrived first. It is a question, and this skill applies what it accepts, so it has to be settled against the code rather than by picking.
+Those dimensions are judged independently, and that cuts both ways.
+
+**When two of them disagree**, they have reached opposite conclusions about the same mechanism — one proposing an abstraction another says is unwarranted. That is not a duplicate to dedup; dedup keeps whichever arrived first. It is a question, and this skill applies what it accepts, so it has to be settled against the code rather than by picking.
 
 Count the call sites yourself and check the captures and lifetimes, not the shape. A finding that claims *N duplicated sites* is the most likely one to be wrong, because the shape matches long before the constraints do. On #2551 one angle found four copies of `thread_named(…).spawn(move || create_basic_runtime().block_on(…))` and wanted a helper for them; two of the four held the runtime across a loop or two branches, and a third passed borrowed closure-locals that no `F: Future + Send + 'static` helper can accept. Two real sites is not an abstraction.
+
+**When two of them agree from different angles**, that is the strongest ranking signal the pass produces: the finding is visible from more than one way of looking, so lead the report with it. On #2518 three findings arrived twice over, and the firmest — a private helper re-implementing an upstream `From` impl — was raised by both reuse and simplification before either had been checked.
+
+Convergence buys confidence, not truth. Two angles reading the same hunk can share one wrong assumption, so verify it exactly as you would a lone finding; what it earns is position in the report, not a pass on the check.
 
 ## 3. Apply the Clarinet pass
 
