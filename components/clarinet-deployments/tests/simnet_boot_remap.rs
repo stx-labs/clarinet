@@ -646,3 +646,126 @@ async fn redeploying_is_idempotent() {
     assert_eq!(first, second);
     assert_eq!(first, 90_000_000_000);
 }
+
+fn check_remote_boot_remap_parity(network_id: u32, expected_boot: &str) {
+    let mut server = mockito::Server::new();
+    // Missing remote state is normal; 501 would trigger retries instead.
+    server
+        .mock("GET", mockito::Matcher::Any)
+        .with_status(404)
+        .expect_at_least(0)
+        .create();
+    let info = server
+        .mock("GET", "/v2/info")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            serde_json::json!({"network_id": network_id, "stacks_tip_height": 556946}).to_string(),
+        )
+        .expect_at_least(2)
+        .create();
+    server.mock("GET", mockito::Matcher::Regex(r"^/extended/v2/blocks/.*$".into()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(serde_json::json!({
+            "height": 556946,
+            "burn_block_height": 882262,
+            "tenure_height": 184037,
+            "block_time": 1735934294,
+            "burn_block_time": 1735451504,
+            "hash": "0xaff3b535a135348ed00023ec1bdc3da9005253a9ce80a4906ade03ea6685d342",
+            "index_block_hash": "0x201cf66636e693d95998b40ddd0cbe038432806046eed11866052f15a9fa8fc5",
+            "burn_block_hash": "0x57f3e2bd4519e4263353bf6b7614a9cee7f2d36fe61409852d42e41afe5e6cad",
+        }).to_string())
+        .create();
+
+    // A principal literal isolates rewriting from remote boot-contract execution.
+    let source = format!("(define-read-only (target) '{BOOT_MAINNET_ADDRESS}.pox-3)");
+    let project = Project::new(
+        "probe",
+        &source,
+        &format!(
+            "\n[repl.remote_data]\nenabled = true\napi_url = \"{}\"\ninitial_height = 556946\n",
+            server.url()
+        ),
+    );
+    assert!(project.manifest.repl_settings.remote_data.enabled);
+    let (mut generated, asts, _) = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(generate_default_deployment(
+            &project.manifest,
+            &StacksNetwork::Simnet,
+            false,
+            None,
+            None,
+            Environment::Simnet,
+        ))
+        .unwrap();
+    assert!(asts.success, "{:?}", asts.diags);
+
+    let path = project.root().join("remote-plan.yaml");
+    fs::write(&path, generated.to_file_content(project.root()).unwrap()).unwrap();
+    let mut reloaded = clarinet_deployments::load_deployment(project.root(), &path).unwrap();
+    let mut fresh = setup_session_with_deployment(
+        &project.manifest,
+        &mut generated,
+        Some(&asts.asts),
+        false,
+        Environment::Simnet,
+    );
+    let mut disk = setup_session_with_deployment(
+        &project.manifest,
+        &mut reloaded,
+        None,
+        false,
+        Environment::Simnet,
+    );
+    assert!(fresh.success, "{:?}", fresh.diags);
+    assert!(disk.success, "{:?}", disk.diags);
+    assert_eq!(fresh.session.interpreter.is_mainnet(), network_id == 1);
+    assert_eq!(disk.session.interpreter.is_mainnet(), network_id == 1);
+    info.assert();
+
+    let call = format!("(contract-call? '{DEPLOYER}.probe target)");
+    let fresh_value = snippet_value(
+        fresh
+            .session
+            .eval(call.clone(), false)
+            .unwrap()
+            .into_inner()
+            .result,
+    );
+    let disk_value = snippet_value(disk.session.eval(call, false).unwrap().into_inner().result);
+    let resolved = fresh
+        .session
+        .resolve_contract_id(DEPLOYER, &format!("{BOOT_MAINNET_ADDRESS}.pox-3"))
+        .unwrap();
+    let expected = Value::Principal(
+        clarity::vm::types::PrincipalData::parse(&format!("{expected_boot}.pox-3")).unwrap(),
+    );
+    assert_eq!(resolved.to_string(), format!("{expected_boot}.pox-3"));
+    assert_eq!(
+        disk_value, expected,
+        "loaded source must agree with the session resolver"
+    );
+    assert_eq!(
+        fresh_value, disk_value,
+        "saving and reloading a plan must not change the executed boot principal"
+    );
+}
+
+/// [P2] Remote testnet executes different boot principals in fresh and saved plans.
+/// Suggested fix: resolve the remote network before building project ASTs and use
+/// the same `!is_mainnet` gate for generation and legacy-plan backfill. Pass the
+/// resolved network from the caller where available; keep the simnet environment
+/// guard. Rewriting only at publish time would leave prebuilt ASTs unchanged.
+#[test]
+fn remote_testnet_fresh_and_saved_plans_agree_with_the_resolver() {
+    check_remote_boot_remap_parity(2_147_483_648, BOOT_TESTNET_ADDRESS);
+}
+
+/// [P2] Mainnet control: aligning the network gates must preserve mainnet principals.
+#[test]
+fn remote_mainnet_fresh_and_saved_plans_preserve_mainnet_principals() {
+    check_remote_boot_remap_parity(1, BOOT_MAINNET_ADDRESS);
+}
