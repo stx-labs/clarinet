@@ -300,6 +300,12 @@ impl BaseSessionCaches {
         self.entries.push((manifest_location.to_path_buf(), cache));
     }
 
+    /// Drop one manifest's entry, freeing its slot and its boot set. For a
+    /// manifest that caches nothing, which is the only alternative to `commit`.
+    pub fn forget(&mut self, manifest_location: &Path) {
+        self.entries.retain(|(path, _)| path != manifest_location);
+    }
+
     pub fn hits(&self) -> u32 {
         self.entries.iter().map(|(_, cache)| cache.hits()).sum()
     }
@@ -1310,5 +1316,40 @@ mod tests {
         caches.commit(&manifest("a"), BaseSessionCache::default());
 
         assert_eq!(caches.entries.len(), 1, "one manifest owns one entry");
+    }
+
+    /// What `build_and_commit` does for a remote-data manifest, which caches no
+    /// base session. Committing its empty cache instead would leave a manifest
+    /// that caches nothing holding one of the two slots, so a third manifest
+    /// would evict a populated one that a full slot count would have kept.
+    #[test]
+    fn base_session_caches_free_the_slot_of_a_manifest_that_caches_nothing() {
+        let mut caches = BaseSessionCaches::default();
+        caches.commit(&manifest("local"), BaseSessionCache::default());
+        caches.commit(&manifest("remote"), BaseSessionCache::default());
+        assert_eq!(caches.entries.len(), 2);
+
+        caches.forget(&manifest("remote"));
+
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("local")],
+            "the remote manifest gives its slot back"
+        );
+    }
+
+    /// Forgetting a manifest that owns no entry is what a remote-data manifest
+    /// does on every save after the first, so it must not disturb the others.
+    #[test]
+    fn base_session_caches_forget_an_unknown_manifest_is_a_no_op() {
+        let mut caches = BaseSessionCaches::default();
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+
+        caches.forget(&manifest("never-seen"));
+
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("a")]
+        );
     }
 }

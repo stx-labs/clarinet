@@ -86,7 +86,15 @@ where
     };
 
     editor_state.try_write(|es| {
-        es.base_sessions.commit(&manifest_location, base_session);
+        // A remote-data manifest caches nothing, so storing its empty cache
+        // would spend one of only two slots and evict a manifest that does.
+        // Forgetting also releases the boot set if this manifest cached one
+        // before remote data was turned on.
+        if base_session.is_empty() {
+            es.base_sessions.forget(&manifest_location);
+        } else {
+            es.base_sessions.commit(&manifest_location, base_session);
+        }
         es.index_protocol(manifest_location, protocol_state);
         es.ast_cache.extend(new_cache_entries);
         post_commit(es);

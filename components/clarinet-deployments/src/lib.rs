@@ -362,6 +362,12 @@ impl BaseSessionCache {
         session
     }
 
+    /// Holds nothing worth keeping. True for a remote-data manifest, which never
+    /// caches a base session, so callers that ration slots can skip storing it.
+    pub fn is_empty(&self) -> bool {
+        self.entry.is_none()
+    }
+
     /// The only signal distinguishing a reuse from a silent ~50 ms rebuild.
     pub fn hits(&self) -> u32 {
         self.hits
