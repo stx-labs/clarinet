@@ -34,8 +34,9 @@
 # machine, which is what PEER_PREFER=pi is for.
 #
 # Env:
-#   PEER_MODEL     model id for the peer (its default otherwise; for pi, the
-#                  largest-context model it lists)
+#   PEER_MODEL     model id for the peer, overriding the route's own choice:
+#                  codex picks the review-specialised model from its catalogue,
+#                  pi the largest-context model it lists, claude its default
 #   PEER_EFFORT    reasoning effort (default xhigh for codex, high otherwise)
 #   PEER_PREFER    move one CLI to the front of the candidate list; it still
 #                  has to pass the different-vendor test
@@ -114,6 +115,36 @@ if ! command -v codex >/dev/null 2>&1; then
 fi
 
 peer_available() { command -v "$1" >/dev/null 2>&1; }
+
+# codex ships a review-specialised model alongside its general-purpose ones, and
+# the difference is not cosmetic: on a diff carrying a planted `exit 1` -> `exit 0`
+# in an error path, the general models returned an empty findings array and the
+# review model found it.
+#
+# Discovered, never pinned. A hardcoded slug goes stale the moment the model is
+# renamed or retired, and the failure would be the worst kind — codex exits
+# non-zero, this script honours its non-blocking contract, and the review quietly
+# proceeds with no peer for however long it takes someone to read the log line.
+#
+# Matching on "review" rather than an exact name survives a rename. Requiring the
+# effort to be supported keeps the pair valid, at the cost of falling back to a
+# general model if the review one ever drops a level. Anything unexpected — no
+# cache, no jq, no match — prints nothing, and codex picks its own default.
+codex_model() {
+  if [ -n "${PEER_MODEL:-}" ]; then
+    printf '%s' "$PEER_MODEL"
+    return 0
+  fi
+  local cache="${CODEX_HOME:-${HOME:-}/.codex}/models_cache.json"
+  [ -r "$cache" ] && command -v jq >/dev/null 2>&1 || return 0
+  jq -r --arg effort "$PEER_EFFORT" '
+    [ .models[]?
+      | select((.slug // "") | test("review"; "i"))
+      | select([.supported_reasoning_levels[]?.effort] | index($effort))
+      | .slug
+    ] | first // empty
+  ' <"$cache" 2>/dev/null
+}
 
 # pi ships no default model and its built-in default provider is usually
 # unauthenticated, so the model is chosen here rather than left to pi. Largest
@@ -212,10 +243,16 @@ case "$PEER" in
   pi) PEER_EFFORT="${PEER_EFFORT:-medium}" ;;
 esac
 
-# pick_peer resolved this in a subshell, so it did not survive; the pi route
-# needs the full "provider/id", not just the vendor half of it.
+# Resolved after the effort above, because the codex route filters candidates on
+# it. pick_peer settled the vendor in a subshell and that did not survive, so the
+# pi route re-resolves the full "provider/id" here too.
 PI_MODEL_ID=""
-[ "$PEER" != pi ] || PI_MODEL_ID="$(pi_model)"
+CODEX_MODEL_ID=""
+case "$PEER" in
+  pi) PI_MODEL_ID="$(pi_model)" ;;
+  codex) CODEX_MODEL_ID="$(codex_model)" ;;
+esac
+MODEL_DISPLAY="${PI_MODEL_ID:-${CODEX_MODEL_ID:-${PEER_MODEL:-peer default}}}"
 
 # --- argv per route --------------------------------------------------------
 # Built in one place so --dry-run asserts on the same command the peer runs.
@@ -230,7 +267,7 @@ build_argv() {
         -o "$RAW"
         -c "model_reasoning_effort=\"$PEER_EFFORT\""
         -c "project_doc_max_bytes=0")
-      [ -z "${PEER_MODEL:-}" ] || ARGV+=(-m "$PEER_MODEL")
+      [ -z "$CODEX_MODEL_ID" ] || ARGV+=(-m "$CODEX_MODEL_ID")
       ;;
     claude)
       # --safe-mode disables customizations, which is how this route drops the
@@ -269,7 +306,7 @@ build_argv() {
 if $DRY_RUN; then
   RAW="<raw-out>"
   build_argv
-  log "host: $HOST/$HOST_VENDOR  peer: $PEER/$PEER_VENDOR  effort: $PEER_EFFORT  model: ${PI_MODEL_ID:-${PEER_MODEL:-peer default}}"
+  log "host: $HOST/$HOST_VENDOR  peer: $PEER/$PEER_VENDOR  effort: $PEER_EFFORT  model: $MODEL_DISPLAY"
   printf '  %q' "${ARGV[@]}" >&2
   printf '\n' >&2
   exit 0
@@ -335,7 +372,7 @@ EOF
   cat "$DIFF_FILE"
 } >"$PROMPT"
 
-log "host $HOST -> peer $PEER (vendor: $PEER_VENDOR): sending ~$(wc -l <"$DIFF_FILE" | tr -d ' ') diff lines (model: ${PI_MODEL_ID:-${PEER_MODEL:-default}}, effort: $PEER_EFFORT)"
+log "host $HOST -> peer $PEER (vendor: $PEER_VENDOR): sending ~$(wc -l <"$DIFF_FILE" | tr -d ' ') diff lines (model: $MODEL_DISPLAY, effort: $PEER_EFFORT)"
 
 # --- run -------------------------------------------------------------------
 build_argv

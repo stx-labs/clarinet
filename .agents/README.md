@@ -73,6 +73,24 @@ peer rather than a guessed one.
 Candidates are tried in the order `codex claude pi`. `PEER_PREFER` moves one to
 the front but cannot buy it past the vendor test.
 
+### Picking the model
+
+Each route chooses its own model, by discovery rather than a pinned slug — a
+hardcoded one goes stale the moment a model is renamed, and the failure would be
+a peer that silently stops running. `PEER_MODEL` overrides all of it.
+
+- **codex** asks its own catalogue (`models_cache.json`) for a review-specialised
+  model that supports the requested effort. This is worth more than it sounds:
+  against a diff with a planted `exit 1` → `exit 0` in an error path, codex's
+  general-purpose models returned an empty findings array and the review model
+  caught it.
+- **pi** takes the largest-context model it lists, because a model too small to
+  hold the diff truncates without saying so.
+- **claude** uses its default.
+
+Anything unexpected — no catalogue, no `jq`, no match — falls back to the CLI's
+own default, which still reviews.
+
 It is non-blocking by contract: a missing CLI, a missing login or a timeout
 logs a reason, exits 0, and writes no output file. Callers detect success
 purely by the presence of that file. It must never fail the review that
