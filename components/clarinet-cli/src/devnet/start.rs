@@ -62,7 +62,19 @@ pub fn start(
 
     let (orchestrator_terminated_tx, orchestrator_terminated_rx) = channel();
 
-    let res = hiro_system_kit::nestable_block_on(do_run_local_devnet(
+    // Multi-threaded on purpose: `do_run_local_devnet` opens Docker connections on
+    // this runtime, then hands the bollard client to the orchestrator thread while
+    // this thread blocks in the dashboard/event loop. A current-thread runtime would
+    // stop driving those connections as soon as we stop polling.
+    //
+    // One worker is enough: nothing in this crate spawns a task, so the only work
+    // left for it is keeping that idle connection pool alive.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .map_err(|e| format!("unable to create runtime: {e}"))?;
+    let res = rt.block_on(do_run_local_devnet(
         config.devnet,
         config.deployment,
         config.log_tx,

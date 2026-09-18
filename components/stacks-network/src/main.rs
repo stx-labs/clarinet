@@ -27,7 +27,8 @@ struct Args {
     no_snapshot: bool,
 }
 
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let args = Args::parse();
     let manifest_location = get_config_location_from_path_or_exit(&args.manifest_path);
     let network_manifest_path = get_config_location_from_path_or_exit(&args.network_manifest_path);
@@ -60,7 +61,7 @@ fn main() {
     ctx.try_log(|logger| slog::info!(logger, "starting devnet coordinator"));
 
     let (orchestrator_terminated_tx, _) = channel();
-    let res = hiro_system_kit::nestable_block_on(do_run_chain_coordinator(
+    let res = do_run_chain_coordinator(
         orchestrator,
         deployment,
         None,
@@ -69,7 +70,8 @@ fn main() {
         orchestrator_terminated_tx,
         &args.namespace,
         network_manifest,
-    ));
+    )
+    .await;
     println!("{:?}", res.unwrap());
 }
 

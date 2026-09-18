@@ -301,9 +301,11 @@ pub async fn start_chains_coordinator(
     let devnet_event_tx_moved = devnet_event_tx.clone();
     let devnet_config = config.clone();
     let _ = hiro_system_kit::thread_named("Bitcoin mining").spawn(move || {
-        let future =
-            handle_bitcoin_mining(mining_command_rx, &devnet_config, &devnet_event_tx_moved);
-        hiro_system_kit::nestable_block_on(future);
+        hiro_system_kit::create_basic_runtime().block_on(handle_bitcoin_mining(
+            mining_command_rx,
+            &devnet_config,
+            &devnet_event_tx_moved,
+        ));
     });
 
     // Loop over events being received from Bitcoin and Stacks,
@@ -1265,28 +1267,29 @@ async fn handle_bitcoin_mining(
                 let stop_miner_reader = stop_miner.clone();
                 let devnet_event_tx_moved = devnet_event_tx.clone();
                 let config_moved = config.clone();
-                let _ =
-                    hiro_system_kit::thread_named("Bitcoin mining runloop").spawn(move || loop {
+                let _ = hiro_system_kit::thread_named("Bitcoin mining runloop").spawn(move || {
+                    let rt = hiro_system_kit::create_basic_runtime();
+                    loop {
                         std::thread::sleep(std::time::Duration::from_millis(
                             config_moved
                                 .devnet_config
                                 .bitcoin_controller_block_time
                                 .into(),
                         ));
-                        let future = mine_bitcoin_block(
+                        let res = rt.block_on(mine_bitcoin_block(
                             &config_moved.services_map_hosts.bitcoin_node_host,
                             &config_moved.devnet_config.bitcoin_node_username,
                             &config_moved.devnet_config.bitcoin_node_password,
                             &config_moved.devnet_config.miner_btc_address,
-                        );
-                        let res = hiro_system_kit::nestable_block_on(future);
+                        ));
                         if stop_miner_reader.load(Ordering::SeqCst) {
                             break;
                         }
                         if let Err(e) = res {
                             let _ = devnet_event_tx_moved.send(DevnetEvent::error(e));
                         }
-                    });
+                    }
+                });
             }
             BitcoinMiningCommand::Pause => {
                 stop_miner.store(true, Ordering::SeqCst);

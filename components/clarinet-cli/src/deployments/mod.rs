@@ -15,15 +15,16 @@ pub fn generate_default_deployment(
     _no_batch: bool,
     environment: Environment,
 ) -> Result<(DeploymentSpecification, DeploymentGenerationArtifacts, bool), String> {
-    let future = clarinet_deployments::generate_default_deployment(
-        manifest,
-        network,
-        false,
-        None,
-        None,
-        environment,
-    );
-    hiro_system_kit::nestable_block_on(future)
+    hiro_system_kit::create_basic_runtime().block_on(
+        clarinet_deployments::generate_default_deployment(
+            manifest,
+            network,
+            false,
+            None,
+            None,
+            environment,
+        ),
+    )
 }
 
 /// Generate a default deployment for devnet with `#[env(simnet)]` code stripped.
