@@ -33,6 +33,7 @@ pub fn run_dap() -> Result<(), String> {
                 &mut deployment,
                 Some(&artifacts.asts),
                 false,
+                Environment::Simnet,
             )
             .session;
 
@@ -52,7 +53,11 @@ pub fn run_dap() -> Result<(), String> {
                 dap.contract_id_to_path.insert(contract_id, location);
             }
 
-            // Begin execution of the expression in debug mode
+            // Begin execution of the expression in debug mode. Debugging is a
+            // simnet session, so the expression gets the same boot rewrite the
+            // console and the SDK apply — otherwise a mainnet-addressed PoX
+            // call reaches the dead twin only while under the debugger.
+            let expression = session.remap_user_snippet(expression);
             match session.eval_with_hooks(expression, Some(vec![&mut dap]), false) {
                 Ok(_result) => Ok(()),
                 Err(_diagnostics) => Err("unable to interpret expression".to_string()),
@@ -112,6 +117,7 @@ fn make_session(
         &mut deployment,
         Some(&artifacts.asts),
         false,
+        Environment::Simnet,
     )
     .session;
 
@@ -685,6 +691,9 @@ fn eval_snippet_as_tx(
     dap: &mut DAPDebugger,
     snippet: String,
 ) -> serde_json::Value {
+    // The single funnel for every DAP evaluate/call request, so the rewrite
+    // belongs here rather than at each caller.
+    let snippet = session.remap_user_snippet(snippet);
     match session.eval_with_hooks(snippet, Some(vec![dap]), false) {
         Ok(result) => {
             let hex = match &result.result {
