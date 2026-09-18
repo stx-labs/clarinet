@@ -22,7 +22,7 @@ use crate::analysis::ast_visitor::{traverse, ASTVisitor, LetBinding, TypedVar};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::{self, AnalysisPass, AnalysisResult};
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Settings {
     // Strict mode sets all other options to false
