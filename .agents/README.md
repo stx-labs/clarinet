@@ -16,9 +16,16 @@ independent of any one coding agent.
 
 `rust-conventions` is the single source for the repo's Rust rules. It is a
 reference rather than a procedure: the other two skills point at it instead of
-carrying their own copy, and `CLAUDE.md` points at it rather than inlining it.
-A skill is the only form of this that both harnesses read natively — `@` imports
-are Claude-only and `AGENTS.md` is Codex-only.
+carrying their own copy. A skill is the only form of this that both harnesses
+read natively — `@` imports are Claude-only and `AGENTS.md` is Codex-only.
+
+`AGENTS.md` deliberately does **not** point at it. Both harnesses load it from
+its `description` alone: given only a Rust editing task, each one invoked it
+unprompted and applied rules that exist nowhere but the skill file. Claude Code
+has two further routes — that description, plus the `PreToolUse` hook on `.rs`
+edits in `.claude/settings.json` — and Codex needs no `allow_implicit_invocation`
+to do the same. A pointer in `AGENTS.md` would cost every session the tokens and
+earn nothing.
 
 ## Why `.agents/` and not `.claude/`
 

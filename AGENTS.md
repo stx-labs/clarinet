@@ -107,6 +107,4 @@ Clarity interpreter and Stacks libraries come from `stacks-network/stacks-core` 
 
 - Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary) for commit messages
 - PRs merge via "squash and merge"
-- Rust style, the helpers to reuse, and the wasm32 platform rules live in
-  `.agents/skills/rust-conventions/SKILL.md`
 
