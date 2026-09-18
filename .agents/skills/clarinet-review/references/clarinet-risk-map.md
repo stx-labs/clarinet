@@ -34,6 +34,14 @@ The useful question is not "does it compile" — the gates answer that — but "
 
 Generally, for any new test: does it fail without the fix? A test that passes on both sides of the change is not evidence of anything.
 
+### 4. A rule added at one entry point does not reach the others
+
+Clarinet opens the same session through many doors: the console's `::` commands, `simnet.execute` and `runSnippet`, the DAP, the SDK accessors, plan generation, publish. A change that establishes a *rule* — resolve this id, rewrite this source, validate this argument — has to hold at every door, and **a diff cannot show you the door nobody touched.**
+
+So when a change adds a policy rather than a behaviour, enumerate the sites that policy should reach and check each one. The question stops being "is this hunk right" and becomes "where else does this rule belong". A carve-out makes it harder, not easier: one deliberate exemption sitting next to an accidental one makes the omission look intentional.
+
+The shape to recognise: a rewrite applied at every snippet surface but one, where that one still called `eval` directly and a legitimate `eval` exemption sat a few hundred lines away. Green CI throughout, and nothing in the diff to see — the missing call site is unchanged code.
+
 ## Observed findings
 
 Entries earn their place by having happened, with a commit or PR as evidence. One occurrence is an entry here — not a class above. Promote an entry to a class only when it recurs in unrelated changes. When a class acquires a CI gate, delete it from this file; the gate owns it from then on.

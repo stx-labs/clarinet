@@ -8,7 +8,7 @@ argument-hint: "[branch | commit | --staged | --unstaged | --worktree] (default:
 
 Quality only: reuse, DRY, idiom, efficiency. Correctness bugs are out of scope — those belong to `clarinet-review`.
 
-Success is code a reviewer understands faster, not a smaller diff. `0e0e0900` was a good simplify pass and it *added* 78 net lines — 55 in tests, 23 in source — because naming things costs lines and buys clarity. Do not optimise for the line count.
+Success is code a reviewer understands faster, not a smaller diff. One good simplify pass here *added* 78 net lines — 55 in tests, 23 in source — because naming things costs lines and buys clarity. Do not optimise for the line count.
 
 ## 1. Resolve the target and the surfaces it reaches
 
@@ -54,9 +54,9 @@ Those dimensions are judged independently, and that cuts both ways.
 
 **When two of them disagree**, they have reached opposite conclusions about the same mechanism — one proposing an abstraction another says is unwarranted. That is not a duplicate to dedup; dedup keeps whichever arrived first. It is a question, and this skill applies what it accepts, so it has to be settled against the code rather than by picking.
 
-Count the call sites yourself and check the captures and lifetimes, not the shape. A finding that claims *N duplicated sites* is the most likely one to be wrong, because the shape matches long before the constraints do. On #2551 one angle found four copies of `thread_named(…).spawn(move || create_basic_runtime().block_on(…))` and wanted a helper for them; two of the four held the runtime across a loop or two branches, and a third passed borrowed closure-locals that no `F: Future + Send + 'static` helper can accept. Two real sites is not an abstraction.
+Count the call sites yourself and check the captures and lifetimes, not the shape. A finding that claims *N duplicated sites* is the most likely one to be wrong, because the shape matches long before the constraints do. One angle once found four copies of `thread_named(…).spawn(move || create_basic_runtime().block_on(…))` and wanted a helper for them; two of the four held the runtime across a loop or two branches, and a third passed borrowed closure-locals that no `F: Future + Send + 'static` helper can accept. Two real sites is not an abstraction.
 
-**When two of them agree from different angles**, that is the strongest ranking signal the pass produces: the finding is visible from more than one way of looking, so lead the report with it. On #2518 three findings arrived twice over, and the firmest — a private helper re-implementing an upstream `From` impl — was raised by both reuse and simplification before either had been checked.
+**When two of them agree from different angles**, that is the strongest ranking signal the pass produces: the finding is visible from more than one way of looking, so lead the report with it. In one pass three findings arrived twice over, and the firmest — a private helper re-implementing an upstream `From` impl — was raised by both reuse and simplification before either had been checked.
 
 Convergence buys confidence, not truth. Two angles reading the same hunk can share one wrong assumption, so verify it exactly as you would a lone finding; what it earns is position in the report, not a pass on the check.
 
