@@ -274,6 +274,14 @@ if $rust; then
 fi
 if $sdk_ts; then
   echo "# slow (wasm-pack build); only needed if the change reaches the SDK"
+  # In a worktree that has never built the wasm, `build:sdk-wasm` fails before it
+  # starts: its own pnpm install wants @stacks/clarinet-sdk-wasm-browser, which
+  # that build is what produces. Reads as a dependency error, not a missing step.
+  if [ ! -d components/clarinet-sdk-wasm/pkg-browser ]; then
+    echo "# first build in this worktree — bootstrap the wasm packages, or the"
+    echo "# pnpm install below fails on ERR_PNPM_WORKSPACE_PKG_NOT_FOUND:"
+    echo "node components/clarinet-sdk-wasm/build.mjs"
+  fi
   echo "pnpm run build:sdk-wasm && pnpm --filter ./components/clarinet-sdk/node run test"
 fi
 if $vscode; then

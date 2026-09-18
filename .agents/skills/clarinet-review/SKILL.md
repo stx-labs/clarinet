@@ -101,13 +101,13 @@ Present one merged view, most severe first:
 - **Peer findings** — first wait for it to finish, then decide:
 
   ```bash
-  for _ in $(seq 1 120); do
+  for _ in $(seq 1 380); do
     [ -f "$P.pid" ] && kill -0 "$(cat "$P.pid")" 2>/dev/null || break
     sleep 5
   done
   ```
 
-  The peer's own timeout bounds it, and this loop caps the wait at ten minutes regardless. Then: if `$P.json` exists, read it and merge, labelling each as peer-sourced and naming the vendor. Verify each one against the code before repeating it: the peer never ran the gates and cannot see the repo's instructions, so it is the most likely source of a confident-sounding false positive. Drop what does not survive. If the file is absent, say in one line that no peer ran and why, and move on.
+  The peer's own timeout bounds it — it scales with the diff, up to 30 minutes — and this loop waits just past that cap. It breaks the moment the peer exits, so a small diff still costs seconds. Do not shorten it below the peer's cap: giving up early reports "no peer ran" for a peer that was still working, which is worse than either waiting or not launching one. Then: if `$P.json` exists, read it and merge, labelling each as peer-sourced and naming the vendor. Verify each one against the code before repeating it: the peer never ran the gates and cannot see the repo's instructions, so it is the most likely source of a confident-sounding false positive. Drop what does not survive. If the file is absent, say in one line that no peer ran and why, and move on.
 
 If your harness has a structured findings report (Claude Code's `ReportFindings`), it is called at most once per review: if step 6 already used it, put the remaining findings in the response text; if not, use it for the merged list. Otherwise just write them out.
 

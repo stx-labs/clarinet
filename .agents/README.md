@@ -96,6 +96,12 @@ logs a reason, exits 0, and writes no output file. Callers detect success
 purely by the presence of that file. It must never fail the review that
 called it.
 
+The timeout scales with the diff — 600s plus a second per line, capped at 1800 —
+because one flat number cannot serve both ends: a 13-line diff came back in about
+two minutes where a 1259-line one needed over ten. Step 7 of `clarinet-review`
+waits just past that cap, so the two move together; shortening either alone makes
+a review report "no peer ran" for a peer that was still working.
+
 ### Egress
 
 It sends the diff, and any repository files the peer reads for context, to that

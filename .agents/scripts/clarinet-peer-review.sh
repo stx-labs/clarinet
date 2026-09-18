@@ -40,21 +40,28 @@
 #   PEER_EFFORT    reasoning effort (default xhigh for codex, high otherwise)
 #   PEER_PREFER    move one CLI to the front of the candidate list; it still
 #                  has to pass the different-vendor test
-#   PEER_TIMEOUT   seconds before the peer is abandoned (default 600)
+#   PEER_TIMEOUT   seconds before the peer is abandoned; unset derives it from
+#                  the diff size (600 + one second per line, capped at 1800)
 
 set -uo pipefail
 
 log() { printf '[peer] %s\n' "$*" >&2; }
 skip() { log "$*"; exit 0; }
 
-PEER_TIMEOUT="${PEER_TIMEOUT:-600}"
+# Empty means "derive it from the diff", once the diff is known. One flat number
+# cannot serve both ends: measured on this repo, codex answered a 13-line diff in
+# ~2 min and needed more than 10 on a 1259-line one, so a flat 600 was slack for
+# small diffs and silently lost the peer on PR-sized ones.
+#
 # Whole seconds only: timeout(1) accepts suffixes and perl's alarm does not
 # (it reads "10m" as 10), so an unvalidated value means two different timeouts
 # on two machines — or none at all.
+PEER_TIMEOUT="${PEER_TIMEOUT:-}"
 case $PEER_TIMEOUT in
-  '' | *[!0-9]*)
-    log "warning: PEER_TIMEOUT='$PEER_TIMEOUT' is not whole seconds; using 600"
-    PEER_TIMEOUT=600
+  '') ;;
+  *[!0-9]*)
+    log "warning: PEER_TIMEOUT='$PEER_TIMEOUT' is not whole seconds; deriving it from the diff"
+    PEER_TIMEOUT=""
     ;;
 esac
 
@@ -320,6 +327,16 @@ OUT="${3:-}"
 [ -s "$DIFF_FILE" ] || skip "empty diff; nothing to review"
 [ -f "$BRIEF_FILE" ] || skip "brief not found: $BRIEF_FILE"
 
+DIFF_LINES=$(wc -l <"$DIFF_FILE" | tr -d ' ')
+if [ -z "$PEER_TIMEOUT" ]; then
+  # A second per diff line on top of the old flat floor, so small diffs keep the
+  # budget they already had and only large ones get more. The cap bounds a
+  # runaway peer; step 7 of the review skill waits slightly past it, so raising
+  # one without the other would report "no peer ran" while it was still going.
+  PEER_TIMEOUT=$((600 + DIFF_LINES))
+  [ "$PEER_TIMEOUT" -le 1800 ] || PEER_TIMEOUT=1800
+fi
+
 # The X run has to END the template: BSD mktemp treats a trailing suffix as a
 # literal filename, so `-XXXXXX.md` creates that exact name once and then fails
 # with "File exists" on every later call.
@@ -372,7 +389,7 @@ EOF
   cat "$DIFF_FILE"
 } >"$PROMPT"
 
-log "host $HOST -> peer $PEER (vendor: $PEER_VENDOR): sending ~$(wc -l <"$DIFF_FILE" | tr -d ' ') diff lines (model: $MODEL_DISPLAY, effort: $PEER_EFFORT)"
+log "host $HOST -> peer $PEER (vendor: $PEER_VENDOR): sending ~$DIFF_LINES diff lines (model: $MODEL_DISPLAY, effort: $PEER_EFFORT, timeout: ${PEER_TIMEOUT}s)"
 
 # --- run -------------------------------------------------------------------
 build_argv
