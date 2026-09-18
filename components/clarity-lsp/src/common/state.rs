@@ -274,6 +274,15 @@ impl BaseSessionCaches {
     /// Editing moves between a couple of projects at most.
     const CAPACITY: usize = 2;
 
+    /// Read one manifest's cache without recording a use, so a build that never
+    /// commits leaves the map — LRU order included — as it found it.
+    pub fn get(&self, manifest_location: &Path) -> Option<&BaseSessionCache> {
+        self.entries
+            .iter()
+            .find(|(path, _)| path == manifest_location)
+            .map(|(_, cache)| cache)
+    }
+
     pub fn get_mut(&mut self, manifest_location: &Path) -> &mut BaseSessionCache {
         let entry = match self
             .entries
@@ -913,7 +922,10 @@ pub async fn build_state(
     // On any error we just drop it — the caller's original cache is
     // untouched, so no restore step is needed.
     mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
-    base_sessions: &mut BaseSessionCaches,
+    // Only this manifest's cache, never the whole map: a build has no business
+    // touching another manifest's entry, and not being handed one is what keeps
+    // a concurrent build's entry safe from this one.
+    base_session: &mut BaseSessionCache,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -963,13 +975,11 @@ pub async fn build_state(
             new_cache_entries.extend(entries);
         }
 
-        let (session, contracts) = base_sessions
-            .get_mut(manifest_location)
-            .run_deployment_plan(
-                session_settings_from_manifest(&manifest),
-                &deployment,
-                Some(&artifacts.asts),
-            );
+        let (session, contracts) = base_session.run_deployment_plan(
+            session_settings_from_manifest(&manifest),
+            &deployment,
+            Some(&artifacts.asts),
+        );
         for (contract_id, mut result) in contracts.into_iter() {
             let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
                 continue;

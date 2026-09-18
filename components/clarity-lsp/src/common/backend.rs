@@ -54,12 +54,20 @@ where
     // require manually restoring the cache. We eat the clone for safety.
     let cached_asts = Some(editor_state.try_read(|es| es.ast_cache.clone())?);
     // Cloned for the same reason, and it is nearly free: `Session::clone` shares
-    // the boot set through an `Rc` rather than copying it, which puts a whole
-    // cache at ~150 µs against a ~34 ms save. Taking it instead would leave the
-    // editor state holding an empty cache for the duration of the build, to be
-    // restored on a path that a panic, a cancelled future or a failed lock all
-    // skip.
-    let mut base_sessions = editor_state.try_read(|es| es.base_sessions.clone())?;
+    // the boot set through an `Rc` rather than copying it, which puts one at
+    // ~150 µs against a ~34 ms save. Taking it instead would leave the editor
+    // state holding an empty cache for the duration of the build, to be restored
+    // on a path that a panic, a cancelled future or a failed lock all skip.
+    //
+    // Just this manifest's entry, committed back into its own slot below.
+    // Nothing in this code serializes two builds — the extension's notification
+    // queue does, but that is its protocol, not our invariant — so a build must
+    // not write a slot it does not own. Cloning the whole map and assigning it
+    // back would do exactly that, silently dropping what a concurrent build
+    // stored for a different manifest.
+    let mut base_session = editor_state
+        .try_read(|es| es.base_sessions.get(&manifest_location).cloned())?
+        .unwrap_or_default();
 
     let mut protocol_state = ProtocolState::new();
     let built = build_state(
@@ -68,7 +76,7 @@ where
         file_accessor,
         static_cost_analysis,
         cached_asts,
-        &mut base_sessions,
+        &mut base_session,
     )
     .await;
 
@@ -78,7 +86,7 @@ where
     };
 
     editor_state.try_write(|es| {
-        es.base_sessions = base_sessions;
+        *es.base_sessions.get_mut(&manifest_location) = base_session;
         es.index_protocol(manifest_location, protocol_state);
         es.ast_cache.extend(new_cache_entries);
         post_commit(es);
@@ -1500,10 +1508,10 @@ mod lsp_tests {
         );
     }
 
-    /// `ContractSaved` clears protocol state and `build_and_commit` moves
-    /// `base_sessions` out and back — either can drop the cache unnoticed, since
-    /// a dropped entry is rebuilt within the same save. Only the hit count tells
-    /// a reuse from a silent ~50 ms rebuild.
+    /// `ContractSaved` clears protocol state and `build_and_commit` rebuilds from
+    /// a clone — either can drop the cache unnoticed, since a dropped entry is
+    /// rebuilt within the same save. Only the hit count tells a reuse from a
+    /// silent ~50 ms rebuild.
     #[tokio::test]
     async fn test_saves_reuse_the_cached_base_session() {
         let source = indoc! {r#"
