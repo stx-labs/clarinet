@@ -86,7 +86,7 @@ where
     };
 
     editor_state.try_write(|es| {
-        *es.base_sessions.get_mut(&manifest_location) = base_session;
+        es.base_sessions.commit(&manifest_location, base_session);
         es.index_protocol(manifest_location, protocol_state);
         es.ast_cache.extend(new_cache_entries);
         post_commit(es);

@@ -283,22 +283,21 @@ impl BaseSessionCaches {
             .map(|(_, cache)| cache)
     }
 
-    pub fn get_mut(&mut self, manifest_location: &Path) -> &mut BaseSessionCache {
-        let entry = match self
+    /// Store one manifest's cache as the most recently used, evicting the least
+    /// recently used first if that would exceed `CAPACITY`. Replacing an entry
+    /// that already exists only reorders it, so it never evicts.
+    pub fn commit(&mut self, manifest_location: &Path, cache: BaseSessionCache) {
+        if let Some(index) = self
             .entries
             .iter()
             .position(|(path, _)| path == manifest_location)
         {
-            Some(index) => self.entries.remove(index),
-            None => (manifest_location.to_path_buf(), BaseSessionCache::default()),
-        };
-
-        if self.entries.len() >= Self::CAPACITY {
+            self.entries.remove(index);
+        } else if self.entries.len() >= Self::CAPACITY {
             self.entries.remove(0);
         }
-        self.entries.push(entry);
 
-        &mut self.entries.last_mut().expect("just pushed").1
+        self.entries.push((manifest_location.to_path_buf(), cache));
     }
 
     pub fn hits(&self) -> u32 {
@@ -1278,7 +1277,7 @@ mod tests {
     fn base_session_caches_evict_the_least_recently_used_manifest() {
         let mut caches = BaseSessionCaches::default();
         for name in ["a", "b", "c"] {
-            caches.get_mut(&manifest(name));
+            caches.commit(&manifest(name), BaseSessionCache::default());
         }
 
         assert_eq!(caches.entries.len(), BaseSessionCaches::CAPACITY);
@@ -1292,10 +1291,10 @@ mod tests {
     #[test]
     fn base_session_caches_keep_the_manifest_most_recently_used() {
         let mut caches = BaseSessionCaches::default();
-        caches.get_mut(&manifest("a"));
-        caches.get_mut(&manifest("b"));
-        caches.get_mut(&manifest("a"));
-        caches.get_mut(&manifest("c"));
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+        caches.commit(&manifest("b"), BaseSessionCache::default());
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+        caches.commit(&manifest("c"), BaseSessionCache::default());
 
         assert_eq!(
             caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
@@ -1307,8 +1306,8 @@ mod tests {
     #[test]
     fn base_session_caches_reuse_the_entry_of_a_known_manifest() {
         let mut caches = BaseSessionCaches::default();
-        caches.get_mut(&manifest("a"));
-        caches.get_mut(&manifest("a"));
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+        caches.commit(&manifest("a"), BaseSessionCache::default());
 
         assert_eq!(caches.entries.len(), 1, "one manifest owns one entry");
     }

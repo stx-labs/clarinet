@@ -2110,11 +2110,8 @@ mod tests {
         deployment
     }
 
-    fn deployer_balance(session: &PreparedSession) -> u128 {
-        session
-            .0
-            .interpreter
-            .get_balance_for_account(DEPLOYER, "STX")
+    fn deployer_balance(session: &Session) -> u128 {
+        session.interpreter.get_balance_for_account(DEPLOYER, "STX")
     }
 
     fn stacks_height(session: &Session) -> u32 {
@@ -2132,7 +2129,7 @@ mod tests {
         let miss = cache.prepared_session(SessionSettings::default(), &deployment);
         let hit = cache.prepared_session(SessionSettings::default(), &deployment);
 
-        assert_eq!(deployer_balance(&hit), deployer_balance(&miss));
+        assert_eq!(deployer_balance(&hit.0), deployer_balance(&miss.0));
         assert_eq!(
             hit.0.boot_contracts.keys().collect::<Vec<_>>(),
             miss.0.boot_contracts.keys().collect::<Vec<_>>(),
@@ -2151,7 +2148,7 @@ mod tests {
         resume_session_with_deployment_plan(first, &deployment, None);
 
         let second = cache.prepared_session(SessionSettings::default(), &deployment);
-        assert_eq!(deployer_balance(&second), 4_200);
+        assert_eq!(deployer_balance(&second.0), 4_200);
         assert_eq!(
             second.0.interpreter.datastore.get_current_epoch(),
             StacksEpochId::Epoch31
@@ -2188,10 +2185,7 @@ mod tests {
 
         let (cached, _) = resume_session_with_deployment_plan(second, &deployment, None);
         assert_eq!(stacks_height(&cached), stacks_height(&spent));
-        assert_eq!(
-            cached.interpreter.get_balance_for_account(DEPLOYER, "STX"),
-            4_200
-        );
+        assert_eq!(deployer_balance(&cached), 4_200);
     }
 
     #[test]
@@ -2200,12 +2194,12 @@ mod tests {
 
         let first = contractless_deployment(genesis_with_balance(4_200), EpochSpec::Epoch3_1);
         let stale = cache.prepared_session(SessionSettings::default(), &first);
-        assert_eq!(deployer_balance(&stale), 4_200);
+        assert_eq!(deployer_balance(&stale.0), 4_200);
 
         let second = contractless_deployment(genesis_with_balance(9_900), EpochSpec::Epoch3_1);
         let fresh = cache.prepared_session(SessionSettings::default(), &second);
         assert_eq!(
-            deployer_balance(&fresh),
+            deployer_balance(&fresh.0),
             9_900,
             "a changed genesis balance must invalidate the cached base"
         );
