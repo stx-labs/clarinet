@@ -8,7 +8,7 @@ It is deliberately short, and it is meant to grow from evidence rather than from
 
 ## Structural classes
 
-These three follow from how the repo is built, so they apply to any change, not just to changes that resemble a past bug.
+These follow from how the repo is built, so they apply to any change, not just to changes that resemble a past bug.
 
 ### 1. The three surfaces can drift apart
 
