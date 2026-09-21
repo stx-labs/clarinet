@@ -45,6 +45,14 @@ Claude-only skill; if one is ever wanted, replace the directory symlink with
 per-skill symlinks alongside it. A third harness needs either its own symlink or
 a config entry pointing here — not a fork of the content.
 
+The second cost is Windows. Git leaves symlinks unmaterialised there unless
+`core.symlinks` is on, so `.claude/skills` arrives as a text file and Claude Code
+finds no skills — quietly, since a harness that discovers nothing looks the same
+as one with nothing to discover. Codex is unaffected: it reads `.agents/skills`
+directly and never touches the link. `CLAUDE.md` used to have the same exposure
+and no longer does — it is a regular file that imports `AGENTS.md`, which is why
+this is the only symlink left.
+
 ## What stays neutral, and what cannot
 
 The scripts are plain bash and the risk map is plain markdown, so both are
@@ -114,10 +122,16 @@ a review report "no peer ran" for a peer that was still working.
 It sends the diff, and any repository files the peer reads for context, to that
 vendor. Every send is logged, naming the vendor.
 
-A peer on a **local** provider sends nothing off the machine, which is what
-`PEER_PREFER=pi` is for — useful for a diff that should not leave, and as a
-fallback when a cloud peer is rate-limited or out of credits. pi ships no default
-model, so the route picks the largest-context model `pi --list-models` offers;
-override with `PEER_MODEL=provider/id`. Local models are weaker reviewers and
-their findings need the same verification as any other peer's — see step 7 of
-`clarinet-review/SKILL.md`.
+A peer on a **local** provider sends nothing off the machine. `PEER_PREFER=pi`
+is the route to one — but it is not by itself a guarantee of one, and the
+difference matters. pi ships no default model, so the route picks the
+largest-context model `pi --list-models` offers, and cloud models advertise the
+largest contexts: on a machine with pi configured for both, preferring pi sends
+the diff to that cloud vendor. Pin the model you mean with
+`PEER_MODEL=ollama/your-model`, and read the log line either way — it names the
+provider, and says outright when it is not a local one.
+
+That leaves `PEER_PREFER=pi` useful for what it reliably is: a fallback when a
+cloud peer is rate-limited or out of credits. Local models are weaker reviewers
+and their findings need the same verification as any other peer's — see step 7
+of `clarinet-review/SKILL.md`.

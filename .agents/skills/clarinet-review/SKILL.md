@@ -64,6 +64,8 @@ Run the `GATES` list from step 1, in order. These are the exact commands CI runs
 
 Report a gate failure as a finding with its output attached. If a gate can't run (missing wasm32 target, PR not checked out, `pnpm run build:sdk-wasm` skipped for time), say which one and why rather than implying it passed.
 
+That runs one way only. The list is selected by path; CI's workflows filter on nothing but `**/CHANGELOG.md` and run everything on every PR. So a gate that fails is a confirmed finding, and a gate list that passes — or comes back empty, as it does for a docs-only change — is not a review result. Say which gates ran.
+
 ## 5. The Clarinet pass
 
 Read `references/clarinet-risk-map.md` and work its classes against the diff. Collect findings — **do not report them yet.**

@@ -31,7 +31,10 @@
 # DATA EGRESS: this sends the diff, and whatever repository files the peer reads
 # for context, to the peer's vendor. Every send is logged below, naming the
 # vendor. A peer on a local provider (ollama, llama-cpp) sends nothing off the
-# machine, which is what PEER_PREFER=pi is for.
+# machine — but PEER_PREFER=pi does not by itself buy that. pi drives cloud
+# providers too, and the route below takes the largest context it is offered,
+# which is normally a cloud model. The log names the provider actually chosen,
+# and says so explicitly when it is not a local one.
 #
 # Env:
 #   PEER_MODEL     model id for the peer, overriding the route's own choice:
@@ -157,6 +160,11 @@ codex_model() {
 # unauthenticated, so the model is chosen here rather than left to pi. Largest
 # context wins: the prompt is a whole diff, and a model too small to hold it
 # truncates without saying so, which would look like a peer that found nothing.
+#
+# Note what that rule is not: it does not prefer local models, and cloud models
+# advertise the largest contexts, so on a machine with both this picks the cloud
+# one. Selecting pi is therefore not a way to keep a diff on the machine — see
+# the egress note the caller gets below.
 pi_model() {
   if [ -n "${PEER_MODEL:-}" ]; then
     printf '%s' "$PEER_MODEL"
@@ -256,7 +264,16 @@ esac
 PI_MODEL_ID=""
 CODEX_MODEL_ID=""
 case "$PEER" in
-  pi) PI_MODEL_ID="$(pi_model)" ;;
+  pi)
+    PI_MODEL_ID="$(pi_model)"
+    # Said at the moment it is decided, not left to the reader of a flag name.
+    # Someone reaches for pi to keep a diff on the machine; the largest-context
+    # rule above hands them a cloud model whenever one is configured.
+    case "${PI_MODEL_ID%%/*}" in
+      ollama | llama-cpp | llamafile | lmstudio) ;;
+      *) log "note: pi provider '${PI_MODEL_ID%%/*}' is not a known local one, so the diff does leave this machine" ;;
+    esac
+    ;;
   codex) CODEX_MODEL_ID="$(codex_model)" ;;
 esac
 MODEL_DISPLAY="${PI_MODEL_ID:-${CODEX_MODEL_ID:-${PEER_MODEL:-peer default}}}"

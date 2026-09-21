@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "case \"$(jq -r '.tool_input.file_path // empty')\" in *.rs) jq -nc --arg c \"Rust here has wasm32 and reuse constraints that a generic Rust reviewer will miss. Read .agents/skills/rust-conventions/SKILL.md before editing, if you have not already this session.\" '{hookSpecificOutput:{hookEventName:\"PreToolUse\",additionalContext:$c}}' ;; esac"
+            "command": "case \"$(jq -r '.tool_input.file_path // empty')\" in *.rs) jq -nc --arg c \"Rust here has wasm32 and reuse constraints that a generic Rust reviewer will miss. This fires alongside the edit rather than before it, so if you have not read .agents/skills/rust-conventions/SKILL.md this session, read it now and re-check the edit you just made against it.\" '{hookSpecificOutput:{hookEventName:\"PreToolUse\",additionalContext:$c}}' ;; esac"
           }
         ]
       }

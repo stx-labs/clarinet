@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository. `CLAUDE.md` is a symlink
-to this file, so Claude Code, Codex and anything else reading either name get
-the same instructions.
+Guidance for coding agents working in this repository. `CLAUDE.md` imports this
+file, so Claude Code, Codex and anything else reading either name get the same
+instructions.
 
 # Project Overview
 

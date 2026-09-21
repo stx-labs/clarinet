@@ -79,7 +79,9 @@ Two things it says that matter most during a simplify pass:
 
 ## 4. Verify
 
-Run the `GATES` from step 1 in the order printed, stopping at the first failure. They are the same commands CI runs, so a clean pass here means a clean pass there.
+Run the `GATES` from step 1 in the order printed, stopping at the first failure. Every one of them is a command CI runs, so a failure here is a failure there.
+
+**The converse does not hold, and this skill is the one that has to care.** CI's workflows filter on nothing but `**/CHANGELOG.md`: every job runs on every PR, while the gate list is selected by path to save you time locally. A clean run means the gates that were printed passed — not that CI will. So when the list came back empty, or when you skipped a slow gate, say which and why rather than reporting a clean pass. `clarinet-review` can afford a vague "gates clean"; this skill has already written the changes that claim is covering.
 
 When a gate fails, fix the specific cause or revert that one simplification. Never weaken an assertion, loosen a type, or delete a test to make a gate pass. If the target reaches `sdk-ts`, note that its gate needs `pnpm run build:sdk-wasm` first and takes minutes — run it, don't skip it.
 

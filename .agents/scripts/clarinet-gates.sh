@@ -187,7 +187,7 @@ sdk_wasm_crates="clarinet-defaults|clarinet-deployments|clarinet-files|clarinet-
 lsp_crates="clarinet-defaults|clarinet-deployments|clarinet-files|clarinet-format|clarinet-utils|clarity-lsp|clarity-repl|clarity-static-cost|hiro-system-kit"
 
 rust=false wasm=false lsp=false sdk_ts=false vscode=false manifest=false
-rust_deps=false js_deps=false
+rust_deps=false js_deps=false agent_sh=false
 
 while IFS= read -r f; do
   [[ -n $f ]] || continue
@@ -221,6 +221,11 @@ while IFS= read -r f; do
   case $f in
     components/clarity-vscode/*) vscode=true ;;
   esac
+  # No CI job lints these, so this is the only gate they get. They decide which
+  # gates every other change runs, which is the worst place for a silent break.
+  case $f in
+    .agents/scripts/*.sh) agent_sh=true ;;
+  esac
   case $f in
     pnpm-lock.yaml | pnpm-workspace.yaml | package.json | */pnpm-lock.yaml | */package.json)
       js_deps=true
@@ -229,10 +234,22 @@ while IFS= read -r f; do
   # Only the files carrying JsonSchema derives can change the generated schema,
   # which is rooted at `schema_for!(ProjectManifestFile)` and describes
   # Clarinet.toml alone. network_manifest.rs (Devnet.toml) and the rest of the
-  # crate cannot affect it. Re-derive this list with:
-  #   grep -l JsonSchema components/clarinet-files/src/*.rs
+  # crate cannot affect it.
+  #
+  # The schema crosses a crate boundary, so grepping clarinet-files alone misses
+  # half of it: ProjectManifestFile holds a `repl::SettingsFile` and a
+  # `Vec<clarity_repl::analysis::Pass>`, both of which derive JsonSchema in
+  # clarity-repl. A field added there goes into the shipped schema with nothing
+  # failing — `cargo gen-schema` is an #[ignore]d test, so `cargo tst` skips it.
+  # Re-derive the whole list with:
+  #   grep -rl JsonSchema components/*/src
   case $f in
-    components/clarinet-files/src/schema.rs | components/clarinet-files/src/project_manifest.rs)
+    components/clarinet-files/src/schema.rs | \
+      components/clarinet-files/src/project_manifest.rs | \
+      components/clarity-repl/src/repl/settings.rs | \
+      components/clarity-repl/src/analysis/mod.rs | \
+      components/clarity-repl/src/analysis/linter.rs | \
+      components/clarity-repl/src/analysis/check_checker/mod.rs)
       manifest=true
       ;;
   esac
@@ -248,11 +265,18 @@ if $sdk_ts; then echo "  sdk-ts      — TypeScript SDK surface"; fi
 if $vscode; then echo "  vscode      — VSCode extension surface"; fi
 if $rust_deps; then echo "  cargo-deps  — Cargo manifest or lockfile change"; fi
 if $js_deps; then echo "  npm-deps    — package.json or pnpm lockfile change"; fi
-if $manifest; then echo "  manifest    — clarinet-files types (manifest schema)"; fi
+if $manifest; then echo "  manifest    — a type in the Clarinet.toml schema"; fi
+if $agent_sh; then echo "  agent-sh    — .agents/scripts, which no CI job lints"; fi
 
 echo
 echo "GATES:"
 echo "# Run in order, cheapest first. Stop at the first failure."
+# Said out loud, because an empty list under this header reads the same as one
+# nobody printed. A change with no gates is not a change that passed them.
+if ! $rust && ! $wasm && ! $lsp && ! $sdk_ts && ! $vscode &&
+  ! $rust_deps && ! $js_deps && ! $manifest && ! $agent_sh; then
+  echo "# none — this change reaches no gated surface, so no gate can confirm it."
+fi
 if [[ -n $pr ]] && [[ $(gh pr view "$pr" --json headRefName --jq .headRefName 2>/dev/null) != "$(git rev-parse --abbrev-ref HEAD)" ]]; then
   echo "# PR #$pr is not checked out here — these gates test the working tree, not the PR."
   echo "#   gh pr checkout $pr   (in a worktree) to make them meaningful."
@@ -272,8 +296,13 @@ fi
 if $rust; then
   echo "cargo tst"
 fi
-if $sdk_ts; then
-  echo "# slow (wasm-pack build); only needed if the change reaches the SDK"
+# `wasm` and not just `sdk_ts`: the SDK's behaviour comes from the shared crates,
+# and CI runs this whole job for any change in that graph — the workflows filter
+# on nothing but `**/CHANGELOG.md`. Gating it on the SDK's own paths would leave
+# a clarity-repl change clearing every gate while CI still runs the SDK against
+# it, which is the drift the risk map's first class is about.
+if $wasm || $sdk_ts; then
+  echo "# slow (wasm-pack build), and CI runs it for the whole sdk-wasm graph"
   # In a worktree that has never built the wasm, `build:sdk-wasm` fails before it
   # starts: its own pnpm install wants @stacks/clarinet-sdk-wasm-browser, which
   # that build is what produces. Reads as a dependency error, not a missing step.
@@ -283,18 +312,34 @@ if $sdk_ts; then
     echo "node components/clarinet-sdk-wasm/build.mjs"
   fi
   echo "pnpm run build:sdk-wasm && pnpm --filter ./components/clarinet-sdk/node run test"
+  # `cargo tst` is --exclude clarinet-sdk-wasm, so this is the only command that
+  # runs that crate's tests at all. Without it a #[wasm_bindgen_test] is green
+  # here because it never executed.
+  echo "wasm-pack test --node components/clarinet-sdk-wasm"
 fi
 if $vscode; then
   echo "# components/clarity-vscode is its own pnpm workspace"
   echo "pnpm --dir components/clarity-vscode run lint"
+  # CI runs this in the same job, right after the lint above, and it needs no
+  # build: `node --test server/tests/*.test.ts`.
+  echo "pnpm --dir components/clarity-vscode run test:server"
 fi
 if $rust_deps; then
   echo "cargo audit"
 fi
 if $js_deps; then
   echo "# pnpm-workspace.yaml sets minimumReleaseAge: any new npm dep must be >= 5 days old"
+  # A manifest edited without regenerating the lockfile fails CI here and
+  # nowhere else, so the comment above needed a command under it.
+  echo "pnpm install --frozen-lockfile"
 fi
 if $manifest; then
-  echo "# regenerate the IDE manifest schema if ProjectManifestFile changed"
+  echo "# regenerate the IDE manifest schema if a type in it changed"
   echo "cargo gen-schema"
+fi
+if $agent_sh; then
+  # Style-level only (SC2001 on multi-line strings, which ${var//…} cannot do),
+  # so warnings and above is the level that means something here.
+  echo "shellcheck --severity=warning .agents/scripts/*.sh"
+  echo ".agents/scripts/clarinet-peer-review.sh --dry-run"
 fi
