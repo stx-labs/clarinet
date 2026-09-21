@@ -188,6 +188,10 @@ lsp_crates="clarinet-defaults|clarinet-deployments|clarinet-files|clarinet-forma
 
 rust=false wasm=false lsp=false sdk_ts=false vscode=false manifest=false
 rust_deps=false js_deps=false agent_sh=false
+# Newline-delimited list of pnpm workspace roots the diff touches, "." for the
+# repo root. Not a boolean, because installing one workspace proves nothing
+# about the others.
+js_ws=
 
 while IFS= read -r f; do
   [[ -n $f ]] || continue
@@ -226,9 +230,23 @@ while IFS= read -r f; do
   case $f in
     .agents/scripts/*.sh) agent_sh=true ;;
   esac
+  # Three independent pnpm workspaces live here — the root one (which holds the
+  # SDK), components/clarity-vscode and components/clarinet-cli/examples — each
+  # with its own lockfile and its own minimumReleaseAge. `pnpm install` at the
+  # root says nothing about the other two, so resolve which workspace owns the
+  # file and gate that one. Walking up to the nearest pnpm-workspace.yaml keeps
+  # this true when a fourth is added.
   case $f in
-    pnpm-lock.yaml | pnpm-workspace.yaml | package.json | */pnpm-lock.yaml | */package.json)
+    *package.json | *pnpm-lock.yaml | *pnpm-workspace.yaml)
       js_deps=true
+      d=${f%/*}
+      [[ $d != "$f" ]] || d=.
+      # Reads the working tree, so a workspace this checkout does not have lands
+      # at "." — the old behaviour, and the safe direction to be wrong in.
+      while [[ $d != . && ! -f $d/pnpm-workspace.yaml ]]; do
+        if [[ $d == */* ]]; then d=${d%/*}; else d=.; fi
+      done
+      js_ws=$(printf '%s\n%s' "$js_ws" "$d" | sed '/^$/d' | sort -u)
       ;;
   esac
   # Only the files carrying JsonSchema derives can change the generated schema,
@@ -264,7 +282,9 @@ if $lsp; then echo "  wasm-lsp    — crate is in the clarity-lsp graph"; fi
 if $sdk_ts; then echo "  sdk-ts      — TypeScript SDK surface"; fi
 if $vscode; then echo "  vscode      — VSCode extension surface"; fi
 if $rust_deps; then echo "  cargo-deps  — Cargo manifest or lockfile change"; fi
-if $js_deps; then echo "  npm-deps    — package.json or pnpm lockfile change"; fi
+if $js_deps; then
+  echo "  npm-deps    — pnpm workspace(s): $(printf '%s ' "$js_ws" | tr '\n' ' ' | sed 's/  *$//')"
+fi
 if $manifest; then echo "  manifest    — a type in the Clarinet.toml schema"; fi
 if $agent_sh; then echo "  agent-sh    — .agents/scripts, which no CI job lints"; fi
 
@@ -328,10 +348,23 @@ if $rust_deps; then
   echo "cargo audit"
 fi
 if $js_deps; then
-  echo "# pnpm-workspace.yaml sets minimumReleaseAge: any new npm dep must be >= 5 days old"
-  # A manifest edited without regenerating the lockfile fails CI here and
-  # nowhere else, so the comment above needed a command under it.
-  echo "pnpm install --frozen-lockfile"
+  # One install per workspace touched, and the release age read from that
+  # workspace rather than asserted — the root and clarity-vscode allow 5 days,
+  # examples 3, and a number restated here would be wrong for one of them.
+  # A manifest edited without regenerating its lockfile fails CI here and
+  # nowhere else, which is why the comment needed a command under it.
+  while IFS= read -r ws; do
+    [[ -n $ws ]] || continue
+    age=$(sed -n 's/^minimumReleaseAge:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+      "$ws/pnpm-workspace.yaml" 2>/dev/null | head -1)
+    [[ -z $age ]] ||
+      echo "# $ws/pnpm-workspace.yaml sets minimumReleaseAge $age min (~$((age / 1440))d): any new npm dep must be older"
+    if [[ $ws == . ]]; then
+      echo "pnpm install --frozen-lockfile"
+    else
+      echo "pnpm --dir $ws install --frozen-lockfile"
+    fi
+  done <<<"$js_ws"
 fi
 if $manifest; then
   echo "# regenerate the IDE manifest schema if a type in it changed"
