@@ -2,9 +2,7 @@
 
 **Only what survives a green CI.**
 
-This repo's CI gates compile every surface, run the tests, and lint the banned stdout macros. Whatever they catch is theirs to report — don't re-hunt it by hand, and don't list it here. This file exists for defects that a clean gate run still lets through.
-
-It is deliberately short, and it is meant to grow from evidence rather than from anticipation. The recording protocol is at the bottom; read it before adding anything.
+The gates compile every surface, run the tests and lint the banned stdout macros. Don't re-hunt by hand what they already report, and don't list it here. What's left is short on purpose and grows from evidence rather than anticipation; read the recording protocol at the bottom before adding to it.
 
 ## Structural classes
 
