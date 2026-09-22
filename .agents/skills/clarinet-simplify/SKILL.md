@@ -31,9 +31,10 @@ Write modern, idiomatic Rust. Prefer:
 - Destructuring in function arguments and match arms
 - Meaningful type aliases and newtypes where they aid readability
 - `impl Into<T>` / `AsRef<T>` parameters for flexible function signatures when appropriate
-- Implement `From<T>` (not `Into<T>`) for type conversions; the blanket impl provides `Into` for free
+- `From` / `TryFrom` / `FromStr` impls for conversions, not standalone `to_x` / `parse_x` helpers; implement `From`, not `Into`
 - Derive macros (`Clone`, `Debug`, `Default`, etc.) rather than manual implementations
-- Standard library traits (`From`, `Display`, `FromStr`) for type conversions
+- `Display` for rendering a type, not a `to_string`-style helper
+- Inline variables in format strings: `format!("{name}")`, not `format!("{}", name)`
 - `indoc!` / `formatdoc!` for multi-line strings
 - `strum` derives (`EnumString`, `Display`, `EnumIter`) instead of hand-written enum boilerplate
 
@@ -48,7 +49,7 @@ Crates shared with the SDK and the LSP compile to wasm32:
 - Use `uprint!` / `ueprint!`, not `println!` / `eprintln!`, which print nothing on wasm32.
 - Keep `#[cfg(target_arch = "wasm32")]` gates. Collapsing one breaks a build you probably didn't run.
 
-Keep comments to the minimum. A comment explains why, never what.
+Keep comments short. Explain why, never restate the code.
 
 ## Finish
 
