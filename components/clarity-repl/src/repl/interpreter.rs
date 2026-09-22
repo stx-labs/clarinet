@@ -24,6 +24,7 @@ use clarity::vm::hooks::EvalHook;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
 use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::resource_limiter::ResourceLimiter;
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvaluationResult,
     ExecutionResult, ParsedContract, SnippetEvaluationResult,
@@ -33,6 +34,7 @@ use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_types::Value;
+use stacks_common::bounded_format;
 
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
@@ -192,7 +194,7 @@ enum Settlement {
     Committed,
     /// The payload was rolled back and only its nonce committed.
     Aborted {
-        reason: String,
+        reason: BoundedErrorString,
         assets_modified: Box<AssetMap>,
     },
 }
@@ -201,7 +203,7 @@ fn post_condition_abort(
     output: Option<Value>,
     assets_modified: AssetMap,
     tx_events: Vec<StacksTransactionEvent>,
-    reason: String,
+    reason: BoundedErrorString,
 ) -> ClarityError {
     ClarityError::AbortedByCallback {
         output: output.map(Box::new),
@@ -255,7 +257,7 @@ impl From<ExecutionError> for Vec<Diagnostic> {
 fn runtime_diagnostic(message: impl std::fmt::Display) -> Diagnostic {
     Diagnostic {
         level: Level::Error,
-        message: format!("Runtime Error: {message}"),
+        message: bounded_format!("Runtime Error: {message}"),
         spans: vec![],
         suggestion: None,
     }
@@ -588,7 +590,7 @@ impl ClarityInterpreter {
             contract.clarity_version,
             epoch,
         ) {
-            Err(e) => BlockInclusion::from_analysis_error(ClarityError::Parse(e), epoch),
+            Err(e) => BlockInclusion::from_analysis_error(ClarityError::Parse(Box::new(e)), epoch),
             // The diagnostic pass found a problem the typed pass did not, so
             // there is no error to classify. Stay conservative.
             Ok(_) => BlockInclusion::Rejected,
@@ -612,7 +614,7 @@ impl ClarityInterpreter {
                         Err(e) => {
                             diagnostics.push(Diagnostic {
                                 level: Level::Warning,
-                                message: e.to_string(),
+                                message: BoundedErrorString::from_display(&e),
                                 spans: vec![span],
                                 suggestion: None,
                             });
@@ -627,7 +629,7 @@ impl ClarityInterpreter {
                     if rest.contains(']') {
                         diagnostics.push(Diagnostic {
                             level: Level::Warning,
-                            message: "annotation at end of line will be ignored".to_string(),
+                            message: "annotation at end of line will be ignored".into(),
                             spans: vec![Span {
                                 start_line: (n + 1) as u32,
                                 start_column: (comment_pos + 1) as u32,
@@ -693,7 +695,7 @@ impl ClarityInterpreter {
             ExecutionError {
                 diagnostics,
                 inclusion: BlockInclusion::from_analysis_error(
-                    ClarityError::StaticCheck(static_check_error),
+                    ClarityError::StaticCheck(Box::new(static_check_error)),
                     contract.epoch.resolve(),
                 ),
             }
@@ -1234,7 +1236,7 @@ impl ClarityInterpreter {
                     reason.clone(),
                 );
                 return Err(ContractCallFailure {
-                    error: ContractCallError::PostConditionAborted(reason),
+                    error: ContractCallError::PostConditionAborted(reason.into()),
                     inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
                 });
             }
@@ -2032,9 +2034,9 @@ mod tests {
 
         // Included: an ordinary type error is mined as a failed deploy.
         assert!(BlockInclusion::from_analysis_error(
-            ClarityError::StaticCheck(StaticCheckError::new(
+            ClarityError::StaticCheck(Box::new(StaticCheckError::new(
                 StaticCheckErrorKind::UnknownFunction("no-such-fn".into())
-            )),
+            ))),
             epoch,
         )
         .is_included());
@@ -2275,7 +2277,7 @@ mod tests {
         let diagnostics = result.unwrap_err().diagnostics;
         assert_eq!(diagnostics.len(), 1);
 
-        let message = format!("Runtime Error: Runtime error while interpreting {}.{}: Runtime(DivisionByZero, Some([FunctionIdentifier {{ identifier: \"_native_:native_div\" }}]))", StandardPrincipalData::transient(), contract.name);
+        let message = bounded_format!("Runtime Error: Runtime error while interpreting {}.{}: Runtime(DivisionByZero, Some([FunctionIdentifier {{ identifier: \"_native_:native_div\" }}]))", StandardPrincipalData::transient(), contract.name);
         assert_eq!(
             diagnostics[0],
             Diagnostic {

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::ClarityName;
 
@@ -124,7 +125,7 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
             if !Self::is_err_value(value, &clarity_version) {
                 diagnostics.push(Diagnostic {
                     level: self.level.clone(),
-                    message: Self::make_not_err_message(name),
+                    message: BoundedErrorString::from_display(&Self::make_not_err_message(name)),
                     spans: vec![const_data.expr.span.clone()],
                     suggestion: Some(format!(
                         "Use `(err ...)` as the value or remove the `{ERR_PREFIX}` prefix"
@@ -151,7 +152,9 @@ impl<'a, 'b> ErrorConst<'a, 'b> {
                     .and_modify(|other_name| {
                         diagnostics.push(Diagnostic {
                             level: self.level.clone(),
-                            message: Self::make_duplicate_message(name, other_name),
+                            message: BoundedErrorString::from_display(
+                                &Self::make_duplicate_message(name, other_name),
+                            ),
                             spans: vec![const_data.expr.span.clone()],
                             suggestion: Some("Use a unique error value".to_string()),
                         });

@@ -92,7 +92,7 @@ pub fn clarity_diagnostic_to_tower_lsp_type_with_lint(
         code,
         code_description: None,
         source: Some("clarity".to_string()),
-        message: diagnostic.message.clone(),
+        message: diagnostic.message.to_string(),
         related_information: None,
         tags: None,
         data: None,

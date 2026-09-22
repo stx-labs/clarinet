@@ -59,7 +59,7 @@ pub fn clarity_diagnostic_to_lsp_type(
         source: Some("clarity".to_string()),
         message: match &diagnostic.suggestion {
             Some(suggestion) => format!("{}\n\n{suggestion}", diagnostic.message),
-            None => diagnostic.message.clone(),
+            None => diagnostic.message.to_string(),
         },
         related_information: None,
         tags: None,

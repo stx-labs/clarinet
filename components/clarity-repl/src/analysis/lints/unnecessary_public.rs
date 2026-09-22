@@ -20,6 +20,7 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::Span;
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
 use clarity_types::types::QualifiedContractIdentifier;
+use stacks_common::bounded_format;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
@@ -201,7 +202,7 @@ impl<'a, 'b, 'c> ASTVisitor<'a> for UnnecessaryPublic<'a, 'b, 'c> {
 
                 self.diagnostics.push(Diagnostic {
                     level: self.level.clone(),
-                    message: format!(
+                    message: bounded_format!(
                         "function `{}` could be declared as `define-read-only`",
                         name,
                     ),

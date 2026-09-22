@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::vec;
 
@@ -15,7 +14,7 @@ use clarity::vm::ast::{build_ast, ContractAST};
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::diagnostic::{Diagnostic, Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
 use clarity::vm::functions::define::DefineFunctions;
-use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData};
+use clarity::vm::types::{BoundedErrorString, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, EvaluationResult, SymbolicExpression};
 use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::LintDiagnostic;
@@ -899,7 +898,8 @@ fn tag_diagnostics(
 ) {
     if found_env_simnet {
         for ref mut diag in diagnostics {
-            let _ = write!(diag.message, " ({environment})");
+            diag.message =
+                BoundedErrorString::from_args(format_args!("{} ({environment})", diag.message));
         }
     }
 }
@@ -911,7 +911,10 @@ fn tag_lint_diagnostics(
 ) {
     if found_env_simnet {
         for ld in lint_diagnostics {
-            let _ = write!(ld.diagnostic.message, " ({environment})");
+            ld.diagnostic.message = BoundedErrorString::from_args(format_args!(
+                "{} ({environment})",
+                ld.diagnostic.message
+            ));
         }
     }
 }
@@ -1251,7 +1254,7 @@ async fn get_cost_analysis(
                     clarity_repl::uprint!("[LSP] Cost warning: {w}");
                     ClarityDiagnostic {
                         level: ClarityLevel::Warning,
-                        message: w.to_string(),
+                        message: BoundedErrorString::from_display(w),
                         spans: vec![],
                         suggestion: None,
                     }

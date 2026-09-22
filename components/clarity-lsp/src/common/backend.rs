@@ -168,7 +168,7 @@ pub enum LspNotification {
     ContractClosed(PathBuf),
 }
 
-#[derive(Debug, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Default, PartialEq, Serialize)]
 pub struct LspNotificationResponse {
     pub aggregated_diagnostics: Vec<(PathBuf, Vec<LintDiagnostic>)>,
     pub env_simnet_diagnostics: Vec<(PathBuf, Vec<LspDiagnostic>)>,

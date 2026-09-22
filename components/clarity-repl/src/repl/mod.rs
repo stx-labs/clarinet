@@ -36,6 +36,7 @@ pub fn clarity_version_to_u8(version: ClarityVersion) -> u8 {
         ClarityVersion::Clarity4 => 4,
         ClarityVersion::Clarity5 => 5,
         ClarityVersion::Clarity6 => 6,
+        ClarityVersion::Clarity7 => 7,
     }
 }
 
