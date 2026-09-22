@@ -49,6 +49,7 @@ pub fn clarity_version_from_u8(value: u8) -> Option<ClarityVersion> {
         4 => Some(ClarityVersion::Clarity4),
         5 => Some(ClarityVersion::Clarity5),
         6 => Some(ClarityVersion::Clarity6),
+        7 => Some(ClarityVersion::Clarity7),
         _ => None,
     }
 }
@@ -297,4 +298,20 @@ pub enum ClarityCodeSource {
     ContractInMemory(String),
     ContractOnDisk(PathBuf),
     Empty,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clarity_version_from_u8, clarity_version_to_u8, ClarityVersion};
+
+    #[test]
+    fn clarity_versions_round_trip() {
+        for &version in ClarityVersion::ALL {
+            assert_eq!(
+                clarity_version_from_u8(clarity_version_to_u8(version)),
+                Some(version),
+                "{version} must round-trip through its numeric representation"
+            );
+        }
+    }
 }
