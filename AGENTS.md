@@ -30,7 +30,7 @@ This repository contains three tools that are built on top of the same Rust comp
 
 ## CLI
 
-- `clarinet-cli` - Main CLI binary. Default member of `./cargo.toml`
+- `clarinet-cli` - Main CLI binary. Default member of `./Cargo.toml`
 
 ### Commands
 

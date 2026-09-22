@@ -19,6 +19,8 @@ cargo clippy --workspace --tests --exclude clarinet-sdk-wasm
 cargo tst
 ```
 
+If `Cargo.lock` changed, also run `cargo audit`.
+
 Crates in the SDK's dependency graph (most shared crates):
 
 ```bash
@@ -28,6 +30,8 @@ wasm-pack test --node components/clarinet-sdk-wasm
 pnpm run build:sdk-wasm && pnpm --filter ./components/clarinet-sdk/node run test
 ```
 
+These need the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and `wasm-pack`.
+
 `cargo tst` skips `clarinet-sdk-wasm`. Its tests run only under `wasm-pack test`, and only if they are `#[wasm_bindgen_test]`.
 
 `clarity-lsp` or `components/clarity-vscode`:
@@ -36,6 +40,8 @@ pnpm run build:sdk-wasm && pnpm --filter ./components/clarinet-sdk/node run test
 cargo clippy --target=wasm32-unknown-unknown --no-default-features --package=clarity-lsp
 pnpm --dir components/clarity-vscode run lint
 pnpm --dir components/clarity-vscode run test:server
+pnpm --dir components/clarity-vscode run build:dap && pnpm --dir components/clarity-vscode run test:dap
+pnpm --dir components/clarity-vscode exec playwright install chromium && pnpm --dir components/clarity-vscode test
 ```
 
 `components/clarity-vscode` is its own pnpm workspace, so it needs `pnpm --dir components/clarity-vscode install --frozen-lockfile` first.

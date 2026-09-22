@@ -32,4 +32,4 @@ Defects that passed CI here and were caught only in review. Add an entry only on
 
 Group the findings: **blocking**, then **minor**, then **resolved** since the last review. For each, give `file:line`, the defect in one sentence, and the input or state that triggers it. If there are no findings, say so.
 
-Write the report to `.agents/reviews/<name>.md` (gitignored), with `<name>` set to `PR-<number>` or the branch name. If the file already exists, update it: move fixed findings to resolved and add new ones. That way the next run, in any harness, picks up where this one stopped.
+Write the report to `.agents/reviews/<name>.md` (gitignored), with `<name>` set to `PR-<number>` or the branch name with `/` replaced by `-`. If the file already exists, update it: move fixed findings to resolved and add new ones. That way the next run, in any harness, picks up where this one stopped.
