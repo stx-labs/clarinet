@@ -17,7 +17,7 @@ Pin down the intent from the PR description or commit messages. A change that co
 
 Use your harness's own review command if it has one, then check the risk map below.
 
-Report only defects the change introduces or exposes. Formatting and lint belong to `cargo fmt-stacks` and clippy, and style belongs to `clarinet-simplify`.
+Report only defects the change introduces or exposes. Formatting and lint belong to `cargo fmt-stacks` and clippy. Report violations of `.agents/rust-conventions.md` as minor.
 
 Check each finding against the surrounding code before reporting it. Drop the ones that don't hold up.
 
@@ -26,7 +26,7 @@ Check each finding against the surrounding code before reporting it. Drop the on
 Defects that passed CI here and were caught only in review. Add an entry only once a finding has been confirmed and fixed, citing the PR.
 
 - **A rule added at one entry point misses the others.** The same session is reached through the console's `::` commands, `simnet.execute`, `runSnippet`, the DAP, the SDK and deployment plans. When a change adds a rule (remap an id, rewrite a source, validate an argument), list every entry point and check each one. The one that was missed is unchanged code, so it won't be in the diff. Missed in `::encode` (#2518).
-- **A hardcoded epoch goes stale.** Epoch and Clarity version literals change with Stacks releases. Derive them (see `clarinet-simplify`). A warning with a baked-in epoch (#2513).
+- **A hardcoded epoch goes stale.** Epoch and Clarity version literals change with Stacks releases. Derive them (see `.agents/rust-conventions.md`). A warning with a baked-in epoch (#2513).
 
 ## Report
 

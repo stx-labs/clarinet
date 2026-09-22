@@ -2,6 +2,8 @@
 
 Guidance for coding agents working in this repository. `CLAUDE.md` is a symlink to this file.
 
+Before writing or editing Rust, read `.agents/rust-conventions.md`.
+
 # Project Overview
 
 Clarinet is a development toolkit for building, testing, and deploying Clarity smart contracts on the Stacks blockchain. It provides a CLI, REPL, testing framework, debugger, and local devnet environment.
