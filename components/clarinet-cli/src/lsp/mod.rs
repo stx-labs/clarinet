@@ -12,15 +12,10 @@ use tower_lsp_server::{LspService, Server};
 use self::native_bridge::LspNativeBridge;
 
 pub fn run_lsp() {
-    if hiro_system_kit::create_basic_runtime()
-        .block_on(do_run_lsp())
-        .is_err()
-    {
-        std::process::exit(1)
-    }
+    hiro_system_kit::create_basic_runtime().block_on(do_run_lsp());
 }
 
-async fn do_run_lsp() -> Result<(), String> {
+async fn do_run_lsp() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
@@ -33,7 +28,6 @@ async fn do_run_lsp() -> Result<(), String> {
         LspNativeBridge::new(client, notification_tx, request_tx, response_rx)
     });
     Server::new(stdin, stdout, socket).serve(service).await;
-    Ok(())
 }
 
 pub fn clarity_diagnostics_to_tower_lsp_type(
