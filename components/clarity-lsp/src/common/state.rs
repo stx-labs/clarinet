@@ -891,6 +891,13 @@ impl ProtocolState {
     }
 }
 
+fn tag_diagnostic_message(
+    message: &BoundedErrorString,
+    environment: Environment,
+) -> BoundedErrorString {
+    BoundedErrorString::from_args(format_args!("({environment}) {message}"))
+}
+
 fn tag_diagnostics(
     environment: Environment,
     found_env_simnet: bool,
@@ -898,8 +905,7 @@ fn tag_diagnostics(
 ) {
     if found_env_simnet {
         for ref mut diag in diagnostics {
-            diag.message =
-                BoundedErrorString::from_args(format_args!("{} ({environment})", diag.message));
+            diag.message = tag_diagnostic_message(&diag.message, environment);
         }
     }
 }
@@ -911,10 +917,7 @@ fn tag_lint_diagnostics(
 ) {
     if found_env_simnet {
         for ld in lint_diagnostics {
-            ld.diagnostic.message = BoundedErrorString::from_args(format_args!(
-                "{} ({environment})",
-                ld.diagnostic.message
-            ));
+            ld.diagnostic.message = tag_diagnostic_message(&ld.diagnostic.message, environment);
         }
     }
 }
