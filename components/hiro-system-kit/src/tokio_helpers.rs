@@ -1,10 +1,7 @@
 use tokio::runtime::{Builder, Runtime};
 
-/// The runtime Clarinet's blocking entry points drive their futures on: a
-/// single-threaded scheduler with the io and time drivers enabled.
-///
-/// Meant to be owned by the thread that blocks on it — either the main thread
-/// or a dedicated `thread_named` worker — and built once per thread.
+/// Only makes progress while `block_on` polls it, so build one per blocking
+/// thread: the main thread or a dedicated `thread_named` worker.
 pub fn create_basic_runtime() -> Runtime {
     Builder::new_current_thread()
         .enable_all()

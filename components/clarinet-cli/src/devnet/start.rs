@@ -62,13 +62,9 @@ pub fn start(
 
     let (orchestrator_terminated_tx, orchestrator_terminated_rx) = channel();
 
-    // Multi-threaded on purpose: `do_run_local_devnet` opens Docker connections on
-    // this runtime, then hands the bollard client to the orchestrator thread while
-    // this thread blocks in the dashboard/event loop. A current-thread runtime would
-    // stop driving those connections as soon as we stop polling.
-    //
-    // One worker is enough: nothing in this crate spawns a task, so the only work
-    // left for it is keeping that idle connection pool alive.
+    // Multi-threaded on purpose: Docker connections opened on this runtime stay in the
+    // bollard pool used by the orchestrator thread, while this thread blocks in the
+    // dashboard/event loop. One worker keeps their hyper drivers polled.
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
