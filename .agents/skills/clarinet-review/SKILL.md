@@ -15,7 +15,7 @@ Pin down the intent from the PR description or commit messages. A change that co
 
 ## Review
 
-Use your harness's own review command if it has one, then check the risk map below.
+Run your harness's general review pass if it's available to you: the `code-review` skill in Claude Code, `codex review` in Codex (it reviews the current checkout). Otherwise, review inline. Then check the risk map below.
 
 Report only defects the change introduces or exposes. Formatting and lint belong to `cargo fmt-stacks` and clippy. Report violations of `.agents/rust-conventions.md` as minor.
 

@@ -19,7 +19,7 @@ Skip generated and vendored files: `Cargo.lock`, `pnpm-lock.yaml`, `components/s
 - Code the change made dead, and comments it made redundant.
 - Rust that doesn't follow `.agents/rust-conventions.md`.
 
-Use your harness's own simplify pass if it has one, then add the Clarinet-specific checks above. Aim for code a reviewer understands faster, not for a smaller diff.
+Run your harness's general simplify pass if it's available to you: the `simplify` skill in Claude Code. Otherwise, simplify inline. Then add the Clarinet-specific checks above. Aim for code a reviewer understands faster, not for a smaller diff.
 
 ## Finish
 
