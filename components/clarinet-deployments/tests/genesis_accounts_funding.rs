@@ -149,6 +149,7 @@ fn can_fund_initial_sbtc_balance_with_explicit_sbtc_requirements() {
                     location: PathBuf::from(format!("./requirements/{contract_name}.clar")),
                     emulated_sender: SBTC_MAINNET_ADDRESS_PRINCIPAL.clone(),
                     skip_analysis: true,
+                    remap_principals: BTreeMap::new(),
                 },
             )
         })

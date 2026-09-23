@@ -6,8 +6,7 @@ use std::vec;
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 pub use clarinet_deployments::CachedContractAST;
 use clarinet_deployments::{
-    generate_default_deployment_with_cache, initiate_session_from_manifest,
-    update_session_with_deployment_plan,
+    generate_default_deployment_with_cache, session_settings_from_manifest, BaseSessionCache,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork};
 use clarity::types::StacksEpochId;
@@ -261,6 +260,57 @@ pub struct ContractMetadata {
     pub deployer: ContractDeployer,
 }
 
+/// Per-manifest [`BaseSessionCache`], capped at `CAPACITY`: each entry holds its
+/// own boot contract set (tens of MB in a wasm heap that never returns memory),
+/// and no LSP notification says when a manifest is done, so nothing else would
+/// ever drop one.
+#[derive(Clone, Default, Debug)]
+pub struct BaseSessionCaches {
+    /// Least recently used first.
+    pub(crate) entries: Vec<(PathBuf, BaseSessionCache)>,
+}
+
+impl BaseSessionCaches {
+    /// Editing moves between a couple of projects at most.
+    const CAPACITY: usize = 2;
+
+    /// Read one manifest's cache without recording a use, so a build that never
+    /// commits leaves the map — LRU order included — as it found it.
+    pub fn get(&self, manifest_location: &Path) -> Option<&BaseSessionCache> {
+        self.entries
+            .iter()
+            .find(|(path, _)| path == manifest_location)
+            .map(|(_, cache)| cache)
+    }
+
+    /// Store one manifest's cache as the most recently used, evicting the least
+    /// recently used first if that would exceed `CAPACITY`. Replacing an entry
+    /// that already exists only reorders it, so it never evicts.
+    pub fn commit(&mut self, manifest_location: &Path, cache: BaseSessionCache) {
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|(path, _)| path == manifest_location)
+        {
+            self.entries.remove(index);
+        } else if self.entries.len() >= Self::CAPACITY {
+            self.entries.remove(0);
+        }
+
+        self.entries.push((manifest_location.to_path_buf(), cache));
+    }
+
+    /// Drop one manifest's entry, freeing its slot and its boot set. For a
+    /// manifest that caches nothing, which is the only alternative to `commit`.
+    pub fn forget(&mut self, manifest_location: &Path) {
+        self.entries.retain(|(path, _)| path != manifest_location);
+    }
+
+    pub fn hits(&self) -> u32 {
+        self.entries.iter().map(|(_, cache)| cache.hits()).sum()
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct EditorState {
     pub protocols: HashMap<PathBuf, ProtocolState>,
@@ -270,17 +320,14 @@ pub struct EditorState {
     /// Parsed ASTs keyed by (contract path, environment). Reused by
     /// `build_state` to skip re-parsing files whose source hasn't changed.
     pub ast_cache: HashMap<(PathBuf, Environment), CachedContractAST>,
+    /// Genesis accounts + boot contracts per manifest. Unlike `ast_cache` it is
+    /// not keyed by `Environment`: environments differ only in contract sources.
+    pub base_sessions: BaseSessionCaches,
 }
 
 impl EditorState {
     pub fn new() -> EditorState {
-        EditorState {
-            protocols: HashMap::new(),
-            contracts_lookup: HashMap::new(),
-            active_contracts: HashMap::new(),
-            settings: InitializationOptions::default(),
-            ast_cache: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn index_protocol(&mut self, manifest_location: PathBuf, protocol: ProtocolState) {
@@ -880,6 +927,10 @@ pub async fn build_state(
     // On any error we just drop it — the caller's original cache is
     // untouched, so no restore step is needed.
     mut cached_asts: Option<HashMap<(PathBuf, Environment), CachedContractAST>>,
+    // Only this manifest's cache, never the whole map: a build has no business
+    // touching another manifest's entry, and not being handed one is what keeps
+    // a concurrent build's entry safe from this one.
+    base_session: &mut BaseSessionCache,
 ) -> Result<HashMap<(PathBuf, Environment), CachedContractAST>, String> {
     let mut locations = HashMap::new();
     let mut asts = BTreeMap::new();
@@ -929,9 +980,11 @@ pub async fn build_state(
             new_cache_entries.extend(entries);
         }
 
-        let mut session = initiate_session_from_manifest(&manifest);
-        let contracts =
-            update_session_with_deployment_plan(&mut session, &deployment, Some(&artifacts.asts));
+        let (session, contracts) = base_session.run_deployment_plan(
+            session_settings_from_manifest(&manifest),
+            &deployment,
+            Some(&artifacts.asts),
+        );
         for (contract_id, mut result) in contracts.into_iter() {
             let Some((_, contract_location)) = deployment.contracts.get(&contract_id) else {
                 continue;
@@ -1216,4 +1269,87 @@ async fn get_cost_analysis(
             clarity_repl::uprint!("[LSP] Cost analysis failed with error: {e:?}");
         })
         .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(name: &str) -> PathBuf {
+        PathBuf::from(format!("/{name}/Clarinet.toml"))
+    }
+
+    #[test]
+    fn base_session_caches_evict_the_least_recently_used_manifest() {
+        let mut caches = BaseSessionCaches::default();
+        for name in ["a", "b", "c"] {
+            caches.commit(&manifest(name), BaseSessionCache::default());
+        }
+
+        assert_eq!(caches.entries.len(), BaseSessionCaches::CAPACITY);
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("b"), &manifest("c")],
+            "the first manifest built is the first evicted"
+        );
+    }
+
+    #[test]
+    fn base_session_caches_keep_the_manifest_most_recently_used() {
+        let mut caches = BaseSessionCaches::default();
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+        caches.commit(&manifest("b"), BaseSessionCache::default());
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+        caches.commit(&manifest("c"), BaseSessionCache::default());
+
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("a"), &manifest("c")],
+            "'b' went unused longest, so it is the one to go"
+        );
+    }
+
+    #[test]
+    fn base_session_caches_reuse_the_entry_of_a_known_manifest() {
+        let mut caches = BaseSessionCaches::default();
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+
+        assert_eq!(caches.entries.len(), 1, "one manifest owns one entry");
+    }
+
+    /// What `build_and_commit` does for a remote-data manifest, which caches no
+    /// base session. Committing its empty cache instead would leave a manifest
+    /// that caches nothing holding one of the two slots, so a third manifest
+    /// would evict a populated one that a full slot count would have kept.
+    #[test]
+    fn base_session_caches_free_the_slot_of_a_manifest_that_caches_nothing() {
+        let mut caches = BaseSessionCaches::default();
+        caches.commit(&manifest("local"), BaseSessionCache::default());
+        caches.commit(&manifest("remote"), BaseSessionCache::default());
+        assert_eq!(caches.entries.len(), 2);
+
+        caches.forget(&manifest("remote"));
+
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("local")],
+            "the remote manifest gives its slot back"
+        );
+    }
+
+    /// Forgetting a manifest that owns no entry is what a remote-data manifest
+    /// does on every save after the first, so it must not disturb the others.
+    #[test]
+    fn base_session_caches_forget_an_unknown_manifest_is_a_no_op() {
+        let mut caches = BaseSessionCaches::default();
+        caches.commit(&manifest("a"), BaseSessionCache::default());
+
+        caches.forget(&manifest("never-seen"));
+
+        assert_eq!(
+            caches.entries.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            vec![&manifest("a")]
+        );
+    }
 }

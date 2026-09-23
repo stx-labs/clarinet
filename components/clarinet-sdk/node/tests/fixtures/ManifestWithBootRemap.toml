@@ -1,0 +1,14 @@
+# a manifest whose only contract references a mainnet boot contract, used to
+# test the simnet boot-principal remap
+
+[project]
+name = 'fixtures'
+description = 'sample project to test clarinet-sdk'
+telemetry = false
+cache_dir = './.cache'
+requirements = []
+
+[contracts.mainnet-pox-stacker]
+path = 'contracts/mainnet-pox-stacker.clar'
+clarity_version = 2
+epoch = 2.4
