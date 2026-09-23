@@ -975,21 +975,23 @@ impl Session {
             let contract_id_str = contract_id.to_string();
             let user_friendly_message = match failure.error {
                 ContractCallError::NoSuchContract(_) => {
-                    format!("Contract '{contract_id_str}' does not exist")
+                    bounded_format!("Contract '{contract_id_str}' does not exist")
                 }
                 ContractCallError::NoSuchFunction(_) => {
-                    format!("Method '{method}' does not exist on contract '{contract_id_str}'")
+                    bounded_format!(
+                        "Method '{method}' does not exist on contract '{contract_id_str}'"
+                    )
                 }
                 // Already phrased for the user by the post-condition checker.
                 ContractCallError::PostConditionAborted(reason) => reason,
                 ContractCallError::Uncategorized(message) => {
-                    format!("Error calling contract function '{method}': {message}")
+                    bounded_format!("Error calling contract function '{method}': {message}")
                 }
             };
             ExecutionError {
                 diagnostics: vec![Diagnostic {
                     level: Level::Error,
-                    message: BoundedErrorString::from_display(&user_friendly_message),
+                    message: user_friendly_message,
                     spans: vec![],
                     suggestion: None,
                 }],

@@ -286,7 +286,7 @@ pub enum ContractCallError {
     NoSuchFunction(String),
     /// A post-condition rejected the call's asset movement. The message is
     /// already phrased for the user by the upstream checker.
-    PostConditionAborted(String),
+    PostConditionAborted(BoundedErrorString),
     Uncategorized(String),
 }
 
@@ -1236,7 +1236,7 @@ impl ClarityInterpreter {
                     reason.clone(),
                 );
                 return Err(ContractCallFailure {
-                    error: ContractCallError::PostConditionAborted(reason.into()),
+                    error: ContractCallError::PostConditionAborted(reason),
                     inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
                 });
             }
