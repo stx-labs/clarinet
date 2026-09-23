@@ -973,7 +973,7 @@ impl Session {
                 ueprint!("{}", traced_error);
             }
             let contract_id_str = contract_id.to_string();
-            let user_friendly_message = match failure.error {
+            let message = match failure.error {
                 ContractCallError::NoSuchContract(_) => {
                     bounded_format!("Contract '{contract_id_str}' does not exist")
                 }
@@ -991,7 +991,7 @@ impl Session {
             ExecutionError {
                 diagnostics: vec![Diagnostic {
                     level: Level::Error,
-                    message: user_friendly_message,
+                    message,
                     spans: vec![],
                     suggestion: None,
                 }],
