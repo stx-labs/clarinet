@@ -5,10 +5,7 @@ import {
   DocumentSymbolRequest,
   InitializeRequest,
 } from "vscode-languageserver";
-import type {
-  Connection,
-  DidOpenTextDocumentParams,
-} from "vscode-languageserver";
+import type { Connection } from "vscode-languageserver";
 
 // this type is the same for the browser and node but node isn't always built in dev
 // it has to stay type-only, `server/tests` loads this file unbuilt
@@ -16,8 +13,9 @@ import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
 
+// every notification the queue carries has this shape, whatever its method
 function documentUri(params: unknown): string | undefined {
-  return (params as DidOpenTextDocumentParams | undefined)?.textDocument?.uri;
+  return (params as { textDocument?: { uri?: string } })?.textDocument?.uri;
 }
 
 // fast and high-frequency, they would drown out everything else
@@ -82,21 +80,18 @@ export function initConnection(
   // snapshot that fully supersedes the queued one, so analyzing the queued
   // snapshot is wasted work. A didOpen/didSave/didClose for the same document
   // is a barrier, snapshots can't be merged across it
-  function replaceQueuedDidChange(params: unknown) {
+  function replaceQueuedDidChange(method: string, params: unknown) {
+    if (method !== DidChangeTextDocumentNotification.method) return false;
     const uri = documentUri(params);
     if (!uri) return false;
 
-    // entry 0 is in flight
-    for (let i = notifications.length - 1; i > 0; i--) {
-      const [queuedMethod, queuedParams] = notifications[i];
-      if (documentUri(queuedParams) !== uri) continue;
-      if (queuedMethod !== DidChangeTextDocumentNotification.method) {
-        return false;
-      }
-      notifications[i][1] = params;
-      return true;
-    }
-    return false;
+    // the newest queued entry for this document, 0 is in flight, -1 is none
+    const i = notifications.findLastIndex(([, p]) => documentUri(p) === uri);
+    // anything but a didChange there is a barrier
+    if (i < 1 || notifications[i][0] !== method) return false;
+
+    notifications[i][1] = params;
+    return true;
   }
 
   connection.onNotification((method: string, params: unknown) => {
@@ -111,12 +106,7 @@ export function initConnection(
       if (!VALID_PROTOCOLS.includes(protocol)) return;
     }
 
-    if (
-      method === DidChangeTextDocumentNotification.method &&
-      replaceQueuedDidChange(params)
-    ) {
-      return;
-    }
+    if (replaceQueuedDidChange(method, params)) return;
 
     notifications.push([method, params]);
     if (notifications.length === 1) consumeNotifications();
