@@ -419,10 +419,8 @@ pub fn do_run_local_devnet(
     ),
     String,
 > {
-    // The runtime that opens the Docker connections must not outlive this scope: once
-    // `do_run_devnet` blocks, nothing would poll it and the pooled connections would
-    // stall until bollard's 120s timeout. Dropping it closes them, so hyper reconnects
-    // on whichever runtime the orchestrator thread builds for itself.
+    // Dropped before `do_run_devnet` blocks: left alive but unpolled, it would stall the
+    // pooled Docker connections until bollard's 120s timeout instead of letting them reconnect.
     let ip_address_setup = {
         let rt = hiro_system_kit::create_basic_runtime();
         rt.block_on(devnet.prepare_local_network())?
