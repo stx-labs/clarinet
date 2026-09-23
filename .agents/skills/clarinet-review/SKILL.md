@@ -5,7 +5,7 @@ description: Review a change in the Clarinet repo for correctness — a branch, 
 
 # Review a Clarinet change
 
-Find defects in the change. Read-only: don't edit code unless the user then asks for fixes. Never post to GitHub.
+Find defects in the change. Read-only: don't edit code unless the user then asks for fixes. To confirm a finding, you may write a throwaway test on a temporary branch or worktree, but remove it and leave no lasting changes. Never post to GitHub.
 
 ## Scope
 

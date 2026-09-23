@@ -15,8 +15,14 @@ Write modern, idiomatic Rust. Prefer:
 - `indoc!` / `formatdoc!` for multi-line strings
 - `strum` derives (`EnumString`, `Display`, `EnumIter`) instead of hand-written enum boilerplate
 
+Let the type system carry correctness:
+
+- `Option` / `Result`, never sentinel values (`-1`, `""`, `u64::MAX`)
+- Make invalid states unrepresentable: an enum instead of a struct of flags and optional fields, a newtype that validates on construction
+
 Reuse what exists instead of re-deriving it:
 
+- Anything stacks-core already provides. Import it rather than copying it. If it isn't exposed, say so and suggest the upstream change, instead of duplicating it here.
 - Default epoch and Clarity version: `clarinet_defaults::{DEFAULT_EPOCH, DEFAULT_CLARITY_VERSION}`
 - A boot contract's epoch: `clarity_repl::repl::boot::get_boot_contract_epoch_and_clarity_version`
 - Formatting a Clarity `Value`: `clarity_repl::repl::clarity_values::value_to_string`
