@@ -56,7 +56,8 @@
     "vscode": "^1.91.0"
   },
   "activationEvents": [
-    "workspaceContains:Clarinet.toml"
+    "workspaceContains:Clarinet.toml",
+    "onLanguage:clarity"
   ],
   "main": "./client/dist/clientNode.js",
   "browser": "./client/dist/clientBrowser.js",
