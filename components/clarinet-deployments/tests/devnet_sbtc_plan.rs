@@ -14,11 +14,16 @@ use clarity_repl::utils::Environment;
 use indoc::formatdoc;
 use tempfile::TempDir;
 
-/// Write a project with a single contract and no requirements, the way
-/// `clarinet new` followed by `clarinet contract new` would.
-fn write_project(root: &Path) {
+/// Write a project with a single contract, the way `clarinet new` followed by
+/// `clarinet contract new` would, plus the given `[[project.requirements]]`.
+fn write_project(root: &Path, requirements: &[&str]) {
     fs::create_dir_all(root.join("settings")).unwrap();
     fs::create_dir_all(root.join("contracts")).unwrap();
+
+    let requirements: String = requirements
+        .iter()
+        .map(|id| format!("\n[[project.requirements]]\ncontract_id = \"{id}\"\n"))
+        .collect();
 
     #[rustfmt::skip]
     let manifest = formatdoc!(r#"
@@ -27,7 +32,7 @@ fn write_project(root: &Path) {
         authors = []
         description = ""
         telemetry = false
-
+        {requirements}
         [contracts.noop]
         path = "contracts/noop.clar"
         epoch = "latest"
@@ -54,10 +59,9 @@ fn write_project(root: &Path) {
     .unwrap();
 }
 
-#[tokio::test]
-async fn devnet_plan_publishes_every_sbtc_contract() {
+async fn published_requirements(requirements: &[&str]) -> Vec<String> {
     let temp_dir = TempDir::new().unwrap();
-    write_project(temp_dir.path());
+    write_project(temp_dir.path(), requirements);
 
     let manifest =
         ProjectManifest::from_location(&temp_dir.path().join("Clarinet.toml"), false).unwrap();
@@ -73,7 +77,7 @@ async fn devnet_plan_publishes_every_sbtc_contract() {
     .await
     .expect("devnet deployment plan should be generated");
 
-    let published: Vec<String> = deployment
+    deployment
         .plan
         .batches
         .iter()
@@ -84,15 +88,32 @@ async fn devnet_plan_publishes_every_sbtc_contract() {
             }
             _ => None,
         })
-        .collect();
+        .collect()
+}
 
-    let expected: Vec<String> = SBTC_CONTRACTS_NAMES
+fn sbtc_contract_ids() -> Vec<String> {
+    SBTC_CONTRACTS_NAMES
         .iter()
         .map(|name| format!("{SBTC_MAINNET_ADDRESS}.{name}"))
-        .collect();
+        .collect()
+}
+
+#[tokio::test]
+async fn devnet_plan_publishes_every_sbtc_contract() {
+    assert_eq!(
+        published_requirements(&[]).await,
+        sbtc_contract_ids(),
+        "a stock devnet plan must publish the sBTC contracts, in dependency order"
+    );
+}
+
+#[tokio::test]
+async fn devnet_plan_publishes_explicit_sbtc_requirement_once() {
+    let sbtc_token = format!("{SBTC_MAINNET_ADDRESS}.sbtc-token");
 
     assert_eq!(
-        published, expected,
-        "a stock devnet plan must publish the sBTC contracts, in dependency order"
+        published_requirements(&[&sbtc_token]).await,
+        sbtc_contract_ids(),
+        "an explicit sBTC requirement must not publish any sBTC contract twice"
     );
 }
