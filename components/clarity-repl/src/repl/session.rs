@@ -745,17 +745,30 @@ impl Session {
             }]);
         }
 
-        let sender = self.interpreter.get_tx_sender();
-        let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
-
-        // An STX transfer is a transaction and consumes a nonce. `eval` also
-        // backs bare snippets and function-argument evaluation, neither of
-        // which is one, so the terms are named here.
-        let terms = TransactionTerms {
-            charge: NonceCharge::Sender(sender.into()),
-            post_conditions: PostConditionCheck::Unchecked,
-        };
-        self.eval_with_inclusion(snippet, false, terms)
+        let recipient = PrincipalData::parse(recipient).map_err(|error| {
+            vec![Diagnostic {
+                level: Level::Error,
+                message: bounded_format!("Invalid transfer recipient: {error}"),
+                spans: vec![],
+                suggestion: None,
+            }]
+        })?;
+        let mut hooks: Vec<&mut dyn EvalHook> = vec![];
+        if let Some(hook) = &mut self.coverage_hook {
+            hooks.push(hook);
+        }
+        if let Some(hook) = &mut self.logger_hook {
+            hooks.push(hook);
+        }
+        if let Some(hook) = &mut self.perf_hook {
+            hooks.push(hook);
+        }
+        self.interpreter
+            .stx_transfer(amount, recipient, hooks)
+            .map(|execution_result| AnnotatedExecutionResult {
+                execution_result,
+                lint_diagnostics: vec![],
+            })
             .map_err(Vec::from)
     }
 
@@ -2377,36 +2390,48 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_stx_transfer_bumps_the_sender_nonce() {
-        // `stx-transfer?` reports insufficient funds as an `(err …)` response,
-        // not a VM failure, so the transaction succeeded as far as the chain is
-        // concerned. Mainnet mines it and charges the nonce.
+    fn an_underfunded_native_stx_transfer_is_rejected_without_a_nonce() {
         let mut session = Session::new(SessionSettings::default());
         let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
         let addr = principal(sender);
-
         session.set_tx_sender(sender);
-        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
-
-        let result = session
+        let error = session
             .stx_transfer(
                 1000,
                 "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG",
                 PostConditionCheck::Unchecked,
             )
-            .expect("an underfunded transfer still executes");
-        match result.execution_result.result {
-            EvaluationResult::Snippet(res) => {
-                assert!(
-                    matches!(res.result, Value::Response(ref r) if !r.committed),
-                    "expected an (err …) response, got {:?}",
-                    res.result
-                );
-            }
-            EvaluationResult::Contract(_) => unreachable!("not a deploy"),
-        }
+            .expect_err("stacks-node rejects an underfunded TokenTransfer");
+        assert!(error[0].message.contains("InsufficientBalance"));
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+    }
 
-        assert_eq!(session.get_nonce(&addr).unwrap(), 1);
+    #[test]
+    fn a_native_stx_self_transfer_is_rejected_without_a_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = session.get_tx_sender();
+        let addr = principal(&sender);
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1000)
+            .unwrap();
+        let error = session
+            .stx_transfer(100, &sender, PostConditionCheck::Unchecked)
+            .unwrap_err();
+        assert!(error[0].message.contains("address tried to send to itself"));
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+        assert_eq!(
+            session.interpreter.get_balance_for_account(&sender, "STX"),
+            1000
+        );
+        // The Clarity function in a snippet still returns its ordinary response.
+        let snippet = session
+            .eval("(stx-transfer? u100 tx-sender tx-sender)".into(), false)
+            .unwrap();
+        let EvaluationResult::Snippet(result) = snippet.execution_result.result else {
+            panic!()
+        };
+        assert!(matches!(result.result, Value::Response(ref response) if !response.committed));
     }
 
     #[test]

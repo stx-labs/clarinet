@@ -8,7 +8,8 @@ use clarity::vm::analysis::errors::RuntimeCheckErrorKind;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast, build_ast_with_diagnostics, ContractAST};
 use clarity::vm::clarity::{
-    handle_clarity_analysis_error, handle_clarity_runtime_error, ClarityError,
+    handle_clarity_analysis_error, handle_clarity_runtime_error, ClarityError, TransactionConfig,
+    TransactionConnection,
 };
 use clarity::vm::contexts::{
     CallStack, ContractContext, ExecutionState, GlobalContext, InvocationContext, LocalContext,
@@ -23,7 +24,7 @@ use clarity::vm::events::*;
 use clarity::vm::hooks::EvalHook;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
 use clarity::vm::representations::{Span, SymbolicExpression};
-use clarity::vm::resource_limiter::ResourceLimiter;
+use clarity::vm::resource_limiter::{ResourceBudget, ResourceLimiter};
 use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{
     eval, eval_all, ClarityVersion, ContractEvaluationResult, CostSynthesis, EvaluationResult,
@@ -39,6 +40,7 @@ use stacks_common::bounded_format;
 use super::datastore::StacksConstants;
 use super::remote_data::HttpClient;
 use super::settings::{ApiUrl, RemoteNetworkInfo};
+use super::transaction::SimnetTransactionConnection;
 use super::ClarityContract;
 use crate::analysis::annotation::{Annotation, AnnotationKind};
 use crate::analysis::ast_dependency_detector::{ASTDependencyDetector, Dependency};
@@ -112,7 +114,7 @@ pub enum NonceCharge {
 
 impl NonceCharge {
     /// Write the charge into `db`'s open transaction.
-    fn apply(&self, db: &mut ClarityDatabase) -> Result<(), String> {
+    pub(super) fn apply(&self, db: &mut ClarityDatabase) -> Result<(), String> {
         let NonceCharge::Sender(principal) = self else {
             return Ok(());
         };
@@ -124,17 +126,6 @@ impl NonceCharge {
         db.set_account_nonce(principal, next)
             .map_err(|e| format!("failed to set nonce for {principal}: {e}"))
     }
-
-    /// Commit only the charge, for an included failure whose state changes the
-    /// caller has already discarded. Expects an open transaction holding
-    /// nothing but the charge.
-    fn commit_alone(&self, global_context: &mut GlobalContext) -> Result<(), String> {
-        self.apply(&mut global_context.database)?;
-        global_context
-            .commit()
-            .map(|_| ())
-            .map_err(|e| format!("failed to commit nonce: {e}"))
-    }
 }
 
 /// Transaction-level obligations applied after executing a payload.
@@ -144,59 +135,6 @@ pub struct TransactionTerms {
     pub charge: NonceCharge,
     /// The constraint on this execution's asset movement.
     pub post_conditions: PostConditionCheck,
-}
-
-impl TransactionTerms {
-    /// Commit a valid payload, or roll back a post-condition violation while
-    /// still charging the nonce of the included transaction.
-    fn settle(
-        &self,
-        global_context: &mut GlobalContext,
-        epoch: StacksEpochId,
-    ) -> Result<Settlement, String> {
-        // Preserve the pre-existing path when enforcement is disabled.
-        let violation = match &self.post_conditions {
-            PostConditionCheck::Unchecked => None,
-            checked => {
-                let asset_map = global_context
-                    .get_readonly_asset_map()
-                    .map_err(|e| format!("failed to read the asset map: {e}"))?;
-                checked
-                    .evaluate(asset_map, epoch)?
-                    .map(|reason| (reason, asset_map.clone()))
-            }
-        };
-
-        if let Some((reason, assets_modified)) = violation {
-            global_context
-                .roll_back()
-                .map_err(|e| format!("failed to roll back an aborted transaction: {e}"))?;
-            global_context.begin();
-            self.charge.commit_alone(global_context)?;
-            return Ok(Settlement::Aborted {
-                reason,
-                assets_modified: Box::new(assets_modified),
-            });
-        }
-
-        self.charge.apply(&mut global_context.database)?;
-        global_context
-            .commit()
-            .map(|_| Settlement::Committed)
-            .map_err(|e| format!("failed to commit: {e}"))
-    }
-}
-
-/// How an execution's database transaction was settled.
-#[derive(Debug)]
-enum Settlement {
-    /// The payload and the nonce both committed.
-    Committed,
-    /// The payload was rolled back and only its nonce committed.
-    Aborted {
-        reason: BoundedErrorString,
-        assets_modified: Box<AssetMap>,
-    },
 }
 
 fn post_condition_abort(
@@ -427,8 +365,8 @@ impl ClarityInterpreter {
 
     /// Execute `contract` without consuming anyone's nonce.
     ///
-    /// For bare snippets and function-argument evaluation. A deploy or an STX
-    /// transfer is a transaction and must use [`Self::run_with_terms`].
+    /// For bare snippets, genesis initialization, and function-argument evaluation.
+    /// Deployments use [`Self::run_with_terms`]; native transfers use [`Self::stx_transfer`].
     pub fn run(
         &mut self,
         contract: &ClarityContract,
@@ -445,8 +383,10 @@ impl ClarityInterpreter {
         )
     }
 
-    /// Execute `contract` as a transaction, settling `terms` in the same
-    /// commit as the execution's own state changes.
+    /// Deploy `contract` when transaction terms are supplied, or evaluate it
+    /// as a nonce-free snippet/genesis contract when the terms are default.
+    /// Transactional deployments use the upstream initializer even when the
+    /// source contains no definitions.
     pub fn run_with_terms(
         &mut self,
         contract: &ClarityContract,
@@ -461,6 +401,26 @@ impl ClarityInterpreter {
             .validate_for_epoch(contract.epoch.resolve())
         {
             return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)]));
+        }
+
+        if terms != &TransactionTerms::default() {
+            let id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
+            let mut db = ClarityDatabase::new(
+                &mut self.clarity_datastore,
+                &self.datastore,
+                &self.datastore,
+            );
+            db.begin();
+            let exists = db.has_contract(&id);
+            db.roll_back().map_err(|error| {
+                ExecutionError::rejected(vec![runtime_diagnostic(error.to_string())])
+            })?;
+            if exists {
+                // stacks-node rejects duplicate names before parsing or analysis.
+                return Err(ExecutionError::rejected(vec![runtime_diagnostic(format!(
+                    "Duplicate contract '{id}'"
+                ))]));
+            }
         }
 
         let (ast, mut diagnostics, success) = match cached_ast {
@@ -493,8 +453,19 @@ impl ClarityInterpreter {
             }
         };
 
-        let mut result = match self.execute(contract, &ast, analysis, cost_track, eval_hooks, terms)
-        {
+        let execution = if terms != &TransactionTerms::default() {
+            self.execute_deployment(
+                contract,
+                &ast,
+                analysis,
+                cost_track,
+                eval_hooks.unwrap_or_default(),
+                terms,
+            )
+        } else {
+            self.execute(contract, &ast, analysis, cost_track, eval_hooks, terms)
+        };
+        let mut result = match execution {
             Ok(result) => result,
             Err(mut runtime_failure) => {
                 diagnostics.append(&mut runtime_failure.diagnostics);
@@ -802,11 +773,12 @@ impl ClarityInterpreter {
             .is_some_and(|data| data.is_mainnet)
     }
 
-    pub fn get_global_context(
-        &'_ mut self,
+    fn get_transaction_connection<'db, 'hooks>(
+        &'db mut self,
         epoch: StacksEpochId,
         cost_track: bool,
-    ) -> Result<GlobalContext<'_, '_>, String> {
+        hooks: Vec<&'hooks mut dyn EvalHook>,
+    ) -> Result<SimnetTransactionConnection<'db, 'hooks>, String> {
         let is_mainnet = self.is_mainnet();
         let chain_id = if is_mainnet {
             CHAIN_ID_MAINNET
@@ -836,11 +808,33 @@ impl ClarityInterpreter {
             LimitedCostTracker::new_free()
         };
 
+        Ok(SimnetTransactionConnection {
+            db: Some(conn),
+            cost_tracker: Some(cost_tracker),
+            config: TransactionConfig {
+                mainnet: is_mainnet,
+                chain_id,
+                epoch,
+            },
+            hooks,
+            datastore: &self.datastore,
+        })
+    }
+
+    pub fn get_global_context(
+        &mut self,
+        epoch: StacksEpochId,
+        cost_track: bool,
+    ) -> Result<GlobalContext<'_, '_>, String> {
+        let mut connection = self.get_transaction_connection(epoch, cost_track, vec![])?;
         Ok(GlobalContext::new(
-            is_mainnet,
-            chain_id,
-            conn,
-            cost_tracker,
+            connection.config.mainnet,
+            connection.config.chain_id,
+            connection.db.take().expect("transaction database"),
+            connection
+                .cost_tracker
+                .take()
+                .expect("transaction cost tracker"),
             epoch,
         ))
     }
@@ -854,6 +848,7 @@ impl ClarityInterpreter {
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
         terms: &TransactionTerms,
     ) -> Result<ExecutionResult, ExecutionError> {
+        debug_assert_eq!(terms, &TransactionTerms::default());
         let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
         let snippet = contract.expect_in_memory_code_source();
         let mut contract_context =
@@ -972,13 +967,9 @@ impl ClarityInterpreter {
                     BlockInclusion::from_runtime_error(ClarityError::Interpreter(e), epoch);
                 let mut diagnostics = vec![runtime_diagnostic(err)];
 
-                // The nested execution was rolled back; an included failure
-                // commits only its nonce.
-                if inclusion.is_included() {
-                    if let Err(e) = terms.charge.commit_alone(&mut global_context) {
-                        diagnostics.push(runtime_diagnostic(e));
-                        return Err(ExecutionError::rejected(diagnostics));
-                    }
+                if let Err(error) = global_context.roll_back() {
+                    diagnostics.push(runtime_diagnostic(error.to_string()));
+                    return Err(ExecutionError::rejected(diagnostics));
                 }
                 return Err(ExecutionError {
                     diagnostics,
@@ -1048,31 +1039,9 @@ impl ClarityInterpreter {
             EvaluationResult::Snippet(SnippetEvaluationResult { result })
         };
 
-        // Settle the nonce and execution state atomically.
-        match terms.settle(&mut global_context, epoch) {
-            Ok(Settlement::Committed) => {}
-            Ok(Settlement::Aborted {
-                reason,
-                assets_modified,
-            }) => {
-                notify_hooks_of_failure(&mut global_context, &reason);
-                let output = match &eval_result {
-                    EvaluationResult::Contract(_) => None,
-                    EvaluationResult::Snippet(result) => Some(result.result.clone()),
-                };
-                let clarity_error = post_condition_abort(
-                    output,
-                    *assets_modified,
-                    emitted_events.clone(),
-                    reason.clone(),
-                );
-                return Err(ExecutionError {
-                    diagnostics: vec![runtime_diagnostic(reason)],
-                    inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
-                });
-            }
-            Err(e) => return Err(ExecutionError::rejected(vec![runtime_diagnostic(e)])),
-        }
+        global_context.commit().map_err(|error| {
+            ExecutionError::rejected(vec![runtime_diagnostic(error.to_string())])
+        })?;
 
         let (events, accounts_to_credit, accounts_to_debit) =
             Self::process_events(&mut emitted_events);
@@ -1108,11 +1077,252 @@ impl ClarityInterpreter {
         Ok(execution_result)
     }
 
-    /// Call `method`, charging `charge` in the same commit as the call's own
-    /// state changes.
-    ///
-    /// This primitive backs both transactions and read-only queries, so the
-    /// charge is the caller's to name — see [`NonceCharge`].
+    #[allow(clippy::too_many_arguments)]
+    fn execute_deployment(
+        &mut self,
+        contract: &ClarityContract,
+        ast: &ContractAST,
+        analysis: ContractAnalysis,
+        track_costs: bool,
+        hooks: Vec<&mut dyn EvalHook>,
+        terms: &TransactionTerms,
+    ) -> Result<ExecutionResult, ExecutionError> {
+        let id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
+        let source = contract.expect_in_memory_code_source();
+        self.execute_transaction_payload(
+            &id,
+            contract.epoch.resolve(),
+            track_costs,
+            hooks,
+            terms,
+            |connection, callback| {
+                let (_, events) = connection.initialize_smart_contract(
+                    &id,
+                    contract.clarity_version,
+                    ast,
+                    source,
+                    None,
+                    callback,
+                    &ResourceBudget::unlimited(),
+                )?;
+                let stored = connection
+                    .db
+                    .as_mut()
+                    .expect("transaction database")
+                    .get_contract(&id)?;
+                let functions = stored
+                    .functions
+                    .iter()
+                    .filter(|(_, function)| function.is_public())
+                    .map(|(name, function)| {
+                        let args = function
+                            .get_arguments()
+                            .iter()
+                            .zip(function.get_arg_types())
+                            .map(|(name, ty)| format!("({name} {ty})"))
+                            .collect();
+                        (name.to_string(), args)
+                    })
+                    .collect();
+                // Like stacks-node, save analysis in the same outer frame as the deployment.
+                connection
+                    .save_analysis(&id, &analysis)
+                    .expect("Unable to save contract analysis");
+                let parsed = ParsedContract {
+                    contract_identifier: id.to_string(),
+                    code: source.to_string(),
+                    function_args: functions,
+                    ast: ast.clone(),
+                    analysis,
+                };
+                Ok((
+                    EvaluationResult::Contract(ContractEvaluationResult {
+                        // StacksTransactionReceipt::from_smart_contract uses this value,
+                        // not the initializer's final expression.
+                        result: Some(Value::okay_true()),
+                        contract: parsed,
+                    }),
+                    events,
+                ))
+            },
+        )
+        .map_err(|failure| ExecutionError {
+            diagnostics: vec![runtime_diagnostic(match failure.error {
+                ContractCallError::PostConditionAborted(reason) => reason.to_string(),
+                error => error.to_string(),
+            })],
+            inclusion: failure.inclusion,
+        })
+    }
+
+    pub fn stx_transfer(
+        &mut self,
+        amount: u64,
+        recipient: PrincipalData,
+        hooks: Vec<&mut dyn EvalHook>,
+    ) -> Result<ExecutionResult, ExecutionError> {
+        let sender: PrincipalData = self.tx_sender.clone().into();
+        if recipient == sender {
+            return Err(ExecutionError::rejected(vec![runtime_diagnostic(
+                "Invalid TokenTransfer: address tried to send to itself",
+            )]));
+        }
+        let terms = TransactionTerms {
+            charge: NonceCharge::Sender(sender.clone()),
+            post_conditions: PostConditionCheck::Unchecked,
+        };
+        let id = QualifiedContractIdentifier::transient();
+        self.execute_transaction_payload(
+            &id,
+            self.datastore.get_current_epoch(),
+            false,
+            hooks,
+            &terms,
+            |connection, _| {
+                let (value, _, events) = connection
+                    .run_stx_transfer(
+                        &sender,
+                        &recipient,
+                        amount.into(),
+                        &clarity_types::types::BuffData { data: vec![0; 34] },
+                    )
+                    .map_err(|error| {
+                        // stacks-node rejects TokenTransfer execution errors directly;
+                        // it does not apply the contract-call inclusion classifier.
+                        ClarityError::BadTransaction(error.to_string())
+                    })?;
+                Ok((
+                    EvaluationResult::Snippet(SnippetEvaluationResult { result: value }),
+                    events,
+                ))
+            },
+        )
+        .map_err(|failure| ExecutionError {
+            diagnostics: vec![runtime_diagnostic(failure.error.to_string())],
+            inclusion: failure.inclusion,
+        })
+    }
+
+    /// Execute one payload inside an outer frame that owns the nonce charge.
+    #[allow(clippy::too_many_arguments)]
+    fn execute_transaction_payload<F>(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+        epoch: StacksEpochId,
+        track_costs: bool,
+        hooks: Vec<&mut dyn EvalHook>,
+        terms: &TransactionTerms,
+        payload: F,
+    ) -> Result<ExecutionResult, ContractCallFailure>
+    where
+        F: FnOnce(
+            &mut SimnetTransactionConnection,
+            &mut dyn FnMut(&AssetMap, &mut ClarityDatabase) -> Option<BoundedErrorString>,
+        ) -> Result<(EvaluationResult, Vec<StacksTransactionEvent>), ClarityError>,
+    {
+        let rejected = |error| ContractCallFailure {
+            error: ContractCallError::Uncategorized(error),
+            inclusion: BlockInclusion::Rejected,
+        };
+        terms
+            .post_conditions
+            .validate_for_epoch(epoch)
+            .map_err(rejected)?;
+        let mut connection = self
+            .get_transaction_connection(epoch, track_costs, hooks)
+            .map_err(rejected)?;
+        connection.begin();
+        let mut callback_error = None;
+        let mut callback = |assets: &AssetMap, _: &mut ClarityDatabase| match terms
+            .post_conditions
+            .evaluate(assets, epoch)
+        {
+            Ok(reason) => reason,
+            Err(error) => {
+                let reason = BoundedErrorString::from_display(&error);
+                callback_error = Some(error);
+                Some(reason)
+            }
+        };
+        let result = payload(&mut connection, &mut callback);
+        let result = if let Some(error) = callback_error {
+            Err(rejected(error))
+        } else {
+            result.map_err(|error| {
+                let message = format!("Runtime error while interpreting {contract_id}: {error:?}");
+                match error {
+                    ClarityError::Interpreter(error) => {
+                        let message =
+                            format!("Runtime error while interpreting {contract_id}: {error:?}");
+                        ContractCallFailure::from_vm_error(error, message, contract_id, epoch)
+                    }
+                    error => {
+                        let kind = match &error {
+                            ClarityError::AbortedByCallback { reason, .. } => {
+                                ContractCallError::PostConditionAborted(reason.clone())
+                            }
+                            _ => ContractCallError::Uncategorized(message),
+                        };
+                        ContractCallFailure {
+                            error: kind,
+                            inclusion: BlockInclusion::from_runtime_error(error, epoch),
+                        }
+                    }
+                }
+            })
+        };
+        let included = result
+            .as_ref()
+            .map_or_else(|error| error.inclusion.is_included(), |_| true);
+        if let Err(error) = connection.settle(&terms.charge, included) {
+            for hook in &mut connection.hooks {
+                hook.did_complete(Err(error.clone()));
+            }
+            return Err(rejected(error));
+        }
+        let (result, mut emitted_events) = match result {
+            Ok(result) => result,
+            Err(failure) => {
+                let message = match &failure.error {
+                    ContractCallError::PostConditionAborted(reason) => reason.to_string(),
+                    ContractCallError::Uncategorized(message)
+                    | ContractCallError::NoSuchContract(message)
+                    | ContractCallError::NoSuchFunction(message) => message.clone(),
+                };
+                for hook in &mut connection.hooks {
+                    hook.did_complete(Err(message.clone()));
+                }
+                return Err(failure);
+            }
+        };
+        let cost = track_costs.then(|| {
+            CostSynthesis::from_cost_tracker(
+                connection
+                    .cost_tracker
+                    .as_ref()
+                    .expect("transaction cost tracker"),
+            )
+        });
+        let (events, credits, debits) = Self::process_events(&mut emitted_events);
+        let mut execution = ExecutionResult {
+            result,
+            events,
+            cost,
+            diagnostics: vec![],
+        };
+        for hook in &mut connection.hooks {
+            hook.did_complete(Ok(&mut execution));
+        }
+        drop(connection);
+        for (account, token, amount) in credits {
+            self.credit_token(account, token, amount);
+        }
+        for (account, token, amount) in debits {
+            self.debit_token(account, token, amount);
+        }
+        Ok(execution)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn call_contract_fn(
         &mut self,
@@ -1126,15 +1336,101 @@ impl ClarityInterpreter {
         eval_hooks: Vec<&mut dyn EvalHook>,
         terms: &TransactionTerms,
     ) -> Result<ExecutionResult, ContractCallFailure> {
-        let tx_sender: PrincipalData = self.tx_sender.clone().into();
-
-        // Reject unsupported post-conditions before execution.
-        if let Err(e) = terms.post_conditions.validate_for_epoch(epoch) {
-            return Err(ContractCallFailure {
-                error: ContractCallError::Uncategorized(e),
-                inclusion: BlockInclusion::Rejected,
-            });
+        if terms == &TransactionTerms::default() {
+            return self.call_contract_fn_unframed(
+                contract_id,
+                method,
+                args,
+                epoch,
+                clarity_version,
+                track_costs,
+                allow_private,
+                eval_hooks,
+            );
         }
+        let sender: PrincipalData = self.tx_sender.clone().into();
+        self.execute_transaction_payload(
+            contract_id,
+            epoch,
+            track_costs,
+            eval_hooks,
+            terms,
+            |connection, callback| {
+                let (value, _, events) = if allow_private {
+                    connection
+                        .with_abort_callback(
+                            |env| {
+                                env.execute_in_env(
+                                    sender,
+                                    None,
+                                    Some(ContractContext::new(
+                                        contract_id.clone(),
+                                        clarity_version,
+                                    )),
+                                    |state, context| {
+                                        state.execute_contract_allow_private(
+                                            context,
+                                            contract_id,
+                                            method,
+                                            args,
+                                            false,
+                                        )
+                                    },
+                                )
+                                .map_err(ClarityError::from)
+                            },
+                            callback,
+                        )
+                        .and_then(|(value, assets, events, reason)| match reason {
+                            Some(reason) => {
+                                Err(post_condition_abort(Some(value), assets, events, reason))
+                            }
+                            None => Ok((value, assets, events)),
+                        })?
+                } else {
+                    let values = args
+                        .iter()
+                        .map(|arg| {
+                            arg.match_atom_value().cloned().ok_or_else(|| {
+                                ClarityError::BadTransaction(
+                                    "expected evaluated function argument".into(),
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    connection.run_contract_call(
+                        &sender,
+                        None,
+                        contract_id,
+                        method,
+                        &values,
+                        callback,
+                        &ResourceBudget::unlimited(),
+                    )?
+                };
+                Ok((
+                    EvaluationResult::Snippet(SnippetEvaluationResult { result: value }),
+                    events,
+                ))
+            },
+        )
+    }
+
+    /// Execute read-only queries and explicitly nonce-free internal calls.
+    /// These operations do not enter the transaction settlement path.
+    #[allow(clippy::too_many_arguments)]
+    fn call_contract_fn_unframed(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+        method: &str,
+        args: &[SymbolicExpression],
+        epoch: StacksEpochId,
+        clarity_version: ClarityVersion,
+        track_costs: bool,
+        allow_private: bool,
+        eval_hooks: Vec<&mut dyn EvalHook>,
+    ) -> Result<ExecutionResult, ContractCallFailure> {
+        let tx_sender: PrincipalData = self.tx_sender.clone().into();
 
         // Failing to stand up the VM is a simnet problem, not a transaction
         // outcome — mainnet would never have accepted the transaction at all.
@@ -1202,51 +1498,22 @@ impl ClarityInterpreter {
         let value = match value {
             Ok(value) => value,
             Err(failure) => {
-                // The nested call was rolled back; an included failure commits
-                // only its nonce.
-                if failure.inclusion.is_included() {
-                    if let Err(e) = terms.charge.commit_alone(&mut global_context) {
-                        return Err(ContractCallFailure {
-                            error: ContractCallError::Uncategorized(e),
-                            inclusion: BlockInclusion::Rejected,
-                        });
-                    }
-                }
+                global_context
+                    .roll_back()
+                    .map_err(|error| ContractCallFailure {
+                        error: ContractCallError::Uncategorized(error.to_string()),
+                        inclusion: BlockInclusion::Rejected,
+                    })?;
                 return Err(failure);
             }
         };
-
         let eval_result = EvaluationResult::Snippet(SnippetEvaluationResult { result: value });
-
-        // Settle the nonce and call state atomically.
-        match terms.settle(&mut global_context, epoch) {
-            Ok(Settlement::Committed) => {}
-            Ok(Settlement::Aborted {
-                reason,
-                assets_modified,
-            }) => {
-                notify_hooks_of_failure(&mut global_context, &reason);
-                let clarity_error = post_condition_abort(
-                    match &eval_result {
-                        EvaluationResult::Snippet(result) => Some(result.result.clone()),
-                        EvaluationResult::Contract(_) => None,
-                    },
-                    *assets_modified,
-                    emitted_events.clone(),
-                    reason.clone(),
-                );
-                return Err(ContractCallFailure {
-                    error: ContractCallError::PostConditionAborted(reason),
-                    inclusion: BlockInclusion::from_runtime_error(clarity_error, epoch),
-                });
-            }
-            Err(e) => {
-                return Err(ContractCallFailure {
-                    error: ContractCallError::Uncategorized(e),
-                    inclusion: BlockInclusion::Rejected,
-                })
-            }
-        }
+        global_context
+            .commit()
+            .map_err(|error| ContractCallFailure {
+                error: ContractCallError::Uncategorized(error.to_string()),
+                inclusion: BlockInclusion::Rejected,
+            })?;
 
         let (events, accounts_to_credit, accounts_to_debit) =
             Self::process_events(&mut emitted_events);
@@ -1654,6 +1921,314 @@ mod tests {
             settings.unwrap_or_default(),
             None,
         )
+    }
+
+    #[test]
+    fn shared_frame_separates_payload_rollback_from_outer_settlement() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        use clarity::vm::hooks::ExecutionOutcome;
+
+        struct Hook(Rc<RefCell<Vec<&'static str>>>);
+        impl EvalHook for Hook {
+            fn will_begin_execution(&mut self) {
+                self.0.borrow_mut().push("begin");
+            }
+            fn did_finish_execution(&mut self, outcome: ExecutionOutcome) {
+                self.0.borrow_mut().push(match outcome {
+                    ExecutionOutcome::Success => "success",
+                    ExecutionOutcome::Failure => "failure",
+                });
+            }
+        }
+        // Successful, callback-aborted, and failed payloads can all be inside
+        // an accepted or rejected outer transaction.
+        for payload_outcome in 0..3 {
+            for included in [false, true] {
+                let mut interpreter = get_interpreter(None);
+                let origin: PrincipalData = StandardPrincipalData::transient().into();
+                let payload_account =
+                    PrincipalData::parse("ST000000000000000000002AMW42H").unwrap();
+                let log = Rc::new(RefCell::new(vec![]));
+                let mut hook = Hook(log.clone());
+                let mut connection = interpreter
+                    .get_transaction_connection(DEFAULT_EPOCH, false, vec![&mut hook])
+                    .unwrap();
+                connection.begin();
+                connection
+                    .db
+                    .as_mut()
+                    .unwrap()
+                    .set_account_nonce(&origin, 7)
+                    .unwrap();
+                let result: Result<_, VmExecutionError> = connection.with_abort_callback(
+                    |env| {
+                        env.execute_in_env(origin.clone(), None, None, |state, _| {
+                            state
+                                .global_context
+                                .database
+                                .set_account_nonce(&payload_account, 9)?;
+                            if payload_outcome == 2 {
+                                return Err(
+                                    VmInternalError::Expect("payload failure".into()).into()
+                                );
+                            }
+                            Ok(())
+                        })
+                    },
+                    |_, _| {
+                        log.borrow_mut().push("callback");
+                        (payload_outcome == 1).then(|| "abort payload".into())
+                    },
+                );
+                assert_eq!(result.is_err(), payload_outcome == 2);
+                assert!(
+                    connection.cost_tracker.is_some(),
+                    "tracker is recovered on every outcome"
+                );
+                assert_eq!(
+                    connection
+                        .db
+                        .as_mut()
+                        .unwrap()
+                        .get_account_nonce(&payload_account)
+                        .unwrap(),
+                    if payload_outcome == 0 { 9 } else { 0 }
+                );
+                connection
+                    .settle(&NonceCharge::Sender(origin.clone()), included)
+                    .unwrap();
+                drop(connection);
+                assert_eq!(
+                    interpreter.get_nonce(&origin).unwrap(),
+                    if included { 8 } else { 0 }
+                );
+                assert_eq!(
+                    interpreter.get_nonce(&payload_account).unwrap(),
+                    if included && payload_outcome == 0 {
+                        9
+                    } else {
+                        0
+                    }
+                );
+                assert_eq!(
+                    *log.borrow(),
+                    if payload_outcome == 2 {
+                        vec!["begin", "failure"]
+                    } else {
+                        vec!["begin", "success", "callback"]
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deployment_uses_node_result_and_stores_contracts_without_functions() {
+        let mut interpreter = get_interpreter(None);
+        let sender: PrincipalData = interpreter.get_tx_sender().into();
+        let terms = TransactionTerms {
+            charge: NonceCharge::Sender(sender.clone()),
+            post_conditions: PostConditionCheck::Unchecked,
+        };
+        let contract = ClarityContractBuilder::default()
+            .code_source(
+                "(define-data-var answer uint u42) (define-constant payload 0x1234) u123".into(),
+            )
+            .build();
+        let id = contract.expect_resolved_contract_identifier(Some(&interpreter.get_tx_sender()));
+        let result = interpreter
+            .run_with_terms(&contract, None, false, None, &terms)
+            .unwrap();
+        let EvaluationResult::Contract(deployment) = result.execution_result.result else {
+            panic!()
+        };
+        assert_eq!(deployment.result, Some(Value::okay_true()));
+        assert_eq!(interpreter.get_nonce(&sender).unwrap(), 1);
+        let mut context = interpreter
+            .get_global_context(contract.epoch.resolve(), false)
+            .unwrap();
+        context.begin();
+        assert!(context.database.has_contract(&id));
+        assert!(context.database.get_contract(&id).unwrap().data_size > 0);
+        context.roll_back().unwrap();
+        drop(context);
+        // A bare snippet still exposes its evaluated value and consumes no nonce.
+        let snippet = ClarityContractBuilder::default()
+            .code_source("u123".into())
+            .build();
+        let result = interpreter.run(&snippet, None, false, None).unwrap();
+        let EvaluationResult::Snippet(value) = result.execution_result.result else {
+            panic!()
+        };
+        assert_eq!(value.result, Value::UInt(123));
+        assert_eq!(interpreter.get_nonce(&sender).unwrap(), 1);
+    }
+
+    #[test]
+    fn framed_deployment_hooks_distinguish_execution_from_commit() {
+        use clarity::vm::hooks::ExecutionOutcome;
+        use stacks_codec::transaction::TransactionPostConditionMode;
+        struct Hook(Vec<&'static str>);
+        impl EvalHook for Hook {
+            fn will_begin_execution(&mut self) {
+                self.0.push("begin");
+            }
+            fn did_finish_execution(&mut self, result: ExecutionOutcome) {
+                self.0.push(match result {
+                    ExecutionOutcome::Success => "executed",
+                    ExecutionOutcome::Failure => "execution failed",
+                });
+            }
+            fn did_complete(&mut self, result: Result<&mut ExecutionResult, String>) {
+                self.0.push(if result.is_ok() {
+                    "committed"
+                } else {
+                    "not committed"
+                });
+            }
+        }
+        for outcome in 0..3 {
+            let mut interpreter = get_interpreter(None);
+            let sender: PrincipalData = interpreter.get_tx_sender().into();
+            interpreter.mint_stx_balance(sender.clone(), 100).unwrap();
+            let source = if outcome == 2 {
+                "(/ u1 u0)"
+            } else {
+                "(stx-transfer? u1 tx-sender 'ST000000000000000000002AMW42H)"
+            };
+            let contract = ClarityContractBuilder::default()
+                .code_source(source.into())
+                .build();
+            let terms = TransactionTerms {
+                charge: NonceCharge::Sender(sender.clone()),
+                post_conditions: if outcome == 1 {
+                    PostConditionCheck::Checked {
+                        conditions: vec![],
+                        mode: TransactionPostConditionMode::Deny,
+                        origin: sender.clone(),
+                    }
+                } else {
+                    PostConditionCheck::Unchecked
+                },
+            };
+            let mut hook = Hook(vec![]);
+            let result =
+                interpreter.run_with_terms(&contract, None, false, Some(vec![&mut hook]), &terms);
+            assert_eq!(result.is_ok(), outcome == 0);
+            assert_eq!(interpreter.get_nonce(&sender).unwrap(), 1);
+            assert_eq!(
+                interpreter.get_balance_for_account(&sender.to_string(), "STX"),
+                if outcome == 0 { 99 } else { 100 }
+            );
+            assert_eq!(
+                hook.0,
+                match outcome {
+                    0 => vec!["begin", "executed", "committed"],
+                    1 => vec!["begin", "executed", "not committed"],
+                    _ => vec!["begin", "execution failed", "not committed"],
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn shared_connection_keeps_attempted_output_and_events_in_typed_aborts() {
+        for deploy in [false, true] {
+            let mut interpreter = get_interpreter(None);
+            let sender: PrincipalData = interpreter.get_tx_sender().into();
+            interpreter.mint_stx_balance(sender.clone(), 100).unwrap();
+            let source = "(define-public (send) (begin
+                (try! (stx-transfer? u10 tx-sender 'ST000000000000000000002AMW42H))
+                (ok u7)))";
+            let contract = ClarityContractBuilder::default()
+                .code_source(source.into())
+                .build();
+            let id =
+                contract.expect_resolved_contract_identifier(Some(&interpreter.get_tx_sender()));
+            deploy_contract(&mut interpreter, &contract).unwrap();
+            let attempted = ClarityContractBuilder::default()
+                .name("aborted")
+                .code_source("(stx-transfer? u10 tx-sender 'ST000000000000000000002AMW42H)".into())
+                .build();
+            let attempted_id =
+                attempted.expect_resolved_contract_identifier(Some(&interpreter.get_tx_sender()));
+            let (ast, _, _) = interpreter.build_ast(&attempted);
+            let mut connection = interpreter
+                .get_transaction_connection(contract.epoch.resolve(), false, vec![])
+                .unwrap();
+            connection.begin();
+            let error = if deploy {
+                connection
+                    .initialize_smart_contract(
+                        &attempted_id,
+                        attempted.clarity_version,
+                        &ast,
+                        attempted.expect_in_memory_code_source(),
+                        None,
+                        |_, _| Some("abort".into()),
+                        &ResourceBudget::unlimited(),
+                    )
+                    .unwrap_err()
+            } else {
+                connection
+                    .run_contract_call(
+                        &sender,
+                        None,
+                        &id,
+                        "send",
+                        &[],
+                        |_, _| Some("abort".into()),
+                        &ResourceBudget::unlimited(),
+                    )
+                    .unwrap_err()
+            };
+            let ClarityError::AbortedByCallback {
+                output,
+                assets_modified,
+                tx_events,
+                reason,
+            } = &error
+            else {
+                panic!("{error:?}")
+            };
+            assert_eq!(
+                output.as_deref().cloned(),
+                if deploy {
+                    None
+                } else {
+                    Some(Value::okay(Value::UInt(7)).unwrap())
+                }
+            );
+            assert_ne!(assets_modified.as_ref(), &AssetMap::new());
+            assert_eq!(tx_events.len(), 1);
+            assert_eq!(reason, "abort");
+            assert!(!connection.db.as_mut().unwrap().has_contract(&attempted_id));
+            let included =
+                BlockInclusion::from_runtime_error(error, contract.epoch.resolve()).is_included();
+            assert!(included);
+            connection
+                .settle(&NonceCharge::Sender(sender.clone()), included)
+                .unwrap();
+            drop(connection);
+            assert_eq!(interpreter.get_nonce(&sender).unwrap(), 1);
+            // The typed abort describes the attempt, while the database kept its balance.
+            let mut context = interpreter
+                .get_global_context(contract.epoch.resolve(), false)
+                .unwrap();
+            context.begin();
+            assert_eq!(
+                context
+                    .database
+                    .get_stx_balance_snapshot(&sender)
+                    .unwrap()
+                    .get_available_balance()
+                    .unwrap(),
+                100
+            );
+            context.roll_back().unwrap();
+        }
     }
 
     /// `mint_ft_balance` takes the full `u128` range, so a second mint can
