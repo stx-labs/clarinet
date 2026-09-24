@@ -3,8 +3,8 @@
  * notifications must reach the bridge one at a time, in the order they were
  * received, and exactly once - even when they pile up while a slow one
  * (`build_state` takes ~100ms) is in flight. The only entries that may be
- * dropped are queued didChanges a newer snapshot of the same document
- * supersedes.
+ * dropped are queued didChanges superseded by a newer snapshot of the same
+ * document.
  *
  * The sources run unbuilt, on Node's type stripping: `pnpm run test:server`
  */
