@@ -10,6 +10,29 @@ duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the f
 be able to simplify this build, it would require some breaking changes so it could be part of
 Clarinet 3.x.
 
+## Transaction behavior
+
+Simnet public calls, deployments, and native STX transfers use the shared
+stacks-core Clarity transaction frame. Included execution failures and
+post-condition aborts roll back payload writes but consume the sender's nonce;
+rejected transactions consume no nonce. Existing convenience calls do not charge
+transaction fees.
+
+Deployments use stacks-node's initializer. A successful `deployContract` returns
+`Cl.ok(Cl.bool(true))`, regardless of the initializer's final expression, and
+stores the contract even if it defines no functions. Duplicate contract names
+are rejected before analysis without consuming a nonce. Use read-only calls,
+`getDataVar`, and events to check initialization effects. Use `execute` when you
+want to evaluate a snippet and receive its expression value. Deployment costs
+include contract storage and subsequent calls account for the stored contract's
+actual data size, so cost assertions may need updating.
+
+`transferSTX` represents a native transfer: self-transfers and transfers exceeding
+the available unlocked balance throw without consuming a nonce. This differs
+from calling the Clarity `stx-transfer?` function inside a contract, which retains
+its ordinary response semantics. Private calls remain a simnet convenience and
+use the same transaction frame.
+
 ## Contributing
 
 The clarinet-sdk requires a few steps to be built and tested locally.
