@@ -1217,19 +1217,11 @@ pub async fn generate_default_deployment_with_cache(
             .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
 
         // `SBTC_BOOT_CONTRACTS` is ordered by dependency, and so is the batch.
+        // No de-duplication needed: an explicit sBTC requirement resolves from
+        // the seeded boot ASTs and is dropped from `ordered_contracts_ids` above
+        // on devnet, so none of these can already be scheduled here.
         for (contract_id, _) in SBTC_BOOT_CONTRACTS.iter() {
             let name = contract_id.name.as_str();
-
-            // Skip if already scheduled as an explicit requirement.
-            if transactions.values().any(|txs| {
-                txs.iter().any(|tx| matches!(
-                    tx,
-                    TransactionSpecification::RequirementPublish(r) if r.contract_id == *contract_id
-                ))
-            }) {
-                continue;
-            }
-
             let source = sbtc_sources
                 .remove(name)
                 .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
