@@ -9,5 +9,9 @@ allowBuilds:
 
 minimumReleaseAge: 4320
 
+minimumReleaseAgeExclude:
+  - '@stacks/clarinet-sdk-wasm@3.24.1'
+  - '@stacks/clarinet-sdk@3.24.1'
+
 publicHoistPattern:
   - '@stacks/clarinet-sdk-wasm'
