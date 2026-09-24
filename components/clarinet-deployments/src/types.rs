@@ -143,7 +143,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
 fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, String> {
     match value {
         Some(v) => clarity_version_from_u8(v).ok_or_else(|| {
-            "unable to parse clarity_version (can either be '1', '2', '3', '4', or '5')".to_string()
+            "unable to parse clarity_version (can either be '1', '2', '3', '4', '5', '6', or '7')".to_string()
         }),
         None => Ok(DEFAULT_CLARITY_VERSION),
     }

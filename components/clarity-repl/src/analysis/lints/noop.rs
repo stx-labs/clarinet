@@ -34,6 +34,7 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{Span, SymbolicExpressionType};
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::variables::NativeVariables;
 use clarity::vm::{ClarityVersion, SymbolicExpression, Value};
 
@@ -197,7 +198,7 @@ impl<'a> NoopChecker<'a> {
     ) {
         let diagnostic = Diagnostic {
             level: self.level.clone(),
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![expr.span.clone()],
             suggestion: Some(suggestion),
         };

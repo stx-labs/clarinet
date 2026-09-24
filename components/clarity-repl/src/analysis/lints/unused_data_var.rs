@@ -6,6 +6,7 @@
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
@@ -94,7 +95,7 @@ impl<'a, 'b> UnusedDataVar<'a, 'b> {
     ) -> Diagnostic {
         Diagnostic {
             level,
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![expr.span.clone()],
             suggestion,
         }

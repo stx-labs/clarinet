@@ -4,6 +4,7 @@
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::types::BoundedErrorString;
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
@@ -52,7 +53,7 @@ impl<'a, 'b> UnusedToken<'a, 'b> {
     fn make_diagnostic(level: &Level, token_data: &TokenData, message: String) -> Diagnostic {
         Diagnostic {
             level: level.clone(),
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![token_data.expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
         }

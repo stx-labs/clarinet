@@ -7,6 +7,7 @@
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::Span;
+use clarity::vm::types::BoundedErrorString;
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
@@ -86,7 +87,7 @@ impl<'a, 'b> UnusedBinding<'a, 'b> {
     ) -> Diagnostic {
         Diagnostic {
             level,
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![span],
             suggestion,
         }

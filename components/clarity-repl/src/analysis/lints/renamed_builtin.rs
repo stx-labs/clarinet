@@ -9,6 +9,7 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
+use stacks_common::bounded_format;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
@@ -144,9 +145,12 @@ impl<'a> ASTVisitor<'a> for RenamedBuiltin<'a> {
 
         self.diagnostics.push(Diagnostic {
             level: self.level.clone(),
-            message: format!(
+            message: bounded_format!(
                 "`{}` was renamed to `{}` in {}. Replace this call with `{}`.",
-                entry.old_name, entry.new_name, entry.since, entry.new_name,
+                entry.old_name,
+                entry.new_name,
+                entry.since,
+                entry.new_name,
             ),
             spans: vec![expr.span.clone()],
             suggestion: Some(format!(
@@ -404,7 +408,7 @@ mod tests {
         let renamed: Vec<&str> = result
             .lint_diagnostics
             .iter()
-            .map(|ld| ld.diagnostic.message.as_str())
+            .map(|ld| &*ld.diagnostic.message)
             .filter(|message| message.contains("was renamed to `with-staking`"))
             .collect();
 
