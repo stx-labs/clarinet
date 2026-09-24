@@ -20,6 +20,7 @@ fn get_test_txs() -> (TransactionSpecification, TransactionSpecification) {
             source: "(ok true)".to_string(),
             clarity_version: ClarityVersion::Clarity2,
             skip_analysis: false,
+            remap_principals: BTreeMap::new(),
         });
 
     let contract_call_txs =

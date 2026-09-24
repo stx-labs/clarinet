@@ -33,14 +33,7 @@ impl DeveloperUsageDigest {
 }
 
 pub fn telemetry_report_event(event: DeveloperUsageEvent) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .max_blocking_threads(32)
-        .build()
-        .unwrap();
-
-    rt.block_on(send_event(event));
+    hiro_system_kit::create_basic_runtime().block_on(send_event(event));
 }
 
 async fn send_event(event: DeveloperUsageEvent) {

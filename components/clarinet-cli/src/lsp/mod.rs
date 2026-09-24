@@ -12,39 +12,22 @@ use tower_lsp_server::{LspService, Server};
 use self::native_bridge::LspNativeBridge;
 
 pub fn run_lsp() {
-    if let Err(_e) = block_on(do_run_lsp()) {
-        std::process::exit(1)
-    };
+    hiro_system_kit::create_basic_runtime().block_on(do_run_lsp());
 }
 
-pub fn block_on<F, R>(future: F) -> R
-where
-    F: std::future::Future<Output = R>,
-{
-    let rt = hiro_system_kit::create_basic_runtime();
-    rt.block_on(future)
-}
-
-async fn do_run_lsp() -> Result<(), String> {
+async fn do_run_lsp() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
     let (notification_tx, notification_rx) = unbounded();
     let (request_tx, request_rx) = unbounded();
     let (response_tx, response_rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        hiro_system_kit::nestable_block_on(native_bridge::start_language_server(
-            notification_rx,
-            request_rx,
-            response_tx,
-        ));
-    });
+    native_bridge::spawn_language_server(notification_rx, request_rx, response_tx);
 
     let (service, socket) = LspService::new(|client| {
         LspNativeBridge::new(client, notification_tx, request_tx, response_rx)
     });
     Server::new(stdin, stdout, socket).serve(service).await;
-    Ok(())
 }
 
 pub fn clarity_diagnostics_to_tower_lsp_type(
@@ -111,13 +94,7 @@ fn test_opening_counter_contract_should_return_fresh_analysis() {
     let (notification_tx, notification_rx) = unbounded();
     let (_request_tx, request_rx) = unbounded();
     let (response_tx, response_rx) = channel();
-    std::thread::spawn(move || {
-        hiro_system_kit::nestable_block_on(native_bridge::start_language_server(
-            notification_rx,
-            request_rx,
-            response_tx,
-        ));
-    });
+    native_bridge::spawn_language_server(notification_rx, request_rx, response_tx);
 
     let contract_location = {
         let mut counter_path = std::env::current_dir().expect("Unable to get current dir");
@@ -161,13 +138,7 @@ fn test_opening_counter_manifest_should_return_fresh_analysis() {
     let (notification_tx, notification_rx) = unbounded();
     let (_request_tx, request_rx) = unbounded();
     let (response_tx, response_rx) = channel();
-    std::thread::spawn(move || {
-        hiro_system_kit::nestable_block_on(native_bridge::start_language_server(
-            notification_rx,
-            request_rx,
-            response_tx,
-        ));
-    });
+    native_bridge::spawn_language_server(notification_rx, request_rx, response_tx);
 
     let manifest_location = {
         let mut manifest_path = std::env::current_dir().expect("Unable to get current dir");
@@ -209,13 +180,7 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
     let (notification_tx, notification_rx) = unbounded();
     let (_request_tx, request_rx) = unbounded();
     let (response_tx, response_rx) = channel();
-    std::thread::spawn(move || {
-        hiro_system_kit::nestable_block_on(native_bridge::start_language_server(
-            notification_rx,
-            request_rx,
-            response_tx,
-        ));
-    });
+    native_bridge::spawn_language_server(notification_rx, request_rx, response_tx);
 
     let mut manifest_location = std::env::current_dir().expect("Unable to get current dir");
     manifest_location.push("examples");
@@ -288,13 +253,7 @@ async fn run_did_open_and_collect_server_requests(code_lens_refresh: bool) -> Ve
     let (notification_tx, notification_rx) = unbounded();
     let (request_tx, request_rx) = unbounded();
     let (response_tx, response_rx) = channel();
-    std::thread::spawn(move || {
-        hiro_system_kit::nestable_block_on(native_bridge::start_language_server(
-            notification_rx,
-            request_rx,
-            response_tx,
-        ));
-    });
+    native_bridge::spawn_language_server(notification_rx, request_rx, response_tx);
 
     let (mut service, socket) = LspService::new(|client| {
         native_bridge::LspNativeBridge::new(client, notification_tx, request_tx, response_rx)
