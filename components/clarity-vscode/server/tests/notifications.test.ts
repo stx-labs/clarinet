@@ -216,6 +216,22 @@ test("didChanges for different documents are all handled", async () => {
   assert.deepEqual(server.handledVersions, [1, 2, 2]);
 });
 
+// only didChange carries a snapshot, every other method carries an event that
+// a later one can't stand in for
+test("a repeated notification that isn't a didChange is never merged", async () => {
+  const server = setup();
+
+  server.notify(didOpen);
+  await tick();
+
+  // two saves of one document, the second must not overwrite the queued first
+  server.notify(didSave, URI);
+  server.notify(didSave, URI);
+
+  await server.drain();
+  assert.deepEqual(server.handled, [didOpen, didSave, didSave]);
+});
+
 // a didChange may only be merged into an entry it can reach without crossing
 // another notification for that same document
 for (const barrier of [didOpen, didSave, didClose]) {
