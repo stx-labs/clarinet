@@ -103,7 +103,13 @@ export function initConnection(
       method === DidOpenTextDocumentNotification.method ||
       method === DidCloseTextDocumentNotification.method
     ) {
-      const [protocol] = documentUri(params)?.split("://") ?? [];
+      const uri = documentUri(params);
+      if (!uri) {
+        console.warn(`${method} notification without a document uri`);
+        return;
+      }
+
+      const [protocol] = uri.split("://");
       if (!VALID_PROTOCOLS.includes(protocol)) return;
     }
 

@@ -99,6 +99,10 @@ function setup() {
     notify(method: string, uri = URI, version?: number) {
       onNotification(method, { textDocument: { uri, version } });
     },
+    /** Send params the LSP types wouldn't allow, like a broken client would. */
+    notifyRaw(method: string, params: unknown) {
+      onNotification(method, params);
+    },
     request(method: string) {
       return onRequest(method, {});
     },
@@ -167,6 +171,28 @@ test("notifications for unsupported protocols are dropped", async () => {
   server.notify(didOpen);
   await tick();
   assert.deepEqual(server.handled, [didOpen]);
+});
+
+test("a didOpen with no document uri is dropped, and warned about", async (t) => {
+  const server = setup();
+  const warn = t.mock.method(console, "warn", () => {});
+
+  server.notifyRaw(didOpen, {});
+  await tick();
+
+  assert.deepEqual(server.handled, []);
+  assert.equal(warn.mock.callCount(), 1);
+});
+
+test("a notification with no document is queued, not warned about", async (t) => {
+  const server = setup();
+  const warn = t.mock.method(console, "warn", () => {});
+
+  server.notifyRaw("initialized", {});
+  await server.drain();
+
+  assert.deepEqual(server.handled, ["initialized"]);
+  assert.equal(warn.mock.callCount(), 0);
 });
 
 test("queued didChanges for one document collapse to the newest", async () => {
