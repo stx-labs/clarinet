@@ -1,0 +1,728 @@
+{
+  "mode": "wasm",
+  "deploys": [
+    {
+      "contract": "counter",
+      "deploy": {
+        "result": "true",
+        "events": [],
+        "cost": {
+          "memory": 19,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 0,
+            "readCount": 0,
+            "runtime": 0
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": null
+      }
+    },
+    {
+      "contract": "caller",
+      "deploy": {
+        "result": "true",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 0,
+            "readCount": 0,
+            "runtime": 0
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": null
+      }
+    }
+  ],
+  "calls": [
+    {
+      "label": "public ok",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::increment",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "(ok u1)",
+        "events": [
+          {
+            "contract_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter",
+            "topic": "print",
+            "value": "{ count: u1, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"
+          }
+        ],
+        "cost": {
+          "memory": 40,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (ok u1)"
+      }
+    },
+    {
+      "label": "public ok with arg",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::add",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "(ok u4)",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (ok u4)"
+      }
+    },
+    {
+      "label": "public err",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::add",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "(err u100)",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (err u100)"
+      }
+    },
+    {
+      "label": "read-only getter",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-count",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "u4",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u4"
+      }
+    },
+    {
+      "label": "read-only map getter",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-total",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "u1",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u1"
+      }
+    },
+    {
+      "label": "cross-contract public",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::bump-counter",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "(ok u5)",
+        "events": [
+          {
+            "contract_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter",
+            "topic": "print",
+            "value": "{ count: u5, event: \"increment\", sender: 'ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 }"
+          }
+        ],
+        "cost": {
+          "memory": 40,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 648,
+            "readCount": 3,
+            "runtime": 727
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (ok u5)"
+      }
+    },
+    {
+      "label": "cross-contract public err",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::add-to-counter",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "(err u100)",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 648,
+            "readCount": 3,
+            "runtime": 727
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (err u100)"
+      }
+    },
+    {
+      "label": "cross-contract public ok",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::add-to-counter",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "(ok u9)",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 648,
+            "readCount": 3,
+            "runtime": 727
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (ok u9)"
+      }
+    },
+    {
+      "label": "cross-contract read-only",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::read-counter",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "u9",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 648,
+            "readCount": 3,
+            "runtime": 727
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u9"
+      }
+    },
+    {
+      "label": "pox-4 get-pox-info",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::pox-info",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "(ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 744,
+            "readCount": 11,
+            "runtime": 7562
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u3\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+      }
+    },
+    {
+      "label": "pox-4 read-only with arg",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::reward-cycle-of",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "u4",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 684,
+            "readCount": 5,
+            "runtime": 2161
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u4"
+      }
+    },
+    {
+      "label": "runtime err unwrap-panic",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::unwrap-none",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "error": "Call contract function error: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::unwrap-none() -> Error calling contract function 'unwrap-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(UnwrapFailure, Some([]))",
+        "trace": "Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller"
+      }
+    },
+    {
+      "label": "runtime err unwrap-panic ro",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::panic-none",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "error": "Call contract function error: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::panic-none() -> Error calling contract function 'panic-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(UnwrapFailure, Some([]))",
+        "trace": "Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter"
+      }
+    },
+    {
+      "label": "runtime err div by zero",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::divide-by-zero",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "error": "Call contract function error: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::divide-by-zero(u7) -> Error calling contract function 'divide-by-zero': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(DivisionByZero, Some([]))",
+        "trace": "Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller"
+      }
+    },
+    {
+      "label": "runtime err div by zero ro",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::divide",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "error": "Call contract function error: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::divide(u7, u0) -> Error calling contract function 'divide': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(DivisionByZero, Some([]))",
+        "trace": "Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter"
+      }
+    },
+    {
+      "label": "read-only divide ok",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::divide",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "u3",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u3"
+      }
+    },
+    {
+      "label": "mutate 1",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::increment",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "(ok u10)",
+        "events": [
+          {
+            "contract_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter",
+            "topic": "print",
+            "value": "{ count: u10, event: \"increment\", sender: 'ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 }"
+          }
+        ],
+        "cost": {
+          "memory": 40,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (ok u10)"
+      }
+    },
+    {
+      "label": "mutate 2",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::bump-counter",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "(ok u11)",
+        "events": [
+          {
+            "contract_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter",
+            "topic": "print",
+            "value": "{ count: u11, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"
+          }
+        ],
+        "cost": {
+          "memory": 40,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 648,
+            "readCount": 3,
+            "runtime": 727
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (ok u11)"
+      }
+    },
+    {
+      "label": "mutate 3",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::add",
+      "sender": "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5",
+      "outcome": {
+        "result": "(ok u21)",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── (ok u21)"
+      }
+    },
+    {
+      "label": "read back count",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-count",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "u21",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u21"
+      }
+    },
+    {
+      "label": "read back total deployer",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-total",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "u2",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u2"
+      }
+    },
+    {
+      "label": "read back total wallet_1",
+      "call": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-total",
+      "sender": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "outcome": {
+        "result": "u2",
+        "events": [],
+        "cost": {
+          "memory": 0,
+          "memory_limit": 100000000,
+          "total": {
+            "writeLength": 0,
+            "writeCount": 0,
+            "readLength": 790,
+            "readCount": 3,
+            "runtime": 869
+          },
+          "limit": {
+            "writeLength": 15000000,
+            "writeCount": 15000,
+            "readLength": 100000000,
+            "readCount": 15000,
+            "runtime": 5000000000
+          }
+        },
+        "trace": "└── u2"
+      }
+    }
+  ],
+  "snippets": [
+    {
+      "snippet": "(contract-call? .counter get-count)",
+      "outcome": {
+        "result": "u21",
+        "events": [],
+        "cost": null,
+        "trace": "└── u2"
+      }
+    },
+    {
+      "snippet": "(contract-call? .caller bump-counter)",
+      "outcome": {
+        "result": "(ok u22)",
+        "events": [
+          {
+            "contract_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter",
+            "topic": "print",
+            "value": "{ count: u22, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"
+          }
+        ],
+        "cost": null,
+        "trace": "└── u2"
+      }
+    },
+    {
+      "snippet": "(print (contract-call? .counter get-total tx-sender))",
+      "outcome": {
+        "result": "u3",
+        "events": [
+          {
+            "contract_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.contract-2",
+            "topic": "print",
+            "value": "u3"
+          }
+        ],
+        "cost": null,
+        "trace": "└── u2"
+      }
+    }
+  ],
+  "manifest_probe": {
+    "epoch": "3.1",
+    "counter::divide u7 u0": {
+      "error": "Call contract function error: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::divide(u7, u0) -> Error calling contract function 'divide': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(DivisionByZero, Some([]))",
+      "trace": "Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter"
+    },
+    "counter::increment": {
+      "result": "(ok u1)",
+      "events": [
+        {
+          "contract_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter",
+          "topic": "print",
+          "value": "{ count: u1, event: \"increment\", sender: 'ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 }"
+        }
+      ],
+      "cost": {
+        "memory": 40,
+        "memory_limit": 100000000,
+        "total": {
+          "writeLength": 0,
+          "writeCount": 0,
+          "readLength": 790,
+          "readCount": 3,
+          "runtime": 869
+        },
+        "limit": {
+          "writeLength": 15000000,
+          "writeCount": 15000,
+          "readLength": 100000000,
+          "readCount": 15000,
+          "runtime": 5000000000
+        }
+      },
+      "trace": "└── (ok u1)"
+    }
+  },
+  "repeat_loop": {
+    "iterations": 200,
+    "first_iteration_costs": {
+      "increment": {
+        "writeLength": 0,
+        "writeCount": 0,
+        "readLength": 790,
+        "readCount": 3,
+        "runtime": 869
+      },
+      "get-count": {
+        "writeLength": 0,
+        "writeCount": 0,
+        "readLength": 790,
+        "readCount": 3,
+        "runtime": 869
+      }
+    },
+    "final_count": "u222"
+  },
+  "console": {
+    "lines": 6,
+    "unique": [
+      "[error] Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter",
+      "[error] Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller",
+      "[log] u# (contract-2:1)"
+    ]
+  }
+}

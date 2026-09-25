@@ -1,0 +1,24 @@
+{
+  "interp": {
+    "mode": "interp",
+    "iterations": 200,
+    "sdk_import_ms": 14.659500000000001,
+    "init_fixture_manifest_ms": 205.864291,
+    "init_empty_manifest_ms": 95.46362499999998,
+    "deploys_ms": 3.6929999999999836,
+    "script_22_calls_ms": 17.818084,
+    "repeat_loop_ms": 228.23033299999997,
+    "repeat_loop_per_call_us": 570.5758324999999
+  },
+  "wasm": {
+    "mode": "wasm",
+    "iterations": 200,
+    "sdk_import_ms": 14.541458000000002,
+    "init_fixture_manifest_ms": 239.334917,
+    "init_empty_manifest_ms": 99.69100000000003,
+    "deploys_ms": 8.590624999999989,
+    "script_22_calls_ms": 46.01829099999998,
+    "repeat_loop_ms": 434.198916,
+    "repeat_loop_per_call_us": 1085.49729
+  }
+}

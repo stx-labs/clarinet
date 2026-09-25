@@ -1,0 +1,156 @@
+## SDK wasm vs native wasm (same engine, different host): native-wasm vs sdk-wasm
+summary: 27 entries, 26 identical; differing field counts {"sender":0,"call":0,"result":0,"error":0,"events":0,"cost":0,"trace":1}
+* pox-4 get-pox-info
+    trace:
+      native-wasm: "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u2\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+      sdk-wasm: "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u3\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+
+## SDK interp vs native interp (sanity): native-interp vs sdk-interp
+summary: 27 entries, 26 identical; differing field counts {"sender":0,"call":0,"result":0,"error":0,"events":0,"cost":0,"trace":1}
+* pox-4 get-pox-info
+    trace:
+      native-interp: "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u2\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+      sdk-interp: "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u3\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+
+## SDK wasm vs SDK interp (engine switch): sdk-interp vs sdk-wasm
+summary: 27 entries, 3 identical; differing field counts {"sender":0,"call":0,"result":0,"error":4,"events":0,"cost":20,"trace":10}
+* deploy counter
+    cost:
+      sdk-interp: "{\"runtime\":5620,\"readCount\":0,\"readLength\":0,\"writeCount\":3,\"writeLength\":182}"
+      sdk-wasm: "{\"runtime\":0,\"readCount\":0,\"readLength\":0,\"writeCount\":0,\"writeLength\":0}"
+* deploy caller
+    cost:
+      sdk-interp: "{\"runtime\":1740,\"readCount\":0,\"readLength\":0,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":0,\"readCount\":0,\"readLength\":0,\"writeCount\":0,\"writeLength\":0}"
+* public ok
+    cost:
+      sdk-interp: "{\"runtime\":13326,\"readCount\":7,\"readLength\":831,\"writeCount\":2,\"writeLength\":59}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "│ ✸ print event: (tuple (count u1) (event \"increment\") (sender ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM))\n└── (ok u1)"
+      sdk-wasm: "└── (ok u1)"
+* public ok with arg
+    cost:
+      sdk-interp: "{\"runtime\":3748,\"readCount\":6,\"readLength\":826,\"writeCount\":1,\"writeLength\":18}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* public err
+    cost:
+      sdk-interp: "{\"runtime\":1447,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* read-only getter
+    cost:
+      sdk-interp: "{\"runtime\":1375,\"readCount\":4,\"readLength\":808,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* read-only map getter
+    cost:
+      sdk-interp: "{\"runtime\":2864,\"readCount\":4,\"readLength\":831,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* cross-contract public
+    cost:
+      sdk-interp: "{\"runtime\":14208,\"readCount\":10,\"readLength\":1479,\"writeCount\":2,\"writeLength\":59}"
+      sdk-wasm: "{\"runtime\":727,\"readCount\":3,\"readLength\":648,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "│ ✸ print event: (tuple (count u5) (event \"increment\") (sender ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5))\n└── (ok u5)\n└── (ok u5)"
+      sdk-wasm: "└── (ok u5)"
+* cross-contract public err
+    cost:
+      sdk-interp: "{\"runtime\":2426,\"readCount\":6,\"readLength\":1438,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":727,\"readCount\":3,\"readLength\":648,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "├── ( contract-call? ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter add n )  caller:5:3\n│   │ ↳ args: u50\n│   └── (err u100)\n└── (err u100)"
+      sdk-wasm: "└── (err u100)"
+* cross-contract public ok
+    cost:
+      sdk-interp: "{\"runtime\":4727,\"readCount\":9,\"readLength\":1474,\"writeCount\":1,\"writeLength\":18}"
+      sdk-wasm: "{\"runtime\":727,\"readCount\":3,\"readLength\":648,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "├── ( contract-call? ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter add n )  caller:5:3\n│   │ ↳ args: u4\n│   └── (ok u9)\n└── (ok u9)"
+      sdk-wasm: "└── (ok u9)"
+* cross-contract read-only
+    cost:
+      sdk-interp: "{\"runtime\":2257,\"readCount\":7,\"readLength\":1456,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":727,\"readCount\":3,\"readLength\":648,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "└── u9\n└── u9"
+      sdk-wasm: "└── u9"
+* pox-4 get-pox-info
+    cost:
+      sdk-interp: "{\"runtime\":84027,\"readCount\":14,\"readLength\":76975,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":7562,\"readCount\":11,\"readLength\":744,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u3\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+      sdk-wasm: "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u3\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+* pox-4 read-only with arg
+    cost:
+      sdk-interp: "{\"runtime\":78723,\"readCount\":8,\"readLength\":76915,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":2161,\"readCount\":5,\"readLength\":684,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "├── ( contract-call? ST000000000000000000002AMW42H.pox-4 burn-height-to-reward-cycle height )  caller:14:3\n│   │ ↳ args: u5000\n│   └── u4\n└── u4"
+      sdk-wasm: "└── u4"
+* runtime err unwrap-panic
+    error:
+      sdk-interp: "Error calling contract function 'unwrap-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(UnwrapFailure, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller:unwrap-none\" }, FunctionIdentifier { identifier: \"_native_:native_unwrap\" }]))"
+      sdk-wasm: "Error calling contract function 'unwrap-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(UnwrapFailure, Some([]))"
+    trace:
+      sdk-interp: "│   ├── ( get-nothing )  caller:17:21\n│   │ ↳ args:\n│   └── none\nError: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller"
+      sdk-wasm: "Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller"
+* runtime err unwrap-panic ro
+    error:
+      sdk-interp: "Error calling contract function 'panic-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(UnwrapFailure, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter:panic-none\" }, FunctionIdentifier { identifier: \"_native_:native_unwrap\" }]))"
+      sdk-wasm: "Error calling contract function 'panic-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(UnwrapFailure, Some([]))"
+* runtime err div by zero
+    error:
+      sdk-interp: "Error calling contract function 'divide-by-zero': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(DivisionByZero, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller:divide-by-zero\" }, FunctionIdentifier { identifier: \"_native_:native_div\" }]))"
+      sdk-wasm: "Error calling contract function 'divide-by-zero': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(DivisionByZero, Some([]))"
+* runtime err div by zero ro
+    error:
+      sdk-interp: "Error calling contract function 'divide': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(DivisionByZero, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter:divide\" }, FunctionIdentifier { identifier: \"_native_:native_div\" }]))"
+      sdk-wasm: "Error calling contract function 'divide': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(DivisionByZero, Some([]))"
+* read-only divide ok
+    cost:
+      sdk-interp: "{\"runtime\":1235,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* mutate 1
+    cost:
+      sdk-interp: "{\"runtime\":13344,\"readCount\":7,\"readLength\":849,\"writeCount\":2,\"writeLength\":59}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "│ ✸ print event: (tuple (count u10) (event \"increment\") (sender ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5))\n└── (ok u10)"
+      sdk-wasm: "└── (ok u10)"
+* mutate 2
+    cost:
+      sdk-interp: "{\"runtime\":14226,\"readCount\":10,\"readLength\":1497,\"writeCount\":2,\"writeLength\":59}"
+      sdk-wasm: "{\"runtime\":727,\"readCount\":3,\"readLength\":648,\"writeCount\":0,\"writeLength\":0}"
+    trace:
+      sdk-interp: "│ ✸ print event: (tuple (count u11) (event \"increment\") (sender ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM))\n└── (ok u11)\n└── (ok u11)"
+      sdk-wasm: "└── (ok u11)"
+* mutate 3
+    cost:
+      sdk-interp: "{\"runtime\":3748,\"readCount\":6,\"readLength\":826,\"writeCount\":1,\"writeLength\":18}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* read back count
+    cost:
+      sdk-interp: "{\"runtime\":1375,\"readCount\":4,\"readLength\":808,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* read back total deployer
+    cost:
+      sdk-interp: "{\"runtime\":2864,\"readCount\":4,\"readLength\":831,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+* read back total wallet_1
+    cost:
+      sdk-interp: "{\"runtime\":2864,\"readCount\":4,\"readLength\":831,\"writeCount\":0,\"writeLength\":0}"
+      sdk-wasm: "{\"runtime\":869,\"readCount\":3,\"readLength\":790,\"writeCount\":0,\"writeLength\":0}"
+
+## Explanations
+- native vs SDK (both engines): results, errors, events and costs are identical. The one trace diff is
+  pox-4 get-pox-info showing burn-block-height u2 (native) vs u3 (SDK): the SDK session sits one burn
+  block higher (initSession + setEpoch("3.1") + deployContract advancing the tip), unrelated to the engine.
+- SDK interp vs SDK wasm, all expected and identical to native-interp vs native-wasm:
+  - cost: clarity-wasm only charges the contract-call/load cost (runtime 869 or 727, read_count 3), no
+    per-expression, data-var or map read/write costs. Deploy costs are all zero in wasm mode.
+  - error: runtime errors carry an empty stack `Some([])` instead of the interpreter's FunctionIdentifier stack.
+  - trace: the eval-hook based trace only sees the top-level call in wasm; print events and nested
+    contract-call frames into wasm contracts are missing. Calls into pox-4 (interpreted boot contract)
+    still show pox-4 frames. The interpreter's duplicated final line for cross-contract calls is also absent.
+- snippet and deploy results are the same across all four runs (SDK reports deploy results as `true`,
+  native as `None`; deploy results are excluded from the comparison).
