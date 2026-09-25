@@ -37,6 +37,8 @@ const DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 
 const REQUIREMENT_DEPLOYER: &str = "SP2X0TZ59D5SZ8ACQ6YMCHHNR2ZN51Z32E2CJ173";
 
+const TESTNET_REQUIREMENT_DEPLOYER: &str = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+
 const REQUIREMENT_STACKER: &str = r#"
 (define-public (stack (amount uint))
     (as-contract
@@ -64,14 +66,19 @@ const PROJECT_READER: &str = r#"
     (contract-call? 'SP000000000000000000002Q6VF78.cost-voting get-proposal u0))
 "#;
 
-fn write_project(root: &Path, project: &[(&str, &str)], requirements: &[(&str, &str)]) {
+fn write_project(
+    root: &Path,
+    requirement_deployer: &str,
+    project: &[(&str, &str)],
+    requirements: &[(&str, &str)],
+) {
     fs::create_dir_all(root.join("settings")).unwrap();
     fs::create_dir_all(root.join("contracts")).unwrap();
     fs::create_dir_all(root.join(".cache/requirements")).unwrap();
 
     let requirement_ids = requirements
         .iter()
-        .map(|(name, _)| format!("{{ contract_id = \"{REQUIREMENT_DEPLOYER}.{name}\" }}"))
+        .map(|(name, _)| format!("{{ contract_id = \"{requirement_deployer}.{name}\" }}"))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -121,7 +128,7 @@ fn write_project(root: &Path, project: &[(&str, &str)], requirements: &[(&str, &
     }
 
     for (name, source) in requirements {
-        let stem = format!(".cache/requirements/{REQUIREMENT_DEPLOYER}.{name}");
+        let stem = format!(".cache/requirements/{requirement_deployer}.{name}");
         fs::write(root.join(format!("{stem}.clar")), source).unwrap();
         fs::write(
             root.join(format!("{stem}.json")),
@@ -138,8 +145,16 @@ struct Project {
 
 impl Project {
     fn new(project: &[(&str, &str)], requirements: &[(&str, &str)]) -> Self {
+        Self::with_requirement_deployer(REQUIREMENT_DEPLOYER, project, requirements)
+    }
+
+    fn with_requirement_deployer(
+        requirement_deployer: &str,
+        project: &[(&str, &str)],
+        requirements: &[(&str, &str)],
+    ) -> Self {
         let temp_dir = TempDir::new().unwrap();
-        write_project(temp_dir.path(), project, requirements);
+        write_project(temp_dir.path(), requirement_deployer, project, requirements);
 
         let manifest =
             ProjectManifest::from_location(&temp_dir.path().join("Clarinet.toml"), true).unwrap();
@@ -236,10 +251,30 @@ async fn a_requirement_calling_the_mainnet_pox_address_locks_stx() {
     let mut session = project.deployed_session().await;
 
     assert_eq!(
-        stack_in_session(&mut session),
+        stack_in_session(&mut session, REQUIREMENT_DEPLOYER),
         90_000_000_000,
         "a requirement naming the mainnet PoX address must lock STX, exactly as a \
          manifest contract does"
+    );
+}
+
+#[tokio::test]
+async fn a_testnet_requirement_is_published_verbatim_and_locks_stx() {
+    let source = REQUIREMENT_STACKER.replace(BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS);
+    let project = Project::with_requirement_deployer(
+        TESTNET_REQUIREMENT_DEPLOYER,
+        &[],
+        &[("stacker", &source)],
+    );
+
+    let (published, remap) = publish(&project.generate().await, "stacker");
+    assert_eq!(published, source);
+    assert!(remap.is_empty());
+
+    let mut session = project.deployed_session().await;
+    assert_eq!(
+        stack_in_session(&mut session, TESTNET_REQUIREMENT_DEPLOYER),
+        90_000_000_000
     );
 }
 
@@ -309,8 +344,8 @@ async fn a_requirement_and_a_project_contract_share_boot_state() {
 }
 
 #[track_caller]
-fn stack_in_session(session: &mut Session) -> u128 {
-    let stacker = format!("{REQUIREMENT_DEPLOYER}.stacker");
+fn stack_in_session(session: &mut Session, requirement_deployer: &str) -> u128 {
+    let stacker = format!("{requirement_deployer}.stacker");
     let stacked = 90_000_000_000_u128;
 
     session.set_tx_sender(DEPLOYER);
@@ -356,7 +391,7 @@ async fn a_legacy_plan_still_rewrites_a_requirement() {
 
     let mut session = artifacts.session;
     assert_eq!(
-        stack_in_session(&mut session),
+        stack_in_session(&mut session, REQUIREMENT_DEPLOYER),
         90_000_000_000,
         "a plan predating the field must lock STX for a requirement too, or loading a \
          plan from disk and generating one afresh describe different code"
@@ -514,7 +549,10 @@ async fn requirement_remap_is_recorded_and_survives_plan_round_trip() {
     for (id, result) in results {
         assert!(result.is_ok(), "{id}: {result:?}");
     }
-    assert_eq!(stack_in_session(&mut session), 90_000_000_000);
+    assert_eq!(
+        stack_in_session(&mut session, REQUIREMENT_DEPLOYER),
+        90_000_000_000
+    );
 }
 
 fn withdrawal_conditions(ft_amount: u64) -> PostConditionCheck {
