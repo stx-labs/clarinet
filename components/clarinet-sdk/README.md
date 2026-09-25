@@ -27,8 +27,9 @@ want to evaluate a snippet and receive its expression value. Deployment costs
 include contract storage and subsequent calls account for the stored contract's
 actual data size, so cost assertions may need updating.
 
-`transferSTX` represents a native transfer: self-transfers and transfers exceeding
-the available unlocked balance throw without consuming a nonce. This differs
+`transferSTX` represents a native transfer: self-transfers, zero-amount transfers,
+and transfers exceeding the available unlocked balance throw without consuming a
+nonce. This differs
 from calling the Clarity `stx-transfer?` function inside a contract, which retains
 its ordinary response semantics. Private calls remain a simnet convenience and
 use the same transaction frame.

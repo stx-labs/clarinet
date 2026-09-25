@@ -82,7 +82,9 @@ describe("test pox-3", () => {
     );
 
     const nonce = simnet.getAccountNonce(address1);
-    expect(() => simnet.transferSTX(ustxAmount, address2, address1)).toThrow(/InsufficientBalance/);
+    expect(() => simnet.transferSTX(ustxAmount, address2, address1)).toThrow(
+      /insufficient unlocked balance/,
+    );
     expect(simnet.getAccountNonce(address1)).toBe(nonce);
   });
 

@@ -2402,7 +2402,33 @@ mod tests {
                 PostConditionCheck::Unchecked,
             )
             .expect_err("stacks-node rejects an underfunded TokenTransfer");
-        assert!(error[0].message.contains("InsufficientBalance"));
+        assert_eq!(
+            error[0].message,
+            "Runtime Error: Invalid TokenTransfer: insufficient unlocked balance to send 1000 uSTX"
+        );
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_zero_amount_native_stx_transfer_is_rejected_without_a_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = session.get_tx_sender();
+        let addr = principal(&sender);
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1000)
+            .unwrap();
+        let error = session
+            .stx_transfer(
+                0,
+                "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG",
+                PostConditionCheck::Unchecked,
+            )
+            .expect_err("stacks-node rejects a zero-amount TokenTransfer");
+        assert_eq!(
+            error[0].message,
+            "Runtime Error: Invalid TokenTransfer: amount must be positive"
+        );
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
     }
 
@@ -2571,7 +2597,15 @@ mod tests {
         // Divide by zero at the top level: `Runtime` → `Acceptable` → included.
         let (before, after, result) =
             deploy_and_read_nonce(&mut session, deployer, "div-zero", "(/ u1 u0)");
-        assert!(result.is_err(), "the deploy must still be reported failed");
+        let error = result.expect_err("the deploy must still be reported failed");
+        assert!(
+            error[0].message.starts_with(
+                "Runtime Error: Runtime error while interpreting \
+                 ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5.div-zero: Runtime(DivisionByZero"
+            ),
+            "{}",
+            error[0].message
+        );
         assert_eq!(after, before + 1, "divide-by-zero is included in a block");
 
         // `unwrap-panic` on `none`: `EarlyReturn` → `Acceptable` → included.
