@@ -1520,9 +1520,15 @@ fn build_function_definition_cost_analysis_tree(
     // non-storage expression, the dynamic VM does not charge OkCons — only the
     // LookupFunction cost for `ok` is incurred.  Reduce ConsOkay to just that
     // lookup cost in this case.
-    if let CostExprNode::NativeFunction(NativeFunctions::Let) = &body_tree.expr {
+    if matches!(
+        body_tree.expr,
+        CostExprNode::NativeFunction(NativeFunctions::Let)
+    ) {
         if let Some(last_child) = body_tree.children.last() {
-            if let CostExprNode::NativeFunction(NativeFunctions::ConsOkay) = &last_child.expr {
+            if matches!(
+                last_child.expr,
+                CostExprNode::NativeFunction(NativeFunctions::ConsOkay)
+            ) {
                 let has_storage_child = last_child.children.iter().any(|c| {
                     matches!(
                         &c.expr,

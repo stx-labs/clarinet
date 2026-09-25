@@ -105,6 +105,7 @@ yaml_serde = "0.10.3"
 # pox-locking = { path = "../stacks-core/pox-locking" }
 
 [workspace.lints.clippy]
+equatable_if_let = "deny"
 needless_collect = "deny"
 needless_pass_by_ref_mut = "deny"
 or_fun_call = "deny"
