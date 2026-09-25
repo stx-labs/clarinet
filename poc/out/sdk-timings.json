@@ -2,23 +2,23 @@
   "interp": {
     "mode": "interp",
     "iterations": 200,
-    "sdk_import_ms": 14.659500000000001,
-    "init_fixture_manifest_ms": 205.864291,
-    "init_empty_manifest_ms": 95.46362499999998,
-    "deploys_ms": 3.6929999999999836,
-    "script_22_calls_ms": 17.818084,
-    "repeat_loop_ms": 228.23033299999997,
-    "repeat_loop_per_call_us": 570.5758324999999
+    "sdk_import_ms": 15.500541999999996,
+    "init_fixture_manifest_ms": 216.10491699999997,
+    "init_empty_manifest_ms": 98.26045899999997,
+    "deploys_ms": 3.794083999999998,
+    "script_22_calls_ms": 18.77812499999999,
+    "repeat_loop_ms": 240.238042,
+    "repeat_loop_per_call_us": 600.595105
   },
   "wasm": {
     "mode": "wasm",
     "iterations": 200,
-    "sdk_import_ms": 14.541458000000002,
-    "init_fixture_manifest_ms": 239.334917,
-    "init_empty_manifest_ms": 99.69100000000003,
-    "deploys_ms": 8.590624999999989,
-    "script_22_calls_ms": 46.01829099999998,
-    "repeat_loop_ms": 434.198916,
-    "repeat_loop_per_call_us": 1085.49729
+    "sdk_import_ms": 15.949333000000003,
+    "init_fixture_manifest_ms": 252.745708,
+    "init_empty_manifest_ms": 101.10858300000001,
+    "deploys_ms": 7.336250000000007,
+    "script_22_calls_ms": 27.29170799999997,
+    "repeat_loop_ms": 276.54487500000005,
+    "repeat_loop_per_call_us": 691.3621875000001
   }
 }

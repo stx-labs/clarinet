@@ -9,7 +9,7 @@ The stacks-core and clarity-wasm branches are local and unpushed, and the root `
 | Repo         | Branch                          | Commit      | Base                                                                                                                                       |
 | ------------ | ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Clarinet     | `feat/clarity-wasm-wasmi-poc`   | this branch | main 2692fda1                                                                                                                              |
-| stacks-core  | `feat/clarity-wasm-on-275c8f86` | 417785c78e  | 275c8f8611, runtime from `melcar-stacks/stacks-core` `wasmi` 1c5512ee6f ([#7662](https://github.com/stacks-network/stacks-core/pull/7662)) |
+| stacks-core  | `feat/clarity-wasm-on-275c8f86` | 7e1de7b325  | 275c8f8611, runtime from `melcar-stacks/stacks-core` `wasmi` 1c5512ee6f ([#7662](https://github.com/stacks-network/stacks-core/pull/7662)) |
 | clarity-wasm | `feat/compile-only`             | 252fb87e    | `wasmi` 12d26f43 ([#870](https://github.com/stx-labs/clarity-wasm/pull/870))                                                               |
 
 Reproduce:
@@ -22,7 +22,7 @@ Reproduce:
 
 Simnet can deploy and run Clarity contracts as clarity-wasm modules on wasmi, both in the native CLI and in the JS SDK on Node. It is opt-in: the `clarity-wasm` cargo feature, then `CLARINET_CLARITY_WASM=1` (native) or `clarityWasm: true` / the same env var (SDK). With the feature off, the build and behaviour are unchanged.
 
-Results, events, error kinds and state read-back match the interpreter on every scripted case. Costs, error stack traces and tooling visibility do not. The runtime is usable for functional testing, but not yet for cost reports or cost-limit testing. In the SDK it is about 1.9x **slower** than the interpreter per call, for a known and fixable reason (§6).
+Results, events, error kinds and state read-back match the interpreter on every scripted case. Costs, error stack traces and tooling visibility do not. The runtime is usable for functional testing, but not yet for cost reports or cost-limit testing. In the SDK it is now within ~7% of the interpreter per call (it was 1.9x slower in the first cut). Natively it is still 2x slower, and the remaining cost is known (§6).
 
 ## 2. What works
 
@@ -49,7 +49,7 @@ Results, events, error kinds and state read-back match the interpreter on every 
 
 | Repo         | Branch @ commit                                                | Size                                                                                   | Upstream?                       |
 | ------------ | -------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------- |
-| stacks-core  | `feat/clarity-wasm-on-275c8f86` @ 417785c78e (from 275c8f8611) | 17 files, +12,398/−14. Mostly `clarity_wasm.rs` (~11.8k lines, copied from 1c5512ee6f) | Yes, as input to rebasing #7662 |
+| stacks-core  | `feat/clarity-wasm-on-275c8f86` @ 7e1de7b325 (from 275c8f8611) | 17 files, +12,463/−14. Mostly `clarity_wasm.rs` (~11.8k lines, copied from 1c5512ee6f) | Yes, as input to rebasing #7662 |
 | clarity-wasm | `feat/compile-only` @ 252fb87e (from `wasmi` 12d26f43)         | 10 files, +121/−27                                                                     | Yes, as-is                      |
 | wasmi        | none                                                           | –                                                                                      | –                               |
 | Clarinet     | `feat/clarity-wasm-wasmi-poc`, 4 commits on 2692fda1           | 10 source files, +165/−14 (plus lock, fixture, example, drivers)                       | Partly, see below               |
@@ -128,20 +128,34 @@ Integration quirks found along the way:
 
 The fwd-port alone is size-neutral. The whole delta is clar2wasm (walrus, wasm-encoder), wasmi 2.0 and the host functions.
 
-**Timings** (ms, Node 26, release wasm, stable across runs):
+**Timings** (ms, Node 26, release wasm, stable across runs). "wasm, first cut" is fwd-port 417785c78e; "wasm" is 7e1de7b325, which adds the three fixes below:
 
-|                                                     | interp             | wasm                | ratio |
-| --------------------------------------------------- | ------------------ | ------------------- | ----- |
-| SDK `initSimnet`, empty manifest                    | 94–95              | 98–100              | 1.05x |
-| SDK `initSimnet`, fixture manifest (2 plan deploys) | 203–206            | 235–239             | 1.15x |
-| SDK 2 × `deployContract`                            | 3.3–3.7            | 7.5–8.6             | ~2.3x |
-| SDK 22-call script                                  | 18                 | 44–46               | ~2.5x |
-| SDK 1000 × (increment + get-count)                  | 1091 (545 µs/call) | 2007 (1004 µs/call) | 1.84x |
-| Native `wasm_poc`, whole process                    | 112                | 133                 | 1.19x |
+|                                                     | interp             | wasm, first cut     | wasm               | ratio |
+| --------------------------------------------------- | ------------------ | ------------------- | ------------------ | ----- |
+| SDK `initSimnet`, empty manifest                    | 96–97              | 98–100              | 100–101            | 1.04x |
+| SDK `initSimnet`, fixture manifest (2 plan deploys) | 214–226            | 235–239             | 246–249            | 1.13x |
+| SDK 2 × `deployContract`                            | 3.4–3.6            | 7.5–8.6             | 6.7–7.4            | ~2x   |
+| SDK 22-call script                                  | 18–19              | 44–46               | 27                 | ~1.5x |
+| SDK 1000 × (increment + get-count)                  | 1124 (562 µs/call) | 2007 (1004 µs/call) | 1203 (601 µs/call) | 1.07x |
+| Native 5000 × (increment + get-count)               | 39 µs/call         | —                   | 78 µs/call         | 2.0x  |
 
-The per-call overhead has a known, fixable cause. `clarity_wasm.rs:534/538` (initialize) and `:631/635` (call) run `Module::new` and `Linker::new` on every call, re-linking every host function and re-parsing and re-validating the ~23 KB module each time. `GlobalContext` also builds `Engine::default()` (`contexts.rs:1513`), so there's nowhere to hang a cache.
+The native loop is `POC_ITERATIONS=5000` on the `wasm_poc` example. The SDK spends ~500 µs per call outside the engine in either mode, which hides most of the engine gap there.
 
-The next measurement to make is a per-contract `Module` cache plus a reusable `Linker`/`InstancePre` (#468). Until then, don't read these numbers as wasmi vs interpreter.
+Per-call cost, native wasm loop:
+
+| Fwd-port state                   | µs/call |
+| -------------------------------- | ------- |
+| shared `Engine` + `Module` cache | 255     |
+| + `wasm_module` stored as hex    | 86      |
+| + cached host `Linker`           | 78      |
+
+1. **Shared `Engine`, `Module` cache** (74740ab2ca). `GlobalContext` built its own `Engine::default()`, and `initialize_contract`/`call_function` ran `Module::new` on every call. Now one process-wide engine, and parsed modules cached by a hash of the wasm bytes. SDK: 1004 → 822 µs/call.
+2. **`wasm_module` as hex.** Profiling showed ~79% of a native wasm call in `ClarityDatabase::get_contract`, with serde_json parsing the ~23 KB module one integer at a time: `Option<Vec<u8>>` serializes as a JSON number array, and the contract context is re-read on every call. A hex string cuts that to one string parse plus a decode. This was the dominant cost, not wasmi. SDK: 822 → ~600 µs/call.
+3. **Cached host `Linker`.** Host functions don't depend on the store, so the 101 registrations happen once per thread and each call clones the linker and adds its 5 cost globals. No lifetime refactor was needed: the fwd-port already erases the store data's lifetimes. It only shows once item 2 is in: −10% natively, within noise in the SDK.
+
+Outputs are unchanged after each step: native output is byte-identical, and the SDK diff summary is the same.
+
+What remains, natively: hex decoding (~31%, `hex_bytes` is char by char) and hashing the bytes for the cache lookup (~6%), both because the whole module still comes back with every `get_contract`; and wasmi instantiation (~23%), which allocates host funcs and exports per call. Storing the module under its own key, loaded only on a cache miss, removes the first two. `InstancePre` (#468) would cut the third.
 
 ## 7. Contradictions with the research
 
@@ -152,7 +166,7 @@ Against the research notes `clarity-wasm-simnet.md` and `clarity-wasm-simnet-sho
    - What stays on Clarinet's side even after alignment: the hand-written wasm deploy in `interpreter.rs`, unless stacks-core ships a public deploy API (ask 8), plus the opt-in flag wiring. That's ~165 lines in this POC.
    - So it's "bump the rev plus a small, one-time integration", not a contradiction.
 2. **"Bundle grows by roughly 2–2.5 MB (uncompressed)."** Measured +3.9 MB raw, +1.2 MB gzip. The research's ~374 KB gzip is wasmi alone. The compiler and host functions are about two thirds of the delta.
-3. **"Real-world gaps should be much smaller [than micro-benchmarks]."** The research compared engines with each other, not with the interpreter. On a real Simnet workload, wasm is currently ~1.9x slower than the interpreter, and per-call setup dominates, not guest compute. Once #468 is fixed this may flip, but no engine will look fast until it is.
+3. **"Real-world gaps should be much smaller [than micro-benchmarks]."** The research compared engines with each other, not with the interpreter. On a real Simnet workload, wasm started 1.9x slower than the interpreter in the SDK and is now ~1.07x, after fixes to per-call setup, not guest compute. The largest cost was not wasmi at all but JSON-deserializing the module bytes on every call. Natively it is still 2x, with per-call setup still dominating.
 4. **"wasmi + fuel or cost code → exact SDK cost fidelity."** The principle holds, but the current wasmi branch has no fidelity at all: costs aren't synced into `cost_track`, and no cost code is emitted. Any cost-fidelity claim for Simnet waits on the metering design.
 5. **"Use `portable-dispatch`" (short doc).** Not needed: wasmi's automatic dispatch already falls back on `wasm32-unknown-unknown`. The long doc's "`auto`/`portable-dispatch`" is the accurate wording.
 6. **#409 as a real ask.** Confirmed, but it's smaller than the research implies: 10 files, +121/−27. On the wasmi branch, clar2wasm pulls wasmi rather than wasmtime.
@@ -161,7 +175,7 @@ These research claims held:
 
 - Host functions work against Simnet's datastore with no backing-store changes.
 - Mixed execution works in both directions.
-- The per-call `Module`/`Linker` rebuild (#468) is still present on wasmi.
+- The per-call `Module`/`Linker` rebuild (#468) is present on wasmi. The POC now caches both; per-call instantiation remains.
 - The branch stores raw bytes (`Option<Vec<u8>>`, JSON-serialized in the contract context).
 - `GlobalContext` hardcodes `Engine::default()`.
 - `compile_contract` emits no cost code.
@@ -169,7 +183,7 @@ These research claims held:
 
 ## 8. Suggested next steps
 
-1. Cache `Module` per contract and reuse `Linker`/`InstancePre`, then re-time. This decides whether wasm mode is viable for `clarinet test`.
+1. Store the wasm module under its own key so `get_contract` stops carrying it, then try `InstancePre` (#468), and re-time. This decides whether wasm mode is viable for `clarinet test`.
 2. Rebase #7662 onto current develop, using the fwd-port's less-invasive API shapes, and upstream the clar2wasm `runtime` split.
 3. Once metering is settled: sync `cost_meter` into `cost_track`, and compile with cost code.
 4. Add a `WasmObserver` (enter/exit, print, error with expression id) to restore the tracer, logger and error locations.

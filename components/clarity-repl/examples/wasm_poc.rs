@@ -198,6 +198,38 @@ fn main() {
     assert!(!pox4_wasm, "boot contracts must stay interpreted");
     modules.insert("pox-4".into(), json!(pox4_wasm));
 
+    if let Some(iterations) = std::env::var("POC_ITERATIONS")
+        .ok()
+        .and_then(|n| n.parse::<u32>().ok())
+    {
+        let start = std::time::Instant::now();
+        for _ in 0..iterations {
+            for (method, kind) in [
+                ("increment", CallKind::Transaction),
+                ("get-count", CallKind::NonceFree),
+            ] {
+                session
+                    .call_contract_fn(
+                        &counter,
+                        method,
+                        &[],
+                        DEPLOYER,
+                        false,
+                        false,
+                        kind,
+                        PostConditionCheck::Unchecked,
+                    )
+                    .unwrap();
+            }
+        }
+        let elapsed = start.elapsed();
+        eprintln!(
+            "{iterations} iterations: {:.1} ms, {:.1} µs/call",
+            elapsed.as_secs_f64() * 1e3,
+            elapsed.as_secs_f64() * 1e6 / f64::from(iterations * 2)
+        );
+    }
+
     let out = json!({
         "wasm_module": modules,
         "deploys": deploys,
