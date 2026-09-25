@@ -61,15 +61,26 @@ fn boot_remap_principals() -> RemapPrincipals {
     )])
 }
 
+/// Applies the boot rewrite to `source` in place and returns the marker to
+/// record, empty when the source references no mainnet boot contract.
+fn remap_source_boot_principals(source: &mut String) -> RemapPrincipals {
+    match remap_mainnet_boot_principals(source) {
+        Some(remapped) => {
+            *source = remapped;
+            boot_remap_principals()
+        }
+        None => BTreeMap::new(),
+    }
+}
+
 /// The source to deploy for `tx`.
 ///
 /// A non-empty `remap_principals` means this contract is due the boot rewrite.
 /// It is set by the plan generator, and by
-/// [`setup_session_with_deployment`] for project contracts whose plan predates
-/// the field — requirements never carry it, since they are deployed
-/// byte-identical to what is on chain. Both setters gate on simnet execution,
-/// so an on-chain `clarinet check` pass reaches this function with an empty
-/// marker and deploys its source verbatim.
+/// [`setup_session_with_deployment`] for contracts and requirements whose plan
+/// predates the field. Both setters gate on simnet execution, so an on-chain
+/// `clarinet check` pass reaches this function with an empty marker and
+/// deploys its source verbatim.
 ///
 /// The rewrite is re-derived from the source rather than replayed from the
 /// recorded pairs, which is what makes a plan re-read from disk (where
@@ -128,10 +139,9 @@ pub fn setup_session_with_deployment(
         session.interpreter.repl_settings.analysis.disable_all();
     }
 
-    // A plan written before `remap-principals` existed records nothing, which
-    // is indistinguishable from a requirement, so the marker is re-derived
-    // here and a plan loaded from disk describes the same code a freshly
-    // generated one would.
+    // Older plans carry no marker, and requirements lacked one until they were
+    // remapped too, so it is re-derived here: a plan loaded from disk then
+    // describes the same code a freshly generated one would.
     //
     // The gate is deliberately narrower than the generator's, which skips the
     // rewrite for any remote-data session. The session is built first because
@@ -160,12 +170,10 @@ pub fn setup_session_with_deployment(
 
                 // Without this, a plan loaded from disk silently deploys
                 // mainnet boot principals and the PoX lock goes missing again.
-                // Requirements are excluded (they deploy byte-identical to
-                // chain), and so is a source that references no mainnet boot
-                // contract — marking it would claim a rewrite that
-                // `source_for_emulated_publish` would then not perform.
+                // A source that references no mainnet boot contract is
+                // skipped — marking it would claim a rewrite that
+                // `source_for_emulated_publish` would not perform.
                 if backfill_legacy_boot_remap
-                    && is_project_contract
                     && spec.remap_principals.is_empty()
                     && remap_mainnet_boot_principals(&spec.source).is_some()
                 {
@@ -1015,7 +1023,7 @@ pub async fn generate_default_deployment_with_cache(
                 Some(requirement_data) => requirement_data,
                 None => {
                     // Download the code
-                    let (source, epoch, clarity_version, contract_location) =
+                    let (mut source, epoch, clarity_version, contract_location) =
                         requirements::retrieve_contract(
                             &contract_id,
                             &manifest.project.cache_location,
@@ -1029,6 +1037,13 @@ pub async fn generate_default_deployment_with_cache(
                     // Build the struct representing the requirement in the deployment
                     if matches!(network, StacksNetwork::Simnet) {
                         if !simnet_remote_data {
+                            // Same rewrite and gate as project contracts
+                            // below, applied before the AST is built.
+                            let remap_principals = if environment == Environment::Simnet {
+                                remap_source_boot_principals(&mut source)
+                            } else {
+                                BTreeMap::new()
+                            };
                             let data = EmulatedContractPublishSpecification {
                                 contract_name: contract_id.name.clone(),
                                 emulated_sender: contract_id.issuer.clone(),
@@ -1036,10 +1051,7 @@ pub async fn generate_default_deployment_with_cache(
                                 location: contract_location,
                                 clarity_version,
                                 skip_analysis: true,
-                                // Requirements are third-party mainnet code;
-                                // they are deployed byte-identical to what is
-                                // on chain and never remapped.
-                                remap_principals: BTreeMap::new(),
+                                remap_principals,
                             };
 
                             emulated_contracts_publish.insert(contract_id.clone(), data);
@@ -1328,16 +1340,14 @@ pub async fn generate_default_deployment_with_cache(
         // `clarinet check` generates a simnet plan for both environments; the
         // on-chain pass must analyse what will actually be published on chain,
         // where the mainnet boot addresses are the correct ones.
-        let mut remap_principals = BTreeMap::new();
-        if matches!(network, StacksNetwork::Simnet)
+        let remap_principals = if matches!(network, StacksNetwork::Simnet)
             && environment == Environment::Simnet
             && !simnet_remote_data
         {
-            if let Some(remapped) = remap_mainnet_boot_principals(&source) {
-                source = remapped;
-                remap_principals = boot_remap_principals();
-            }
-        }
+            remap_source_boot_principals(&mut source)
+        } else {
+            BTreeMap::new()
+        };
 
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
 

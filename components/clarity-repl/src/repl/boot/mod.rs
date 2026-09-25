@@ -297,8 +297,8 @@ fn mainnet_boot_contract_name_at(s: &str) -> Option<&str> {
 ///
 /// - the bare mainnet burn address `'SP000000000000000000002Q6VF78`, a real
 ///   transfer target, is left alone — a contract name is required;
-/// - the name must be a [`BOOT_CONTRACTS_NAMES`] entry, which keeps sBTC and
-///   every requirement contract out of scope;
+/// - the name must be a [`BOOT_CONTRACTS_NAMES`] entry, which keeps
+///   references to sBTC and to requirement contracts out of scope;
 /// - occurrences inside `;;` comments and string literals are skipped;
 /// - the leading `'` is required, which is what separates a principal literal
 ///   from an address that merely appears in text.
@@ -306,13 +306,13 @@ fn mainnet_boot_contract_name_at(s: &str) -> Option<&str> {
 /// Both addresses are 29 characters, so the rewrite preserves every span in
 /// the source — diagnostics and coverage line/column data stay valid.
 ///
-/// Applied to *user* sources — manifest contracts (via `clarinet-deployments`)
-/// and `simnet.deployContract` — and to the **testnet copy** of a custom boot
-/// contract override, which has to reference testnet boot contracts the way
-/// the built-in testnet bodies do. Never to the mainnet copy of a boot
-/// contract, which would point the mainnet boot set at the testnet one. The
-/// embedded boot sources do not reference each other by qualified id, so only
-/// overrides need it.
+/// Applied to *user* sources — manifest contracts and requirements emulated
+/// in simnet (via `clarinet-deployments`), and `simnet.deployContract` — and
+/// to the **testnet copy** of a custom boot contract override, which has to
+/// reference testnet boot contracts the way the built-in testnet bodies do.
+/// Never to the mainnet copy of a boot contract, which would point the mainnet
+/// boot set at the testnet one. The embedded boot sources do not reference each
+/// other by qualified id, so only overrides need it.
 ///
 /// Idempotent: the output holds no mainnet boot literals, so a second pass
 /// returns `None`.
