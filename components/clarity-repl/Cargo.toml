@@ -35,6 +35,7 @@ strum = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 indoc = { workspace = true }
 stacks-common = { workspace = true, default-features = false }
+clar2wasm = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clarity = { workspace = true, default-features = false, features = ["rusqlite", "developer-mode", "devtools"] }
@@ -111,6 +112,7 @@ web = [
     "web-sys/XmlHttpRequest",
     "web-sys/Event",
 ]
+clarity-wasm = ["dep:clar2wasm", "clarity/clarity-wasm"]
 
 [lints]
 workspace = true

@@ -37,6 +37,7 @@ default = []
 web = [
   "clarity-repl/web",
 ]
+clarity-wasm = ["clarity-repl/clarity-wasm"]
 
 # DEV
 [profile.dev]
