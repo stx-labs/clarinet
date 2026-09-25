@@ -10,6 +10,7 @@
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::types::BoundedErrorString;
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
@@ -82,7 +83,7 @@ impl<'a, 'b> UnusedPrivateFn<'a, 'b> {
             let (message, suggestion) = Self::make_diagnostic_strings(name);
             diagnostics.push(Diagnostic {
                 level: self.level.clone(),
-                message,
+                message: BoundedErrorString::from_display(&message),
                 spans: vec![fn_data.expr.span.clone()],
                 suggestion,
             });

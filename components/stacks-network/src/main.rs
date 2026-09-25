@@ -27,8 +27,7 @@ struct Args {
     no_snapshot: bool,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
+fn main() {
     let args = Args::parse();
     let manifest_location = get_config_location_from_path_or_exit(&args.manifest_path);
     let network_manifest_path = get_config_location_from_path_or_exit(&args.network_manifest_path);
@@ -70,8 +69,7 @@ async fn main() {
         orchestrator_terminated_tx,
         &args.namespace,
         network_manifest,
-    )
-    .await;
+    );
     println!("{:?}", res.unwrap());
 }
 

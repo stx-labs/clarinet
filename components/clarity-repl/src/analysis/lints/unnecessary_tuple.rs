@@ -10,6 +10,7 @@ use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::Span;
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{ClarityName, ClarityVersion, SymbolicExpression};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
@@ -82,7 +83,7 @@ impl<'a> UnnecessaryTuple<'a> {
     fn add_diagnostic(&mut self, span: &Span, message: String, suggestion: String) {
         self.diagnostics.push(Diagnostic {
             level: self.level.clone(),
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![span.clone()],
             suggestion: Some(suggestion),
         });

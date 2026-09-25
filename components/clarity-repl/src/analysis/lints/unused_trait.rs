@@ -4,6 +4,7 @@
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::types::BoundedErrorString;
 use clarity_types::ClarityName;
 
 use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
@@ -67,7 +68,7 @@ impl<'a, 'b> UnusedTrait<'a, 'b> {
     ) -> Diagnostic {
         Diagnostic {
             level: level.clone(),
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![trait_data.expr.span.clone()],
             suggestion,
         }

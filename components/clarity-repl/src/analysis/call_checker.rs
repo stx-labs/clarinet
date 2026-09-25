@@ -6,6 +6,7 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::SymbolicExpression;
 use clarity::vm::SymbolicExpressionType::List;
 use clarity::vm::{ClarityName, ClarityVersion};
+use stacks_common::bounded_format;
 
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::cache::AnalysisCache;
@@ -84,7 +85,7 @@ impl<'a> CallChecker<'a> {
     ) -> Diagnostic {
         Diagnostic {
             level: self.level.clone(),
-            message: format!(
+            message: bounded_format!(
                 "incorrect number of arguments in call to '{name}' (expected {expected} got {got})"
             ),
             spans: vec![expr.span.clone()],

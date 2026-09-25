@@ -27,18 +27,16 @@ const fn version_to_index(version: ClarityVersion) -> usize {
         ClarityVersion::Clarity4 => 3,
         ClarityVersion::Clarity5 => 4,
         ClarityVersion::Clarity6 => 5,
+        ClarityVersion::Clarity7 => 6,
     }
 }
 
+/// One completion cache slot per Clarity version, indexed by [`version_to_index`].
+const VERSION_COUNT: usize = ClarityVersion::ALL.len();
+
 fn get_native_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-    ];
+    static CELLS: [OnceLock<Vec<CompletionItem>>; VERSION_COUNT] =
+        [const { OnceLock::new() }; VERSION_COUNT];
     CELLS[version_to_index(version)].get_or_init(|| build_default_native_keywords_list(version))
 }
 
@@ -82,38 +80,20 @@ static ITERATOR_FUNCTIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
 });
 
 fn get_map_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-    ];
+    static CELLS: [OnceLock<Vec<CompletionItem>>; VERSION_COUNT] =
+        [const { OnceLock::new() }; VERSION_COUNT];
     CELLS[version_to_index(version)].get_or_init(|| build_map_valid_cb_completion_items(version))
 }
 
 fn get_filter_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-    ];
+    static CELLS: [OnceLock<Vec<CompletionItem>>; VERSION_COUNT] =
+        [const { OnceLock::new() }; VERSION_COUNT];
     CELLS[version_to_index(version)].get_or_init(|| build_filter_valid_cb_completion_items(version))
 }
 
 fn get_fold_cb_completions(version: ClarityVersion) -> &'static Vec<CompletionItem> {
-    static CELLS: [OnceLock<Vec<CompletionItem>>; 6] = [
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-    ];
+    static CELLS: [OnceLock<Vec<CompletionItem>>; VERSION_COUNT] =
+        [const { OnceLock::new() }; VERSION_COUNT];
     CELLS[version_to_index(version)].get_or_init(|| build_fold_valid_cb_completion_items(version))
 }
 
