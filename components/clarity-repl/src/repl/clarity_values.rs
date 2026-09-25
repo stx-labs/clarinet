@@ -135,7 +135,7 @@ mod tests {
             committed: false,
             data: Box::new(Value::Sequence(SequenceData::String(CharType::ASCII(
                 ASCIIData {
-                    data: "'foo'".as_bytes().to_vec(),
+                    data: b"'foo'".to_vec(),
                 },
             )))),
         }));
@@ -143,12 +143,12 @@ mod tests {
 
         s = value_to_string(&Value::Sequence(SequenceData::String(CharType::ASCII(
             ASCIIData {
-                data: "Hello, \"world\"\n".as_bytes().to_vec(),
+                data: b"Hello, \"world\"\n".to_vec(),
             },
         ))));
         assert_eq!(s, "\"Hello, \"world\"\n\"");
 
-        s = value_to_string(&UTF8Data::to_value(&"Hello, 'world'\n".as_bytes().to_vec()).unwrap());
+        s = value_to_string(&UTF8Data::to_value(&b"Hello, 'world'\n".to_vec()).unwrap());
         assert_eq!(s, "u\"Hello, 'world'\n\"");
 
         s = value_to_string(&Value::Sequence(SequenceData::List(ListData {

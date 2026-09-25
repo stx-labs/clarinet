@@ -109,6 +109,7 @@ needless_collect = "deny"
 needless_pass_by_ref_mut = "deny"
 or_fun_call = "deny"
 redundant_clone = "deny"
+string_lit_as_bytes = "deny"
 trait_duplication_in_bounds = "deny"
 unnecessary_struct_initialization = "deny"
 
