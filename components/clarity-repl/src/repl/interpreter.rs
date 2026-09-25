@@ -218,10 +218,23 @@ impl std::fmt::Display for ContractCallFailure {
 
 impl std::error::Error for ContractCallFailure {}
 
+/// Why a contract call failed. `Display` is the message shown to the user.
 #[derive(Debug, Clone)]
 pub enum ContractCallError {
-    NoSuchContract(String),
-    NoSuchFunction(String),
+    /// The called contract is not deployed.
+    NoSuchContract {
+        contract: String,
+    },
+    /// The contract defines no function by this name.
+    NoSuchFunction {
+        contract: String,
+        function: String,
+    },
+    /// The function exists but cannot be called from outside the contract.
+    PrivateFunction {
+        contract: String,
+        function: String,
+    },
     /// A post-condition rejected the call's asset movement. The message is
     /// already phrased for the user by the upstream checker.
     PostConditionAborted(BoundedErrorString),
@@ -229,32 +242,40 @@ pub enum ContractCallError {
 }
 
 impl ContractCallError {
-    /// What to tell the user, without the variant name `Display` adds.
-    pub fn message(&self) -> &str {
-        match self {
-            ContractCallError::NoSuchContract(message)
-            | ContractCallError::NoSuchFunction(message)
-            | ContractCallError::Uncategorized(message) => message,
-            ContractCallError::PostConditionAborted(reason) => reason,
-        }
-    }
-
     /// Classify the typed error; the formatted message may contain unrelated
-    /// nested error names.
-    fn from_vm_error(error: &VmExecutionError, message: String) -> Self {
+    /// nested error names, so it is only used when nothing more specific fits.
+    fn from_vm_error(
+        error: &VmExecutionError,
+        contract_id: &QualifiedContractIdentifier,
+        message: String,
+    ) -> Self {
         match error {
-            // Either the function is absent, or it exists but is not callable
-            // from outside the contract.
-            VmExecutionError::RuntimeCheck(
-                RuntimeCheckErrorKind::UndefinedFunction(_)
-                | RuntimeCheckErrorKind::NoSuchPublicFunction(..),
-            ) => ContractCallError::NoSuchFunction(message),
-
-            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NoSuchContract(_)) => {
-                ContractCallError::NoSuchContract(message)
+            // `UndefinedFunction` names no contract; the called one is the
+            // contract it was looked up on.
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::UndefinedFunction(function)) => {
+                ContractCallError::NoSuchFunction {
+                    contract: contract_id.to_string(),
+                    function: function.clone(),
+                }
             }
 
-            _ if is_missing_contract_metadata(error) => ContractCallError::NoSuchContract(message),
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NoSuchPublicFunction(
+                contract,
+                function,
+            )) => ContractCallError::PrivateFunction {
+                contract: contract.clone(),
+                function: function.clone(),
+            },
+
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NoSuchContract(contract)) => {
+                ContractCallError::NoSuchContract {
+                    contract: contract.clone(),
+                }
+            }
+
+            _ if is_missing_contract_metadata(error) => ContractCallError::NoSuchContract {
+                contract: contract_id.to_string(),
+            },
 
             _ => ContractCallError::Uncategorized(message),
         }
@@ -279,7 +300,7 @@ impl ContractCallFailure {
         contract_id: &QualifiedContractIdentifier,
         epoch: StacksEpochId,
     ) -> Self {
-        let kind = ContractCallError::from_vm_error(&error, message);
+        let kind = ContractCallError::from_vm_error(&error, contract_id, message);
         let as_mainnet_raised_it = if is_missing_contract_metadata(&error) {
             VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NoSuchContract(
                 contract_id.to_string(),
@@ -300,18 +321,23 @@ impl ContractCallFailure {
 impl std::fmt::Display for ContractCallError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContractCallError::NoSuchContract(contract_id) => {
-                write!(f, "NoSuchContract({contract_id})")
+            ContractCallError::NoSuchContract { contract } => {
+                write!(f, "Contract '{contract}' does not exist")
             }
-            ContractCallError::NoSuchFunction(function_name) => {
-                write!(f, "NoSuchFunction({function_name})")
+            ContractCallError::NoSuchFunction { contract, function } => {
+                write!(
+                    f,
+                    "Function '{function}' does not exist on contract '{contract}'"
+                )
             }
-            ContractCallError::PostConditionAborted(reason) => {
-                write!(f, "PostConditionAborted({reason})")
+            ContractCallError::PrivateFunction { contract, function } => {
+                write!(
+                    f,
+                    "Function '{function}' on contract '{contract}' is not public"
+                )
             }
-            ContractCallError::Uncategorized(message) => {
-                write!(f, "Uncategorized({message})")
-            }
+            ContractCallError::PostConditionAborted(reason) => reason.fmt(f),
+            ContractCallError::Uncategorized(message) => message.fmt(f),
         }
     }
 }
@@ -1157,7 +1183,7 @@ impl ClarityInterpreter {
             },
         )
         .map_err(|failure| ExecutionError {
-            diagnostics: vec![runtime_diagnostic(failure.error.message())],
+            diagnostics: vec![runtime_diagnostic(&failure.error)],
             inclusion: failure.inclusion,
         })
     }
@@ -1220,7 +1246,7 @@ impl ClarityInterpreter {
             },
         )
         .map_err(|failure| ExecutionError {
-            diagnostics: vec![runtime_diagnostic(failure.error.message())],
+            diagnostics: vec![runtime_diagnostic(&failure.error)],
             inclusion: failure.inclusion,
         })
     }
@@ -1309,7 +1335,7 @@ impl ClarityInterpreter {
             Ok(result) => result,
             Err(failure) => {
                 for hook in &mut connection.hooks {
-                    hook.did_complete(Err(failure.error.message().to_string()));
+                    hook.did_complete(Err(failure.error.to_string()));
                 }
                 return Err(failure);
             }
@@ -2570,22 +2596,37 @@ mod tests {
     fn contract_call_errors_are_classified_by_type_not_message() {
         use clarity::vm::errors::RuntimeError;
 
+        let contract_id = QualifiedContractIdentifier::transient();
+
         // An unrelated failure whose text merely mentions `UndefinedFunction`
         // must not be reported as a missing function.
         let misleading =
             VmExecutionError::Runtime(RuntimeError::Arithmetic("UndefinedFunction".into()), None);
         assert!(matches!(
-            ContractCallError::from_vm_error(&misleading, "UndefinedFunction".into()),
+            ContractCallError::from_vm_error(&misleading, &contract_id, "UndefinedFunction".into()),
             ContractCallError::Uncategorized(_)
         ));
 
         // A genuinely undefined function is still classified as one.
         let undefined =
             VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::UndefinedFunction("no".into()));
-        assert!(matches!(
-            ContractCallError::from_vm_error(&undefined, "message".into()),
-            ContractCallError::NoSuchFunction(_)
+        let error = ContractCallError::from_vm_error(&undefined, &contract_id, "message".into());
+        assert!(matches!(error, ContractCallError::NoSuchFunction { .. }));
+        assert_eq!(
+            error.to_string(),
+            format!("Function 'no' does not exist on contract '{contract_id}'")
+        );
+
+        // An existing function that is not public is reported as such, naming
+        // the contract upstream looked it up on.
+        let private = VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NoSuchPublicFunction(
+            "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.other".into(),
+            "hidden".into(),
         ));
+        assert_eq!(
+            ContractCallError::from_vm_error(&private, &contract_id, "message".into()).to_string(),
+            "Function 'hidden' on contract 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.other' is not public"
+        );
 
         // As is the internal-expectation route simnet takes to a contract that
         // does not exist.
@@ -2593,10 +2634,11 @@ mod tests {
             "Failed to read non-consensus contract metadata, even though contract exists in MARF."
                 .into(),
         ));
-        assert!(matches!(
-            ContractCallError::from_vm_error(&missing_contract, "message".into()),
-            ContractCallError::NoSuchContract(_)
-        ));
+        assert_eq!(
+            ContractCallError::from_vm_error(&missing_contract, &contract_id, "message".into())
+                .to_string(),
+            format!("Contract '{contract_id}' does not exist")
+        );
     }
 
     #[test]
@@ -3564,7 +3606,7 @@ mod tests {
 
         let failure = result.expect_err("calling an undefined function must fail");
         assert!(
-            matches!(failure.error, ContractCallError::NoSuchFunction(_)),
+            matches!(failure.error, ContractCallError::NoSuchFunction { .. }),
             "got: {:?}",
             failure.error
         );
@@ -3588,7 +3630,7 @@ mod tests {
 
         let failure = result.expect_err("calling a missing contract must fail");
         assert!(
-            matches!(failure.error, ContractCallError::NoSuchContract(_)),
+            matches!(failure.error, ContractCallError::NoSuchContract { .. }),
             "got: {:?}",
             failure.error
         );
@@ -3625,7 +3667,7 @@ mod tests {
                 .expect_err("calling a missing contract must fail");
 
             assert!(
-                matches!(failure.error, ContractCallError::NoSuchContract(_)),
+                matches!(failure.error, ContractCallError::NoSuchContract { .. }),
                 "{epoch}: got {:?}",
                 failure.error
             );
@@ -3694,10 +3736,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().error;
         match err {
-            ContractCallError::NoSuchFunction(ref function_name) => {
-                assert!(function_name.contains("private-func"));
+            ContractCallError::PrivateFunction { ref function, .. } => {
+                assert_eq!(function, "private-func");
             }
-            _ => panic!("Expected NoSuchFunction error"),
+            _ => panic!("Expected PrivateFunction error, got {err:?}"),
         }
     }
 
