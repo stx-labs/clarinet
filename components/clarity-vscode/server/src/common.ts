@@ -13,7 +13,8 @@ import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
 
-// every notification the queue carries has this shape, whatever its method
+// notifications with no textDocument (`initialized`, `$/setTrace`) reach this
+// handler too, they just never match a URI
 function documentUri(params: unknown): string | undefined {
   return (params as { textDocument?: { uri?: string } })?.textDocument?.uri;
 }
