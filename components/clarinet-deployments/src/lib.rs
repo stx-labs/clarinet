@@ -139,9 +139,10 @@ pub fn setup_session_with_deployment(
         session.interpreter.repl_settings.analysis.disable_all();
     }
 
-    // A plan written before `remap-principals` existed records nothing, so
-    // the marker is re-derived here and a plan loaded from disk describes the
-    // same code a freshly generated one would.
+    // Older plans carry no marker: they predate `remap-principals`, or, for
+    // requirements, predate requirements being remapped. The marker is
+    // re-derived here so a plan loaded from disk describes the same code a
+    // freshly generated one would.
     //
     // The gate is deliberately narrower than the generator's, which skips the
     // rewrite for any remote-data session. The session is built first because
@@ -170,10 +171,9 @@ pub fn setup_session_with_deployment(
 
                 // Without this, a plan loaded from disk silently deploys
                 // mainnet boot principals and the PoX lock goes missing again.
-                // Requirements are included: simnet emulates them, so they
-                // need the same rewrite. A source that references no mainnet
-                // boot contract is skipped — marking it would claim a rewrite
-                // that `source_for_emulated_publish` would then not perform.
+                // Applies to requirements too. A source that references no
+                // mainnet boot contract is skipped — marking it would claim a
+                // rewrite that `source_for_emulated_publish` would not perform.
                 if backfill_legacy_boot_remap
                     && spec.remap_principals.is_empty()
                     && remap_mainnet_boot_principals(&spec.source).is_some()
@@ -1038,10 +1038,9 @@ pub async fn generate_default_deployment_with_cache(
                     // Build the struct representing the requirement in the deployment
                     if matches!(network, StacksNetwork::Simnet) {
                         if !simnet_remote_data {
-                            // Requirements are mainnet code, so they always
-                            // name the `SP000...` boot contracts. Same rewrite
-                            // and gate as project contracts below, applied
-                            // before the AST is built.
+                            // Same rewrite and gate as project contracts
+                            // below, applied before the AST is built. A no-op
+                            // for testnet requirements.
                             let remap_principals = if environment == Environment::Simnet {
                                 remap_source_boot_principals(&mut source)
                             } else {

@@ -1,8 +1,9 @@
 //! Requirements and project contracts must share simnet's testnet boot state.
 //! Cache fixtures exercise requirement loading without network access.
 //!
-//! A fix must rewrite requirements before building their ASTs, only for
-//! `Environment::Simnet` with remote data disabled, and backfill legacy plans.
+//! Requirements are rewritten before their ASTs are built, only for
+//! `Environment::Simnet` with remote data disabled, and legacy plans are
+//! backfilled.
 
 use std::fs;
 use std::path::Path;
@@ -261,7 +262,7 @@ async fn a_requirement_and_a_project_contract_share_boot_state() {
         &format!("(contract-call? '{DEPLOYER}.reader read-proposal)"),
     );
 
-    // Bypass user-snippet remapping to identify which copy holds the write.
+    // `eval` skips `remap_user_snippet`, so each twin is queried directly.
     let on_mainnet_twin = eval(
         &mut session,
         &format!("(contract-call? '{BOOT_MAINNET_ADDRESS}.cost-voting get-proposal u0)"),
@@ -440,7 +441,7 @@ async fn generated_dependencies_and_project_asts_share_requirement_boot_state() 
         "{REQUIREMENT_DEPLOYER}.writer"
     ))
     .unwrap();
-    // Requirement ASTs feed dependency analysis; only project ASTs are returned.
+    // `deps` covers requirements; `asts` holds project contracts only.
     let deps = &generated.deps[&writer_id];
     assert!(deps
         .iter()
