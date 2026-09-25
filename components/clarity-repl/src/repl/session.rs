@@ -259,9 +259,29 @@ pub struct Session {
     pub show_costs: bool,
     pub last_contract_call_trace: Option<String>,
 
-    coverage_hook: Option<CoverageHook>,
-    logger_hook: Option<LoggerHook>,
-    perf_hook: Option<PerfHook>,
+    hooks: SessionHooks,
+}
+
+/// The optional hooks a session attaches to every evaluation.
+#[derive(Clone, Default)]
+struct SessionHooks {
+    coverage: Option<CoverageHook>,
+    logger: Option<LoggerHook>,
+    perf: Option<PerfHook>,
+}
+
+impl SessionHooks {
+    /// Borrows only the hooks, so callers can still use the interpreter.
+    fn enabled(&mut self) -> Vec<&mut dyn EvalHook> {
+        [
+            self.coverage.as_mut().map(|hook| hook as &mut dyn EvalHook),
+            self.logger.as_mut().map(|hook| hook as &mut dyn EvalHook),
+            self.perf.as_mut().map(|hook| hook as &mut dyn EvalHook),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
 }
 
 impl Session {
@@ -302,30 +322,27 @@ impl Session {
             show_costs: false,
             settings,
             last_contract_call_trace: None,
-
-            coverage_hook: None,
-            logger_hook: None,
-            perf_hook: None,
+            hooks: SessionHooks::default(),
         }
     }
 
     pub fn enable_coverage_hook(&mut self) {
-        self.coverage_hook = Some(CoverageHook::new());
+        self.hooks.coverage = Some(CoverageHook::new());
     }
 
     pub fn enable_logger_hook(&mut self) {
         let mode = self.settings.repl_settings.log_print_events;
         if mode != LogPrintEvents::None {
-            self.logger_hook = Some(LoggerHook::new(mode));
+            self.hooks.logger = Some(LoggerHook::new(mode));
         }
     }
 
     pub fn enable_performance(&mut self, cost_field: CostField) {
-        self.perf_hook = Some(PerfHook::new(cost_field));
+        self.hooks.perf = Some(PerfHook::new(cost_field));
     }
 
     pub fn set_test_name(&mut self, name: String) {
-        if let Some(coverage_hook) = &mut self.coverage_hook {
+        if let Some(coverage_hook) = &mut self.hooks.coverage {
             coverage_hook.set_current_test_name(name);
         }
     }
@@ -335,7 +352,7 @@ impl Session {
         asts: &BTreeMap<QualifiedContractIdentifier, ContractAST>,
         contract_paths: &BTreeMap<String, String>,
     ) -> String {
-        if let Some(coverage_hook) = &mut self.coverage_hook {
+        if let Some(coverage_hook) = &mut self.hooks.coverage {
             coverage_hook.collect_lcov_content(asts, contract_paths)
         } else {
             "".to_string()
@@ -745,17 +762,20 @@ impl Session {
             }]);
         }
 
-        let sender = self.interpreter.get_tx_sender();
-        let snippet = format!("(stx-transfer? u{amount} tx-sender '{recipient})");
-
-        // An STX transfer is a transaction and consumes a nonce. `eval` also
-        // backs bare snippets and function-argument evaluation, neither of
-        // which is one, so the terms are named here.
-        let terms = TransactionTerms {
-            charge: NonceCharge::Sender(sender.into()),
-            post_conditions: PostConditionCheck::Unchecked,
-        };
-        self.eval_with_inclusion(snippet, false, terms)
+        let recipient = PrincipalData::parse(recipient).map_err(|error| {
+            vec![Diagnostic {
+                level: Level::Error,
+                message: bounded_format!("Invalid transfer recipient: {error}"),
+                spans: vec![],
+                suggestion: None,
+            }]
+        })?;
+        self.interpreter
+            .stx_transfer(amount, recipient, self.hooks.enabled())
+            .map(|execution_result| AnnotatedExecutionResult {
+                execution_result,
+                lint_diagnostics: vec![],
+            })
             .map_err(Vec::from)
     }
 
@@ -801,16 +821,7 @@ impl Session {
         let initial_tx_sender = self.get_tx_sender();
         self.set_tx_sender(&contract_id.issuer.to_string());
 
-        let mut hooks: Vec<&mut dyn EvalHook> = vec![];
-        if let Some(ref mut coverage_hook) = self.coverage_hook {
-            hooks.push(coverage_hook);
-        }
-        if let Some(ref mut logger_hook) = self.logger_hook {
-            hooks.push(logger_hook);
-        }
-        if let Some(ref mut perf_hook) = self.perf_hook {
-            hooks.push(perf_hook);
-        }
+        let hooks = self.hooks.enabled();
 
         // Boot contracts bypass this transaction path because they are genesis
         // state and consume no nonce.
@@ -930,15 +941,7 @@ impl Session {
 
         let mut tracer_hook = TracerHook::new();
         let mut hooks: Vec<&mut dyn EvalHook> = vec![&mut tracer_hook];
-        if let Some(ref mut coverage_hook) = self.coverage_hook {
-            hooks.push(coverage_hook);
-        }
-        if let Some(ref mut logger_hook) = self.logger_hook {
-            hooks.push(logger_hook);
-        }
-        if let Some(ref mut perf_hook) = self.perf_hook {
-            hooks.push(perf_hook);
-        }
+        hooks.extend(self.hooks.enabled());
 
         // Taken from the interpreter rather than re-parsed, so the principal
         // charged is exactly the one the call runs as.
@@ -972,21 +975,12 @@ impl Session {
             if let Some(traced_error) = tracer_hook.error {
                 ueprint!("{}", traced_error);
             }
-            let contract_id_str = contract_id.to_string();
             let message = match failure.error {
-                ContractCallError::NoSuchContract(_) => {
-                    bounded_format!("Contract '{contract_id_str}' does not exist")
-                }
-                ContractCallError::NoSuchFunction(_) => {
-                    bounded_format!(
-                        "Method '{method}' does not exist on contract '{contract_id_str}'"
-                    )
-                }
-                // Already phrased for the user by the post-condition checker.
-                ContractCallError::PostConditionAborted(reason) => reason,
                 ContractCallError::Uncategorized(message) => {
                     bounded_format!("Error calling contract function '{method}': {message}")
                 }
+                // The other variants are already phrased for the user.
+                error => BoundedErrorString::from_display(&error),
             };
             ExecutionError {
                 diagnostics: vec![Diagnostic {
@@ -1006,17 +1000,6 @@ impl Session {
         snippet: String,
         cost_track: bool,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
-        self.eval_with_inclusion(snippet, cost_track, TransactionTerms::default())
-            .map_err(Vec::from)
-    }
-
-    /// Evaluate a snippet while preserving failure inclusion and transaction terms.
-    fn eval_with_inclusion(
-        &mut self,
-        snippet: String,
-        cost_track: bool,
-        terms: TransactionTerms,
-    ) -> Result<AnnotatedExecutionResult, ExecutionError> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
@@ -1029,27 +1012,19 @@ impl Session {
         let contract_identifier =
             contract.expect_resolved_contract_identifier(Some(&self.interpreter.get_tx_sender()));
 
-        let mut hooks: Vec<&mut dyn EvalHook> = vec![];
-        if let Some(ref mut coverage_hook) = self.coverage_hook {
-            hooks.push(coverage_hook);
-        }
-        if let Some(ref mut logger_hook) = self.logger_hook {
-            hooks.push(logger_hook);
-        }
-        if let Some(ref mut perf_hook) = self.perf_hook {
-            hooks.push(perf_hook);
-        }
+        let hooks = self.hooks.enabled();
+        let result = self
+            .interpreter
+            .run(&contract, None, cost_track, Some(hooks));
 
-        let result =
-            self.interpreter
-                .run_with_terms(&contract, None, cost_track, Some(hooks), &terms);
-
-        result.inspect(|result| {
-            if let EvaluationResult::Contract(contract_result) = &result.result {
-                self.contracts
-                    .insert(contract_identifier, contract_result.contract.clone());
-            }
-        })
+        result
+            .inspect(|result| {
+                if let EvaluationResult::Contract(contract_result) = &result.result {
+                    self.contracts
+                        .insert(contract_identifier, contract_result.contract.clone());
+                }
+            })
+            .map_err(Vec::from)
     }
 
     /// Evaluate a Clarity snippet in order to use it as Clarity function arguments
@@ -1749,7 +1724,7 @@ impl Session {
     }
 
     pub fn get_performance_data(&self) -> Option<String> {
-        if let Some(ref perf_hook) = self.perf_hook {
+        if let Some(perf_hook) = &self.hooks.perf {
             perf_hook.get_buffer_data()
         } else {
             None
@@ -1757,7 +1732,7 @@ impl Session {
     }
 
     pub fn clear_performance_buffer(&mut self) {
-        if let Some(ref mut perf_hook) = self.perf_hook {
+        if let Some(perf_hook) = &mut self.hooks.perf {
             perf_hook.clear_buffer();
         }
     }
@@ -2377,36 +2352,74 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_stx_transfer_bumps_the_sender_nonce() {
-        // `stx-transfer?` reports insufficient funds as an `(err …)` response,
-        // not a VM failure, so the transaction succeeded as far as the chain is
-        // concerned. Mainnet mines it and charges the nonce.
+    fn an_underfunded_native_stx_transfer_is_rejected_without_a_nonce() {
         let mut session = Session::new(SessionSettings::default());
         let sender = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
         let addr = principal(sender);
-
         session.set_tx_sender(sender);
-        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
-
-        let result = session
+        let error = session
             .stx_transfer(
                 1000,
                 "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG",
                 PostConditionCheck::Unchecked,
             )
-            .expect("an underfunded transfer still executes");
-        match result.execution_result.result {
-            EvaluationResult::Snippet(res) => {
-                assert!(
-                    matches!(res.result, Value::Response(ref r) if !r.committed),
-                    "expected an (err …) response, got {:?}",
-                    res.result
-                );
-            }
-            EvaluationResult::Contract(_) => unreachable!("not a deploy"),
-        }
+            .expect_err("stacks-node rejects an underfunded TokenTransfer");
+        assert_eq!(
+            error[0].message,
+            "Runtime Error: Invalid TokenTransfer: insufficient unlocked balance to send 1000 uSTX"
+        );
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+    }
 
-        assert_eq!(session.get_nonce(&addr).unwrap(), 1);
+    #[test]
+    fn a_zero_amount_native_stx_transfer_is_rejected_without_a_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = session.get_tx_sender();
+        let addr = principal(&sender);
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1000)
+            .unwrap();
+        let error = session
+            .stx_transfer(
+                0,
+                "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG",
+                PostConditionCheck::Unchecked,
+            )
+            .expect_err("stacks-node rejects a zero-amount TokenTransfer");
+        assert_eq!(
+            error[0].message,
+            "Runtime Error: Invalid TokenTransfer: amount must be positive"
+        );
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_native_stx_self_transfer_is_rejected_without_a_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = session.get_tx_sender();
+        let addr = principal(&sender);
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1000)
+            .unwrap();
+        let error = session
+            .stx_transfer(100, &sender, PostConditionCheck::Unchecked)
+            .unwrap_err();
+        assert!(error[0].message.contains("address tried to send to itself"));
+        assert_eq!(session.get_nonce(&addr).unwrap(), 0);
+        assert_eq!(
+            session.interpreter.get_balance_for_account(&sender, "STX"),
+            1000
+        );
+        // The Clarity function in a snippet still returns its ordinary response.
+        let snippet = session
+            .eval("(stx-transfer? u100 tx-sender tx-sender)".into(), false)
+            .unwrap();
+        let EvaluationResult::Snippet(result) = snippet.execution_result.result else {
+            panic!()
+        };
+        assert!(matches!(result.result, Value::Response(ref response) if !response.committed));
     }
 
     #[test]
@@ -2546,7 +2559,15 @@ mod tests {
         // Divide by zero at the top level: `Runtime` → `Acceptable` → included.
         let (before, after, result) =
             deploy_and_read_nonce(&mut session, deployer, "div-zero", "(/ u1 u0)");
-        assert!(result.is_err(), "the deploy must still be reported failed");
+        let error = result.expect_err("the deploy must still be reported failed");
+        assert!(
+            error[0].message.starts_with(
+                "Runtime Error: Runtime error while interpreting \
+                 ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5.div-zero: Runtime(DivisionByZero"
+            ),
+            "{}",
+            error[0].message
+        );
         assert_eq!(after, before + 1, "divide-by-zero is included in a block");
 
         // `unwrap-panic` on `none`: `EarlyReturn` → `Acceptable` → included.
@@ -3149,9 +3170,48 @@ mod tests {
         assert_eq!(
             diagnostics[0].message,
             format!(
-                "Method 'doesnt-exist' does not exist on contract '{}.contract'",
+                "Function 'doesnt-exist' does not exist on contract '{}.contract'",
                 session.get_tx_sender()
             )
+        );
+    }
+
+    #[test]
+    fn contract_call_errors_name_the_contract_and_function() {
+        let mut session = Session::new(SessionSettings::default());
+        session.update_epoch(DEFAULT_EPOCH);
+        let sender = session.get_tx_sender();
+        let contract = ClarityContractBuilder::default()
+            .code_source("(define-private (hidden) (ok true))".into())
+            .build();
+        session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .unwrap();
+
+        let call = |session: &mut Session, contract: &str, function: &str| {
+            let diagnostics = session
+                .call_contract_fn(
+                    contract,
+                    function,
+                    &[],
+                    &sender,
+                    false,
+                    false,
+                    CallKind::Transaction,
+                    PostConditionCheck::Unchecked,
+                )
+                .unwrap_err()
+                .diagnostics;
+            diagnostics[0].message.to_string()
+        };
+
+        assert_eq!(
+            call(&mut session, "contract", "hidden"),
+            format!("Function 'hidden' on contract '{sender}.contract' is not public")
+        );
+        assert_eq!(
+            call(&mut session, "missing", "hidden"),
+            format!("Contract '{sender}.missing' does not exist")
         );
     }
 
@@ -3407,7 +3467,7 @@ mod tests {
         let mut session = Session::new_without_boot_contracts(settings);
 
         session.enable_logger_hook();
-        if let Some(hook) = &session.logger_hook {
+        if let Some(hook) = &session.hooks.logger {
             assert_eq!(hook.mode, LogPrintEvents::All);
         } else {
             panic!("logger_hook is None");

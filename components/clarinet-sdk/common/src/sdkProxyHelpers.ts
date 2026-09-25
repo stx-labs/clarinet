@@ -104,6 +104,8 @@ export type CallReadOnlyFn = (
 export type DeployContractOptions = {
   clarityVersion: ClarityVersion;
 };
+/** Deploy using the node's initialization rules. Success returns `(ok true)`,
+ * regardless of the initializer's final expression. */
 export type DeployContract = (
   name: string,
   content: string,
@@ -112,6 +114,8 @@ export type DeployContract = (
   postConditionOptions?: PostConditionOptions,
 ) => ParsedTransactionResult;
 
+/** Execute a native STX transfer. Invalid transfers (self-transfers, zero
+ * amounts and insufficient funds) throw without consuming a nonce. */
 export type TransferSTX = (
   amount: number | bigint,
   recipient: string,

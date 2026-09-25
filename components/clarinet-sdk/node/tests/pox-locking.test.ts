@@ -81,8 +81,11 @@ describe("test pox-3", () => {
       }),
     );
 
-    const transfer = simnet.transferSTX(ustxAmount, address2, address1);
-    expect(transfer.result).toStrictEqual(Cl.error(Cl.uint(1)));
+    const nonce = simnet.getAccountNonce(address1);
+    expect(() => simnet.transferSTX(ustxAmount, address2, address1)).toThrow(
+      /insufficient unlocked balance/,
+    );
+    expect(simnet.getAccountNonce(address1)).toBe(nonce);
   });
 
   it("unlocks stx after a certain number of blocks", () => {
