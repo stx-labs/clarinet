@@ -29,6 +29,7 @@ type Options = {
   trackCosts: boolean;
   trackCoverage: boolean;
   trackPerformance?: boolean;
+  clarityWasm?: boolean;
 };
 
 export async function getSDK(options?: Options): Promise<Simnet> {
@@ -37,6 +38,7 @@ export async function getSDK(options?: Options): Promise<Simnet> {
     !!options?.trackCosts,
     !!options?.trackCoverage,
     !!options?.trackPerformance,
+    options?.clarityWasm ?? process.env.CLARINET_CLARITY_WASM === "1",
   );
 
   const simnet = new Proxy(
@@ -72,6 +74,7 @@ function memoizedInit() {
       trackCosts: boolean;
       trackCoverage: boolean;
       trackPerformance?: boolean;
+      clarityWasm?: boolean;
       performanceCostField?: string;
       apiUrl?: string;
     },

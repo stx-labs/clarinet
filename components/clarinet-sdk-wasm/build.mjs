@@ -13,7 +13,17 @@ const rootDir = new URL(".", import.meta.url).pathname;
 async function build_wasm_sdk() {
   const isDev = process.argv.includes("--dev");
   const profileFlag = isDev ? "--dev" : "--release";
-  console.log(`Building wasm SDK (${profileFlag})`);
+  const extraFeatures = (process.env.CLARINET_SDK_FEATURES ?? "")
+    .split(",")
+    .map((f) => f.trim())
+    .filter(Boolean);
+  const nodeFeatures = extraFeatures.length
+    ? ["--features", extraFeatures.join(",")]
+    : [];
+  const browserFeatures = ["--features", ["web", ...extraFeatures].join(",")];
+  console.log(
+    `Building wasm SDK (${profileFlag})${extraFeatures.length ? ` with features: ${extraFeatures.join(",")}` : ""}`,
+  );
 
   console.log("Deleting pkg-node");
   await rmIfExists(path.join(rootDir, "pkg-node"));
@@ -30,6 +40,7 @@ async function build_wasm_sdk() {
       "pkg-node",
       "--target",
       "nodejs",
+      ...nodeFeatures,
     ]),
     execCommand("wasm-pack", [
       "build",
@@ -40,8 +51,7 @@ async function build_wasm_sdk() {
       "pkg-browser",
       "--target",
       "web",
-      "--features",
-      "web",
+      ...browserFeatures,
     ]),
   ]);
 
@@ -60,7 +70,9 @@ async function includeNodeSnippets() {
     pkg.files.push("snippets");
   }
   await fs.writeFile(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
-  console.log("✅ pkg-node/package.json files list patched to include snippets");
+  console.log(
+    "✅ pkg-node/package.json files list patched to include snippets",
+  );
 
   // Sanity check: sync_http.cjs is self-contained (worker + layout inlined)
   // precisely so that nothing else needs to be copied here — wasm-bindgen

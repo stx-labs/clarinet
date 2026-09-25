@@ -343,18 +343,37 @@ pub struct SDKOptions {
     pub track_coverage: bool,
     #[wasm_bindgen(js_name = trackPerformance)]
     pub track_performance: bool,
+    #[wasm_bindgen(js_name = clarityWasm)]
+    pub clarity_wasm: bool,
 }
 
 #[wasm_bindgen]
 impl SDKOptions {
     #[wasm_bindgen(constructor)]
-    pub fn new(track_costs: bool, track_coverage: bool, track_performance: Option<bool>) -> Self {
+    pub fn new(
+        track_costs: bool,
+        track_coverage: bool,
+        track_performance: Option<bool>,
+        clarity_wasm: Option<bool>,
+    ) -> Self {
         Self {
             track_costs,
             track_coverage,
             track_performance: track_performance.unwrap_or(false),
+            clarity_wasm: clarity_wasm.unwrap_or(false),
         }
     }
+}
+
+// No-op unless built with the `clarity-wasm` feature.
+fn apply_clarity_wasm(session: &mut Session, enabled: bool) {
+    #[cfg(feature = "clarity-wasm")]
+    {
+        session.settings.repl_settings.clarity_wasm = enabled;
+        session.interpreter.repl_settings.clarity_wasm = enabled;
+    }
+    #[cfg(not(feature = "clarity-wasm"))]
+    let _ = (session, enabled);
 }
 
 #[wasm_bindgen]
@@ -405,6 +424,7 @@ impl SDK {
         let track_coverage = options.as_ref().is_some_and(|o| o.track_coverage);
         let track_costs = options.as_ref().is_some_and(|o| o.track_costs);
         let track_performance = options.as_ref().is_some_and(|o| o.track_performance);
+        let clarity_wasm = options.as_ref().is_some_and(|o| o.clarity_wasm);
 
         Self {
             deployer: String::new(),
@@ -418,6 +438,7 @@ impl SDK {
                 track_coverage,
                 track_costs,
                 track_performance,
+                clarity_wasm,
             },
             current_test_name: String::new(),
             costs_reports: vec![],
@@ -454,7 +475,8 @@ impl SDK {
 
         let mut settings = SessionSettings::default();
         settings.repl_settings.remote_data = config.unwrap_or_default();
-        let session = Session::new(settings);
+        let mut session = Session::new(settings);
+        apply_clarity_wasm(&mut session, self.options.clarity_wasm);
 
         self.session = Some(session);
         Ok(())
@@ -511,6 +533,7 @@ impl SDK {
             .await?;
 
         let mut session = initiate_session_from_manifest(&manifest);
+        apply_clarity_wasm(&mut session, self.options.clarity_wasm);
         session.interpreter.repl_settings.analysis.disable_all();
         if self.options.track_coverage {
             session.enable_coverage_hook();
