@@ -109,6 +109,7 @@ needless_collect = "deny"
 needless_pass_by_ref_mut = "deny"
 or_fun_call = "deny"
 redundant_clone = "deny"
+unnecessary_struct_initialization = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wasm_bindgen_unstable_test_coverage)', 'cfg(getrandom_backend, values("wasm_js"))'] }
