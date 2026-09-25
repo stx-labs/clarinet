@@ -985,21 +985,12 @@ impl Session {
             if let Some(traced_error) = tracer_hook.error {
                 ueprint!("{}", traced_error);
             }
-            let contract_id_str = contract_id.to_string();
             let message = match failure.error {
-                ContractCallError::NoSuchContract(_) => {
-                    bounded_format!("Contract '{contract_id_str}' does not exist")
-                }
-                ContractCallError::NoSuchFunction(_) => {
-                    bounded_format!(
-                        "Method '{method}' does not exist on contract '{contract_id_str}'"
-                    )
-                }
-                // Already phrased for the user by the post-condition checker.
-                ContractCallError::PostConditionAborted(reason) => reason,
                 ContractCallError::Uncategorized(message) => {
                     bounded_format!("Error calling contract function '{method}': {message}")
                 }
+                // The other variants are already phrased for the user.
+                error => BoundedErrorString::from_display(&error),
             };
             ExecutionError {
                 diagnostics: vec![Diagnostic {
@@ -3208,9 +3199,48 @@ mod tests {
         assert_eq!(
             diagnostics[0].message,
             format!(
-                "Method 'doesnt-exist' does not exist on contract '{}.contract'",
+                "Function 'doesnt-exist' does not exist on contract '{}.contract'",
                 session.get_tx_sender()
             )
+        );
+    }
+
+    #[test]
+    fn contract_call_errors_name_the_contract_and_function() {
+        let mut session = Session::new(SessionSettings::default());
+        session.update_epoch(DEFAULT_EPOCH);
+        let sender = session.get_tx_sender();
+        let contract = ClarityContractBuilder::default()
+            .code_source("(define-private (hidden) (ok true))".into())
+            .build();
+        session
+            .deploy_contract(&contract, false, None, PostConditionCheck::Unchecked)
+            .unwrap();
+
+        let call = |session: &mut Session, contract: &str, function: &str| {
+            let diagnostics = session
+                .call_contract_fn(
+                    contract,
+                    function,
+                    &[],
+                    &sender,
+                    false,
+                    false,
+                    CallKind::Transaction,
+                    PostConditionCheck::Unchecked,
+                )
+                .unwrap_err()
+                .diagnostics;
+            diagnostics[0].message.to_string()
+        };
+
+        assert_eq!(
+            call(&mut session, "contract", "hidden"),
+            format!("Function 'hidden' on contract '{sender}.contract' is not public")
+        );
+        assert_eq!(
+            call(&mut session, "missing", "hidden"),
+            format!("Contract '{sender}.missing' does not exist")
         );
     }
 
