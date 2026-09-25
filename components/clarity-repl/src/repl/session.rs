@@ -275,6 +275,14 @@ impl Session {
     }
 
     fn inner_new(settings: SessionSettings, with_boot_contracts: bool) -> Self {
+        #[cfg(all(feature = "clarity-wasm", not(target_arch = "wasm32")))]
+        let settings = {
+            let mut settings = settings;
+            if std::env::var("CLARINET_CLARITY_WASM").is_ok_and(|v| v == "1") {
+                settings.repl_settings.clarity_wasm = true;
+            }
+            settings
+        };
         let mut interpreter = ClarityInterpreter::new(
             settings.get_default_sender(),
             settings.repl_settings.clone(),

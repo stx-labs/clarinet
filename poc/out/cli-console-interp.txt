@@ -1,0 +1,58 @@
+clarity-repl v3.24.1
+Enter "::help" for usage hints.
+Connected to a transient in-memory database.
++---------------------------------------------------+---------------------------------+
+| Contract identifier                               | Public functions                |
+|---------------------------------------------------+---------------------------------|
+| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller  | (add-to-counter (n uint))       |
+|                                                   | (bump-counter)                  |
+|                                                   | (divide-by-zero (a uint))       |
+|                                                   | (pox-info)                      |
+|                                                   | (read-counter)                  |
+|                                                   | (reward-cycle-of (height uint)) |
+|                                                   | (unwrap-none)                   |
+|---------------------------------------------------+---------------------------------|
+| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter | (add (n uint))                  |
+|                                                   | (divide                         |
+|                                                   |     (a uint)                    |
+|                                                   |     (b uint))                   |
+|                                                   | (get-count)                     |
+|                                                   | (get-total (who principal))     |
+|                                                   | (increment)                     |
+|                                                   | (panic-none)                    |
++---------------------------------------------------+---------------------------------+
++-------------------------------------------+------------------------+-----------------+
+| Address                                   | .sbtc-token.sbtc-token | uSTX            |
+|-------------------------------------------+------------------------+-----------------|
+| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM | 1000000000             | 100000000000000 |
+|-------------------------------------------+------------------------+-----------------|
+| ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 | 1000000000             | 100000000000000 |
++-------------------------------------------+------------------------+-----------------+
+Events emitted
+{"type":"contract_event","contract_event":{"contract_identifier":"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter","topic":"print","value":"{ count: u1, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"}}
+(ok u1)
+(err u100)
+u1
+Events emitted
+{"type":"contract_event","contract_event":{"contract_identifier":"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter","topic":"print","value":"{ count: u2, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"}}
+(ok u2)
+u2
+(ok { first-burnchain-block-height: u0, min-amount-ustx: u25000000000, prepare-cycle-length: u50, reward-cycle-id: u0, reward-cycle-length: u1050, total-liquid-supply-ustx: u200000000000000 })
+error: Runtime Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.contract-2: Runtime(DivisionByZero, Some([FunctionIdentifier { identifier: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller:divide-by-zero" }, FunctionIdentifier { identifier: "_native_:native_div" }]))
++----------------------+----------+------------+------------+
+|                      | Consumed | Limit      | Percentage |
+|----------------------+----------+------------+------------|
+| Runtime              | 13344    | 5000000000 | 0.00 %     |
+|----------------------+----------+------------+------------|
+| Read count           | 7        | 15000      | 0.05 %     |
+|----------------------+----------+------------+------------|
+| Read length (bytes)  | 849      | 100000000  | 0.00 %     |
+|----------------------+----------+------------+------------|
+| Write count          | 2        | 15000      | 0.01 %     |
+|----------------------+----------+------------+------------|
+| Write length (bytes) | 59       | 15000000   | 0.00 %     |
++----------------------+----------+------------+------------+
+Events emitted
+{"type":"contract_event","contract_event":{"contract_identifier":"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter","topic":"print","value":"{ count: u3, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"}}
+(ok u3)
+CTRL-D

@@ -1,0 +1,298 @@
+15c15
+<           "memory": 57,
+---
+>           "memory": 40,
+18,22c18,22
+<             "read_count": 7,
+<             "read_length": 831,
+<             "runtime": 13326,
+<             "write_count": 2,
+<             "write_length": 59
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+>             "write_count": 0,
+>             "write_length": 0
+38c38
+<       "trace": "│ ✸ print event: (tuple (count u1) (event \"increment\") (sender ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM))\n└── (ok u1)"
+---
+>       "trace": "└── (ok u1)"
+52c52
+<           "memory": 17,
+---
+>           "memory": 0,
+55,59c55,59
+<             "read_count": 6,
+<             "read_length": 826,
+<             "runtime": 3748,
+<             "write_count": 1,
+<             "write_length": 18
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+>             "write_count": 0,
+>             "write_length": 0
+85c85
+<             "runtime": 1447,
+---
+>             "runtime": 869,
+111,113c111,113
+<             "read_count": 4,
+<             "read_length": 808,
+<             "runtime": 1375,
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+139,141c139,141
+<             "read_count": 4,
+<             "read_length": 831,
+<             "runtime": 2864,
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+164c164
+<           "memory": 57,
+---
+>           "memory": 40,
+167,171c167,171
+<             "read_count": 10,
+<             "read_length": 1479,
+<             "runtime": 14208,
+<             "write_count": 2,
+<             "write_length": 59
+---
+>             "read_count": 3,
+>             "read_length": 648,
+>             "runtime": 727,
+>             "write_count": 0,
+>             "write_length": 0
+187c187
+<       "trace": "│ ✸ print event: (tuple (count u5) (event \"increment\") (sender ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5))\n└── (ok u5)\n└── (ok u5)"
+---
+>       "trace": "└── (ok u5)"
+204,206c204,206
+<             "read_count": 6,
+<             "read_length": 1438,
+<             "runtime": 2426,
+---
+>             "read_count": 3,
+>             "read_length": 648,
+>             "runtime": 727,
+215c215
+<       "trace": "├── ( contract-call? ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter add n )  caller:5:3\n│   │ ↳ args: u50\n│   └── (err u100)\n└── (err u100)"
+---
+>       "trace": "└── (err u100)"
+229c229
+<           "memory": 17,
+---
+>           "memory": 0,
+232,236c232,236
+<             "read_count": 9,
+<             "read_length": 1474,
+<             "runtime": 4727,
+<             "write_count": 1,
+<             "write_length": 18
+---
+>             "read_count": 3,
+>             "read_length": 648,
+>             "runtime": 727,
+>             "write_count": 0,
+>             "write_length": 0
+243c243
+<       "trace": "├── ( contract-call? ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter add n )  caller:5:3\n│   │ ↳ args: u4\n│   └── (ok u9)\n└── (ok u9)"
+---
+>       "trace": "└── (ok u9)"
+260,262c260,262
+<             "read_count": 7,
+<             "read_length": 1456,
+<             "runtime": 2257,
+---
+>             "read_count": 3,
+>             "read_length": 648,
+>             "runtime": 727,
+271c271
+<       "trace": "└── u9\n└── u9"
+---
+>       "trace": "└── u9"
+288,290c288,290
+<             "read_count": 14,
+<             "read_length": 76975,
+<             "runtime": 84027,
+---
+>             "read_count": 11,
+>             "read_length": 744,
+>             "runtime": 7562,
+299c299
+<       "trace": "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u2\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+---
+>       "trace": "│   ├── ( get-stacking-minimum )  pox-4:1031:26\n│   │ ↳ args:\n│   └── u25000000000\n│   ├── ( current-pox-reward-cycle )  pox-4:1032:26\n│   │ ↳ args:\n│   ├── ( burn-height-to-reward-cycle burn-block-height )  pox-4:275:5\n│   │   │ ↳ args: u2\n│   │   └── u0\n│   └── u0\n└── (ok (tuple (first-burnchain-block-height u0) (min-amount-ustx u25000000000) (prepare-cycle-length u50) (reward-cycle-id u0) (reward-cycle-length u1050) (total-liquid-supply-ustx u200000000000000)))"
+316,318c316,318
+<             "read_count": 8,
+<             "read_length": 76915,
+<             "runtime": 78723,
+---
+>             "read_count": 5,
+>             "read_length": 684,
+>             "runtime": 2161,
+327c327
+<       "trace": "├── ( contract-call? ST000000000000000000002AMW42H.pox-4 burn-height-to-reward-cycle height )  caller:14:3\n│   │ ↳ args: u5000\n│   └── u4\n└── u4"
+---
+>       "trace": "└── u4"
+333c333
+<         "error": "Error calling contract function 'unwrap-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(UnwrapFailure, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller:unwrap-none\" }, FunctionIdentifier { identifier: \"_native_:native_unwrap\" }]))"
+---
+>         "error": "Error calling contract function 'unwrap-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(UnwrapFailure, Some([]))"
+336c336
+<       "trace": "│   ├── ( get-nothing )  caller:17:21\n│   │ ↳ args:\n│   └── none\nError: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller"
+---
+>       "trace": "Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller"
+342c342
+<         "error": "Error calling contract function 'panic-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(UnwrapFailure, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter:panic-none\" }, FunctionIdentifier { identifier: \"_native_:native_unwrap\" }]))"
+---
+>         "error": "Error calling contract function 'panic-none': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(UnwrapFailure, Some([]))"
+351c351
+<         "error": "Error calling contract function 'divide-by-zero': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(DivisionByZero, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller:divide-by-zero\" }, FunctionIdentifier { identifier: \"_native_:native_div\" }]))"
+---
+>         "error": "Error calling contract function 'divide-by-zero': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: Runtime(DivisionByZero, Some([]))"
+360c360
+<         "error": "Error calling contract function 'divide': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(DivisionByZero, Some([FunctionIdentifier { identifier: \"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter:divide\" }, FunctionIdentifier { identifier: \"_native_:native_div\" }]))"
+---
+>         "error": "Error calling contract function 'divide': Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: Runtime(DivisionByZero, Some([]))"
+382c382
+<             "runtime": 1235,
+---
+>             "runtime": 869,
+405c405
+<           "memory": 57,
+---
+>           "memory": 40,
+408,412c408,412
+<             "read_count": 7,
+<             "read_length": 849,
+<             "runtime": 13344,
+<             "write_count": 2,
+<             "write_length": 59
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+>             "write_count": 0,
+>             "write_length": 0
+428c428
+<       "trace": "│ ✸ print event: (tuple (count u10) (event \"increment\") (sender ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5))\n└── (ok u10)"
+---
+>       "trace": "└── (ok u10)"
+442c442
+<           "memory": 57,
+---
+>           "memory": 40,
+445,449c445,449
+<             "read_count": 10,
+<             "read_length": 1497,
+<             "runtime": 14226,
+<             "write_count": 2,
+<             "write_length": 59
+---
+>             "read_count": 3,
+>             "read_length": 648,
+>             "runtime": 727,
+>             "write_count": 0,
+>             "write_length": 0
+465c465
+<       "trace": "│ ✸ print event: (tuple (count u11) (event \"increment\") (sender ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM))\n└── (ok u11)\n└── (ok u11)"
+---
+>       "trace": "└── (ok u11)"
+479c479
+<           "memory": 17,
+---
+>           "memory": 0,
+482,486c482,486
+<             "read_count": 6,
+<             "read_length": 826,
+<             "runtime": 3748,
+<             "write_count": 1,
+<             "write_length": 18
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+>             "write_count": 0,
+>             "write_length": 0
+510,512c510,512
+<             "read_count": 4,
+<             "read_length": 808,
+<             "runtime": 1375,
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+538,540c538,540
+<             "read_count": 4,
+<             "read_length": 831,
+<             "runtime": 2864,
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+566,568c566,568
+<             "read_count": 4,
+<             "read_length": 831,
+<             "runtime": 2864,
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+597,599c597,599
+<             "runtime": 5620,
+<             "write_count": 3,
+<             "write_length": 182
+---
+>             "runtime": 0,
+>             "write_count": 0,
+>             "write_length": 0
+622c622
+<             "runtime": 1740,
+---
+>             "runtime": 0,
+646,648c646,648
+<             "read_count": 4,
+<             "read_length": 808,
+<             "runtime": 1375,
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 869,
+668c668
+<           "memory": 57,
+---
+>           "memory": 40,
+671,675c671,675
+<             "read_count": 10,
+<             "read_length": 1497,
+<             "runtime": 14226,
+<             "write_count": 2,
+<             "write_length": 59
+---
+>             "read_count": 3,
+>             "read_length": 648,
+>             "runtime": 727,
+>             "write_count": 0,
+>             "write_length": 0
+705,707c705,707
+<             "read_count": 4,
+<             "read_length": 831,
+<             "runtime": 4728,
+---
+>             "read_count": 3,
+>             "read_length": 790,
+>             "runtime": 2733,
+728,729c728,729
+<     "caller": false,
+<     "counter": false,
+---
+>     "caller": true,
+>     "counter": true,

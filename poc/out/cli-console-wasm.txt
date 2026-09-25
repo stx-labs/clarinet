@@ -1,0 +1,68 @@
+[clarity-wasm] deploy ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: module 23259 bytes
+[clarity-wasm] deploy ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: module 22875 bytes
+clarity-repl v3.24.1
+Enter "::help" for usage hints.
+Connected to a transient in-memory database.
++---------------------------------------------------+---------------------------------+
+| Contract identifier                               | Public functions                |
+|---------------------------------------------------+---------------------------------|
+| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller  | (add-to-counter (n uint))       |
+|                                                   | (bump-counter)                  |
+|                                                   | (divide-by-zero (a uint))       |
+|                                                   | (pox-info)                      |
+|                                                   | (read-counter)                  |
+|                                                   | (reward-cycle-of (height uint)) |
+|                                                   | (unwrap-none)                   |
+|---------------------------------------------------+---------------------------------|
+| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter | (add (n uint))                  |
+|                                                   | (divide                         |
+|                                                   |     (a uint)                    |
+|                                                   |     (b uint))                   |
+|                                                   | (get-count)                     |
+|                                                   | (get-total (who principal))     |
+|                                                   | (increment)                     |
+|                                                   | (panic-none)                    |
++---------------------------------------------------+---------------------------------+
++-------------------------------------------+------------------------+-----------------+
+| Address                                   | .sbtc-token.sbtc-token | uSTX            |
+|-------------------------------------------+------------------------+-----------------|
+| ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM | 1000000000             | 100000000000000 |
+|-------------------------------------------+------------------------+-----------------|
+| ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 | 1000000000             | 100000000000000 |
++-------------------------------------------+------------------------+-----------------+
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::increment
+Events emitted
+{"type":"contract_event","contract_event":{"contract_identifier":"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter","topic":"print","value":"{ count: u1, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"}}
+(ok u1)
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::add
+(err u100)
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-count
+u1
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::bump-counter
+Events emitted
+{"type":"contract_event","contract_event":{"contract_identifier":"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter","topic":"print","value":"{ count: u2, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"}}
+(ok u2)
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::read-counter
+u2
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::pox-info
+(ok { first-burnchain-block-height: u0, min-amount-ustx: u25000000000, prepare-cycle-length: u50, reward-cycle-id: u0, reward-cycle-length: u1050, total-liquid-supply-ustx: u200000000000000 })
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::divide-by-zero
+error: Runtime Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.contract-2: Runtime(DivisionByZero, Some([]))
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::increment
++----------------------+----------+------------+------------+
+|                      | Consumed | Limit      | Percentage |
+|----------------------+----------+------------+------------|
+| Runtime              | 869      | 5000000000 | 0.00 %     |
+|----------------------+----------+------------+------------|
+| Read count           | 3        | 15000      | 0.02 %     |
+|----------------------+----------+------------+------------|
+| Read length (bytes)  | 790      | 100000000  | 0.00 %     |
+|----------------------+----------+------------+------------|
+| Write count          | 0        | 15000      | 0.00 %     |
+|----------------------+----------+------------+------------|
+| Write length (bytes) | 0        | 15000000   | 0.00 %     |
++----------------------+----------+------------+------------+
+Events emitted
+{"type":"contract_event","contract_event":{"contract_identifier":"ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter","topic":"print","value":"{ count: u3, event: \"increment\", sender: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM }"}}
+(ok u3)
+CTRL-D

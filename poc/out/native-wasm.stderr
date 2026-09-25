@@ -1,0 +1,30 @@
+[clarity-wasm] deploy ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter: module 23259 bytes
+[clarity-wasm] deploy ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller: module 22875 bytes
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::increment
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::add
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::add
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-count
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-total
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::bump-counter
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::add-to-counter
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::add-to-counter
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::read-counter
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::pox-info
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::reward-cycle-of
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::unwrap-none
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::panic-none
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::divide-by-zero
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::divide
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::divide
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::increment
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::bump-counter
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::add
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-count
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-total
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-total
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter::get-count
+[clarity-wasm] call ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller::bump-counter

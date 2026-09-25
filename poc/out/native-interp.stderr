@@ -1,0 +1,47 @@
+│   ├── ( get-nothing )  caller:17:21
+│   │ ↳ args:
+│   └── none
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller
+
+Error occured in caller:17:7
+============================
+Expression:
+( unwrap-panic ( get-nothing ) )
+Error: UnwrapFailure
+ Stack Trace: 
+ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller:unwrap-none
+_native_:native_unwrap
+
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
+
+Error occured in counter:30:3
+=============================
+Expression:
+( unwrap-panic ( as-max-len? ( list u1 u2 ) u1 ) )
+Error: UnwrapFailure
+ Stack Trace: 
+ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter:panic-none
+_native_:native_unwrap
+
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller
+
+Error occured in caller:23:7
+============================
+Expression:
+( / a u0 )
+Error: DivisionByZero
+ Stack Trace: 
+ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.caller:divide-by-zero
+_native_:native_div
+
+Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter
+
+Error occured in counter:27:3
+=============================
+Expression:
+( / a b )
+Error: DivisionByZero
+ Stack Trace: 
+ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter:divide
+_native_:native_div
+

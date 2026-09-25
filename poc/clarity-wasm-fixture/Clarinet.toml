@@ -1,0 +1,18 @@
+[project]
+name = 'clarity-wasm-fixture'
+description = 'POC fixture: Simnet contracts run through clarity-wasm'
+telemetry = false
+requirements = []
+
+[contracts.counter]
+path = 'contracts/counter.clar'
+clarity_version = 3
+epoch = 3.1
+
+[contracts.caller]
+path = 'contracts/caller.clar'
+clarity_version = 3
+epoch = 3.1
+
+[repl.analysis]
+passes = []

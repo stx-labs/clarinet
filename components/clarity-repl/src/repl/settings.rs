@@ -111,6 +111,10 @@ pub struct Settings {
     pub log_print_events: LogPrintEvents,
     #[serde(skip_serializing, skip_deserializing)]
     pub show_timings: bool,
+    /// Deploy non-boot contracts as clarity-wasm modules. Only honoured with
+    /// the `clarity-wasm` feature.
+    #[serde(skip)]
+    pub clarity_wasm: bool,
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -141,6 +145,7 @@ impl TryFrom<SettingsFile> for Settings {
             remote_data,
             log_print_events: file.log_print_events.unwrap_or_default(),
             show_timings: false,
+            clarity_wasm: false,
         })
     }
 }

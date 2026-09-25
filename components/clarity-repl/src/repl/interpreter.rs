@@ -251,6 +251,52 @@ impl From<ExecutionError> for Vec<Diagnostic> {
     }
 }
 
+#[cfg(feature = "clarity-wasm")]
+fn clarity_wasm_log_enabled() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static ENABLED: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+            std::env::var("CLARINET_CLARITY_WASM_LOG").is_ok_and(|v| v == "1")
+        });
+        *ENABLED
+    }
+    #[cfg(target_arch = "wasm32")]
+    false
+}
+
+#[cfg(feature = "clarity-wasm")]
+fn is_boot_issuer(contract_id: &QualifiedContractIdentifier) -> bool {
+    use super::boot::{
+        BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
+    };
+    let issuer = contract_id.issuer.to_string();
+    [
+        BOOT_MAINNET_ADDRESS,
+        BOOT_TESTNET_ADDRESS,
+        SBTC_MAINNET_ADDRESS,
+        SBTC_TESTNET_ADDRESS,
+    ]
+    .contains(&issuer.as_str())
+}
+
+/// Log a top-level call from Clarinet that `execute_function_as_transaction`
+/// will dispatch to the wasm runtime.
+#[cfg(feature = "clarity-wasm")]
+fn log_wasm_dispatch(
+    global_context: &mut GlobalContext,
+    contract_id: &QualifiedContractIdentifier,
+    method: &str,
+) {
+    if !clarity_wasm_log_enabled() {
+        return;
+    }
+    if let Ok(contract) = global_context.database.get_contract(contract_id) {
+        if contract.wasm_module.is_some() {
+            eprintln!("[clarity-wasm] call {contract_id}::{method}");
+        }
+    }
+}
+
 /// Wrap a failure message the way `ClarityInterpreter::run` has always
 /// reported one. Kept in one place because the exact text is asserted by
 /// `simnet-usage.test.ts` and matched by the tracer hook.
@@ -864,6 +910,31 @@ impl ClarityInterpreter {
 
         let tx_sender: PrincipalData = self.tx_sender.clone().into();
 
+        let is_snippet = contract_ast.expressions.len() == 1 && !snippet.contains("(define-");
+
+        #[cfg(feature = "clarity-wasm")]
+        let wasm_module =
+            if self.repl_settings.clarity_wasm && !is_snippet && !is_boot_issuer(&contract_id) {
+                let mut module = clar2wasm::compile_contract(analysis.clone()).map_err(|e| {
+                    ExecutionError::rejected(vec![Diagnostic {
+                        level: Level::Error,
+                        message: bounded_format!("Wasm Generator Error: {e:?}"),
+                        spans: vec![],
+                        suggestion: None,
+                    }])
+                })?;
+                let bytes = module.emit_wasm();
+                if clarity_wasm_log_enabled() {
+                    eprintln!(
+                        "[clarity-wasm] deploy {contract_id}: module {} bytes",
+                        bytes.len()
+                    );
+                }
+                Some(bytes)
+            } else {
+                None
+            };
+
         let epoch = contract.epoch.resolve();
         // Failing to stand up the VM is a simnet problem, not a transaction
         // outcome — mainnet would never have accepted the transaction at all.
@@ -881,7 +952,7 @@ impl ClarityInterpreter {
 
         global_context.begin();
         let result = global_context.execute(|g| {
-            if contract_ast.expressions.len() == 1 && !snippet.contains("(define-") {
+            if is_snippet {
                 let context = LocalContext::new();
                 let mut call_stack = CallStack::new();
                 let invoke_ctx = InvocationContext {
@@ -908,6 +979,8 @@ impl ClarityInterpreter {
                                 unreachable!();
                             };
                             let method = expression[2].match_atom().unwrap().to_string();
+                            #[cfg(feature = "clarity-wasm")]
+                            log_wasm_dispatch(env.global_context, &contract_id, &method);
                             let mut args = vec![];
                             for arg in expression[3..].iter() {
                                 let evaluated_arg = eval(arg, &mut env, &invoke_ctx, &context)
@@ -960,6 +1033,16 @@ impl ClarityInterpreter {
             }
 
             // deploy a contract
+            #[cfg(feature = "clarity-wasm")]
+            if let Some(module) = wasm_module {
+                contract_context.set_wasm_module(module);
+                return clarity::vm::clarity_wasm::initialize_contract(
+                    g,
+                    &mut contract_context,
+                    None,
+                    &analysis,
+                );
+            }
             eval_all(&contract_ast.expressions, &mut contract_context, g, None)
         });
 
@@ -1158,6 +1241,8 @@ impl ClarityInterpreter {
 
         global_context.begin();
         let result = global_context.execute(|g| {
+            #[cfg(feature = "clarity-wasm")]
+            log_wasm_dispatch(g, contract_id, method);
             let mut call_stack = CallStack::new();
             let invoke_ctx = InvocationContext {
                 contract_context: &contract_context,
