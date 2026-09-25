@@ -419,12 +419,8 @@ pub fn do_run_local_devnet(
     ),
     String,
 > {
-    // Dropped before `do_run_devnet` blocks: left alive but unpolled, it would stall the
-    // pooled Docker connections until bollard's 120s timeout instead of letting them reconnect.
-    let ip_address_setup = {
-        let rt = hiro_system_kit::create_basic_runtime();
-        rt.block_on(devnet.prepare_local_network())?
-    };
+    let ip_address_setup =
+        hiro_system_kit::create_basic_runtime().block_on(devnet.prepare_local_network())?;
     let config = DevnetRunConfig {
         deployment,
         log_tx,
