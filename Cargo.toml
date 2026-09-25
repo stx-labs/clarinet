@@ -107,6 +107,7 @@ yaml_serde = "0.10.3"
 [workspace.lints.clippy]
 clear_with_drain = "deny"
 equatable_if_let = "deny"
+iter_on_empty_collections = "deny"
 needless_collect = "deny"
 needless_pass_by_ref_mut = "deny"
 or_fun_call = "deny"
