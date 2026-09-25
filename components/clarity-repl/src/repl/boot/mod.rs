@@ -309,10 +309,10 @@ fn mainnet_boot_contract_name_at(s: &str) -> Option<&str> {
 /// Applied to *user* sources — manifest contracts and requirements emulated
 /// in simnet (via `clarinet-deployments`), and `simnet.deployContract` — and
 /// to the **testnet copy** of a custom boot contract override, which has to
-/// reference testnet boot contracts the way the built-in testnet bodies do. Never to the mainnet copy of a boot
-/// contract, which would point the mainnet boot set at the testnet one. The
-/// embedded boot sources do not reference each other by qualified id, so only
-/// overrides need it.
+/// reference testnet boot contracts the way the built-in testnet bodies do.
+/// Never to the mainnet copy of a boot contract, which would point the mainnet
+/// boot set at the testnet one. The embedded boot sources do not reference each
+/// other by qualified id, so only overrides need it.
 ///
 /// Idempotent: the output holds no mainnet boot literals, so a second pass
 /// returns `None`.

@@ -61,6 +61,18 @@ fn boot_remap_principals() -> RemapPrincipals {
     )])
 }
 
+/// Applies the boot rewrite to `source` in place and returns the marker to
+/// record, empty when the source references no mainnet boot contract.
+fn remap_source_boot_principals(source: &mut String) -> RemapPrincipals {
+    match remap_mainnet_boot_principals(source) {
+        Some(remapped) => {
+            *source = remapped;
+            boot_remap_principals()
+        }
+        None => BTreeMap::new(),
+    }
+}
+
 /// The source to deploy for `tx`.
 ///
 /// A non-empty `remap_principals` means this contract is due the boot rewrite.
@@ -1030,13 +1042,11 @@ pub async fn generate_default_deployment_with_cache(
                             // name the `SP000...` boot contracts. Same rewrite
                             // and gate as project contracts below, applied
                             // before the AST is built.
-                            let mut remap_principals = BTreeMap::new();
-                            if environment == Environment::Simnet {
-                                if let Some(remapped) = remap_mainnet_boot_principals(&source) {
-                                    source = remapped;
-                                    remap_principals = boot_remap_principals();
-                                }
-                            }
+                            let remap_principals = if environment == Environment::Simnet {
+                                remap_source_boot_principals(&mut source)
+                            } else {
+                                BTreeMap::new()
+                            };
                             let data = EmulatedContractPublishSpecification {
                                 contract_name: contract_id.name.clone(),
                                 emulated_sender: contract_id.issuer.clone(),
@@ -1333,16 +1343,14 @@ pub async fn generate_default_deployment_with_cache(
         // `clarinet check` generates a simnet plan for both environments; the
         // on-chain pass must analyse what will actually be published on chain,
         // where the mainnet boot addresses are the correct ones.
-        let mut remap_principals = BTreeMap::new();
-        if matches!(network, StacksNetwork::Simnet)
+        let remap_principals = if matches!(network, StacksNetwork::Simnet)
             && environment == Environment::Simnet
             && !simnet_remote_data
         {
-            if let Some(remapped) = remap_mainnet_boot_principals(&source) {
-                source = remapped;
-                remap_principals = boot_remap_principals();
-            }
-        }
+            remap_source_boot_principals(&mut source)
+        } else {
+            BTreeMap::new()
+        };
 
         let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name.clone());
 
