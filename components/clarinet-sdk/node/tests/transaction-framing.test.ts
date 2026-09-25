@@ -36,11 +36,14 @@ it("rejects a duplicate deployment before analysis without consuming a nonce", (
   expect(simnet.getDataVar("existing", "answer")).toEqual(Cl.uint(42));
 });
 
-it("rejects native self-transfers and underfunded transfers without consuming a nonce", () => {
+it("rejects invalid native transfers without consuming a nonce", () => {
   const nonce = simnet.getAccountNonce(sender);
   const balance = simnet.getAssetsMap().get("STX")!.get(sender)!;
   expect(() => simnet.transferSTX(1, sender, sender)).toThrow(/send to itself/);
-  expect(() => simnet.transferSTX(balance + 1n, recipient, sender)).toThrow(/InsufficientBalance/);
+  expect(() => simnet.transferSTX(0, recipient, sender)).toThrow(/amount must be positive/);
+  expect(() => simnet.transferSTX(balance + 1n, recipient, sender)).toThrow(
+    /insufficient unlocked balance/,
+  );
   expect(simnet.getAccountNonce(sender)).toBe(nonce);
   expect(simnet.getAssetsMap().get("STX")!.get(sender)).toBe(balance);
 });

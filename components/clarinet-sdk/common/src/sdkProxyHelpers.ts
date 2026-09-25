@@ -114,8 +114,8 @@ export type DeployContract = (
   postConditionOptions?: PostConditionOptions,
 ) => ParsedTransactionResult;
 
-/** Execute a native STX transfer. Invalid transfers (including self-transfers
- * and insufficient funds) throw without consuming a nonce. */
+/** Execute a native STX transfer. Invalid transfers (self-transfers, zero
+ * amounts and insufficient funds) throw without consuming a nonce. */
 export type TransferSTX = (
   amount: number | bigint,
   recipient: string,
