@@ -8,8 +8,8 @@ use clarity::vm::analysis::errors::RuntimeCheckErrorKind;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast, build_ast_with_diagnostics, ContractAST};
 use clarity::vm::clarity::{
-    handle_clarity_analysis_error, handle_clarity_runtime_error, ClarityError, TransactionConfig,
-    TransactionConnection,
+    handle_clarity_analysis_error, handle_clarity_runtime_error, ClarityConnection, ClarityError,
+    TransactionConfig, TransactionConnection,
 };
 use clarity::vm::contexts::{
     CallStack, ContractContext, ExecutionState, GlobalContext, InvocationContext, LocalContext,
@@ -352,6 +352,10 @@ pub const BLOCK_LIMIT_MAINNET: ExecutionCost = ExecutionCost {
     runtime: 5_000_000_000,
 };
 
+/// The memo of a `transferSTX` call. stacks-core's `TokenTransferMemo([u8; 34])`
+/// always passes all 34 bytes, zeroed when the sender gave no memo.
+const EMPTY_TOKEN_TRANSFER_MEMO: [u8; 34] = [0; 34];
+
 #[derive(Clone)]
 pub struct ClarityInterpreter {
     pub clarity_datastore: ClarityDatastore,
@@ -441,16 +445,9 @@ impl ClarityInterpreter {
 
         if terms != &TransactionTerms::default() {
             let id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
-            let mut db = ClarityDatabase::new(
-                &mut self.clarity_datastore,
-                &self.datastore,
-                &self.datastore,
-            );
-            db.begin();
-            let exists = db.has_contract(&id);
-            db.roll_back().map_err(|error| {
-                ExecutionError::rejected(vec![runtime_diagnostic(error.to_string())])
-            })?;
+            let exists = self
+                .has_contract(&id)
+                .map_err(|error| ExecutionError::rejected(vec![runtime_diagnostic(error)]))?;
             if exists {
                 // stacks-node rejects duplicate names before parsing or analysis.
                 return Err(ExecutionError::rejected(vec![runtime_diagnostic(format!(
@@ -499,7 +496,7 @@ impl ClarityInterpreter {
                 terms,
             )
         } else {
-            self.execute(contract, &ast, analysis, cost_track, eval_hooks, terms)
+            self.execute(contract, &ast, analysis, cost_track, eval_hooks)
         };
         let mut result = match execution {
             Ok(result) => result,
@@ -809,52 +806,71 @@ impl ClarityInterpreter {
             .is_some_and(|data| data.is_mainnet)
     }
 
+    fn transaction_config(&self, epoch: StacksEpochId) -> TransactionConfig {
+        let mainnet = self.is_mainnet();
+        let chain_id = if mainnet {
+            CHAIN_ID_MAINNET
+        } else {
+            CHAIN_ID_TESTNET
+        };
+
+        TransactionConfig {
+            mainnet,
+            chain_id,
+            epoch,
+        }
+    }
+
+    /// Open the database at `config.epoch`, with a cost tracker for it.
+    ///
+    /// Takes the datastores rather than `self`, so the connection can also
+    /// borrow `datastore` for switching database views.
+    fn open_database<'db>(
+        clarity_datastore: &'db mut ClarityDatastore,
+        datastore: &'db Datastore,
+        config: TransactionConfig,
+        cost_track: bool,
+    ) -> Result<(ClarityDatabase<'db>, LimitedCostTracker), String> {
+        let mut db = ClarityDatabase::new(clarity_datastore, datastore, datastore);
+        db.begin();
+        db.set_clarity_epoch_version(config.epoch)
+            .map_err(|e| e.to_string())?;
+        db.commit().map_err(|e| e.to_string())?;
+        let cost_tracker = if cost_track {
+            LimitedCostTracker::new(
+                config.mainnet,
+                config.chain_id,
+                BLOCK_LIMIT_MAINNET.clone(),
+                &mut db,
+                config.epoch,
+            )
+            .map_err(|e| format!("failed to initialize cost tracker: {e}"))?
+        } else {
+            LimitedCostTracker::new_free()
+        };
+        Ok((db, cost_tracker))
+    }
+
     fn get_transaction_connection<'db, 'hooks>(
         &'db mut self,
         epoch: StacksEpochId,
         cost_track: bool,
         hooks: Vec<&'hooks mut dyn EvalHook>,
     ) -> Result<SimnetTransactionConnection<'db, 'hooks>, String> {
-        let is_mainnet = self.is_mainnet();
-        let chain_id = if is_mainnet {
-            CHAIN_ID_MAINNET
-        } else {
-            CHAIN_ID_TESTNET
-        };
-
-        let mut conn = ClarityDatabase::new(
+        let config = self.transaction_config(epoch);
+        let (db, cost_tracker) = Self::open_database(
             &mut self.clarity_datastore,
             &self.datastore,
-            &self.datastore,
-        );
-        conn.begin();
-        conn.set_clarity_epoch_version(epoch)
-            .map_err(|e| e.to_string())?;
-        conn.commit().map_err(|e| e.to_string())?;
-        let cost_tracker = if cost_track {
-            LimitedCostTracker::new(
-                is_mainnet,
-                chain_id,
-                BLOCK_LIMIT_MAINNET.clone(),
-                &mut conn,
-                epoch,
-            )
-            .map_err(|e| format!("failed to initialize cost tracker: {e}"))?
-        } else {
-            LimitedCostTracker::new_free()
-        };
-
-        Ok(SimnetTransactionConnection {
-            db: Some(conn),
-            cost_tracker: Some(cost_tracker),
-            config: TransactionConfig {
-                mainnet: is_mainnet,
-                chain_id,
-                epoch,
-            },
+            config,
+            cost_track,
+        )?;
+        Ok(SimnetTransactionConnection::new(
+            db,
+            cost_tracker,
+            config,
             hooks,
-            datastore: &self.datastore,
-        })
+            &self.datastore,
+        ))
     }
 
     pub fn get_global_context(
@@ -862,15 +878,18 @@ impl ClarityInterpreter {
         epoch: StacksEpochId,
         cost_track: bool,
     ) -> Result<GlobalContext<'_, '_>, String> {
-        let mut connection = self.get_transaction_connection(epoch, cost_track, vec![])?;
+        let config = self.transaction_config(epoch);
+        let (db, cost_tracker) = Self::open_database(
+            &mut self.clarity_datastore,
+            &self.datastore,
+            config,
+            cost_track,
+        )?;
         Ok(GlobalContext::new(
-            connection.config.mainnet,
-            connection.config.chain_id,
-            connection.db.take().expect("transaction database"),
-            connection
-                .cost_tracker
-                .take()
-                .expect("transaction cost tracker"),
+            config.mainnet,
+            config.chain_id,
+            db,
+            cost_tracker,
             epoch,
         ))
     }
@@ -882,9 +901,7 @@ impl ClarityInterpreter {
         analysis: ContractAnalysis,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-        terms: &TransactionTerms,
     ) -> Result<ExecutionResult, ExecutionError> {
-        debug_assert_eq!(terms, &TransactionTerms::default());
         let contract_id = contract.expect_resolved_contract_identifier(Some(&self.tx_sender));
         let snippet = contract.expect_in_memory_code_source();
         let mut contract_context =
@@ -1113,7 +1130,6 @@ impl ClarityInterpreter {
         Ok(execution_result)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn execute_deployment(
         &mut self,
         contract: &ClarityContract,
@@ -1141,11 +1157,7 @@ impl ClarityInterpreter {
                     callback,
                     &ResourceBudget::unlimited(),
                 )?;
-                let stored = connection
-                    .db
-                    .as_mut()
-                    .expect("transaction database")
-                    .get_contract(&id)?;
+                let stored = connection.with_clarity_db_readonly(|db| db.get_contract(&id))?;
                 let functions = stored
                     .functions
                     .iter()
@@ -1224,7 +1236,9 @@ impl ClarityInterpreter {
                         &sender,
                         &recipient,
                         amount.into(),
-                        &clarity_types::types::BuffData { data: vec![0; 34] },
+                        &clarity_types::types::BuffData {
+                            data: EMPTY_TOKEN_TRANSFER_MEMO.to_vec(),
+                        },
                     )
                     .map_err(|error| {
                         // stacks-node rejects TokenTransfer execution errors directly;
@@ -1252,7 +1266,6 @@ impl ClarityInterpreter {
     }
 
     /// Execute one payload inside an outer frame that owns the nonce charge.
-    #[allow(clippy::too_many_arguments)]
     fn execute_transaction_payload<F>(
         &mut self,
         contract_id: &QualifiedContractIdentifier,
@@ -1272,10 +1285,6 @@ impl ClarityInterpreter {
             error: ContractCallError::Uncategorized(error),
             inclusion: BlockInclusion::Rejected,
         };
-        terms
-            .post_conditions
-            .validate_for_epoch(epoch)
-            .map_err(rejected)?;
         let mut connection = self
             .get_transaction_connection(epoch, track_costs, hooks)
             .map_err(rejected)?;
@@ -1322,32 +1331,22 @@ impl ClarityInterpreter {
                 }
             })
         };
-        let included = result
+        let inclusion = result
             .as_ref()
-            .map_or_else(|error| error.inclusion.is_included(), |_| true);
-        if let Err(error) = connection.settle(&terms.charge, included) {
-            for hook in &mut connection.hooks {
-                hook.did_complete(Err(error.clone()));
-            }
+            .err()
+            .map_or(BlockInclusion::Included, |failure| failure.inclusion);
+        if let Err(error) = connection.settle(&terms.charge, inclusion) {
+            connection.did_complete(Err(error.clone()));
             return Err(rejected(error));
         }
         let (result, mut emitted_events) = match result {
             Ok(result) => result,
             Err(failure) => {
-                for hook in &mut connection.hooks {
-                    hook.did_complete(Err(failure.error.to_string()));
-                }
+                connection.did_complete(Err(failure.error.to_string()));
                 return Err(failure);
             }
         };
-        let cost = track_costs.then(|| {
-            CostSynthesis::from_cost_tracker(
-                connection
-                    .cost_tracker
-                    .as_ref()
-                    .expect("transaction cost tracker"),
-            )
-        });
+        let cost = track_costs.then(|| CostSynthesis::from_cost_tracker(connection.cost_tracker()));
         let (events, credits, debits) = Self::process_events(&mut emitted_events);
         let mut execution = ExecutionResult {
             result,
@@ -1355,9 +1354,7 @@ impl ClarityInterpreter {
             cost,
             diagnostics: vec![],
         };
-        for hook in &mut connection.hooks {
-            hook.did_complete(Ok(&mut execution));
-        }
+        connection.did_complete(Ok(&mut execution));
         drop(connection);
         for (account, token, amount) in credits {
             self.credit_token(account, token, amount);
@@ -1393,6 +1390,14 @@ impl ClarityInterpreter {
                 eval_hooks,
             );
         }
+        // Deployments check this before parsing, and transfers carry no post-conditions.
+        terms
+            .post_conditions
+            .validate_for_epoch(epoch)
+            .map_err(|error| ContractCallFailure {
+                error: ContractCallError::Uncategorized(error),
+                inclusion: BlockInclusion::Rejected,
+            })?;
         let sender: PrincipalData = self.tx_sender.clone().into();
         self.execute_transaction_payload(
             contract_id,
@@ -1888,6 +1893,23 @@ impl ClarityInterpreter {
         }
     }
 
+    /// Whether `contract_id` is deployed.
+    pub fn has_contract(
+        &mut self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Result<bool, String> {
+        let mut conn = ClarityDatabase::new(
+            &mut self.clarity_datastore,
+            &self.datastore,
+            &self.datastore,
+        );
+        conn.begin();
+        let exists = conn.has_contract(contract_id);
+        conn.roll_back()
+            .map_err(|e| format!("failed to roll back contract lookup for {contract_id}: {e}"))?;
+        Ok(exists)
+    }
+
     /// Read the transaction nonce of `principal`.
     ///
     /// Stored in the `ClarityBackingStore`, so transaction rollback also rolls
@@ -1987,10 +2009,19 @@ mod tests {
                 });
             }
         }
+        #[derive(Clone, Copy, PartialEq)]
+        enum Payload {
+            Succeeds,
+            AbortedByCallback,
+            Fails,
+        }
+        use Payload::*;
+
         // Successful, callback-aborted, and failed payloads can all be inside
         // an accepted or rejected outer transaction.
-        for payload_outcome in 0..3 {
-            for included in [false, true] {
+        for payload in [Succeeds, AbortedByCallback, Fails] {
+            for inclusion in [BlockInclusion::Rejected, BlockInclusion::Included] {
+                let included = inclusion.is_included();
                 let mut interpreter = get_interpreter(None);
                 let origin: PrincipalData = StandardPrincipalData::transient().into();
                 let payload_account =
@@ -2001,12 +2032,7 @@ mod tests {
                     .get_transaction_connection(DEFAULT_EPOCH, false, vec![&mut hook])
                     .unwrap();
                 connection.begin();
-                connection
-                    .db
-                    .as_mut()
-                    .unwrap()
-                    .set_account_nonce(&origin, 7)
-                    .unwrap();
+                connection.db().set_account_nonce(&origin, 7).unwrap();
                 let result: Result<_, VmExecutionError> = connection.with_abort_callback(
                     |env| {
                         env.execute_in_env(origin.clone(), None, None, |state, _| {
@@ -2014,7 +2040,7 @@ mod tests {
                                 .global_context
                                 .database
                                 .set_account_nonce(&payload_account, 9)?;
-                            if payload_outcome == 2 {
+                            if payload == Fails {
                                 return Err(
                                     VmInternalError::Expect("payload failure".into()).into()
                                 );
@@ -2024,25 +2050,18 @@ mod tests {
                     },
                     |_, _| {
                         log.borrow_mut().push("callback");
-                        (payload_outcome == 1).then(|| "abort payload".into())
+                        (payload == AbortedByCallback).then(|| "abort payload".into())
                     },
                 );
-                assert_eq!(result.is_err(), payload_outcome == 2);
-                assert!(
-                    connection.cost_tracker.is_some(),
-                    "tracker is recovered on every outcome"
-                );
+                assert_eq!(result.is_err(), payload == Fails);
+                // Panics unless the tracker is recovered on every outcome.
+                connection.cost_tracker();
                 assert_eq!(
-                    connection
-                        .db
-                        .as_mut()
-                        .unwrap()
-                        .get_account_nonce(&payload_account)
-                        .unwrap(),
-                    if payload_outcome == 0 { 9 } else { 0 }
+                    connection.db().get_account_nonce(&payload_account).unwrap(),
+                    if payload == Succeeds { 9 } else { 0 }
                 );
                 connection
-                    .settle(&NonceCharge::Sender(origin.clone()), included)
+                    .settle(&NonceCharge::Sender(origin.clone()), inclusion)
                     .unwrap();
                 drop(connection);
                 assert_eq!(
@@ -2051,7 +2070,7 @@ mod tests {
                 );
                 assert_eq!(
                     interpreter.get_nonce(&payload_account).unwrap(),
-                    if included && payload_outcome == 0 {
+                    if included && payload == Succeeds {
                         9
                     } else {
                         0
@@ -2059,7 +2078,7 @@ mod tests {
                 );
                 assert_eq!(
                     *log.borrow(),
-                    if payload_outcome == 2 {
+                    if payload == Fails {
                         vec!["begin", "failure"]
                     } else {
                         vec!["begin", "success", "callback"]
@@ -2134,11 +2153,19 @@ mod tests {
                 });
             }
         }
-        for outcome in 0..3 {
+        #[derive(Clone, Copy, PartialEq)]
+        enum Deployment {
+            Commits,
+            AbortedByPostCondition,
+            Fails,
+        }
+        use Deployment::*;
+
+        for deployment in [Commits, AbortedByPostCondition, Fails] {
             let mut interpreter = get_interpreter(None);
             let sender: PrincipalData = interpreter.get_tx_sender().into();
             interpreter.mint_stx_balance(sender.clone(), 100).unwrap();
-            let source = if outcome == 2 {
+            let source = if deployment == Fails {
                 "(/ u1 u0)"
             } else {
                 "(stx-transfer? u1 tx-sender 'ST000000000000000000002AMW42H)"
@@ -2148,7 +2175,7 @@ mod tests {
                 .build();
             let terms = TransactionTerms {
                 charge: NonceCharge::Sender(sender.clone()),
-                post_conditions: if outcome == 1 {
+                post_conditions: if deployment == AbortedByPostCondition {
                     PostConditionCheck::Checked {
                         conditions: vec![],
                         mode: TransactionPostConditionMode::Deny,
@@ -2161,18 +2188,18 @@ mod tests {
             let mut hook = Hook(vec![]);
             let result =
                 interpreter.run_with_terms(&contract, None, false, Some(vec![&mut hook]), &terms);
-            assert_eq!(result.is_ok(), outcome == 0);
+            assert_eq!(result.is_ok(), deployment == Commits);
             assert_eq!(interpreter.get_nonce(&sender).unwrap(), 1);
             assert_eq!(
                 interpreter.get_balance_for_account(&sender.to_string(), "STX"),
-                if outcome == 0 { 99 } else { 100 }
+                if deployment == Commits { 99 } else { 100 }
             );
             assert_eq!(
                 hook.0,
-                match outcome {
-                    0 => vec!["begin", "executed", "committed"],
-                    1 => vec!["begin", "executed", "not committed"],
-                    _ => vec!["begin", "execution failed", "not committed"],
+                match deployment {
+                    Commits => vec!["begin", "executed", "committed"],
+                    AbortedByPostCondition => vec!["begin", "executed", "not committed"],
+                    Fails => vec!["begin", "execution failed", "not committed"],
                 }
             );
         }
@@ -2249,12 +2276,11 @@ mod tests {
             assert_ne!(assets_modified.as_ref(), &AssetMap::new());
             assert_eq!(tx_events.len(), 1);
             assert_eq!(reason, "abort");
-            assert!(!connection.db.as_mut().unwrap().has_contract(&attempted_id));
-            let included =
-                BlockInclusion::from_runtime_error(error, contract.epoch.resolve()).is_included();
-            assert!(included);
+            assert!(!connection.db().has_contract(&attempted_id));
+            let inclusion = BlockInclusion::from_runtime_error(error, contract.epoch.resolve());
+            assert_eq!(inclusion, BlockInclusion::Included);
             connection
-                .settle(&NonceCharge::Sender(sender.clone()), included)
+                .settle(&NonceCharge::Sender(sender.clone()), inclusion)
                 .unwrap();
             drop(connection);
             assert_eq!(interpreter.get_nonce(&sender).unwrap(), 1);
@@ -2397,14 +2423,7 @@ mod tests {
             .run_analysis(contract, &ast, &annotations)
             .unwrap();
 
-        let result = interpreter.execute(
-            contract,
-            &ast,
-            analysis,
-            false,
-            None,
-            &TransactionTerms::default(),
-        );
+        let result = interpreter.execute(contract, &ast, analysis, false, None);
         assert!(result.is_ok());
         result
     }
@@ -2963,14 +2982,7 @@ mod tests {
             .run_analysis(&contract, &ast, &annotations)
             .unwrap();
 
-        let result = interpreter.execute(
-            &contract,
-            &ast,
-            analysis,
-            false,
-            None,
-            &TransactionTerms::default(),
-        );
+        let result = interpreter.execute(&contract, &ast, analysis, false, None);
         assert!(result.is_ok());
         let ExecutionResult {
             diagnostics,

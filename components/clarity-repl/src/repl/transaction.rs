@@ -12,20 +12,25 @@ use clarity::vm::database::ClarityDatabase;
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::events::StacksTransactionEvent;
 use clarity::vm::hooks::EvalHook;
+use clarity::vm::ExecutionResult;
 use clarity_types::effects::AssetMap;
 use clarity_types::types::BoundedErrorString;
 
 use super::datastore::Datastore;
+use super::interpreter::{BlockInclusion, NonceCharge};
 
 /// Keeps the outer database frame alive while the upstream helper owns the
 /// nested payload frame. Hooks are reborrowed for execution and remain available
 /// to Clarinet for completion notifications after settlement.
+///
+/// `db` and `cost_tracker` are only `None` while a trait method has lent them
+/// out, so the accessors below never observe them missing.
 pub(crate) struct SimnetTransactionConnection<'db, 'hooks> {
-    pub db: Option<ClarityDatabase<'db>>,
-    pub cost_tracker: Option<LimitedCostTracker>,
-    pub config: TransactionConfig,
-    pub hooks: Vec<&'hooks mut dyn EvalHook>,
-    pub datastore: &'db Datastore,
+    db: Option<ClarityDatabase<'db>>,
+    cost_tracker: Option<LimitedCostTracker>,
+    config: TransactionConfig,
+    hooks: Vec<&'hooks mut dyn EvalHook>,
+    datastore: &'db Datastore,
 }
 
 impl ClarityConnection for SimnetTransactionConnection<'_, '_> {
@@ -118,20 +123,53 @@ impl Drop for SimnetTransactionConnection<'_, '_> {
     }
 }
 
-impl SimnetTransactionConnection<'_, '_> {
+impl<'db, 'hooks> SimnetTransactionConnection<'db, 'hooks> {
+    pub fn new(
+        db: ClarityDatabase<'db>,
+        cost_tracker: LimitedCostTracker,
+        config: TransactionConfig,
+        hooks: Vec<&'hooks mut dyn EvalHook>,
+        datastore: &'db Datastore,
+    ) -> Self {
+        Self {
+            db: Some(db),
+            cost_tracker: Some(cost_tracker),
+            config,
+            hooks,
+            datastore,
+        }
+    }
+
+    pub fn db(&mut self) -> &mut ClarityDatabase<'db> {
+        self.db.as_mut().expect("transaction database")
+    }
+
+    pub fn cost_tracker(&self) -> &LimitedCostTracker {
+        self.cost_tracker
+            .as_ref()
+            .expect("transaction cost tracker")
+    }
+
+    /// Tell every hook how the transaction ended, after settlement.
+    pub fn did_complete(&mut self, mut result: Result<&mut ExecutionResult, String>) {
+        for hook in &mut self.hooks {
+            hook.did_complete(result.as_deref_mut().map_err(|error| error.clone()));
+        }
+    }
+
     /// Open the transaction-level frame before invoking a nested payload.
     pub fn begin(&mut self) {
-        self.db.as_mut().expect("transaction database").begin();
+        self.db().begin();
     }
 
     /// An included failure keeps transaction-level writes; a rejection keeps none.
     pub fn settle(
         &mut self,
-        charge: &super::interpreter::NonceCharge,
-        included: bool,
+        charge: &NonceCharge,
+        inclusion: BlockInclusion,
     ) -> Result<(), String> {
-        let db = self.db.as_mut().expect("transaction database");
-        if !included {
+        let db = self.db();
+        if !inclusion.is_included() {
             return db
                 .roll_back()
                 .map_err(|e| format!("failed to roll back transaction: {e}"));
