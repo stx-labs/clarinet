@@ -112,6 +112,7 @@ redundant_clone = "deny"
 string_lit_as_bytes = "deny"
 trait_duplication_in_bounds = "deny"
 unnecessary_struct_initialization = "deny"
+useless_let_if_seq = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wasm_bindgen_unstable_test_coverage)', 'cfg(getrandom_backend, values("wasm_js"))'] }
