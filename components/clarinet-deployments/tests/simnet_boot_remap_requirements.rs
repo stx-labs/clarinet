@@ -1,9 +1,5 @@
 //! Requirements and project contracts must share simnet's testnet boot state.
 //! Cache fixtures exercise requirement loading without network access.
-//!
-//! Requirements are rewritten before their ASTs are built, only for
-//! `Environment::Simnet` with remote data disabled, and legacy plans are
-//! backfilled.
 
 use std::fs;
 use std::path::Path;
@@ -476,7 +472,6 @@ async fn generated_dependencies_and_project_asts_share_requirement_boot_state() 
         "{REQUIREMENT_DEPLOYER}.writer"
     ))
     .unwrap();
-    // `deps` covers requirements; `asts` holds project contracts only.
     let deps = &generated.deps[&writer_id];
     assert!(deps
         .iter()
