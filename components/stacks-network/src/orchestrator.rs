@@ -335,9 +335,7 @@ impl DevnetOrchestrator {
             .create_network::<&str>(CreateNetworkOptions {
                 name: &self.network_name,
                 driver: "bridge",
-                ipam: Ipam {
-                    ..Default::default()
-                },
+                ipam: Ipam::default(),
                 labels,
                 options,
                 ..Default::default()

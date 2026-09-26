@@ -105,10 +105,20 @@ yaml_serde = "0.10.3"
 # pox-locking = { path = "../stacks-core/pox-locking" }
 
 [workspace.lints.clippy]
+clear_with_drain = "deny"
+iter_on_empty_collections = "deny"
+iter_on_single_items = "deny"
+iter_with_drain = "deny"
 needless_collect = "deny"
 needless_pass_by_ref_mut = "deny"
 or_fun_call = "deny"
+path_buf_push_overwrite = "deny"
+read_zero_byte_vec = "deny"
 redundant_clone = "deny"
+set_contains_or_insert = "deny"
+string_lit_as_bytes = "deny"
+trait_duplication_in_bounds = "deny"
+unnecessary_struct_initialization = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wasm_bindgen_unstable_test_coverage)', 'cfg(getrandom_backend, values("wasm_js"))'] }

@@ -632,18 +632,14 @@ fn test_against_dynamic_cost_analysis() {
 
     let uint_value = [clarity_types::Value::UInt(1)];
     let multi_arg_value = [
-        clarity_types::Value::string_ascii_from_bytes("".to_string().into_bytes()).unwrap(),
+        clarity_types::Value::string_ascii_from_bytes(b"".to_vec()).unwrap(),
         clarity_types::Value::UInt(1),
     ];
-    let value =
-        [clarity_types::Value::string_ascii_from_bytes("".to_string().into_bytes()).unwrap()];
+    let value = [clarity_types::Value::string_ascii_from_bytes(b"".to_vec()).unwrap()];
     let _max_value =
-        [
-            clarity_types::Value::string_ascii_from_bytes("aaaaaaaaaa".to_string().into_bytes())
-                .unwrap(),
-        ];
+        [clarity_types::Value::string_ascii_from_bytes(b"aaaaaaaaaa".to_vec()).unwrap()];
     let if_args = [
-        clarity_types::Value::string_ascii_from_bytes("a".to_string().into_bytes()).unwrap(),
+        clarity_types::Value::string_ascii_from_bytes(b"a".to_vec()).unwrap(),
         clarity_types::Value::UInt(1),
     ];
     let list_32_uint_value = clarity_types::Value::Sequence(SequenceData::List(ListData {
