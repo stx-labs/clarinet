@@ -166,8 +166,6 @@ pub fn setup_session_with_deployment(
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(ref mut spec) = tx {
-                let is_project_contract = manifest.contracts_settings.contains_key(&spec.location);
-
                 // Without this, a plan loaded from disk silently deploys
                 // mainnet boot principals and the PoX lock goes missing again.
                 // A source that references no mainnet boot contract is
@@ -190,6 +188,7 @@ pub fn setup_session_with_deployment(
                     spec.remap_principals.clear();
                 }
 
+                let is_project_contract = manifest.contracts_settings.contains_key(&spec.location);
                 if !enable_analysis || !is_project_contract {
                     spec.skip_analysis = true;
                 } else if let Ok(relative) = spec.location.strip_prefix(&manifest.root_dir) {

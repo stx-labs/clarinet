@@ -4,7 +4,9 @@
 use std::fs;
 use std::path::Path;
 
-use clarinet_deployments::types::{DeploymentSpecification, TransactionSpecification};
+use clarinet_deployments::types::{
+    DeploymentGenerationArtifacts, DeploymentSpecification, TransactionSpecification,
+};
 use clarinet_deployments::{
     generate_default_deployment, initiate_session_from_manifest, setup_session_with_deployment,
     update_session_with_deployment_plan,
@@ -12,7 +14,7 @@ use clarinet_deployments::{
 use clarinet_files::{ProjectManifest, StacksNetwork};
 use clarity::util::hash::to_hex;
 use clarity::util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
-use clarity::vm::types::PrincipalData;
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{EvaluationResult, Value};
 use clarity_repl::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
 use clarity_repl::repl::post_conditions::PostConditionCheck;
@@ -162,18 +164,22 @@ impl Project {
     }
 
     async fn generate(&self) -> DeploymentSpecification {
-        let (deployment, artifacts, _) = generate_default_deployment(
-            &self.manifest,
-            &StacksNetwork::Simnet,
-            false,
-            None,
-            None,
-            Environment::Simnet,
-        )
-        .await
-        .expect("simnet deployment plan should be generated");
+        self.generate_for(StacksNetwork::Simnet, Environment::Simnet)
+            .await
+            .0
+    }
+
+    async fn generate_for(
+        &self,
+        network: StacksNetwork,
+        environment: Environment,
+    ) -> (DeploymentSpecification, DeploymentGenerationArtifacts) {
+        let (deployment, artifacts, _) =
+            generate_default_deployment(&self.manifest, &network, false, None, None, environment)
+                .await
+                .expect("deployment plan should be generated");
         assert!(artifacts.success, "{:?}", artifacts.diags);
-        deployment
+        (deployment, artifacts)
     }
 
     async fn deployed_session(&self) -> Session {
@@ -239,6 +245,28 @@ fn locked_amount(session: &mut Session, principal: &str) -> u128 {
     eval(session, &format!("(get locked (stx-account '{principal}))"))
         .expect_u128()
         .expect("locked should be a uint")
+}
+
+#[track_caller]
+fn stack_in_session(session: &mut Session, requirement_deployer: &str) -> u128 {
+    let stacker = format!("{requirement_deployer}.stacker");
+    let stacked = 90_000_000_000_u128;
+
+    session.set_tx_sender(DEPLOYER);
+    session
+        .stx_transfer(100_000_000_000, &stacker, PostConditionCheck::Unchecked)
+        .expect("funding the stacker requirement should succeed");
+
+    let value = eval(
+        session,
+        &format!("(contract-call? '{stacker} stack u{stacked})"),
+    );
+    assert!(
+        matches!(&value, Value::Response(response) if response.committed),
+        "stack should succeed, got {value}"
+    );
+
+    locked_amount(session, &stacker)
 }
 
 #[tokio::test]
@@ -339,28 +367,6 @@ async fn a_requirement_and_a_project_contract_share_boot_state() {
     }
 }
 
-#[track_caller]
-fn stack_in_session(session: &mut Session, requirement_deployer: &str) -> u128 {
-    let stacker = format!("{requirement_deployer}.stacker");
-    let stacked = 90_000_000_000_u128;
-
-    session.set_tx_sender(DEPLOYER);
-    session
-        .stx_transfer(100_000_000_000, &stacker, PostConditionCheck::Unchecked)
-        .expect("funding the stacker requirement should succeed");
-
-    let value = eval(
-        session,
-        &format!("(contract-call? '{stacker} stack u{stacked})"),
-    );
-    assert!(
-        matches!(&value, Value::Response(response) if response.committed),
-        "stack should succeed, got {value}"
-    );
-
-    locked_amount(session, &stacker)
-}
-
 #[tokio::test]
 async fn a_legacy_plan_still_rewrites_a_requirement() {
     let project = Project::new(&[], &[("stacker", REQUIREMENT_STACKER)]);
@@ -397,16 +403,9 @@ async fn a_legacy_plan_still_rewrites_a_requirement() {
 #[tokio::test]
 async fn devnet_publishes_requirement_source_verbatim() {
     let project = Project::new(&[], &[("writer", REQUIREMENT_WRITER)]);
-    let (deployment, _, _) = generate_default_deployment(
-        &project.manifest,
-        &StacksNetwork::Devnet,
-        false,
-        None,
-        None,
-        Environment::Simnet,
-    )
-    .await
-    .unwrap();
+    let (deployment, _) = project
+        .generate_for(StacksNetwork::Devnet, Environment::Simnet)
+        .await;
     let spec = deployment
         .plan
         .batches
@@ -427,17 +426,9 @@ async fn devnet_publishes_requirement_source_verbatim() {
 #[tokio::test]
 async fn onchain_analysis_preserves_requirement_source() {
     let project = Project::new(&[], &[("writer", REQUIREMENT_WRITER)]);
-    let (mut deployment, generated, _) = generate_default_deployment(
-        &project.manifest,
-        &StacksNetwork::Simnet,
-        false,
-        None,
-        None,
-        Environment::OnChain,
-    )
-    .await
-    .unwrap();
-    assert!(generated.success, "{:?}", generated.diags);
+    let (mut deployment, generated) = project
+        .generate_for(StacksNetwork::Simnet, Environment::OnChain)
+        .await;
     let (source, remap) = publish(&deployment, "writer");
     assert_eq!(source, REQUIREMENT_WRITER);
     assert!(remap.is_empty());
@@ -457,21 +448,11 @@ async fn generated_dependencies_and_project_asts_share_requirement_boot_state() 
         &[("reader", PROJECT_READER)],
         &[("writer", REQUIREMENT_WRITER)],
     );
-    let (mut deployment, generated, _) = generate_default_deployment(
-        &project.manifest,
-        &StacksNetwork::Simnet,
-        false,
-        None,
-        None,
-        Environment::Simnet,
-    )
-    .await
-    .unwrap();
-    assert!(generated.success, "{:?}", generated.diags);
-    let writer_id = clarity::vm::types::QualifiedContractIdentifier::parse(&format!(
-        "{REQUIREMENT_DEPLOYER}.writer"
-    ))
-    .unwrap();
+    let (mut deployment, generated) = project
+        .generate_for(StacksNetwork::Simnet, Environment::Simnet)
+        .await;
+    let writer_id =
+        QualifiedContractIdentifier::parse(&format!("{REQUIREMENT_DEPLOYER}.writer")).unwrap();
     let deps = &generated.deps[&writer_id];
     assert!(deps
         .iter()
@@ -479,9 +460,7 @@ async fn generated_dependencies_and_project_asts_share_requirement_boot_state() 
     assert!(!deps
         .iter()
         .any(|d| d.contract_id.to_string() == format!("{BOOT_MAINNET_ADDRESS}.cost-voting")));
-    let reader_id =
-        clarity::vm::types::QualifiedContractIdentifier::parse(&format!("{DEPLOYER}.reader"))
-            .unwrap();
+    let reader_id = QualifiedContractIdentifier::parse(&format!("{DEPLOYER}.reader")).unwrap();
     assert!(generated.asts.contains_key(&reader_id));
     let mut deployed = setup_session_with_deployment(
         &project.manifest,
@@ -502,7 +481,7 @@ async fn generated_dependencies_and_project_asts_share_requirement_boot_state() 
         &format!("(contract-call? '{reader_id} read-proposal)"),
     );
     assert!(
-        value.clone().expect_optional().unwrap().is_some(),
+        matches!(&value, Value::Optional(option) if option.data.is_some()),
         "{value}"
     );
     assert_eq!(
