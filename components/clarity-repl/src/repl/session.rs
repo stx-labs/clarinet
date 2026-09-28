@@ -1049,7 +1049,7 @@ impl Session {
             self.interpreter
                 .run_with_terms(&contract, None, cost_track, Some(hooks), &terms);
 
-        result.inspect(|result| self.record_snippet_result(&contract, contract_identifier, result))
+        result.inspect(|result| self.record_snippet_result(contract_identifier, result))
     }
 
     /// Evaluate a Clarity snippet in order to use it as Clarity function arguments
@@ -1086,7 +1086,7 @@ impl Session {
 
         match result {
             Ok(result) => {
-                self.record_snippet_result(&contract, contract_identifier, &result);
+                self.record_snippet_result(contract_identifier, &result);
                 Ok(result)
             }
             Err(res) => Err(res.into()),
@@ -1102,7 +1102,6 @@ impl Session {
 
     fn record_snippet_result(
         &mut self,
-        contract: &ClarityContract,
         contract_identifier: QualifiedContractIdentifier,
         result: &ExecutionResult,
     ) {
@@ -1111,9 +1110,13 @@ impl Session {
                 self.contracts
                     .insert(contract_identifier, contract_result.contract.clone());
             }
-            // Same test the interpreter uses to run a snippet as a deployment.
+            // A snippet that defined a data var, map or token has written it under
+            // this name, so the name cannot be handed out again.
             EvaluationResult::Snippet(_)
-                if contract.expect_in_memory_code_source().contains("(define-") =>
+                if self
+                    .interpreter
+                    .clarity_datastore
+                    .has_local_metadata(&contract_identifier) =>
             {
                 self.unsaved_definition_snippets += 1;
             }
@@ -1902,6 +1905,24 @@ mod tests {
     fn snippets_without_definitions_keep_the_contract_numbering() {
         let mut session = Session::new_without_boot_contracts(SessionSettings::default());
         run_session_snippet(&mut session, "(+ 1 2)");
+
+        let deployed = session
+            .eval("(define-read-only (f) u1)".into(), false)
+            .unwrap();
+        let EvaluationResult::Contract(contract) = deployed.into_inner().result else {
+            panic!("expected a contract");
+        };
+        assert!(contract
+            .contract
+            .contract_identifier
+            .ends_with(".contract-0"));
+    }
+
+    #[test]
+    fn snippets_mentioning_define_in_strings_or_comments_keep_the_contract_numbering() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings::default());
+        run_session_snippet(&mut session, "(print \"(define-\")");
+        run_session_snippet(&mut session, ";; (define-data-var x uint u0)\n(+ 1 2)");
 
         let deployed = session
             .eval("(define-read-only (f) u1)".into(), false)
