@@ -116,7 +116,7 @@ pub struct DevnetRunConfig {
     pub save_container_logs: bool,
 }
 
-async fn do_run_devnet(
+fn do_run_devnet(
     mut devnet: DevnetOrchestrator,
     config: DevnetRunConfig,
 ) -> Result<
@@ -365,7 +365,7 @@ async fn do_run_devnet(
     Ok((None, None, Some(chains_coordinator_commands_tx)))
 }
 
-pub async fn do_run_chain_coordinator(
+pub fn do_run_chain_coordinator(
     mut devnet: DevnetOrchestrator,
     deployment: DeploymentSpecification,
     log_tx: Option<Sender<LogData>>,
@@ -397,10 +397,10 @@ pub async fn do_run_chain_coordinator(
         network_manifest: Some(network_manifest),
         save_container_logs: false,
     };
-    do_run_devnet(devnet, config).await
+    do_run_devnet(devnet, config)
 }
 
-pub async fn do_run_local_devnet(
+pub fn do_run_local_devnet(
     mut devnet: DevnetOrchestrator,
     deployment: DeploymentSpecification,
     log_tx: Option<Sender<LogData>>,
@@ -419,7 +419,8 @@ pub async fn do_run_local_devnet(
     ),
     String,
 > {
-    let ip_address_setup = devnet.prepare_local_network().await?;
+    let ip_address_setup =
+        hiro_system_kit::create_basic_runtime().block_on(devnet.prepare_local_network())?;
     let config = DevnetRunConfig {
         deployment,
         log_tx,
@@ -434,5 +435,5 @@ pub async fn do_run_local_devnet(
         network_manifest: None,
         save_container_logs,
     };
-    do_run_devnet(devnet, config).await
+    do_run_devnet(devnet, config)
 }
