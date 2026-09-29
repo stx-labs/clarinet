@@ -64,13 +64,12 @@ fn boot_remap_principals() -> RemapPrincipals {
 /// Applies the boot rewrite to `source` in place and returns the marker to
 /// record, empty when the source references no mainnet boot contract.
 fn remap_source_boot_principals(source: &mut String) -> RemapPrincipals {
-    match remap_mainnet_boot_principals(source) {
-        Some(remapped) => {
+    remap_mainnet_boot_principals(source)
+        .map(|remapped| {
             *source = remapped;
             boot_remap_principals()
-        }
-        None => BTreeMap::new(),
-    }
+        })
+        .unwrap_or_default()
 }
 
 /// The source to deploy for `tx`.
