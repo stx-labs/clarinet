@@ -4,7 +4,8 @@ use crate::indexer::stacks::{
 };
 use crate::indexer::{IndexerConfig, StacksChainContext};
 use crate::types::{
-    BitcoinNetwork, StacksBlockData, StacksNetwork, StacksNodeConfig, StacksTransactionKind,
+    BitcoinNetwork, OperationIdentifier, OperationType, StacksBlockData, StacksNetwork,
+    StacksNodeConfig, StacksTransactionKind,
 };
 use crate::utils::Context;
 
@@ -210,17 +211,39 @@ fn serialized_block_standardizes_into_rosetta_shape() {
         tx.metadata.description,
         "transfered: 1000000 µSTX from ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5 to ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG"
     );
-    // The STX transfer event must be folded into a credit/debit operation
-    // pair with the transfer amount.
-    let credited: Vec<_> = tx
-        .operations
-        .iter()
-        .filter(|op| op.account.address == "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG")
-        .collect();
-    assert_eq!(credited.len(), 1);
+    // The STX transfer event must produce exactly two operations: a Debit
+    // from the sender at index 0 and a Credit to the recipient at index 1,
+    // each pointing at the other via related_operations.
+    assert_eq!(tx.operations.len(), 2);
+
+    let debit = &tx.operations[0];
+    assert_eq!(debit.type_, OperationType::Debit);
     assert_eq!(
-        credited[0].amount.as_ref().map(|a| a.value),
-        Some(1_000_000)
+        debit.account.address,
+        "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5"
+    );
+    assert_eq!(debit.amount.as_ref().map(|a| a.value), Some(1_000_000));
+    assert_eq!(
+        debit.related_operations,
+        Some(vec![OperationIdentifier {
+            index: 1,
+            network_index: None,
+        }])
+    );
+
+    let credit = &tx.operations[1];
+    assert_eq!(credit.type_, OperationType::Credit);
+    assert_eq!(
+        credit.account.address,
+        "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG"
+    );
+    assert_eq!(credit.amount.as_ref().map(|a| a.value), Some(1_000_000));
+    assert_eq!(
+        credit.related_operations,
+        Some(vec![OperationIdentifier {
+            index: 0,
+            network_index: None,
+        }])
     );
 }
 
