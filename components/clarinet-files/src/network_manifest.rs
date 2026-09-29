@@ -222,8 +222,14 @@ enum StacksNodeEventObserverFile {
     Endpoint(String),
     Config {
         endpoint: String,
+        // same default as the bare-endpoint form, so `{ endpoint = "…" }` means the same thing
+        #[serde(default = "all_events_keys")]
         events_keys: Vec<String>,
     },
+}
+
+fn all_events_keys() -> Vec<String> {
+    vec!["*".into()]
 }
 
 impl From<StacksNodeEventObserverFile> for StacksNodeEventObserver {
@@ -231,7 +237,7 @@ impl From<StacksNodeEventObserverFile> for StacksNodeEventObserver {
         match observer {
             StacksNodeEventObserverFile::Endpoint(endpoint) => Self {
                 endpoint,
-                events_keys: vec!["*".into()],
+                events_keys: all_events_keys(),
             },
             StacksNodeEventObserverFile::Config {
                 endpoint,
@@ -1340,6 +1346,50 @@ mod tests {
                 StacksNodeEventObserver {
                     endpoint: "host.docker.internal:8788".into(),
                     events_keys: vec![],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn defaults_events_keys_in_the_table_form() {
+        let config: DevnetConfigFile = toml::from_str(
+            r#"stacks_node_events_observers = [{ endpoint = "host.docker.internal:8002" }]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.stacks_node_events_observers.unwrap(),
+            vec![StacksNodeEventObserver {
+                endpoint: "host.docker.internal:8002".into(),
+                events_keys: vec!["*".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_both_event_observer_forms_in_one_array() {
+        // the shape the generated Devnet.toml shows, uncommented
+        let config: DevnetConfigFile = toml::from_str(
+            r#"
+            stacks_node_events_observers = [
+              "host.docker.internal:8002", # events_keys defaults to ["*"]
+              { endpoint = "host.docker.internal:8787", events_keys = ["burn_blocks", "memtx"] },
+            ]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.stacks_node_events_observers.unwrap(),
+            vec![
+                StacksNodeEventObserver {
+                    endpoint: "host.docker.internal:8002".into(),
+                    events_keys: vec!["*".into()],
+                },
+                StacksNodeEventObserver {
+                    endpoint: "host.docker.internal:8787".into(),
+                    events_keys: vec!["burn_blocks".into(), "memtx".into()],
                 },
             ]
         );
