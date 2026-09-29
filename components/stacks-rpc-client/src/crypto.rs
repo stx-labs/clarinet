@@ -290,10 +290,6 @@ mod tests {
 
     use super::*;
 
-    fn to_hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
-
     /// The deployer wallet `clarinet new` writes into `settings/Devnet.toml`.
     /// The expected values are the fixtures the template prints as comments,
     /// so a derivation or signing regression fails against addresses users
@@ -374,11 +370,11 @@ mod tests {
         // flag lives on the public key side.
         let secret_bytes = keypair.secret_key.to_bytes();
         assert_eq!(
-            to_hex(&secret_bytes),
+            bytes_to_hex(&secret_bytes),
             "753b7cc01a1a2e86221266a154af739463fce51219d97e4f856cd7200c3bd2a6"
         );
         assert_eq!(
-            to_hex(&keypair.public_key.serialize_compressed()),
+            bytes_to_hex(&keypair.public_key.serialize_compressed()),
             "0390a5cac7c33fda49f70bc1b0866fa0ba7a9440d9de647fecb8132ceb76a94dfa"
         );
     }

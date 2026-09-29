@@ -3,7 +3,9 @@ use crate::indexer::stacks::{
     standardize_stacks_serialized_block_header, NewBlock, NewEvent, NewTransaction,
 };
 use crate::indexer::{IndexerConfig, StacksChainContext};
-use crate::types::{BitcoinNetwork, StacksNetwork, StacksNodeConfig, StacksTransactionKind};
+use crate::types::{
+    BitcoinNetwork, StacksBlockData, StacksNetwork, StacksNodeConfig, StacksTransactionKind,
+};
 use crate::utils::Context;
 
 fn test_indexer_config() -> IndexerConfig {
@@ -92,6 +94,19 @@ fn transfer_event() -> NewEvent {
     }
 }
 
+fn standardize_block(block: &NewBlock) -> StacksBlockData {
+    let indexer_config = test_indexer_config();
+    let mut chain_ctx = StacksChainContext::new(&StacksNetwork::Devnet);
+    let ctx = Context::empty();
+    standardize_stacks_serialized_block(
+        &indexer_config,
+        &serde_json::to_string(block).unwrap(),
+        &mut chain_ctx,
+        &ctx,
+    )
+    .unwrap()
+}
+
 #[test]
 fn block_header_identifiers_are_derived_from_the_serialized_header() {
     let header = r#"{
@@ -160,15 +175,7 @@ fn serialized_block_standardizes_into_rosetta_shape() {
     let mut block = empty_block();
     block.transactions = vec![transfer_tx()];
     block.events = vec![transfer_event()];
-    let serialized = serde_json::to_string(&block).unwrap();
-
-    let indexer_config = test_indexer_config();
-    let mut chain_ctx = StacksChainContext::new(&StacksNetwork::Devnet);
-    let ctx = Context::empty();
-
-    let block_data =
-        standardize_stacks_serialized_block(&indexer_config, &serialized, &mut chain_ctx, &ctx)
-            .unwrap();
+    let block_data = standardize_block(&block);
 
     assert_eq!(block_data.block_identifier.index, 1);
     assert_eq!(block_data.block_identifier.hash, "0x2222");
@@ -225,15 +232,7 @@ fn aborted_contract_calls_are_skipped() {
     tx.raw_tx = "0x00".to_string();
     tx.raw_result = "0x".to_string();
     block.transactions = vec![tx];
-    let serialized = serde_json::to_string(&block).unwrap();
-
-    let indexer_config = test_indexer_config();
-    let mut chain_ctx = StacksChainContext::new(&StacksNetwork::Devnet);
-    let ctx = Context::empty();
-
-    let block_data =
-        standardize_stacks_serialized_block(&indexer_config, &serialized, &mut chain_ctx, &ctx)
-            .unwrap();
+    let block_data = standardize_block(&block);
     assert!(block_data.transactions.is_empty());
 }
 
