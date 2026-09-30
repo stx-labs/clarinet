@@ -50,6 +50,7 @@ fn write_project(root: &Path, contract_source: &str, requirements_toml: &str) {
             authors = []
             description = ""
             telemetry = false
+            cache_dir = "./.cache"
             {requirements_toml}
 
             [contracts.caller]
@@ -398,6 +399,188 @@ async fn trait_argument_is_auto_detected_after_loading_explicit_callee() {
         published.contains(&format!("{EXTERNAL_DEPLOYER}.implementation")),
         "loading the explicitly declared callee should reveal its trait \
          argument as another requirement to publish; got {published:?}"
+    );
+}
+
+/// A contract that appears in `[[project.requirements]]` AND is referenced by
+/// user code via `use-trait` must appear exactly once in the plan.
+#[tokio::test]
+async fn explicit_requirement_not_duplicated_when_also_auto_detected() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &format!(
+            "(use-trait nft '{EXTERNAL_DEPLOYER}.nft-trait.nft-trait)\n\
+             (define-read-only (noop) (ok none))\n"
+        ),
+        &formatdoc!(
+            r#"
+            [[project.requirements]]
+            contract_id = "{EXTERNAL_DEPLOYER}.nft-trait"
+            "#
+        ),
+    );
+
+    let server = mock_contracts(&[(
+        EXTERNAL_DEPLOYER,
+        "nft-trait",
+        "(define-trait nft-trait ((get-owner (uint) (response (optional principal) uint))))",
+    )])
+    .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+    let count = published
+        .iter()
+        .filter(|id| *id == &format!("{EXTERNAL_DEPLOYER}.nft-trait"))
+        .count();
+    assert_eq!(
+        count, 1,
+        "nft-trait must appear exactly once even when both explicitly declared and \
+         auto-detected from user code; got {published:?}"
+    );
+}
+
+/// An explicit `[[project.requirements]]` entry must not prevent auto-detection
+/// of other externally-referenced contracts.
+#[tokio::test]
+async fn explicit_requirement_does_not_suppress_auto_detection_of_others() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // nft-trait is explicit; ft-trait is only auto-detected via use-trait.
+    write_project(
+        root,
+        &format!(
+            "(use-trait ft '{EXTERNAL_DEPLOYER}.ft-trait.sip-010-trait)\n\
+             (define-read-only (noop) (ok none))\n"
+        ),
+        &formatdoc!(
+            r#"
+            [[project.requirements]]
+            contract_id = "{EXTERNAL_DEPLOYER}.nft-trait"
+            "#
+        ),
+    );
+
+    let server = mock_contracts(&[
+        (
+            EXTERNAL_DEPLOYER,
+            "nft-trait",
+            "(define-trait nft-trait ((get-owner (uint) (response (optional principal) uint))))",
+        ),
+        (
+            EXTERNAL_DEPLOYER,
+            "ft-trait",
+            "(define-trait sip-010-trait ((transfer (uint principal principal) (response bool uint))))",
+        ),
+    ])
+    .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.nft-trait")),
+        "the explicitly declared nft-trait should be published; got {published:?}"
+    );
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.ft-trait")),
+        "ft-trait referenced by user code must be auto-detected even though \
+         a different explicit requirement is also declared; got {published:?}"
+    );
+}
+
+/// On simnet, an explicit requirement and an auto-detected requirement (both
+/// loaded from the local cache) must both appear in the generated plan.
+#[tokio::test]
+async fn simnet_explicit_and_auto_detected_requirements_both_deployed() {
+    const FT_DEPLOYER: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9";
+
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // nft-trait is explicit; ft-trait is only auto-detected via contract-call?.
+    write_project(
+        root,
+        &formatdoc!(
+            "
+            (define-public (go)
+              (contract-call? '{FT_DEPLOYER}.ft-trait get-one))
+            "
+        ),
+        &formatdoc!(
+            r#"
+            [[project.requirements]]
+            contract_id = "{EXTERNAL_DEPLOYER}.nft-trait"
+            "#
+        ),
+    );
+
+    // Simnet generation reads Devnet.toml for network settings.
+    fs::write(
+        root.join("settings/Devnet.toml"),
+        formatdoc!(
+            r#"
+            [network]
+            name = "devnet"
+            deployment_fee_rate = 10
+
+            [accounts.deployer]
+            mnemonic = "{TEST_MNEMONIC}"
+            balance = 100_000_000_000_000
+            "#
+        ),
+    )
+    .unwrap();
+
+    // Write cache files so simnet generation can load both without network access.
+    // Use string concatenation (not PathBuf::with_extension) since the contract
+    // name may contain dots that would be misinterpreted as file extensions.
+    let cache = root.join(".cache/requirements");
+    fs::create_dir_all(&cache).unwrap();
+    for (deployer, name) in [(EXTERNAL_DEPLOYER, "nft-trait"), (FT_DEPLOYER, "ft-trait")] {
+        let stem = format!("{deployer}.{name}");
+        fs::write(cache.join(format!("{stem}.clar")), PLAIN_SOURCE).unwrap();
+        fs::write(
+            cache.join(format!("{stem}.json")),
+            r#"{"epoch":"Epoch30","clarity_version":"Clarity3"}"#,
+        )
+        .unwrap();
+    }
+
+    let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
+    let (deployment, _, _) = generate_default_deployment(
+        &manifest,
+        &StacksNetwork::Simnet,
+        false,
+        None,
+        None,
+        Environment::Simnet,
+    )
+    .await
+    .expect("simnet deployment plan should be generated");
+
+    let emulated: Vec<String> = deployment
+        .plan
+        .batches
+        .iter()
+        .flat_map(|b| &b.transactions)
+        .filter_map(|tx| match tx {
+            TransactionSpecification::EmulatedContractPublish(spec) => {
+                Some(format!("{}.{}", spec.emulated_sender, spec.contract_name))
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        emulated.contains(&format!("{EXTERNAL_DEPLOYER}.nft-trait")),
+        "the explicitly declared nft-trait should be in the simnet plan; got {emulated:?}"
+    );
+    assert!(
+        emulated.contains(&format!("{FT_DEPLOYER}.ft-trait")),
+        "the auto-detected ft-trait should be in the simnet plan; got {emulated:?}"
     );
 }
 
