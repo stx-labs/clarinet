@@ -1072,20 +1072,15 @@ pub async fn generate_default_deployment_with_cache(
         let mut emulated_contracts_publish = HashMap::new();
         let mut requirements_publish = HashMap::new();
 
-        let explicit_ids: HashSet<QualifiedContractIdentifier> = requirements
-            .iter()
-            .filter_map(|e| QualifiedContractIdentifier::parse(&e.contract_id).ok())
-            .collect();
-        let user_contract_ids: HashSet<&QualifiedContractIdentifier> =
-            user_contract_asts.keys().collect();
-
         // Contracts that could not be retrieved and were not declared explicitly.
         // They are left for the full contract analysis pass to diagnose and must
         // never be retried, or an unavailable requirement would keep producing
         // new work on every pass.
         let mut unresolved_requirements: HashSet<QualifiedContractIdentifier> = HashSet::new();
 
-        // Push explicit requirements to front of queue (highest priority).
+        // Parse explicit requirements once — build the set and seed the queue in
+        // a single pass. Iterating in reverse so push_front preserves declaration order.
+        let mut explicit_ids: HashSet<QualifiedContractIdentifier> = HashSet::new();
         for entry in requirements.iter().rev() {
             let contract_id =
                 QualifiedContractIdentifier::parse(&entry.contract_id).map_err(|_| {
@@ -1094,6 +1089,7 @@ pub async fn generate_default_deployment_with_cache(
                         entry.contract_id
                     )
                 })?;
+            explicit_ids.insert(contract_id.clone());
             queue.push_front(contract_id);
         }
 
@@ -1127,7 +1123,7 @@ pub async fn generate_default_deployment_with_cache(
                 .chain(non_inferable)
             {
                 if boot_contracts_ids.contains(&contract_id)
-                    || user_contract_ids.contains(&contract_id)
+                    || user_contract_asts.contains_key(&contract_id)
                     || explicit_ids.contains(&contract_id)
                     || requirements_data.contains_key(&contract_id)
                     || requirements_deps.contains_key(&contract_id)

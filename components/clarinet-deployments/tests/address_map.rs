@@ -6,12 +6,12 @@ use std::path::Path;
 use clarinet_deployments::generate_default_deployment;
 use clarinet_deployments::types::TransactionSpecification;
 use clarinet_files::{ProjectManifest, StacksNetwork};
+use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC as TEST_MNEMONIC;
 use clarity_repl::utils::Environment;
 use indoc::formatdoc;
 use mockito::{Server, ServerGuard};
 use tempfile::TempDir;
 
-const TEST_MNEMONIC: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
 const REQUIREMENT_SOURCE: &str = "(define-read-only (get-one) (ok u1))";
 const EXTERNAL_DEPLOYER: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9";
 
