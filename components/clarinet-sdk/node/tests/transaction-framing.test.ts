@@ -36,8 +36,9 @@ it("rejects a duplicate deployment before analysis without consuming a nonce", (
   expect(simnet.getDataVar("existing", "answer")).toEqual(Cl.uint(42));
 });
 
-it("rejects invalid native transfers without consuming a nonce", () => {
+it("rejects invalid native transfers without consuming a nonce or mining a block", () => {
   const nonce = simnet.getAccountNonce(sender);
+  const height = simnet.blockHeight;
   const balance = simnet.getAssetsMap().get("STX")!.get(sender)!;
   expect(() => simnet.transferSTX(1, sender, sender)).toThrow(/send to itself/);
   expect(() => simnet.transferSTX(0, recipient, sender)).toThrow(/amount must be positive/);
@@ -46,6 +47,11 @@ it("rejects invalid native transfers without consuming a nonce", () => {
   );
   expect(simnet.getAccountNonce(sender)).toBe(nonce);
   expect(simnet.getAssetsMap().get("STX")!.get(sender)).toBe(balance);
+  // A rejected transaction never makes it into a block.
+  expect(simnet.blockHeight).toBe(height);
+  // A valid transfer still mines one.
+  simnet.transferSTX(1, recipient, sender);
+  expect(simnet.blockHeight).toBe(height + 1);
 });
 
 it("returns error responses for invalid transfers in a block and keeps mining it", () => {
