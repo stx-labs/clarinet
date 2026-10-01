@@ -23,8 +23,8 @@ use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, Dep
 use clarity_repl::repl::boot::{
     get_boot_contract_epoch_and_clarity_version, remap_mainnet_boot_principals,
     BOOT_CONTRACTS_DATA, BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL, SBTC_BOOT_CONTRACTS,
-    SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
-    SBTC_TOKEN_ASSET_IDENTIFIER, SBTC_TOKEN_MAINNET_ADDRESS,
+    SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_ASSET_IDENTIFIER,
+    SBTC_TOKEN_MAINNET_ADDRESS,
 };
 use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
@@ -1100,7 +1100,10 @@ pub async fn generate_default_deployment_with_cache(
         // finds nothing new.
         // Under simnet remote data the remote node holds all contracts already;
         // skip discovery to avoid fetching and discarding sources unnecessarily.
-        while !simnet_remote_data {
+        loop {
+            if simnet_remote_data {
+                break;
+            }
             let (inferable, non_inferable) = match ASTDependencyDetector::detect_dependencies(
                 &user_contract_asts,
                 &requirements_data,
@@ -1157,13 +1160,12 @@ pub async fn generate_default_deployment_with_cache(
                 // remapped to the sBTC testnet deployer, so it has to be retrieved
                 // like any other requirement: the boot copies seeded into
                 // `requirements_data` above carry no publish specification.
-                let cached_requirement = if matches!(network, StacksNetwork::Testnet)
-                    && is_sbtc_mainnet_deployer
-                {
-                    None
-                } else {
-                    requirements_data.remove(&contract_id)
-                };
+                let cached_requirement =
+                    if matches!(network, StacksNetwork::Testnet) && is_sbtc_mainnet_deployer {
+                        None
+                    } else {
+                        requirements_data.remove(&contract_id)
+                    };
 
                 // Did we already get the source in a prior cycle?
                 let (clarity_version, ast) = match cached_requirement {

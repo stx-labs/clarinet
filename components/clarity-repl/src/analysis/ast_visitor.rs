@@ -706,8 +706,7 @@ pub trait ASTVisitor<'a> {
                             // expression. Traverse all so contract-calls
                             // nested in the latter two are discovered.
                             args.iter().all(|arg| self.traverse_expr(arg))
-                                && self
-                                    .visit_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
+                                && self.visit_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
                         }
                         AllowanceWithStx
                         | AllowanceWithStacking

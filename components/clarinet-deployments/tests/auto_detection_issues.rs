@@ -273,7 +273,17 @@ async fn env_simnet_dependencies_stay_off_chain() {
         "",
     );
 
-    let server = mock_contracts(&[(EXTERNAL_DEPLOYER, "mock", PLAIN_SOURCE)]).await;
+    // The mock endpoint must never be called — a simnet-only reference must
+    // not trigger a network fetch for an on-chain deployment.
+    let mut server = Server::new_async().await;
+    server
+        .mock(
+            "GET",
+            format!("/extended/v1/contract/{EXTERNAL_DEPLOYER}.mock").as_str(),
+        )
+        .expect(0)
+        .create_async()
+        .await;
 
     let published = testnet_requirement_publishes(root, &server.url()).await;
 
@@ -714,11 +724,17 @@ async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
         ),
     );
 
-    let server = mock_contracts(&[
-        (SBTC_MAINNET_DEPLOYER, "sbtc-token", PLAIN_SOURCE),
-        (SBTC_MAINNET_DEPLOYER, "sbtc-deposit", PLAIN_SOURCE),
-    ])
-    .await;
+    let mut server = mock_contracts(&[(SBTC_MAINNET_DEPLOYER, "sbtc-token", PLAIN_SOURCE)]).await;
+    // sbtc-deposit must never be fetched — declaring sbtc-token must not
+    // implicitly pull in unrelated sBTC contracts.
+    server
+        .mock(
+            "GET",
+            format!("/extended/v1/contract/{SBTC_MAINNET_DEPLOYER}.sbtc-deposit").as_str(),
+        )
+        .expect(0)
+        .create_async()
+        .await;
 
     let published = testnet_requirement_publishes(root, &server.url()).await;
 
@@ -726,5 +742,72 @@ async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
         !published.contains(&format!("{SBTC_MAINNET_DEPLOYER}.sbtc-deposit")),
         "only the declared sbtc-token requirement should be published, but \
          sbtc-deposit was added too; got {published:?}"
+    );
+}
+
+/// `contract-hash?` with a literal principal is a static dependency.
+///
+/// The AST visitor's `visit_contract_hash` implementation must register the
+/// referenced contract as a dependency so it appears in the generated plan.
+/// `contract-hash?` requires Clarity 5 (Epoch 3.4+).
+#[tokio::test]
+async fn contract_hash_literal_is_auto_detected() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // write_project hardcodes Clarity 3 / Epoch 3.0; write the manifest manually
+    // so we can use Clarity 5 / Epoch 3.4, where contract-hash? is available.
+    fs::create_dir_all(root.join("settings")).unwrap();
+    fs::create_dir_all(root.join("contracts")).unwrap();
+
+    fs::write(
+        root.join("settings/Testnet.toml"),
+        formatdoc!(
+            r#"
+            [network]
+            name = "testnet"
+            deployment_fee_rate = 10
+
+            [accounts.deployer]
+            mnemonic = "{TEST_MNEMONIC}"
+            "#
+        ),
+    )
+    .unwrap();
+
+    fs::write(
+        root.join("Clarinet.toml"),
+        formatdoc!(
+            r#"
+            [project]
+            name = "contract-hash-test"
+            authors = []
+            description = ""
+            telemetry = false
+            cache_dir = "./.cache"
+
+            [contracts.caller]
+            path = "contracts/caller.clar"
+            clarity_version = 5
+            epoch = "3.4"
+            "#
+        ),
+    )
+    .unwrap();
+
+    fs::write(
+        root.join("contracts/caller.clar"),
+        format!("(define-read-only (hash) (contract-hash? '{EXTERNAL_DEPLOYER}.hasher))"),
+    )
+    .unwrap();
+
+    let server = mock_contracts(&[(EXTERNAL_DEPLOYER, "hasher", PLAIN_SOURCE)]).await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.hasher")),
+        "a contract referenced via contract-hash? with a literal principal must \
+         be auto-detected and published as a requirement; got {published:?}"
     );
 }

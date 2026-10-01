@@ -74,9 +74,7 @@ pub async fn retrieve_contract(
         .is_mainnet();
 
     let api_base_url = api_base_url.unwrap_or_else(|| default_api_base_url(is_mainnet));
-    log::debug!(
-        "fetching requirement {contract_deployer}.{contract_name} from {api_base_url}"
-    );
+    log::debug!("fetching requirement {contract_deployer}.{contract_name} from {api_base_url}");
     let contract = fetch_contract(api_base_url, &contract_deployer, &contract_name).await?;
 
     let epoch = epoch_for_height(is_mainnet, contract.block_height);
