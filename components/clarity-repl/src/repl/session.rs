@@ -24,7 +24,9 @@ use stacks_common::bounded_format;
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
 use super::hooks::perf::{CostField, PerfHook};
-use super::interpreter::{ContractCallError, ExecutionError, NonceCharge, TransactionTerms};
+use super::interpreter::{
+    ContractCallError, ExecutionError, InvalidTransfer, NonceCharge, TransactionTerms,
+};
 use super::post_conditions::PostConditionCheck;
 use super::{
     ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch,
@@ -738,6 +740,18 @@ impl Session {
         recipient: &str,
         post_conditions: PostConditionCheck,
     ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+        self.stx_transfer_with(amount, recipient, post_conditions, InvalidTransfer::Reject)
+    }
+
+    /// [`Session::stx_transfer`], reporting a transfer that `stx-transfer?`
+    /// refuses as `invalid` says.
+    pub fn stx_transfer_with(
+        &mut self,
+        amount: u64,
+        recipient: &str,
+        post_conditions: PostConditionCheck,
+        invalid: InvalidTransfer,
+    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
         // stacks-core rejects TokenTransfer payloads with post-conditions
         // before execution. Keep simnet aligned with mainnet/testnet here.
         if post_conditions.has_conditions() {
@@ -771,7 +785,7 @@ impl Session {
             }]
         })?;
         self.interpreter
-            .stx_transfer(amount, recipient, self.hooks.enabled())
+            .stx_transfer(amount, recipient, self.hooks.enabled(), invalid)
             .map(|execution_result| AnnotatedExecutionResult {
                 execution_result,
                 lint_diagnostics: vec![],
@@ -2420,6 +2434,42 @@ mod tests {
             panic!()
         };
         assert!(matches!(result.result, Value::Response(ref response) if !response.committed));
+    }
+
+    #[test]
+    fn an_invalid_transfer_can_return_its_error_response_and_consume_a_nonce() {
+        let mut session = Session::new(SessionSettings::default());
+        let sender = session.get_tx_sender();
+        let addr = principal(&sender);
+        let recipient = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
+        session
+            .interpreter
+            .mint_stx_balance(addr.clone(), 1000)
+            .unwrap();
+
+        // `stx-transfer?` checks the amount before the recipient.
+        let cases = [(1001, recipient, 1), (100, &sender, 2), (0, &sender, 3)];
+        for (nonce, (amount, to, code)) in (1..).zip(cases) {
+            let execution = session
+                .stx_transfer_with(
+                    amount,
+                    to,
+                    PostConditionCheck::Unchecked,
+                    InvalidTransfer::ErrorResponse,
+                )
+                .unwrap()
+                .execution_result;
+            let EvaluationResult::Snippet(result) = execution.result else {
+                panic!("expected a snippet result");
+            };
+            assert_eq!(result.result, Value::err_uint(code));
+            assert!(execution.events.is_empty());
+            assert_eq!(session.get_nonce(&addr).unwrap(), nonce);
+        }
+        assert_eq!(
+            session.interpreter.get_balance_for_account(&sender, "STX"),
+            1000
+        );
     }
 
     #[test]

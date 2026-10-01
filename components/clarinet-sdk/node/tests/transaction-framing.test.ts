@@ -1,6 +1,6 @@
 import { Cl, Pc } from "@stacks/transactions";
 import { beforeEach, expect, it } from "vitest";
-import { initSimnet, Simnet } from "..";
+import { initSimnet, Simnet, tx } from "..";
 
 const sender = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 const recipient = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
@@ -46,6 +46,28 @@ it("rejects invalid native transfers without consuming a nonce", () => {
   );
   expect(simnet.getAccountNonce(sender)).toBe(nonce);
   expect(simnet.getAssetsMap().get("STX")!.get(sender)).toBe(balance);
+});
+
+it("returns error responses for invalid transfers in a block and keeps mining it", () => {
+  const nonce = simnet.getAccountNonce(sender);
+  const height = simnet.blockHeight;
+  const balance = simnet.getAssetsMap().get("STX")!.get(sender)!;
+  const results = simnet.mineBlock([
+    tx.transferSTX(1, sender, sender),
+    tx.transferSTX(0, recipient, sender),
+    tx.transferSTX(Number(balance + 1n), recipient, sender),
+    tx.transferSTX(1, recipient, sender),
+  ]);
+  expect(results.map(({ result }) => result)).toEqual([
+    Cl.error(Cl.uint(2)),
+    Cl.error(Cl.uint(3)),
+    Cl.error(Cl.uint(1)),
+    Cl.ok(Cl.bool(true)),
+  ]);
+  expect(results.map(({ events }) => events.length)).toEqual([0, 0, 0, 1]);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce + 4n);
+  expect(simnet.blockHeight).toBe(height + 1);
+  expect(simnet.getAssetsMap().get("STX")!.get(sender)).toBe(balance - 1n);
 });
 
 it("rolls back initializer writes, events, and interfaces on a post-condition abort", () => {

@@ -29,7 +29,9 @@ actual data size, so cost assertions may need updating.
 
 `transferSTX` represents a native transfer: self-transfers, zero-amount transfers,
 and transfers exceeding the available unlocked balance throw without consuming a
-nonce. This differs
+nonce. Inside `mineBlock`, the same transfers instead return the `stx-transfer?`
+error response (`(err u1)`, `(err u2)` or `(err u3)`), consume a nonce, and the
+rest of the block is still processed. This differs
 from calling the Clarity `stx-transfer?` function inside a contract, which retains
 its ordinary response semantics. Private calls remain a simnet convenience and
 use the same transaction frame.

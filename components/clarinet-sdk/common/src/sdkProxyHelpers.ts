@@ -115,7 +115,9 @@ export type DeployContract = (
 ) => ParsedTransactionResult;
 
 /** Execute a native STX transfer. Invalid transfers (self-transfers, zero
- * amounts and insufficient funds) throw without consuming a nonce. */
+ * amounts and insufficient funds) throw without consuming a nonce. In
+ * `mineBlock`, they return the `stx-transfer?` error response and consume a
+ * nonce instead. */
 export type TransferSTX = (
   amount: number | bigint,
   recipient: string,

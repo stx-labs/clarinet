@@ -102,6 +102,20 @@ impl From<bool> for BlockInclusion {
     }
 }
 
+/// How [`ClarityInterpreter::stx_transfer`] reports a transfer that
+/// `stx-transfer?` refuses: a zero amount, a self-transfer or an insufficient
+/// unlocked balance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InvalidTransfer {
+    /// Reject it without consuming a nonce, as a Stacks node does.
+    #[default]
+    Reject,
+    /// Consume the nonce and return the `stx-transfer?` error response,
+    /// changing nothing else. `mineBlock` has always recorded an invalid
+    /// transfer this way.
+    ErrorResponse,
+}
+
 /// The nonce charge to include in an execution's database transaction.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum NonceCharge {
@@ -1205,8 +1219,23 @@ impl ClarityInterpreter {
         amount: u64,
         recipient: PrincipalData,
         hooks: Vec<&mut dyn EvalHook>,
+        invalid: InvalidTransfer,
     ) -> Result<ExecutionResult, ExecutionError> {
+        // `stx-transfer?` error codes.
+        const NOT_ENOUGH_BALANCE: u128 = 1;
+        const SENDER_IS_RECIPIENT: u128 = 2;
+        const NON_POSITIVE_AMOUNT: u128 = 3;
+
         let sender: PrincipalData = self.tx_sender.clone().into();
+        if invalid == InvalidTransfer::ErrorResponse && (amount == 0 || recipient == sender) {
+            // `stx-transfer?` checks the amount before the recipient.
+            let code = if amount == 0 {
+                NON_POSITIVE_AMOUNT
+            } else {
+                SENDER_IS_RECIPIENT
+            };
+            return self.stx_transfer_error_response(&sender, code);
+        }
         if recipient == sender {
             return Err(ExecutionError::rejected(vec![runtime_diagnostic(
                 "Invalid TokenTransfer: address tried to send to itself",
@@ -1224,6 +1253,7 @@ impl ClarityInterpreter {
             post_conditions: PostConditionCheck::Unchecked,
         };
         let id = QualifiedContractIdentifier::transient();
+        let mut insufficient_balance = false;
         self.execute_transaction_payload(
             &id,
             self.datastore.get_current_epoch(),
@@ -1248,7 +1278,10 @@ impl ClarityInterpreter {
                         let reason = match error {
                             ClarityError::Interpreter(VmExecutionError::Internal(
                                 VmInternalError::InsufficientBalance,
-                            )) => format!("insufficient unlocked balance to send {amount} uSTX"),
+                            )) => {
+                                insufficient_balance = true;
+                                format!("insufficient unlocked balance to send {amount} uSTX")
+                            }
                             error => error.to_string(),
                         };
                         ClarityError::BadTransaction(format!("Invalid TokenTransfer: {reason}"))
@@ -1262,6 +1295,33 @@ impl ClarityInterpreter {
         .map_err(|failure| ExecutionError {
             diagnostics: vec![runtime_diagnostic(&failure.error)],
             inclusion: failure.inclusion,
+        })
+        .or_else(|error| {
+            // The rejected payload rolled back, so only the nonce moves.
+            if insufficient_balance && invalid == InvalidTransfer::ErrorResponse {
+                self.stx_transfer_error_response(&sender, NOT_ENOUGH_BALANCE)
+            } else {
+                Err(error)
+            }
+        })
+    }
+
+    /// Record a transfer that `stx-transfer?` refuses with `code`, the way
+    /// [`InvalidTransfer::ErrorResponse`] describes.
+    fn stx_transfer_error_response(
+        &mut self,
+        sender: &PrincipalData,
+        code: u128,
+    ) -> Result<ExecutionResult, ExecutionError> {
+        self.increment_nonce(sender)
+            .map_err(|error| ExecutionError::rejected(vec![runtime_diagnostic(error)]))?;
+        Ok(ExecutionResult {
+            result: EvaluationResult::Snippet(SnippetEvaluationResult {
+                result: Value::err_uint(code),
+            }),
+            events: vec![],
+            cost: None,
+            diagnostics: vec![],
         })
     }
 
