@@ -636,6 +636,36 @@ async fn simnet_explicit_and_auto_detected_requirements_both_deployed() {
     );
 }
 
+/// An auto-detected reference to an sBTC contract must produce a
+/// RequirementPublish on testnet.
+#[tokio::test]
+async fn auto_detected_sbtc_is_published_on_testnet() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // Reference sbtc-token without any explicit [[project.requirements]] entry.
+    write_project(
+        root,
+        &formatdoc!(
+            "
+            (define-read-only (balance)
+              (contract-call? '{SBTC_MAINNET_DEPLOYER}.sbtc-token get-balance tx-sender))
+            "
+        ),
+        "",
+    );
+
+    let server = mock_contracts(&[(SBTC_MAINNET_DEPLOYER, "sbtc-token", PLAIN_SOURCE)]).await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        published.contains(&format!("{SBTC_MAINNET_DEPLOYER}.sbtc-token")),
+        "auto-detected sbtc-token must be published on testnet even though its AST \
+         is pre-seeded for boot setup; got {published:?}"
+    );
+}
+
 /// Declaring an sBTC token requirement does not imply unrelated requirements.
 #[tokio::test]
 async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {

@@ -1122,10 +1122,16 @@ pub async fn generate_default_deployment_with_cache(
                 })
                 .chain(non_inferable)
             {
+                // On testnet, sBTC entries are pre-seeded into `requirements_data`
+                // for signature lookup only; they still need to be fetched and
+                // published, so don't treat the pre-seeded AST as "done".
+                let already_loaded = requirements_data.contains_key(&contract_id)
+                    && !(matches!(network, StacksNetwork::Testnet)
+                        && contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS);
                 if boot_contracts_ids.contains(&contract_id)
                     || user_contract_asts.contains_key(&contract_id)
                     || explicit_ids.contains(&contract_id)
-                    || requirements_data.contains_key(&contract_id)
+                    || already_loaded
                     || requirements_deps.contains_key(&contract_id)
                     || unresolved_requirements.contains(&contract_id)
                 {
