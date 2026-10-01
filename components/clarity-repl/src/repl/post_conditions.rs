@@ -1,7 +1,7 @@
 use clarity::types::StacksEpochId;
 use clarity::util::hash::hex_bytes;
 use clarity_types::effects::AssetMap;
-use clarity_types::types::PrincipalData;
+use clarity_types::types::{BoundedErrorString, PrincipalData};
 use stacks_codec::transaction::{
     AssetInfo, PostConditionPrincipal, TransactionPostCondition, TransactionPostConditionMode,
 };
@@ -135,7 +135,7 @@ impl PostConditionCheck {
         &self,
         asset_map: &AssetMap,
         epoch: StacksEpochId,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<BoundedErrorString>, String> {
         let Self::Checked {
             conditions,
             mode,

@@ -6,6 +6,7 @@ use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::Span;
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
@@ -59,7 +60,7 @@ impl<'a> PanicChecker<'a> {
     ) {
         let diagnostic = Diagnostic {
             level: self.level.clone(),
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![expr.span.clone()],
             suggestion,
         };

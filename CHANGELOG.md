@@ -1,3 +1,28 @@
+# [3.24.1](https://github.com/stx-labs/clarinet/compare/v3.24.0...v3.24.1) (2026-09-24)
+
+##### Chores
+
+*  Apply and enable 4 Clippy `nursery` lints (#2543) (b544d58a)
+*  Upgrade rustls (#2542) (039519aa)
+
+##### Bug Fixes
+
+* **simnet:**  Remap mainnet boot-contract addresses to testnet (#2518) (2ef4cc1b)
+*  Restore the pox-5 testnet admin rewrite (#2547) (d6a24b3d)
+* **linter:**  Suppress unnecessary tuple warnings in print (#2536) (a9ded507)
+* **clarity-vscode:**  Consume LSP notifications in FIFO order (#2534) (724162e8)
+
+##### Performance Improvements
+
+*  LSP didsave session cache (#2541) (4c14014d)
+*  Cache wallet key derivation (#2531) (8ab4daf5)
+*  Credit genesis sBTC balances directly instead of replaying a deposit per wallet (#2539) (1d63543e)
+
+##### Refactors
+
+*  Drop nestable_block_on in favor of explicit tokio runtimes (#2551) (edccd1ee)
+*  Give the shipped mnemonics a single home (#2540) (6c2ad8ab)
+
 # [3.24.0](https://github.com/stx-labs/clarinet/compare/v3.23.2...v3.24.0) (2026-09-10)
 
 ##### New Features

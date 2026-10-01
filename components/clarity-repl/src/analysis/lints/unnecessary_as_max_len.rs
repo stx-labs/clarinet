@@ -6,6 +6,7 @@ use clarity::vm::analysis::type_checker::contexts::TypeMap;
 use clarity::vm::analysis::types::ContractAnalysis;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::representations::Span;
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
 
@@ -74,7 +75,10 @@ impl<'a> UnnecessaryAsMaxLen<'a> {
     fn add_diagnostic(&mut self, expr: &SymbolicExpression, max_len: u32, specified_len: u128) {
         self.diagnostics.push(Diagnostic {
             level: self.level.clone(),
-            message: Self::make_diagnostic_message(max_len, specified_len),
+            message: BoundedErrorString::from_display(&Self::make_diagnostic_message(
+                max_len,
+                specified_len,
+            )),
             spans: vec![expr.span.clone()],
             suggestion: Some(Self::suggestion()),
         });

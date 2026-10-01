@@ -68,7 +68,7 @@ impl<'a> ASTVisitor<'a> for AtBlock<'a> {
             message: "A SIP proposes removing the `at-block` function starting in Epoch 3.4. \
                 If approved, new contracts using `at-block` will be rejected at deployment. \
                 Learn more and vote [here](https://ballot.gg/67a34537-0375-4046-a4b7-432e8dfd4eb3/1MP9LjMBZRKXWq3tRio6nGwFyUoboozEQx)."
-                .to_string(),
+                .into(),
             spans: vec![expr.span.clone()],
             suggestion: None,
         });

@@ -4,6 +4,7 @@
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
@@ -61,7 +62,7 @@ impl<'a, 'b> CaseTrait<'a, 'b> {
         let message = Self::make_diagnostic_message(name, &error);
         diagnostics.push(Diagnostic {
             level: level.clone(),
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![expr.span.clone()],
             suggestion: Some(error.suggestion()),
         });

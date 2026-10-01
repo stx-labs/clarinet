@@ -716,7 +716,7 @@ fn eval_snippet_as_tx(
             serde_json::json!({"result": hex, "events": events_json, "costs": costs_json})
         }
         Err(diagnostics) => {
-            let errors: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+            let errors: Vec<&str> = diagnostics.iter().map(|d| &*d.message).collect();
             let msg = errors.join("; ");
             serde_json::json!({"error": msg})
         }

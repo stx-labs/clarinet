@@ -71,8 +71,8 @@ impl From<SettingsFile> for Settings {
 pub struct CheckError;
 
 impl DiagnosableError for CheckError {
-    fn message(&self) -> String {
-        "Use of potentially unchecked data".to_string()
+    fn write_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Use of potentially unchecked data")
     }
     fn suggestion(&self) -> Option<String> {
         None
@@ -300,7 +300,7 @@ impl<'a> CheckChecker<'a> {
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
         let diagnostic = Diagnostic {
             level: self.level.clone(),
-            message: "use of potentially unchecked data".to_string(),
+            message: "use of potentially unchecked data".into(),
             spans: vec![expr.span.clone()],
             suggestion: None,
         };
@@ -317,7 +317,7 @@ impl<'a> CheckChecker<'a> {
         for span in source_spans {
             let diagnostic = Diagnostic {
                 level: Level::Note,
-                message: "source of untrusted input here".to_string(),
+                message: "source of untrusted input here".into(),
                 spans: vec![span],
                 suggestion: None,
             };

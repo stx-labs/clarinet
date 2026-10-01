@@ -5,16 +5,19 @@ import {
   DocumentSymbolRequest,
   InitializeRequest,
 } from "vscode-languageserver";
-import type {
-  Connection,
-  DidOpenTextDocumentParams,
-} from "vscode-languageserver";
+import type { Connection } from "vscode-languageserver";
 
 // this type is the same for the browser and node but node isn't always built in dev
 // it has to stay type-only, `server/tests` loads this file unbuilt
 import type { LspVscodeBridge } from "./clarity-lsp-browser/lsp-browser";
 
 const VALID_PROTOCOLS = ["file", "vscode-vfs", "vscode-test-web"];
+
+// notifications with no textDocument (`initialized`, `$/setTrace`) reach this
+// handler too, they just never match a URI
+function documentUri(params: unknown): string | undefined {
+  return (params as { textDocument?: { uri?: string } })?.textDocument?.uri;
+}
 
 // fast and high-frequency, they would drown out everything else
 const ignoreMethodsLog: string[] = [
@@ -74,6 +77,24 @@ export function initConnection(
     }
   }
 
+  // document sync is full (see `capabilities.rs`): a newer didChange carries a
+  // snapshot that fully supersedes the queued one, so analyzing the queued
+  // snapshot is wasted work. A didOpen/didSave/didClose for the same document
+  // is a barrier, snapshots can't be merged across it
+  function replaceQueuedDidChange(method: string, params: unknown) {
+    if (method !== DidChangeTextDocumentNotification.method) return false;
+    const uri = documentUri(params);
+    if (!uri) return false;
+
+    // the newest queued entry for this document, 0 is in flight, -1 is none
+    const i = notifications.findLastIndex(([, p]) => documentUri(p) === uri);
+    // anything but a didChange there is a barrier
+    if (i < 1 || notifications[i][0] !== method) return false;
+
+    notifications[i][1] = params;
+    return true;
+  }
+
   connection.onNotification((method: string, params: unknown) => {
     // vscode.dev sends didOpen notification twice
     // including a notification with a read only github:// url
@@ -82,11 +103,17 @@ export function initConnection(
       method === DidOpenTextDocumentNotification.method ||
       method === DidCloseTextDocumentNotification.method
     ) {
-      const [protocol] = (
-        params as DidOpenTextDocumentParams
-      ).textDocument.uri.split("://");
+      const uri = documentUri(params);
+      if (!uri) {
+        console.warn(`${method} notification without a document uri`);
+        return;
+      }
+
+      const [protocol] = uri.split("://");
       if (!VALID_PROTOCOLS.includes(protocol)) return;
     }
+
+    if (replaceQueuedDidChange(method, params)) return;
 
     notifications.push([method, params]);
     if (notifications.length === 1) consumeNotifications();

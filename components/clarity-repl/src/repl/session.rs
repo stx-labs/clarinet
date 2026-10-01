@@ -9,6 +9,7 @@ use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::hooks::EvalHook;
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{
     ClarityName, ClarityVersion, CostSynthesis, EvaluationResult, ExecutionResult, ParsedContract,
     SymbolicExpression,
@@ -18,6 +19,7 @@ use clarity_types::Value;
 use colored::Colorize;
 use comfy_table::Table;
 use serde::Serialize;
+use stacks_common::bounded_format;
 
 use super::diagnostic::output_diagnostic;
 use super::hooks::logger::LoggerHook;
@@ -737,7 +739,7 @@ impl Session {
         if let Err(message) = post_conditions.validate_for_epoch(current_epoch) {
             return Err(vec![Diagnostic {
                 level: Level::Error,
-                message,
+                message: BoundedErrorString::from_display(&message),
                 spans: vec![],
                 suggestion: None,
             }]);
@@ -768,9 +770,10 @@ impl Session {
         if contract.epoch.resolve() != current_epoch {
             let diagnostic = Diagnostic {
                 level: Level::Error,
-                message: format!(
+                message: bounded_format!(
                     "contract epoch ({}) does not match current epoch ({})",
-                    contract.epoch, current_epoch
+                    contract.epoch,
+                    current_epoch
                 ),
                 spans: vec![],
                 suggestion: None,
@@ -781,9 +784,10 @@ impl Session {
         if contract.clarity_version > ClarityVersion::default_for_epoch(contract.epoch.resolve()) {
             let diagnostic = Diagnostic {
                 level: Level::Error,
-                message: format!(
+                message: bounded_format!(
                     "{} can not be used with {}",
-                    contract.clarity_version, contract.epoch
+                    contract.clarity_version,
+                    contract.epoch
                 ),
                 spans: vec![],
                 suggestion: None,
@@ -916,7 +920,7 @@ impl Session {
             .map_err(|e| {
                 ExecutionError::rejected(vec![Diagnostic {
                     level: Level::Error,
-                    message: e,
+                    message: BoundedErrorString::from_display(&e),
                     spans: vec![],
                     suggestion: None,
                 }])
@@ -969,23 +973,25 @@ impl Session {
                 ueprint!("{}", traced_error);
             }
             let contract_id_str = contract_id.to_string();
-            let user_friendly_message = match failure.error {
+            let message = match failure.error {
                 ContractCallError::NoSuchContract(_) => {
-                    format!("Contract '{contract_id_str}' does not exist")
+                    bounded_format!("Contract '{contract_id_str}' does not exist")
                 }
                 ContractCallError::NoSuchFunction(_) => {
-                    format!("Method '{method}' does not exist on contract '{contract_id_str}'")
+                    bounded_format!(
+                        "Method '{method}' does not exist on contract '{contract_id_str}'"
+                    )
                 }
                 // Already phrased for the user by the post-condition checker.
                 ContractCallError::PostConditionAborted(reason) => reason,
                 ContractCallError::Uncategorized(message) => {
-                    format!("Error calling contract function '{method}': {message}")
+                    bounded_format!("Error calling contract function '{method}': {message}")
                 }
             };
             ExecutionError {
                 diagnostics: vec![Diagnostic {
                     level: Level::Error,
-                    message: user_friendly_message,
+                    message,
                     spans: vec![],
                     suggestion: None,
                 }],
@@ -3308,7 +3314,7 @@ mod tests {
                     missing.push(format!(
                         "{id} (Err: {})",
                         e.iter()
-                            .map(|d| d.message.clone())
+                            .map(|d| d.message.to_string())
                             .collect::<Vec<_>>()
                             .join(", ")
                     ));

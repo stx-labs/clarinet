@@ -19,7 +19,7 @@ use crate::schema;
 use crate::{paths, FileAccessor};
 
 pub const INVALID_CLARITY_VERSION: &str =
-    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5, 6)";
+    "clarity_version field invalid (value supported: 1, 2, 3, 4, 5, 6, 7)";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ClarityContractMetadata {

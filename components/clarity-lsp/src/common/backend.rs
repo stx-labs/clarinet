@@ -168,7 +168,7 @@ pub enum LspNotification {
     ContractClosed(PathBuf),
 }
 
-#[derive(Debug, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Default, PartialEq, Serialize)]
 pub struct LspNotificationResponse {
     pub aggregated_diagnostics: Vec<(PathBuf, Vec<LintDiagnostic>)>,
     pub env_simnet_diagnostics: Vec<(PathBuf, Vec<LspDiagnostic>)>,
@@ -991,7 +991,7 @@ mod lsp_tests {
         let message = diagnostic
             .get("message")
             .expect("Failed to find \"message\": in diagnostic");
-        assert_eq!(message, "use of unresolved function 'increment' (onchain)");
+        assert_eq!(message, "(onchain) use of unresolved function 'increment'");
 
         let spans = diagnostic
             .get("spans")
@@ -1150,7 +1150,7 @@ mod lsp_tests {
             .expect("Failed to find \"message\": in diagnostic");
         assert_eq!(
             message,
-            "use of unresolved function 'minty-fresh' (onchain)"
+            "(onchain) use of unresolved function 'minty-fresh'"
         );
 
         let spans = diagnostic

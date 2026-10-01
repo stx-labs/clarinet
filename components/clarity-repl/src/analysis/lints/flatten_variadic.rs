@@ -9,6 +9,7 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::Span;
 use clarity::vm::{ClarityVersion, SymbolicExpression};
+use stacks_common::bounded_format;
 
 use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind, WarningKind};
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
@@ -88,7 +89,9 @@ impl<'a> FlattenVariadic<'a> {
                 };
                 self.diagnostics.push(Diagnostic {
                     level: self.level.clone(),
-                    message: format!("nested `{func_name}` can be flattened into a single call"),
+                    message: bounded_format!(
+                        "nested `{func_name}` can be flattened into a single call"
+                    ),
                     spans: vec![expr.span.clone()],
                     suggestion: Some(suggestion),
                 });

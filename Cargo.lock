@@ -647,7 +647,7 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "clarinet-cli"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "chrono",
  "clap",
@@ -688,14 +688,14 @@ dependencies = [
 
 [[package]]
 name = "clarinet-defaults"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "clarity",
 ]
 
 [[package]]
 name = "clarinet-deployments"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "base58",
  "base64 0.22.1",
@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-files"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "bitcoin",
  "clarinet-defaults",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -799,7 +799,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-events"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "clap",
  "clarinet-files",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "bytes",
  "chrono",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-static-cost"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "clarity",
  "clarity-types",
@@ -921,7 +921,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "lazy_static",
  "regex",
@@ -2494,11 +2494,10 @@ dependencies = [
 [[package]]
 name = "libsigner"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "clarity",
  "hashbrown 0.15.5",
- "libc",
  "libstackerdb",
  "serde",
  "serde_json",
@@ -2524,7 +2523,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "clarity",
  "serde",
@@ -2876,7 +2875,7 @@ dependencies = [
 
 [[package]]
 name = "observer"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "axum",
  "base58",
@@ -3067,7 +3066,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "clarity",
  "slog",
@@ -4244,7 +4243,7 @@ dependencies = [
 [[package]]
 name = "stacks-codec"
 version = "0.1.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "clarity-types",
  "serde",
@@ -4254,8 +4253,8 @@ dependencies = [
 
 [[package]]
 name = "stacks-common"
-version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+version = "4.0.3"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4279,13 +4278,12 @@ dependencies = [
  "slog-json",
  "slog-term",
  "thiserror 1.0.69",
- "toml",
  "winapi 0.3.9",
 ]
 
 [[package]]
 name = "stacks-network"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "base58",
  "bitcoincore-rpc",
@@ -4325,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "3.24.0"
+version = "3.24.1"
 dependencies = [
  "clarinet-utils",
  "clarity",
@@ -4341,7 +4339,7 @@ dependencies = [
 [[package]]
 name = "stacks-transactions"
 version = "0.1.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "clarity-types",
  "stacks-codec",
@@ -4351,7 +4349,7 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=ab048f9c1b96cbe47572b789e947fe42b0465154#ab048f9c1b96cbe47572b789e947fe42b0465154"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=275c8f861159a4c4aaa4ad80ebc5e708315d51e5#275c8f861159a4c4aaa4ad80ebc5e708315d51e5"
 dependencies = [
  "clarity",
  "ed25519-dalek",

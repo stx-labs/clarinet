@@ -50,6 +50,27 @@ async fn it_can_execute_clarity_code() {
     assert_eq!(tx.result, expected);
 }
 
+/// The Wasm secp256k1 backend used to accept high-S signatures here, which
+/// mainnet's `secp256k1-verify` rejects. Fixed upstream by stacks-core #7546.
+#[wasm_bindgen_test]
+async fn it_rejects_a_high_s_signature_in_secp256k1_verify() {
+    let mut sdk = init_sdk().await;
+    let message = "0x89171d7815da4bc1f644665a3234bc99d1680afa0b3285eff4878f4275fbfa89";
+    let pubkey = "0x0256b328b30c8bf5839e24058747879408bdb36241dc9c2e7c619faa12b2920967";
+    // The same signature with `s` replaced by `n - s`, so exactly one of the
+    // pair is high-S. The low-S twin verifying rules out a verifier that
+    // rejects everything.
+    let low_s = "0x54cd3f378a424a3e50ff1c911b7d80cf424e1b86dddecadbcf39077e62fa1e54119aebcb83e9f720d3c66a18ca90d29e18b426de372759f9ac84e5bf3df95ec7";
+    let high_s = "0x54cd3f378a424a3e50ff1c911b7d80cf424e1b86dddecadbcf39077e62fa1e54ee6514347c1608df2c3995e7356f2d60a1fab60878214642134d78cd923ce27a";
+
+    for (signature, expected) in [(low_s, true), (high_s, false)] {
+        let tx = sdk
+            .execute(format!("(secp256k1-verify {message} {signature} {pubkey})"))
+            .unwrap();
+        assert_tx_result(&tx, ClarityValue::Bool(expected));
+    }
+}
+
 #[wasm_bindgen_test]
 async fn it_can_set_epoch() {
     let mut sdk = init_sdk().await;

@@ -4,6 +4,7 @@
 
 use clarity::vm::analysis::analysis_db::AnalysisDatabase;
 use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::types::BoundedErrorString;
 use clarity::vm::SymbolicExpression;
 use clarity_types::ClarityName;
 
@@ -69,7 +70,7 @@ impl<'a, 'b> UnusedConst<'a, 'b> {
     fn make_diagnostic(level: Level, expr: &'a SymbolicExpression, message: String) -> Diagnostic {
         Diagnostic {
             level,
-            message,
+            message: BoundedErrorString::from_display(&message),
             spans: vec![expr.span.clone()],
             suggestion: Some("Remove this expression".to_string()),
         }
