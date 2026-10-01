@@ -1127,9 +1127,10 @@ pub async fn generate_default_deployment_with_cache(
                 // On testnet, sBTC entries are pre-seeded into `requirements_data`
                 // for signature lookup only; they still need to be fetched and
                 // published, so don't treat the pre-seeded AST as "done".
+                let is_sbtc_mainnet_deployer =
+                    contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS;
                 let already_loaded = requirements_data.contains_key(&contract_id)
-                    && !(matches!(network, StacksNetwork::Testnet)
-                        && contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS);
+                    && !(matches!(network, StacksNetwork::Testnet) && is_sbtc_mainnet_deployer);
                 if boot_contracts_ids.contains(&contract_id)
                     || user_contract_asts.contains_key(&contract_id)
                     || explicit_ids.contains(&contract_id)
@@ -1149,12 +1150,15 @@ pub async fn generate_default_deployment_with_cache(
                     continue;
                 }
 
+                let is_sbtc_mainnet_deployer =
+                    contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS;
+
                 // On testnet, an sBTC requirement is published as a real transaction
                 // remapped to the sBTC testnet deployer, so it has to be retrieved
                 // like any other requirement: the boot copies seeded into
                 // `requirements_data` above carry no publish specification.
                 let cached_requirement = if matches!(network, StacksNetwork::Testnet)
-                    && contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS
+                    && is_sbtc_mainnet_deployer
                 {
                     None
                 } else {
@@ -1237,7 +1241,7 @@ pub async fn generate_default_deployment_with_cache(
                             );
 
                             // Remap sBTC mainnet address to testnet address
-                            if contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS {
+                            if is_sbtc_mainnet_deployer {
                                 remap_sender = SBTC_TESTNET_ADDRESS_PRINCIPAL.clone();
                                 remap_principals.insert(
                                     contract_id.issuer.clone(),

@@ -709,6 +709,7 @@ dependencies = [
  "clarity-repl",
  "indoc",
  "libsecp256k1",
+ "log",
  "mockito",
  "pretty_assertions",
  "reqwest",

@@ -547,24 +547,24 @@ async fn explicit_requirement_does_not_suppress_auto_detection_of_others() {
 /// loaded from the local cache) must both appear in the generated plan.
 #[tokio::test]
 async fn simnet_explicit_and_auto_detected_requirements_both_deployed() {
-    const FT_DEPLOYER: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9";
+    const SECOND_DEPLOYER: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9";
 
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path();
 
-    // nft-trait is explicit; ft-trait is only auto-detected via contract-call?.
+    // external-a is explicit; external-b is only auto-detected via contract-call?.
     write_project(
         root,
         &formatdoc!(
             "
             (define-public (go)
-              (contract-call? '{FT_DEPLOYER}.ft-trait get-one))
+              (contract-call? '{SECOND_DEPLOYER}.external-b get-one))
             "
         ),
         &formatdoc!(
             r#"
             [[project.requirements]]
-            contract_id = "{EXTERNAL_DEPLOYER}.nft-trait"
+            contract_id = "{EXTERNAL_DEPLOYER}.external-a"
             "#
         ),
     );
@@ -591,7 +591,10 @@ async fn simnet_explicit_and_auto_detected_requirements_both_deployed() {
     // name may contain dots that would be misinterpreted as file extensions.
     let cache = root.join(".cache/requirements");
     fs::create_dir_all(&cache).unwrap();
-    for (deployer, name) in [(EXTERNAL_DEPLOYER, "nft-trait"), (FT_DEPLOYER, "ft-trait")] {
+    for (deployer, name) in [
+        (EXTERNAL_DEPLOYER, "external-a"),
+        (SECOND_DEPLOYER, "external-b"),
+    ] {
         let stem = format!("{deployer}.{name}");
         fs::write(cache.join(format!("{stem}.clar")), PLAIN_SOURCE).unwrap();
         fs::write(
@@ -627,12 +630,12 @@ async fn simnet_explicit_and_auto_detected_requirements_both_deployed() {
         .collect();
 
     assert!(
-        emulated.contains(&format!("{EXTERNAL_DEPLOYER}.nft-trait")),
-        "the explicitly declared nft-trait should be in the simnet plan; got {emulated:?}"
+        emulated.contains(&format!("{EXTERNAL_DEPLOYER}.external-a")),
+        "the explicitly declared external-a should be in the simnet plan; got {emulated:?}"
     );
     assert!(
-        emulated.contains(&format!("{FT_DEPLOYER}.ft-trait")),
-        "the auto-detected ft-trait should be in the simnet plan; got {emulated:?}"
+        emulated.contains(&format!("{SECOND_DEPLOYER}.external-b")),
+        "the auto-detected external-b should be in the simnet plan; got {emulated:?}"
     );
 }
 
@@ -663,6 +666,33 @@ async fn auto_detected_sbtc_is_published_on_testnet() {
         published.contains(&format!("{SBTC_MAINNET_DEPLOYER}.sbtc-token")),
         "auto-detected sbtc-token must be published on testnet even though its AST \
          is pre-seeded for boot setup; got {published:?}"
+    );
+}
+
+/// A direct `contract-call?` (not trait-mediated) is auto-detected and
+/// published as a requirement.
+#[tokio::test]
+async fn direct_contract_call_is_auto_detected() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &format!(
+            "(define-public (call-ext) \
+             (contract-call? '{EXTERNAL_DEPLOYER}.helper get-one))"
+        ),
+        "",
+    );
+
+    let server = mock_contracts(&[(EXTERNAL_DEPLOYER, "helper", PLAIN_SOURCE)]).await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.helper")),
+        "a directly called external contract must be auto-detected and published \
+         as a requirement; got {published:?}"
     );
 }
 

@@ -772,6 +772,22 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
         true
     }
 
+    fn visit_contract_hash(
+        &mut self,
+        _expr: &'a SymbolicExpression,
+        input: &'a SymbolicExpression,
+    ) -> bool {
+        // `contract-hash?` reads the referenced contract's stored hash, so the
+        // contract must be published before the caller. A literal principal is
+        // the only statically-identifiable form.
+        if let Some(Value::Principal(PrincipalData::Contract(contract))) =
+            input.match_literal_value()
+        {
+            self.add_dependency(self.current_contract.unwrap(), contract);
+        }
+        true
+    }
+
     fn visit_use_trait(
         &mut self,
         expr: &'a SymbolicExpression,
