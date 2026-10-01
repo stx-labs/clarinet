@@ -442,6 +442,58 @@ async fn explicit_requirement_not_duplicated_when_also_auto_detected() {
     );
 }
 
+/// When the same contract is in `[[project.requirements]]` AND auto-detected,
+/// a fetch failure is a hard error (not silently skipped). Explicit entries
+/// promote auto-detected contracts to required: if the address is wrong or the
+/// contract is unavailable, plan generation fails rather than continuing without it.
+#[tokio::test]
+async fn explicit_requirement_fetch_failure_aborts_plan() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &format!(
+            "(use-trait nft '{EXTERNAL_DEPLOYER}.nft-trait.nft-trait)\n\
+             (define-read-only (noop) (ok none))\n"
+        ),
+        &formatdoc!(
+            r#"
+            [[project.requirements]]
+            contract_id = "{EXTERNAL_DEPLOYER}.nft-trait"
+            "#
+        ),
+    );
+
+    // Server returns 404 — the contract cannot be retrieved.
+    let mut server = Server::new_async().await;
+    server
+        .mock(
+            "GET",
+            format!("/extended/v1/contract/{EXTERNAL_DEPLOYER}.nft-trait").as_str(),
+        )
+        .with_status(404)
+        .create_async()
+        .await;
+
+    let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
+    let result = generate_default_deployment(
+        &manifest,
+        &StacksNetwork::Testnet,
+        false,
+        None,
+        Some(&server.url()),
+        Environment::OnChain,
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "an explicit requirement that cannot be fetched must abort plan generation, \
+         not be silently skipped like an auto-detected one; got Ok"
+    );
+}
+
 /// An explicit `[[project.requirements]]` entry must not prevent auto-detection
 /// of other externally-referenced contracts.
 #[tokio::test]
