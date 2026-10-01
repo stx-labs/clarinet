@@ -58,3 +58,20 @@ jobs:
 
       - name: Publish sdk package
         run: pnpm --filter ./components/clarinet-sdk/node --filter ./components/clarinet-sdk/browser publish --access public
+
+  notify-slack:
+    name: Notify Slack on failure
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    if: failure() && github.event_name == 'release'
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": ":x: Release workflow `${{ github.workflow }}` failed\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run #${{ github.run_id }}>\nRef: `${{ github.ref_name }}`\nTriggered by: `${{ github.actor }}`"
+            }
