@@ -1098,7 +1098,9 @@ pub async fn generate_default_deployment_with_cache(
         // passed as a trait argument is only identifiable once the callee's
         // signature has been loaded. Repeat discovery and loading until a pass
         // finds nothing new.
-        loop {
+        // Under simnet remote data the remote node holds all contracts already;
+        // skip discovery to avoid fetching and discarding sources unnecessarily.
+        while !simnet_remote_data {
             let (inferable, non_inferable) = match ASTDependencyDetector::detect_dependencies(
                 &user_contract_asts,
                 &requirements_data,
@@ -1318,7 +1320,10 @@ pub async fn generate_default_deployment_with_cache(
                         let retryable: Vec<QualifiedContractIdentifier> =
                             non_inferable_dependencies
                                 .into_iter()
-                                .filter(|id| !unresolved_requirements.contains(id))
+                                .filter(|id| {
+                                    !unresolved_requirements.contains(id)
+                                        && !requirements_deps.contains_key(id)
+                                })
                                 .collect();
                         if retryable.is_empty() {
                             // Keep the dependencies that were resolved so the
@@ -1368,7 +1373,7 @@ pub async fn generate_default_deployment_with_cache(
             if matches!(network, StacksNetwork::Simnet) {
                 for contract_id in ordered_contracts_ids.iter() {
                     let Some(data) = emulated_contracts_publish.remove(contract_id) else {
-                        continue; // no EmulatedContractPublish (e.g. simnet_remote_data path)
+                        continue; // requirement was loaded for AST only (e.g. boot contract)
                     };
                     let tx = TransactionSpecification::EmulatedContractPublish(data);
                     add_transaction_to_epoch(
@@ -1380,7 +1385,7 @@ pub async fn generate_default_deployment_with_cache(
             } else if matches!(network, StacksNetwork::Devnet | StacksNetwork::Testnet) {
                 for contract_id in ordered_contracts_ids.iter() {
                     let Some(data) = requirements_publish.remove(contract_id) else {
-                        continue; // contract has a network override — remapped at broadcast time
+                        continue; // requirement was loaded for AST only (e.g. sBTC on testnet pre-seeded boot copy)
                     };
                     let tx = TransactionSpecification::RequirementPublish(data);
                     add_transaction_to_epoch(

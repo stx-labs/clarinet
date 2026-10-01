@@ -242,7 +242,7 @@ impl Serialize for ProjectConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct RequirementConfig {
-    /// Contract identifier of the required contract
+    /// Contract identifier of the required contract, e.g. `SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait`
     pub contract_id: String,
 }
 

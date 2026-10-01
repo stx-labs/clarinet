@@ -700,9 +700,16 @@ pub trait ASTVisitor<'a> {
 
                             self.traverse_restrict_assets(expr, owner, raw_allowances, body)
                         }
+                        AllowanceWithFt | AllowanceWithNft => {
+                            // Three evaluated arguments: contract principal,
+                            // asset-name expression, and amount/token-ID
+                            // expression. Traverse all so contract-calls
+                            // nested in the latter two are discovered.
+                            args.iter().all(|arg| self.traverse_expr(arg))
+                                && self
+                                    .visit_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
+                        }
                         AllowanceWithStx
-                        | AllowanceWithFt
-                        | AllowanceWithNft
                         | AllowanceWithStacking
                         | AllowanceAll
                         | AllowanceWithStaking

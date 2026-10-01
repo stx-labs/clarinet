@@ -157,11 +157,19 @@ fn deep_check_callee_type(
             }
         }
         TypeSignature::ResponseType(inner_type) => {
-            if let Some(expr) = expr.match_list().and_then(|l| l.get(1)) {
-                deep_check_callee_type(&inner_type.0, expr, dependencies);
-            }
-            if let Some(expr) = expr.match_list().and_then(|l| l.get(2)) {
-                deep_check_callee_type(&inner_type.1, expr, dependencies);
+            // Select the success or error type from the constructor name, then
+            // recurse into element 1.
+            if let Some(list) = expr.match_list() {
+                let constructor = list.first().and_then(|e| e.match_atom());
+                let payload = list.get(1);
+                if let (Some(constructor), Some(payload)) = (constructor, payload) {
+                    let arg_type = if constructor.as_str() == "err" {
+                        &inner_type.1
+                    } else {
+                        &inner_type.0
+                    };
+                    deep_check_callee_type(arg_type, payload, dependencies);
+                }
             }
         }
         TypeSignature::TupleType(inner_type) => {
