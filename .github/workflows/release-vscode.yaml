@@ -117,6 +117,7 @@ jobs:
       - publish-vscode-marketplace
       - publish-open-vsx
     if: failure() && github.event_name == 'release'
+    environment: notifications
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
