@@ -4,7 +4,7 @@ use bitcoin::hex::DisplayHex;
 
 pub use crate::DevnetConfig;
 
-/// Config which fields to check for differences
+/// Configures which fields to compare
 pub struct DevnetDiffConfig {
     /// Fields to check for differences
     significant_fields: Vec<SignificantField>,

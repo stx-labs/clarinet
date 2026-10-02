@@ -24,7 +24,6 @@ This repository contains three tools that are built on top of the same Rust comp
 - `clarinet-format` - Clarity code formatter
 - `stacks-network` - Local devnet orchestration (Docker-based)
 - `stacks-rpc-client` - Stacks node HTTP client
-- `stacks-codec` - Stacks wire format encoding/decoding
 - `clarinet-utils` - Cryptographic utilities
 - `hiro-system-kit` - Cross-platform system helpers
 
@@ -83,7 +82,7 @@ cargo clippy --package clarinet-sdk-wasm --target wasm32-unknown-unknown
 
 ## VSCode extension
 
-- `clarity-vscode` - TypeScript/WASM extension for Microsoft Visual Studio Code
+- `clarity-vscode` - TypeScript/Wasm extension for Microsoft Visual Studio Code
 
 A wrapper around the `clarity-lsp`, compiled to Wasm to produce a self-contained VSCode extension binary.
 It has its own `package.json` in `./components/clarity-vscode/package.json`
@@ -101,4 +100,4 @@ pnpm test
 
 ## Key Dependencies
 
-Clarity interpreter and Stacks libraries come from `stacks-network/stacks-core` git dependency (see `Cargo.toml` for current revision).
+The Clarity interpreter and Stacks libraries come from `stacks-network/stacks-core` git dependency (see `Cargo.toml` for current revision).

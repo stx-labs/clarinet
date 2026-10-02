@@ -97,7 +97,7 @@ impl From<Utf8Error> for ParseError {
     }
 }
 
-/// Encodes and decodes Language Server Protocol messages.
+/// Encodes and decodes Debug Adapter Protocol messages.
 pub struct DebugAdapterCodec<T> {
     content_len: Option<usize>,
     _marker: PhantomData<T>,

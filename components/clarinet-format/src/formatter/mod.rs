@@ -269,7 +269,7 @@ impl<'a> Aggregator<'a> {
             }
         }
 
-        // Create a key based on the slice pointer and length for the whole array
+        // Cache by slice pointer and indentation
         let key = (
             expressions.as_ptr() as usize,
             previous_indentation.to_string(),

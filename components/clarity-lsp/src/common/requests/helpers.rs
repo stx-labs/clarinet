@@ -18,7 +18,7 @@ pub fn span_to_range(span: &Span) -> Range {
     }
 }
 
-// end_offset is usded to include the end position of a keyword, for go to definition in particular
+// end_offset is used to include the end position of a keyword, for go to definition in particular
 pub fn is_position_within_span(position: &Position, span: &Span, end_offset: u32) -> bool {
     if position.line < span.start_line || position.line > span.end_line {
         return false;
