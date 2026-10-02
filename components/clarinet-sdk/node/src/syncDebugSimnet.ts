@@ -3,8 +3,9 @@
  * via a SharedArrayBuffer + Atomics.wait worker (see syncDebugSocket.ts).
  *
  * When CLARINET_DEBUG_PORT is set, initSimnet() returns one of these instead of
- * the WASM simnet. The API surface is identical, so existing tests run unchanged
- * while breakpoints in .clar files fire in VSCode (or any DAP-capable editor).
+ * the Wasm simnet. It supports contract calls, snippets, and mining, with
+ * breakpoints in .clar files. API coverage and transaction behavior differ
+ * from the Wasm SDK; coverage and cost reports are not supported.
  */
 import { Cl, type ClarityValue } from "@stacks/transactions";
 import { syncSend } from "./syncDebugSocket.js";

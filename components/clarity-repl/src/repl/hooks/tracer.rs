@@ -18,7 +18,7 @@ pub struct TracerErrorOutput {
 impl std::fmt::Display for TracerErrorOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let header = format!(
-            "Error occured in {}:{}:{}",
+            "Error occurred in {}:{}:{}",
             self.contract_id.name, self.expr.span.start_line, self.expr.span.start_column
         );
         let header_underline = "=".repeat(header.len());
