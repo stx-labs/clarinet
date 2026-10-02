@@ -228,9 +228,9 @@ describe("simnet can call contracts function", () => {
       total: {
         writeLength: 44,
         writeCount: 3,
-        readLength: 1548,
+        readLength: 1696,
         readCount: 8,
-        runtime: 15712,
+        runtime: 15860,
       },
       limit: {
         writeLength: 15000000,
@@ -250,7 +250,8 @@ describe("simnet can call contracts function", () => {
     expect(res).toHaveProperty("costs");
     expect(res.costs).not.toBeNull();
     // Verify that runtime cost is reported (should be > 0 for a deployment)
-    expect(res.costs!.total.runtime).toEqual(224);
+    // Includes the upstream ContractStorage charge.
+    expect(res.costs!.total.runtime).toEqual(7972);
   });
 
   it("can call public functions with arguments", () => {
@@ -529,20 +530,20 @@ describe("simnet can get contracts info and deploy contracts", () => {
     expect(counterAst.expressions[0].pre_comments[0][0]).toBe("counter contract");
   });
 
-  it("can deploy contracts as snippets", () => {
+  it("stores expression-only deployments as contracts", () => {
     simnet.setEpoch(latestEpochStr);
     const res = simnet.deployContract("temp", "(+ 24 18)", null, deployerAddr);
-    expect(res.result).toStrictEqual(Cl.int(42));
+    expect(res.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
     const contractInterfaces = simnet.getContractsInterfaces();
-    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch40 + 5);
+    expect(contractInterfaces).toHaveLength(bootContractsAtEpoch40 + 6);
   });
 
   it("can deploy contracts", () => {
     simnet.setEpoch(latestEpochStr);
     const source = "(define-public (add (a uint) (b uint)) (ok (+ a b)))\n";
     const deployRes = simnet.deployContract("op", source, null, deployerAddr);
-    expect(deployRes.result).toStrictEqual(Cl.bool(true));
+    expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
     const contractInterfaces = simnet.getContractsInterfaces();
     expect(contractInterfaces).toHaveLength(bootContractsAtEpoch40 + 6);
@@ -586,7 +587,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
       tx.deployContract("oktrue", source, { clarityVersion: 3 }, simnet.deployer),
     ]);
 
-    expect(deployRes.result).toStrictEqual(Cl.bool(true));
+    expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
     const contractInterface = simnet.getContractsInterfaces().get(`${simnet.deployer}.oktrue`)!;
     expect(contractInterface.clarity_version).toBe("Clarity3");
@@ -603,7 +604,7 @@ describe("simnet can get contracts info and deploy contracts", () => {
       tx.deployContract("test-null", source, null, simnet.deployer),
     ]);
 
-    expect(deployRes.result).toStrictEqual(Cl.bool(true));
+    expect(deployRes.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
     const contractInterface = simnet.getContractsInterfaces().get(`${simnet.deployer}.test-null`)!;
     expect(contractInterface).toBeDefined();
@@ -667,7 +668,7 @@ describe("prints logs", () => {
       { clarityVersion: 2 },
       deployerAddr,
     );
-    expect(deploy.result).toStrictEqual(Cl.bool(true));
+    expect(deploy.result).toStrictEqual(Cl.ok(Cl.bool(true)));
     const { result } = simnet.callPublicFn("test-contract", "always-fail", [], address1);
     expect(result).toStrictEqual(Cl.error(Cl.uint(1)));
 
