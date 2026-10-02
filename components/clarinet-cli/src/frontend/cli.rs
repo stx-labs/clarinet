@@ -20,8 +20,7 @@ use clarinet_deployments::{
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::{
-    get_manifest_location, paths, NetworkManifest, ProjectManifest, RequirementConfig,
-    StacksNetwork,
+    get_manifest_location, paths, NetworkManifest, ProjectManifest, StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity::types::StacksEpochId;
@@ -99,9 +98,6 @@ enum Command {
     /// Subcommands for working with contracts
     #[clap(subcommand, name = "contracts", aliases = &["contract"])]
     Contracts(Contracts),
-    /// Interact with contracts deployed on Mainnet
-    #[clap(subcommand, name = "requirements", aliases = &["requirement"])]
-    Requirements(Requirements),
     /// Manage contracts deployments on Simnet/Devnet/Testnet/Mainnet
     #[clap(subcommand, name = "deployments", aliases = &["deployment"])]
     Deployments(Deployments),
@@ -260,13 +256,6 @@ enum Contracts {
     RemoveContract(RemoveContract),
 }
 
-#[derive(Subcommand, PartialEq, Clone, Debug)]
-enum Requirements {
-    /// Interact with contracts deployed on Mainnet
-    #[clap(name = "add", bin_name = "add")]
-    AddRequirement(AddRequirement),
-}
-
 #[allow(clippy::enum_variant_names)]
 #[derive(Subcommand, PartialEq, Clone, Debug)]
 enum Deployments {
@@ -323,15 +312,6 @@ struct NewContract {
 struct RemoveContract {
     /// Contract's name
     pub name: String,
-    /// Path to Clarinet.toml
-    #[clap(long = "manifest-path", short = 'm')]
-    pub manifest_path: Option<String>,
-}
-
-#[derive(Parser, PartialEq, Clone, Debug)]
-struct AddRequirement {
-    /// Contract id (ex. "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait")
-    pub contract_id: String,
     /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
@@ -1099,31 +1079,6 @@ pub fn main() {
                     std::process::exit(0);
                 }
                 if !execute_changes(changes) {
-                    std::process::exit(1);
-                }
-                if clarinetrc.enable_hints.unwrap_or(true) {
-                    display_post_check_hint();
-                }
-            }
-        },
-        Command::Requirements(subcommand) => match subcommand {
-            Requirements::AddRequirement(cmd) => {
-                let manifest = load_manifest_or_exit(cmd.manifest_path, true);
-
-                let change = TOMLEdition {
-                    comment: format!(
-                        "{} with requirement {}",
-                        yellow!("Updated Clarinet.toml"),
-                        green!("{}", cmd.contract_id)
-                    ),
-                    manifest_location: manifest.location,
-                    contracts_to_rm: vec![],
-                    contracts_to_add: HashMap::new(),
-                    requirements_to_add: vec![RequirementConfig {
-                        contract_id: cmd.contract_id,
-                    }],
-                };
-                if !execute_changes(vec![Changes::EditTOML(change)]) {
                     std::process::exit(1);
                 }
                 if clarinetrc.enable_hints.unwrap_or(true) {
@@ -2074,10 +2029,6 @@ fn load_manifest(location: &Path) -> Option<DocumentMut> {
 
 /// Edit a TOML document directly, preserving comments and structure.
 fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> DocumentMut {
-    for req in options.requirements_to_add.drain(..) {
-        add_requirement_to_doc(&mut doc, &req.contract_id);
-    }
-
     for (name, contract) in options.contracts_to_add.drain() {
         add_contract_to_doc(&mut doc, &name, &contract);
     }
@@ -2087,45 +2038,6 @@ fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> Docume
     }
 
     doc
-}
-
-/// Add a requirement to the [[project.requirements]] array in the document.
-fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
-    use toml_edit::{ArrayOfTables, Item, Table};
-
-    // Ensure [project] table exists
-    let project = doc
-        .entry("project")
-        .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
-        .expect("[project] should be a table");
-
-    // Ensure [[project.requirements]] array exists.
-    // If requirements = [] (an empty inline array), replace it with an array of tables.
-    if project
-        .get("requirements")
-        .is_some_and(|v| v.as_array().is_some_and(|a| a.is_empty()))
-    {
-        project["requirements"] = Item::ArrayOfTables(ArrayOfTables::new());
-    }
-
-    let requirements = project
-        .entry("requirements")
-        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
-        .as_array_of_tables_mut()
-        .expect("[[project.requirements]] should be an array of tables");
-
-    // Check for duplicates
-    let already_exists = requirements
-        .iter()
-        .filter_map(|req| req.get("contract_id")?.as_str())
-        .any(|id| id == contract_id);
-
-    if !already_exists {
-        let mut new_req = Table::new();
-        new_req["contract_id"] = toml_edit::value(contract_id);
-        requirements.push(new_req);
-    }
 }
 
 /// Add a contract to the [contracts.<name>] section in the document.
@@ -2550,16 +2462,21 @@ mod tests {
         /// Helper to check if a requirement exists in the TOML
         fn has_requirement(content: &str, contract_id: &str) -> bool {
             let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
-            if let Some(project) = doc.get("project").and_then(|p| p.as_table()) {
-                if let Some(requirements) = project.get("requirements") {
-                    if let Some(arr) = requirements.as_array_of_tables() {
-                        return arr.iter().any(|req| {
-                            req.get("contract_id")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s == contract_id)
-                                .unwrap_or(false)
-                        });
-                    }
+            let Some(project) = doc.get("project").and_then(|p| p.as_table()) else {
+                return false;
+            };
+            if let Some(arr) = project
+                .get("requirements")
+                .and_then(|v| v.as_array_of_tables())
+            {
+                if arr.iter().any(|entry| {
+                    entry
+                        .get("contract_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s == contract_id)
+                        .unwrap_or(false)
+                }) {
+                    return true;
                 }
             }
             false
@@ -2661,153 +2578,6 @@ mod tests {
             assert!(
                 contains_comment(&output, "Comment about contracts"),
                 "Contract section comment should be preserved"
-            );
-        }
-
-        #[test]
-        fn test_add_requirement_preserves_comments() {
-            let input = indoc! {r#"
-                [project]
-                name = "test-project"
-                description = "A test project"
-                authors = ["Test Author"]
-                telemetry = false
-
-                # This comment should survive
-
-                [contracts.my-contract]
-                path = "contracts/my-contract.clar"
-                clarity_version = 2
-                epoch = "latest"
-            "#};
-
-            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(
-                &mut doc,
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
-            );
-
-            let output = doc.to_string();
-
-            // Verify the requirement was added
-            assert!(
-                has_requirement(
-                    &output,
-                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
-                ),
-                "Requirement should be added"
-            );
-
-            // Verify comment is preserved
-            assert!(
-                contains_comment(&output, "This comment should survive"),
-                "Comment should be preserved"
-            );
-
-            // Verify existing settings are preserved
-            assert!(
-                has_toml_value(&output, "project.name", "test-project"),
-                "Project name should be preserved"
-            );
-            assert!(
-                has_toml_value(&output, "project.telemetry", "false"),
-                "Telemetry setting should be preserved"
-            );
-
-            // Verify contract is still there
-            assert!(
-                has_contract(&output, "my-contract"),
-                "Contract should be preserved"
-            );
-        }
-
-        #[test]
-        fn test_add_requirement_with_empty_requirements_array() {
-            let input = indoc! {r#"
-                [project]
-                name = 'project-template'
-                requirements = []
-            "#};
-
-            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(
-                &mut doc,
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
-            );
-
-            let output = doc.to_string();
-
-            assert!(
-                has_requirement(
-                    &output,
-                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
-                ),
-                "Requirement should be added when requirements was an empty array"
-            );
-
-            assert!(
-                has_toml_value(&output, "project.name", "project-template"),
-                "Project name should be preserved"
-            );
-        }
-
-        #[test]
-        fn test_add_requirement_does_not_duplicate() {
-            let input = indoc! {r#"
-                [project]
-                name = "test-project"
-
-                [[project.requirements]]
-                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
-            "#};
-
-            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-
-            // Try to add the same requirement again
-            add_requirement_to_doc(
-                &mut doc,
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
-            );
-
-            let output = doc.to_string();
-
-            // Count how many times the contract_id appears
-            let count = output.matches("nft-trait").count();
-            assert_eq!(count, 1, "Requirement should not be duplicated");
-        }
-
-        #[test]
-        fn test_add_multiple_requirements() {
-            let input = indoc! {r#"
-                [project]
-                name = "test-project"
-
-                [[project.requirements]]
-                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
-            "#};
-
-            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            add_requirement_to_doc(
-                &mut doc,
-                "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait",
-            );
-
-            let output = doc.to_string();
-
-            // Both requirements should exist
-            assert!(
-                has_requirement(
-                    &output,
-                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
-                ),
-                "Original requirement should be preserved"
-            );
-            assert!(
-                has_requirement(
-                    &output,
-                    "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"
-                ),
-                "New requirement should be added"
             );
         }
 
