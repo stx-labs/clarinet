@@ -75,7 +75,6 @@ impl GetChangesForRmContract {
             manifest_location,
             contracts_to_rm,
             contracts_to_add: HashMap::new(),
-            requirements_to_add: vec![],
         };
         self.changes.push(Changes::EditTOML(change));
     }
@@ -219,7 +218,6 @@ impl GetChangesForNewContract {
             manifest_location,
             contracts_to_rm: vec![],
             contracts_to_add,
-            requirements_to_add: vec![],
         };
         self.changes.push(Changes::EditTOML(change));
     }

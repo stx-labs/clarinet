@@ -4,7 +4,7 @@ use std::process::Command;
 
 use clarinet_deployments::load_deployment;
 use clarinet_deployments::types::TransactionSpecification;
-use clarinet_files::{ProjectManifest, ProjectManifestFile, StacksNetwork};
+use clarinet_files::StacksNetwork;
 use clarinet_lib::deployments::generate_devnet_deployment;
 use clarinet_lib::frontend::cli::load_manifest_or_exit;
 use indoc::{formatdoc, indoc};
@@ -38,14 +38,6 @@ fn create_project_with_env_simnet(project_name: &str) -> (tempfile::TempDir, std
     fs::write(&contract_path, ENV_SIMNET_CONTRACT_SOURCE).unwrap();
 
     (temp_dir, project_path)
-}
-
-#[track_caller]
-fn parse_manifest(project_dir: &Path) -> ProjectManifest {
-    let manifest_path = project_dir.join("Clarinet.toml");
-    let manifest_str = fs::read_to_string(&manifest_path).expect("Failed to read Clarinet.toml");
-    let manifest_file: ProjectManifestFile = toml::from_str(&manifest_str).unwrap();
-    ProjectManifest::from_project_manifest_file(manifest_file, &manifest_path, false).unwrap()
 }
 
 #[track_caller]
@@ -169,27 +161,6 @@ fn test_contract_new() {
         let metadata = fs::metadata(&file_path).expect("Failed to get file metadata");
         assert!(metadata.len() > 0, "'{file}' is empty");
     }
-}
-
-#[test]
-fn test_requirement_add() {
-    let project_name = "test_requirement_add";
-    let temp_dir = create_new_project(project_name);
-    let project_path = temp_dir.path().join(project_name);
-    let requirement_name = "SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard";
-    let status = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["requirement", "add", requirement_name])
-        .current_dir(&project_path)
-        .status();
-    assert!(status.unwrap().success());
-
-    let manifest = parse_manifest(&project_path);
-    let found = manifest
-        .project
-        .requirements
-        .iter()
-        .any(|c| c.contract_id == requirement_name);
-    assert!(found, "Requirement not found in manifest");
 }
 
 #[test]
