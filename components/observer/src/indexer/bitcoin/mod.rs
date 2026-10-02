@@ -628,17 +628,21 @@ fn try_parse_stacks_operation(
                 2
             };
 
-            let mut mining_sats_left = 0;
-            let mut mining_address_post_commit = None;
-            if let Some(mining_post_commit) = outputs.get(mining_output_index) {
-                mining_sats_left = mining_post_commit.value.to_sat();
-                mining_address_post_commit = match mining_post_commit.script_pub_key.script() {
-                    Ok(script) => Address::from_script(&script, bitcoin::Network::Bitcoin)
-                        .map(|a| a.to_string())
-                        .ok(),
-                    Err(_) => None,
+            let (mining_sats_left, mining_address_post_commit) =
+                match outputs.get(mining_output_index) {
+                    Some(mining_post_commit) => (
+                        mining_post_commit.value.to_sat(),
+                        mining_post_commit
+                            .script_pub_key
+                            .script()
+                            .ok()
+                            .and_then(|script| {
+                                Address::from_script(&script, bitcoin::Network::Bitcoin).ok()
+                            })
+                            .map(|a| a.to_string()),
+                    ),
+                    None => (0, None),
                 };
-            }
 
             // let mining_address_pre_commit = match inputs[0].script_sig {
             //     Some(script) => match script.script() {
