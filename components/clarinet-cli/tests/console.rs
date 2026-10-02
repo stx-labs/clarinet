@@ -7,6 +7,11 @@ fn run_console_command(args: &[&str], commands: &[&str]) -> Vec<String> {
         .args(["console"])
         .args(args)
         .current_dir(&temp_dir)
+        // rustyline echoes its prompt to stdout when the terminal is
+        // "unsupported" (e.g. TERM=dumb), shifting every line the tests
+        // assert on. Pin a supported TERM so the harness is immune to the
+        // contributor's environment.
+        .env("TERM", "xterm-256color")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
