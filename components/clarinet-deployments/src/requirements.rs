@@ -56,6 +56,17 @@ pub async fn retrieve_contract(
         ),
     };
 
+    let cache_errors = [&contract_source, &metadata_json]
+        .into_iter()
+        .zip([&contract_location, &metadata_location])
+        .filter_map(|(result, path)| {
+            result
+                .as_ref()
+                .err()
+                .map(|error| format!("{}: {error}", path.display()))
+        })
+        .collect::<Vec<_>>();
+
     if let (Ok(contract_source), Ok(metadata_json)) = (contract_source, metadata_json) {
         let metadata: ContractMetadata = serde_json::from_str(&metadata_json)
             .map_err(|e| format!("Unable to parse metadata file: {e}"))?;
@@ -73,7 +84,14 @@ pub async fn retrieve_contract(
         .is_mainnet();
 
     let api_base_url = api_base_url.unwrap_or_else(|| default_api_base_url(is_mainnet));
-    let contract = fetch_contract(api_base_url, &contract_deployer, &contract_name).await?;
+    let contract = fetch_contract(api_base_url, &contract_deployer, &contract_name)
+        .await
+        .map_err(|error| {
+            format!(
+                "{error}; requirement cache unavailable: {}",
+                cache_errors.join("; ")
+            )
+        })?;
 
     let epoch = epoch_for_height(is_mainnet, contract.block_height);
     let clarity_version = match contract.clarity_version {
@@ -164,6 +182,8 @@ async fn fetch_contract(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use mockito::Server;
 
     use super::*;
@@ -171,6 +191,149 @@ mod tests {
     const TEST_DEPLOYER: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
     const TEST_CONTRACT_NAME: &str = "test-contract";
     const TEST_SOURCE: &str = "(define-public (hello) (ok u1))";
+
+    struct MemoryAccessor(HashMap<String, String>);
+
+    impl FileAccessor for MemoryAccessor {
+        fn file_exists(&self, path: String) -> clarinet_files::FileAccessorResult<bool> {
+            let exists = self.0.contains_key(&path);
+            Box::pin(async move { Ok(exists) })
+        }
+        fn read_file(&self, path: String) -> clarinet_files::FileAccessorResult<String> {
+            let result = self
+                .0
+                .get(&path)
+                .cloned()
+                .ok_or_else(|| "VFS cache entry missing".to_string());
+            Box::pin(async move { result })
+        }
+        fn read_files(
+            &self,
+            _: Vec<String>,
+        ) -> clarinet_files::FileAccessorResult<HashMap<String, String>> {
+            Box::pin(async { Err("unexpected bulk read".to_string()) })
+        }
+        fn write_file(&self, _: String, _: &[u8]) -> clarinet_files::FileAccessorResult<()> {
+            Box::pin(async { Err("unexpected write".to_string()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_vfs_cache_hit_and_missing_metadata_diagnostic() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(404)
+            .expect(1)
+            .create_async()
+            .await;
+        let cache = Path::new("vfs-cache");
+        let id =
+            QualifiedContractIdentifier::parse(&format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"))
+                .unwrap();
+        let source_path = cache
+            .join("requirements")
+            .join(format!("{id}.clar"))
+            .to_string_lossy()
+            .into_owned();
+        let metadata_path = cache
+            .join("requirements")
+            .join(format!("{id}.json"))
+            .to_string_lossy()
+            .into_owned();
+        let mut accessor = MemoryAccessor(HashMap::from([
+            (source_path.clone(), TEST_SOURCE.to_string()),
+            (
+                metadata_path.clone(),
+                serde_json::to_string(&ContractMetadata::default()).unwrap(),
+            ),
+        ]));
+        let (source, _, _, _) =
+            retrieve_contract(&id, cache, &Some(&accessor), Some(&server.url()))
+                .await
+                .unwrap();
+        assert_eq!(source, TEST_SOURCE);
+        accessor.0.remove(&metadata_path);
+        let error = retrieve_contract(&id, cache, &Some(&accessor), Some(&server.url()))
+            .await
+            .unwrap_err();
+        assert!(error.contains(&metadata_path));
+        assert!(error.contains("VFS cache entry missing"));
+        assert!(!error.contains(&source_path));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_cache_miss_fetch_error_identifies_missing_files() {
+        for missing_source in [true, false] {
+            let mut server = Server::new_async().await;
+            let mock = server
+                .mock(
+                    "GET",
+                    format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+                )
+                .with_status(404)
+                .expect(1)
+                .create_async()
+                .await;
+            let cache = tempfile::tempdir().unwrap();
+            let directory = cache.path().join("requirements");
+            std::fs::create_dir_all(&directory).unwrap();
+            let source_path = directory.join(format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}.clar"));
+            let metadata_path =
+                directory.join(format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}.json"));
+            if missing_source {
+                std::fs::write(
+                    &metadata_path,
+                    serde_json::to_string(&ContractMetadata::default()).unwrap(),
+                )
+                .unwrap();
+            } else {
+                std::fs::write(&source_path, TEST_SOURCE).unwrap();
+            }
+            let id = QualifiedContractIdentifier::parse(&format!(
+                "{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"
+            ))
+            .unwrap();
+            let error = retrieve_contract(&id, cache.path(), &None, Some(&server.url()))
+                .await
+                .unwrap_err();
+            assert!(error.contains("404"));
+            assert!(error.contains("requirement cache unavailable"));
+            let (missing, present) = if missing_source {
+                (&source_path, &metadata_path)
+            } else {
+                (&metadata_path, &source_path)
+            };
+            assert!(error.contains(missing.to_str().unwrap()));
+            assert!(!error.contains(present.to_str().unwrap()));
+            mock.assert_async().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_complete_cache_works_without_http() {
+        let cache = tempfile::tempdir().unwrap();
+        let directory = cache.path().join("requirements");
+        std::fs::create_dir_all(&directory).unwrap();
+        let id =
+            QualifiedContractIdentifier::parse(&format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"))
+                .unwrap();
+        std::fs::write(directory.join(format!("{id}.clar")), TEST_SOURCE).unwrap();
+        std::fs::write(
+            directory.join(format!("{id}.json")),
+            serde_json::to_string(&ContractMetadata::default()).unwrap(),
+        )
+        .unwrap();
+        let (source, _, _, _) =
+            retrieve_contract(&id, cache.path(), &None, Some("http://127.0.0.1:0"))
+                .await
+                .unwrap();
+        assert_eq!(source, TEST_SOURCE);
+    }
 
     #[tokio::test]
     async fn test_fetch_contract_from_mock_server() {
