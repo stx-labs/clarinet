@@ -476,7 +476,7 @@ mod tests {
         let info_result = std::panic::catch_unwind(|| client.fetch_info());
         assert!(
             info_result.is_err(),
-            "Expected session creation to succeed after rate limit retries"
+            "Expected fetch_info to panic after exhausting rate limit retries"
         );
     }
 

@@ -1,5 +1,5 @@
 # this manifest is a copy of Clarinet.toml without the multiplier-contract
-# it's use to simulate a manifest update when testing deployment plan handling
+# it's used to simulate a manifest update when testing deployment plan handling
 
 [project]
 name = 'fixtures'

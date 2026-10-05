@@ -614,7 +614,7 @@ pub fn process_request(
 
             let formatter = clarinet_format::formatter::ClarityFormatter::new(formatting_options);
 
-            // Try to format the range text, but handle panics/errors gracefully
+            // Try to format the range text
             let formatted_result = formatter.format_section(&range_text, epoch);
 
             let formatted_result = match formatted_result {

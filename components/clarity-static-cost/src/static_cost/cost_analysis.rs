@@ -374,7 +374,7 @@ fn compute_function_overhead_costs(
 
     // cost_load_contract
     // The VM's get_contract_size() returns source_size + data_size, where
-    // data_size accounts for memory used by define-map, define-data-var, etc.
+    // data_size accounts for memory used by constant values.
     if let Some(source_size) = contract_size {
         let data_size = compute_contract_data_size(ast_expressions);
         let total_size = source_size.saturating_add(data_size);
