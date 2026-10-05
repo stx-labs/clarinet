@@ -8,6 +8,7 @@ import {
   languages,
   commands,
   DiagnosticSeverity,
+  ConfigurationTarget,
 } from "vscode";
 import type { Diagnostic } from "vscode";
 
@@ -25,18 +26,18 @@ before(async () => {
   await extension.activate();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   const config = workspace.getConfiguration("clarity-lsp");
-  Object.keys(config).forEach((k) => {
+  for (const k of Object.keys(config)) {
     const setting = config.inspect(k);
     if (
       setting &&
       typeof setting.defaultValue !== "object" &&
       setting.defaultValue !== undefined
     ) {
-      config.update(k, setting.defaultValue);
+      await config.update(k, setting.defaultValue, ConfigurationTarget.Global);
     }
-  });
+  }
 });
 
 function getDiagnostics(uri: Uri) {
