@@ -130,7 +130,6 @@ impl ForkScratchPad {
         // As long as we are successful appending blocks that were previously unprocessable,
         // Keep looping on this backlog
         let mut applied = HashSet::new();
-        let mut forks_created = vec![];
         while at_least_one_orphan_appended {
             at_least_one_orphan_appended = false;
             for orphan_block_identifier in orphans.iter() {
@@ -142,13 +141,11 @@ impl ForkScratchPad {
                     None => continue,
                 };
 
-                let (orphan_appended, mut new_fork) = fork_updated.try_append_block(&block, ctx);
+                // TODO: Register recovered forks in self.forks.
+                let (orphan_appended, _) = fork_updated.try_append_block(&block, ctx);
                 if orphan_appended {
                     applied.insert(orphan_block_identifier);
                     orphans_to_untrack.insert(orphan_block_identifier);
-                    if let Some(new_fork) = new_fork.take() {
-                        forks_created.push(new_fork);
-                    }
                 }
                 at_least_one_orphan_appended = at_least_one_orphan_appended || orphan_appended;
             }

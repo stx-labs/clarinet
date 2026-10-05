@@ -13,15 +13,11 @@ enum Input {
 }
 
 fn complete_input(str: &str) -> Result<Input, (char, char)> {
-    let mut forms: Vec<&str> = vec![];
-    let mut paren_count = 0;
-    let mut last_pos = 0;
-
     let mut brackets = vec![];
     let mut skip_next = false;
     let mut in_string = false;
 
-    for (pos, character) in str.char_indices() {
+    for character in str.chars() {
         // if the previous character was a backslash, skip this character (only in strings)
         if skip_next {
             skip_next = false;
@@ -35,17 +31,6 @@ fn complete_input(str: &str) -> Result<Input, (char, char)> {
             '"' => in_string = !in_string,
             '(' | '{' if !in_string => {
                 brackets.push(character);
-                // skip whitespace between the previous form's
-                // closing paren (if there is one) and the current
-                // form's opening paren
-                match (character, paren_count) {
-                    ('(', 0) => {
-                        paren_count += 1;
-                        last_pos = pos
-                    }
-                    ('(', _) => paren_count += 1,
-                    _ => {}
-                }
             }
             ')' | '}' if !in_string => {
                 match (brackets.pop(), character) {
@@ -53,12 +38,6 @@ fn complete_input(str: &str) -> Result<Input, (char, char)> {
                     (Some('{'), ')') => return Err(('}', ')')),
                     _ => {}
                 };
-                if character == ')' {
-                    paren_count -= 1;
-                    if paren_count == 0 {
-                        forms.push(&str[last_pos..pos + 1]);
-                    }
-                }
             }
             _ => {}
         }
