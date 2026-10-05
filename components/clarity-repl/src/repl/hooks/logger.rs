@@ -50,7 +50,7 @@ impl EvalHook for LoggerHook {
             return;
         };
 
-        if let Some(NativeFunctions::Print) = NativeFunctions::lookup_by_name(function_name) {
+        if NativeFunctions::lookup_by_name(function_name) == Some(NativeFunctions::Print) {
             let contract_id = &invoke_ctx.contract_context.contract_identifier;
 
             if self.mode == LogPrintEvents::ProjectOnly {

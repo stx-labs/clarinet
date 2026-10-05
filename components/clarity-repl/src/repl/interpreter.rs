@@ -987,10 +987,7 @@ impl ClarityInterpreter {
             }
         };
 
-        let mut cost = None;
-        if cost_track {
-            cost = Some(CostSynthesis::from_cost_tracker(&global_context.cost_track));
-        }
+        let cost = cost_track.then(|| CostSynthesis::from_cost_tracker(&global_context.cost_track));
 
         let mut emitted_events = global_context
             .event_batches
@@ -1188,10 +1185,8 @@ impl ClarityInterpreter {
             ContractCallFailure::from_vm_error(e, err, contract_id, epoch)
         });
 
-        let mut cost = None;
-        if track_costs {
-            cost = Some(CostSynthesis::from_cost_tracker(&global_context.cost_track));
-        }
+        let cost =
+            track_costs.then(|| CostSynthesis::from_cost_tracker(&global_context.cost_track));
 
         let mut emitted_events = global_context
             .event_batches
