@@ -1115,7 +1115,7 @@ impl<'a> Aggregator<'a> {
     /// Check if an expression represents a signed integer (for list type size detection)
     /// Only signed integers are valid for list type signatures: (list 10 <type>)
     /// Unsigned integers like u10 would be list elements, not type signatures
-    fn is_integer_expr(&mut self, expr: &PreSymbolicExpression) -> bool {
+    fn is_integer_expr(&self, expr: &PreSymbolicExpression) -> bool {
         match &expr.pre_expr {
             PreSymbolicExpressionType::AtomValue(ref value) => {
                 matches!(value, clarity::vm::types::Value::Int(_))
@@ -1125,7 +1125,7 @@ impl<'a> Aggregator<'a> {
     }
 
     /// Detect if this is a list type signature: (list <integer> <type>)
-    fn is_list_type_signature(&mut self, exprs: &[PreSymbolicExpression]) -> bool {
+    fn is_list_type_signature(&self, exprs: &[PreSymbolicExpression]) -> bool {
         // the 1st item is a different type than the 2nd
         exprs.len() >= 3
             && exprs[0].match_atom() == Some(&clarity::vm::ClarityName::from_literal("list"))
@@ -2844,7 +2844,7 @@ mod tests_formatter {
                 StackDepthLimits::for_epoch(DEFAULT_EPOCH),
             )
             .unwrap();
-            let mut aggregator = Aggregator::new(&settings, &exprs, Some(src));
+            let aggregator = Aggregator::new(&settings, &exprs, Some(src));
             let list_exprs = exprs[0].match_list().unwrap();
             assert_eq!(aggregator.is_list_type_signature(list_exprs), expected);
         }

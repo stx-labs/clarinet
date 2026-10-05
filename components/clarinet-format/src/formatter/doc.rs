@@ -126,8 +126,10 @@ impl<'a> Printer<'a> {
             Doc::Fill(items) => {
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
-                        // Check if the next item fits on the current line
-                        if self.flat_fits(item) {
+                        // Check if separator (1 space) + item fits on the current line.
+                        // Subtract 1 for the space before calling measure_flat.
+                        let remaining = self.max_width.saturating_sub(self.column) as isize - 1;
+                        if Self::measure_flat(item, remaining) {
                             self.output.push(' ');
                             self.column += 1;
                         } else {
