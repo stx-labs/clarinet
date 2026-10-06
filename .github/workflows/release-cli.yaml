@@ -1,5 +1,3 @@
-# Release the CLI to homebrew and winget.
-
 name: Release CLI
 on:
   release:
@@ -66,41 +64,3 @@ jobs:
           push: true
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
-
-  winget:
-    name: Winget
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    environment: release
-    steps:
-      - name: Generate release bot app token
-        id: generate-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
-        with:
-          app-id: ${{ secrets.STACKSLABS_PKG_RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.STACKSLABS_PKG_RELEASE_BOT_APP_PEM }}
-          owner: stx-labs  # token scoped to the org so forking works
-
-      - name: Install komac
-        run: |
-          KOMAC_VERSION="2.16.0"
-          KOMAC_SHA256="7d2707fa6210f2789a3702de49fbd150b736dbf426ee0b9bc8e098736f9fd82d"
-          KOMAC_TARBALL="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          curl -fsSLO "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/${KOMAC_TARBALL}"
-          echo "${KOMAC_SHA256}  ${KOMAC_TARBALL}" | sha256sum --check
-          tar xzf "${KOMAC_TARBALL}" komac
-          chmod +x komac
-          sudo mv komac /usr/local/bin/
-
-      - name: Update winget manifest and submit PR
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          VERSION="${TAG#v}"
-          komac update StacksLabs.Clarinet \
-            --urls "https://github.com/${{ github.repository }}/releases/download/${TAG}/clarinet-windows-x64.zip" \
-            --version "${VERSION}" \
-            --submit \
-            --token "${GH_TOKEN}"
