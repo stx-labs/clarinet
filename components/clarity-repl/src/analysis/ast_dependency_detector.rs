@@ -1919,4 +1919,26 @@ mod tests {
 
         assert_impl_dep(&contracts, &caller, &implementation);
     }
+
+    #[test]
+    fn contract_hash_self_reference() {
+        // (contract-hash? .self-contract) inside self-contract must not register
+        // a self-dependency — add_dependency already guards against from == to.
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let snippet = "(define-read-only (get-hash) (contract-hash? .self-contract))".to_string();
+        let self_contract =
+            deploy_snippet(&session, &snippet, Some("self-contract"), &mut contracts);
+
+        let dependencies =
+            ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            dependencies
+                .get(&self_contract)
+                .map(|d| d.len())
+                .unwrap_or(0),
+            0,
+            "contract-hash? on self must not register a self-dependency"
+        );
+    }
 }

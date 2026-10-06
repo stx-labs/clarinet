@@ -749,14 +749,14 @@ async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
 ///
 /// The AST visitor's `visit_contract_hash` implementation must register the
 /// referenced contract as a dependency so it appears in the generated plan.
-/// `contract-hash?` requires Clarity 5 (Epoch 3.4+).
+/// `contract-hash?` requires Clarity 4 (Epoch 3.3+).
 #[tokio::test]
 async fn contract_hash_literal_is_auto_detected() {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path();
 
     // write_project hardcodes Clarity 3 / Epoch 3.0; write the manifest manually
-    // so we can use Clarity 5 / Epoch 3.4, where contract-hash? is available.
+    // so we can use Clarity 4 / Epoch 3.3, where contract-hash? is available.
     fs::create_dir_all(root.join("settings")).unwrap();
     fs::create_dir_all(root.join("contracts")).unwrap();
 
@@ -788,8 +788,8 @@ async fn contract_hash_literal_is_auto_detected() {
 
             [contracts.caller]
             path = "contracts/caller.clar"
-            clarity_version = 5
-            epoch = "3.4"
+            clarity_version = 4
+            epoch = "3.3"
             "#
         ),
     )

@@ -29,7 +29,7 @@ use clarity_repl::repl::boot::{
 use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
-    ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
+    ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch, Session,
     SessionSettings,
 };
 use clarity_repl::ueprint;
@@ -1054,15 +1054,34 @@ pub async fn generate_default_deployment_with_cache(
         } else {
             source.clone()
         };
-        let contract = ClarityContract {
-            code_source: ClarityCodeSource::ContractInMemory(source),
-            deployer: ContractDeployer::Address(deployer_account.stx_address.clone()),
-            name: name.clone(),
-            clarity_version: contract_config.clarity_version,
-            epoch: contract_config.epoch.clone(),
-            skip_analysis: true,
+        // Reuse a cached AST if the source is unchanged — avoids a redundant
+        // parse in LSP incremental rebuilds, which already hold fully-analysed
+        // ASTs from the previous pass.
+        let cache_key = (contract_location.clone(), environment);
+        let content_hash = compute_content_hash(&source);
+        let epoch_id = match contract_config.epoch {
+            Epoch::Specific(e) => e,
+            Epoch::Latest => DEFAULT_EPOCH,
         };
-        let (ast, _, _) = interpreter.build_ast(&contract);
+        let ast = match cached_asts
+            .as_ref()
+            .and_then(|c| c.get(&cache_key))
+            .filter(|e| e.matches(&content_hash, contract_config.clarity_version, epoch_id))
+        {
+            Some(cached) => cached.ast.clone(),
+            None => {
+                let contract = ClarityContract {
+                    code_source: ClarityCodeSource::ContractInMemory(source),
+                    deployer: ContractDeployer::Address(deployer_account.stx_address.clone()),
+                    name: name.clone(),
+                    clarity_version: contract_config.clarity_version,
+                    epoch: contract_config.epoch.clone(),
+                    skip_analysis: true,
+                };
+                let (ast, _, _) = interpreter.build_ast(&contract);
+                ast
+            }
+        };
         user_contract_asts.insert(contract_id, (contract_config.clarity_version, ast));
     }
 
