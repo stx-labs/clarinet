@@ -176,19 +176,21 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
     use clarity_lsp::backend::LspNotification;
     use crossbeam_channel::unbounded;
 
+    use indoc::indoc;
+
     use crate::lsp::native_bridge::LspResponse;
 
     const REQUIREMENT_ID: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait";
-    const NFT_TRAIT: &str = r#"
-(define-trait nft-trait
-  (
-    (get-last-token-id () (response uint uint))
-    (get-token-uri (uint) (response (optional (string-ascii 256)) uint))
-    (get-owner (uint) (response (optional principal) uint))
-    (transfer (uint principal principal) (response bool uint))
-  )
-)
-"#;
+    const NFT_TRAIT: &str = indoc! {r#"
+        (define-trait nft-trait
+          (
+            (get-last-token-id () (response uint uint))
+            (get-token-uri (uint) (response (optional (string-ascii 256)) uint))
+            (get-owner (uint) (response (optional principal) uint))
+            (transfer (uint principal principal) (response bool uint))
+          )
+        )
+    "#};
 
     let project = tempfile::tempdir().expect("Unable to create temporary project");
     let contracts_dir = project.path().join("contracts");

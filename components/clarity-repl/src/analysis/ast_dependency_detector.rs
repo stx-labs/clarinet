@@ -401,6 +401,11 @@ impl<'a> ASTDependencyDetector<'a> {
             return;
         }
 
+        // Ignore self-references.
+        if from == to {
+            return;
+        }
+
         if let Some(set) = self.dependencies.get_mut(from) {
             set.add_dependency(to.clone(), self.top_level);
         } else {
