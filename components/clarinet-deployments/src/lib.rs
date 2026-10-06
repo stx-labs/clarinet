@@ -1112,11 +1112,10 @@ pub async fn generate_default_deployment_with_cache(
                 Err((inferable, non_inferable)) => (inferable, non_inferable),
             };
 
-            // Whether this pass retrieved a requirement. Loading one can reveal
-            // new dependencies in the user contracts even when nothing new was
-            // auto-detected (e.g. an explicitly declared callee whose signature
-            // only now makes a trait argument identifiable), so keep rescanning
-            // until a pass loads nothing.
+            // Loading a requirement can reveal new dependencies even when
+            // auto-detection found nothing new (e.g. a callee whose signature
+            // makes a trait argument identifiable only after it is loaded).
+            // Keep scanning until a pass loads nothing.
             let mut loaded_requirement = false;
             for contract_id in inferable
                 .values()

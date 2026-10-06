@@ -175,7 +175,6 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
 
     use clarity_lsp::backend::LspNotification;
     use crossbeam_channel::unbounded;
-
     use indoc::indoc;
 
     use crate::lsp::native_bridge::LspResponse;

@@ -149,6 +149,44 @@ fn deep_check_callee_type(
                 expr.match_literal_value()
             {
                 dependencies.insert(contract.clone());
+            } else if let Some(list) = expr.match_list() {
+                let name = list.first().and_then(|e| e.match_atom());
+                match name.map(|n| n.as_str()) {
+                    // `begin` evaluates to its last sub-expression.
+                    Some("begin") => {
+                        if let Some(last) = list.last() {
+                            deep_check_callee_type(arg_type, last, dependencies);
+                        }
+                    }
+                    // Wrappers/constructors that carry their value at index 1:
+                    // `unwrap-panic`/`unwrap-err-panic` strip an optional/response;
+                    // `some`/`ok`/`err` introduce one. Either way, recurse into
+                    // the inner expression.
+                    Some("unwrap-panic" | "unwrap-err-panic" | "some" | "ok" | "err") => {
+                        if let Some(inner) = list.get(1) {
+                            deep_check_callee_type(arg_type, inner, dependencies);
+                        }
+                    }
+                    // `default-to` returns either its first arg or the unwrapped
+                    // optional; check both.
+                    Some("default-to") => {
+                        if let Some(default) = list.get(1) {
+                            deep_check_callee_type(arg_type, default, dependencies);
+                        }
+                        if let Some(opt) = list.get(2) {
+                            deep_check_callee_type(arg_type, opt, dependencies);
+                        }
+                    }
+                    // `match` branches (indices 3+) may be literal principals.
+                    // Bound variable names are atoms with no literal value, so
+                    // the recursive call is a no-op for those.
+                    Some("match") => {
+                        for branch in list.iter().skip(3) {
+                            deep_check_callee_type(arg_type, branch, dependencies);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
         TypeSignature::OptionalType(inner_type) => {
@@ -504,6 +542,19 @@ impl<'a> ASTDependencyDetector<'a> {
         let mut dependencies = BTreeSet::new();
         for (i, arg_type) in arg_types.iter().enumerate() {
             if let Some(expr) = args.get(i) {
+                // If a trait-typed argument is a named constant, resolve it.
+                if matches!(
+                    arg_type,
+                    TypeSignature::CallableType(CallableSubtype::Trait(_))
+                        | TypeSignature::TraitReferenceType(_)
+                ) {
+                    if let Some(name) = expr.match_atom() {
+                        if let Some(contract_id) = self.get_contract_constant(name) {
+                            dependencies.insert(contract_id.clone());
+                            continue;
+                        }
+                    }
+                }
                 deep_check_callee_type(arg_type, expr, &mut dependencies);
             }
         }
@@ -755,6 +806,27 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
             }
         } else if let Some(contract_constant) = self.get_contract_constant(callable) {
             self.add_dependency(self.current_contract.unwrap(), contract_constant);
+            // Also detect trait-typed argument dependencies when the callee's
+            // function type is known. Skip when there are no arguments, since
+            // there is nothing to check for trait types.
+            if !args.is_empty() {
+                let dependencies = if let Some(arg_types) = self
+                    .defined_functions
+                    .get(&(contract_constant, function_name))
+                {
+                    self.check_callee_type(arg_types, args)
+                } else {
+                    self.add_pending_function_check(
+                        self.current_contract.unwrap(),
+                        (contract_constant, function_name),
+                        args,
+                    );
+                    BTreeSet::new()
+                };
+                for dependency in dependencies {
+                    self.add_dependency(self.current_contract.unwrap(), &dependency);
+                }
+            }
         }
         true
     }
@@ -1727,5 +1799,142 @@ mod tests {
             }
             other => panic!("expected IncorrectContractHeight, got {other:?}"),
         }
+    }
+
+    // Helpers shared by the trait-arg-in-expression tests below.
+    fn setup_trait_callee(
+        session: &Session,
+        contracts: &mut BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
+    ) -> (QualifiedContractIdentifier, QualifiedContractIdentifier) {
+        let callee_snippet = indoc!(
+            "
+            (define-trait reader ((get-one () (response uint uint))))
+            (define-public (take (target <reader>))
+              (contract-call? target get-one))
+        "
+        )
+        .to_string();
+        let callee = deploy_snippet(session, &callee_snippet, Some("callee"), contracts);
+
+        let impl_snippet = indoc!(
+            "
+            (define-public (get-one) (ok u1))
+        "
+        )
+        .to_string();
+        let implementation =
+            deploy_snippet(session, &impl_snippet, Some("implementation"), contracts);
+
+        (callee, implementation)
+    }
+
+    fn assert_impl_dep(
+        contracts: &BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
+        caller: &QualifiedContractIdentifier,
+        implementation: &QualifiedContractIdentifier,
+    ) {
+        let dependencies =
+            ASTDependencyDetector::detect_dependencies(contracts, &BTreeMap::new()).unwrap();
+        assert!(
+            dependencies[caller]
+                .has_dependency(implementation)
+                .is_some(),
+            "expected .implementation to be detected as a dependency of .caller"
+        );
+    }
+
+    #[test]
+    fn trait_arg_constant() {
+        // (define-constant target .implementation)
+        // (contract-call? .callee take target)
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+
+        let snippet = indoc!(
+            "
+            (define-constant target .implementation)
+            (define-public (go)
+              (contract-call? .callee take target))
+        "
+        )
+        .to_string();
+        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+
+        assert_impl_dep(&contracts, &caller, &implementation);
+    }
+
+    #[test]
+    fn trait_arg_begin() {
+        // (contract-call? .callee take (begin .implementation))
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+
+        let snippet = "(define-public (go) (contract-call? .callee take (begin .implementation)))"
+            .to_string();
+        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+
+        assert_impl_dep(&contracts, &caller, &implementation);
+    }
+
+    #[test]
+    fn trait_arg_unwrap_panic() {
+        // (contract-call? .callee take (unwrap-panic (some .implementation)))
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+
+        let snippet = "(define-public (go) (contract-call? .callee take (unwrap-panic (some .implementation))))".to_string();
+        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+
+        assert_impl_dep(&contracts, &caller, &implementation);
+    }
+
+    #[test]
+    fn trait_arg_default_to() {
+        // (contract-call? .callee take (default-to .implementation (some .implementation)))
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+
+        let snippet = "(define-public (go) (contract-call? .callee take (default-to .implementation (some .implementation))))".to_string();
+        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+
+        assert_impl_dep(&contracts, &caller, &implementation);
+    }
+
+    #[test]
+    fn trait_arg_match() {
+        // (contract-call? .callee take (match (some .implementation) x x .implementation))
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+
+        let snippet = "(define-public (go) (contract-call? .callee take (match (some .implementation) x x .implementation)))".to_string();
+        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+
+        assert_impl_dep(&contracts, &caller, &implementation);
+    }
+
+    #[test]
+    fn trait_arg_constant_callee() {
+        // (define-constant c .callee)
+        // (contract-call? c take .implementation)
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+
+        let snippet = indoc!(
+            "
+            (define-constant c .callee)
+            (define-public (go)
+              (contract-call? c take .implementation))
+        "
+        )
+        .to_string();
+        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+
+        assert_impl_dep(&contracts, &caller, &implementation);
     }
 }
