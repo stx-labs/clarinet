@@ -137,6 +137,25 @@ impl Ord for Dependency {
     }
 }
 
+/// Walk `expr` recursively and collect every literal contract principal found
+/// anywhere in the tree into `dependencies`.
+///
+/// Used for trait-typed arguments where the actual contract may be buried
+/// inside wrapper expressions (`begin`, `unwrap-panic`, `some`, `match`, `get`,
+/// `let`, etc.) without the need to enumerate every possible form.
+fn collect_contract_principals(
+    expr: &SymbolicExpression,
+    dependencies: &mut BTreeSet<QualifiedContractIdentifier>,
+) {
+    if let Some(Value::Principal(PrincipalData::Contract(contract))) = expr.match_literal_value() {
+        dependencies.insert(contract.clone());
+    } else if let Some(children) = expr.match_list() {
+        for child in children {
+            collect_contract_principals(child, dependencies);
+        }
+    }
+}
+
 fn deep_check_callee_type(
     arg_type: &TypeSignature,
     expr: &SymbolicExpression,
@@ -145,49 +164,7 @@ fn deep_check_callee_type(
     match arg_type {
         TypeSignature::CallableType(CallableSubtype::Trait(_))
         | TypeSignature::TraitReferenceType(_) => {
-            if let Some(Value::Principal(PrincipalData::Contract(contract))) =
-                expr.match_literal_value()
-            {
-                dependencies.insert(contract.clone());
-            } else if let Some(list) = expr.match_list() {
-                let name = list.first().and_then(|e| e.match_atom());
-                match name.map(|n| n.as_str()) {
-                    // `begin` evaluates to its last sub-expression.
-                    Some("begin") => {
-                        if let Some(last) = list.last() {
-                            deep_check_callee_type(arg_type, last, dependencies);
-                        }
-                    }
-                    // Wrappers/constructors that carry their value at index 1:
-                    // `unwrap-panic`/`unwrap-err-panic` strip an optional/response;
-                    // `some`/`ok`/`err` introduce one. Either way, recurse into
-                    // the inner expression.
-                    Some("unwrap-panic" | "unwrap-err-panic" | "some" | "ok" | "err") => {
-                        if let Some(inner) = list.get(1) {
-                            deep_check_callee_type(arg_type, inner, dependencies);
-                        }
-                    }
-                    // `default-to` returns either its first arg or the unwrapped
-                    // optional; check both.
-                    Some("default-to") => {
-                        if let Some(default) = list.get(1) {
-                            deep_check_callee_type(arg_type, default, dependencies);
-                        }
-                        if let Some(opt) = list.get(2) {
-                            deep_check_callee_type(arg_type, opt, dependencies);
-                        }
-                    }
-                    // `match` branches (indices 3+) may be literal principals.
-                    // Bound variable names are atoms with no literal value, so
-                    // the recursive call is a no-op for those.
-                    Some("match") => {
-                        for branch in list.iter().skip(3) {
-                            deep_check_callee_type(arg_type, branch, dependencies);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            collect_contract_principals(expr, dependencies);
         }
         TypeSignature::OptionalType(inner_type) => {
             if let Some(expr) = expr.match_list().and_then(|l| l.get(1)) {
@@ -1806,22 +1783,18 @@ mod tests {
         session: &Session,
         contracts: &mut BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
     ) -> (QualifiedContractIdentifier, QualifiedContractIdentifier) {
-        let callee_snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let callee_snippet = indoc!("
             (define-trait reader ((get-one () (response uint uint))))
             (define-public (take (target <reader>))
               (contract-call? target get-one))
-        "
-        )
-        .to_string();
+        ").to_string();
         let callee = deploy_snippet(session, &callee_snippet, Some("callee"), contracts);
 
-        let impl_snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let impl_snippet = indoc!("
             (define-public (get-one) (ok u1))
-        "
-        )
-        .to_string();
+        ").to_string();
         let implementation =
             deploy_snippet(session, &impl_snippet, Some("implementation"), contracts);
 
@@ -1851,14 +1824,12 @@ mod tests {
         let mut contracts = BTreeMap::new();
         let (_, implementation) = setup_trait_callee(&session, &mut contracts);
 
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-constant target .implementation)
             (define-public (go)
               (contract-call? .callee take target))
-        "
-        )
-        .to_string();
+        ").to_string();
         let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
 
         assert_impl_dep(&contracts, &caller, &implementation);
@@ -1918,6 +1889,19 @@ mod tests {
     }
 
     #[test]
+    fn trait_arg_tuple_get() {
+        // (contract-call? .callee take (get target { target: .implementation }))
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+
+        let snippet = "(define-public (go) (contract-call? .callee take (get target { target: .implementation })))".to_string();
+        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+
+        assert_impl_dep(&contracts, &caller, &implementation);
+    }
+
+    #[test]
     fn trait_arg_constant_callee() {
         // (define-constant c .callee)
         // (contract-call? c take .implementation)
@@ -1925,14 +1909,12 @@ mod tests {
         let mut contracts = BTreeMap::new();
         let (_, implementation) = setup_trait_callee(&session, &mut contracts);
 
-        let snippet = indoc!(
-            "
+        #[rustfmt::skip]
+        let snippet = indoc!("
             (define-constant c .callee)
             (define-public (go)
               (contract-call? c take .implementation))
-        "
-        )
-        .to_string();
+        ").to_string();
         let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
 
         assert_impl_dep(&contracts, &caller, &implementation);
