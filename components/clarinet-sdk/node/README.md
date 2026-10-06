@@ -50,18 +50,6 @@ It's also possible to provide the path to the manifest like so:
 const simnet = await initSimnet("./path/to/Clarinet.toml");
 ```
 
-## Cached requirements
-
-Simnet can initialize without network access when every required contract,
-including transitive dependencies, has both a `.clar` source file and a `.json`
-metadata file in `<cache_dir>/requirements/`. Initializing once with network
-access fills this cache. Caching only the requirements listed in
-`Clarinet.toml` can leave transitive dependencies missing.
-
-If either cached file cannot be read, the SDK fetches the contract from the API
-as usual. When that fetch also fails, the error lists the unreadable cache paths
-and their read errors.
-
 ## Tests
 
 The SDK can be used to write unit tests for Clarinet projects.
