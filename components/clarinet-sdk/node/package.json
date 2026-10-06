@@ -58,8 +58,7 @@
     "@stacks/clarinet-sdk-wasm": "workspace:*",
     "@stacks/transactions": "7.6.0",
     "kolorist": "1.8.0",
-    "prompts": "2.4.2",
-    "yargs": "18.1.0"
+    "prompts": "2.4.2"
   },
   "devDependencies": {
     "@stacks/encryption": "7.6.0",
@@ -67,7 +66,6 @@
     "@stacks/stacking": "7.6.0",
     "@types/node": "26.4.0",
     "@types/prompts": "2.4.9",
-    "@types/yargs": "17.0.35",
     "vitest": "4.1.11"
   }
 }
