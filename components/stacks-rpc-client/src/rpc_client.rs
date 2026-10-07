@@ -6,7 +6,7 @@ use clarity::vm::types::Value;
 use reqwest::blocking::Client;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-#[cfg(any(test, feature = "mock"))]
+#[cfg(feature = "mock")]
 use serde::Serialize;
 use serde_json::json;
 use stacks_codec::transaction::{StacksTransaction, TransactionPayload};

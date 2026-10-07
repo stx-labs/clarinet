@@ -1700,4 +1700,7 @@ fn get_mutated_ids(asset_class_id: &str) -> (String, String) {
 }
 
 #[cfg(test)]
+mod standardize_tests;
+
+#[cfg(test)]
 pub mod tests;
