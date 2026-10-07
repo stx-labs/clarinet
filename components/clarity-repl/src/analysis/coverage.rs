@@ -391,6 +391,24 @@ fn retrieve_executable_lines_and_branches(
                             }
                             continue;
                         }
+                        NativeFunctions::Let | NativeFunctions::TupleCons => {
+                            // names are never evaluated: their line runs when their value does
+                            let pairs = match func {
+                                NativeFunctions::Let => args
+                                    .first()
+                                    .and_then(|bindings| bindings.match_list())
+                                    .unwrap_or_default(),
+                                _ => args,
+                            };
+                            for pair in pairs {
+                                if let Some([name, value]) = pair.match_list() {
+                                    lines
+                                        .entry(name.span.start_line)
+                                        .or_default()
+                                        .push(extract_expr_from_list(value).id);
+                                }
+                            }
+                        }
                         _ => {}
                     };
                 };
@@ -398,12 +416,10 @@ fn retrieve_executable_lines_and_branches(
                 // don't count list expressions as a whole, just their children
                 frontier.extend(children);
             } else {
-                let line = cur_expr.span.start_line;
-                if let Some(line) = lines.get_mut(&line) {
-                    line.push(cur_expr.id);
-                } else {
-                    lines.insert(line, vec![cur_expr.id]);
-                }
+                lines
+                    .entry(cur_expr.span.start_line)
+                    .or_default()
+                    .push(cur_expr.id);
             }
         }
     }
@@ -420,31 +436,43 @@ fn try_parse_native_func(
 }
 
 fn report_eval(expr_coverage: &mut ExprCoverage, expr: &SymbolicExpression) {
-    if let Some(children) = expr.match_list() {
-        if let Some((func, args)) = try_parse_native_func(children) {
-            // All native function calls recurse on the function name expression
-            // to ensure it gets recorded in coverage
-            if let Some(func_expr) = children.first() {
-                report_eval(expr_coverage, func_expr);
-            }
-
-            match func {
-                NativeFunctions::Fold | NativeFunctions::Map | NativeFunctions::Filter => {
-                    if let Some(iterator_func) = args.first() {
-                        report_eval(expr_coverage, iterator_func);
-                    }
-                }
-                _ => {}
-            }
-            return;
-        }
-        if let Some(func_expr) = children.first() {
-            report_eval(expr_coverage, func_expr);
-        }
+    let Some(children) = expr.match_list() else {
+        *expr_coverage.entry(expr.id).or_default() += 1;
         return;
+    };
+    if let Some(func_expr) = children.first() {
+        report_eval(expr_coverage, func_expr);
     }
-    let count = expr_coverage.entry(expr.id).or_insert(0);
-    *count += 1;
+    if let Some((func, args)) = try_parse_native_func(children) {
+        for arg in syntax_args(func, args) {
+            report_syntax(expr_coverage, arg);
+        }
+    }
+}
+
+fn report_syntax(expr_coverage: &mut ExprCoverage, expr: &SymbolicExpression) {
+    match expr.match_list() {
+        Some(children) => children
+            .iter()
+            .for_each(|child| report_syntax(expr_coverage, child)),
+        None => *expr_coverage.entry(expr.id).or_default() += 1,
+    }
+}
+
+/// Arguments the VM reads as names or types instead of evaluating them. The
+/// eval hook never fires on them, so they are counted along with their call.
+fn syntax_args(func: NativeFunctions, args: &[SymbolicExpression]) -> Vec<&SymbolicExpression> {
+    use NativeFunctions::*;
+    match func {
+        ContractCall => args.iter().take(2).collect(),
+        Fold | Map | Filter | FromConsensusBuff | TupleGet | ContractOf | FetchVar | SetVar
+        | FetchEntry | SetEntry | InsertEntry | DeleteEntry | GetTokenBalance | GetAssetOwner
+        | TransferToken | TransferAsset | MintAsset | MintToken | GetTokenSupply | BurnToken
+        | BurnAsset | GetBlockInfo | GetBurnBlockInfo | GetStacksBlockInfo | GetTenureInfo => {
+            args.iter().take(1).collect()
+        }
+        _ => vec![],
+    }
 }
 
 // because list expressions are not considered as evaluated
