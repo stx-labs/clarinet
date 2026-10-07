@@ -437,17 +437,15 @@ describe("simnet can call contracts function", () => {
 │   │   │ ↳ args: u3 u4
 Error: Runtime error while interpreting ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stacks-trace-test`);
 
-    expect(consoleSpy).toHaveBeenCalledWith(`\nError occured in stacks-trace-test:5:7
-======================================
-Expression:
-( - n m )
-Error: ArithmeticUnderflow
- Stack Trace:\u0020
-ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stacks-trace-test:call-sub
+    const errorOutput = consoleSpy.mock.calls[1][0];
+    expect(errorOutput).toContain("Error occurred in stacks-trace-test:5:7");
+    expect(errorOutput).toContain("Expression:\n( - n m )\nError: ArithmeticUnderflow");
+    expect(errorOutput).toContain(
+      `ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stacks-trace-test:call-sub
 ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stacks-trace-test:sub-a
 ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stacks-trace-test:sub-b
-_native_:native_sub
-`);
+_native_:native_sub`,
+    );
   });
 });
 

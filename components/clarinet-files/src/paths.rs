@@ -94,9 +94,10 @@ pub async fn find_manifest_location_async(
     let mut current = from.parent().map(|p| p.to_path_buf());
     while let Some(ref dir) = current {
         let candidate = dir.join("Clarinet.toml");
-        if let Ok(true) = file_accessor
+        if file_accessor
             .file_exists(candidate.to_string_lossy().into_owned())
             .await
+            == Ok(true)
         {
             return Ok(candidate);
         }

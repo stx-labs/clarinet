@@ -1598,7 +1598,7 @@ mod tests {
         assert_eq!(height, 10);
     }
 
-    // make sure that when a ClarityDatastore is clones, the current_chain_tip is reset
+    // make sure that when a ClarityDatastore is cloned, the current_chain_tip is reset
     #[test]
     fn test_clarity_datastore_caching() {
         let (mut clarity_datastore, mut datastore) = get_datastores();

@@ -1,45 +1,58 @@
 import path from "node:path";
 import url from "node:url";
+import { parseArgs } from "node:util";
 
-import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
+type ParsedValues = Record<string, string | boolean | undefined>;
+
+function readString(values: ParsedValues, flags: string[]) {
+  for (const flag of flags) {
+    const value = values[flag];
+    if (typeof value === "string") return value;
+  }
+}
+
+function readBoolean(values: ParsedValues, flags: string[]) {
+  for (const flag of flags) {
+    if (values[`no-${flag}`] === true) return false;
+    const value = values[flag];
+    if (value !== undefined) return value !== "false";
+  }
+}
 
 export function getClarinetVitestsArgv() {
-  const argv = hideBin(process.argv);
-  const topLevel = yargs(argv).argv;
+  // clarinet options are the ones passed after the separator: `vitest run -- --coverage`
+  const separator = process.argv.indexOf("--");
+  const args = separator === -1 ? [] : process.argv.slice(separator + 1);
 
-  // @ts-ignore
-  return yargs(topLevel._)
-    .option("manifest-path", {
-      alias: "manifest",
-      type: "string",
-      default: "./Clarinet.toml",
-    })
-    .option("init-before-each", {
-      description: "Reinitialize the Clarinet state before each test",
-      type: "boolean",
-      default: true,
-    })
-    .option("coverage", {
-      alias: "cov",
-      type: "boolean",
-      default: false,
-    })
-    .option("costs", {
-      alias: "cost",
-      type: "boolean",
-      default: false,
-    })
-    .option("coverage-filename", {
-      alias: "cov-file",
-      type: "string",
-      default: "lcov.info",
-    })
-    .option("costs-filename", {
-      alias: "costs-file",
-      type: "string",
-      default: "costs-reports.json",
-    }).argv;
+  const { values } = parseArgs({
+    args,
+    strict: false,
+    allowPositionals: true,
+    options: {
+      "manifest-path": { type: "string" },
+      manifest: { type: "string" },
+      "coverage-filename": { type: "string" },
+      "cov-file": { type: "string" },
+      "costs-filename": { type: "string" },
+      "costs-file": { type: "string" },
+      "boot-contracts-path": { type: "string" },
+    },
+  });
+
+  const includeBootContracts = readBoolean(values, ["include-boot-contracts"]);
+  const bootContractsPath = readString(values, ["boot-contracts-path"]);
+
+  return {
+    manifestPath: readString(values, ["manifest-path", "manifest"]) ?? "./Clarinet.toml",
+    initBeforeEach: readBoolean(values, ["init-before-each"]) ?? true,
+    coverage: readBoolean(values, ["coverage", "cov"]) ?? false,
+    costs: readBoolean(values, ["costs", "cost"]) ?? false,
+    coverageFilename: readString(values, ["coverage-filename", "cov-file"]) ?? "lcov.info",
+    costsFilename: readString(values, ["costs-filename", "costs-file"]) ?? "costs-reports.json",
+    // only set when passed, so they don't override a value set in the vitest config
+    ...(includeBootContracts !== undefined && { includeBootContracts }),
+    ...(bootContractsPath !== undefined && { bootContractsPath }),
+  };
 }
 
 // Derive the package root from this module's own location

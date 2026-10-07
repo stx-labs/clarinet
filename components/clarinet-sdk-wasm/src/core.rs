@@ -1420,8 +1420,7 @@ impl SDK {
         self.current_test_name = test_name;
     }
 
-    // this method empty the session costs and coverage reports
-    // and returns this report
+    // Return the session costs and coverage reports and clear the collected data
     #[wasm_bindgen(js_name=collectReport)]
     pub fn collect_report(
         &mut self,

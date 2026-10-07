@@ -7,9 +7,7 @@ fn main() {
     let _subcommand = args.subcommand().unwrap().unwrap_or_default();
     let code = args.subcommand().unwrap();
 
-    let settings = SessionSettings {
-        ..Default::default()
-    };
+    let settings = SessionSettings::default();
 
     match code {
         Some(code_str) => {

@@ -2,13 +2,11 @@
 
 This workspace regroups
 `@stacks/clarinet-sdk` for node.js and `@stacks/clarinet-sdk-browser` for web browsers.  
-They respectively rely on `@stacks/clarinet-sdk-wasm` and `@stacks/clarinet-sdk-browser-wasm`.
+They respectively rely on `@stacks/clarinet-sdk-wasm` and `@stacks/clarinet-sdk-wasm-browser`.
 
-Because of the way the wasm packages are build, with wasm-pack, it made sense to have two different
-packages for Node.js and the browsers, but it has some caveats. Especially, some of the code is
-duplicated in `./browser/src/sdkProxy.ts` and `./node/src/sdkProxy.ts`. In the future, we hope to
-be able to simplify this build, it would require some breaking changes so it could be part of
-Clarinet 3.x.
+The Wasm packages are built separately for Node.js and browsers. Both SDKs share
+`./common/src/sdkProxy.ts`, with small adapters in `./node/src/sdkProxy.ts` and
+`./browser/src/sdkProxy.ts`.
 
 ## Contributing
 
@@ -38,10 +36,10 @@ wasm-pack (install [wasm-pack](https://wasm-bindgen.github.io/wasm-pack/installe
 
 ```sh
 # install dependencies without running prepare scripts
-# (the SDK packages' `prepare` hook depends on the wasm build,
+# (the SDK packages' `prepare` hook depends on the Wasm build,
 # which doesn't exist yet on a fresh clone)
 pnpm install --ignore-scripts
-# build the wasm package
+# build the Wasm package
 pnpm run build:sdk-wasm
 # install dependencies and build the node package
 pnpm install
@@ -52,10 +50,10 @@ pnpm test
 ### Release
 
 The Node.js and browser versions can be published with this single command.
-Make sure to check the check both packages versions first.
+Check both package versions first.
 
 ```sh
-# the wasm package must be published first
+# the Wasm package must be published first
 # $ pnpm run publish:sdk-wasm
 pnpm run publish:sdk
 ```

@@ -72,7 +72,7 @@ enum OutputFormat {
 }
 
 #[derive(Serialize)]
-struct JsonCheckOutput<D: Serialize> {
+struct JsonCheckOutput<D> {
     success: bool,
     diagnostics: HashMap<String, Vec<D>>,
     environment: String,
