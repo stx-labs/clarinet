@@ -290,10 +290,8 @@ mod tests {
 
     use super::*;
 
-    /// The deployer wallet `clarinet new` writes into `settings/Devnet.toml`.
-    /// The expected values are the fixtures the template prints as comments,
-    /// so a derivation or signing regression fails against addresses users
-    /// can read in their own generated manifest.
+    /// Returns the deployer wallet that uses the precomputed keys in the
+    /// `clarinet new` template fixtures.
     fn deployer_wallet() -> Wallet {
         Wallet {
             mnemonic: clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC.to_string(),
@@ -322,16 +320,20 @@ mod tests {
         hex_bytes("753b7cc01a1a2e86221266a154af739463fce51219d97e4f856cd7200c3bd2a601").unwrap()
     }
 
-    fn counter_call_payload() -> TransactionPayload {
+    fn sign_counter_call(nonce: u64, tx_fee: u64) -> StacksTransaction {
         let contract_id =
             QualifiedContractIdentifier::parse("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter")
                 .unwrap();
-        TransactionPayload::ContractCall(TransactionContractCall {
-            address: StacksAddress::from(contract_id.issuer),
-            contract_name: "counter".try_into().unwrap(),
-            function_name: "increment".try_into().unwrap(),
-            function_args: vec![ClarityValue::UInt(1)],
-        })
+        encode_contract_call(
+            &contract_id,
+            "increment".try_into().unwrap(),
+            vec![ClarityValue::UInt(1)],
+            &deployer_wallet(),
+            nonce,
+            tx_fee,
+            TransactionAnchorMode::Any,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -366,8 +368,6 @@ mod tests {
     #[test]
     fn keypair_matches_the_precomputed_deployer_keys() {
         let keypair = compute_keypair(&deployer_wallet());
-        // `PrivateKey::to_bytes` returns the 32-byte scalar; the compression
-        // flag lives on the public key side.
         let secret_bytes = keypair.secret_key.to_bytes();
         assert_eq!(
             bytes_to_hex(&secret_bytes),
@@ -381,14 +381,7 @@ mod tests {
 
     #[test]
     fn signed_contract_call_txid_is_stable() {
-        let tx = sign_transaction_payload(
-            &deployer_wallet(),
-            counter_call_payload(),
-            0,
-            1_000,
-            TransactionAnchorMode::Any,
-        )
-        .unwrap();
+        let tx = sign_counter_call(0, 1_000);
         assert_eq!(
             tx.txid().to_string(),
             "8bc7c85ac68ef7ae63e6353cf9e9955aa54a87c4d1e34fd7b1b6e3536544687c",
@@ -398,14 +391,7 @@ mod tests {
 
     #[test]
     fn signed_transaction_fields_round_trip() {
-        let tx = sign_transaction_payload(
-            &deployer_wallet(),
-            counter_call_payload(),
-            7,
-            2_500,
-            TransactionAnchorMode::Any,
-        )
-        .unwrap();
+        let tx = sign_counter_call(7, 2_500);
         assert_eq!(tx.version, TransactionVersion::Testnet);
         assert_eq!(tx.chain_id, 0x80000000);
         let TransactionAuth::Standard(TransactionSpendingCondition::Singlesig(origin)) = &tx.auth
@@ -510,14 +496,7 @@ mod tests {
     /// wire format.
     #[test]
     fn signed_contract_call_raw_encoding_is_stable() {
-        let tx = sign_transaction_payload(
-            &deployer_wallet(),
-            counter_call_payload(),
-            0,
-            1_000,
-            TransactionAnchorMode::Any,
-        )
-        .unwrap();
+        let tx = sign_counter_call(0, 1_000);
         let mut bytes = vec![];
         tx.consensus_serialize(&mut bytes)
             .expect("FATAL: invalid transaction");

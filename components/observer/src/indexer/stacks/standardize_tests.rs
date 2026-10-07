@@ -248,11 +248,10 @@ fn serialized_block_standardizes_into_rosetta_shape() {
 }
 
 #[test]
-fn aborted_contract_calls_are_skipped() {
+fn abort_by_response_transactions_are_skipped() {
     let mut block = empty_block();
     let mut tx = transfer_tx();
     tx.status = "abort_by_response".to_string();
-    tx.raw_tx = "0x00".to_string();
     tx.raw_result = "0x".to_string();
     block.transactions = vec![tx];
     let block_data = standardize_block(&block);
@@ -264,8 +263,10 @@ fn value_description_formats_clarity_values() {
     let ctx = Context::empty();
     // `(ok true)` consensus-encoded: 0x07 = ResponseTrue, 0x03 = Bool(true).
     assert_eq!(get_value_description("0x0703", &ctx), "(ok true)");
-    // Non-hex input passes through untouched.
+    // The function returns non-hexadecimal input without changes.
     assert_eq!(get_value_description("plain", &ctx), "plain");
-    // Hex that fails Clarity decoding passes through as the raw hex body.
+    // The function returns invalid hexadecimal text without the prefix.
     assert_eq!(get_value_description("0xzz", &ctx), "zz");
+    // The function also returns incomplete Clarity value bytes without the prefix.
+    assert_eq!(get_value_description("0x00", &ctx), "00");
 }

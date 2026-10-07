@@ -415,21 +415,17 @@ pub fn standardize_stacks_block(
 
     let mut transactions = vec![];
     for tx in block.transactions.iter() {
+        if tx.status == "abort_by_response" {
+            continue;
+        }
         let tx_events = events.remove(&tx.txid).unwrap_or_default();
         let (description, tx_type, fee, nonce, sender, sponsor) =
-            match get_tx_description(&tx.raw_tx, &tx_events) {
-                Ok(desc) => desc,
-                Err(e) => {
-                    if tx.status.eq("abort_by_response") {
-                        // We should probably revisit this approach
-                        continue;
-                    }
-                    return Err(format!(
-                        "unable to standardize block #{} ({})",
-                        block.block_height, e
-                    ));
-                }
-            };
+            get_tx_description(&tx.raw_tx, &tx_events).map_err(|e| {
+                format!(
+                    "unable to standardize block #{} ({})",
+                    block.block_height, e
+                )
+            })?;
         let events = tx_events
             .iter()
             .map(|e| e.into_observer_event())
