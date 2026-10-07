@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
 use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarinet_files::{paths, FileAccessor};
@@ -24,6 +27,60 @@ impl Default for ContractMetadata {
             clarity_version: DEFAULT_CLARITY_VERSION,
         }
     }
+}
+
+/// Bounds a contract fetch, so an unreachable API can't stall plan generation.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a failed lookup of a detected dependency is remembered.
+const UNAVAILABLE_TTL_SECS: f64 = 300.0;
+
+/// Failed lookups of detected dependencies, keyed by API and contract, with the
+/// time of the failure in seconds.
+static UNAVAILABLE: LazyLock<Mutex<HashMap<(Option<String>, String), f64>>> =
+    LazyLock::new(Mutex::default);
+
+fn now_secs() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() / 1000.0
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+    }
+}
+
+/// [`retrieve_contract`] for a dependency detected in the project's contracts
+/// rather than declared. A failure is remembered for a few minutes, so a
+/// reference that can't be resolved doesn't hit the network again on every
+/// plan generation (each LSP rebuild, each `clarinet check`).
+pub async fn retrieve_detected_contract(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+    file_accessor: &Option<&dyn FileAccessor>,
+    api_base_url: Option<&str>,
+) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
+    let key = (api_base_url.map(str::to_string), contract_id.to_string());
+    let failed_at = UNAVAILABLE
+        .lock()
+        .ok()
+        .and_then(|failed| failed.get(&key).copied());
+    if failed_at.is_some_and(|failed_at| now_secs() - failed_at < UNAVAILABLE_TTL_SECS) {
+        return Err(format!("contract {contract_id} was recently unavailable"));
+    }
+
+    let contract =
+        retrieve_contract(contract_id, cache_location, file_accessor, api_base_url).await;
+    if let Ok(mut failed) = UNAVAILABLE.lock() {
+        match contract {
+            Ok(_) => failed.remove(&key),
+            Err(_) => failed.insert(key, now_secs()),
+        };
+    }
+    contract
 }
 
 pub async fn retrieve_contract(
@@ -149,7 +206,10 @@ async fn fetch_contract(
     name: &str,
 ) -> Result<Contract, String> {
     let url = format!("{api_base_url}/extended/v1/contract/{deployer}.{name}");
-    let response = reqwest::get(&url)
+    let response = reqwest::Client::new()
+        .get(&url)
+        .timeout(FETCH_TIMEOUT)
+        .send()
         .await
         .map_err(|e| format!("Unable to retrieve contract {url}: {e}"))?;
 
@@ -284,5 +344,36 @@ mod tests {
 
         assert_eq!(source2, TEST_SOURCE);
         assert_eq!(clarity_version2, ClarityVersion::Clarity3);
+    }
+
+    #[tokio::test]
+    async fn test_detected_contract_failure_is_remembered() {
+        let mut server = Server::new_async().await;
+        let not_found = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(404)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let contract_id =
+            QualifiedContractIdentifier::parse(&format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"))
+                .unwrap();
+        for _ in 0..2 {
+            let result = retrieve_detected_contract(
+                &contract_id,
+                cache_dir.path(),
+                &None,
+                Some(&server.url()),
+            )
+            .await;
+            assert!(result.is_err());
+        }
+
+        not_found.assert_async().await;
     }
 }

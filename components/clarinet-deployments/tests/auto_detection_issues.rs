@@ -276,7 +276,7 @@ async fn env_simnet_dependencies_stay_off_chain() {
     // The mock endpoint must never be called — a simnet-only reference must
     // not trigger a network fetch for an on-chain deployment.
     let mut server = Server::new_async().await;
-    server
+    let mock_request = server
         .mock(
             "GET",
             format!("/extended/v1/contract/{EXTERNAL_DEPLOYER}.mock").as_str(),
@@ -286,6 +286,8 @@ async fn env_simnet_dependencies_stay_off_chain() {
         .await;
 
     let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    mock_request.assert_async().await;
 
     assert!(
         !published.contains(&format!("{EXTERNAL_DEPLOYER}.mock")),
@@ -727,7 +729,7 @@ async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
     let mut server = mock_contracts(&[(SBTC_MAINNET_DEPLOYER, "sbtc-token", PLAIN_SOURCE)]).await;
     // sbtc-deposit must never be fetched — declaring sbtc-token must not
     // implicitly pull in unrelated sBTC contracts.
-    server
+    let deposit_request = server
         .mock(
             "GET",
             format!("/extended/v1/contract/{SBTC_MAINNET_DEPLOYER}.sbtc-deposit").as_str(),
@@ -737,6 +739,8 @@ async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
         .await;
 
     let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    deposit_request.assert_async().await;
 
     assert!(
         !published.contains(&format!("{SBTC_MAINNET_DEPLOYER}.sbtc-deposit")),
@@ -809,5 +813,113 @@ async fn contract_hash_literal_is_auto_detected() {
         published.contains(&format!("{EXTERNAL_DEPLOYER}.hasher")),
         "a contract referenced via contract-hash? with a literal principal must \
          be auto-detected and published as a requirement; got {published:?}"
+    );
+}
+
+/// A reference under a project account names a contract missing from the
+/// manifest. The devnet keys are public, so fetching it would pull in whatever
+/// a third party deployed under them; it is left for analysis to report.
+#[tokio::test]
+async fn reference_under_project_account_is_not_fetched() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        "(define-public (go) (contract-call? .not-in-manifest get-x))\n",
+        "",
+    );
+
+    let mut server = Server::new_async().await;
+    let any_request = server
+        .mock("GET", mockito::Matcher::Any)
+        .expect(0)
+        .create_async()
+        .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    any_request.assert_async().await;
+    assert!(published.is_empty(), "got {published:?}");
+}
+
+/// A contract principal inside a trait argument's expression that is only
+/// data must not be published: once fetched, it doesn't define the trait's
+/// functions.
+#[tokio::test]
+async fn data_principal_in_trait_argument_is_not_published() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &format!(
+            "(define-public (go)\n\
+               (contract-call? '{EXTERNAL_DEPLOYER}.callee take\n\
+                 (get impl {{ owner: '{EXTERNAL_DEPLOYER}.other, impl: '{EXTERNAL_DEPLOYER}.implementation }})))\n"
+        ),
+        "",
+    );
+
+    let server = mock_contracts(&[
+        (
+            EXTERNAL_DEPLOYER,
+            "callee",
+            "(define-trait reader ((get-one () (response uint uint))))\n\
+             (define-public (take (target <reader>)) (contract-call? target get-one))",
+        ),
+        (EXTERNAL_DEPLOYER, "implementation", PLAIN_SOURCE),
+        (
+            EXTERNAL_DEPLOYER,
+            "other",
+            "(define-read-only (get-two) (ok u2))",
+        ),
+    ])
+    .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert_eq!(
+        published,
+        [
+            format!("{EXTERNAL_DEPLOYER}.callee"),
+            format!("{EXTERNAL_DEPLOYER}.implementation"),
+        ]
+    );
+}
+
+/// A trait argument bound by a `let` outside the call is resolved once the
+/// external callee's signature is loaded, from the bindings at the call site.
+#[tokio::test]
+async fn let_bound_trait_argument_is_auto_detected() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &format!(
+            "(define-public (go)\n\
+               (let ((t '{EXTERNAL_DEPLOYER}.implementation))\n\
+                 (contract-call? '{EXTERNAL_DEPLOYER}.callee take t)))\n"
+        ),
+        "",
+    );
+
+    let server = mock_contracts(&[
+        (
+            EXTERNAL_DEPLOYER,
+            "callee",
+            "(define-trait reader ((get-one () (response uint uint))))\n\
+             (define-public (take (target <reader>)) (contract-call? target get-one))",
+        ),
+        (EXTERNAL_DEPLOYER, "implementation", PLAIN_SOURCE),
+    ])
+    .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        published.contains(&format!("{EXTERNAL_DEPLOYER}.implementation")),
+        "got {published:?}"
     );
 }

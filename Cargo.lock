@@ -709,6 +709,7 @@ dependencies = [
  "clarity",
  "clarity-repl",
  "indoc",
+ "js-sys",
  "libsecp256k1",
  "log",
  "mockito",

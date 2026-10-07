@@ -15,7 +15,7 @@ use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
-use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
+use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{
     ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
 };
@@ -29,7 +29,7 @@ use clarity_repl::repl::boot::{
 use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
 use clarity_repl::repl::{
-    ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Epoch, Session,
+    ClarityCodeSource, ClarityContract, ClarityInterpreter, ContractDeployer, Session,
     SessionSettings,
 };
 use clarity_repl::ueprint;
@@ -988,8 +988,8 @@ pub async fn generate_default_deployment_with_cache(
 
     let mut contract_epochs = HashMap::new();
 
-    // Read user contract sources early so we can auto-detect external dependencies
-    // before populating the requirements queue.
+    // User contracts are read and parsed before the requirements are loaded:
+    // their ASTs are what reveals the external contracts to load.
     let sources: HashMap<String, String> = match file_accessor {
         None => {
             let mut sources = HashMap::new();
@@ -1016,463 +1016,6 @@ pub async fn generate_default_deployment_with_cache(
             file_accessor.read_files(contracts_location).await?
         }
     };
-
-    // Build lightweight user-contract ASTs (skip_analysis: true) to detect
-    // external contract references that need to be loaded as requirements.
-    let mut user_contract_asts: BTreeMap<
-        QualifiedContractIdentifier,
-        (ClarityVersion, ContractAST),
-    > = BTreeMap::new();
-    for (name, contract_config) in manifest.contracts.iter() {
-        let Ok(contract_name) = ContractName::try_from(name.to_string()) else {
-            continue; // error will be surfaced in the full build below
-        };
-        let deployer_account = match &contract_config.deployer {
-            ContractDeployer::DefaultDeployer => default_deployer,
-            ContractDeployer::LabeledDeployer(label) => {
-                let Some(d) = network_manifest.accounts.get(label) else {
-                    continue;
-                };
-                d
-            }
-            _ => continue,
-        };
-        let Ok(sender) = PrincipalData::parse_standard_principal(&deployer_account.stx_address)
-        else {
-            continue;
-        };
-        let contract_id = QualifiedContractIdentifier::new(sender.clone(), contract_name);
-        let contract_location = project_root.join(contract_config.expect_contract_path_as_str());
-        let Some(source) = sources.get(contract_location.to_string_lossy().as_ref()) else {
-            continue;
-        };
-        let source = if environment == Environment::OnChain {
-            match remove_env_simnet(source) {
-                Ok(Some(clean)) => clean,
-                _ => source.clone(),
-            }
-        } else {
-            source.clone()
-        };
-        // Reuse a cached AST if the source is unchanged — avoids a redundant
-        // parse in LSP incremental rebuilds, which already hold fully-analysed
-        // ASTs from the previous pass.
-        let cache_key = (contract_location.clone(), environment);
-        let content_hash = compute_content_hash(&source);
-        let epoch_id = match contract_config.epoch {
-            Epoch::Specific(e) => e,
-            Epoch::Latest => DEFAULT_EPOCH,
-        };
-        let ast = match cached_asts
-            .as_ref()
-            .and_then(|c| c.get(&cache_key))
-            .filter(|e| e.matches(&content_hash, contract_config.clarity_version, epoch_id))
-        {
-            Some(cached) => cached.ast.clone(),
-            None => {
-                let contract = ClarityContract {
-                    code_source: ClarityCodeSource::ContractInMemory(source),
-                    deployer: ContractDeployer::Address(deployer_account.stx_address.clone()),
-                    name: name.clone(),
-                    clarity_version: contract_config.clarity_version,
-                    epoch: contract_config.epoch.clone(),
-                    skip_analysis: true,
-                };
-                let (ast, _, _) = interpreter.build_ast(&contract);
-                ast
-            }
-        };
-        user_contract_asts.insert(contract_id, (contract_config.clarity_version, ast));
-    }
-
-    // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
-    {
-        let requirements = &manifest.project.requirements;
-        let mut emulated_contracts_publish = HashMap::new();
-        let mut requirements_publish = HashMap::new();
-
-        // Contracts that could not be retrieved and were not declared explicitly.
-        // They are left for the full contract analysis pass to diagnose and must
-        // never be retried, or an unavailable requirement would keep producing
-        // new work on every pass.
-        let mut unresolved_requirements: HashSet<QualifiedContractIdentifier> = HashSet::new();
-
-        // Parse explicit requirements once — build the set and seed the queue in
-        // a single pass. Iterating in reverse so push_front preserves declaration order.
-        let mut explicit_ids: HashSet<QualifiedContractIdentifier> = HashSet::new();
-        for entry in requirements.iter().rev() {
-            let contract_id =
-                QualifiedContractIdentifier::parse(&entry.contract_id).map_err(|_| {
-                    format!(
-                        "malformatted contract_id in requirements: {}",
-                        entry.contract_id
-                    )
-                })?;
-            explicit_ids.insert(contract_id.clone());
-            queue.push_front(contract_id);
-        }
-
-        // Auto-detection is iterative: loading a requirement can reveal new
-        // dependencies in the user contracts. For example, a contract literal
-        // passed as a trait argument is only identifiable once the callee's
-        // signature has been loaded. Repeat discovery and loading until a pass
-        // finds nothing new.
-        // Under simnet remote data the remote node holds all contracts already;
-        // skip discovery to avoid fetching and discarding sources unnecessarily.
-        loop {
-            if simnet_remote_data {
-                break;
-            }
-            let (inferable, non_inferable) = match ASTDependencyDetector::detect_dependencies(
-                &user_contract_asts,
-                &requirements_data,
-            ) {
-                Ok(inferable) => (inferable, Vec::new()),
-                Err((inferable, non_inferable)) => (inferable, non_inferable),
-            };
-
-            // Loading a requirement can reveal new dependencies even when
-            // auto-detection found nothing new (e.g. a callee whose signature
-            // makes a trait argument identifiable only after it is loaded).
-            // Keep scanning until a pass loads nothing.
-            let mut loaded_requirement = false;
-            for contract_id in inferable
-                .values()
-                .flat_map(|dependencies| {
-                    dependencies
-                        .iter()
-                        .map(|dependency| dependency.contract_id.clone())
-                })
-                .chain(non_inferable)
-            {
-                // On testnet, sBTC entries are pre-seeded into `requirements_data`
-                // for signature lookup only; they still need to be fetched and
-                // published, so don't treat the pre-seeded AST as "done".
-                let is_sbtc_mainnet_deployer =
-                    contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS;
-                let already_loaded = requirements_data.contains_key(&contract_id)
-                    && !(matches!(network, StacksNetwork::Testnet) && is_sbtc_mainnet_deployer);
-                if boot_contracts_ids.contains(&contract_id)
-                    || user_contract_asts.contains_key(&contract_id)
-                    || explicit_ids.contains(&contract_id)
-                    || already_loaded
-                    || requirements_deps.contains_key(&contract_id)
-                    || unresolved_requirements.contains(&contract_id)
-                {
-                    continue;
-                }
-                queue.push_back(contract_id);
-            }
-
-            while let Some(contract_id) = queue.pop_front() {
-                if requirements_deps.contains_key(&contract_id)
-                    || unresolved_requirements.contains(&contract_id)
-                {
-                    continue;
-                }
-
-                let is_sbtc_mainnet_deployer =
-                    contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS;
-
-                // On testnet, an sBTC requirement is published as a real transaction
-                // remapped to the sBTC testnet deployer, so it has to be retrieved
-                // like any other requirement: the boot copies seeded into
-                // `requirements_data` above carry no publish specification.
-                let cached_requirement =
-                    if matches!(network, StacksNetwork::Testnet) && is_sbtc_mainnet_deployer {
-                        None
-                    } else {
-                        requirements_data.remove(&contract_id)
-                    };
-
-                // Did we already get the source in a prior cycle?
-                let (clarity_version, ast) = match cached_requirement {
-                    Some(requirement_data) => requirement_data,
-                    None => {
-                        // Download the code. Missing inferred requirements are left
-                        // for the full contract analysis pass to diagnose.
-                        let (mut source, epoch, clarity_version, contract_location) =
-                            match requirements::retrieve_contract(
-                                &contract_id,
-                                &manifest.project.cache_location,
-                                &file_accessor,
-                                api_base_url,
-                            )
-                            .await
-                            {
-                                Ok(contract) => contract,
-                                Err(error) if explicit_ids.contains(&contract_id) => {
-                                    return Err(error)
-                                }
-                                Err(_) => {
-                                    // Remember the failure so the dependency is
-                                    // neither retried nor re-enqueued later.
-                                    unresolved_requirements.insert(contract_id);
-                                    continue;
-                                }
-                            };
-
-                        loaded_requirement = true;
-                        contract_epochs.insert(contract_id.clone(), epoch);
-
-                        // Build the struct representing the requirement in the deployment
-                        if matches!(network, StacksNetwork::Simnet) {
-                            if !simnet_remote_data {
-                                let remap_principals = if environment == Environment::Simnet {
-                                    remap_source_boot_principals(&mut source)
-                                } else {
-                                    BTreeMap::new()
-                                };
-                                let data = EmulatedContractPublishSpecification {
-                                    contract_name: contract_id.name.clone(),
-                                    emulated_sender: contract_id.issuer.clone(),
-                                    source: source.clone(),
-                                    location: contract_location,
-                                    clarity_version,
-                                    skip_analysis: true,
-                                    remap_principals,
-                                };
-
-                                emulated_contracts_publish.insert(contract_id.clone(), data);
-                            }
-                        } else if matches!(network, StacksNetwork::Devnet) {
-                            let mut remap_principals = BTreeMap::new();
-                            remap_principals.insert(
-                                contract_id.issuer.clone(),
-                                default_deployer_address.clone(),
-                            );
-
-                            let data = RequirementPublishSpecification {
-                                contract_id: contract_id.clone(),
-                                remap_sender: default_deployer_address.clone(),
-                                source: source.clone(),
-                                location: contract_location,
-                                cost: deployment_fee_rate * source.len() as u64,
-                                remap_principals,
-                                clarity_version,
-                            };
-                            requirements_publish.insert(contract_id.clone(), data);
-                        } else if matches!(network, StacksNetwork::Testnet) {
-                            let mut remap_sender = default_deployer_address.clone();
-                            let mut remap_principals = BTreeMap::new();
-                            remap_principals.insert(
-                                contract_id.issuer.clone(),
-                                default_deployer_address.clone(),
-                            );
-
-                            // Remap sBTC mainnet address to testnet address
-                            if is_sbtc_mainnet_deployer {
-                                remap_sender = SBTC_TESTNET_ADDRESS_PRINCIPAL.clone();
-                                remap_principals.insert(
-                                    contract_id.issuer.clone(),
-                                    SBTC_TESTNET_ADDRESS_PRINCIPAL.clone(),
-                                );
-                            }
-
-                            let data = RequirementPublishSpecification {
-                                contract_id: contract_id.clone(),
-                                remap_sender,
-                                source: source.clone(),
-                                location: contract_location,
-                                cost: deployment_fee_rate * source.len() as u64,
-                                remap_principals,
-                                clarity_version,
-                            };
-                            requirements_publish.insert(contract_id.clone(), data);
-                        }
-
-                        // Compute the AST
-                        let contract = ClarityContract {
-                            code_source: ClarityCodeSource::ContractInMemory(source),
-                            name: contract_id.name.to_string(),
-                            deployer: ContractDeployer::ContractIdentifier(contract_id.clone()),
-                            clarity_version,
-                            epoch: clarity_repl::repl::Epoch::Specific(epoch),
-                            skip_analysis: true,
-                        };
-                        let (ast, _, _) = interpreter.build_ast(&contract);
-                        (clarity_version, ast)
-                    }
-                };
-
-                // Detect the eventual dependencies for this AST
-                let mut contract_data = BTreeMap::new();
-
-                contract_data.insert(contract_id.clone(), (clarity_version, ast));
-                let dependencies =
-                    ASTDependencyDetector::detect_dependencies(&contract_data, &requirements_data);
-                let (_, ast) = contract_data
-                    .remove(&contract_id)
-                    .expect("unable to retrieve ast");
-
-                // Extract the known / unknown dependencies
-                match dependencies {
-                    Ok(inferable_dependencies) => {
-                        if inferable_dependencies.len() > 1 {
-                            clarity_repl::ueprint!(
-                                "warning: inferable_dependencies contains more than one entry"
-                            );
-                        }
-                        // We submitted a HashMap with one contract, so we have at most one result in the `inferable_dependencies` map.
-                        // We will extract and keep the associated data (source, ast, deps).
-                        if let Some((contract_id, dependencies)) =
-                            inferable_dependencies.into_iter().next()
-                        {
-                            for dependency in dependencies.iter() {
-                                queue.push_back(dependency.contract_id.clone());
-                            }
-                            requirements_deps.insert(contract_id.clone(), dependencies);
-                            requirements_data.insert(contract_id.clone(), (clarity_version, ast));
-                        }
-                    }
-                    Err((mut inferable_dependencies, non_inferable_dependencies)) => {
-                        // Some dependencies could not be resolved from
-                        // `requirements_data`. Re-enqueue the present contract so it
-                        // is re-examined once its missing dependencies are loaded,
-                        // and keep the source in memory to avoid useless disk access.
-                        for dependencies in inferable_dependencies.values() {
-                            for dependency in dependencies.iter() {
-                                queue.push_back(dependency.contract_id.clone());
-                            }
-                        }
-                        requirements_data.insert(contract_id.clone(), (clarity_version, ast));
-
-                        // Retry only unresolved dependencies that can still be
-                        // retrieved. Once every one of them has failed, this contract
-                        // can never become inferable; re-enqueueing it would loop
-                        // forever.
-                        let retryable: Vec<QualifiedContractIdentifier> =
-                            non_inferable_dependencies
-                                .into_iter()
-                                .filter(|id| {
-                                    !unresolved_requirements.contains(id)
-                                        && !requirements_deps.contains_key(id)
-                                })
-                                .collect();
-                        if retryable.is_empty() {
-                            // Keep the dependencies that were resolved so the
-                            // contract is still deployed and ordered.
-                            let resolved = inferable_dependencies
-                                .remove(&contract_id)
-                                .unwrap_or_default();
-                            requirements_deps.insert(contract_id.clone(), resolved);
-                        } else {
-                            queue.push_front(contract_id);
-                            for unresolved in retryable {
-                                queue.push_front(unresolved);
-                            }
-                        }
-                    }
-                };
-            }
-
-            if !loaded_requirement {
-                break;
-            }
-        }
-
-        // Avoid listing requirements as deployment transactions to the deployment specification on Mainnet
-        if !matches!(network, StacksNetwork::Mainnet) && !simnet_remote_data {
-            let mut ordered_contracts_ids =
-                ASTDependencyDetector::order_contracts(&requirements_deps, &contract_epochs)
-                    .map_err(|e| format!("unable to order requirements: {e}"))?;
-
-            // Filter out boot contracts from requirement dependencies.
-            // On devnet, also filter sbtc boot contracts — they are deployed
-            // separately as RequirementPublish below
-            ordered_contracts_ids.retain(|contract_id| {
-                if boot_contracts_ids.contains(contract_id) {
-                    return false;
-                }
-                if matches!(network, StacksNetwork::Devnet)
-                    && SBTC_BOOT_CONTRACTS
-                        .iter()
-                        .any(|(sbtc_id, _)| sbtc_id == *contract_id)
-                {
-                    return false;
-                }
-                true
-            });
-
-            if matches!(network, StacksNetwork::Simnet) {
-                for contract_id in ordered_contracts_ids.iter() {
-                    let Some(data) = emulated_contracts_publish.remove(contract_id) else {
-                        continue; // requirement was loaded for AST only (e.g. boot contract)
-                    };
-                    let tx = TransactionSpecification::EmulatedContractPublish(data);
-                    add_transaction_to_epoch(
-                        &mut transactions,
-                        tx,
-                        &contract_epochs[contract_id].into(),
-                    );
-                }
-            } else if matches!(network, StacksNetwork::Devnet | StacksNetwork::Testnet) {
-                for contract_id in ordered_contracts_ids.iter() {
-                    let Some(data) = requirements_publish.remove(contract_id) else {
-                        continue; // requirement was loaded for AST only (e.g. sBTC on testnet pre-seeded boot copy)
-                    };
-                    let tx = TransactionSpecification::RequirementPublish(data);
-                    add_transaction_to_epoch(
-                        &mut transactions,
-                        tx,
-                        &contract_epochs[contract_id].into(),
-                    );
-                }
-            }
-        }
-    }
-
-    // Deploy the sBTC contracts as RequirementPublish on devnet so the
-    // stacks-node has them on-chain before the epoch 4.0 transition, and so the
-    // chains coordinator can mint the configured `sbtc_balance` through
-    // sbtc-deposit.
-    if matches!(network, StacksNetwork::Devnet) {
-        let sbtc_mainnet_principal =
-            PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
-        let mut remap_principals = BTreeMap::new();
-        remap_principals.insert(sbtc_mainnet_principal, default_deployer_address.clone());
-
-        // The sources are written to the requirements cache so the deployment
-        // plan can reload them from disk after a serialization round-trip.
-        let requirements_dir = manifest.project.cache_location.join("requirements");
-        std::fs::create_dir_all(&requirements_dir)
-            .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
-
-        // `SBTC_BOOT_CONTRACTS` is ordered by dependency, and so is the batch.
-        for (contract_id, _) in SBTC_BOOT_CONTRACTS.iter() {
-            let name = contract_id.name.as_str();
-
-            // Skip if already scheduled as an explicit requirement.
-            if transactions.values().any(|txs| {
-                txs.iter().any(|tx| matches!(
-                    tx,
-                    TransactionSpecification::RequirementPublish(r) if r.contract_id == *contract_id
-                ))
-            }) {
-                continue;
-            }
-
-            let source = sbtc_sources
-                .remove(name)
-                .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
-
-            let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
-            std::fs::write(&location, &source)
-                .map_err(|e| format!("unable to write {name} to requirements cache: {e}"))?;
-
-            let tx =
-                TransactionSpecification::RequirementPublish(RequirementPublishSpecification {
-                    contract_id: contract_id.clone(),
-                    remap_sender: default_deployer_address.clone(),
-                    remap_principals: remap_principals.clone(),
-                    source: source.clone(),
-                    clarity_version: ClarityVersion::Clarity3,
-                    cost: deployment_fee_rate * source.len() as u64,
-                    location,
-                });
-            add_transaction_to_epoch(&mut transactions, tx, &EpochSpec::Epoch3_0);
-        }
-    }
 
     let mut contracts = HashMap::new();
     let mut contracts_sources = HashMap::new();
@@ -1656,6 +1199,444 @@ pub async fn generate_default_deployment_with_cache(
 
         contract_data.insert(contract_id.clone(), (clarity_version, ast_for_data));
         contract_epochs.insert(contract_id, resolved_epoch);
+    }
+
+    // Build the ASTs / DependencySet for requirements - step required for Simnet/Devnet/Testnet/Mainnet
+    {
+        let requirements = &manifest.project.requirements;
+        let mut emulated_contracts_publish = HashMap::new();
+        let mut requirements_publish = HashMap::new();
+
+        // Contracts that could not be retrieved and were not declared explicitly.
+        // They are left for the full contract analysis pass to diagnose and must
+        // never be retried, or an unavailable requirement would keep producing
+        // new work on every pass.
+        let mut unresolved_requirements: HashSet<QualifiedContractIdentifier> = HashSet::new();
+
+        // A reference under one of the project's own accounts names a project
+        // contract missing from the manifest, so it is left for the analysis
+        // pass to report. The devnet keys are public: fetching would pull in
+        // whatever a third party deployed under them on testnet.
+        let project_issuers: HashSet<StandardPrincipalData> = network_manifest
+            .accounts
+            .values()
+            .filter_map(|account| {
+                PrincipalData::parse_standard_principal(&account.stx_address).ok()
+            })
+            .collect();
+
+        // Parse explicit requirements once — build the set and seed the queue in
+        // a single pass. Iterating in reverse so push_front preserves declaration order.
+        let mut explicit_ids: HashSet<QualifiedContractIdentifier> = HashSet::new();
+        for entry in requirements.iter().rev() {
+            let contract_id =
+                QualifiedContractIdentifier::parse(&entry.contract_id).map_err(|_| {
+                    format!(
+                        "malformatted contract_id in requirements: {}",
+                        entry.contract_id
+                    )
+                })?;
+            explicit_ids.insert(contract_id.clone());
+            queue.push_front(contract_id);
+        }
+
+        // Auto-detection is iterative: loading a requirement can reveal new
+        // dependencies in the user contracts. For example, a contract literal
+        // passed as a trait argument is only identifiable once the callee's
+        // signature has been loaded. Repeat discovery and loading until a pass
+        // finds nothing new.
+        // Under simnet remote data the remote node holds all contracts already;
+        // skip discovery to avoid fetching and discarding sources unnecessarily.
+        // The project contracts' dependencies from the latest discovery pass.
+        let mut project_dependencies = BTreeMap::new();
+        loop {
+            if simnet_remote_data {
+                break;
+            }
+            let (inferable, non_inferable) = match ASTDependencyDetector::detect_dependencies(
+                &contract_data,
+                &requirements_data,
+            ) {
+                Ok(inferable) => (inferable, Vec::new()),
+                Err((inferable, non_inferable)) => (inferable, non_inferable),
+            };
+
+            // Loading a requirement can reveal new dependencies even when
+            // auto-detection found nothing new (e.g. a callee whose signature
+            // makes a trait argument identifiable only after it is loaded).
+            // Keep scanning until a pass loads nothing.
+            let mut loaded_requirement = false;
+            for contract_id in inferable
+                .values()
+                .flat_map(|dependencies| {
+                    dependencies
+                        .iter()
+                        .map(|dependency| dependency.contract_id.clone())
+                })
+                .chain(non_inferable)
+            {
+                // On testnet, sBTC entries are pre-seeded into `requirements_data`
+                // for signature lookup only; they still need to be fetched and
+                // published, so don't treat the pre-seeded AST as "done".
+                let is_sbtc_mainnet_deployer =
+                    contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS;
+                let already_loaded = requirements_data.contains_key(&contract_id)
+                    && !(matches!(network, StacksNetwork::Testnet) && is_sbtc_mainnet_deployer);
+                if boot_contracts_ids.contains(&contract_id)
+                    || project_issuers.contains(&contract_id.issuer)
+                    || contract_data.contains_key(&contract_id)
+                    || explicit_ids.contains(&contract_id)
+                    || already_loaded
+                    || requirements_deps.contains_key(&contract_id)
+                    || unresolved_requirements.contains(&contract_id)
+                {
+                    continue;
+                }
+                queue.push_back(contract_id);
+            }
+            project_dependencies = inferable;
+
+            while let Some(contract_id) = queue.pop_front() {
+                if requirements_deps.contains_key(&contract_id)
+                    || unresolved_requirements.contains(&contract_id)
+                {
+                    continue;
+                }
+
+                let is_sbtc_mainnet_deployer =
+                    contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS;
+
+                // On testnet, an sBTC requirement is published as a real transaction
+                // remapped to the sBTC testnet deployer, so it has to be retrieved
+                // like any other requirement: the boot copies seeded into
+                // `requirements_data` above carry no publish specification.
+                let cached_requirement =
+                    if matches!(network, StacksNetwork::Testnet) && is_sbtc_mainnet_deployer {
+                        None
+                    } else {
+                        requirements_data.remove(&contract_id)
+                    };
+
+                // Did we already get the source in a prior cycle?
+                let (clarity_version, ast) = match cached_requirement {
+                    Some(requirement_data) => requirement_data,
+                    None => {
+                        // Download the code. Missing inferred requirements are left
+                        // for the full contract analysis pass to diagnose.
+                        let cache_location = &manifest.project.cache_location;
+                        let explicit = explicit_ids.contains(&contract_id);
+                        let retrieved = if explicit {
+                            requirements::retrieve_contract(
+                                &contract_id,
+                                cache_location,
+                                &file_accessor,
+                                api_base_url,
+                            )
+                            .await
+                        } else {
+                            requirements::retrieve_detected_contract(
+                                &contract_id,
+                                cache_location,
+                                &file_accessor,
+                                api_base_url,
+                            )
+                            .await
+                        };
+                        let (mut source, epoch, clarity_version, contract_location) =
+                            match retrieved {
+                                Ok(contract) => contract,
+                                Err(error) if explicit => return Err(error),
+                                Err(_) => {
+                                    // Remember the failure so the dependency is
+                                    // neither retried nor re-enqueued later.
+                                    unresolved_requirements.insert(contract_id);
+                                    continue;
+                                }
+                            };
+
+                        loaded_requirement = true;
+                        contract_epochs.insert(contract_id.clone(), epoch);
+
+                        // Build the struct representing the requirement in the deployment
+                        if matches!(network, StacksNetwork::Simnet) {
+                            if !simnet_remote_data {
+                                let remap_principals = if environment == Environment::Simnet {
+                                    remap_source_boot_principals(&mut source)
+                                } else {
+                                    BTreeMap::new()
+                                };
+                                let data = EmulatedContractPublishSpecification {
+                                    contract_name: contract_id.name.clone(),
+                                    emulated_sender: contract_id.issuer.clone(),
+                                    source: source.clone(),
+                                    location: contract_location,
+                                    clarity_version,
+                                    skip_analysis: true,
+                                    remap_principals,
+                                };
+
+                                emulated_contracts_publish.insert(contract_id.clone(), data);
+                            }
+                        } else if matches!(network, StacksNetwork::Devnet) {
+                            let mut remap_principals = BTreeMap::new();
+                            remap_principals.insert(
+                                contract_id.issuer.clone(),
+                                default_deployer_address.clone(),
+                            );
+
+                            let data = RequirementPublishSpecification {
+                                contract_id: contract_id.clone(),
+                                remap_sender: default_deployer_address.clone(),
+                                source: source.clone(),
+                                location: contract_location,
+                                cost: deployment_fee_rate * source.len() as u64,
+                                remap_principals,
+                                clarity_version,
+                            };
+                            requirements_publish.insert(contract_id.clone(), data);
+                        } else if matches!(network, StacksNetwork::Testnet) {
+                            let mut remap_sender = default_deployer_address.clone();
+                            let mut remap_principals = BTreeMap::new();
+                            remap_principals.insert(
+                                contract_id.issuer.clone(),
+                                default_deployer_address.clone(),
+                            );
+
+                            // Remap sBTC mainnet address to testnet address
+                            if is_sbtc_mainnet_deployer {
+                                remap_sender = SBTC_TESTNET_ADDRESS_PRINCIPAL.clone();
+                                remap_principals.insert(
+                                    contract_id.issuer.clone(),
+                                    SBTC_TESTNET_ADDRESS_PRINCIPAL.clone(),
+                                );
+                            }
+
+                            let data = RequirementPublishSpecification {
+                                contract_id: contract_id.clone(),
+                                remap_sender,
+                                source: source.clone(),
+                                location: contract_location,
+                                cost: deployment_fee_rate * source.len() as u64,
+                                remap_principals,
+                                clarity_version,
+                            };
+                            requirements_publish.insert(contract_id.clone(), data);
+                        }
+
+                        // Compute the AST
+                        let contract = ClarityContract {
+                            code_source: ClarityCodeSource::ContractInMemory(source),
+                            name: contract_id.name.to_string(),
+                            deployer: ContractDeployer::ContractIdentifier(contract_id.clone()),
+                            clarity_version,
+                            epoch: clarity_repl::repl::Epoch::Specific(epoch),
+                            skip_analysis: true,
+                        };
+                        let (ast, _, _) = interpreter.build_ast(&contract);
+                        (clarity_version, ast)
+                    }
+                };
+
+                // Detect the eventual dependencies for this AST
+                let mut requirement_ast = BTreeMap::new();
+
+                requirement_ast.insert(contract_id.clone(), (clarity_version, ast));
+                let dependencies = ASTDependencyDetector::detect_dependencies(
+                    &requirement_ast,
+                    &requirements_data,
+                );
+                let (_, ast) = requirement_ast
+                    .remove(&contract_id)
+                    .expect("unable to retrieve ast");
+
+                // Extract the known / unknown dependencies
+                match dependencies {
+                    Ok(inferable_dependencies) => {
+                        if inferable_dependencies.len() > 1 {
+                            clarity_repl::ueprint!(
+                                "warning: inferable_dependencies contains more than one entry"
+                            );
+                        }
+                        // We submitted a HashMap with one contract, so we have at most one result in the `inferable_dependencies` map.
+                        // We will extract and keep the associated data (source, ast, deps).
+                        if let Some((contract_id, dependencies)) =
+                            inferable_dependencies.into_iter().next()
+                        {
+                            for dependency in dependencies.iter() {
+                                queue.push_back(dependency.contract_id.clone());
+                            }
+                            requirements_deps.insert(contract_id.clone(), dependencies);
+                            requirements_data.insert(contract_id.clone(), (clarity_version, ast));
+                        }
+                    }
+                    Err((mut inferable_dependencies, non_inferable_dependencies)) => {
+                        // Some dependencies could not be resolved from
+                        // `requirements_data`. Re-enqueue the present contract so it
+                        // is re-examined once its missing dependencies are loaded,
+                        // and keep the source in memory to avoid useless disk access.
+                        for dependencies in inferable_dependencies.values() {
+                            for dependency in dependencies.iter() {
+                                queue.push_back(dependency.contract_id.clone());
+                            }
+                        }
+                        requirements_data.insert(contract_id.clone(), (clarity_version, ast));
+
+                        // Retry only unresolved dependencies that can still be
+                        // retrieved. Once every one of them has failed, this contract
+                        // can never become inferable; re-enqueueing it would loop
+                        // forever.
+                        let retryable: Vec<QualifiedContractIdentifier> =
+                            non_inferable_dependencies
+                                .into_iter()
+                                .filter(|id| {
+                                    !unresolved_requirements.contains(id)
+                                        && !requirements_deps.contains_key(id)
+                                })
+                                .collect();
+                        if retryable.is_empty() {
+                            // Keep the dependencies that were resolved so the
+                            // contract is still deployed and ordered.
+                            let resolved = inferable_dependencies
+                                .remove(&contract_id)
+                                .unwrap_or_default();
+                            requirements_deps.insert(contract_id.clone(), resolved);
+                        } else {
+                            queue.push_front(contract_id);
+                            for unresolved in retryable {
+                                queue.push_front(unresolved);
+                            }
+                        }
+                    }
+                };
+            }
+
+            if !loaded_requirement {
+                break;
+            }
+        }
+
+        // Keep only the requirements the project still references: a contract
+        // fetched as a speculative trait argument can turn out to be plain data
+        // once its source is known.
+        let mut referenced: Vec<&QualifiedContractIdentifier> = explicit_ids
+            .iter()
+            .chain(
+                project_dependencies
+                    .values()
+                    .flat_map(|dependencies| dependencies.iter().map(|dep| &dep.contract_id)),
+            )
+            .collect();
+        let mut reachable = HashSet::new();
+        while let Some(contract_id) = referenced.pop() {
+            if reachable.insert(contract_id.clone()) {
+                if let Some(dependencies) = requirements_deps.get(contract_id) {
+                    referenced.extend(dependencies.iter().map(|dep| &dep.contract_id));
+                }
+            }
+        }
+        requirements_deps.retain(|contract_id, _| reachable.contains(contract_id));
+
+        // Avoid listing requirements as deployment transactions to the deployment specification on Mainnet
+        if !matches!(network, StacksNetwork::Mainnet) && !simnet_remote_data {
+            let mut ordered_contracts_ids =
+                ASTDependencyDetector::order_contracts(&requirements_deps, &contract_epochs)
+                    .map_err(|e| format!("unable to order requirements: {e}"))?;
+
+            // Filter out boot contracts from requirement dependencies.
+            // On devnet, also filter sbtc boot contracts — they are deployed
+            // separately as RequirementPublish below
+            ordered_contracts_ids.retain(|contract_id| {
+                if boot_contracts_ids.contains(contract_id) {
+                    return false;
+                }
+                if matches!(network, StacksNetwork::Devnet)
+                    && SBTC_BOOT_CONTRACTS
+                        .iter()
+                        .any(|(sbtc_id, _)| sbtc_id == *contract_id)
+                {
+                    return false;
+                }
+                true
+            });
+
+            if matches!(network, StacksNetwork::Simnet) {
+                for contract_id in ordered_contracts_ids.iter() {
+                    let Some(data) = emulated_contracts_publish.remove(contract_id) else {
+                        continue; // requirement was loaded for AST only (e.g. boot contract)
+                    };
+                    let tx = TransactionSpecification::EmulatedContractPublish(data);
+                    add_transaction_to_epoch(
+                        &mut transactions,
+                        tx,
+                        &contract_epochs[contract_id].into(),
+                    );
+                }
+            } else if matches!(network, StacksNetwork::Devnet | StacksNetwork::Testnet) {
+                for contract_id in ordered_contracts_ids.iter() {
+                    let Some(data) = requirements_publish.remove(contract_id) else {
+                        continue; // requirement was loaded for AST only (e.g. sBTC on testnet pre-seeded boot copy)
+                    };
+                    let tx = TransactionSpecification::RequirementPublish(data);
+                    add_transaction_to_epoch(
+                        &mut transactions,
+                        tx,
+                        &contract_epochs[contract_id].into(),
+                    );
+                }
+            }
+        }
+    }
+
+    // Deploy the sBTC contracts as RequirementPublish on devnet so the
+    // stacks-node has them on-chain before the epoch 4.0 transition, and so the
+    // chains coordinator can mint the configured `sbtc_balance` through
+    // sbtc-deposit.
+    if matches!(network, StacksNetwork::Devnet) {
+        let sbtc_mainnet_principal =
+            PrincipalData::parse_standard_principal(SBTC_MAINNET_ADDRESS).unwrap();
+        let mut remap_principals = BTreeMap::new();
+        remap_principals.insert(sbtc_mainnet_principal, default_deployer_address.clone());
+
+        // The sources are written to the requirements cache so the deployment
+        // plan can reload them from disk after a serialization round-trip.
+        let requirements_dir = manifest.project.cache_location.join("requirements");
+        std::fs::create_dir_all(&requirements_dir)
+            .map_err(|e| format!("unable to create requirements cache directory: {e}"))?;
+
+        // `SBTC_BOOT_CONTRACTS` is ordered by dependency, and so is the batch.
+        for (contract_id, _) in SBTC_BOOT_CONTRACTS.iter() {
+            let name = contract_id.name.as_str();
+
+            // Skip if already scheduled as an explicit requirement.
+            if transactions.values().any(|txs| {
+                txs.iter().any(|tx| matches!(
+                    tx,
+                    TransactionSpecification::RequirementPublish(r) if r.contract_id == *contract_id
+                ))
+            }) {
+                continue;
+            }
+
+            let source = sbtc_sources
+                .remove(name)
+                .unwrap_or_else(|| panic!("sbtc boot contract {name} not found"));
+
+            let location = requirements_dir.join(format!("{SBTC_MAINNET_ADDRESS}.{name}.clar"));
+            std::fs::write(&location, &source)
+                .map_err(|e| format!("unable to write {name} to requirements cache: {e}"))?;
+
+            let tx =
+                TransactionSpecification::RequirementPublish(RequirementPublishSpecification {
+                    contract_id: contract_id.clone(),
+                    remap_sender: default_deployer_address.clone(),
+                    remap_principals: remap_principals.clone(),
+                    source: source.clone(),
+                    clarity_version: ClarityVersion::Clarity3,
+                    cost: deployment_fee_rate * source.len() as u64,
+                    location,
+                });
+            add_transaction_to_epoch(&mut transactions, tx, &EpochSpec::Epoch3_0);
+        }
     }
 
     let dependencies =
