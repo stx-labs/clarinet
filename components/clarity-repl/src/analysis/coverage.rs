@@ -444,7 +444,10 @@ fn report_eval(expr_coverage: &mut ExprCoverage, expr: &SymbolicExpression) {
         report_eval(expr_coverage, func_expr);
     }
     if let Some((func, args)) = try_parse_native_func(children) {
-        for arg in syntax_args(func, args) {
+        for arg in syntax_args(func, args)
+            .iter()
+            .chain(allowance_names(func, args))
+        {
             report_syntax(expr_coverage, arg);
         }
     }
@@ -461,18 +464,36 @@ fn report_syntax(expr_coverage: &mut ExprCoverage, expr: &SymbolicExpression) {
 
 /// Arguments the VM reads as names or types instead of evaluating them. The
 /// eval hook never fires on them, so they are counted along with their call.
-fn syntax_args(func: NativeFunctions, args: &[SymbolicExpression]) -> Vec<&SymbolicExpression> {
+fn syntax_args(func: NativeFunctions, args: &[SymbolicExpression]) -> &[SymbolicExpression] {
     use NativeFunctions::*;
-    match func {
-        ContractCall => args.iter().take(2).collect(),
+    let range = match func {
+        ContractCall => 0..2,
+        AsMaxLen => 1..2,
         Fold | Map | Filter | FromConsensusBuff | TupleGet | ContractOf | FetchVar | SetVar
         | FetchEntry | SetEntry | InsertEntry | DeleteEntry | GetTokenBalance | GetAssetOwner
         | TransferToken | TransferAsset | MintAsset | MintToken | GetTokenSupply | BurnToken
-        | BurnAsset | GetBlockInfo | GetBurnBlockInfo | GetStacksBlockInfo | GetTenureInfo => {
-            args.iter().take(1).collect()
-        }
-        _ => vec![],
-    }
+        | BurnAsset | GetBlockInfo | GetBurnBlockInfo | GetStacksBlockInfo | GetTenureInfo => 0..1,
+        _ => return &[],
+    };
+    args.get(range).unwrap_or_default()
+}
+
+/// `as-contract?` and `restrict-assets?` look up each allowance by name and
+/// only evaluate its arguments.
+fn allowance_names(
+    func: NativeFunctions,
+    args: &[SymbolicExpression],
+) -> impl Iterator<Item = &SymbolicExpression> {
+    let allowances = match func {
+        NativeFunctions::AsContractSafe => args.first(),
+        NativeFunctions::RestrictAssets => args.get(1),
+        _ => None,
+    };
+    allowances
+        .and_then(SymbolicExpression::match_list)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|allowance| allowance.match_list()?.first())
 }
 
 // because list expressions are not considered as evaluated

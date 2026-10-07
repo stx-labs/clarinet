@@ -957,10 +957,36 @@ fn syntax_lines_count_with_their_call() {
           (var-get
             counter)
         )
+        (define-read-only (bounded (l (list 10 uint)))
+          (as-max-len?
+            l
+            u5)
+        )
+        (define-public (owned)
+          (restrict-assets? tx-sender (
+            (with-stx
+              u1)
+          )
+            u1)
+        )
+        (define-public (unsafe)
+          (as-contract? (
+            (with-all-assets-unsafe)
+          )
+            u1)
+        )
     "};
     session.eval(callee.into(), false).unwrap();
     session.eval(contract.into(), false).unwrap();
-    for args in ["call", "decode 0x00", "bindings", "data"] {
+    for args in [
+        "call",
+        "decode 0x00",
+        "bindings",
+        "data",
+        "bounded (list u1)",
+        "owned",
+        "unsafe",
+    ] {
         let snippet = format!("(contract-call? .contract-1 {args})");
         session.eval(snippet, false).unwrap();
     }
@@ -976,12 +1002,18 @@ fn syntax_lines_count_with_their_call() {
             "FN:9,decode",
             "FN:14,bindings",
             "FN:27,data",
+            "FN:31,bounded",
+            "FN:36,owned",
+            "FN:43,unsafe",
             "FNDA:1,bindings",
+            "FNDA:1,bounded",
             "FNDA:1,call",
             "FNDA:1,data",
             "FNDA:1,decode",
-            "FNF:4",
-            "FNH:4",
+            "FNDA:1,owned",
+            "FNDA:1,unsafe",
+            "FNF:7",
+            "FNH:7",
             "DA:2,1",
             "DA:3,1",
             "DA:4,1",
@@ -1002,6 +1034,19 @@ fn syntax_lines_count_with_their_call() {
             "DA:27,1",
             "DA:28,1",
             "DA:29,1",
+            "DA:31,1",
+            "DA:32,1",
+            "DA:33,1",
+            "DA:34,1",
+            "DA:36,1",
+            "DA:37,1",
+            "DA:38,1",
+            "DA:39,1",
+            "DA:41,1",
+            "DA:43,1",
+            "DA:44,1",
+            "DA:45,1",
+            "DA:47,1",
             "BRF:0",
             "BRH:0",
         ]
