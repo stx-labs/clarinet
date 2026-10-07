@@ -667,6 +667,7 @@ dependencies = [
  "hiro-system-kit",
  "indoc",
  "mac_address",
+ "mockito",
  "ratatui",
  "reqwest",
  "rpassword",
