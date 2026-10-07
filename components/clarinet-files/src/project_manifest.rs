@@ -757,13 +757,6 @@ mod tests {
     }
 
     /// Empty requirements must survive a project config's JSON round trip.
-    ///
-    /// The custom serializer omits an empty requirements list, but changing the
-    /// field from `Option<Vec<_>>` to `Vec<_>` makes the derived deserializer
-    /// require it. A config loaded from a manifest without requirements therefore
-    /// fails to deserialize its own JSON with `missing field requirements`.
-    /// Add `#[serde(default)]` to `ProjectConfig::requirements` so an omitted
-    /// field deserializes as an empty vector.
     #[test]
     fn test_empty_requirements_json_roundtrip() {
         let manifest_file: ProjectManifestFile = toml::from_str(

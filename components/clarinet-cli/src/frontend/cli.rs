@@ -2462,24 +2462,15 @@ mod tests {
         /// Helper to check if a requirement exists in the TOML
         fn has_requirement(content: &str, contract_id: &str) -> bool {
             let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
-            let Some(project) = doc.get("project").and_then(|p| p.as_table()) else {
-                return false;
-            };
-            if let Some(arr) = project
-                .get("requirements")
-                .and_then(|v| v.as_array_of_tables())
-            {
-                if arr.iter().any(|entry| {
-                    entry
-                        .get("contract_id")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s == contract_id)
-                        .unwrap_or(false)
-                }) {
-                    return true;
-                }
-            }
-            false
+            doc.get("project")
+                .and_then(|project| project.get("requirements"))
+                .and_then(|requirements| requirements.as_array_of_tables())
+                .is_some_and(|requirements| {
+                    requirements.iter().any(|requirement| {
+                        requirement.get("contract_id").and_then(|id| id.as_str())
+                            == Some(contract_id)
+                    })
+                })
         }
 
         #[test]

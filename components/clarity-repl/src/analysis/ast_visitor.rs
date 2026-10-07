@@ -700,21 +700,13 @@ pub trait ASTVisitor<'a> {
 
                             self.traverse_restrict_assets(expr, owner, raw_allowances, body)
                         }
-                        AllowanceWithFt | AllowanceWithNft => {
-                            // Three evaluated arguments: contract principal,
-                            // asset-name expression, and amount/token-ID
-                            // expression. Traverse all so contract-calls
-                            // nested in the latter two are discovered.
-                            args.iter().all(|arg| self.traverse_expr(arg))
-                                && self.visit_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
-                        }
                         AllowanceWithStx
+                        | AllowanceWithFt
+                        | AllowanceWithNft
                         | AllowanceWithStacking
                         | AllowanceAll
                         | AllowanceWithStaking
-                        | AllowanceWithPox => {
-                            self.traverse_allowance(expr, args.get(0).unwrap_or(&DEFAULT_EXPR))
-                        }
+                        | AllowanceWithPox => self.traverse_allowance(expr, args),
                         VerifyMerkleProof => self.traverse_verify_merkle_proof(
                             expr,
                             args.get(0).unwrap_or(&DEFAULT_EXPR),
@@ -2861,18 +2853,20 @@ pub trait ASTVisitor<'a> {
         true
     }
 
+    /// Every argument is evaluated: `with-ft` and `with-nft` take an asset
+    /// name and amount or token IDs after the contract.
     fn traverse_allowance(
         &mut self,
         expr: &'a SymbolicExpression,
-        amount: &'a SymbolicExpression,
+        args: &'a [SymbolicExpression],
     ) -> bool {
-        self.traverse_expr(amount) && self.visit_allowance(expr, amount)
+        args.iter().all(|arg| self.traverse_expr(arg)) && self.visit_allowance(expr, args)
     }
 
     fn visit_allowance(
         &mut self,
         expr: &'a SymbolicExpression,
-        amount: &'a SymbolicExpression,
+        args: &'a [SymbolicExpression],
     ) -> bool {
         true
     }

@@ -37,8 +37,11 @@ const UNAVAILABLE_TTL_SECS: f64 = 300.0;
 
 /// Failed lookups of detected dependencies, keyed by API and contract, with the
 /// time of the failure in seconds.
-static UNAVAILABLE: LazyLock<Mutex<HashMap<(Option<String>, String), f64>>> =
+static UNAVAILABLE: LazyLock<Mutex<HashMap<(Option<String>, QualifiedContractIdentifier), f64>>> =
     LazyLock::new(Mutex::default);
+
+/// Shared so contract fetches reuse connections.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 fn now_secs() -> f64 {
     #[cfg(target_arch = "wasm32")]
@@ -63,7 +66,7 @@ pub async fn retrieve_detected_contract(
     file_accessor: &Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
 ) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
-    let key = (api_base_url.map(str::to_string), contract_id.to_string());
+    let key = (api_base_url.map(str::to_string), contract_id.clone());
     let failed_at = UNAVAILABLE
         .lock()
         .ok()
@@ -206,7 +209,7 @@ async fn fetch_contract(
     name: &str,
 ) -> Result<Contract, String> {
     let url = format!("{api_base_url}/extended/v1/contract/{deployer}.{name}");
-    let response = reqwest::Client::new()
+    let response = CLIENT
         .get(&url)
         .timeout(FETCH_TIMEOUT)
         .send()

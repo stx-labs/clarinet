@@ -203,18 +203,6 @@ impl DependencySet {
         });
     }
 
-    pub fn add_speculative_dependency(
-        &mut self,
-        contract_id: QualifiedContractIdentifier,
-        required_before_publish: bool,
-    ) {
-        self.insert(Dependency {
-            contract_id,
-            required_before_publish,
-            speculative: true,
-        });
-    }
-
     /// A required-before-publish or definite reference to a contract
     /// overrides a deferred or speculative one.
     fn insert(&mut self, mut dependency: Dependency) {
@@ -310,10 +298,8 @@ impl<'a> ASTDependencyDetector<'a> {
             ) {
                 continue;
             }
-            detector.top_level = reference.top_level;
-            detector.insert_dependency(reference.from, reference.to, true);
+            detector.insert_dependency(reference.from, reference.to, reference.top_level, true);
         }
-        detector.top_level = true;
 
         // Anything remaining in the pending_ maps indicates an unresolved dependency
         let mut unresolved: Vec<QualifiedContractIdentifier> = detector
@@ -422,7 +408,7 @@ impl<'a> ASTDependencyDetector<'a> {
         from: &QualifiedContractIdentifier,
         to: &QualifiedContractIdentifier,
     ) {
-        self.insert_dependency(from, to, false);
+        self.insert_dependency(from, to, self.top_level, false);
     }
 
     fn add_arg_dependencies(
@@ -467,6 +453,30 @@ impl<'a> ASTDependencyDetector<'a> {
             .any(|function| !self.defined_functions.contains_key(&(contract, function)))
     }
 
+    /// Dependencies of a call to `contract`: the contract itself, and the
+    /// contracts passed as its trait arguments once its signature is known.
+    fn check_contract_call(
+        &mut self,
+        site: CallSite<'a>,
+        contract: &'a QualifiedContractIdentifier,
+        function_name: &'a ClarityName,
+        args: &'a [SymbolicExpression],
+    ) {
+        self.add_dependency(site.caller, contract);
+        match self.defined_functions.get(&(contract, function_name)) {
+            Some(arg_types) => {
+                let dependencies = self.check_callee_type(&site, arg_types, args);
+                self.add_arg_dependencies(site.caller, dependencies);
+            }
+            // Only trait arguments need the signature: with none, there is
+            // nothing to resolve later.
+            None if !args.is_empty() => {
+                self.add_pending_function_check(site, (contract, function_name), args)
+            }
+            None => (),
+        }
+    }
+
     fn call_site(&self) -> CallSite<'a> {
         CallSite {
             caller: self.current_contract.unwrap(),
@@ -478,6 +488,7 @@ impl<'a> ASTDependencyDetector<'a> {
         &mut self,
         from: &QualifiedContractIdentifier,
         to: &QualifiedContractIdentifier,
+        required_before_publish: bool,
         speculative: bool,
     ) {
         if self.preloaded.contains_key(from) {
@@ -494,12 +505,14 @@ impl<'a> ASTDependencyDetector<'a> {
             return;
         }
 
-        let set = self.dependencies.entry(from.clone()).or_default();
-        if speculative {
-            set.add_speculative_dependency(to.clone(), self.top_level);
-        } else {
-            set.add_dependency(to.clone(), self.top_level);
-        }
+        self.dependencies
+            .entry(from.clone())
+            .or_default()
+            .insert(Dependency {
+                contract_id: to.clone(),
+                required_before_publish,
+                speculative,
+            });
     }
 
     fn add_defined_function(
@@ -524,10 +537,10 @@ impl<'a> ASTDependencyDetector<'a> {
 
     fn add_pending_function_check(
         &mut self,
+        site: CallSite<'a>,
         callee: (&'a QualifiedContractIdentifier, &'a ClarityName),
         args: &'a [SymbolicExpression],
     ) {
-        let site = self.call_site();
         self.pending_function_checks
             .entry(callee)
             .or_default()
@@ -567,11 +580,11 @@ impl<'a> ASTDependencyDetector<'a> {
 
     fn add_pending_trait_check(
         &mut self,
+        site: CallSite<'a>,
         callee: &'a TraitIdentifier,
         function: &'a ClarityName,
         args: &'a [SymbolicExpression],
     ) {
-        let site = self.call_site();
         self.pending_trait_checks
             .entry(callee)
             .or_default()
@@ -585,9 +598,10 @@ impl<'a> ASTDependencyDetector<'a> {
         site: &CallSite<'a>,
         expr: &'a SymbolicExpression,
     ) -> Option<&'a QualifiedContractIdentifier> {
-        let mut seen = HashSet::new();
         let mut expr = expr;
-        loop {
+        // Each hop follows a binding, so this bounds a binding that names
+        // itself, in unchecked code.
+        for _ in 0..=site.let_bindings.len() {
             if let Some(Value::Principal(PrincipalData::Contract(contract_id))) =
                 expr.match_literal_value()
             {
@@ -597,12 +611,9 @@ impl<'a> ASTDependencyDetector<'a> {
             if let Some(contract_id) = self.defined_contract_constants.get(&(site.caller, name)) {
                 return Some(contract_id);
             }
-            // `seen` stops a binding that names itself, in unchecked code.
-            if !seen.insert(name) {
-                return None;
-            }
             expr = site.let_binding(name)?;
         }
+        None
     }
 
     /// Record the contracts a trait argument may evaluate to. A contract found
@@ -661,8 +672,6 @@ impl<'a> ASTDependencyDetector<'a> {
                 }
             }
             TypeSignature::ResponseType(inner_type) => {
-                // Select the success or error type from the constructor name, then
-                // recurse into element 1.
                 if let Some(list) = expr.match_list() {
                     let constructor = list.first().and_then(|e| e.match_atom());
                     let payload = list.get(1);
@@ -751,15 +760,6 @@ impl<'a> ASTDependencyDetector<'a> {
             }
         }
         None
-    }
-
-    fn get_contract_constant(
-        &self,
-        name: &'a ClarityName,
-    ) -> Option<&'a QualifiedContractIdentifier> {
-        self.defined_contract_constants
-            .get(&(self.current_contract.unwrap(), name))
-            .copied()
     }
 }
 
@@ -910,20 +910,7 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
         function_name: &'a ClarityName,
         args: &'a [SymbolicExpression],
     ) -> bool {
-        let site = self.call_site();
-        self.add_dependency(site.caller, contract_identifier);
-        let dependencies = if let Some(arg_types) = self
-            .defined_functions
-            .get(&(contract_identifier, function_name))
-        {
-            // If we know the type of this function, check the parameters for traits
-            self.check_callee_type(&site, arg_types, args)
-        } else {
-            // If we do not yet know the type of this function, record it to re-analyze later
-            self.add_pending_function_check((contract_identifier, function_name), args);
-            return true;
-        };
-        self.add_arg_dependencies(site.caller, dependencies);
+        self.check_contract_call(self.call_site(), contract_identifier, function_name, args);
         true
     }
 
@@ -943,28 +930,13 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
             )) {
                 self.check_trait_dependencies(&site, trait_definition, function_name, args)
             } else {
-                self.add_pending_trait_check(trait_identifier, function_name, args);
+                self.add_pending_trait_check(site, trait_identifier, function_name, args);
                 return true;
             };
 
             self.add_arg_dependencies(site.caller, dependencies);
-        } else if let Some(contract_constant) = self.get_contract_constant(callable) {
-            self.add_dependency(site.caller, contract_constant);
-            // Also detect trait-typed argument dependencies when the callee's
-            // function type is known. Skip when there are no arguments, since
-            // there is nothing to check for trait types.
-            if !args.is_empty() {
-                let dependencies = if let Some(arg_types) = self
-                    .defined_functions
-                    .get(&(contract_constant, function_name))
-                {
-                    self.check_callee_type(&site, arg_types, args)
-                } else {
-                    self.add_pending_function_check((contract_constant, function_name), args);
-                    ArgDependencies::new()
-                };
-                self.add_arg_dependencies(site.caller, dependencies);
-            }
+        } else if let Some(contract) = self.contract_reference(&site, callable_expr) {
+            self.check_contract_call(site, contract, function_name, args);
         }
         true
     }
@@ -975,10 +947,10 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
         name: &'a ClarityName,
         args: &'a [SymbolicExpression],
     ) -> bool {
-        let site = self.call_site();
-        if let Some(arg_types) = self.defined_functions.get(&(site.caller, name)) {
-            let dependencies = self.check_callee_type(&site, arg_types, args);
-            self.add_arg_dependencies(site.caller, dependencies);
+        let caller = self.current_contract.unwrap();
+        if let Some(arg_types) = self.defined_functions.get(&(caller, name)) {
+            let dependencies = self.check_callee_type(&self.call_site(), arg_types, args);
+            self.add_arg_dependencies(caller, dependencies);
         }
 
         true
@@ -1974,6 +1946,7 @@ mod tests {
     // Helpers shared by the trait-arg-in-expression tests below.
     fn setup_trait_callee(
         session: &Session,
+        callee_name: &str,
         contracts: &mut BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
     ) -> (QualifiedContractIdentifier, QualifiedContractIdentifier) {
         #[rustfmt::skip]
@@ -1981,15 +1954,15 @@ mod tests {
             (define-trait reader ((get-one () (response uint uint))))
             (define-public (take (target <reader>))
               (contract-call? target get-one))
-        ").to_string();
-        let callee = deploy_snippet(session, &callee_snippet, Some("callee"), contracts);
+        ");
+        let callee = deploy_snippet(session, callee_snippet, Some(callee_name), contracts);
 
         #[rustfmt::skip]
         let impl_snippet = indoc!("
             (define-public (get-one) (ok u1))
-        ").to_string();
+        ");
         let implementation =
-            deploy_snippet(session, &impl_snippet, Some("implementation"), contracts);
+            deploy_snippet(session, impl_snippet, Some("implementation"), contracts);
 
         (callee, implementation)
     }
@@ -2015,83 +1988,37 @@ mod tests {
         // (contract-call? .callee take target)
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+        let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
 
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant target .implementation)
             (define-public (go)
               (contract-call? .callee take target))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
 
         assert_impl_dep(&contracts, &caller, &implementation);
     }
 
     #[test]
-    fn trait_arg_begin() {
-        // (contract-call? .callee take (begin .implementation))
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
-        let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+    fn trait_arg_in_expression() {
+        for argument in [
+            "(begin .implementation)",
+            "(unwrap-panic (some .implementation))",
+            "(default-to .implementation (some .implementation))",
+            "(match (some .implementation) x x .implementation)",
+            "(get target { target: .implementation })",
+        ] {
+            let session = Session::new_without_boot_contracts(SessionSettings::default());
+            let mut contracts = BTreeMap::new();
+            let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
 
-        let snippet = "(define-public (go) (contract-call? .callee take (begin .implementation)))"
-            .to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+            let snippet = format!("(define-public (go) (contract-call? .callee take {argument}))");
+            let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
 
-        assert_impl_dep(&contracts, &caller, &implementation);
-    }
-
-    #[test]
-    fn trait_arg_unwrap_panic() {
-        // (contract-call? .callee take (unwrap-panic (some .implementation)))
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
-        let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
-
-        let snippet = "(define-public (go) (contract-call? .callee take (unwrap-panic (some .implementation))))".to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
-
-        assert_impl_dep(&contracts, &caller, &implementation);
-    }
-
-    #[test]
-    fn trait_arg_default_to() {
-        // (contract-call? .callee take (default-to .implementation (some .implementation)))
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
-        let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
-
-        let snippet = "(define-public (go) (contract-call? .callee take (default-to .implementation (some .implementation))))".to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
-
-        assert_impl_dep(&contracts, &caller, &implementation);
-    }
-
-    #[test]
-    fn trait_arg_match() {
-        // (contract-call? .callee take (match (some .implementation) x x .implementation))
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
-        let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
-
-        let snippet = "(define-public (go) (contract-call? .callee take (match (some .implementation) x x .implementation)))".to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
-
-        assert_impl_dep(&contracts, &caller, &implementation);
-    }
-
-    #[test]
-    fn trait_arg_tuple_get() {
-        // (contract-call? .callee take (get target { target: .implementation }))
-        let session = Session::new_without_boot_contracts(SessionSettings::default());
-        let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
-
-        let snippet = "(define-public (go) (contract-call? .callee take (get target { target: .implementation })))".to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
-
-        assert_impl_dep(&contracts, &caller, &implementation);
+            assert_impl_dep(&contracts, &caller, &implementation);
+        }
     }
 
     #[test]
@@ -2100,15 +2027,15 @@ mod tests {
         // (contract-call? c take .implementation)
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+        let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
 
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant c .callee)
             (define-public (go)
               (contract-call? c take .implementation))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
 
         assert_impl_dep(&contracts, &caller, &implementation);
     }
@@ -2116,21 +2043,17 @@ mod tests {
     #[test]
     fn contract_hash_self_reference() {
         // (contract-hash? .self-contract) inside self-contract must not register
-        // a self-dependency — add_dependency already guards against from == to.
+        // a self-dependency.
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let snippet = "(define-read-only (get-hash) (contract-hash? .self-contract))".to_string();
+        let snippet = "(define-read-only (get-hash) (contract-hash? .self-contract))";
         let self_contract =
-            deploy_snippet(&session, &snippet, Some("self-contract"), &mut contracts);
+            deploy_snippet(&session, snippet, Some("self-contract"), &mut contracts);
 
         let dependencies =
             ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
-        assert_eq!(
-            dependencies
-                .get(&self_contract)
-                .map(|d| d.len())
-                .unwrap_or(0),
-            0,
+        assert!(
+            dependencies[&self_contract].is_empty(),
             "contract-hash? on self must not register a self-dependency"
         );
     }
@@ -2141,27 +2064,15 @@ mod tests {
         // `zcallee` is visited; `target` must still resolve in `caller`.
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        #[rustfmt::skip]
-        let callee_snippet = indoc!("
-            (define-trait reader ((get-one () (response uint uint))))
-            (define-public (take (target <reader>))
-              (contract-call? target get-one))
-        ").to_string();
-        deploy_snippet(&session, &callee_snippet, Some("zcallee"), &mut contracts);
-        let implementation = deploy_snippet(
-            &session,
-            "(define-public (get-one) (ok u1))",
-            Some("implementation"),
-            &mut contracts,
-        );
+        let (_, implementation) = setup_trait_callee(&session, "zcallee", &mut contracts);
 
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant target .implementation)
             (define-public (go)
               (contract-call? .zcallee take target))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
 
         assert_impl_dep(&contracts, &caller, &implementation);
     }
@@ -2172,15 +2083,15 @@ mod tests {
         // (contract-call? .callee take (begin target))
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+        let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
 
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-constant target .implementation)
             (define-public (go)
               (contract-call? .callee take (begin target)))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
 
         assert_impl_dep(&contracts, &caller, &implementation);
     }
@@ -2199,8 +2110,8 @@ mod tests {
         let snippet = indoc!("
             (define-constant c .target)
             (define-read-only (get-hash) (contract-hash? c))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
 
         let dependencies =
             ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
@@ -2215,21 +2126,21 @@ mod tests {
         // still deploy the implementation before `caller`.
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+        let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
 
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (go)
               (contract-call? .callee take
                 (get impl { impl: .implementation, owner: .user })))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
         #[rustfmt::skip]
         let user_snippet = indoc!("
             (define-public (get-one) (ok u2))
             (define-public (run) (contract-call? .caller go))
-        ").to_string();
-        let user = deploy_snippet(&session, &user_snippet, Some("user"), &mut contracts);
+        ");
+        let user = deploy_snippet(&session, user_snippet, Some("user"), &mut contracts);
 
         let dependencies =
             ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
@@ -2245,15 +2156,15 @@ mod tests {
         // (let ((t .implementation)) (contract-call? .callee take t))
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+        let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
 
         #[rustfmt::skip]
         let snippet = indoc!("
             (define-public (go)
               (let ((t .implementation))
                 (contract-call? .callee take t)))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
 
         let dependencies =
             ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
@@ -2273,7 +2184,7 @@ mod tests {
         // the trait's functions, so it can't be what is passed.
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+        let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
         let other = deploy_snippet(
             &session,
             "(define-read-only (get-two) u2)",
@@ -2286,8 +2197,8 @@ mod tests {
             (define-public (go)
               (contract-call? .callee take
                 (get impl { impl: .implementation, owner: .other })))
-        ").to_string();
-        let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
 
         let dependencies =
             ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
@@ -2301,7 +2212,7 @@ mod tests {
     fn speculative_dependency_on_later_epoch_is_reported() {
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
-        let (_, implementation) = setup_trait_callee(&session, &mut contracts);
+        let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
 
         let snippet = "(define-public (go) (contract-call? .callee take (begin .implementation)))";
         let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);

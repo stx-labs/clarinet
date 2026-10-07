@@ -7,6 +7,7 @@ use clarinet_deployments::generate_default_deployment;
 use clarinet_deployments::types::TransactionSpecification;
 use clarinet_files::{ProjectManifest, StacksNetwork};
 use clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC as TEST_MNEMONIC;
+use clarity_repl::repl::boot::SBTC_MAINNET_ADDRESS;
 use clarity_repl::utils::Environment;
 use indoc::formatdoc;
 use mockito::{Server, ServerGuard};
@@ -14,9 +15,6 @@ use tempfile::TempDir;
 
 /// External contract deployer used by test fixtures.
 const EXTERNAL_DEPLOYER: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9";
-
-/// Mainnet sBTC deployer.
-const SBTC_MAINNET_DEPLOYER: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
 
 /// Dependency-free requirement source.
 const PLAIN_SOURCE: &str = "(define-read-only (get-one) (ok u1))";
@@ -296,16 +294,9 @@ async fn env_simnet_dependencies_stay_off_chain() {
     );
 }
 
-/// Loading an external callee's signature must reveal its trait argument dependencies.
-///
-/// The initial scan discovers `callee`, but cannot identify `implementation` as
-/// a dependency until it knows that `take` accepts a trait argument. Loading
-/// `callee` does not currently trigger another scan of the user contract, so the
-/// generated plan omits `implementation`.
-///
-/// Re-scan user contracts after loading requirements, repeating discovery and
-/// loading until no new dependencies are found. Track failed resolutions too,
-/// so an unavailable dependency cannot keep this process running indefinitely.
+/// Loading an external callee's signature reveals its trait argument
+/// dependencies: `implementation` is only identifiable once `take` is known to
+/// accept a trait.
 #[tokio::test]
 async fn external_trait_argument_is_auto_detected_after_loading_callee() {
     let temp_dir = TempDir::new().unwrap();
@@ -355,12 +346,8 @@ async fn external_trait_argument_is_auto_detected_after_loading_callee() {
     );
 }
 
-/// Loading an explicitly declared callee's signature must also trigger a rescan.
-///
-/// Here `callee` is listed in `[[project.requirements]]`, so it is filtered out
-/// of auto-detection and its trait argument `implementation` is only revealed
-/// once the callee has been loaded. Discovery must not stop just because no new
-/// dependency was auto-detected on the first pass.
+/// Loading an explicitly declared callee's signature also reveals its trait
+/// argument dependencies.
 #[tokio::test]
 async fn trait_argument_is_auto_detected_after_loading_explicit_callee() {
     let temp_dir = TempDir::new().unwrap();
@@ -664,20 +651,19 @@ async fn auto_detected_sbtc_is_published_on_testnet() {
         &formatdoc!(
             "
             (define-read-only (balance)
-              (contract-call? '{SBTC_MAINNET_DEPLOYER}.sbtc-token get-balance tx-sender))
+              (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-balance tx-sender))
             "
         ),
         "",
     );
 
-    let server = mock_contracts(&[(SBTC_MAINNET_DEPLOYER, "sbtc-token", PLAIN_SOURCE)]).await;
+    let server = mock_contracts(&[(SBTC_MAINNET_ADDRESS, "sbtc-token", PLAIN_SOURCE)]).await;
 
     let published = testnet_requirement_publishes(root, &server.url()).await;
 
     assert!(
-        published.contains(&format!("{SBTC_MAINNET_DEPLOYER}.sbtc-token")),
-        "auto-detected sbtc-token must be published on testnet even though its AST \
-         is pre-seeded for boot setup; got {published:?}"
+        published.contains(&format!("{SBTC_MAINNET_ADDRESS}.sbtc-token")),
+        "auto-detected sbtc-token must be published on testnet; got {published:?}"
     );
 }
 
@@ -721,18 +707,18 @@ async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
             r#"
 
             [[project.requirements]]
-            contract_id = "{SBTC_MAINNET_DEPLOYER}.sbtc-token"
+            contract_id = "{SBTC_MAINNET_ADDRESS}.sbtc-token"
             "#
         ),
     );
 
-    let mut server = mock_contracts(&[(SBTC_MAINNET_DEPLOYER, "sbtc-token", PLAIN_SOURCE)]).await;
+    let mut server = mock_contracts(&[(SBTC_MAINNET_ADDRESS, "sbtc-token", PLAIN_SOURCE)]).await;
     // sbtc-deposit must never be fetched — declaring sbtc-token must not
     // implicitly pull in unrelated sBTC contracts.
     let deposit_request = server
         .mock(
             "GET",
-            format!("/extended/v1/contract/{SBTC_MAINNET_DEPLOYER}.sbtc-deposit").as_str(),
+            format!("/extended/v1/contract/{SBTC_MAINNET_ADDRESS}.sbtc-deposit").as_str(),
         )
         .expect(0)
         .create_async()
@@ -743,16 +729,13 @@ async fn sbtc_token_requirement_does_not_pull_in_sbtc_deposit() {
     deposit_request.assert_async().await;
 
     assert!(
-        !published.contains(&format!("{SBTC_MAINNET_DEPLOYER}.sbtc-deposit")),
+        !published.contains(&format!("{SBTC_MAINNET_ADDRESS}.sbtc-deposit")),
         "only the declared sbtc-token requirement should be published, but \
          sbtc-deposit was added too; got {published:?}"
     );
 }
 
 /// `contract-hash?` with a literal principal is a static dependency.
-///
-/// The AST visitor's `visit_contract_hash` implementation must register the
-/// referenced contract as a dependency so it appears in the generated plan.
 /// `contract-hash?` requires Clarity 4 (Epoch 3.3+).
 #[tokio::test]
 async fn contract_hash_literal_is_auto_detected() {
