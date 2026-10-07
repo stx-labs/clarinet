@@ -281,3 +281,228 @@ pub fn build_contract_publish_transaction(
 
     signed_tx
 }
+
+#[cfg(test)]
+mod tests {
+    use clarity::types::PrivateKey;
+    use clarity::util::hash::{bytes_to_hex, hex_bytes};
+    use stacks_codec::transaction::TransactionAuthVerificationMode;
+
+    use super::*;
+
+    /// Returns the deployer wallet that uses the precomputed keys in the
+    /// `clarinet new` template fixtures.
+    fn deployer_wallet() -> Wallet {
+        Wallet {
+            mnemonic: clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC.to_string(),
+            derivation: clarinet_utils::DEFAULT_DERIVATION_PATH.to_string(),
+            mainnet: false,
+        }
+    }
+
+    fn deployer_wallet_mainnet() -> Wallet {
+        Wallet {
+            mainnet: true,
+            ..deployer_wallet()
+        }
+    }
+
+    fn wallet_1() -> Wallet {
+        Wallet {
+            mnemonic: clarinet_utils::DEFAULT_WALLET_1_MNEMONIC.to_string(),
+            derivation: clarinet_utils::DEFAULT_DERIVATION_PATH.to_string(),
+            mainnet: false,
+        }
+    }
+
+    /// The deployer secret key from the `clarinet new` template.
+    fn deployer_secret_key() -> Vec<u8> {
+        hex_bytes("753b7cc01a1a2e86221266a154af739463fce51219d97e4f856cd7200c3bd2a601").unwrap()
+    }
+
+    fn sign_counter_call(nonce: u64, tx_fee: u64) -> StacksTransaction {
+        let contract_id =
+            QualifiedContractIdentifier::parse("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter")
+                .unwrap();
+        encode_contract_call(
+            &contract_id,
+            "increment".try_into().unwrap(),
+            vec![ClarityValue::UInt(1)],
+            &deployer_wallet(),
+            nonce,
+            tx_fee,
+            TransactionAnchorMode::Any,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn deployer_address_matches_the_devnet_template() {
+        assert_eq!(
+            deployer_wallet().compute_stacks_address().to_string(),
+            "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM"
+        );
+    }
+
+    #[test]
+    fn wallet_1_address_matches_the_devnet_template() {
+        assert_eq!(
+            wallet_1().compute_stacks_address().to_string(),
+            "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5"
+        );
+    }
+
+    #[test]
+    fn mainnet_version_byte_is_applied() {
+        // Same key material as the devnet deployer, mainnet version byte.
+        // Mirrors the mainnet deployer address asserted in clarinet-cli's
+        // console tests.
+        assert_eq!(
+            deployer_wallet_mainnet()
+                .compute_stacks_address()
+                .to_string(),
+            "SP1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRCBGD7R"
+        );
+    }
+
+    #[test]
+    fn keypair_matches_the_precomputed_deployer_keys() {
+        let keypair = compute_keypair(&deployer_wallet());
+        let secret_bytes = keypair.secret_key.to_bytes();
+        assert_eq!(
+            bytes_to_hex(&secret_bytes),
+            "753b7cc01a1a2e86221266a154af739463fce51219d97e4f856cd7200c3bd2a6"
+        );
+        assert_eq!(
+            bytes_to_hex(&keypair.public_key.serialize_compressed()),
+            "0390a5cac7c33fda49f70bc1b0866fa0ba7a9440d9de647fecb8132ceb76a94dfa"
+        );
+    }
+
+    #[test]
+    fn signed_contract_call_txid_is_stable() {
+        let tx = sign_counter_call(0, 1_000);
+        assert_eq!(
+            tx.txid().to_string(),
+            "8bc7c85ac68ef7ae63e6353cf9e9955aa54a87c4d1e34fd7b1b6e3536544687c",
+            "contract-call serialization or signing drifted"
+        );
+    }
+
+    #[test]
+    fn signed_transaction_fields_round_trip() {
+        let tx = sign_counter_call(7, 2_500);
+        assert_eq!(tx.version, TransactionVersion::Testnet);
+        assert_eq!(tx.chain_id, 0x80000000);
+        let TransactionAuth::Standard(TransactionSpendingCondition::Singlesig(origin)) = &tx.auth
+        else {
+            panic!("expected singlesig standard auth");
+        };
+        assert_eq!(origin.nonce, 7);
+        assert_eq!(origin.tx_fee, 2_500);
+        assert_eq!(origin.hash_mode, SinglesigHashMode::P2PKH);
+        assert_eq!(
+            origin.key_encoding,
+            TransactionPublicKeyEncoding::Compressed
+        );
+        assert!(
+            tx.verify(TransactionAuthVerificationMode::EnforceLowS)
+                .is_ok(),
+            "signature must verify"
+        );
+    }
+
+    #[test]
+    fn stx_transfer_txid_is_stable() {
+        let recipient =
+            PrincipalData::parse_standard_principal("ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG")
+                .unwrap()
+                .into();
+        let mut memo = [0u8; 34];
+        memo[0..5].copy_from_slice(b"hello");
+        let tx = encode_stx_transfer(
+            recipient,
+            1_000_000,
+            memo,
+            &wallet_1(),
+            0,
+            500,
+            TransactionAnchorMode::Any,
+        )
+        .unwrap();
+        assert_eq!(
+            tx.txid().to_string(),
+            "a5364f209406bce0205052fd2333836e61b7b277122b578e1baa58adbada8edd",
+            "stx-transfer serialization drifted"
+        );
+    }
+
+    #[test]
+    fn contract_publish_txid_is_stable() {
+        let contract_name: ContractName = "hello-world".try_into().unwrap();
+        let tx = encode_contract_publish(
+            &contract_name,
+            "(define-public (say-hi) (ok u1))",
+            Some(ClarityVersion::Clarity2),
+            &deployer_wallet(),
+            0,
+            10_000,
+            TransactionAnchorMode::Any,
+        )
+        .unwrap();
+        assert_eq!(
+            tx.txid().to_string(),
+            "ec0de5590f5f3738086bc02e4fc837bcd611387e0f4bd87f69f453c24a810753",
+            "contract-publish serialization drifted"
+        );
+    }
+
+    #[test]
+    fn build_contract_call_transaction_signs_with_raw_secret() {
+        let tx = build_contract_call_transaction(
+            "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.counter".to_string(),
+            "increment".to_string(),
+            vec![],
+            3,
+            1_000,
+            &deployer_secret_key(),
+        );
+        assert_eq!(
+            tx.txid().to_string(),
+            "25b10176f57998de92fac6fc6bd4ba175014c56dcf4df1e561c5f60fca8a82b3",
+            "raw-secret contract-call serialization drifted"
+        );
+    }
+
+    #[test]
+    fn build_contract_publish_transaction_signs_with_raw_secret() {
+        let tx = build_contract_publish_transaction(
+            "hello-world",
+            "(define-public (say-hi) (ok u1))",
+            Some(ClarityVersion::Clarity2),
+            3,
+            10_000,
+            &deployer_secret_key(),
+        );
+        assert_eq!(
+            tx.txid().to_string(),
+            "93bb19e1517b3cee476def533f3e3cb8cc058351e50699f375b33faddf238a39",
+            "raw-secret contract-publish serialization drifted"
+        );
+    }
+
+    /// `bytes_to_hex` is what `mock_stacks_rpc` and `rpc_client` rely on for
+    /// tx payloads; keep the txids asserted above consistent with the raw
+    /// wire format.
+    #[test]
+    fn signed_contract_call_raw_encoding_is_stable() {
+        let tx = sign_counter_call(0, 1_000);
+        let mut bytes = vec![];
+        tx.consensus_serialize(&mut bytes)
+            .expect("FATAL: invalid transaction");
+        assert_eq!(
+            bytes_to_hex(&bytes),
+            "808000000004006d78de7b0625dfbfc16c3a8a5735f6dc3dc3f2ce000000000000000000000000000003e8000038781d4e42c05f5993ecbec3f93971afdc57b39b390df2f4403d588fb8a542402dc025a0e6d5d7a834bb774ff372284531e49116951323dfde3b043f0bc34751030100000000021a6d78de7b0625dfbfc16c3a8a5735f6dc3dc3f2ce07636f756e74657209696e6372656d656e74000000010100000000000000000000000000000001"
+        );
+    }
+}

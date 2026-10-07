@@ -4,5 +4,5 @@ pub mod crypto;
 
 pub use rpc_client::StacksRpc;
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(feature = "mock")]
 pub mod mock_stacks_rpc;
