@@ -10,6 +10,7 @@ pub mod post_conditions;
 pub mod remote_data;
 pub mod session;
 pub mod settings;
+mod transaction;
 
 #[cfg(any(not(target_arch = "wasm32"), feature = "dap"))]
 pub mod debug;
