@@ -40,12 +40,16 @@ fn from_metadata(metadata: &str) -> Settings {
         indentation: indent,
     }
 }
-fn format_file_with_metadata(source: &str) -> String {
+fn settings_from_source(source: &str) -> (Settings, String) {
     let mut lines = source.lines();
     let metadata_line = lines.next().unwrap_or_default();
     let settings = from_metadata(metadata_line);
-
     let real_source = lines.collect::<Vec<&str>>().join("\n");
+    (settings, real_source)
+}
+
+fn format_file_with_metadata(source: &str) -> String {
+    let (settings, real_source) = settings_from_source(source);
     let formatter = ClarityFormatter::new(settings);
     formatter.format_file(&real_source, None)
 }
@@ -72,6 +76,19 @@ fn test_irl_contracts() {
             // Apply formatting and compare
             let result = format_file_with_metadata(&src);
             pretty_assertions::assert_eq!(result, intended, "Mismatch in file: {:?}", file_name);
+
+            // Format the intended output again with the same settings
+            let (settings, _) = settings_from_source(&src);
+            let formatter = ClarityFormatter::new(settings);
+            let reformatted = formatter.format_file(&result, None);
+
+            pretty_assertions::assert_eq!(
+                reformatted,
+                intended,
+                "Idempotency failure in file: {:?} — formatting the output again changed it",
+                file_name
+            );
+
             // parse resulting contract
             let (_statements, diagnostics, success) =
                 clarity::vm::ast::parser::v2::parse_collect_diagnostics(

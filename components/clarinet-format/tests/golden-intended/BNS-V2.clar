@@ -1098,7 +1098,12 @@
         (asserts! (not (has-invalid-chars name)) ERR-CHARSET-INVALID)
         ;; Ensure the contract-caller is the namespace's designated import principal or the namespace manager
         (asserts!
-            (or (is-eq (get namespace-import namespace-props) contract-caller) (is-eq (get namespace-manager namespace-props) (some contract-caller)))
+            (or
+                (is-eq (get namespace-import namespace-props) contract-caller)
+                (is-eq (get namespace-manager namespace-props)
+                    (some contract-caller)
+                )
+            )
             ERR-OPERATION-UNAUTHORIZED
         )
         ;; Check that the namespace has not been launched yet, as names can only be imported to namespaces that are revealed but not launched.
@@ -1753,8 +1758,10 @@
                 (unwrap-panic (map-get? name-properties {
                     name: name,
                     namespace: namespace,
-                })) { stx-burn: (try! (compute-name-price name (get price-function namespace-props))) }
-            ))
+                })) {
+                stx-burn: (try! (compute-name-price name (get price-function namespace-props))),
+            })
+        )
         ;; Return success
         (ok true)
     )
