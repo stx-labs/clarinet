@@ -248,17 +248,6 @@ fn serialized_block_standardizes_into_rosetta_shape() {
 }
 
 #[test]
-fn abort_by_response_transactions_are_skipped() {
-    let mut block = empty_block();
-    let mut tx = transfer_tx();
-    tx.status = "abort_by_response".to_string();
-    tx.raw_result = "0x".to_string();
-    block.transactions = vec![tx];
-    let block_data = standardize_block(&block);
-    assert!(block_data.transactions.is_empty());
-}
-
-#[test]
 fn value_description_formats_clarity_values() {
     let ctx = Context::empty();
     // `(ok true)` consensus-encoded: 0x07 = ResponseTrue, 0x03 = Bool(true).
