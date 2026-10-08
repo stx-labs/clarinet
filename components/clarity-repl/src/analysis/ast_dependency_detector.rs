@@ -103,11 +103,8 @@ pub struct ASTDependencyDetector<'a> {
         // defined, together with the function called and the associated args.
         Vec<(CallSite<'a>, &'a ClarityName, &'a [SymbolicExpression])>,
     >,
-    /// Trait-argument references that may be plain data, settled once every
-    /// contract has been visited.
-    speculative_references: Vec<SpeculativeReference<'a>>,
     /// `let` bindings in scope, outermost first.
-    let_bindings: Vec<(&'a ClarityName, &'a SymbolicExpression)>,
+    let_bindings: Vec<Binding<'a>>,
     params: Option<Vec<TypedVar<'a>>>,
     top_level: bool,
     preloaded: &'a BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
@@ -117,11 +114,6 @@ pub struct ASTDependencyDetector<'a> {
 pub struct Dependency {
     pub contract_id: QualifiedContractIdentifier,
     pub required_before_publish: bool,
-    /// Found inside an expression passed as a trait argument rather than as
-    /// the argument itself, so it may be plain data, like `.owner` in
-    /// `(get impl { impl: .impl, owner: .owner })`. Ordering drops it rather
-    /// than report a cycle.
-    pub speculative: bool,
 }
 
 impl PartialEq for Dependency {
@@ -143,43 +135,78 @@ impl Ord for Dependency {
     }
 }
 
+/// A `let` (or `match`) binding: the name and the expression it is bound to.
+type Binding<'a> = (&'a ClarityName, &'a SymbolicExpression);
+
+/// The value `expr` names in `scope`, with the scope that value is evaluated
+/// in: the bindings before it.
+fn resolve_binding<'a, 's>(
+    scope: &'s [Binding<'a>],
+    expr: &SymbolicExpression,
+) -> Option<(&'a SymbolicExpression, &'s [Binding<'a>])> {
+    let name = expr.match_atom()?;
+    let index = scope.iter().rposition(|(bound, _)| *bound == name)?;
+    Some((scope[index].1, &scope[..index]))
+}
+
+/// `scope` extended with the `((name value) ...)` bindings of a `let`.
+fn with_let_bindings<'a>(
+    scope: &[Binding<'a>],
+    bindings: &'a SymbolicExpression,
+) -> Vec<Binding<'a>> {
+    let bindings = bindings.match_list().into_iter().flatten();
+    scope
+        .iter()
+        .copied()
+        .chain(bindings.filter_map(|binding| match binding.match_list()? {
+            [name, value] => Some((name.match_atom()?, value)),
+            _ => None,
+        }))
+        .collect()
+}
+
+/// `scope` extended with a `match` branch's binding of `name` to `input`.
+fn with_match_binding<'a>(
+    scope: &[Binding<'a>],
+    name: &'a SymbolicExpression,
+    input: &'a SymbolicExpression,
+) -> Vec<Binding<'a>> {
+    let mut scope = scope.to_vec();
+    scope.extend(name.match_atom().map(|name| (name, input)));
+    scope
+}
+
+/// The field `key` of `tuple`, a tuple literal or a binding of one, with the
+/// scope it is evaluated in.
+fn tuple_field<'a, 's>(
+    scope: &'s [Binding<'a>],
+    tuple: &'a SymbolicExpression,
+    key: &SymbolicExpression,
+) -> Option<(&'a SymbolicExpression, &'s [Binding<'a>])> {
+    if let Some((tuple, scope)) = resolve_binding(scope, tuple) {
+        return tuple_field(scope, tuple, key);
+    }
+    let key = key.match_atom()?;
+    let (constructor, fields) = tuple.match_list()?.split_first()?;
+    if constructor.match_atom()?.as_str() != "tuple" {
+        return None;
+    }
+    fields.iter().find_map(|field| match field.match_list()? {
+        [name, value] if name.match_atom() == Some(key) => Some((value, scope)),
+        _ => None,
+    })
+}
+
 /// Where a callee's arguments are resolved: the calling contract, whose
 /// constants they may name, and the `let` bindings in scope at the call.
 #[derive(Clone)]
 struct CallSite<'a> {
     caller: &'a QualifiedContractIdentifier,
-    let_bindings: Vec<(&'a ClarityName, &'a SymbolicExpression)>,
+    let_bindings: Vec<Binding<'a>>,
 }
 
-impl<'a> CallSite<'a> {
-    fn let_binding(&self, name: &ClarityName) -> Option<&'a SymbolicExpression> {
-        self.let_bindings
-            .iter()
-            .rev()
-            .find_map(|(bound, value)| (*bound == name).then_some(*value))
-    }
-}
-
-/// How a callee's argument refers to a contract.
-#[derive(Clone)]
-enum ArgReference {
-    /// The argument itself names the contract.
-    Definite,
-    /// Found inside the argument's expression, so it may be plain data (see
-    /// [`Dependency::speculative`]). Only kept if the contract can implement
-    /// the argument's trait.
-    Speculative(TraitIdentifier),
-}
-
-/// Contracts referenced by a callee's arguments.
-type ArgDependencies<'a> = BTreeMap<&'a QualifiedContractIdentifier, ArgReference>;
-
-struct SpeculativeReference<'a> {
-    from: &'a QualifiedContractIdentifier,
-    to: &'a QualifiedContractIdentifier,
-    trait_identifier: TraitIdentifier,
-    top_level: bool,
-}
+/// Contracts passed as a callee's trait arguments.
+type ArgDependencies<'a> = BTreeSet<&'a QualifiedContractIdentifier>;
 
 #[derive(Debug, Clone, Default)]
 pub struct DependencySet {
@@ -196,21 +223,18 @@ impl DependencySet {
         contract_id: QualifiedContractIdentifier,
         required_before_publish: bool,
     ) {
-        self.insert(Dependency {
+        let dep = Dependency {
             contract_id,
             required_before_publish,
-            speculative: false,
-        });
-    }
+        };
 
-    /// A required-before-publish or definite reference to a contract
-    /// overrides a deferred or speculative one.
-    fn insert(&mut self, mut dependency: Dependency) {
-        if let Some(existing) = self.set.take(&dependency) {
-            dependency.required_before_publish |= existing.required_before_publish;
-            dependency.speculative &= existing.speculative;
+        // If this dependency is required before publish, then make sure to
+        // delete any existing dependency so that this overrides it.
+        if required_before_publish {
+            self.set.remove(&dep);
         }
-        self.set.insert(dependency);
+
+        self.set.insert(dep);
     }
 
     pub fn has_dependency(&self, contract_id: &QualifiedContractIdentifier) -> Option<bool> {
@@ -218,7 +242,6 @@ impl DependencySet {
             .get(&Dependency {
                 contract_id: contract_id.clone(),
                 required_before_publish: false,
-                speculative: false,
             })
             .map(|dep| dep.required_before_publish)
     }
@@ -260,7 +283,6 @@ impl<'a> ASTDependencyDetector<'a> {
             defined_contract_constants: BTreeMap::new(),
             pending_function_checks: BTreeMap::new(),
             pending_trait_checks: BTreeMap::new(),
-            speculative_references: Vec::new(),
             let_bindings: Vec::new(),
             params: None,
             top_level: true,
@@ -286,19 +308,6 @@ impl<'a> ASTDependencyDetector<'a> {
             detector.current_clarity_version = Some(clarity_version);
             detector.current_contract = Some(contract_identifier);
             traverse(&mut detector, &ast.expressions);
-        }
-
-        // Every contract has been visited, so whether a referenced contract
-        // defines a trait's functions is now known if it ever will be.
-        for reference in std::mem::take(&mut detector.speculative_references) {
-            if detector.lacks_trait_functions(
-                reference.to,
-                &reference.trait_identifier,
-                contract_asts,
-            ) {
-                continue;
-            }
-            detector.insert_dependency(reference.from, reference.to, reference.top_level, true);
         }
 
         // Anything remaining in the pending_ maps indicates an unresolved dependency
@@ -338,7 +347,6 @@ impl<'a> ASTDependencyDetector<'a> {
         }
 
         let mut graph = Graph::new();
-        let mut speculative_edges = Vec::new();
         for (contract, contract_dependencies) in dependencies {
             let contract_id = lookup.get(contract).unwrap();
             // Boot contracts will not be in the contract_epochs map, so default to Epoch20
@@ -366,19 +374,7 @@ impl<'a> ASTDependencyDetector<'a> {
                     // later analyses. Just skip it.
                     continue;
                 };
-                if dep.speculative {
-                    speculative_edges.push((*contract_id, *dep_id));
-                } else {
-                    graph.add_directed_edge(*contract_id, *dep_id);
-                }
-            }
-        }
-
-        // A trait implementation is deployed before its caller, so it can't
-        // close a cycle: a speculative edge that does is plain data.
-        for (contract_id, dep_id) in speculative_edges {
-            if !graph.reaches(dep_id, contract_id) {
-                graph.add_directed_edge(contract_id, dep_id);
+                graph.add_directed_edge(*contract_id, *dep_id);
             }
         }
 
@@ -408,49 +404,34 @@ impl<'a> ASTDependencyDetector<'a> {
         from: &QualifiedContractIdentifier,
         to: &QualifiedContractIdentifier,
     ) {
-        self.insert_dependency(from, to, self.top_level, false);
+        if self.preloaded.contains_key(from) {
+            return;
+        }
+
+        // Ignore the placeholder contract.
+        if to.name.starts_with("__") {
+            return;
+        }
+
+        // Ignore self-references.
+        if from == to {
+            return;
+        }
+
+        self.dependencies
+            .entry(from.clone())
+            .or_default()
+            .add_dependency(to.clone(), self.top_level);
     }
 
     fn add_arg_dependencies(
         &mut self,
-        from: &'a QualifiedContractIdentifier,
+        from: &QualifiedContractIdentifier,
         dependencies: ArgDependencies<'a>,
     ) {
-        for (to, reference) in dependencies {
-            match reference {
-                ArgReference::Definite => self.add_dependency(from, to),
-                ArgReference::Speculative(trait_identifier) => {
-                    self.speculative_references.push(SpeculativeReference {
-                        from,
-                        to,
-                        trait_identifier,
-                        top_level: self.top_level,
-                    })
-                }
-            }
+        for to in dependencies {
+            self.add_dependency(from, to);
         }
-    }
-
-    /// Whether `contract` is known not to define every function of the
-    /// trait. A contract or trait that isn't loaded yet may still implement it.
-    fn lacks_trait_functions(
-        &self,
-        contract: &QualifiedContractIdentifier,
-        trait_identifier: &TraitIdentifier,
-        contract_asts: &BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
-    ) -> bool {
-        if !self.preloaded.contains_key(contract) && !contract_asts.contains_key(contract) {
-            return false;
-        }
-        let Some(trait_definition) = self.defined_traits.get(&(
-            &trait_identifier.contract_identifier,
-            &trait_identifier.name,
-        )) else {
-            return false;
-        };
-        trait_definition
-            .keys()
-            .any(|function| !self.defined_functions.contains_key(&(contract, function)))
     }
 
     /// Dependencies of a call to `contract`: the contract itself, and the
@@ -482,37 +463,6 @@ impl<'a> ASTDependencyDetector<'a> {
             caller: self.current_contract.unwrap(),
             let_bindings: self.let_bindings.clone(),
         }
-    }
-
-    fn insert_dependency(
-        &mut self,
-        from: &QualifiedContractIdentifier,
-        to: &QualifiedContractIdentifier,
-        required_before_publish: bool,
-        speculative: bool,
-    ) {
-        if self.preloaded.contains_key(from) {
-            return;
-        }
-
-        // Ignore the placeholder contract.
-        if to.name.starts_with("__") {
-            return;
-        }
-
-        // Ignore self-references.
-        if from == to {
-            return;
-        }
-
-        self.dependencies
-            .entry(from.clone())
-            .or_default()
-            .insert(Dependency {
-                contract_id: to.clone(),
-                required_before_publish,
-                speculative,
-            });
     }
 
     fn add_defined_function(
@@ -592,60 +542,85 @@ impl<'a> ASTDependencyDetector<'a> {
     }
 
     /// The contract `expr` names: a contract principal literal, a contract
-    /// constant of the caller, or a `let` binding of either.
+    /// constant of `caller`, or a binding of either.
     fn contract_reference(
         &self,
-        site: &CallSite<'a>,
+        caller: &'a QualifiedContractIdentifier,
+        scope: &[Binding<'a>],
         expr: &'a SymbolicExpression,
     ) -> Option<&'a QualifiedContractIdentifier> {
-        let mut expr = expr;
-        // Each hop follows a binding, so this bounds a binding that names
-        // itself, in unchecked code.
-        for _ in 0..=site.let_bindings.len() {
-            if let Some(Value::Principal(PrincipalData::Contract(contract_id))) =
-                expr.match_literal_value()
-            {
-                return Some(contract_id);
-            }
-            let name = expr.match_atom()?;
-            if let Some(contract_id) = self.defined_contract_constants.get(&(site.caller, name)) {
-                return Some(contract_id);
-            }
-            expr = site.let_binding(name)?;
+        if let Some((value, scope)) = resolve_binding(scope, expr) {
+            return self.contract_reference(caller, scope, value);
         }
-        None
+        if let Some(Value::Principal(PrincipalData::Contract(contract_id))) =
+            expr.match_literal_value()
+        {
+            return Some(contract_id);
+        }
+        self.defined_contract_constants
+            .get(&(caller, expr.match_atom()?))
+            .copied()
     }
 
-    /// Record the contracts a trait argument may evaluate to. A contract found
-    /// inside a wrapping expression (`begin`, `match`, `get`...) is speculative,
-    /// so the forms that produce a value don't need to be enumerated.
-    fn trait_arg_references(
+    /// The contracts a trait argument may evaluate to, following the forms
+    /// that pass a value through (`begin`, `let`, `if`, `match`, `unwrap!`,
+    /// `get` on a tuple literal...). A contract that is only data in the
+    /// expression, like `.owner` in `(get impl { impl: .impl, owner: .owner })`,
+    /// isn't one of them.
+    fn trait_arg_values(
         &self,
-        site: &CallSite<'a>,
-        trait_identifier: &TraitIdentifier,
+        caller: &'a QualifiedContractIdentifier,
+        scope: &[Binding<'a>],
         expr: &'a SymbolicExpression,
-        speculative: bool,
-        seen: &mut HashSet<&'a ClarityName>,
-        dependencies: &mut ArgDependencies<'a>,
+        values: &mut ArgDependencies<'a>,
     ) {
-        if let Some(contract_id) = self.contract_reference(site, expr) {
-            if speculative {
-                dependencies
-                    .entry(contract_id)
-                    .or_insert_with(|| ArgReference::Speculative(trait_identifier.clone()));
-            } else {
-                dependencies.insert(contract_id, ArgReference::Definite);
+        if let Some((value, scope)) = resolve_binding(scope, expr) {
+            return self.trait_arg_values(caller, scope, value, values);
+        }
+        if let Some(contract_id) = self.contract_reference(caller, scope, expr) {
+            values.insert(contract_id);
+            return;
+        }
+        let Some((function, args)) = expr.match_list().and_then(<[_]>::split_first) else {
+            return;
+        };
+        let mut values_of = |scope: &[Binding<'a>], expr: &'a SymbolicExpression| {
+            self.trait_arg_values(caller, scope, expr, values)
+        };
+        match (function.match_atom().map(ClarityName::as_str), args) {
+            (Some("begin"), [.., last]) => values_of(scope, last),
+            (Some("let"), [bindings, .., body]) => {
+                values_of(&with_let_bindings(scope, bindings), body)
             }
-        } else if let Some(value) = expr
-            .match_atom()
-            .filter(|name| seen.insert(name))
-            .and_then(|name| site.let_binding(name))
-        {
-            self.trait_arg_references(site, trait_identifier, value, true, seen, dependencies);
-        } else if let Some(children) = expr.match_list() {
-            for child in children {
-                self.trait_arg_references(site, trait_identifier, child, true, seen, dependencies);
+            (
+                Some(
+                    "some" | "ok" | "err" | "unwrap!" | "unwrap-panic" | "unwrap-err!"
+                    | "unwrap-err-panic" | "try!",
+                ),
+                [value, ..],
+            ) => values_of(scope, value),
+            (Some("default-to"), [default, value]) => {
+                values_of(scope, default);
+                values_of(scope, value);
             }
+            (Some("if"), [_, then, otherwise]) => {
+                values_of(scope, then);
+                values_of(scope, otherwise);
+            }
+            (Some("match"), [input, name, some_branch, none_branch]) => {
+                values_of(&with_match_binding(scope, name, input), some_branch);
+                values_of(scope, none_branch);
+            }
+            (Some("match"), [input, ok_name, ok_branch, err_name, err_branch]) => {
+                values_of(&with_match_binding(scope, ok_name, input), ok_branch);
+                values_of(&with_match_binding(scope, err_name, input), err_branch);
+            }
+            (Some("get"), [key, tuple]) => {
+                if let Some((field, scope)) = tuple_field(scope, tuple, key) {
+                    values_of(scope, field);
+                }
+            }
+            _ => (),
         }
     }
 
@@ -657,15 +632,10 @@ impl<'a> ASTDependencyDetector<'a> {
         dependencies: &mut ArgDependencies<'a>,
     ) {
         match arg_type {
-            TypeSignature::CallableType(CallableSubtype::Trait(trait_identifier))
-            | TypeSignature::TraitReferenceType(trait_identifier) => self.trait_arg_references(
-                site,
-                trait_identifier,
-                expr,
-                false,
-                &mut HashSet::new(),
-                dependencies,
-            ),
+            TypeSignature::CallableType(CallableSubtype::Trait(_))
+            | TypeSignature::TraitReferenceType(_) => {
+                self.trait_arg_values(site.caller, &site.let_bindings, expr, dependencies)
+            }
             TypeSignature::OptionalType(inner_type) => {
                 if let Some(expr) = expr.match_list().and_then(|l| l.get(1)) {
                     self.deep_check_callee_type(site, inner_type, expr, dependencies);
@@ -935,7 +905,9 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
             };
 
             self.add_arg_dependencies(site.caller, dependencies);
-        } else if let Some(contract) = self.contract_reference(&site, callable_expr) {
+        } else if let Some(contract) =
+            self.contract_reference(site.caller, &site.let_bindings, callable_expr)
+        {
             self.check_contract_call(site, contract, function_name, args);
         }
         true
@@ -964,18 +936,18 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
     ) -> bool {
         // Bindings stay in scope for the trait arguments of calls in the body
         // (and in later bindings, which `let` evaluates in sequence).
-        let outer_scope = self.let_bindings.len();
-        self.let_bindings.extend(
-            bindings
-                .iter()
-                .map(|(name, binding)| (*name, binding.value)),
-        );
+        // Read from the expression rather than `bindings`, which loses their order.
+        let inner_scope = match expr.match_list() {
+            Some([_, let_bindings, ..]) => with_let_bindings(&self.let_bindings, let_bindings),
+            _ => self.let_bindings.clone(),
+        };
+        let outer_scope = std::mem::replace(&mut self.let_bindings, inner_scope);
         let res = bindings
             .values()
             .all(|binding| self.traverse_expr(binding.value))
             && body.iter().all(|expr| self.traverse_expr(expr))
             && self.visit_let(expr, bindings, body);
-        self.let_bindings.truncate(outer_scope);
+        self.let_bindings = outer_scope;
         res
     }
 
@@ -987,7 +959,7 @@ impl<'a> ASTVisitor<'a> for ASTDependencyDetector<'a> {
         // `contract-hash?` reads the referenced contract's stored hash, so the
         // contract must be published before the caller.
         let site = self.call_site();
-        if let Some(contract) = self.contract_reference(&site, input) {
+        if let Some(contract) = self.contract_reference(site.caller, &site.let_bindings, input) {
             self.add_dependency(site.caller, contract);
         }
         true
@@ -1145,20 +1117,6 @@ impl Graph {
 
     fn nodes_count(&self) -> usize {
         self.adjacency_list.len()
-    }
-
-    fn reaches(&self, from: usize, to: usize) -> bool {
-        let mut seen = HashSet::new();
-        let mut stack = vec![from];
-        while let Some(node) = stack.pop() {
-            if node == to {
-                return true;
-            }
-            if seen.insert(node) {
-                stack.extend(&self.adjacency_list[node]);
-            }
-        }
-        false
     }
 }
 
@@ -2168,14 +2126,9 @@ mod tests {
 
         let dependencies =
             ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
-        let dependency = dependencies[&caller]
-            .get(&Dependency {
-                contract_id: implementation,
-                required_before_publish: false,
-                speculative: false,
-            })
-            .expect("expected .implementation to be detected as a dependency of .caller");
-        assert!(!dependency.speculative);
+        assert!(dependencies[&caller]
+            .has_dependency(&implementation)
+            .is_some());
     }
 
     #[test]
@@ -2209,7 +2162,7 @@ mod tests {
     }
 
     #[test]
-    fn speculative_dependency_on_later_epoch_is_reported() {
+    fn trait_arg_expression_dependency_on_later_epoch_is_reported() {
         let session = Session::new_without_boot_contracts(SessionSettings::default());
         let mut contracts = BTreeMap::new();
         let (_, implementation) = setup_trait_callee(&session, "callee", &mut contracts);

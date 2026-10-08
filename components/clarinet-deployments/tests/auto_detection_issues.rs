@@ -968,8 +968,6 @@ async fn data_principal_in_requirement_trait_argument_is_not_published() {
 async fn remote_data_loads_explicit_requirements_to_order_local_contracts() {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path();
-    fs::create_dir_all(root.join("settings")).unwrap();
-    fs::create_dir_all(root.join("contracts")).unwrap();
 
     let server = mock_contracts(&[(
         EXTERNAL_DEPLOYER,
@@ -979,6 +977,81 @@ async fn remote_data_loads_explicit_requirements_to_order_local_contracts() {
     )])
     .await;
 
+    write_remote_data_project(
+        root,
+        &format!("[[project.requirements]]\ncontract_id = \"{EXTERNAL_DEPLOYER}.callee\""),
+        &[
+            (
+                "caller",
+                &format!(
+                    "(define-public (go) (contract-call? '{EXTERNAL_DEPLOYER}.callee take .implementation))\n"
+                ),
+            ),
+            ("implementation", PLAIN_SOURCE),
+        ],
+    );
+
+    let deployed = remote_data_simnet_publishes(root, &server.url()).await;
+
+    let position = |name: &str| deployed.iter().position(|c| c == name).unwrap();
+    assert!(
+        position("implementation") < position("caller"),
+        "`caller` passes `.implementation` as a trait argument; got {deployed:?}"
+    );
+}
+
+/// Under simnet remote data the boot contracts aren't seeded, but they are on
+/// the remote chain: a reference to one must not be fetched.
+#[tokio::test]
+async fn remote_data_does_not_fetch_boot_contracts() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_remote_data_project(
+        root,
+        "",
+        &[(
+            "caller",
+            &format!(
+                "(define-read-only (cycle) (contract-call? 'SP000000000000000000002Q6VF78.pox-4 current-pox-reward-cycle))\n\
+                 (define-read-only (supply) (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-total-supply))\n"
+            ),
+        )],
+    );
+
+    let mut server = Server::new_async().await;
+    let any_request = server
+        .mock("GET", mockito::Matcher::Any)
+        .expect(0)
+        .create_async()
+        .await;
+
+    let deployed = remote_data_simnet_publishes(root, &server.url()).await;
+
+    any_request.assert_async().await;
+    assert_eq!(deployed, ["caller"]);
+}
+
+/// Write a project with simnet remote data enabled, the supplied requirements
+/// and `(name, source)` contracts.
+fn write_remote_data_project(root: &Path, requirements_toml: &str, contracts: &[(&str, &str)]) {
+    fs::create_dir_all(root.join("settings")).unwrap();
+    fs::create_dir_all(root.join("contracts")).unwrap();
+
+    let contracts_toml: String = contracts
+        .iter()
+        .map(|(name, _)| {
+            formatdoc!(
+                r#"
+                [contracts.{name}]
+                path = "contracts/{name}.clar"
+                clarity_version = 3
+                epoch = "3.0"
+
+                "#
+            )
+        })
+        .collect();
     fs::write(
         root.join("Clarinet.toml"),
         formatdoc!(
@@ -989,20 +1062,9 @@ async fn remote_data_loads_explicit_requirements_to_order_local_contracts() {
             description = ""
             telemetry = false
             cache_dir = "./.cache"
+            {requirements_toml}
 
-            [[project.requirements]]
-            contract_id = "{EXTERNAL_DEPLOYER}.callee"
-
-            [contracts.caller]
-            path = "contracts/caller.clar"
-            clarity_version = 2
-            epoch = 2.4
-
-            [contracts.implementation]
-            path = "contracts/implementation.clar"
-            clarity_version = 2
-            epoch = 2.4
-
+            {contracts_toml}
             [repl.remote_data]
             enabled = true
             api_url = "https://api.hiro.so"
@@ -1026,15 +1088,14 @@ async fn remote_data_loads_explicit_requirements_to_order_local_contracts() {
         ),
     )
     .unwrap();
-    fs::write(
-        root.join("contracts/caller.clar"),
-        format!(
-            "(define-public (go) (contract-call? '{EXTERNAL_DEPLOYER}.callee take .implementation))\n"
-        ),
-    )
-    .unwrap();
-    fs::write(root.join("contracts/implementation.clar"), PLAIN_SOURCE).unwrap();
+    for (name, source) in contracts {
+        fs::write(root.join(format!("contracts/{name}.clar")), source).unwrap();
+    }
+}
 
+/// Return the names of the contracts published by a generated simnet plan,
+/// with remote data enabled.
+async fn remote_data_simnet_publishes(root: &Path, api_url: &str) -> Vec<String> {
     // `true` keeps `[repl.remote_data]` enabled.
     let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), true).unwrap();
     assert!(manifest.repl_settings.remote_data.enabled);
@@ -1043,13 +1104,13 @@ async fn remote_data_loads_explicit_requirements_to_order_local_contracts() {
         &StacksNetwork::Simnet,
         false,
         None,
-        Some(&server.url()),
+        Some(api_url),
         Environment::Simnet,
     )
     .await
     .expect("simnet deployment plan should be generated");
 
-    let deployed: Vec<String> = deployment
+    deployment
         .plan
         .batches
         .iter()
@@ -1061,11 +1122,5 @@ async fn remote_data_loads_explicit_requirements_to_order_local_contracts() {
             TransactionSpecification::ContractPublish(spec) => Some(spec.contract_name.to_string()),
             _ => None,
         })
-        .collect();
-
-    let position = |name: &str| deployed.iter().position(|c| c == name).unwrap();
-    assert!(
-        position("implementation") < position("caller"),
-        "`caller` passes `.implementation` as a trait argument; got {deployed:?}"
-    );
+        .collect()
 }

@@ -57,7 +57,7 @@ fn now_secs() -> f64 {
 }
 
 /// [`retrieve_contract`] for a dependency detected in the project's contracts
-/// rather than declared. A failure is remembered for a few minutes, so a
+/// rather than declared. A failed fetch is remembered for a few minutes, so a
 /// reference that can't be resolved doesn't hit the network again on every
 /// plan generation (each LSP rebuild, each `clarinet check`).
 pub async fn retrieve_detected_contract(
@@ -66,6 +66,10 @@ pub async fn retrieve_detected_contract(
     file_accessor: &Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
 ) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
+    if let Some(cached) = read_cached_contract(contract_id, cache_location, file_accessor).await {
+        return cached;
+    }
+
     let key = (api_base_url.map(str::to_string), contract_id.clone());
     let failed_at = UNAVAILABLE
         .lock()
@@ -76,7 +80,7 @@ pub async fn retrieve_detected_contract(
     }
 
     let contract =
-        retrieve_contract(contract_id, cache_location, file_accessor, api_base_url).await;
+        fetch_and_cache_contract(contract_id, cache_location, file_accessor, api_base_url).await;
     if let Ok(mut failed) = UNAVAILABLE.lock() {
         match contract {
             Ok(_) => failed.remove(&key),
@@ -92,14 +96,34 @@ pub async fn retrieve_contract(
     file_accessor: &Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
 ) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
-    let contract_deployer = contract_id.issuer.to_address();
-    let contract_name = contract_id.name.to_string();
+    match read_cached_contract(contract_id, cache_location, file_accessor).await {
+        Some(cached) => cached,
+        None => {
+            fetch_and_cache_contract(contract_id, cache_location, file_accessor, api_base_url).await
+        }
+    }
+}
 
+/// The source and metadata cache locations of a requirement.
+fn cache_locations(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+) -> (PathBuf, PathBuf) {
     let requirements_dir = cache_location.join("requirements");
-    let contract_location =
-        requirements_dir.join(format!("{contract_deployer}.{contract_name}.clar"));
-    let metadata_location =
-        requirements_dir.join(format!("{contract_deployer}.{contract_name}.json"));
+    let file_stem = format!("{}.{}", contract_id.issuer.to_address(), contract_id.name);
+    (
+        requirements_dir.join(format!("{file_stem}.clar")),
+        requirements_dir.join(format!("{file_stem}.json")),
+    )
+}
+
+/// The contract from the requirements cache, or `None` if it isn't cached.
+async fn read_cached_contract(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+    file_accessor: &Option<&dyn FileAccessor>,
+) -> Option<Result<(String, StacksEpochId, ClarityVersion, PathBuf), String>> {
+    let (contract_location, metadata_location) = cache_locations(contract_id, cache_location);
 
     let (contract_source, metadata_json) = match file_accessor {
         None => (
@@ -116,18 +140,34 @@ pub async fn retrieve_contract(
         ),
     };
 
-    if let (Ok(contract_source), Ok(metadata_json)) = (contract_source, metadata_json) {
-        let metadata: ContractMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| format!("Unable to parse metadata file: {e}"))?;
+    let (Ok(contract_source), Ok(metadata_json)) = (contract_source, metadata_json) else {
+        return None;
+    };
+    log::debug!("requirement cache hit: {contract_id}");
+    Some(
+        serde_json::from_str(&metadata_json)
+            .map_err(|e| format!("Unable to parse metadata file: {e}"))
+            .map(|metadata: ContractMetadata| {
+                (
+                    contract_source,
+                    metadata.epoch,
+                    metadata.clarity_version,
+                    contract_location,
+                )
+            }),
+    )
+}
 
-        log::debug!("requirement cache hit: {contract_deployer}.{contract_name}");
-        return Ok((
-            contract_source,
-            metadata.epoch,
-            metadata.clarity_version,
-            contract_location,
-        ));
-    }
+/// Fetch the contract from the API and write it to the requirements cache.
+async fn fetch_and_cache_contract(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+    file_accessor: &Option<&dyn FileAccessor>,
+    api_base_url: Option<&str>,
+) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
+    let contract_deployer = contract_id.issuer.to_address();
+    let contract_name = contract_id.name.to_string();
+    let (contract_location, metadata_location) = cache_locations(contract_id, cache_location);
 
     let is_mainnet = StacksAddress::from_string(&contract_deployer)
         .unwrap()
