@@ -2,7 +2,6 @@ mod native_bridge;
 
 use std::sync::mpsc;
 
-use clarity_lsp::utils;
 use crossbeam_channel::unbounded;
 use tower_lsp_server::{LspService, Server};
 

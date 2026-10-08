@@ -7,6 +7,7 @@ use clarity_lsp::backend::{
     LspNotification, LspNotificationResponse, LspRequest, LspRequestResponse,
 };
 use clarity_lsp::state::EditorState;
+use clarity_lsp::utils;
 use crossbeam_channel::{Receiver as MultiplexableReceiver, Select, Sender as MultiplexableSender};
 use serde_json::Value;
 use tower_lsp_server::jsonrpc::{Error, ErrorCode, Result};
@@ -19,8 +20,6 @@ use tower_lsp_server::ls_types::{
     SignatureHelpParams, TextEdit,
 };
 use tower_lsp_server::{Client, LanguageServer};
-
-use super::utils;
 
 pub enum LspResponse {
     Notification(LspNotificationResponse),

@@ -19,22 +19,21 @@ macro_rules! log {
 #[cfg(target_arch = "wasm32")]
 pub(crate) use log;
 
-pub fn lint_diagnostics_to_lsp_type(diagnostics: &[LintDiagnostic]) -> Vec<LspDiagnostic> {
-    diagnostics
-        .iter()
-        .map(|ld| clarity_diagnostic_to_lsp_type(&ld.diagnostic, ld.lint_name.as_ref()))
-        .collect()
-}
-
 /// Combine lint diagnostics with extra LSP diagnostics into one list per file,
 /// so each file can be published once without one source overwriting the other.
 pub fn merge_diagnostics(
     lint_diagnostics: Vec<(PathBuf, Vec<LintDiagnostic>)>,
     lsp_diagnostics: Vec<(PathBuf, Vec<LspDiagnostic>)>,
 ) -> Vec<(PathBuf, Vec<LspDiagnostic>)> {
-    let mut merged: Vec<_> = lint_diagnostics
+    let mut merged: Vec<(PathBuf, Vec<LspDiagnostic>)> = lint_diagnostics
         .into_iter()
-        .map(|(location, diags)| (location, lint_diagnostics_to_lsp_type(&diags)))
+        .map(|(location, diags)| {
+            let diags = diags
+                .iter()
+                .map(|ld| clarity_diagnostic_to_lsp_type(&ld.diagnostic, ld.lint_name.as_ref()))
+                .collect();
+            (location, diags)
+        })
         .collect();
     for (location, diags) in lsp_diagnostics {
         match merged

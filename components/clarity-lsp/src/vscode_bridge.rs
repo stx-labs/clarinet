@@ -166,21 +166,18 @@ impl LspVscodeBridge {
 
         future_to_promise(async move {
             let response =
-                match process_notification(command, &mut editor_state_lock, Some(&*file_accessor))
+                process_notification(command, &mut editor_state_lock, Some(&*file_accessor))
                     .await
-                {
-                    Ok(response) => response,
-                    Err(err) => {
+                    .inspect_err(|err| {
                         if err.starts_with("No Clarinet.toml is associated to the contract") {
                             let _ = send_notification.call2(
                                 &JsValue::NULL,
                                 &encode_to_js("clarity/noManifestWarning").unwrap(),
-                                &encode_to_js(&err).unwrap(),
+                                &encode_to_js(err).unwrap(),
                             );
                         }
-                        return Err(JsValue::from(err));
-                    }
-                };
+                    })
+                    .map_err(JsValue::from)?;
 
             for (location, diags) in merge_diagnostics(
                 response.aggregated_diagnostics,
