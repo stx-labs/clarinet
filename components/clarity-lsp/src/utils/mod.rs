@@ -26,6 +26,28 @@ pub fn lint_diagnostics_to_lsp_type(diagnostics: &[LintDiagnostic]) -> Vec<LspDi
         .collect()
 }
 
+/// Combine lint diagnostics with extra LSP diagnostics into one list per file,
+/// so each file can be published once without one source overwriting the other.
+pub fn merge_diagnostics(
+    lint_diagnostics: Vec<(PathBuf, Vec<LintDiagnostic>)>,
+    lsp_diagnostics: Vec<(PathBuf, Vec<LspDiagnostic>)>,
+) -> Vec<(PathBuf, Vec<LspDiagnostic>)> {
+    let mut merged: Vec<_> = lint_diagnostics
+        .into_iter()
+        .map(|(location, diags)| (location, lint_diagnostics_to_lsp_type(&diags)))
+        .collect();
+    for (location, diags) in lsp_diagnostics {
+        match merged
+            .iter_mut()
+            .find(|(existing, _)| *existing == location)
+        {
+            Some((_, existing_diags)) => existing_diags.extend(diags),
+            None => merged.push((location, diags)),
+        }
+    }
+    merged
+}
+
 pub fn clarity_diagnostic_to_lsp_type(
     diagnostic: &ClarityDiagnostic,
     lint_name: Option<&LintName>,

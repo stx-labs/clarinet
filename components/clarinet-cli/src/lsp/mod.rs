@@ -2,11 +2,8 @@ mod native_bridge;
 
 use std::sync::mpsc;
 
-use clarity::vm::diagnostic::{Diagnostic as ClarityDiagnostic, Level as ClarityLevel};
 use clarity_lsp::utils;
-use clarity_repl::analysis::linter::LintName;
 use crossbeam_channel::unbounded;
-use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 use tower_lsp_server::{LspService, Server};
 
 use self::native_bridge::LspNativeBridge;
@@ -28,58 +25,6 @@ async fn do_run_lsp() {
         LspNativeBridge::new(client, notification_tx, request_tx, response_rx)
     });
     Server::new(stdin, stdout, socket).serve(service).await;
-}
-
-pub fn clarity_diagnostics_to_tower_lsp_type(
-    diagnostics: &[ClarityDiagnostic],
-) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
-    diagnostics
-        .iter()
-        .map(clarity_diagnostic_to_tower_lsp_type)
-        .collect()
-}
-
-pub fn clarity_diagnostic_to_tower_lsp_type(
-    diagnostic: &ClarityDiagnostic,
-) -> tower_lsp_server::ls_types::Diagnostic {
-    clarity_diagnostic_to_tower_lsp_type_with_lint(diagnostic, None)
-}
-
-pub fn clarity_diagnostic_to_tower_lsp_type_with_lint(
-    diagnostic: &ClarityDiagnostic,
-    lint_name: Option<&LintName>,
-) -> tower_lsp_server::ls_types::Diagnostic {
-    let range = match diagnostic.spans.len() {
-        0 => Range::default(),
-        _ => Range {
-            start: Position {
-                line: diagnostic.spans[0].start_line - 1,
-                character: diagnostic.spans[0].start_column - 1,
-            },
-            end: Position {
-                line: diagnostic.spans[0].end_line - 1,
-                character: diagnostic.spans[0].end_column,
-            },
-        },
-    };
-    let code = lint_name.map(|name| NumberOrString::String(name.to_string()));
-
-    // TODO(lgalabru): add hint for contracts not found errors
-    Diagnostic {
-        range,
-        severity: match diagnostic.level {
-            ClarityLevel::Error => Some(DiagnosticSeverity::ERROR),
-            ClarityLevel::Warning => Some(DiagnosticSeverity::WARNING),
-            ClarityLevel::Note => Some(DiagnosticSeverity::INFORMATION),
-        },
-        code,
-        code_description: None,
-        source: Some("clarity".to_string()),
-        message: diagnostic.message.to_string(),
-        related_information: None,
-        tags: None,
-        data: None,
-    }
 }
 
 #[test]
