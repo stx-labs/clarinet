@@ -135,18 +135,47 @@ impl Ord for Dependency {
     }
 }
 
-/// A `let` (or `match`) binding: the name and the expression it is bound to.
-type Binding<'a> = (&'a ClarityName, &'a SymbolicExpression);
+#[derive(Clone, Copy)]
+struct Binding<'a> {
+    name: &'a ClarityName,
+    value: &'a SymbolicExpression,
+    payload: Option<Payload>,
+}
+
+#[derive(Clone, Copy)]
+enum Payload {
+    Some,
+    Ok,
+    Err,
+    Success,
+}
+
+impl Payload {
+    fn accepts(self, constructor: &str) -> bool {
+        matches!(
+            (self, constructor),
+            (Self::Some | Self::Success, "some")
+                | (Self::Ok | Self::Success, "ok")
+                | (Self::Err, "err")
+        )
+    }
+}
+
+// A stack-borrowed path preserves nested projections without allocating.
+struct ValueProjection<'a> {
+    payload: Payload,
+    rest: Option<&'a ValueProjection<'a>>,
+}
 
 /// The value `expr` names in `scope`, with the scope that value is evaluated
 /// in: the bindings before it.
 fn resolve_binding<'a, 's>(
     scope: &'s [Binding<'a>],
     expr: &SymbolicExpression,
-) -> Option<(&'a SymbolicExpression, &'s [Binding<'a>])> {
+) -> Option<(Binding<'a>, &'s [Binding<'a>])> {
     let name = expr.match_atom()?;
-    let index = scope.iter().rposition(|(bound, _)| *bound == name)?;
-    Some((scope[index].1, &scope[..index]))
+    let index = scope.iter().rposition(|binding| binding.name == name)?;
+    Some((scope[index], &scope[..index]))
 }
 
 /// `scope` extended with the `((name value) ...)` bindings of a `let`.
@@ -159,7 +188,11 @@ fn with_let_bindings<'a>(
         .iter()
         .copied()
         .chain(bindings.filter_map(|binding| match binding.match_list()? {
-            [name, value] => Some((name.match_atom()?, value)),
+            [name, value] => Some(Binding {
+                name: name.match_atom()?,
+                value,
+                payload: None,
+            }),
             _ => None,
         }))
         .collect()
@@ -170,9 +203,14 @@ fn with_match_binding<'a>(
     scope: &[Binding<'a>],
     name: &'a SymbolicExpression,
     input: &'a SymbolicExpression,
+    payload: Payload,
 ) -> Vec<Binding<'a>> {
     let mut scope = scope.to_vec();
-    scope.extend(name.match_atom().map(|name| (name, input)));
+    scope.extend(name.match_atom().map(|name| Binding {
+        name,
+        value: input,
+        payload: Some(payload),
+    }));
     scope
 }
 
@@ -183,8 +221,11 @@ fn tuple_field<'a, 's>(
     tuple: &'a SymbolicExpression,
     key: &SymbolicExpression,
 ) -> Option<(&'a SymbolicExpression, &'s [Binding<'a>])> {
-    if let Some((tuple, scope)) = resolve_binding(scope, tuple) {
-        return tuple_field(scope, tuple, key);
+    if let Some((binding, scope)) = resolve_binding(scope, tuple) {
+        if binding.payload.is_some() {
+            return None;
+        }
+        return tuple_field(scope, binding.value, key);
     }
     let key = key.match_atom()?;
     let (constructor, fields) = tuple.match_list()?.split_first()?;
@@ -549,8 +590,12 @@ impl<'a> ASTDependencyDetector<'a> {
         scope: &[Binding<'a>],
         expr: &'a SymbolicExpression,
     ) -> Option<&'a QualifiedContractIdentifier> {
-        if let Some((value, scope)) = resolve_binding(scope, expr) {
-            return self.contract_reference(caller, scope, value);
+        if let Some((binding, scope)) = resolve_binding(scope, expr) {
+            return binding
+                .payload
+                .is_none()
+                .then(|| self.contract_reference(caller, scope, binding.value))
+                .flatten();
         }
         if let Some(Value::Principal(PrincipalData::Contract(contract_id))) =
             expr.match_literal_value()
@@ -573,51 +618,99 @@ impl<'a> ASTDependencyDetector<'a> {
         scope: &[Binding<'a>],
         expr: &'a SymbolicExpression,
         values: &mut ArgDependencies<'a>,
+        projection: Option<&ValueProjection<'_>>,
     ) {
-        if let Some((value, scope)) = resolve_binding(scope, expr) {
-            return self.trait_arg_values(caller, scope, value, values);
+        if let Some((binding, scope)) = resolve_binding(scope, expr) {
+            let binding_projection = binding.payload.map(|payload| ValueProjection {
+                payload,
+                rest: projection,
+            });
+            return self.trait_arg_values(
+                caller,
+                scope,
+                binding.value,
+                values,
+                binding_projection.as_ref().or(projection),
+            );
         }
-        if let Some(contract_id) = self.contract_reference(caller, scope, expr) {
-            values.insert(contract_id);
-            return;
+        if projection.is_none() {
+            if let Some(contract_id) = self.contract_reference(caller, scope, expr) {
+                values.insert(contract_id);
+                return;
+            }
         }
         let Some((function, args)) = expr.match_list().and_then(<[_]>::split_first) else {
             return;
         };
-        let mut values_of = |scope: &[Binding<'a>], expr: &'a SymbolicExpression| {
-            self.trait_arg_values(caller, scope, expr, values)
+        let mut values_of = |scope: &[Binding<'a>],
+                             expr: &'a SymbolicExpression,
+                             projection: Option<&ValueProjection<'_>>| {
+            self.trait_arg_values(caller, scope, expr, values, projection)
         };
         match (function.match_atom().map(ClarityName::as_str), args) {
-            (Some("begin"), [.., last]) => values_of(scope, last),
+            (Some("begin"), [.., last]) => values_of(scope, last, projection),
             (Some("let"), [bindings, .., body]) => {
-                values_of(&with_let_bindings(scope, bindings), body)
+                values_of(&with_let_bindings(scope, bindings), body, projection)
+            }
+            (Some(constructor @ ("some" | "ok" | "err")), [value]) => {
+                if let Some(path) = projection {
+                    if path.payload.accepts(constructor) {
+                        values_of(scope, value, path.rest);
+                    }
+                }
             }
             (
                 Some(
-                    "some" | "ok" | "err" | "unwrap!" | "unwrap-panic" | "unwrap-err!"
-                    | "unwrap-err-panic" | "try!",
+                    operation @ ("unwrap!" | "unwrap-panic" | "try!" | "unwrap-err!"
+                    | "unwrap-err-panic"),
                 ),
                 [value, ..],
-            ) => values_of(scope, value),
+            ) => {
+                let path = ValueProjection {
+                    payload: if operation.starts_with("unwrap-err") {
+                        Payload::Err
+                    } else {
+                        Payload::Success
+                    },
+                    rest: projection,
+                };
+                values_of(scope, value, Some(&path));
+            }
             (Some("default-to"), [default, value]) => {
-                values_of(scope, default);
-                values_of(scope, value);
+                values_of(scope, default, projection);
+                let path = ValueProjection {
+                    payload: Payload::Some,
+                    rest: projection,
+                };
+                values_of(scope, value, Some(&path));
             }
             (Some("if"), [_, then, otherwise]) => {
-                values_of(scope, then);
-                values_of(scope, otherwise);
+                values_of(scope, then, projection);
+                values_of(scope, otherwise, projection);
             }
             (Some("match"), [input, name, some_branch, none_branch]) => {
-                values_of(&with_match_binding(scope, name, input), some_branch);
-                values_of(scope, none_branch);
+                values_of(
+                    &with_match_binding(scope, name, input, Payload::Some),
+                    some_branch,
+                    projection,
+                );
+                values_of(scope, none_branch, projection);
             }
             (Some("match"), [input, ok_name, ok_branch, err_name, err_branch]) => {
-                values_of(&with_match_binding(scope, ok_name, input), ok_branch);
-                values_of(&with_match_binding(scope, err_name, input), err_branch);
+                values_of(
+                    &with_match_binding(scope, ok_name, input, Payload::Ok),
+                    ok_branch,
+                    projection,
+                );
+                values_of(
+                    &with_match_binding(scope, err_name, input, Payload::Err),
+                    err_branch,
+                    projection,
+                );
             }
             (Some("get"), [key, tuple]) => {
                 if let Some((field, scope)) = tuple_field(scope, tuple, key) {
-                    values_of(scope, field);
+                    values_of(scope, field, projection);
                 }
             }
             _ => (),
@@ -634,7 +727,7 @@ impl<'a> ASTDependencyDetector<'a> {
         match arg_type {
             TypeSignature::CallableType(CallableSubtype::Trait(_))
             | TypeSignature::TraitReferenceType(_) => {
-                self.trait_arg_values(site.caller, &site.let_bindings, expr, dependencies)
+                self.trait_arg_values(site.caller, &site.let_bindings, expr, dependencies, None)
             }
             TypeSignature::OptionalType(inner_type) => {
                 if let Some(expr) = expr.match_list().and_then(|l| l.get(1)) {
@@ -2107,6 +2200,56 @@ mod tests {
         let position = |id| ordered.iter().position(|c| *c == id).unwrap();
         assert!(position(&implementation) < position(&caller));
         assert!(position(&caller) < position(&user));
+    }
+
+    #[test]
+    fn discarded_response_payload_is_not_a_trait_dependency() {
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        for argument in [
+            "(unwrap-panic (if true (ok .implementation) (err .user)))",
+            "(unwrap! (if true (ok .implementation) (err .user)) (err u1))",
+            "(try! (if true (ok .implementation) (err .user)))",
+            "(unwrap-err-panic (if true (err .implementation) (ok .user)))",
+            "(unwrap-err! (if true (err .implementation) (ok .user)) (err u1))",
+            "(let ((result (if true (ok .implementation) (err .user)))) (unwrap-panic result))",
+            "(unwrap-panic (unwrap-panic (if true (ok (some .implementation)) (err .user))))",
+            "(match (if true (ok .implementation) (err .user)) target target error .implementation)",
+            "(match (if true (err .implementation) (ok .user)) unused .implementation target target)",
+        ] {
+            let mut contracts = BTreeMap::new();
+            let (_, implementation) =
+                setup_trait_callee(&session, "callee", &mut contracts);
+            let snippet = format!(
+                "(define-public (go) (contract-call? .callee take {argument}))"
+            );
+            let caller = deploy_snippet(&session, &snippet, Some("caller"), &mut contracts);
+            let user = deploy_snippet(
+                &session,
+                indoc!("
+                    (define-public (get-one) (ok u2))
+                    (define-public (run) (contract-call? .caller go))
+                "),
+                Some("user"),
+                &mut contracts,
+            );
+            let dependencies =
+                ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new())
+                    .unwrap();
+            assert!(
+                dependencies[&caller].has_dependency(&implementation).is_some(),
+                "missing implementation for {argument}"
+            );
+            assert!(
+                dependencies[&caller].has_dependency(&user).is_none(),
+                "discarded payload became a dependency for {argument}"
+            );
+            let ordered =
+                ASTDependencyDetector::order_contracts(&dependencies, &HashMap::new())
+                    .expect("discarded payload must not create a cycle");
+            let position = |id| ordered.iter().position(|contract| *contract == id).unwrap();
+            assert!(position(&implementation) < position(&caller));
+            assert!(position(&caller) < position(&user));
+        }
     }
 
     #[test]
