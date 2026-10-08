@@ -906,3 +906,166 @@ async fn let_bound_trait_argument_is_auto_detected() {
         "got {published:?}"
     );
 }
+
+// PR #2508 review, finding #27: "Fetched requirements retain speculative edges
+// after their targets are loaded".
+//
+// `wrapper`'s dependencies are finalized while `other` isn't loaded yet, so the
+// speculative edge to it can't be ruled out. Once `other` is loaded it plainly
+// lacks `get-one`, but `wrapper` is never re-examined, and `other` is published
+// through it.
+#[tokio::test]
+async fn data_principal_in_requirement_trait_argument_is_not_published() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    write_project(
+        root,
+        &format!("(define-public (go) (contract-call? '{EXTERNAL_DEPLOYER}.wrapper go))\n"),
+        "",
+    );
+
+    let server = mock_contracts(&[
+        (
+            EXTERNAL_DEPLOYER,
+            "wrapper",
+            &format!(
+                "(define-public (go)\n\
+                   (contract-call? '{EXTERNAL_DEPLOYER}.callee take\n\
+                     (get impl {{ owner: '{EXTERNAL_DEPLOYER}.other, impl: '{EXTERNAL_DEPLOYER}.implementation }})))\n"
+            ),
+        ),
+        (
+            EXTERNAL_DEPLOYER,
+            "callee",
+            "(define-trait reader ((get-one () (response uint uint))))\n\
+             (define-public (take (target <reader>)) (contract-call? target get-one))",
+        ),
+        (EXTERNAL_DEPLOYER, "implementation", PLAIN_SOURCE),
+        (
+            EXTERNAL_DEPLOYER,
+            "other",
+            "(define-read-only (get-two) (ok u2))",
+        ),
+    ])
+    .await;
+
+    let published = testnet_requirement_publishes(root, &server.url()).await;
+
+    assert!(
+        !published.contains(&format!("{EXTERNAL_DEPLOYER}.other")),
+        "`other` lacks the trait's functions, so it is only data; got {published:?}"
+    );
+}
+
+// PR #2508 review, finding #26: "Remote-data mode drops explicit signatures
+// needed to order local contracts".
+//
+// Under simnet remote data, the explicit `callee` requirement is never loaded,
+// so `caller`'s trait argument `.implementation` isn't detected and `caller` is
+// ordered first, which fails full analysis.
+#[tokio::test]
+async fn remote_data_loads_explicit_requirements_to_order_local_contracts() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+    fs::create_dir_all(root.join("settings")).unwrap();
+    fs::create_dir_all(root.join("contracts")).unwrap();
+
+    let server = mock_contracts(&[(
+        EXTERNAL_DEPLOYER,
+        "callee",
+        "(define-trait reader ((get-one () (response uint uint))))\n\
+         (define-public (take (target <reader>)) (contract-call? target get-one))",
+    )])
+    .await;
+
+    fs::write(
+        root.join("Clarinet.toml"),
+        formatdoc!(
+            r#"
+            [project]
+            name = "auto-detection-test"
+            authors = []
+            description = ""
+            telemetry = false
+            cache_dir = "./.cache"
+
+            [[project.requirements]]
+            contract_id = "{EXTERNAL_DEPLOYER}.callee"
+
+            [contracts.caller]
+            path = "contracts/caller.clar"
+            clarity_version = 2
+            epoch = 2.4
+
+            [contracts.implementation]
+            path = "contracts/implementation.clar"
+            clarity_version = 2
+            epoch = 2.4
+
+            [repl.remote_data]
+            enabled = true
+            api_url = "https://api.hiro.so"
+            initial_height = 522000
+            "#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("settings/Devnet.toml"),
+        formatdoc!(
+            r#"
+            [network]
+            name = "devnet"
+            deployment_fee_rate = 10
+
+            [accounts.deployer]
+            mnemonic = "{TEST_MNEMONIC}"
+            balance = 100_000_000_000_000
+            "#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("contracts/caller.clar"),
+        format!(
+            "(define-public (go) (contract-call? '{EXTERNAL_DEPLOYER}.callee take .implementation))\n"
+        ),
+    )
+    .unwrap();
+    fs::write(root.join("contracts/implementation.clar"), PLAIN_SOURCE).unwrap();
+
+    // `true` keeps `[repl.remote_data]` enabled.
+    let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), true).unwrap();
+    assert!(manifest.repl_settings.remote_data.enabled);
+    let (deployment, _artifacts, _) = generate_default_deployment(
+        &manifest,
+        &StacksNetwork::Simnet,
+        false,
+        None,
+        Some(&server.url()),
+        Environment::Simnet,
+    )
+    .await
+    .expect("simnet deployment plan should be generated");
+
+    let deployed: Vec<String> = deployment
+        .plan
+        .batches
+        .iter()
+        .flat_map(|batch| &batch.transactions)
+        .filter_map(|tx| match tx {
+            TransactionSpecification::EmulatedContractPublish(spec) => {
+                Some(spec.contract_name.to_string())
+            }
+            TransactionSpecification::ContractPublish(spec) => Some(spec.contract_name.to_string()),
+            _ => None,
+        })
+        .collect();
+
+    let position = |name: &str| deployed.iter().position(|c| c == name).unwrap();
+    assert!(
+        position("implementation") < position("caller"),
+        "`caller` passes `.implementation` as a trait argument; got {deployed:?}"
+    );
+}

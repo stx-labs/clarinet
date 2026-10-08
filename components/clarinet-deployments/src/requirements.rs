@@ -379,4 +379,54 @@ mod tests {
 
         not_found.assert_async().await;
     }
+
+    // PR #2508 review, finding #25: "A failed lookup hides subsequently
+    // available local sources".
+    //
+    // The negative cache is checked before the local cache, so once a lookup
+    // fails, a copy that later lands in the cache (written by an explicit
+    // retrieval, or by another process sharing the cache) is ignored until the
+    // failure expires.
+    #[tokio::test]
+    async fn test_detected_contract_failure_does_not_hide_cached_source() {
+        let mut server = Server::new_async().await;
+        let not_found = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(404)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let contract_id =
+            QualifiedContractIdentifier::parse(&format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"))
+                .unwrap();
+        let result =
+            retrieve_detected_contract(&contract_id, cache_dir.path(), &None, Some(&server.url()))
+                .await;
+        assert!(result.is_err());
+        not_found.assert_async().await;
+
+        let requirements_dir = cache_dir.path().join("requirements");
+        std::fs::create_dir_all(&requirements_dir).unwrap();
+        std::fs::write(
+            requirements_dir.join(format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}.clar")),
+            TEST_SOURCE,
+        )
+        .unwrap();
+        std::fs::write(
+            requirements_dir.join(format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}.json")),
+            serde_json::to_string(&ContractMetadata::default()).unwrap(),
+        )
+        .unwrap();
+
+        let (source, ..) =
+            retrieve_detected_contract(&contract_id, cache_dir.path(), &None, Some(&server.url()))
+                .await
+                .expect("the cached copy should be used despite the earlier failure");
+        assert_eq!(source, TEST_SOURCE);
+    }
 }

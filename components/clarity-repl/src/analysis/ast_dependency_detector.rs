@@ -2232,4 +2232,90 @@ mod tests {
             other => panic!("expected IncorrectContractHeight, got {other:?}"),
         }
     }
+
+    // PR #2508 review, finding #22: "Data principals with matching function
+    // names are still published" (merged with #24: "A speculative data edge can
+    // displace a real implementation dependency").
+    //
+    // `.b` is only data in `a`, but defines `get-one`, so `a → b` survives as a
+    // speculative edge. It is accepted before `b → a` (contract-name order),
+    // which then looks cyclic and is dropped, although `.a` is the value `b`
+    // actually passes. Deploying `b` before `a` fails full analysis.
+    #[test]
+    fn data_principal_defining_trait_functions_is_not_a_dependency() {
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        setup_trait_callee(&session, "zcallee", &mut contracts);
+
+        #[rustfmt::skip]
+        let a_snippet = indoc!("
+            (define-public (get-one) (ok u1))
+            (define-public (go)
+              (contract-call? .zcallee take
+                (get impl { owner: .b, impl: .implementation })))
+        ");
+        let a = deploy_snippet(&session, a_snippet, Some("a"), &mut contracts);
+        #[rustfmt::skip]
+        let b_snippet = indoc!("
+            (define-public (get-one) (ok u1))
+            (define-public (go)
+              (contract-call? .zcallee take (begin .a)))
+        ");
+        let b = deploy_snippet(&session, b_snippet, Some("b"), &mut contracts);
+
+        let dependencies =
+            ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
+        let ordered = ASTDependencyDetector::order_contracts(&dependencies, &HashMap::new())
+            .expect("the contracts can be ordered");
+        let position = |id| ordered.iter().position(|c| *c == id).unwrap();
+        assert!(
+            position(&a) < position(&b),
+            "`b` passes `.a` as its trait argument, so `a` must deploy first; got {ordered:?}"
+        );
+        assert!(
+            dependencies[&a].has_dependency(&b).is_none(),
+            "`.b` is only data in `a`'s trait argument"
+        );
+    }
+
+    // PR #2508 review, finding #28: "Discarded data edges still trigger epoch
+    // errors".
+    //
+    // `caller → user` is a speculative data edge that closes a cycle with
+    // `user → caller`, so ordering discards it, but the epoch check runs on it
+    // first and rejects a valid project.
+    #[test]
+    fn discarded_speculative_edge_is_not_epoch_checked() {
+        let session = Session::new_without_boot_contracts(SessionSettings::default());
+        let mut contracts = BTreeMap::new();
+        let (callee, implementation) = setup_trait_callee(&session, "callee", &mut contracts);
+
+        #[rustfmt::skip]
+        let snippet = indoc!("
+            (define-public (go)
+              (contract-call? .callee take
+                (get impl { impl: .implementation, owner: .user })))
+        ");
+        let caller = deploy_snippet(&session, snippet, Some("caller"), &mut contracts);
+        #[rustfmt::skip]
+        let user_snippet = indoc!("
+            (define-public (get-one) (ok u2))
+            (define-public (run) (contract-call? .caller go))
+        ");
+        let user = deploy_snippet(&session, user_snippet, Some("user"), &mut contracts);
+
+        let dependencies =
+            ASTDependencyDetector::detect_dependencies(&contracts, &BTreeMap::new()).unwrap();
+        let contract_epochs = HashMap::from([
+            (callee, StacksEpochId::Epoch21),
+            (implementation.clone(), StacksEpochId::Epoch21),
+            (caller.clone(), StacksEpochId::Epoch21),
+            (user.clone(), StacksEpochId::Epoch24),
+        ]);
+        let ordered = ASTDependencyDetector::order_contracts(&dependencies, &contract_epochs)
+            .expect("a discarded data edge must not be epoch-checked");
+        let position = |id| ordered.iter().position(|c| *c == id).unwrap();
+        assert!(position(&implementation) < position(&caller));
+        assert!(position(&caller) < position(&user));
+    }
 }
