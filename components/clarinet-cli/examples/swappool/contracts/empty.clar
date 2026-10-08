@@ -24,6 +24,8 @@
 
 ;; read only functions
 ;;
+(define-read-only (is-pool-paused)
+  (contract-call? 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.amm-swap-pool-v1-1 is-paused))
 
 ;; private functions
 ;;

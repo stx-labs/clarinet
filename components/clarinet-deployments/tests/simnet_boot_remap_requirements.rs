@@ -45,6 +45,7 @@ const REQUIREMENT_STACKER: &str = r#"
             { version: 0x00, hashbytes: 0x0101010101010101010101010101010101010101 }
             burn-block-height
             u1)))
+(define-read-only (ping) true)
 "#;
 
 const REQUIREMENT_WRITER: &str = r#"
@@ -57,6 +58,7 @@ const REQUIREMENT_WRITER: &str = r#"
     (contract-call? 'SP000000000000000000002Q6VF78.cost-voting withdraw-votes u0 u100))
 (define-read-only (votes)
     (contract-call? 'SP000000000000000000002Q6VF78.cost-voting get-principal-votes tx-sender u0))
+(define-read-only (ping) true)
 "#;
 
 const PROJECT_READER: &str = r#"
@@ -64,9 +66,30 @@ const PROJECT_READER: &str = r#"
     (contract-call? 'SP000000000000000000002Q6VF78.cost-voting get-proposal u0))
 "#;
 
+/// Epoch the requirements were published in, as written to their cache metadata.
+#[derive(Clone, Copy)]
+struct RequirementEpoch {
+    epoch: &'static str,
+    clarity_version: u8,
+}
+
+const EPOCH_2_4: RequirementEpoch = RequirementEpoch {
+    epoch: "2.4",
+    clarity_version: 2,
+};
+
+const EPOCH_4_0: RequirementEpoch = RequirementEpoch {
+    epoch: "4.0",
+    clarity_version: 4,
+};
+
 fn write_project(
     root: &Path,
     requirement_deployer: &str,
+    RequirementEpoch {
+        epoch,
+        clarity_version,
+    }: RequirementEpoch,
     project: &[(&str, &str)],
     requirements: &[(&str, &str)],
 ) {
@@ -74,21 +97,28 @@ fn write_project(
     fs::create_dir_all(root.join("contracts")).unwrap();
     fs::create_dir_all(root.join(".cache/requirements")).unwrap();
 
-    let requirement_ids = requirements
+    // Requirements are only loaded when a project contract references them.
+    let requirement_users = requirements.iter().map(|(name, _)| {
+        let source = format!(
+            "(define-read-only (ping) (contract-call? '{requirement_deployer}.{name} ping))\n"
+        );
+        (format!("uses-{name}"), source, epoch, clarity_version)
+    });
+    let project = project
         .iter()
-        .map(|(name, _)| format!("{{ contract_id = \"{requirement_deployer}.{name}\" }}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+        .map(|(name, source)| (name.to_string(), source.to_string(), "2.4", 2))
+        .chain(requirement_users)
+        .collect::<Vec<_>>();
 
     let project_entries = project
         .iter()
-        .map(|(name, _)| {
+        .map(|(name, _, epoch, clarity_version)| {
             formatdoc!(
                 r#"
                 [contracts.{name}]
                 path = "contracts/{name}.clar"
-                clarity_version = 2
-                epoch = 2.4
+                clarity_version = {clarity_version}
+                epoch = {epoch}
                 "#
             )
         })
@@ -102,7 +132,6 @@ fn write_project(
         description = ""
         telemetry = false
         cache_dir = "./.cache"
-        requirements = [{requirement_ids}]
 
         {project_entries}
     "#);
@@ -121,7 +150,7 @@ fn write_project(
     fs::write(root.join("Clarinet.toml"), manifest).unwrap();
     fs::write(root.join("settings/Devnet.toml"), devnet_settings).unwrap();
 
-    for (name, source) in project {
+    for (name, source, ..) in &project {
         fs::write(root.join(format!("contracts/{name}.clar")), source).unwrap();
     }
 
@@ -130,7 +159,10 @@ fn write_project(
         fs::write(root.join(format!("{stem}.clar")), source).unwrap();
         fs::write(
             root.join(format!("{stem}.json")),
-            r#"{"epoch":"Epoch24","clarity_version":"Clarity2"}"#,
+            format!(
+                r#"{{"epoch":"Epoch{}","clarity_version":"Clarity{clarity_version}"}}"#,
+                epoch.replace('.', "")
+            ),
         )
         .unwrap();
     }
@@ -143,16 +175,23 @@ struct Project {
 
 impl Project {
     fn new(project: &[(&str, &str)], requirements: &[(&str, &str)]) -> Self {
-        Self::with_requirement_deployer(REQUIREMENT_DEPLOYER, project, requirements)
+        Self::with_requirement_deployer(REQUIREMENT_DEPLOYER, EPOCH_2_4, project, requirements)
     }
 
     fn with_requirement_deployer(
         requirement_deployer: &str,
+        requirement_epoch: RequirementEpoch,
         project: &[(&str, &str)],
         requirements: &[(&str, &str)],
     ) -> Self {
         let temp_dir = TempDir::new().unwrap();
-        write_project(temp_dir.path(), requirement_deployer, project, requirements);
+        write_project(
+            temp_dir.path(),
+            requirement_deployer,
+            requirement_epoch,
+            project,
+            requirements,
+        );
 
         let manifest =
             ProjectManifest::from_location(&temp_dir.path().join("Clarinet.toml"), true).unwrap();
@@ -287,6 +326,7 @@ async fn a_testnet_requirement_is_published_verbatim_and_locks_stx() {
     let source = REQUIREMENT_STACKER.replace(BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS);
     let project = Project::with_requirement_deployer(
         TESTNET_REQUIREMENT_DEPLOYER,
+        EPOCH_2_4,
         &[],
         &[("stacker", &source)],
     );
@@ -376,6 +416,9 @@ async fn a_legacy_plan_still_rewrites_a_requirement() {
     for batch in deployment.plan.batches.iter_mut() {
         for tx in batch.transactions.iter_mut() {
             if let TransactionSpecification::EmulatedContractPublish(spec) = tx {
+                if spec.contract_name.as_str() != "stacker" {
+                    continue;
+                }
                 spec.remap_principals.clear();
                 spec.source = REQUIREMENT_STACKER.to_string();
             }
@@ -628,6 +671,7 @@ const REQUIREMENT_STAKER_V5: &str = r#"
     (restrict-assets? tx-sender ((with-stacking allowance))
         (try! (contract-call? 'SP000000000000000000002Q6VF78.pox-5 stake
             signer amount u1 burn-block-height none))))
+(define-read-only (ping) true)
 "#;
 
 // Grant and registration must originate from the manager, not the test wallet.
@@ -645,25 +689,19 @@ const REQUIREMENT_SIGNER: &str = r#"
 (define-read-only (grant-hash)
     (contract-call? 'SP000000000000000000002Q6VF78.pox-5 get-signer-grant-message-hash
         'SP2X0TZ59D5SZ8ACQ6YMCHHNR2ZN51Z32E2CJ173.signer u1))
+(define-read-only (ping) true)
 "#;
 
 async fn pox5_requirement_session() -> Session {
-    let project = Project::new(
+    let project = Project::with_requirement_deployer(
+        REQUIREMENT_DEPLOYER,
+        EPOCH_4_0,
         &[],
         &[
             ("signer", REQUIREMENT_SIGNER),
             ("staker", REQUIREMENT_STAKER_V5),
         ],
     );
-    for name in ["signer", "staker"] {
-        fs::write(
-            project.manifest.root_dir.join(format!(
-                ".cache/requirements/{REQUIREMENT_DEPLOYER}.{name}.json"
-            )),
-            r#"{"epoch":"Epoch40","clarity_version":"Clarity4"}"#,
-        )
-        .unwrap();
-    }
     let mut session = project.deployed_session().await;
     let signer = format!("{REQUIREMENT_DEPLOYER}.signer");
     // Ask the requirement for the hash so setup uses the same PoX copy as stake.

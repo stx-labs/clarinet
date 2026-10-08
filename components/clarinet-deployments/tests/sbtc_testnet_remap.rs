@@ -34,7 +34,7 @@ const OTHER_DEPLOYER: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9";
 /// address, not the body, so a dependency-free contract keeps the test fast.
 const REQUIREMENT_SOURCE: &str = "(define-read-only (get-one) (ok u1))";
 
-/// Write a minimal project whose only requirement is `contract_id`.
+/// Write a minimal project whose only contract calls `contract_id`.
 fn write_project(root: &Path, contract_id: &str) {
     fs::create_dir_all(root.join("settings")).unwrap();
     fs::create_dir_all(root.join("contracts")).unwrap();
@@ -47,8 +47,9 @@ fn write_project(root: &Path, contract_id: &str) {
         description = ""
         telemetry = false
 
-        [[project.requirements]]
-        contract_id = "{contract_id}"
+        [contracts.caller]
+        path = "contracts/caller.clar"
+        epoch = "latest"
     "#);
 
     #[rustfmt::skip]
@@ -63,6 +64,11 @@ fn write_project(root: &Path, contract_id: &str) {
 
     fs::write(root.join("Clarinet.toml"), manifest).unwrap();
     fs::write(root.join("settings/Testnet.toml"), testnet_settings).unwrap();
+    fs::write(
+        root.join("contracts/caller.clar"),
+        format!("(define-read-only (one) (contract-call? '{contract_id} get-one))\n"),
+    )
+    .unwrap();
 }
 
 /// Serve `deployer.contract_name` from a mock API so the test stays offline.

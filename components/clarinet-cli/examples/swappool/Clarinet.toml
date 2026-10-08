@@ -5,9 +5,6 @@ authors = []
 telemetry = false
 cache_dir = './.cache'
 
-[[project.requirements]]
-contract_id = 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.amm-swap-pool-v1-1'
-
 [contracts.empty]
 path = 'contracts/empty.clar'
 clarity_version = 6

@@ -44,13 +44,6 @@ pub struct ProjectConfigFile {
     /// Enable or disable telemetry
     #[serde(default)]
     telemetry: Option<bool>,
-    /// External contract dependencies
-    #[serde(default)]
-    #[cfg_attr(
-        feature = "json_schema",
-        schemars(schema_with = "schema::requirements_schema")
-    )]
-    requirements: Option<TomlValue>,
     /// List of boot contracts to include
     #[serde(default)]
     boot_contracts: Option<Vec<String>>,
@@ -197,7 +190,6 @@ pub struct ProjectConfig {
     pub authors: Vec<String>,
     pub description: String,
     pub telemetry: bool,
-    pub requirements: Option<Vec<RequirementConfig>>,
     #[serde(rename = "cache_dir")]
     pub cache_location: PathBuf,
     #[serde(skip_deserializing)]
@@ -221,9 +213,6 @@ impl Serialize for ProjectConfig {
         map.serialize_entry("authors", &self.authors)?;
         map.serialize_entry("telemetry", &self.telemetry)?;
         map.serialize_entry("cache_dir", &self.cache_location.to_string_lossy())?;
-        if self.requirements.is_some() {
-            map.serialize_entry("requirements", &self.requirements)?;
-        }
         if !self.override_boot_contracts_source.is_empty() {
             let paths: BTreeMap<&str, &str> = self
                 .override_boot_contracts_source
@@ -234,13 +223,6 @@ impl Serialize for ProjectConfig {
         }
         map.end()
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-pub struct RequirementConfig {
-    /// Contract identifier (e.g., SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait)
-    pub contract_id: String,
 }
 
 impl ProjectManifest {
@@ -416,7 +398,6 @@ impl ProjectManifest {
 
         let project = ProjectConfig {
             name: project_name,
-            requirements: None,
             description: project_manifest_file
                 .project
                 .description
@@ -438,19 +419,6 @@ impl ProjectManifest {
         };
         let mut config_contracts = BTreeMap::new();
         let mut contracts_settings = HashMap::new();
-        let mut config_requirements: Vec<RequirementConfig> = Vec::new();
-
-        if let Some(TomlValue::Array(requirements)) = project_manifest_file.project.requirements {
-            for link_settings in requirements.iter() {
-                if let TomlValue::Table(link_settings) = link_settings {
-                    let contract_id = match link_settings.get("contract_id") {
-                        Some(TomlValue::String(contract_id)) => contract_id.to_string(),
-                        _ => continue,
-                    };
-                    config_requirements.push(RequirementConfig { contract_id });
-                }
-            }
-        };
 
         if let Some(TomlValue::Table(contracts)) = project_manifest_file.contracts {
             for (contract_name, contract_settings) in contracts.iter() {
@@ -502,7 +470,6 @@ impl ProjectManifest {
 
         config.contracts = config_contracts;
         config.contracts_settings = contracts_settings;
-        config.project.requirements = Some(config_requirements);
         Ok(config)
     }
 

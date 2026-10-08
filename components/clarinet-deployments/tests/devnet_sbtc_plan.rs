@@ -15,15 +15,10 @@ use indoc::formatdoc;
 use tempfile::TempDir;
 
 /// Write a project with a single contract, the way `clarinet new` followed by
-/// `clarinet contract new` would, plus the given `[[project.requirements]]`.
-fn write_project(root: &Path, requirements: &[&str]) {
+/// `clarinet contract new` would, with the given source.
+fn write_project(root: &Path, source: &str) {
     fs::create_dir_all(root.join("settings")).unwrap();
     fs::create_dir_all(root.join("contracts")).unwrap();
-
-    let requirements: String = requirements
-        .iter()
-        .map(|id| format!("\n[[project.requirements]]\ncontract_id = \"{id}\"\n"))
-        .collect();
 
     #[rustfmt::skip]
     let manifest = formatdoc!(r#"
@@ -32,7 +27,7 @@ fn write_project(root: &Path, requirements: &[&str]) {
         authors = []
         description = ""
         telemetry = false
-        {requirements}
+
         [contracts.noop]
         path = "contracts/noop.clar"
         epoch = "latest"
@@ -52,16 +47,12 @@ fn write_project(root: &Path, requirements: &[&str]) {
 
     fs::write(root.join("Clarinet.toml"), manifest).unwrap();
     fs::write(root.join("settings/Devnet.toml"), devnet_settings).unwrap();
-    fs::write(
-        root.join("contracts/noop.clar"),
-        "(define-read-only (noop) u1)\n",
-    )
-    .unwrap();
+    fs::write(root.join("contracts/noop.clar"), source).unwrap();
 }
 
-async fn published_requirements(requirements: &[&str]) -> Vec<String> {
+async fn published_requirements(source: &str) -> Vec<String> {
     let temp_dir = TempDir::new().unwrap();
-    write_project(temp_dir.path(), requirements);
+    write_project(temp_dir.path(), source);
 
     let manifest =
         ProjectManifest::from_location(&temp_dir.path().join("Clarinet.toml"), false).unwrap();
@@ -101,19 +92,21 @@ fn sbtc_contract_ids() -> Vec<String> {
 #[tokio::test]
 async fn devnet_plan_publishes_every_sbtc_contract() {
     assert_eq!(
-        published_requirements(&[]).await,
+        published_requirements("(define-read-only (noop) u1)\n").await,
         sbtc_contract_ids(),
         "a stock devnet plan must publish the sBTC contracts, in dependency order"
     );
 }
 
 #[tokio::test]
-async fn devnet_plan_publishes_explicit_sbtc_requirement_once() {
-    let sbtc_token = format!("{SBTC_MAINNET_ADDRESS}.sbtc-token");
+async fn devnet_plan_publishes_referenced_sbtc_contract_once() {
+    let source = format!(
+        "(define-read-only (noop) (contract-call? '{SBTC_MAINNET_ADDRESS}.sbtc-token get-name))\n"
+    );
 
     assert_eq!(
-        published_requirements(&[&sbtc_token]).await,
+        published_requirements(&source).await,
         sbtc_contract_ids(),
-        "an explicit sBTC requirement must not publish any sBTC contract twice"
+        "a referenced sBTC contract must not be published twice"
     );
 }

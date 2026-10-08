@@ -31,9 +31,7 @@ pub use network_manifest::{
     DEFAULT_STACKS_EXPLORER_IMAGE, DEFAULT_STACKS_MINER_MNEMONIC, DEFAULT_STACKS_NODE_IMAGE,
     DEFAULT_STACKS_SIGNER_IMAGE,
 };
-pub use project_manifest::{
-    ProjectManifest, ProjectManifestFile, RequirementConfig, INVALID_CLARITY_VERSION,
-};
+pub use project_manifest::{ProjectManifest, ProjectManifestFile, INVALID_CLARITY_VERSION};
 #[cfg(target_arch = "wasm32")]
 pub use wasm_fs_accessor::WASMFileSystemAccessor;
 

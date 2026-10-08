@@ -10,8 +10,8 @@ Clarinet is the fastest way to build, test, and deploy smart contracts on the St
 gives you a local devnet, REPL, testing framework, and debugging tools to ship high-quality Clarity
 code with confidence.
 
-- 🧑‍💻 **Leverage a powerful CLI:** Create new projects, manage your smart contracts and their
-  dependencies using clarinet requirements, and interact with your code through the built-in REPL.
+- 🧑‍💻 **Leverage a powerful CLI:** Create new projects, manage your smart contracts (on-chain
+  dependencies are detected automatically), and interact with your code through the built-in REPL.
 
 - 🧪 **Write unit tests with the SDK:** Use the Clarinet SDK to write unit tests in a familiar JS
   environment and validate contract behavior.
