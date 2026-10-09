@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use clarity::types::StacksEpochId;
+use indoc::indoc;
+
 use crate::repl::session::Session;
 use crate::repl::SessionSettings;
 
@@ -912,4 +915,191 @@ fn multiple_test_files() {
         .join("\n"),
         cov
     );
+}
+
+// names and types are never evaluated, so they are counted with their call
+#[test]
+fn syntax_lines_count_with_their_call() {
+    let mut session = Session::new(SessionSettings::default());
+    session.enable_coverage_hook();
+    session.update_epoch(StacksEpochId::Epoch40);
+    session.set_test_name("test_scenario".to_string());
+
+    let callee = "(define-public (callee (a uint)) (ok a))";
+    let contract = indoc! {"
+        (define-data-var counter uint u0)
+        (define-public (call)
+          (contract-call?
+            .contract-0
+            callee
+            u1
+          )
+        )
+        (define-read-only (decode (b (buff 8)))
+          (from-consensus-buff? {
+            max-fee: uint
+          } b)
+        )
+        (define-read-only (bindings)
+          (let (
+            (x
+              u1)
+          )
+            (get
+              a
+              {
+                a:
+                  x
+              })
+          )
+        )
+        (define-read-only (data)
+          (var-get
+            counter)
+        )
+        (define-read-only (bounded (l (list 10 uint)))
+          (as-max-len?
+            l
+            u5)
+        )
+        (define-public (owned)
+          (restrict-assets? tx-sender (
+            (with-stx
+              u1)
+          )
+            u1)
+        )
+        (define-public (unsafe)
+          (as-contract? (
+            (with-all-assets-unsafe)
+          )
+            u1)
+        )
+    "};
+    session.eval(callee.into(), false).unwrap();
+    session.eval(contract.into(), false).unwrap();
+    for args in [
+        "call",
+        "decode 0x00",
+        "bindings",
+        "data",
+        "bounded (list u1)",
+        "owned",
+        "unsafe",
+    ] {
+        let snippet = format!("(contract-call? .contract-1 {args})");
+        session.eval(snippet, false).unwrap();
+    }
+
+    let (contract_id, contract) = session.contracts.pop_last().unwrap();
+    let asts = BTreeMap::from([(contract_id.clone(), contract.ast)]);
+    let paths = BTreeMap::from([(contract_id.name.to_string(), "/contract-0.clar".into())]);
+    let cov = session.collect_lcov_content(&asts, &paths);
+
+    let expect = get_expected_report(
+        [
+            "FN:2,call",
+            "FN:9,decode",
+            "FN:14,bindings",
+            "FN:27,data",
+            "FN:31,bounded",
+            "FN:36,owned",
+            "FN:43,unsafe",
+            "FNDA:1,bindings",
+            "FNDA:1,bounded",
+            "FNDA:1,call",
+            "FNDA:1,data",
+            "FNDA:1,decode",
+            "FNDA:1,owned",
+            "FNDA:1,unsafe",
+            "FNF:7",
+            "FNH:7",
+            "DA:2,1",
+            "DA:3,1",
+            "DA:4,1",
+            "DA:5,1",
+            "DA:6,1",
+            "DA:9,1",
+            "DA:10,1",
+            "DA:11,1",
+            "DA:12,1",
+            "DA:14,1",
+            "DA:15,1",
+            "DA:16,1",
+            "DA:17,1",
+            "DA:19,1",
+            "DA:20,1",
+            "DA:22,1",
+            "DA:23,1",
+            "DA:27,1",
+            "DA:28,1",
+            "DA:29,1",
+            "DA:31,1",
+            "DA:32,1",
+            "DA:33,1",
+            "DA:34,1",
+            "DA:36,1",
+            "DA:37,1",
+            "DA:38,1",
+            "DA:39,1",
+            "DA:41,1",
+            "DA:43,1",
+            "DA:44,1",
+            "DA:45,1",
+            "DA:47,1",
+            "BRF:0",
+            "BRH:0",
+        ]
+        .join("\n"),
+    );
+    assert_eq!(cov, expect);
+}
+
+// a name's line only runs when its value does, so an early exit leaves it unhit
+#[test]
+fn syntax_lines_do_not_mask_skipped_values() {
+    let contract = indoc! {"
+        (define-public (bindings (x (optional uint)))
+          (let (
+            (a (unwrap! x (err u1)))
+            (b a)
+          )
+            (ok b)
+          )
+        )
+        (define-public (keys (x (optional uint)))
+          (ok {
+            a: (unwrap! x (err u1)),
+            b: u1
+          })
+        )
+    "};
+    let snippets = ["bindings", "keys"]
+        .map(|f| format!("(contract-call? .contract-0 {f} none)"))
+        .to_vec();
+    let cov = get_coverage_report(contract, snippets);
+
+    let expect = get_expected_report(
+        [
+            "FN:1,bindings",
+            "FN:9,keys",
+            "FNDA:1,bindings",
+            "FNDA:1,keys",
+            "FNF:2",
+            "FNH:2",
+            "DA:1,1",
+            "DA:2,1",
+            "DA:3,1",
+            "DA:4,0",
+            "DA:6,0",
+            "DA:9,1",
+            "DA:10,1",
+            "DA:11,1",
+            "DA:12,0",
+            "BRF:0",
+            "BRH:0",
+        ]
+        .join("\n"),
+    );
+    assert_eq!(cov, expect);
 }
