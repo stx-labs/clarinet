@@ -36,13 +36,28 @@ impl ClarinetRC {
         }
 
         // Keep backwards compatibility with ENV var
-        let enable_hints = match env::var("CLARINET_DISABLE_HINTS") {
-            Ok(v) => Some(v == "1"),
-            Err(_) => None,
-        };
+        let disable_hints = env::var("CLARINET_DISABLE_HINTS").ok();
         Self {
-            enable_hints,
+            enable_hints: enable_hints_from_env(disable_hints.as_deref()),
             ..Default::default()
         }
+    }
+}
+
+/// Hints are disabled only by `CLARINET_DISABLE_HINTS=1`, as before the setting moved to `clarinetrc.toml`
+fn enable_hints_from_env(disable_hints: Option<&str>) -> Option<bool> {
+    disable_hints.map(|v| v != "1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disable_hints_env_var() {
+        assert_eq!(enable_hints_from_env(None), None);
+        assert_eq!(enable_hints_from_env(Some("1")), Some(false));
+        assert_eq!(enable_hints_from_env(Some("0")), Some(true));
+        assert_eq!(enable_hints_from_env(Some("")), Some(true));
     }
 }
