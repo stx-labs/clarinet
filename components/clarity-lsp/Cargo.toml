@@ -61,10 +61,8 @@ demangle-name-section = true
 dwarf-debug-info = false
 
 [package.metadata.wasm-pack.profile.release]
-# -04  aggressively optimizes for speed
-wasm-opt = ['-O4']
-# -0z aggressively optimizes for size
-# wasm-opt = ['-Oz']
+# -Oz is smaller than -O4 and no slower for the LSP
+wasm-opt = ['-Oz']
 
 [package.metadata.wasm-pack.profile.release.wasm-bindgen]
 debug-js-glue = false

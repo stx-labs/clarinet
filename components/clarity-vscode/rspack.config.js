@@ -8,6 +8,13 @@ const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
 const PRODUCTION = process.env.NODE_ENV === "production";
 
+// Cargo settings for the LSP wasm, set here so wasm-pack inherits them.
+// Fat LTO with a single codegen unit makes the LSP both faster and smaller
+Object.assign(process.env, {
+  CARGO_PROFILE_RELEASE_LTO: "fat",
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1",
+});
+
 /** @type RspackConfig["mode"] */
 const mode = PRODUCTION ? "production" : "none";
 /** @type RspackConfig["devtool"] */
