@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
 use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarinet_files::{paths, FileAccessor};
@@ -26,20 +29,101 @@ impl Default for ContractMetadata {
     }
 }
 
+/// Bounds a contract fetch, so an unreachable API can't stall plan generation.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a failed lookup of a detected dependency is remembered.
+const UNAVAILABLE_TTL_SECS: f64 = 300.0;
+
+/// Failed lookups of detected dependencies, keyed by API and contract, with the
+/// time of the failure in seconds.
+static UNAVAILABLE: LazyLock<Mutex<HashMap<(Option<String>, QualifiedContractIdentifier), f64>>> =
+    LazyLock::new(Mutex::default);
+
+/// Shared so contract fetches reuse connections.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+fn now_secs() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() / 1000.0
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+    }
+}
+
+/// [`retrieve_contract`] for a dependency detected in the project's contracts
+/// rather than declared. A failed fetch is remembered for a few minutes, so a
+/// reference that can't be resolved doesn't hit the network again on every
+/// plan generation (each LSP rebuild, each `clarinet check`).
+pub async fn retrieve_detected_contract(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+    file_accessor: &Option<&dyn FileAccessor>,
+    api_base_url: Option<&str>,
+) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
+    if let Some(cached) = read_cached_contract(contract_id, cache_location, file_accessor).await {
+        return cached;
+    }
+
+    let key = (api_base_url.map(str::to_string), contract_id.clone());
+    let failed_at = UNAVAILABLE
+        .lock()
+        .ok()
+        .and_then(|failed| failed.get(&key).copied());
+    if failed_at.is_some_and(|failed_at| now_secs() - failed_at < UNAVAILABLE_TTL_SECS) {
+        return Err(format!("contract {contract_id} was recently unavailable"));
+    }
+
+    let contract =
+        fetch_and_cache_contract(contract_id, cache_location, file_accessor, api_base_url).await;
+    if let Ok(mut failed) = UNAVAILABLE.lock() {
+        match contract {
+            Ok(_) => failed.remove(&key),
+            Err(_) => failed.insert(key, now_secs()),
+        };
+    }
+    contract
+}
+
 pub async fn retrieve_contract(
     contract_id: &QualifiedContractIdentifier,
     cache_location: &Path,
     file_accessor: &Option<&dyn FileAccessor>,
     api_base_url: Option<&str>,
 ) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
-    let contract_deployer = contract_id.issuer.to_address();
-    let contract_name = contract_id.name.to_string();
+    match read_cached_contract(contract_id, cache_location, file_accessor).await {
+        Some(cached) => cached,
+        None => {
+            fetch_and_cache_contract(contract_id, cache_location, file_accessor, api_base_url).await
+        }
+    }
+}
 
+/// The source and metadata cache locations of a requirement.
+fn cache_locations(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+) -> (PathBuf, PathBuf) {
     let requirements_dir = cache_location.join("requirements");
-    let contract_location =
-        requirements_dir.join(format!("{contract_deployer}.{contract_name}.clar"));
-    let metadata_location =
-        requirements_dir.join(format!("{contract_deployer}.{contract_name}.json"));
+    let file_stem = format!("{}.{}", contract_id.issuer.to_address(), contract_id.name);
+    (
+        requirements_dir.join(format!("{file_stem}.clar")),
+        requirements_dir.join(format!("{file_stem}.json")),
+    )
+}
+
+/// The contract from the requirements cache, or `None` if it isn't cached.
+async fn read_cached_contract(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+    file_accessor: &Option<&dyn FileAccessor>,
+) -> Option<Result<(String, StacksEpochId, ClarityVersion, PathBuf), String>> {
+    let (contract_location, metadata_location) = cache_locations(contract_id, cache_location);
 
     let (contract_source, metadata_json) = match file_accessor {
         None => (
@@ -56,23 +140,41 @@ pub async fn retrieve_contract(
         ),
     };
 
-    if let (Ok(contract_source), Ok(metadata_json)) = (contract_source, metadata_json) {
-        let metadata: ContractMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| format!("Unable to parse metadata file: {e}"))?;
+    let (Ok(contract_source), Ok(metadata_json)) = (contract_source, metadata_json) else {
+        return None;
+    };
+    log::debug!("requirement cache hit: {contract_id}");
+    Some(
+        serde_json::from_str(&metadata_json)
+            .map_err(|e| format!("Unable to parse metadata file: {e}"))
+            .map(|metadata: ContractMetadata| {
+                (
+                    contract_source,
+                    metadata.epoch,
+                    metadata.clarity_version,
+                    contract_location,
+                )
+            }),
+    )
+}
 
-        return Ok((
-            contract_source,
-            metadata.epoch,
-            metadata.clarity_version,
-            contract_location,
-        ));
-    }
+/// Fetch the contract from the API and write it to the requirements cache.
+async fn fetch_and_cache_contract(
+    contract_id: &QualifiedContractIdentifier,
+    cache_location: &Path,
+    file_accessor: &Option<&dyn FileAccessor>,
+    api_base_url: Option<&str>,
+) -> Result<(String, StacksEpochId, ClarityVersion, PathBuf), String> {
+    let contract_deployer = contract_id.issuer.to_address();
+    let contract_name = contract_id.name.to_string();
+    let (contract_location, metadata_location) = cache_locations(contract_id, cache_location);
 
     let is_mainnet = StacksAddress::from_string(&contract_deployer)
         .unwrap()
         .is_mainnet();
 
     let api_base_url = api_base_url.unwrap_or_else(|| default_api_base_url(is_mainnet));
+    log::debug!("fetching requirement {contract_deployer}.{contract_name} from {api_base_url}");
     let contract = fetch_contract(api_base_url, &contract_deployer, &contract_name).await?;
 
     let epoch = epoch_for_height(is_mainnet, contract.block_height);
@@ -147,7 +249,10 @@ async fn fetch_contract(
     name: &str,
 ) -> Result<Contract, String> {
     let url = format!("{api_base_url}/extended/v1/contract/{deployer}.{name}");
-    let response = reqwest::get(&url)
+    let response = CLIENT
+        .get(&url)
+        .timeout(FETCH_TIMEOUT)
+        .send()
         .await
         .map_err(|e| format!("Unable to retrieve contract {url}: {e}"))?;
 
@@ -282,5 +387,86 @@ mod tests {
 
         assert_eq!(source2, TEST_SOURCE);
         assert_eq!(clarity_version2, ClarityVersion::Clarity3);
+    }
+
+    #[tokio::test]
+    async fn test_detected_contract_failure_is_remembered() {
+        let mut server = Server::new_async().await;
+        let not_found = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(404)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let contract_id =
+            QualifiedContractIdentifier::parse(&format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"))
+                .unwrap();
+        for _ in 0..2 {
+            let result = retrieve_detected_contract(
+                &contract_id,
+                cache_dir.path(),
+                &None,
+                Some(&server.url()),
+            )
+            .await;
+            assert!(result.is_err());
+        }
+
+        not_found.assert_async().await;
+    }
+
+    // PR #2508 review, finding #25: "A failed lookup hides subsequently
+    // available local sources".
+    //
+    // The negative cache is checked before the local cache, so once a lookup
+    // fails, a copy that later lands in the cache (written by an explicit
+    // retrieval, or by another process sharing the cache) is ignored until the
+    // failure expires.
+    #[tokio::test]
+    async fn test_detected_contract_failure_does_not_hide_cached_source() {
+        let mut server = Server::new_async().await;
+        let not_found = server
+            .mock(
+                "GET",
+                format!("/extended/v1/contract/{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}").as_str(),
+            )
+            .with_status(404)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let contract_id =
+            QualifiedContractIdentifier::parse(&format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}"))
+                .unwrap();
+        let result =
+            retrieve_detected_contract(&contract_id, cache_dir.path(), &None, Some(&server.url()))
+                .await;
+        assert!(result.is_err());
+        not_found.assert_async().await;
+
+        let requirements_dir = cache_dir.path().join("requirements");
+        std::fs::create_dir_all(&requirements_dir).unwrap();
+        std::fs::write(
+            requirements_dir.join(format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}.clar")),
+            TEST_SOURCE,
+        )
+        .unwrap();
+        std::fs::write(
+            requirements_dir.join(format!("{TEST_DEPLOYER}.{TEST_CONTRACT_NAME}.json")),
+            serde_json::to_string(&ContractMetadata::default()).unwrap(),
+        )
+        .unwrap();
+
+        let (source, ..) =
+            retrieve_detected_contract(&contract_id, cache_dir.path(), &None, Some(&server.url()))
+                .await
+                .expect("the cached copy should be used despite the earlier failure");
+        assert_eq!(source, TEST_SOURCE);
     }
 }

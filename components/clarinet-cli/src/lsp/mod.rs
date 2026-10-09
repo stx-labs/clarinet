@@ -170,32 +170,78 @@ fn test_opening_counter_manifest_should_return_fresh_analysis() {
 
 #[test]
 fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
+    use std::fs;
     use std::sync::mpsc::channel;
 
     use clarity_lsp::backend::LspNotification;
     use crossbeam_channel::unbounded;
+    use indoc::indoc;
 
     use crate::lsp::native_bridge::LspResponse;
+
+    const REQUIREMENT_ID: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait";
+    const NFT_TRAIT: &str = indoc! {r#"
+        (define-trait nft-trait
+          (
+            (get-last-token-id () (response uint uint))
+            (get-token-uri (uint) (response (optional (string-ascii 256)) uint))
+            (get-owner (uint) (response (optional principal) uint))
+            (transfer (uint principal principal) (response bool uint))
+          )
+        )
+    "#};
+
+    let project = tempfile::tempdir().expect("Unable to create temporary project");
+    let contracts_dir = project.path().join("contracts");
+    let settings_dir = project.path().join("settings");
+    let requirements_dir = project.path().join(".cache").join("requirements");
+    fs::create_dir_all(&contracts_dir).expect("Unable to create contracts directory");
+    fs::create_dir_all(&settings_dir).expect("Unable to create settings directory");
+    fs::create_dir_all(&requirements_dir).expect("Unable to create requirements cache");
+    fs::write(
+        project.path().join("Clarinet.toml"),
+        include_str!("../../examples/simple-nft/Clarinet.toml"),
+    )
+    .expect("Unable to write manifest");
+    fs::write(
+        settings_dir.join("Devnet.toml"),
+        include_str!("../../examples/simple-nft/settings/Devnet.toml"),
+    )
+    .expect("Unable to write Devnet settings");
+    fs::write(
+        contracts_dir.join("simple-nft.clar"),
+        include_str!("../../examples/simple-nft/contracts/simple-nft.clar"),
+    )
+    .expect("Unable to write contract");
+    fs::write(
+        requirements_dir.join(format!("{REQUIREMENT_ID}.clar")),
+        NFT_TRAIT,
+    )
+    .expect("Unable to write cached requirement");
+    fs::write(
+        requirements_dir.join(format!("{REQUIREMENT_ID}.json")),
+        r#"{"epoch":"Epoch20","clarity_version":"Clarity1"}"#,
+    )
+    .expect("Unable to write cached requirement metadata");
 
     let (notification_tx, notification_rx) = unbounded();
     let (_request_tx, request_rx) = unbounded();
     let (response_tx, response_rx) = channel();
     native_bridge::spawn_language_server(notification_rx, request_rx, response_tx);
 
-    let mut manifest_location = std::env::current_dir().expect("Unable to get current dir");
-    manifest_location.push("examples");
-    manifest_location.push("simple-nft");
-    manifest_location.push("Clarinet.toml");
-
+    let manifest_location = project.path().join("Clarinet.toml");
     let _ = notification_tx.send(LspNotification::ManifestOpened(manifest_location));
     let response = response_rx.recv().expect("Unable to get response");
     let LspResponse::Notification(response) = response else {
         panic!("Unable to get response")
     };
-
-    assert_eq!(response.aggregated_diagnostics.len(), 1);
+    assert_eq!(
+        response.aggregated_diagnostics.len(),
+        1,
+        "unexpected LSP response: {response:?}"
+    );
     let (_, diags_0) = &response.aggregated_diagnostics[0];
-    // the counter project should emit 4 warnings and 4 notes coming from counter.clar
+    // The simple NFT project emits 4 warnings and 4 notes.
     assert_eq!(diags_0.len(), 8);
 }
 
