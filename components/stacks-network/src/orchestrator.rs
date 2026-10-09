@@ -46,57 +46,56 @@ struct StacksNodeEventObserversConfig<'a> {
     events_observer: &'a [StacksNodeEventObserver],
 }
 
-fn serialize_stacks_node_event_observers(
-    observers: &[StacksNodeEventObserver],
-) -> Result<String, String> {
-    if observers.is_empty() {
-        return Ok(String::new());
-    }
-
+fn serialize_stacks_node_event_observers(observers: &[StacksNodeEventObserver]) -> String {
+    // Endpoints and event keys are plain strings, which always have a TOML form.
     toml::to_string(&StacksNodeEventObserversConfig {
         events_observer: observers,
     })
-    .map_err(|e| format!("unable to serialize Stacks node event observers: {e:?}"))
+    .expect("event observers are strings and string arrays")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Every event observer the devnet stacks-node reports to: the signers, the orchestrator
+/// (docker-host), the stacks-api when enabled, and those configured in Devnet.toml.
+fn stacks_node_event_observers(
+    network_name: &str,
+    devnet_config: &DevnetConfig,
+) -> Vec<StacksNodeEventObserver> {
+    // the signer endpoints are
+    // `stacks-signer-0.<network>:30000`
+    // `stacks-signer-1.<network>:30001`
+    // ...
+    let mut observers: Vec<StacksNodeEventObserver> = (0..devnet_config.stacks_signers_keys.len())
+        .map(|i| StacksNodeEventObserver {
+            endpoint: format!("stacks-signer-{i}.{network_name}:{}", 30000 + i),
+            events_keys: vec![
+                "stackerdb".into(),
+                "block_proposal".into(),
+                "burn_blocks".into(),
+            ],
+        })
+        .collect();
 
-    #[test]
-    fn serializes_selective_stacks_node_event_observers() {
-        let observers = vec![
-            StacksNodeEventObserver {
-                endpoint: "host.docker.internal:8787".into(),
-                events_keys: vec!["burn_blocks".into(), "memtx".into()],
-            },
-            StacksNodeEventObserver {
-                endpoint: "host.docker.internal:8788".into(),
-                events_keys: vec![
-                    "ST000000000000000000002AMW42H.token::mint".into(),
-                    "ST000000000000000000002AMW42H.token.asset".into(),
-                ],
-            },
-        ];
+    // also used by the devnet observer instance
+    observers.push(StacksNodeEventObserver {
+        endpoint: format!(
+            "host.docker.internal:{}",
+            devnet_config.orchestrator_ingestion_port
+        ),
+        events_keys: vec!["*".into()],
+    });
 
-        let serialized = serialize_stacks_node_event_observers(&observers).unwrap();
-        let config = stackslib::config::ConfigFile::from_str(&serialized).unwrap();
-        let parsed = config.events_observer.unwrap();
-
-        assert_eq!(parsed.len(), 2);
-        for observer in observers {
-            let parsed_observer = parsed
-                .iter()
-                .find(|candidate| candidate.endpoint == observer.endpoint)
-                .unwrap();
-            assert_eq!(parsed_observer.events_keys, observer.events_keys);
-        }
+    if !devnet_config.disable_stacks_api {
+        observers.push(StacksNodeEventObserver {
+            endpoint: format!(
+                "stacks-api.{network_name}:{}",
+                devnet_config.stacks_api_events_port
+            ),
+            events_keys: vec!["*".into()],
+        });
     }
 
-    #[test]
-    fn omits_empty_stacks_node_event_observer_config() {
-        assert_eq!(serialize_stacks_node_event_observers(&[]).unwrap(), "");
-    }
+    observers.extend(devnet_config.stacks_node_events_observers.iter().cloned());
+    observers
 }
 
 #[derive(Debug)]
@@ -971,49 +970,9 @@ impl DevnetOrchestrator {
             ));
         }
 
-        for i in 0..devnet_config.stacks_signers_keys.len() {
-            // the endpoints are
-            // `stacks-signer-0.<network>:30000`
-            // `stacks-signer-1.<network>:30001`
-            // ...
-            stacks_conf.push_str(&formatdoc!(
-                r#"
-                [[events_observer]]
-                endpoint = "stacks-signer-{i}.{network_name}:{port}"
-                events_keys = ["stackerdb", "block_proposal", "burn_blocks"]
-                "#,
-                network_name = self.network_name,
-                port = 30000 + i,
-            ));
-        }
-
-        stacks_conf.push_str(&formatdoc!(
-            r#"
-            # Add orchestrator (docker-host) as an event observer
-            # Also used by the devnet observer instance
-            [[events_observer]]
-            endpoint = "host.docker.internal:{orchestrator_ingestion_port}"
-            events_keys = ["*"]
-            "#,
-            orchestrator_ingestion_port = devnet_config.orchestrator_ingestion_port,
-        ));
-
-        if !devnet_config.disable_stacks_api {
-            stacks_conf.push_str(&formatdoc!(
-                r#"
-                # Add stacks-api as an event observer
-                [[events_observer]]
-                endpoint = "stacks-api.{network_name}:{stacks_api_events_port}"
-                events_keys = ["*"]
-                "#,
-                network_name = self.network_name,
-                stacks_api_events_port = devnet_config.stacks_api_events_port,
-            ));
-        }
-
         stacks_conf.push_str(&serialize_stacks_node_event_observers(
-            &devnet_config.stacks_node_events_observers,
-        )?);
+            &stacks_node_event_observers(&self.network_name, devnet_config),
+        ));
 
         stacks_conf.push_str(&formatdoc!(
             r#"
@@ -2480,4 +2439,103 @@ pub async fn copy_snapshot_to_container(
     )));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_selective_stacks_node_event_observers() {
+        let observers = vec![
+            StacksNodeEventObserver {
+                endpoint: "host.docker.internal:8787".into(),
+                events_keys: vec!["burn_blocks".into(), "memtx".into()],
+            },
+            StacksNodeEventObserver {
+                endpoint: "host.docker.internal:8788".into(),
+                events_keys: vec![
+                    "ST000000000000000000002AMW42H.token::mint".into(),
+                    "ST000000000000000000002AMW42H.token.asset".into(),
+                ],
+            },
+        ];
+
+        let serialized = serialize_stacks_node_event_observers(&observers);
+        let config = stackslib::config::ConfigFile::from_str(&serialized).unwrap();
+        let parsed = config.events_observer.unwrap();
+
+        assert_eq!(parsed.len(), 2);
+        for observer in observers {
+            let parsed_observer = parsed
+                .iter()
+                .find(|candidate| candidate.endpoint == observer.endpoint)
+                .unwrap();
+            assert_eq!(parsed_observer.events_keys, observer.events_keys);
+        }
+    }
+
+    #[test]
+    fn serializes_every_devnet_event_observer() {
+        let devnet_config = DevnetConfig {
+            stacks_signers_keys: vec![StacksPrivateKey::random(), StacksPrivateKey::random()],
+            orchestrator_ingestion_port: 20445,
+            stacks_api_events_port: 3700,
+            stacks_node_events_observers: vec![StacksNodeEventObserver {
+                endpoint: "host.docker.internal:8787".into(),
+                events_keys: vec!["burn_blocks".into()],
+            }],
+            ..Default::default()
+        };
+
+        let serialized = serialize_stacks_node_event_observers(&stacks_node_event_observers(
+            "devnet",
+            &devnet_config,
+        ));
+        let config = stackslib::config::ConfigFile::from_str(&serialized).unwrap();
+        // the node keeps its observers in a set, so compare them in a fixed order
+        let mut parsed: Vec<_> = config
+            .events_observer
+            .unwrap()
+            .into_iter()
+            .map(|observer| (observer.endpoint, observer.events_keys))
+            .collect();
+        parsed.sort();
+
+        let signer_keys = vec![
+            "stackerdb".to_string(),
+            "block_proposal".to_string(),
+            "burn_blocks".to_string(),
+        ];
+        let mut expected = vec![
+            (
+                "stacks-signer-0.devnet:30000".to_string(),
+                signer_keys.clone(),
+            ),
+            ("stacks-signer-1.devnet:30001".to_string(), signer_keys),
+            (
+                "host.docker.internal:20445".to_string(),
+                vec!["*".to_string()],
+            ),
+            ("stacks-api.devnet:3700".to_string(), vec!["*".to_string()]),
+            (
+                "host.docker.internal:8787".to_string(),
+                vec!["burn_blocks".to_string()],
+            ),
+        ];
+        expected.sort();
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn leaves_out_the_stacks_api_observer_when_the_api_is_disabled() {
+        let devnet_config = DevnetConfig {
+            disable_stacks_api: true,
+            ..Default::default()
+        };
+        let observers = stacks_node_event_observers("devnet", &devnet_config);
+        assert!(observers
+            .iter()
+            .all(|observer| !observer.endpoint.starts_with("stacks-api.")));
+    }
 }
