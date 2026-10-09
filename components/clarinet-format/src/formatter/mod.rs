@@ -1582,14 +1582,24 @@ impl<'a> Aggregator<'a> {
                 )) => {
                     match string_data {
                         clarity::vm::types::CharType::ASCII(ascii_data) => {
-                            let content = String::from_utf8_lossy(&ascii_data.data);
-                            format!("\"{content}\"")
+                            // ASCIIData's Display emits escapes Clarity rejects, such as \'.
+                            let mut literal = String::with_capacity(ascii_data.data.len() + 2);
+                            literal.push('"');
+                            for &byte in &ascii_data.data {
+                                match byte {
+                                    b'\\' => literal.push_str("\\\\"),
+                                    b'"' => literal.push_str("\\\""),
+                                    b'\n' => literal.push_str("\\n"),
+                                    b'\r' => literal.push_str("\\r"),
+                                    b'\t' => literal.push_str("\\t"),
+                                    _ => literal.push(char::from(byte)),
+                                }
+                            }
+                            literal.push('"');
+                            literal
                         }
                         clarity::vm::types::CharType::UTF8(_) => {
                             // utf8 strings use the original source to preserve formatting
-                            // note: we could just apply this to both utf8
-                            // and ascii but format! is much faster than
-                            // using extract_expr_source
                             self.source
                                 .map(|source| extract_expr_source(pse, source))
                                 .filter(|extracted| !extracted.is_empty())
