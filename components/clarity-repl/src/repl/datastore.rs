@@ -272,6 +272,13 @@ impl ClarityDatastore {
         }
     }
 
+    /// Whether anything (data vars, maps, tokens, a contract) has been written
+    /// under `contract` in this session's local metadata.
+    pub fn has_local_metadata(&self, contract: &QualifiedContractIdentifier) -> bool {
+        let contract = contract.to_string();
+        self.metadata.keys().any(|(owner, _)| *owner == contract)
+    }
+
     pub fn as_analysis_db(&mut self) -> AnalysisDatabase<'_> {
         AnalysisDatabase::new(self)
     }

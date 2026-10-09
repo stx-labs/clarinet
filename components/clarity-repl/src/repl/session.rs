@@ -258,6 +258,10 @@ pub struct Session {
     pub interpreter: ClarityInterpreter,
     pub show_costs: bool,
     pub last_contract_call_trace: Option<String>,
+    /// Snippets that ran definitions without defining a function or trait. They
+    /// are not stored as contracts, yet their data vars, maps and tokens are
+    /// written under the name they ran as, so that name cannot be handed out again.
+    unsaved_definition_snippets: usize,
 
     coverage_hook: Option<CoverageHook>,
     logger_hook: Option<LoggerHook>,
@@ -302,6 +306,7 @@ impl Session {
             show_costs: false,
             settings,
             last_contract_call_trace: None,
+            unsaved_definition_snippets: 0,
 
             coverage_hook: None,
             logger_hook: None,
@@ -1020,7 +1025,7 @@ impl Session {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
-            name: format!("contract-{}", self.contracts.len()),
+            name: self.next_snippet_contract_name(),
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
@@ -1044,12 +1049,7 @@ impl Session {
             self.interpreter
                 .run_with_terms(&contract, None, cost_track, Some(hooks), &terms);
 
-        result.inspect(|result| {
-            if let EvaluationResult::Contract(contract_result) = &result.result {
-                self.contracts
-                    .insert(contract_identifier, contract_result.contract.clone());
-            }
-        })
+        result.inspect(|result| self.record_snippet_result(contract_identifier, result))
     }
 
     /// Evaluate a Clarity snippet in order to use it as Clarity function arguments
@@ -1071,7 +1071,7 @@ impl Session {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
-            name: format!("contract-{}", self.contracts.len()),
+            name: self.next_snippet_contract_name(),
             deployer: ContractDeployer::DefaultDeployer,
             clarity_version: ClarityVersion::default_for_epoch(current_epoch),
             epoch: Epoch::Specific(current_epoch),
@@ -1086,13 +1086,41 @@ impl Session {
 
         match result {
             Ok(result) => {
-                if let EvaluationResult::Contract(contract_result) = &result.result {
-                    self.contracts
-                        .insert(contract_identifier, contract_result.contract.clone());
-                };
+                self.record_snippet_result(contract_identifier, &result);
                 Ok(result)
             }
             Err(res) => Err(res.into()),
+        }
+    }
+
+    fn next_snippet_contract_name(&self) -> String {
+        format!(
+            "contract-{}",
+            self.contracts.len() + self.unsaved_definition_snippets
+        )
+    }
+
+    fn record_snippet_result(
+        &mut self,
+        contract_identifier: QualifiedContractIdentifier,
+        result: &ExecutionResult,
+    ) {
+        match &result.result {
+            EvaluationResult::Contract(contract_result) => {
+                self.contracts
+                    .insert(contract_identifier, contract_result.contract.clone());
+            }
+            // A snippet that defined a data var, map or token has written it under
+            // this name, so the name cannot be handed out again.
+            EvaluationResult::Snippet(_)
+                if self
+                    .interpreter
+                    .clarity_datastore
+                    .has_local_metadata(&contract_identifier) =>
+            {
+                self.unsaved_definition_snippets += 1;
+            }
+            EvaluationResult::Snippet(_) => {}
         }
     }
 
@@ -1839,6 +1867,73 @@ mod tests {
         assert!(!result.lint_diagnostics.is_empty());
         // Lint diagnostics should NOT be duplicated in execution_result.diagnostics
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn a_data_var_defined_in_a_snippet_can_be_defined_again() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings::default());
+        session
+            .eval("(define-data-var my-number uint u0)".into(), false)
+            .unwrap();
+        session
+            .eval("(define-data-var my-number uint u1)".into(), false)
+            .expect("each snippet runs under its own contract name");
+    }
+
+    #[test]
+    fn a_data_var_defined_in_a_snippet_does_not_block_a_contract_using_the_name() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings::default());
+        session
+            .eval("(define-data-var n uint u0)".into(), false)
+            .unwrap();
+
+        let snippet = "(define-data-var n uint u5) (define-read-only (get-n) (var-get n))";
+        let deployed = session
+            .eval(snippet.into(), false)
+            .expect("contract deploys");
+        let EvaluationResult::Contract(contract) = deployed.into_inner().result else {
+            panic!("expected a contract");
+        };
+        let id = contract.contract.contract_identifier;
+        assert_eq!(
+            run_session_snippet(&mut session, &format!("(contract-call? '{id} get-n)")),
+            Value::UInt(5)
+        );
+    }
+
+    #[test]
+    fn snippets_without_definitions_keep_the_contract_numbering() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings::default());
+        run_session_snippet(&mut session, "(+ 1 2)");
+
+        let deployed = session
+            .eval("(define-read-only (f) u1)".into(), false)
+            .unwrap();
+        let EvaluationResult::Contract(contract) = deployed.into_inner().result else {
+            panic!("expected a contract");
+        };
+        assert!(contract
+            .contract
+            .contract_identifier
+            .ends_with(".contract-0"));
+    }
+
+    #[test]
+    fn snippets_mentioning_define_in_strings_or_comments_keep_the_contract_numbering() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings::default());
+        run_session_snippet(&mut session, "(print \"(define-\")");
+        run_session_snippet(&mut session, ";; (define-data-var x uint u0)\n(+ 1 2)");
+
+        let deployed = session
+            .eval("(define-read-only (f) u1)".into(), false)
+            .unwrap();
+        let EvaluationResult::Contract(contract) = deployed.into_inner().result else {
+            panic!("expected a contract");
+        };
+        assert!(contract
+            .contract
+            .contract_identifier
+            .ends_with(".contract-0"));
     }
 
     #[track_caller]
