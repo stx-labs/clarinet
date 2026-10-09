@@ -9,7 +9,7 @@ const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 const PRODUCTION = process.env.NODE_ENV === "production";
 
 // Cargo settings for the LSP wasm, set here so wasm-pack inherits them.
-// The LSP favors speed: opt-level stays 3, LTO makes it faster and smaller
+// Fat LTO with a single codegen unit makes the LSP both faster and smaller
 Object.assign(process.env, {
   CARGO_PROFILE_RELEASE_LTO: "fat",
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1",
