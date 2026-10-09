@@ -536,15 +536,14 @@ impl ClarityBackingStore for ClarityDatastore {
                 return Ok(Some(data.clone()));
             }
 
+            // values at or below initial_height come from the remote chain, not local history
             let initial_height = self.remote_network_info.as_ref().unwrap().initial_height;
-            if current_height > initial_height {
-                if let Some((_, value)) = values_map.and_then(|data| {
-                    data.iter()
-                        .rev()
-                        .find(|(height, _)| height > &&initial_height && height <= &&current_height)
-                }) {
-                    return Ok(Some(value.clone()));
-                }
+            if let Some((_, value)) = values_map.and_then(|data| {
+                data.range(..=current_height)
+                    .next_back()
+                    .filter(|(height, _)| height > &&initial_height)
+            }) {
+                return Ok(Some(value.clone()));
             }
 
             let data = self.fetch_clarity_marf_value(key);
@@ -555,9 +554,8 @@ impl ClarityBackingStore for ClarityDatastore {
         }
 
         Ok(values_map.and_then(|data| {
-            data.iter()
-                .rev()
-                .find(|(height, _)| height <= &&current_height)
+            data.range(..=current_height)
+                .next_back()
                 .map(|(_, value)| value.clone())
         }))
     }
@@ -1596,6 +1594,25 @@ mod tests {
         let (mut clarity_datastore, _datastore) = get_datastores_with_remote_data();
         let height = clarity_datastore.get_current_block_height();
         assert_eq!(height, 10);
+    }
+
+    #[test]
+    fn test_get_data_at_historical_heights() {
+        let (mut clarity_datastore, mut datastore) = get_datastores();
+        for height in 1..=5 {
+            datastore.advance_burn_chain_tip(&mut clarity_datastore, 1);
+            if height % 2 == 0 {
+                clarity_datastore.put("vm::key", &format!("v{height}"));
+            }
+        }
+
+        let expected = [None, None, Some("v2"), Some("v2"), Some("v4"), Some("v4")];
+        for (height, expected) in (0..).zip(expected) {
+            let block = clarity_datastore.get_block_at_height(height).unwrap();
+            clarity_datastore.set_block_hash(block).unwrap();
+            let value = clarity_datastore.get_data("vm::key").unwrap();
+            assert_eq!(value.as_deref(), expected, "height {height}");
+        }
     }
 
     // make sure that when a ClarityDatastore is cloned, the current_chain_tip is reset
