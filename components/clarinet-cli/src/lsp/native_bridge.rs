@@ -7,6 +7,7 @@ use clarity_lsp::backend::{
     LspNotification, LspNotificationResponse, LspRequest, LspRequestResponse,
 };
 use clarity_lsp::state::EditorState;
+use clarity_lsp::utils;
 use crossbeam_channel::{Receiver as MultiplexableReceiver, Select, Sender as MultiplexableSender};
 use serde_json::Value;
 use tower_lsp_server::jsonrpc::{Error, ErrorCode, Result};
@@ -19,9 +20,6 @@ use tower_lsp_server::ls_types::{
     SignatureHelpParams, TextEdit,
 };
 use tower_lsp_server::{Client, LanguageServer};
-
-use super::utils;
-use crate::lsp::clarity_diagnostic_to_tower_lsp_type_with_lint;
 
 pub enum LspResponse {
     Notification(LspNotificationResponse),
@@ -123,47 +121,20 @@ impl LspNativeBridge {
 
     // Call after receiving `LspNotification` message
     async fn after_receive_lsp_notification(&self) {
-        let mut aggregated_diagnostics = vec![];
-        let mut env_simnet_diagnostics = vec![];
-        let mut notification = None;
-        if let Ok(response_rx) = self.response_rx.lock() {
-            if let Ok(LspResponse::Notification(ref mut notification_response)) = response_rx.recv()
-            {
-                aggregated_diagnostics.append(&mut notification_response.aggregated_diagnostics);
-                env_simnet_diagnostics.append(&mut notification_response.env_simnet_diagnostics);
-                notification = notification_response.notification.take();
-            }
-        }
+        let response = self
+            .response_rx
+            .lock()
+            .ok()
+            .and_then(|response_rx| match response_rx.recv() {
+                Ok(LspResponse::Notification(response)) => Some(response),
+                _ => None,
+            })
+            .unwrap_or_default();
 
-        // Build a map of extra LSP diagnostics keyed by location
-        let mut extra_diags: std::collections::HashMap<_, Vec<_>> =
-            std::collections::HashMap::new();
-        for (location, diags) in env_simnet_diagnostics {
-            extra_diags.entry(location).or_default().extend(diags);
-        }
-
-        for (location, diags) in aggregated_diagnostics {
-            if let Ok(url) = clarinet_files::paths::path_to_url_string(&location) {
-                let mut lsp_diags: Vec<_> = diags
-                    .iter()
-                    .map(|ld| {
-                        clarity_diagnostic_to_tower_lsp_type_with_lint(
-                            &ld.diagnostic,
-                            ld.lint_name.as_ref(),
-                        )
-                    })
-                    .collect();
-                if let Some(extra) = extra_diags.remove(&location) {
-                    lsp_diags.extend(extra);
-                }
-                self.client
-                    .publish_diagnostics(url.parse().expect("Failed to parse URL"), lsp_diags, None)
-                    .await;
-            }
-        }
-
-        // Publish any remaining env_simnet diagnostics for contracts not in aggregated
-        for (location, diags) in extra_diags {
+        for (location, diags) in utils::merge_diagnostics(
+            response.aggregated_diagnostics,
+            response.env_simnet_diagnostics,
+        ) {
             if let Ok(url) = clarinet_files::paths::path_to_url_string(&location) {
                 self.client
                     .publish_diagnostics(url.parse().expect("Failed to parse URL"), diags, None)
@@ -171,7 +142,7 @@ impl LspNativeBridge {
             }
         }
 
-        if let Some((level, message)) = notification {
+        if let Some((level, message)) = response.notification {
             self.client.show_message(level, message).await;
         }
     }
