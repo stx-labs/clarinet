@@ -1948,6 +1948,8 @@ mod tests_formatter {
     use clarinet_defaults::DEFAULT_EPOCH;
     use clarity::types::StacksEpochId;
     use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
+    use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType};
+    use clarity::vm::types::Value;
     use indoc::indoc;
 
     use super::{ClarityFormatter, Settings};
@@ -1972,6 +1974,59 @@ mod tests_formatter {
     fn format_with(source: &str, settings: Settings) -> String {
         let formatter = ClarityFormatter::new(settings);
         formatter.format_section(source, None).unwrap()
+    }
+
+    #[test]
+    fn test_ascii_string_escapes_round_trip() {
+        fn values(expressions: &[PreSymbolicExpression]) -> Vec<Value> {
+            expressions
+                .iter()
+                .flat_map(|expression| match &expression.pre_expr {
+                    PreSymbolicExpressionType::AtomValue(value) => vec![value.clone()],
+                    PreSymbolicExpressionType::List(items) => values(items),
+                    _ => vec![],
+                })
+                .collect()
+        }
+
+        let formatter = ClarityFormatter::new(Settings::default());
+        let parse = |source: &str| {
+            clarity::vm::ast::parser::v2::parse(source, StackDepthLimits::for_epoch(DEFAULT_EPOCH))
+        };
+        for literal in [
+            r#""a\"b""#,
+            r#""a\\b""#,
+            r#""a\tb""#,
+            r#""a\nb""#,
+            r#""a\rb""#,
+            r#""""#,
+            r#""it's printable!""#,
+            r#""\\'\\x0c""#,
+            "\"form\u{c}feed\"",
+            r#"(list "a\"b" "\\" "" "\t\n\r")"#,
+        ] {
+            let source = format!("(define-constant s {literal})");
+            let original = parse(&source).expect("valid input");
+            let expected_values = values(&original);
+            assert!(!expected_values.is_empty());
+
+            for (mode, formatted) in [
+                ("file", formatter.format_file(&source, None)),
+                ("section", formatter.format_section(&source, None).unwrap()),
+                ("ast", formatter.format_ast(&original)),
+            ] {
+                let reparsed = parse(&formatted).unwrap_or_else(|error| {
+                    panic!("{mode} formatting {source:?} produced invalid source {formatted:?}: {error}")
+                });
+                assert_eq!(values(&reparsed), expected_values, "{mode}: {source}");
+                let reformatted = match mode {
+                    "file" => formatter.format_file(&formatted, None),
+                    "section" => formatter.format_section(&formatted, None).unwrap(),
+                    _ => formatter.format_ast(&reparsed),
+                };
+                assert_eq!(reformatted, formatted, "{mode}: {source}");
+            }
+        }
     }
 
     #[test]
