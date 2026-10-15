@@ -79,7 +79,6 @@ jobs:
           name: clarity-vsix
           path: ./components/clarity-vscode
 
-      # The Entra identity must be a member of the Marketplace publisher
       - name: Azure login
         uses: azure/login@053f7285eb20bf5469ef084617b0b24d3cec53fc # v3.1.0
         with:
