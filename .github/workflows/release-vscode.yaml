@@ -66,6 +66,7 @@ jobs:
 
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
@@ -78,10 +79,16 @@ jobs:
           name: clarity-vsix
           path: ./components/clarity-vscode
 
+      # The Entra identity must be a member of the Marketplace publisher
+      - name: Azure login
+        uses: azure/login@053f7285eb20bf5469ef084617b0b24d3cec53fc # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
       - name: Publish to VSCode Marketplace
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_TOKEN }}
-        run: npx -y @vscode/vsce@3.9.2 publish --packagePath clarity.vsix --pat "$VSCE_PAT"
+        run: npx -y @vscode/vsce@3.9.2 publish --packagePath clarity.vsix --azure-credential
 
   publish-open-vsx:
     name: Publish to Open VSX
@@ -92,6 +99,7 @@ jobs:
 
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
@@ -105,6 +113,4 @@ jobs:
           path: ./components/clarity-vscode
 
       - name: Publish to Open VSX
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
-        run: npx -y ovsx@1.1.1 publish --packagePath clarity.vsix --pat "$OVSX_PAT"
+        run: npx -y ovsx@1.2.0 publish --packagePath clarity.vsix --trusted-publishing
