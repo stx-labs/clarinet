@@ -88,7 +88,7 @@ jobs:
           allow-no-subscriptions: true
 
       - name: Publish to VSCode Marketplace
-        run: npx -y @vscode/vsce@3.9.2 publish --packagePath clarity.vsix --azure-credential
+        run: npx -y @vscode/vsce@4.0.0 publish --packagePath clarity.vsix --azure-credential
 
   publish-open-vsx:
     name: Publish to Open VSX
