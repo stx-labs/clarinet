@@ -83,7 +83,10 @@ async fn it_can_set_epoch() {
 async fn it_can_deploy_contract() {
     let mut sdk = init_sdk().await;
     let tx = deploy_basic_contract(&mut sdk);
-    let expected = format!("0x{}", ClarityValue::Bool(true).serialize_to_hex().unwrap());
+    let expected = format!(
+        "0x{}",
+        ClarityValue::okay_true().serialize_to_hex().unwrap()
+    );
     assert_eq!(tx.result, expected);
 }
 
@@ -377,6 +380,8 @@ async fn it_handles_invalid_sender_address() {
 #[wasm_bindgen_test]
 async fn it_handles_contract_recipient_address() {
     let mut sdk = init_sdk().await;
+    sdk.mint_stx("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(), 1000)
+        .unwrap();
 
     let result = sdk.transfer_stx(&crate::core::TransferSTXArgs::new(
         1000,
@@ -387,7 +392,7 @@ async fn it_handles_contract_recipient_address() {
     ));
 
     // contract addresses are valid recipients
-    assert!(result.is_ok());
+    assert_tx_result(&result.unwrap(), ClarityValue::okay_true());
 }
 
 #[wasm_bindgen_test]
@@ -434,6 +439,8 @@ async fn it_handles_contract_address_as_sender() {
 #[wasm_bindgen_test]
 async fn it_handles_contract_address_as_recipient() {
     let mut sdk = init_sdk().await;
+    sdk.mint_stx("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(), 1000)
+        .unwrap();
 
     let contract_address = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.test";
     let result = sdk.transfer_stx(&crate::core::TransferSTXArgs::new(
@@ -445,5 +452,5 @@ async fn it_handles_contract_address_as_recipient() {
     ));
 
     // we support contract addresses as recipients
-    assert!(result.is_ok());
+    assert_tx_result(&result.unwrap(), ClarityValue::okay_true());
 }

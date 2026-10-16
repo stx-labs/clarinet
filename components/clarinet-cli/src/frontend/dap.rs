@@ -560,8 +560,11 @@ fn run_sdk_request_loop(
                             } else if PrincipalData::parse_standard_principal(sender_str).is_err() {
                                 serde_json::json!({"error": format!("transferSTX: invalid sender: {sender_str}")})
                             } else {
-                                let snippet =
-                                    format!("(stx-transfer? u{amount} tx-sender '{recipient})");
+                                // Native token transfers carry a fixed 34-byte memo.
+                                let memo = "00".repeat(34);
+                                let snippet = format!(
+                                    "(stx-transfer-memo? u{amount} tx-sender '{recipient} 0x{memo})"
+                                );
                                 let orig = session.get_tx_sender();
                                 session.set_tx_sender(sender_str);
                                 let cid = QualifiedContractIdentifier::transient();

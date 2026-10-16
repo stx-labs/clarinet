@@ -24,7 +24,7 @@ use clarity_repl::repl::boot::{
 };
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
 use clarity_repl::repl::hooks::perf::CostField;
-use clarity_repl::repl::interpreter::BlockInclusion;
+use clarity_repl::repl::interpreter::{BlockInclusion, InvalidTransfer};
 use clarity_repl::repl::post_conditions::{
     parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
 };
@@ -1070,6 +1070,7 @@ impl SDK {
         &mut self,
         args: &TransferSTXArgs,
         advance_chain_tip: bool,
+        invalid: InvalidTransfer,
     ) -> Result<TransactionRes, String> {
         if PrincipalData::parse_standard_principal(&args.sender).is_err() {
             return Err(format!("Invalid sender address '{}'.", args.sender));
@@ -1089,7 +1090,8 @@ impl SDK {
         let initial_tx_sender = session.get_tx_sender();
         session.set_tx_sender(&args.sender);
 
-        let result = session.stx_transfer(args.amount, &args.recipient, post_conditions);
+        let result =
+            session.stx_transfer_with(args.amount, &args.recipient, post_conditions, invalid);
         session.set_tx_sender(&initial_tx_sender);
 
         let execution = match result {
@@ -1210,7 +1212,7 @@ impl SDK {
 
     #[wasm_bindgen(js_name = "transferSTX")]
     pub fn transfer_stx(&mut self, args: &TransferSTXArgs) -> Result<TransactionRes, String> {
-        self.inner_transfer_stx(args, true)
+        self.inner_transfer_stx(args, true, InvalidTransfer::Reject)
     }
 
     #[wasm_bindgen(js_name = "callPublicFn")]
@@ -1242,7 +1244,9 @@ impl SDK {
             } else if let Some(call_private) = tx.call_private_fn {
                 self.inner_call_private_fn(&CallFnArgs::from_json_args(call_private), false)
             } else if let Some(transfer_stx) = tx.transfer_stx {
-                self.inner_transfer_stx(&transfer_stx, false)
+                // Unlike a standalone `transferSTX`, an invalid transfer in a
+                // block returns its error response and the block continues.
+                self.inner_transfer_stx(&transfer_stx, false, InvalidTransfer::ErrorResponse)
             } else if let Some(deploy_contract) = tx.deploy_contract {
                 self.inner_deploy_contract(&deploy_contract, false)
             } else {

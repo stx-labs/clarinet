@@ -228,7 +228,7 @@ describe("post-conditions on contract deployments", () => {
       postConditions: [Pc.principal(address1).willSendEq(500).ustx()],
     });
 
-    expect(result).toStrictEqual(Cl.bool(true));
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
   });
 
   it("aborts a deployment that violates the conditions", () => {
@@ -426,7 +426,7 @@ describe("post-conditions in a mined block", () => {
         postConditions: [Pc.principal(address1).willSendEq(500).ustx()],
       }),
     ]);
-    expect(ok.result).toStrictEqual(Cl.bool(true));
+    expect(ok.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
     expect(() =>
       simnet.mineBlock([
