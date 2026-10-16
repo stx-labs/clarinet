@@ -172,6 +172,89 @@ fn test_contract_new() {
 }
 
 #[test]
+fn test_contract_remove_requires_confirmation_unless_yes() {
+    let temp_dir = create_new_project("test_contract_remove");
+    let project_path = temp_dir.path().join("test_contract_remove");
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contracts", "new", "counter"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let contract_path = project_path.join("contracts/counter.clar");
+    let test_path = project_path.join("tests/counter.test.ts");
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contracts", "rm", "counter"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(contract_path.is_file());
+    assert!(test_path.is_file());
+    assert!(parse_manifest(&project_path)
+        .contracts
+        .contains_key("counter"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contracts", "rm", "counter", "--yes"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!contract_path.exists());
+    assert!(!test_path.exists());
+    assert!(!parse_manifest(&project_path)
+        .contracts
+        .contains_key("counter"));
+}
+
+#[test]
+fn test_check_yes_preserves_explicit_on_disk_plan() {
+    let temp_dir = create_new_project("test_check_yes");
+    let project_path = temp_dir.path().join("test_check_yes");
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["deployments", "generate", "--simnet"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let plan_path = project_path.join("deployments/default.simnet-plan.yaml");
+    let generated_plan = fs::read_to_string(&plan_path).unwrap();
+    let edited_plan = format!("{generated_plan}# Local edits\n");
+    fs::write(&plan_path, &edited_plan).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["check", "--yes", "--use-on-disk-deployment-plan"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(&plan_path).unwrap(), edited_plan);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["-y", "check"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(&plan_path).unwrap(), generated_plan);
+}
+
+#[test]
 fn test_requirement_add() {
     let project_name = "test_requirement_add";
     let temp_dir = create_new_project(project_name);

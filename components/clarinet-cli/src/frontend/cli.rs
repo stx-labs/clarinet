@@ -83,6 +83,9 @@ struct JsonCheckOutput<D> {
 #[derive(Parser, PartialEq, Clone, Debug)]
 #[clap(version = env!("CARGO_PKG_VERSION"), name = "clarinet", bin_name = "clarinet")]
 struct Opts {
+    /// Accept all confirmation prompts without reading stdin
+    #[clap(long = "yes", short = 'y', global = true)]
+    yes: bool,
     #[clap(subcommand)]
     command: Command,
 }
@@ -663,7 +666,7 @@ pub fn main() {
                     let is_empty = entries.count() == 0;
                     if !is_empty {
                         println!("{}", yellow!("Current directory is not empty"));
-                        prompt_user_to_continue();
+                        prompt_user_to_continue(opts.yes);
                     }
                 };
                 (
@@ -675,7 +678,7 @@ pub fn main() {
             } else {
                 if std::fs::read_dir(&project_opts.name).is_ok() {
                     println!("{}", yellow!("Directory already exists"));
-                    prompt_user_to_continue();
+                    prompt_user_to_continue(opts.yes);
                 }
                 let mut name_and_dir = project_opts.name.rsplitn(2, '/');
                 let project_id = name_and_dir.next().unwrap();
@@ -695,6 +698,7 @@ pub fn main() {
                 } else {
                     match clarinetrc.enable_telemetry {
                         Some(enable) => enable,
+                        None if opts.yes => true,
                         _ => {
                             println!("{}", yellow!("Send usage data to Stacks Labs."));
                             println!("{}", yellow!("Help Stacks Labs improve its products and services by automatically sending diagnostics and usage data."));
@@ -847,6 +851,7 @@ pub fn main() {
                         &existing_deployment,
                         &deployment,
                         project_root,
+                        opts.yes,
                     )
                 } else {
                     true
@@ -891,7 +896,7 @@ pub fn main() {
                         Err(format!("{}: a flag `--devnet`, `--testnet`, `--mainnet` or `--deployment-plan-path=path/to/yaml` should be provided.", yellow!("Command usage")))
                     }
                     (Some(network), None) => {
-                        load_deployment_if_exists(&manifest, network, cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan).and_then(|opt| match opt {
+                        load_deployment_if_exists(&manifest, network, cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan || opts.yes).and_then(|opt| match opt {
                             Some(deployment) => {
                                 println!(
                                     "{} using existing deployments/default.{}-plan.yaml",
@@ -908,7 +913,7 @@ pub fn main() {
                                             eprintln!("{}", red!(message));
                                             std::process::exit(1);
                                         });
-                                write_deployment(&deployment, &default_deployment_path, project_root, true)?;
+                                write_deployment(&deployment, &default_deployment_path, project_root, !opts.yes)?;
                                 println!("{} {}", green!("Generated file"), paths::get_relative_path(&default_deployment_path, project_root).unwrap());
                                 Ok(deployment)
                             }
@@ -937,7 +942,7 @@ pub fn main() {
                     DeploymentSynthesis::from_deployment(&deployment, project_root)
                 );
 
-                if !cmd.use_on_disk_deployment_plan {
+                if !opts.yes && !cmd.use_on_disk_deployment_plan {
                     println!("{}", yellow!("Continue [Y/n]?"));
                     let mut buffer = String::new();
                     std::io::stdin().read_line(&mut buffer).unwrap();
@@ -1088,15 +1093,17 @@ pub fn main() {
                         std::process::exit(1);
                     });
 
-                let mut answer = String::new();
-                println!(
-                    "{} This command will delete the files {contract_name}.test.ts, {contract_name}.clar, and remove the contract from the manifest. Do you confirm? [y/N]",
-                    yellow!("warning:")
-                );
-                std::io::stdin().read_line(&mut answer).unwrap();
-                if !answer.trim().eq_ignore_ascii_case("y") {
-                    eprintln!("{} Not deleting contract files", yellow!("warning:"));
-                    std::process::exit(0);
+                if !opts.yes {
+                    let mut answer = String::new();
+                    println!(
+                        "{} This command will delete the files {contract_name}.test.ts, {contract_name}.clar, and remove the contract from the manifest. Do you confirm? [y/N]",
+                        yellow!("warning:")
+                    );
+                    std::io::stdin().read_line(&mut answer).unwrap();
+                    if !answer.trim().eq_ignore_ascii_case("y") {
+                        eprintln!("{} Not deleting contract files", yellow!("warning:"));
+                        std::process::exit(0);
+                    }
                 }
                 if !execute_changes(changes) {
                     std::process::exit(1);
@@ -1142,7 +1149,7 @@ pub fn main() {
                             manifest,
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
-                            cmd.use_computed_deployment_plan,
+                            cmd.use_computed_deployment_plan || opts.yes,
                             false,
                             Environment::Simnet,
                         );
@@ -1349,7 +1356,7 @@ pub fn main() {
                         &manifest,
                         &cmd.deployment_plan_path,
                         cmd.use_on_disk_deployment_plan,
-                        cmd.use_computed_deployment_plan,
+                        cmd.use_computed_deployment_plan || opts.yes,
                         true,
                         environment,
                     );
@@ -1451,7 +1458,7 @@ pub fn main() {
                 "{}",
                 format_warn!("This command is deprecated. Use 'clarinet devnet start' instead"),
             );
-            devnet_start(cmd, clarinetrc)
+            devnet_start(cmd, clarinetrc, opts.yes)
         }
         Command::LSP => run_lsp(),
         Command::DAP(cmd) => {
@@ -1559,7 +1566,7 @@ pub fn main() {
                     process::exit(1);
                 }
             }
-            Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
+            Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc, opts.yes),
         },
     };
 
@@ -1823,6 +1830,7 @@ fn should_existing_plan_be_replaced(
     existing_plan: &DeploymentSpecification,
     new_plan: &DeploymentSpecification,
     project_root: &Path,
+    yes: bool,
 ) -> bool {
     use similar::{ChangeTag, TextDiff};
 
@@ -1855,6 +1863,10 @@ fn should_existing_plan_be_replaced(
             ChangeTag::Equal => format!("  {change}"),
         };
         print!("{formatted_change}");
+    }
+
+    if yes {
+        return true;
     }
 
     println!("{}", yellow!("Overwrite? [Y/n]"));
@@ -2167,7 +2179,10 @@ fn remove_contract_from_doc(doc: &mut DocumentMut, name: &str) {
     }
 }
 
-fn prompt_user_to_continue() {
+fn prompt_user_to_continue(yes: bool) {
+    if yes {
+        return;
+    }
     println!("{}", yellow!("Do you want to continue? (y/N)"));
     let mut buffer = String::new();
     std::io::stdin().read_line(&mut buffer).unwrap();
@@ -2307,7 +2322,7 @@ fn display_deploy_hint() {
     display_hint_footer();
 }
 
-fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
+fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC, yes: bool) {
     let manifest = load_manifest_or_exit(cmd.manifest_path, false);
     let project_root = &manifest.root_dir;
     println!("Computing deployment plan");
@@ -2326,7 +2341,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                     &manifest,
                     &StacksNetwork::Devnet,
                     cmd.use_on_disk_deployment_plan,
-                    cmd.use_computed_deployment_plan,
+                    cmd.use_computed_deployment_plan || yes,
                 )
             };
 
@@ -2346,7 +2361,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
                             eprintln!("{}", red!(message));
                             std::process::exit(1);
                         });
-                    write_deployment(&deployment, &default_deployment_path, project_root, true)?;
+                    write_deployment(&deployment, &default_deployment_path, project_root, !yes)?;
                     println!(
                         "{} {}",
                         green!("Generated file"),
@@ -2399,7 +2414,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let compatible = differ.is_compatible(&devnet_config.unwrap());
     if let Err(incompatibles) = compatible {
         display_devnet_incompatibilities(incompatibles);
-        prompt_user_to_continue();
+        prompt_user_to_continue(yes);
         display_devnet_incompatibilities_continue()
     }
     let config = StartConfig {
