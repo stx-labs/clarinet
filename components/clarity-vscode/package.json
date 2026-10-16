@@ -296,7 +296,6 @@
     "@wasm-tool/wasm-pack-plugin": "1.7.0",
     "concurrently": "10.0.5",
     "eslint": "10.9.1",
-    "ovsx": "1.1.1",
     "path-browserify": "1.0.1",
     "playwright": "1.62.1",
     "regenerator-runtime": "0.14.1",

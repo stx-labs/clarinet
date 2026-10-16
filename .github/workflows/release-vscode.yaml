@@ -112,4 +112,4 @@ jobs:
           path: ./components/clarity-vscode
 
       - name: Publish to Open VSX
-        run: npx -y ovsx@1.2.0 publish --packagePath clarity.vsix --trusted-publishing
+        run: npx -y ovsx@1.3.0 publish --packagePath clarity.vsix --trusted-publishing
