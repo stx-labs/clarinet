@@ -108,3 +108,23 @@ jobs:
         env:
           OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
         run: npx -y ovsx@1.1.1 publish --packagePath clarity.vsix --pat "$OVSX_PAT"
+
+  notify-slack:
+    name: Notify Slack on failure
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - publish-vscode-marketplace
+      - publish-open-vsx
+    if: failure() && github.event_name == 'release'
+    environment: notifications
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": ":x: Release workflow `${{ github.workflow }}` failed\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run #${{ github.run_id }}>\nRef: `${{ github.ref_name }}`\nTriggered by: `${{ github.actor }}`"
+            }
