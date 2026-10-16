@@ -32,6 +32,7 @@ fn build_test_deployement_plan(
         bitcoin_node: None,
         genesis,
         contracts: BTreeMap::new(),
+        contract_remaps: None,
         plan: TransactionPlanSpecification { batches },
     }
 }

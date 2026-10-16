@@ -1062,6 +1062,70 @@ pub struct DeploymentSpecification {
     // Keep a cache of contract's (source, relative_path)
     #[serde(with = "contracts_serde")]
     pub contracts: BTreeMap<QualifiedContractIdentifier, (String, PathBuf)>,
+    /// Contract references rewritten before broadcast, pointing requirements
+    /// at contracts already deployed on the target network. `None` identifies
+    /// legacy plans; an explicit empty map disables legacy defaults.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "contract_remaps_serde"
+    )]
+    pub contract_remaps: Option<ContractRemaps>,
+}
+
+/// Contract identifiers rewritten in published sources, from the identifier
+/// used in Clarity source code to the contract deployed on the network.
+pub type ContractRemaps = BTreeMap<QualifiedContractIdentifier, QualifiedContractIdentifier>;
+
+/// Parse the `contract-remaps` section of a plan file.
+fn parse_contract_remaps(
+    specs: Option<&BTreeMap<String, String>>,
+) -> Result<Option<ContractRemaps>, String> {
+    let parse = |role, contract_id: &str| {
+        QualifiedContractIdentifier::parse(contract_id).map_err(|_| {
+            format!("unable to parse contract remap {role} '{contract_id}' as a valid contract identifier")
+        })
+    };
+
+    specs
+        .map(|specs| {
+            specs
+                .iter()
+                .map(|(src, dst)| Ok((parse("source", src)?, parse("destination", dst)?)))
+                .collect()
+        })
+        .transpose()
+}
+
+pub mod contract_remaps_serde {
+    use std::collections::BTreeMap;
+
+    use serde::ser::SerializeMap;
+    use serde::{Deserializer, Serializer};
+
+    use super::ContractRemaps;
+
+    pub fn serialize<S>(target: &Option<ContractRemaps>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let Some(target) = target else {
+            return serializer.serialize_none();
+        };
+        let mut map = serializer.serialize_map(Some(target.len()))?;
+        for (k, v) in target {
+            map.serialize_entry(&k.to_string(), &v.to_string())?;
+        }
+        map.end()
+    }
+
+    pub fn deserialize<'de, D>(des: D) -> Result<Option<ContractRemaps>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let container: Option<BTreeMap<String, String>> = serde::Deserialize::deserialize(des)?;
+        super::parse_contract_remaps(container.as_ref()).map_err(serde::de::Error::custom)
+    }
 }
 
 pub mod contracts_serde {
@@ -1314,6 +1378,7 @@ impl DeploymentSpecification {
             genesis,
             plan,
             contracts,
+            contract_remaps: parse_contract_remaps(specs.contract_remaps.as_ref())?,
         })
     }
 
@@ -1331,6 +1396,12 @@ impl DeploymentSpecification {
             bitcoin_node: self.bitcoin_node.clone(),
             node: None,
             genesis: self.genesis.as_ref().map(|g| g.to_specification_file()),
+            contract_remaps: self.contract_remaps.as_ref().map(|remaps| {
+                remaps
+                    .iter()
+                    .map(|(src, dst)| (src.to_string(), dst.to_string()))
+                    .collect()
+            }),
             plan: Some(self.plan.to_specification_file(project_root)),
         }
     }
@@ -1439,6 +1510,8 @@ pub struct DeploymentSpecificationFile {
     pub node: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genesis: Option<GenesisSpecificationFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_remaps: Option<BTreeMap<String, String>>,
     pub plan: Option<TransactionPlanSpecificationFile>,
 }
 

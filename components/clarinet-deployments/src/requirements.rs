@@ -146,12 +146,60 @@ async fn fetch_contract(
     deployer: &str,
     name: &str,
 ) -> Result<Contract, String> {
+    fetch_contract_if_published(&reqwest::Client::new(), api_base_url, deployer, name)
+        .await?
+        .ok_or_else(|| {
+            format!(
+                "Unable to retrieve contract {api_base_url}/extended/v1/contract/{deployer}.{name}: {}",
+                reqwest::StatusCode::NOT_FOUND
+            )
+        })
+}
+
+/// A client for optional checks: a slow node must not hold up a plan.
+pub(crate) fn verification_client() -> reqwest::Client {
+    let builder = reqwest::Client::builder();
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder.timeout(std::time::Duration::from_secs(5));
+    builder.build().unwrap_or_default()
+}
+
+/// Fetch the source of `contract_id` from the network its address belongs
+/// to, or `None` if no such contract is published there.
+pub(crate) async fn fetch_published_source(
+    client: &reqwest::Client,
+    contract_id: &QualifiedContractIdentifier,
+    api_base_url: Option<&str>,
+) -> Result<Option<String>, String> {
+    let api_base_url =
+        api_base_url.unwrap_or_else(|| default_api_base_url(contract_id.issuer.is_mainnet()));
+    let contract = fetch_contract_if_published(
+        client,
+        api_base_url,
+        &contract_id.issuer.to_address(),
+        contract_id.name.as_str(),
+    )
+    .await?;
+    Ok(contract.map(|contract| contract.source_code))
+}
+
+async fn fetch_contract_if_published(
+    client: &reqwest::Client,
+    api_base_url: &str,
+    deployer: &str,
+    name: &str,
+) -> Result<Option<Contract>, String> {
     let url = format!("{api_base_url}/extended/v1/contract/{deployer}.{name}");
-    let response = reqwest::get(&url)
+    let response = client
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Unable to retrieve contract {url}: {e}"))?;
 
     let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
     if !status.is_success() {
         return Err(format!("Unable to retrieve contract {url}: {status}"));
     }
@@ -159,6 +207,7 @@ async fn fetch_contract(
     response
         .json()
         .await
+        .map(Some)
         .map_err(|e| format!("Unable to parse contract json data {url}: {e}"))
 }
 

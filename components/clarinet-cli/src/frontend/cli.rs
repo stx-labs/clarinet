@@ -332,6 +332,12 @@ struct RemoveContract {
 struct AddRequirement {
     /// Contract id (ex. "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait")
     pub contract_id: String,
+    /// Contract already deployed on testnet to use instead of redeploying a copy
+    #[clap(long = "testnet")]
+    pub testnet: Option<String>,
+    /// Contract to use in place of the requirement on mainnet
+    #[clap(long = "mainnet")]
+    pub mainnet: Option<String>,
     /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
@@ -1110,18 +1116,26 @@ pub fn main() {
             Requirements::AddRequirement(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
 
+                let requirement = RequirementConfig {
+                    contract_id: cmd.contract_id,
+                    testnet: cmd.testnet,
+                    mainnet: cmd.mainnet,
+                };
+                if let Err(e) = requirement.validate() {
+                    eprintln!("{} {e}", red!("error:"));
+                    std::process::exit(1);
+                }
+
                 let change = TOMLEdition {
                     comment: format!(
                         "{} with requirement {}",
                         yellow!("Updated Clarinet.toml"),
-                        green!("{}", cmd.contract_id)
+                        green!("{}", requirement.contract_id)
                     ),
                     manifest_location: manifest.location,
                     contracts_to_rm: vec![],
                     contracts_to_add: HashMap::new(),
-                    requirements_to_add: vec![RequirementConfig {
-                        contract_id: cmd.contract_id,
-                    }],
+                    requirements_to_add: vec![requirement],
                 };
                 if !execute_changes(vec![Changes::EditTOML(change)]) {
                     std::process::exit(1);
@@ -2075,7 +2089,7 @@ fn load_manifest(location: &Path) -> Option<DocumentMut> {
 /// Edit a TOML document directly, preserving comments and structure.
 fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> DocumentMut {
     for req in options.requirements_to_add.drain(..) {
-        add_requirement_to_doc(&mut doc, &req.contract_id);
+        add_requirement_to_doc(&mut doc, &req);
     }
 
     for (name, contract) in options.contracts_to_add.drain() {
@@ -2089,8 +2103,9 @@ fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> Docume
     doc
 }
 
-/// Add a requirement to the [[project.requirements]] array in the document.
-fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
+/// Add a requirement to the [[project.requirements]] array in the document,
+/// or set the network overrides of an existing one.
+fn add_requirement_to_doc(doc: &mut DocumentMut, requirement: &RequirementConfig) {
     use toml_edit::{ArrayOfTables, Item, Table};
 
     // Ensure [project] table exists
@@ -2115,16 +2130,28 @@ fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
         .as_array_of_tables_mut()
         .expect("[[project.requirements]] should be an array of tables");
 
-    // Check for duplicates
-    let already_exists = requirements
+    let contract_id = requirement.contract_id.as_str();
+    let existing = requirements
         .iter()
-        .filter_map(|req| req.get("contract_id")?.as_str())
-        .any(|id| id == contract_id);
-
-    if !already_exists {
+        .position(|req| req.get("contract_id").and_then(Item::as_str) == Some(contract_id));
+    let index = existing.unwrap_or_else(|| {
+        let index = requirements.len();
         let mut new_req = Table::new();
         new_req["contract_id"] = toml_edit::value(contract_id);
         requirements.push(new_req);
+        index
+    });
+    let entry = requirements
+        .get_mut(index)
+        .expect("index comes from the same array");
+
+    for (key, remap) in [
+        ("testnet", &requirement.testnet),
+        ("mainnet", &requirement.mainnet),
+    ] {
+        if let Some(remap) = remap {
+            entry[key] = toml_edit::value(remap.as_str());
+        }
     }
 }
 
@@ -2547,6 +2574,13 @@ mod tests {
             false
         }
 
+        fn requirement(contract_id: &str) -> RequirementConfig {
+            RequirementConfig {
+                contract_id: contract_id.to_string(),
+                ..Default::default()
+            }
+        }
+
         /// Helper to check if a requirement exists in the TOML
         fn has_requirement(content: &str, contract_id: &str) -> bool {
             let doc: DocumentMut = content.parse().expect("Failed to parse TOML");
@@ -2684,7 +2718,7 @@ mod tests {
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_requirement_to_doc(
                 &mut doc,
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+                &requirement("SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"),
             );
 
             let output = doc.to_string();
@@ -2732,7 +2766,7 @@ mod tests {
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_requirement_to_doc(
                 &mut doc,
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+                &requirement("SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"),
             );
 
             let output = doc.to_string();
@@ -2766,7 +2800,7 @@ mod tests {
             // Try to add the same requirement again
             add_requirement_to_doc(
                 &mut doc,
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
+                &requirement("SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"),
             );
 
             let output = doc.to_string();
@@ -2789,7 +2823,7 @@ mod tests {
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
             add_requirement_to_doc(
                 &mut doc,
-                "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait",
+                &requirement("SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"),
             );
 
             let output = doc.to_string();
@@ -2808,6 +2842,54 @@ mod tests {
                     "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"
                 ),
                 "New requirement should be added"
+            );
+        }
+
+        #[test]
+        fn test_add_requirement_overrides() {
+            let input = indoc! {r#"
+                [project]
+                name = "test-project"
+
+                [[project.requirements]]
+                contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+            "#};
+
+            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
+            // Setting an override on an existing requirement updates it in place.
+            add_requirement_to_doc(
+                &mut doc,
+                &RequirementConfig {
+                    testnet: Some(
+                        "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait".to_string(),
+                    ),
+                    ..requirement("SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait")
+                },
+            );
+            add_requirement_to_doc(
+                &mut doc,
+                &RequirementConfig {
+                    mainnet: Some(
+                        "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.real-trait".to_string(),
+                    ),
+                    ..requirement("SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait")
+                },
+            );
+
+            assert_eq!(
+                doc.to_string(),
+                indoc! {r#"
+                    [project]
+                    name = "test-project"
+
+                    [[project.requirements]]
+                    contract_id = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"
+                    testnet = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait"
+
+                    [[project.requirements]]
+                    contract_id = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait"
+                    mainnet = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.real-trait"
+                "#}
             );
         }
 
