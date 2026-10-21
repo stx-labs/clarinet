@@ -323,7 +323,7 @@ impl<'de> Deserialize<'de> for TransactionSpecificationFile {
         let serde_saphyr::Tagged(value, tag) =
             serde_saphyr::Tagged::<serde_json::Value>::deserialize(deserializer)?;
 
-        if let Some(tag) = tag {
+        if let Some(tag) = tag.filter(|tag| tag != "tag:yaml.org,2002:map" && tag != "!") {
             let variant = tag.strip_prefix('!').unwrap_or(&tag);
             return deserialize_variant(variant, value).map_err(serde::de::Error::custom);
         }
