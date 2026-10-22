@@ -14,25 +14,10 @@ use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
 use clarity_repl::utils::{remove_env_simnet, Environment};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 
-/// The only YAML entry point (clippy bans the others), so every read gets the previous
-/// parser's YAML 1.2 rules instead of serde-saphyr's YAML 1.1 defaults:
-/// - only `true`/`false` are booleans: serde buffers tagged, untagged and flattened values
-///   before their type is known, where plain `yes`/`no`/`on`/`off` would become booleans
-/// - `<<` is an ordinary key, not a merge
-/// - `!!binary` strings keep their text instead of being base64-decoded
-#[allow(clippy::disallowed_methods)]
-pub fn from_yaml<T: DeserializeOwned>(content: &[u8]) -> Result<T, serde_saphyr::Error> {
-    let options = serde_saphyr::options! {
-        strict_booleans: true,
-        merge_keys: serde_saphyr::MergeKeyPolicy::AsOrdinary,
-        ignore_binary_tag_for_string: true,
-    };
-    serde_saphyr::from_slice_with_options(content, options)
-}
+use crate::yaml::from_yaml;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy, Eq, PartialOrd, Ord, EnumIter)]
 pub enum EpochSpec {

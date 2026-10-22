@@ -1,8 +1,10 @@
-use clarinet_deployments::types::{
-    from_yaml, DeploymentSpecificationFile, TransactionSpecification, TransactionSpecificationFile,
-};
 use indoc::indoc;
 use serde_json::{json, Value};
+
+use super::from_yaml;
+use crate::types::{
+    DeploymentSpecificationFile, TransactionSpecification, TransactionSpecificationFile,
+};
 
 fn transactions() -> Vec<(&'static str, Value)> {
     vec![
@@ -250,4 +252,136 @@ fn merge_keys_and_binary_tags_are_not_interpreted() {
         })
         .collect();
     assert_eq!(memos, [Some("aGVsbG8=".to_string()), None]);
+}
+
+#[test]
+#[ignore = "serde-saphyr 2.0.0 does not implement strict YAML 1.2 Core resolution"]
+fn yaml_12_core_scalar_resolution() {
+    for directive in ["", "%YAML 1.2\n---\n"] {
+        for (scalar, expected) in [
+            ("yes", json!("yes")),
+            ("tRuE", json!("tRuE")),
+            ("True", json!(true)),
+            ("FALSE", json!(false)),
+            ("1_000", json!("1_000")),
+            ("0X10", json!("0X10")),
+            ("0b101", json!("0b101")),
+            ("010", json!(10)),
+            ("-010", json!(-10)),
+            ("0o10", json!(8)),
+            ("0x10", json!(16)),
+            ("18446744073709551615", json!(u64::MAX)),
+            ("'010'", json!("010")),
+            ("!!str 010", json!("010")),
+        ] {
+            let input = format!("{directive}{scalar}\n");
+            assert_eq!(
+                from_yaml::<Value>(input.as_bytes()).unwrap(),
+                expected,
+                "{input}"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "serde-saphyr 2.0.0 does not select a schema from YAML version directives"]
+fn yaml_11_directive_selects_legacy_scalar_resolution() {
+    for (scalar, expected) in [
+        ("yes", json!(true)),
+        ("OFF", json!(false)),
+        ("010", json!(8)),
+        ("0b101", json!(5)),
+        ("1_000", json!(1000)),
+        ("1:20", json!(80)),
+        ("'yes'", json!("yes")),
+        ("!!str 010", json!("010")),
+    ] {
+        let input = format!("%YAML 1.1\n---\n{scalar}\n");
+        assert_eq!(
+            from_yaml::<Value>(input.as_bytes()).unwrap(),
+            expected,
+            "{input}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "serde-saphyr 2.0.0 coerces these plain scalars in untyped buffers"]
+fn scalar_regressions_stay_strings_in_all_transaction_formats() {
+    let fields = indoc! {"
+        contract-id: ST000000000000000000002AMW42H.test
+        expected-sender: ST000000000000000000002AMW42H
+        method: tRuE
+        parameters: [1_000, 0X10, 0b101]
+        cost: 1
+    "};
+    let indented: String = fields.lines().map(|line| format!("  {line}\n")).collect();
+    for directive in ["", "%YAML 1.2\n---\n"] {
+        for body in [
+            format!("transaction-type: contract-call\n{fields}"),
+            format!("contract-call:\n{indented}"),
+            format!("!contract-call\n{fields}"),
+        ] {
+            let input = format!("{directive}{body}");
+            let TransactionSpecificationFile::ContractCall(call) =
+                from_yaml(input.as_bytes()).unwrap()
+            else {
+                panic!("expected contract call");
+            };
+            assert_eq!(call.method, "tRuE");
+            assert_eq!(call.parameters, ["1_000", "0X10", "0b101"]);
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires schema resolution unavailable in serde-saphyr 2.0.0"]
+fn yaml_schema_applies_to_aliases_and_mapping_keys() {
+    for directive in ["", "%YAML 1.2\n---\n"] {
+        let input = format!("{directive}first: &value tRuE\nsecond: *value\n1_000: a\n'1000': b\n");
+        let actual: Value = from_yaml(input.as_bytes()).unwrap();
+        assert_eq!(actual["first"], "tRuE");
+        assert_eq!(actual["second"], "tRuE");
+        assert_eq!(actual["1_000"], "a");
+        assert_eq!(actual["1000"], "b");
+    }
+    for input in [
+        "010: first\n10: second\n",
+        "%YAML 1.1\n---\n010: first\n8: second\n",
+    ] {
+        assert!(
+            from_yaml::<std::collections::BTreeMap<u64, String>>(input.as_bytes()).is_err(),
+            "{input}"
+        );
+    }
+    assert!(from_yaml::<std::collections::BTreeMap<bool, String>>(
+        b"%YAML 1.1\n---\nyes: first\ntrue: second\n"
+    )
+    .is_err());
+}
+
+#[test]
+fn directives_in_scalar_contents_do_not_select_a_schema() {
+    let input = "text: |\n  %YAML 1.1\nvalue: yes\n";
+    let actual: Value = from_yaml(input.as_bytes()).unwrap();
+    assert_eq!(actual["value"], "yes");
+    assert_eq!(actual["text"], "%YAML 1.1\n");
+}
+
+#[test]
+#[ignore = "requires schema resolution unavailable in serde-saphyr 2.0.0"]
+fn schema_checks_typed_fields_and_explicit_tags() {
+    assert_eq!(from_yaml::<u64>(b"010").unwrap(), 10);
+    assert_eq!(from_yaml::<f64>(b"10").unwrap(), 10.0);
+    assert_eq!(from_yaml::<u64>(b"%YAML 1.1\n---\n010").unwrap(), 8);
+    assert!(from_yaml::<bool>(b"tRuE").is_err());
+    assert!(from_yaml::<u64>(b"1_000").is_err());
+    assert!(from_yaml::<Value>(b"!!bool tRuE").is_err());
+    assert!(from_yaml::<Value>(b"!!int 1_000").is_err());
+    assert!(from_yaml::<bool>(b"%YAML 1.1\n---\nyes").unwrap());
+    assert_eq!(
+        from_yaml::<Value>(b"%YAML 1.1\n---\n!!int 1:20").unwrap(),
+        json!(80)
+    );
 }

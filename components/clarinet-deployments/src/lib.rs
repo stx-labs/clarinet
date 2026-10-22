@@ -5,6 +5,7 @@ pub mod diagnostic_digest;
 pub mod onchain;
 pub mod requirements;
 pub mod types;
+pub mod yaml;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
