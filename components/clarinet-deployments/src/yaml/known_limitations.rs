@@ -1,4 +1,4 @@
-//! Spec expectations that crates.io serde-saphyr 2.0.0 does not yet satisfy.
+//! Core resolution and requested legacy-version policy gaps in crates.io serde-saphyr 2.0.0.
 //! Keep these assertions intact rather than treating the current behavior as correct.
 
 use std::collections::BTreeMap;
@@ -12,6 +12,46 @@ use super::from_yaml;
 #[ignore = "serde-saphyr 2.0.0 infers mixed-case booleans"]
 fn mixed_case_boolean_is_a_string() {
     assert_eq!(from_yaml::<Value>(b"tRuE").unwrap(), json!("tRuE"));
+}
+
+/// Our Core policy must preserve mixed-case null text, as main does.
+#[test]
+#[ignore = "serde-saphyr 2.0.0 infers mixed-case nulls"]
+fn mixed_case_null_is_a_string() {
+    assert_eq!(from_yaml::<Value>(b"nUlL").unwrap(), json!("nUlL"));
+}
+
+/// Core's octal prefix is lowercase; main preserves uppercase 0O as a string.
+#[test]
+#[ignore = "serde-saphyr 2.0.0 accepts uppercase octal prefixes"]
+fn uppercase_octal_prefix_is_a_string() {
+    assert_eq!(from_yaml::<Value>(b"0O10").unwrap(), json!("0O10"));
+}
+
+/// Unlike YAML 1.1, Core permits signs only on decimal integers.
+/// Main also incorrectly infers signed hexadecimal and octal integers.
+#[test]
+#[ignore = "serde-saphyr 2.0.0 accepts signed radix-prefixed integers"]
+fn signed_radix_prefixes_are_strings() {
+    for input in ["-0x10", "+0x10", "-0o10", "+0o10"] {
+        assert_eq!(from_yaml::<Value>(input.as_bytes()).unwrap(), json!(input));
+    }
+}
+
+/// Our Core policy must preserve invalid mixed-case infinity text, as main does.
+#[test]
+#[ignore = "serde-saphyr 2.0.0 infers mixed-case infinity and rejects it in Value"]
+fn mixed_case_infinity_is_a_string() {
+    assert_eq!(from_yaml::<Value>(b".iNf").unwrap(), json!(".iNf"));
+}
+
+/// Our Core policy must preserve signed NaN text, as main does.
+#[test]
+#[ignore = "serde-saphyr 2.0.0 infers signed NaN and rejects it in Value"]
+fn signed_nan_is_a_string() {
+    for input in ["+.nan", "-.nan"] {
+        assert_eq!(from_yaml::<Value>(input.as_bytes()).unwrap(), json!(input));
+    }
 }
 
 /// Core numbers cannot contain underscores; main correctly preserves this scalar as a string.
