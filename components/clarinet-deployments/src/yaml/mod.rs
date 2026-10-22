@@ -14,3 +14,6 @@ pub fn from_yaml<T: DeserializeOwned>(content: &[u8]) -> Result<T, serde_saphyr:
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod known_limitations;

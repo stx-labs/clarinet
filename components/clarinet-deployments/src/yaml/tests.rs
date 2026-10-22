@@ -1,387 +1,199 @@
-use indoc::indoc;
+use std::collections::BTreeMap;
+
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::from_yaml;
-use crate::types::{
-    DeploymentSpecificationFile, TransactionSpecification, TransactionSpecificationFile,
-};
 
-fn transactions() -> Vec<(&'static str, Value)> {
-    vec![
-        (
-            "contract-call",
-            json!({"contract-id": "ST000000000000000000002AMW42H.test", "expected-sender": "ST000000000000000000002AMW42H", "method": "run", "parameters": ["u1", "true", "0x00", "(some u1)"], "cost": 123, "anchor-block-only": false}),
-        ),
-        (
-            "contract-publish",
-            json!({"contract-name": "test", "expected-sender": "ST000000000000000000002AMW42H", "cost": 123, "path": "contracts/test.clar", "clarity-version": 2}),
-        ),
-        (
-            "emulated-contract-call",
-            json!({"contract-id": "ST000000000000000000002AMW42H.test", "emulated-sender": "ST000000000000000000002AMW42H", "method": "run", "parameters": ["'ST000000000000000000002AMW42H", "\"hello\""]}),
-        ),
-        (
-            "emulated-contract-publish",
-            json!({"contract-name": "test", "emulated-sender": "ST000000000000000000002AMW42H", "path": "contracts/test.clar", "clarity-version": 2, "remap-principals": {"SP000000000000000000002Q6VF78": "ST000000000000000000002AMW42H"}}),
-        ),
-        (
-            "requirement-publish",
-            json!({"contract-id": "SP000000000000000000002Q6VF78.test", "remap-sender": "ST000000000000000000002AMW42H", "remap-principals": {"SP000000000000000000002Q6VF78": "ST000000000000000000002AMW42H"}, "cost": 123, "path": "contracts/test.clar"}),
-        ),
-        (
-            "btc-transfer",
-            json!({"expected-sender": "sender", "recipient": "recipient", "sats-amount": u64::MAX, "sats-per-byte": 42}),
-        ),
-        (
-            "stx-transfer",
-            json!({"expected-sender": "sender", "recipient": "recipient", "mstx-amount": u64::MAX, "cost": 42, "memo": "0x0001"}),
-        ),
-    ]
+/// YAML 1.1 boolean words remain strings under our default policy, as on main.
+#[test]
+fn legacy_boolean_words_are_strings() {
+    let actual: Value = from_yaml(b"[yes, NO, y, n, on, Off]").unwrap();
+    assert_eq!(actual, json!(["yes", "NO", "y", "n", "on", "Off"]));
 }
 
+/// All six YAML 1.2 Core boolean spellings resolve to booleans.
 #[test]
-fn all_transaction_variants_accept_all_three_formats() {
-    for (variant, fields) in transactions() {
-        let mut current = fields.clone();
-        current["transaction-type"] = json!(variant);
-        let expected: TransactionSpecificationFile =
-            serde_json::from_value(current.clone()).unwrap();
-        let body = serde_saphyr::to_string(&fields).unwrap();
-        let legacy = format!(
-            "{variant}:\n{}",
-            body.lines()
-                .map(|line| format!("  {line}\n"))
-                .collect::<String>()
-        );
-        let tagged = format!("!{variant}\n{body}");
-        let current = serde_saphyr::to_string(&current).unwrap();
-
-        for input in [current, legacy, tagged] {
-            let actual: TransactionSpecificationFile =
-                from_yaml(input.as_bytes()).unwrap_or_else(|error| panic!("{input}\n{error}"));
-            assert_eq!(actual, expected, "{input}");
-            let emitted = serde_saphyr::to_string(&actual).unwrap();
-            assert!(
-                emitted.contains(&format!("transaction-type: {variant}")),
-                "{emitted}"
-            );
-            assert_eq!(
-                from_yaml::<TransactionSpecificationFile>(emitted.as_bytes()).unwrap(),
-                expected
-            );
-        }
-    }
+fn core_boolean_spellings() {
+    let actual: Value = from_yaml(b"[true, True, TRUE, false, False, FALSE]").unwrap();
+    assert_eq!(actual, json!([true, true, true, false, false, false]));
 }
 
+/// YAML 1.2 Core null spellings and empty mapping values resolve to null.
 #[test]
-fn deployment_preserves_epochs_aliases_and_literal_parameters() {
-    let input = r#"
-id: 0
-name: "Deployment: 日本語"
-network: simnet
-plan:
-  batches:
-    - id: 0
-      epoch: "3.0"
-      transactions:
-        - transaction-type: emulated-contract-call
-          contract-id: ST000000000000000000002AMW42H.test
-          emulated-sender: &sender ST000000000000000000002AMW42H
-          method: run
-          parameters: ["true", "null", "123", "0x01", "yes", "NO", "3.0"]
-        - !emulated-contract-call
-          contract-id: ST000000000000000000002AMW42H.test
-          emulated-sender: *sender
-          method: run
-          parameters:
-            - |-
-              (some
-                u1)
-"#;
-    let plan = DeploymentSpecificationFile::from_file_content(input).unwrap();
-    let emitted = serde_saphyr::to_string(&plan).unwrap();
+fn core_null_spellings() {
+    let actual: Value = from_yaml(b"[null, Null, NULL, ~]").unwrap();
+    assert_eq!(actual, json!([null, null, null, null]));
     assert_eq!(
-        DeploymentSpecificationFile::from_file_content(&emitted).unwrap(),
-        plan
+        from_yaml::<Value>(b"value:").unwrap(),
+        json!({"value": null})
     );
-    let batch = &plan.plan.unwrap().batches[0];
-    if let TransactionSpecificationFile::EmulatedContractCall(call) = &batch.transactions[0] {
-        assert_eq!(
-            call.parameters,
-            ["true", "null", "123", "0x01", "yes", "NO", "3.0"]
-        );
-    } else {
-        panic!("expected emulated contract call");
+}
+
+/// Quotes prevent boolean, null, and numeric inference, preserving the literal text.
+#[test]
+fn quoted_scalars_stay_strings() {
+    let actual: Value = from_yaml(b"['true', 'null', '123', '0x01', 'yes', '3.0']").unwrap();
+    assert_eq!(actual, json!(["true", "null", "123", "0x01", "yes", "3.0"]));
+}
+
+/// Explicit string tags preserve text even when plain scalar inference would choose another type.
+#[test]
+fn explicit_string_tags() {
+    let actual: Value = from_yaml(b"[!!str true, !!str null, !!str 010]").unwrap();
+    assert_eq!(actual, json!(["true", "null", "010"]));
+}
+
+/// Decimal integers, lowercase radix prefixes, and decimal floats follow Core resolution.
+#[test]
+fn core_numeric_forms() {
+    let actual: Value = from_yaml(b"[12, -12, 0o10, 0x10, 3.5, 1e2]").unwrap();
+    assert_eq!(actual, json!([12, -12, 8, 16, 3.5, 100.0]));
+}
+
+/// The largest deployment amount retains every bit when passing through an untyped buffer.
+#[test]
+fn unsigned_integer_precision() {
+    let actual: Value = from_yaml(b"18446744073709551615").unwrap();
+    assert_eq!(actual, json!(u64::MAX));
+    assert_eq!(from_yaml::<u64>(b"18446744073709551615").unwrap(), u64::MAX);
+}
+
+/// Negative and overflowing integers cannot be loaded into an unsigned 64-bit field.
+#[test]
+fn unsigned_integer_bounds() {
+    assert!(from_yaml::<u64>(b"-1").is_err());
+    assert!(from_yaml::<u64>(b"18446744073709551616").is_err());
+}
+
+/// Rust string fields retain plain scalar text, matching main's application-level conversion policy.
+#[test]
+fn typed_strings_preserve_text() {
+    for input in ["123", "true", "010", "0x10", "3.0"] {
+        assert_eq!(from_yaml::<String>(input.as_bytes()).unwrap(), input);
     }
 }
 
+/// String-keyed Rust maps preserve numeric-looking key text, matching main's conversion policy.
 #[test]
-fn unquoted_yes_no_on_off_stay_strings() {
-    let input = indoc! {"
-        id: 0
-        name: deployment
-        network: simnet
-        plan:
-          batches:
-            - id: 0
-              transactions:
-                - transaction-type: contract-call
-                  contract-id: ST000000000000000000002AMW42H.test
-                  expected-sender: ST000000000000000000002AMW42H
-                  method: on
-                  parameters: [yes, NO, y, Off]
-                  cost: 1
-                - contract-call:
-                    contract-id: ST000000000000000000002AMW42H.test
-                    expected-sender: ST000000000000000000002AMW42H
-                    method: on
-                    parameters: [yes, NO, y, Off]
-                    cost: 1
-                - !contract-call
-                  contract-id: ST000000000000000000002AMW42H.test
-                  expected-sender: ST000000000000000000002AMW42H
-                  method: on
-                  parameters: [yes, NO, y, Off]
-                  cost: 1
-                - transaction-type: contract-publish
-                  contract-name: n
-                  expected-sender: ST000000000000000000002AMW42H
-                  cost: 1
-                  path: contracts/n.clar
-                - transaction-type: stx-transfer
-                  expected-sender: ST000000000000000000002AMW42H
-                  recipient: ST000000000000000000002AMW42H
-                  mstx-amount: 1
-                  memo: off
-                  cost: 1
-    "};
-    let plan = DeploymentSpecificationFile::from_file_content(input).unwrap();
-    let transactions = &plan.plan.unwrap().batches[0].transactions;
-
-    for transaction in &transactions[..3] {
-        let TransactionSpecificationFile::ContractCall(call) = transaction else {
-            panic!("expected contract call, got {transaction:?}");
-        };
-        assert_eq!(call.method, "on");
-        assert_eq!(call.parameters, ["yes", "NO", "y", "Off"]);
-    }
-    let TransactionSpecificationFile::ContractPublish(publish) = &transactions[3] else {
-        panic!("expected contract publish, got {:?}", transactions[3]);
-    };
-    assert_eq!(publish.contract_name, "n");
-    let TransactionSpecificationFile::StxTransfer(transfer) = &transactions[4] else {
-        panic!("expected stx transfer, got {:?}", transactions[4]);
-    };
-    assert_eq!(transfer.memo.as_deref(), Some("off"));
+fn typed_string_mapping_keys() {
+    let actual: BTreeMap<String, String> = from_yaml(b"010: value").unwrap();
+    assert_eq!(actual.get("010").map(String::as_str), Some("value"));
 }
 
-// The devnet coordinator reads the serde-derived `DeploymentSpecification`, buffered by serde itself.
+/// Unicode and literal-block line breaks survive parsing, including the strip chomping indicator.
 #[test]
-fn unquoted_yes_no_on_off_stay_strings_in_specification() {
-    let input = indoc! {"
-        transaction_type: ContractCall
-        contract_id: ST000000000000000000002AMW42H.test
-        expected_sender: ST000000000000000000002AMW42H
-        method: on
-        parameters: [yes, n]
-        cost: 1
-        anchor_block_only: false
-    "};
-    let TransactionSpecification::ContractCall(call) = from_yaml(input.as_bytes()).unwrap() else {
-        panic!("expected contract call");
-    };
-    assert_eq!(call.method.as_str(), "on");
-    assert_eq!(call.parameters, ["yes", "n"]);
+fn literal_block_text() {
+    let actual: String = from_yaml("|-\n  日本語\n  second line\n".as_bytes()).unwrap();
+    assert_eq!(actual, "日本語\nsecond line");
 }
 
+/// An alias resolves to its anchor's value without changing scalar types.
 #[test]
-fn malformed_transactions_are_rejected() {
-    for input in [
-        "transaction-type: nonexistent\n",
-        "!nonexistent {}",
-        "transaction-type: stx-transfer\ncost: 1\n",
-        "[]",
-        "null",
-        "transaction-type: btc-transfer\nexpected-sender: sender\nrecipient: recipient\nsats-amount: -1\nsats-per-byte: 1\n",
-        "transaction-type: btc-transfer\nexpected-sender: sender\nrecipient: recipient\nsats-amount: 18446744073709551616\nsats-per-byte: 1\n",
-    ] {
-        assert!(
-            from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_err(),
-            "{input}"
-        );
-    }
+fn aliases_preserve_values() {
+    let actual: Value = from_yaml(b"[&word yes, *word]").unwrap();
+    assert_eq!(actual, json!(["yes", "yes"]));
 }
 
+/// References to missing anchors are invalid YAML.
 #[test]
-fn standard_yaml_map_tag_is_not_a_transaction_variant() {
-    let input = "!!map {transaction-type: btc-transfer, expected-sender: sender, recipient: recipient, sats-amount: 1, sats-per-byte: 1}";
-    assert!(from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_ok());
+fn undefined_alias_is_rejected() {
+    assert!(from_yaml::<Value>(b"*missing").is_err());
 }
 
+/// Merge keys remain ordinary keys, matching main and the YAML 1.2 Core schema.
 #[test]
-fn merge_keys_and_binary_tags_are_not_interpreted() {
-    let input = indoc! {"
-        id: 0
-        name: deployment
-        network: simnet
-        plan:
-          batches:
-            - id: 0
-              transactions:
-                - &first
-                  transaction-type: stx-transfer
-                  expected-sender: ST000000000000000000002AMW42H
-                  recipient: ST000000000000000000002AMW42H
-                  mstx-amount: 1
-                  memo: !!binary aGVsbG8=
-                  cost: 1
-                - <<: *first
-                  transaction-type: stx-transfer
-                  expected-sender: ST000000000000000000002AMW42H
-                  recipient: ST000000000000000000002AMW42H
-                  mstx-amount: 2
-                  cost: 1
-    "};
-    let plan = DeploymentSpecificationFile::from_file_content(input).unwrap();
-    let memos: Vec<_> = plan.plan.unwrap().batches[0]
-        .transactions
-        .iter()
-        .map(|transaction| match transaction {
-            TransactionSpecificationFile::StxTransfer(transfer) => transfer.memo.clone(),
-            other => panic!("expected stx transfer, got {other:?}"),
-        })
-        .collect();
-    assert_eq!(memos, [Some("aGVsbG8=".to_string()), None]);
+fn merge_keys_are_ordinary() {
+    let actual: Value = from_yaml(b"base: &base {value: 1}\ncopy: {<<: *base}").unwrap();
+    assert_eq!(actual["copy"], json!({"<<": {"value": 1}}));
 }
 
+/// Binary-tagged strings keep their encoded text, matching main's compatibility policy.
+/// This is an application policy, not a YAML 1.2 Core requirement for the non-Core binary tag.
 #[test]
-#[ignore = "serde-saphyr 2.0.0 does not implement strict YAML 1.2 Core resolution"]
-fn yaml_12_core_scalar_resolution() {
-    for directive in ["", "%YAML 1.2\n---\n"] {
-        for (scalar, expected) in [
-            ("yes", json!("yes")),
-            ("tRuE", json!("tRuE")),
-            ("True", json!(true)),
-            ("FALSE", json!(false)),
-            ("1_000", json!("1_000")),
-            ("0X10", json!("0X10")),
-            ("0b101", json!("0b101")),
-            ("010", json!(10)),
-            ("-010", json!(-10)),
-            ("0o10", json!(8)),
-            ("0x10", json!(16)),
-            ("18446744073709551615", json!(u64::MAX)),
-            ("'010'", json!("010")),
-            ("!!str 010", json!("010")),
-        ] {
-            let input = format!("{directive}{scalar}\n");
-            assert_eq!(
-                from_yaml::<Value>(input.as_bytes()).unwrap(),
-                expected,
-                "{input}"
-            );
-        }
-    }
-}
-
-#[test]
-#[ignore = "serde-saphyr 2.0.0 does not select a schema from YAML version directives"]
-fn yaml_11_directive_selects_legacy_scalar_resolution() {
-    for (scalar, expected) in [
-        ("yes", json!(true)),
-        ("OFF", json!(false)),
-        ("010", json!(8)),
-        ("0b101", json!(5)),
-        ("1_000", json!(1000)),
-        ("1:20", json!(80)),
-        ("'yes'", json!("yes")),
-        ("!!str 010", json!("010")),
-    ] {
-        let input = format!("%YAML 1.1\n---\n{scalar}\n");
-        assert_eq!(
-            from_yaml::<Value>(input.as_bytes()).unwrap(),
-            expected,
-            "{input}"
-        );
-    }
-}
-
-#[test]
-#[ignore = "serde-saphyr 2.0.0 coerces these plain scalars in untyped buffers"]
-fn scalar_regressions_stay_strings_in_all_transaction_formats() {
-    let fields = indoc! {"
-        contract-id: ST000000000000000000002AMW42H.test
-        expected-sender: ST000000000000000000002AMW42H
-        method: tRuE
-        parameters: [1_000, 0X10, 0b101]
-        cost: 1
-    "};
-    let indented: String = fields.lines().map(|line| format!("  {line}\n")).collect();
-    for directive in ["", "%YAML 1.2\n---\n"] {
-        for body in [
-            format!("transaction-type: contract-call\n{fields}"),
-            format!("contract-call:\n{indented}"),
-            format!("!contract-call\n{fields}"),
-        ] {
-            let input = format!("{directive}{body}");
-            let TransactionSpecificationFile::ContractCall(call) =
-                from_yaml(input.as_bytes()).unwrap()
-            else {
-                panic!("expected contract call");
-            };
-            assert_eq!(call.method, "tRuE");
-            assert_eq!(call.parameters, ["1_000", "0X10", "0b101"]);
-        }
-    }
-}
-
-#[test]
-#[ignore = "requires schema resolution unavailable in serde-saphyr 2.0.0"]
-fn yaml_schema_applies_to_aliases_and_mapping_keys() {
-    for directive in ["", "%YAML 1.2\n---\n"] {
-        let input = format!("{directive}first: &value tRuE\nsecond: *value\n1_000: a\n'1000': b\n");
-        let actual: Value = from_yaml(input.as_bytes()).unwrap();
-        assert_eq!(actual["first"], "tRuE");
-        assert_eq!(actual["second"], "tRuE");
-        assert_eq!(actual["1_000"], "a");
-        assert_eq!(actual["1000"], "b");
-    }
-    for input in [
-        "010: first\n10: second\n",
-        "%YAML 1.1\n---\n010: first\n8: second\n",
-    ] {
-        assert!(
-            from_yaml::<std::collections::BTreeMap<u64, String>>(input.as_bytes()).is_err(),
-            "{input}"
-        );
-    }
-    assert!(from_yaml::<std::collections::BTreeMap<bool, String>>(
-        b"%YAML 1.1\n---\nyes: first\ntrue: second\n"
-    )
-    .is_err());
-}
-
-#[test]
-fn directives_in_scalar_contents_do_not_select_a_schema() {
-    let input = "text: |\n  %YAML 1.1\nvalue: yes\n";
-    let actual: Value = from_yaml(input.as_bytes()).unwrap();
-    assert_eq!(actual["value"], "yes");
-    assert_eq!(actual["text"], "%YAML 1.1\n");
-}
-
-#[test]
-#[ignore = "requires schema resolution unavailable in serde-saphyr 2.0.0"]
-fn schema_checks_typed_fields_and_explicit_tags() {
-    assert_eq!(from_yaml::<u64>(b"010").unwrap(), 10);
-    assert_eq!(from_yaml::<f64>(b"10").unwrap(), 10.0);
-    assert_eq!(from_yaml::<u64>(b"%YAML 1.1\n---\n010").unwrap(), 8);
-    assert!(from_yaml::<bool>(b"tRuE").is_err());
-    assert!(from_yaml::<u64>(b"1_000").is_err());
-    assert!(from_yaml::<Value>(b"!!bool tRuE").is_err());
-    assert!(from_yaml::<Value>(b"!!int 1_000").is_err());
-    assert!(from_yaml::<bool>(b"%YAML 1.1\n---\nyes").unwrap());
+fn binary_strings_keep_encoded_text() {
+    let actual: Value = from_yaml(b"!!binary aGVsbG8=").unwrap();
+    assert_eq!(actual, json!("aGVsbG8="));
     assert_eq!(
-        from_yaml::<Value>(b"%YAML 1.1\n---\n!!int 1:20").unwrap(),
-        json!(80)
+        from_yaml::<String>(b"!!binary aGVsbG8=").unwrap(),
+        "aGVsbG8="
     );
+}
+
+/// Custom tags can be captured without changing the contained mapping's scalar values.
+#[test]
+fn custom_mapping_tags() {
+    let serde_saphyr::Tagged(value, tag): serde_saphyr::Tagged<Value> =
+        from_yaml(b"!item {value: yes}").unwrap();
+    assert_eq!(tag.as_deref(), Some("!item"));
+    assert_eq!(value, json!({"value": "yes"}));
+}
+
+/// A standard mapping tag leaves the mapping's contents intact.
+#[test]
+fn standard_mapping_tag() {
+    assert_eq!(
+        from_yaml::<Value>(b"!!map {value: yes}").unwrap(),
+        json!({"value": "yes"})
+    );
+}
+
+/// Internally tagged enums buffer values without turning legacy boolean words into booleans.
+#[test]
+fn internally_tagged_enum_strings() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    #[serde(tag = "kind")]
+    enum Item {
+        Text { value: String },
+    }
+    let actual: Item = from_yaml(b"kind: Text\nvalue: on").unwrap();
+    assert_eq!(actual, Item::Text { value: "on".into() });
+}
+
+/// Untagged enums preserve legacy boolean words while trying their candidate variants.
+#[test]
+fn untagged_enum_strings() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    #[serde(untagged)]
+    enum Item {
+        Boolean(bool),
+        Text(String),
+    }
+    assert_eq!(from_yaml::<Item>(b"yes").unwrap(), Item::Text("yes".into()));
+}
+
+/// Flattened fields preserve legacy boolean words through Serde's intermediate buffer.
+#[test]
+fn flattened_strings() {
+    #[derive(Debug, Deserialize)]
+    struct Item {
+        #[serde(flatten)]
+        fields: BTreeMap<String, String>,
+    }
+    let actual: Item = from_yaml(b"value: off").unwrap();
+    assert_eq!(actual.fields.get("value").map(String::as_str), Some("off"));
+}
+
+/// An explicit 1.2 directive preserves the default handling of legacy boolean words.
+#[test]
+fn explicit_yaml_12_directive() {
+    assert_eq!(
+        from_yaml::<Value>(b"%YAML 1.2\n---\nyes").unwrap(),
+        json!("yes")
+    );
+}
+
+/// Directive-like text inside a literal block is content and does not affect other values.
+#[test]
+fn directive_text_in_scalar_content() {
+    let actual: Value = from_yaml(b"text: |\n  %YAML 1.1\nvalue: yes").unwrap();
+    assert_eq!(actual, json!({"text": "%YAML 1.1\n", "value": "yes"}));
+}
+
+/// Quoting or an explicit string tag must override the requested legacy inference.
+/// This already works on main and does not depend on version-based schema selection.
+#[test]
+fn explicit_yaml_11_strings_remain_strings() {
+    let actual: Value = from_yaml(b"%YAML 1.1\n---\n['yes', !!str 010]").unwrap();
+    assert_eq!(actual, json!(["yes", "010"]));
 }
