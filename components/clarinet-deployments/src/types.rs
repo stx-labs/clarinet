@@ -18,11 +18,20 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 
-/// Parse YAML where only `true`/`false` are booleans, like the previous parser. Serde buffers
-/// tagged, untagged and flattened values before their type is known, and serde-saphyr's
-/// default would read plain `yes`/`no`/`on`/`off` there as booleans.
+/// The only YAML entry point (clippy bans the others), so every read gets the previous
+/// parser's YAML 1.2 rules instead of serde-saphyr's YAML 1.1 defaults:
+/// - only `true`/`false` are booleans: serde buffers tagged, untagged and flattened values
+///   before their type is known, where plain `yes`/`no`/`on`/`off` would become booleans
+/// - `<<` is an ordinary key, not a merge
+/// - `!!binary` strings keep their text instead of being base64-decoded
+#[allow(clippy::disallowed_methods)]
 pub fn from_yaml<T: DeserializeOwned>(content: &[u8]) -> Result<T, serde_saphyr::Error> {
-    serde_saphyr::from_slice_with_options(content, serde_saphyr::options! { strict_booleans: true })
+    let options = serde_saphyr::options! {
+        strict_booleans: true,
+        merge_keys: serde_saphyr::MergeKeyPolicy::AsOrdinary,
+        ignore_binary_tag_for_string: true,
+    };
+    serde_saphyr::from_slice_with_options(content, options)
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy, Eq, PartialOrd, Ord, EnumIter)]

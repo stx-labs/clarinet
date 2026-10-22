@@ -56,7 +56,7 @@ fn all_transaction_variants_accept_all_three_formats() {
 
         for input in [current, legacy, tagged] {
             let actual: TransactionSpecificationFile =
-                serde_saphyr::from_str(&input).unwrap_or_else(|error| panic!("{input}\n{error}"));
+                from_yaml(input.as_bytes()).unwrap_or_else(|error| panic!("{input}\n{error}"));
             assert_eq!(actual, expected, "{input}");
             let emitted = serde_saphyr::to_string(&actual).unwrap();
             assert!(
@@ -64,7 +64,7 @@ fn all_transaction_variants_accept_all_three_formats() {
                 "{emitted}"
             );
             assert_eq!(
-                serde_saphyr::from_str::<TransactionSpecificationFile>(&emitted).unwrap(),
+                from_yaml::<TransactionSpecificationFile>(emitted.as_bytes()).unwrap(),
                 expected
             );
         }
@@ -97,9 +97,6 @@ plan:
                 u1)
 "#;
     let plan = DeploymentSpecificationFile::from_file_content(input).unwrap();
-    let bytes_plan: DeploymentSpecificationFile =
-        serde_saphyr::from_slice(input.as_bytes()).unwrap();
-    assert_eq!(plan, bytes_plan);
     let emitted = serde_saphyr::to_string(&plan).unwrap();
     assert_eq!(
         DeploymentSpecificationFile::from_file_content(&emitted).unwrap(),
@@ -206,12 +203,51 @@ fn malformed_transactions_are_rejected() {
         "transaction-type: btc-transfer\nexpected-sender: sender\nrecipient: recipient\nsats-amount: -1\nsats-per-byte: 1\n",
         "transaction-type: btc-transfer\nexpected-sender: sender\nrecipient: recipient\nsats-amount: 18446744073709551616\nsats-per-byte: 1\n",
     ] {
-        assert!(serde_saphyr::from_str::<TransactionSpecificationFile>(input).is_err(), "{input}");
+        assert!(
+            from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_err(),
+            "{input}"
+        );
     }
 }
 
 #[test]
 fn standard_yaml_map_tag_is_not_a_transaction_variant() {
     let input = "!!map {transaction-type: btc-transfer, expected-sender: sender, recipient: recipient, sats-amount: 1, sats-per-byte: 1}";
-    assert!(serde_saphyr::from_str::<TransactionSpecificationFile>(input).is_ok());
+    assert!(from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_ok());
+}
+
+#[test]
+fn merge_keys_and_binary_tags_are_not_interpreted() {
+    let input = indoc! {"
+        id: 0
+        name: deployment
+        network: simnet
+        plan:
+          batches:
+            - id: 0
+              transactions:
+                - &first
+                  transaction-type: stx-transfer
+                  expected-sender: ST000000000000000000002AMW42H
+                  recipient: ST000000000000000000002AMW42H
+                  mstx-amount: 1
+                  memo: !!binary aGVsbG8=
+                  cost: 1
+                - <<: *first
+                  transaction-type: stx-transfer
+                  expected-sender: ST000000000000000000002AMW42H
+                  recipient: ST000000000000000000002AMW42H
+                  mstx-amount: 2
+                  cost: 1
+    "};
+    let plan = DeploymentSpecificationFile::from_file_content(input).unwrap();
+    let memos: Vec<_> = plan.plan.unwrap().batches[0]
+        .transactions
+        .iter()
+        .map(|transaction| match transaction {
+            TransactionSpecificationFile::StxTransfer(transfer) => transfer.memo.clone(),
+            other => panic!("expected stx transfer, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(memos, [Some("aGVsbG8=".to_string()), None]);
 }
