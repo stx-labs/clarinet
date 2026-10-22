@@ -14,8 +14,16 @@ use clarity_repl::analysis::ast_dependency_detector::DependencySet;
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session};
 use clarity_repl::utils::{remove_env_simnet, Environment};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
+
+/// Parse YAML where only `true`/`false` are booleans, like the previous parser. Serde buffers
+/// tagged, untagged and flattened values before their type is known, and serde-saphyr's
+/// default would read plain `yes`/`no`/`on`/`off` there as booleans.
+pub fn from_yaml<T: DeserializeOwned>(content: &[u8]) -> Result<T, serde_saphyr::Error> {
+    serde_saphyr::from_slice_with_options(content, serde_saphyr::options! { strict_booleans: true })
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy, Eq, PartialOrd, Ord, EnumIter)]
 pub enum EpochSpec {
@@ -835,8 +843,7 @@ impl DeploymentSpecification {
         let spec_file_content = paths::read_content(deployment_path)?;
 
         let specification_file: DeploymentSpecificationFile =
-            serde_saphyr::from_slice(&spec_file_content[..])
-                .map_err(|msg| format!("unable to read file {msg}"))?;
+            from_yaml(&spec_file_content).map_err(|msg| format!("unable to read file {msg}"))?;
 
         let network = match specification_file.network.to_lowercase().as_str() {
             "simnet" => StacksNetwork::Simnet,
@@ -1143,14 +1150,12 @@ impl DeploymentSpecificationFile {
             .read_file(path.to_string_lossy().into_owned())
             .await?;
 
-        serde_saphyr::from_str(&spec_file_content)
-            .map_err(|msg| format!("unable to read file {msg}"))
+        Self::from_file_content(&spec_file_content)
     }
     pub fn from_file_content(
         spec_file_content: &str,
     ) -> Result<DeploymentSpecificationFile, String> {
-        serde_saphyr::from_str(spec_file_content)
-            .map_err(|msg| format!("unable to read file {msg}"))
+        from_yaml(spec_file_content.as_bytes()).map_err(|msg| format!("unable to read file {msg}"))
     }
 }
 

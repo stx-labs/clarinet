@@ -1,4 +1,7 @@
-use clarinet_deployments::types::{DeploymentSpecificationFile, TransactionSpecificationFile};
+use clarinet_deployments::types::{
+    from_yaml, DeploymentSpecificationFile, TransactionSpecification, TransactionSpecificationFile,
+};
+use indoc::indoc;
 use serde_json::{json, Value};
 
 fn transactions() -> Vec<(&'static str, Value)> {
@@ -111,6 +114,85 @@ plan:
     } else {
         panic!("expected emulated contract call");
     }
+}
+
+#[test]
+fn unquoted_yes_no_on_off_stay_strings() {
+    let input = indoc! {"
+        id: 0
+        name: deployment
+        network: simnet
+        plan:
+          batches:
+            - id: 0
+              transactions:
+                - transaction-type: contract-call
+                  contract-id: ST000000000000000000002AMW42H.test
+                  expected-sender: ST000000000000000000002AMW42H
+                  method: on
+                  parameters: [yes, NO, y, Off]
+                  cost: 1
+                - contract-call:
+                    contract-id: ST000000000000000000002AMW42H.test
+                    expected-sender: ST000000000000000000002AMW42H
+                    method: on
+                    parameters: [yes, NO, y, Off]
+                    cost: 1
+                - !contract-call
+                  contract-id: ST000000000000000000002AMW42H.test
+                  expected-sender: ST000000000000000000002AMW42H
+                  method: on
+                  parameters: [yes, NO, y, Off]
+                  cost: 1
+                - transaction-type: contract-publish
+                  contract-name: n
+                  expected-sender: ST000000000000000000002AMW42H
+                  cost: 1
+                  path: contracts/n.clar
+                - transaction-type: stx-transfer
+                  expected-sender: ST000000000000000000002AMW42H
+                  recipient: ST000000000000000000002AMW42H
+                  mstx-amount: 1
+                  memo: off
+                  cost: 1
+    "};
+    let plan = DeploymentSpecificationFile::from_file_content(input).unwrap();
+    let transactions = &plan.plan.unwrap().batches[0].transactions;
+
+    for transaction in &transactions[..3] {
+        let TransactionSpecificationFile::ContractCall(call) = transaction else {
+            panic!("expected contract call, got {transaction:?}");
+        };
+        assert_eq!(call.method, "on");
+        assert_eq!(call.parameters, ["yes", "NO", "y", "Off"]);
+    }
+    let TransactionSpecificationFile::ContractPublish(publish) = &transactions[3] else {
+        panic!("expected contract publish, got {:?}", transactions[3]);
+    };
+    assert_eq!(publish.contract_name, "n");
+    let TransactionSpecificationFile::StxTransfer(transfer) = &transactions[4] else {
+        panic!("expected stx transfer, got {:?}", transactions[4]);
+    };
+    assert_eq!(transfer.memo.as_deref(), Some("off"));
+}
+
+// The devnet coordinator reads the serde-derived `DeploymentSpecification`, buffered by serde itself.
+#[test]
+fn unquoted_yes_no_on_off_stay_strings_in_specification() {
+    let input = indoc! {"
+        transaction_type: ContractCall
+        contract_id: ST000000000000000000002AMW42H.test
+        expected_sender: ST000000000000000000002AMW42H
+        method: on
+        parameters: [yes, n]
+        cost: 1
+        anchor_block_only: false
+    "};
+    let TransactionSpecification::ContractCall(call) = from_yaml(input.as_bytes()).unwrap() else {
+        panic!("expected contract call");
+    };
+    assert_eq!(call.method.as_str(), "on");
+    assert_eq!(call.parameters, ["yes", "n"]);
 }
 
 #[test]
