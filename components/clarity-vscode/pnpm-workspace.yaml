@@ -5,7 +5,6 @@ packages:
 
 allowBuilds:
   '@playwright/browser-chromium': true
-  '@swc/core': true
   '@vscode/vsce-sign': true
   keytar: true
 
