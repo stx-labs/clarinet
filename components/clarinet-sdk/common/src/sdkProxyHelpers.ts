@@ -53,7 +53,11 @@ export type RawTransactionResult =
       performance?: string;
     };
 
-export type BroadcastTransaction = (rawHex: string) => RawTransactionResult;
+export type BroadcastTransactionResult =
+  | { txid: string }
+  | { error: string; reason: string; reason_data?: Record<string, unknown>; txid?: string };
+
+export type BroadcastTransaction = (rawHex: string) => BroadcastTransactionResult;
 
 /**
  * Post-conditions to enforce on a simnet transaction.
@@ -148,6 +152,14 @@ export type TransferSTX = (
  */
 export type Tx =
   | {
+      broadcastTx: string;
+      callPublicFn?: never;
+      callPrivateFn?: never;
+      deployContract?: never;
+      transferSTX?: never;
+    }
+  | {
+      broadcastTx?: never;
       callPublicFn: {
         contract: string;
         method: string;
@@ -159,6 +171,7 @@ export type Tx =
       transferSTX?: never;
     }
   | {
+      broadcastTx?: never;
       callPublicFn?: never;
       callPrivateFn: {
         contract: string;
@@ -170,6 +183,7 @@ export type Tx =
       transferSTX?: never;
     }
   | {
+      broadcastTx?: never;
       callPublicFn?: never;
       callPrivateFn?: never;
       deployContract: {
@@ -181,6 +195,7 @@ export type Tx =
       transferSTX?: never;
     }
   | {
+      broadcastTx?: never;
       callPublicFn?: never;
       callPrivateFn?: never;
       deployContract?: never;
@@ -281,12 +296,23 @@ export function parseCosts(costs: string): ClarityCosts | null {
 }
 
 /** One outcome per entry; rejected entries do not consume a nonce. */
-export type BlockTransactionResult =
-  | { status: "success"; execution: ParsedTransactionResult }
-  | { status: "included_failure"; error: string; execution: ParsedTransactionResult | null }
-  | { status: "rejected"; error: string };
+export type MinedTransactionDetails = {
+  transaction?: RawTransactionMetadata | null;
+  kind?: "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
+  result?: ClarityValue | null;
+  events?: ClarityEvent[];
+  costs?: ClarityCosts | null;
+  performance?: string;
+};
 
-export type MineBlock = (txs: Array<Tx>) => BlockTransactionResult[];
+export type BlockTransactionResult = MinedTransactionDetails &
+  (
+    | { status: "success"; execution: ParsedTransactionResult }
+    | { status: "included_failure"; error: string; execution: ParsedTransactionResult | null }
+    | { status: "rejected"; error: string }
+  );
+
+export type MineBlock = (txs?: Array<Tx>) => BlockTransactionResult[];
 
 export type SerializedTransactionResult = {
   result: string;
@@ -306,25 +332,56 @@ export function parseTransactionResult(
   };
 }
 
-export type SerializedBlockTransactionResult =
+export type SerializedBlockTransactionResult = {
+  transaction?: { txid: string; fee: string; nonce: string } | null;
+  kind?: MinedTransactionDetails["kind"];
+  result?: string | null;
+  events?: string;
+  costs?: string;
+  performance?: string | null;
+} & (
   | { status: "success"; execution: SerializedTransactionResult }
   | {
       status: "included_failure";
       error: string;
       execution: SerializedTransactionResult | null;
     }
-  | { status: "rejected"; error: string };
+  | { status: "rejected"; error: string }
+);
 
 export function parseBlockTransactionResult(
   response: SerializedBlockTransactionResult,
 ): BlockTransactionResult {
+  const details: MinedTransactionDetails = {};
+  if (response.transaction !== undefined) {
+    details.transaction =
+      response.transaction === null
+        ? null
+        : {
+            txid: response.transaction.txid,
+            fee: BigInt(response.transaction.fee),
+            nonce: BigInt(response.transaction.nonce),
+          };
+  }
+  if (response.kind !== undefined) {
+    details.kind = response.kind;
+    details.result = response.result == null ? null : Cl.deserialize(response.result);
+    details.events = parseEvents(response.events ?? "[]");
+    details.costs = parseCosts(response.costs ?? "null");
+    details.performance = response.performance ?? undefined;
+  }
   switch (response.status) {
     case "rejected":
-      return response;
+      return { ...details, status: "rejected", error: response.error };
     case "success":
-      return { status: "success", execution: parseTransactionResult(response.execution) };
+      return {
+        ...details,
+        status: "success",
+        execution: parseTransactionResult(response.execution),
+      };
     case "included_failure":
       return {
+        ...details,
         status: "included_failure",
         error: response.error,
         execution: response.execution === null ? null : parseTransactionResult(response.execution),

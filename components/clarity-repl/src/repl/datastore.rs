@@ -1719,7 +1719,7 @@ mod tests {
             let store = session.interpreter.clarity_datastore.clone();
             let blocks = session.interpreter.datastore.clone();
             for raw in ["xyz", wrong_nonce, wrong_nonce] {
-                let outcome = session.broadcast_transaction_in_next_block(raw);
+                let outcome = session.execute_raw_transaction_in_next_block(raw);
                 assert!(!outcome.is_included());
                 if raw == wrong_nonce {
                     assert!(format!("{outcome:?}").contains("origin nonce mismatch"));
@@ -1785,7 +1785,7 @@ mod tests {
             };
             // Use a fresh rejection to exercise precisely that boundary.
             assert!(!session
-                .broadcast_transaction_in_next_block(wrong_nonce)
+                .execute_raw_transaction_in_next_block(wrong_nonce)
                 .is_included());
             session
                 .interpreter

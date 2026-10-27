@@ -286,6 +286,7 @@ fn post_condition_check(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum TxArgs {
+    BroadcastTx(String),
     CallPrivateFn(CallContractArgsJSON),
     CallPublicFn(CallContractArgsJSON),
     DeployContract(DeployContractArgs),
@@ -1299,15 +1300,20 @@ impl SDK {
         Ok(execution_result_to_transaction_res(&execution))
     }
 
-    /// Execute a signed transaction in the next block, retaining it only on inclusion.
+    /// Submit signed bytes to the session's mempool without mining.
     #[wasm_bindgen(js_name=broadcastTransaction)]
     pub fn broadcast_transaction(&mut self, raw_hex: &str) -> String {
+        serde_json::to_string(&self.get_session_mut().submit_transaction(raw_hex))
+            .expect("admission response is serializable")
+    }
+
+    fn raw_transaction_response(
+        &mut self,
+        outcome: clarity_repl::repl::raw_transaction::RawTransactionOutcome,
+    ) -> serde_json::Value {
         use clarity_repl::repl::raw_transaction::{
             RawFailureKind, RawTransactionMetadata, RawTransactionOutcome, RawTransactionResult,
         };
-        let outcome = self
-            .get_session_mut()
-            .broadcast_transaction_in_next_block(raw_hex);
         let metadata_json = |metadata: &RawTransactionMetadata| {
             json!({
                 "txid": metadata.txid,
@@ -1370,7 +1376,7 @@ impl SDK {
                             None
                         };
                         let status: &'static str = kind.into();
-                        json!({ "status": status, "transaction": transaction, "error": error,
+                        json!({ "status": "included_failure", "kind": status, "execution": null, "transaction": transaction, "error": error,
                             "result": output.as_deref().map(clarity_values::to_raw_value),
                             "events": serialize_events(&events), "costs": json!(cost).to_string(),
                             "performance": performance })
@@ -1378,7 +1384,7 @@ impl SDK {
                 }
             }
         };
-        response.to_string()
+        response
     }
 
     #[wasm_bindgen(js_name=deployContract)]
@@ -1408,24 +1414,32 @@ impl SDK {
     #[wasm_bindgen(js_name=mineBlock)]
     pub fn mine_block_js(&mut self, js_txs: js_sys::Array) -> Result<JsValue, String> {
         let tx_len = usize::try_from(js_txs.length()).unwrap();
-        let mut results: Vec<BlockTransactionResult> = Vec::with_capacity(tx_len);
+        let mut results: Vec<serde_json::Value> = Vec::with_capacity(tx_len);
 
         {
             let session = self.get_session_mut();
             session.advance_chain_tip(1);
         }
 
+        while let Some(tx) = self.get_session_mut().next_mempool_transaction() {
+            let outcome = self.get_session_mut().execute_transaction(&tx);
+            results.push(self.raw_transaction_response(outcome));
+        }
+
         for tx in js_txs.iter() {
             let tx: TxArgs = match tx.into_serde() {
                 Ok(tx) => tx,
                 Err(error) => {
-                    results.push(BlockTransactionResult::Rejected {
-                        error: format!("Invalid tx arguments: {error}"),
-                    });
+                    results.push(json!({ "status": "rejected", "error": format!("Invalid tx arguments: {error}") }));
                     continue;
                 }
             };
             let result = match tx {
+                TxArgs::BroadcastTx(raw_hex) => {
+                    let outcome = self.get_session_mut().execute_raw_transaction(&raw_hex);
+                    results.push(self.raw_transaction_response(outcome));
+                    continue;
+                }
                 TxArgs::CallPublicFn(call_public) => CallFnArgs::from_json_args(call_public)
                     .map_err(TransactionError::from)
                     .and_then(|args| self.inner_call_public_fn(&args, false)),
@@ -1437,11 +1451,17 @@ impl SDK {
                     self.inner_deploy_contract(&deploy_contract, false)
                 }
             };
-            results.push(result.into());
+            results.push(
+                serde_json::to_value(BlockTransactionResult::from(result)).expect("block result"),
+            );
         }
 
         results
-            .serialize(&serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true))
+            .serialize(
+                &serde_wasm_bindgen::Serializer::new()
+                    .serialize_missing_as_null(true)
+                    .serialize_maps_as_objects(true),
+            )
             .map_err(|e| format!("error: {e}"))
     }
 

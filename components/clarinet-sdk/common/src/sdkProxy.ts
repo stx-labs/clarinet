@@ -1,15 +1,12 @@
 import { Cl, serializeCVBytes } from "@stacks/transactions";
 
 import {
-  parseCosts,
   parseBlockTransactionResult,
   parseTransactionResult,
   type SerializedTransactionResult,
   type SerializedBlockTransactionResult,
-  parseEvents,
   serializePostConditions,
   type BroadcastTransaction,
-  type RawTransactionResult,
   type CallFn,
   type CallReadOnlyFn,
   type DeployContract,
@@ -116,39 +113,8 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
       }
 
       if (prop === "broadcastTransaction") {
-        const broadcast: BroadcastTransaction = (rawHex) => {
-          const response = JSON.parse(sdk.broadcastTransaction(rawHex));
-          const transaction =
-            response.transaction === null
-              ? null
-              : {
-                  txid: response.transaction.txid,
-                  fee: BigInt(response.transaction.fee),
-                  nonce: BigInt(response.transaction.nonce),
-                };
-          if (response.status === "rejected") {
-            return { status: "rejected", transaction, error: response.error };
-          }
-          if (response.status === "success") {
-            return {
-              status: "success",
-              transaction: transaction!,
-              execution: parseTransactionResult(response.execution),
-            };
-          }
-          return {
-            status: response.status as Exclude<
-              RawTransactionResult["status"],
-              "success" | "rejected"
-            >,
-            transaction: transaction!,
-            error: response.error,
-            result: response.result === null ? null : Cl.deserialize(response.result),
-            events: parseEvents(response.events),
-            costs: parseCosts(response.costs),
-            performance: response.performance ?? undefined,
-          };
-        };
+        const broadcast: BroadcastTransaction = (rawHex) =>
+          JSON.parse(sdk.broadcastTransaction(rawHex));
         return broadcast;
       }
 
@@ -205,7 +171,7 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
       }
 
       if (prop === "mineBlock") {
-        const mineBlock: MineBlock = (txs) => {
+        const mineBlock: MineBlock = (txs = []) => {
           const serializedTxs = txs.map((tx) => {
             if (tx.callPublicFn) {
               return {

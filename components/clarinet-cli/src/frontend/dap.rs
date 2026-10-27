@@ -524,6 +524,14 @@ fn run_sdk_request_loop(
                 let _ = writer.flush();
             }
 
+            "broadcastTransaction" => {
+                let raw = request["rawHex"].as_str().unwrap_or_default();
+                let result = session.submit_transaction(raw);
+                let response = serde_json::json!({"id": id, "result": result});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                let _ = writer.flush();
+            }
+
             // Execute a block of transactions in order, returning one result per tx.
             "mineBlock" => {
                 let txs = request["txs"]
@@ -534,6 +542,18 @@ fn run_sdk_request_loop(
                 let mut dap_guard = dap.lock().expect("DAP mutex poisoned");
                 let mut results: Vec<serde_json::Value> = Vec::with_capacity(txs.len());
                 session.advance_chain_tip(1);
+                while let Some(tx) = session.next_mempool_transaction() {
+                    if let Some(call) =
+                        clarity_repl::repl::raw_transaction::RawTransactionMetadata::from(&tx)
+                            .contract_call
+                    {
+                        dap_guard
+                            .prepare_for_call(&call.to_clarity_contract_id(), &call.function_name);
+                    }
+                    results.push(raw_block_result(
+                        session.execute_transaction_with_hooks(&tx, vec![&mut *dap_guard]),
+                    ));
+                }
                 for tx in txs {
                     results.push(execute_block_entry(session, &mut dap_guard, tx));
                 }
@@ -561,6 +581,53 @@ fn run_sdk_request_loop(
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn raw_block_result(
+    outcome: clarity_repl::repl::raw_transaction::RawTransactionOutcome,
+) -> serde_json::Value {
+    use clarity_repl::repl::raw_transaction::{
+        RawTransactionMetadata, RawTransactionOutcome, RawTransactionResult,
+    };
+    use serde_json::json;
+    let metadata = |m: &RawTransactionMetadata| json!({"txid": m.txid, "fee": m.fee.to_string(), "nonce": m.nonce.to_string()});
+    match outcome {
+        RawTransactionOutcome::Rejected {
+            metadata: tx,
+            error,
+        } => {
+            json!({"status": "rejected", "error": error, "transaction": tx.as_ref().map(metadata)})
+        }
+        RawTransactionOutcome::Included {
+            metadata: tx,
+            result,
+        } => match result {
+            RawTransactionResult::Success(execution) => {
+                let value = match &execution.result {
+                    EvaluationResult::Snippet(result) => &result.result,
+                    EvaluationResult::Contract(result) => {
+                        result.result.as_ref().expect("raw deployment result")
+                    }
+                };
+                json!({"status": "success", "transaction": metadata(&tx), "execution": {
+                    "result": to_raw_value(value), "events": serialize_events(&execution.events),
+                    "costs": serde_json::to_string(&execution.cost).unwrap(), "performance": null,
+                }})
+            }
+            RawTransactionResult::Failure {
+                kind,
+                error,
+                output,
+                events,
+                cost,
+            } => {
+                let kind: &'static str = kind.into();
+                json!({"status": "included_failure", "kind": kind, "error": error, "execution": null,
+                    "transaction": metadata(&tx), "result": output.as_deref().map(to_raw_value),
+                    "events": serialize_events(&events), "costs": serde_json::to_string(&cost).unwrap(), "performance": null})
+            }
+        },
+    }
+}
+
 /// The SDK's `ContractOptions`, so both batch paths reject the same malformed options.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -574,6 +641,12 @@ fn execute_block_entry(
     dap: &mut DAPDebugger,
     tx: &serde_json::Value,
 ) -> serde_json::Value {
+    if tx["type"].as_str() == Some("broadcastTx") {
+        return raw_block_result(session.execute_raw_transaction_with_hooks(
+            tx["rawHex"].as_str().unwrap_or_default(),
+            vec![dap],
+        ));
+    }
     use clarity::vm::analysis::contract_interface_builder::ContractInterfaceFunctionAccess;
     use clarity::vm::types::Value;
     use clarity::vm::{ClarityVersion, ExecutionResult, SymbolicExpression};
@@ -921,6 +994,39 @@ mod batch_tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn debug_batch_preserves_signed_transaction_metadata() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../clarinet-sdk/node/tests/fixtures/raw-transactions/transactions.json"
+        ))
+        .unwrap();
+        let mut session = Session::new(SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch34),
+            ..SessionSettings::default()
+        });
+        let sender = PrincipalData::parse(fixtures["sender"].as_str().unwrap()).unwrap();
+        session
+            .interpreter
+            .mint_stx_balance(sender.clone(), 1_000_000)
+            .unwrap();
+        let mut dap = DAPDebugger::no_op();
+        let entry =
+            json!({ "type": "broadcastTx", "rawHex": fixtures["transactions"]["transfer"]["hex"] });
+        let result = execute_block_entry(&mut session, &mut dap, &entry);
+        assert_eq!(result["status"], "success");
+        assert_eq!(
+            result["transaction"],
+            json!({
+                "txid": fixtures["transactions"]["transfer"]["txid"], "fee": "10", "nonce": "0",
+            })
+        );
+        assert_eq!(session.get_nonce(&sender).unwrap(), 1);
+        assert_eq!(
+            execute_block_entry(&mut session, &mut dap, &entry)["status"],
+            "rejected"
+        );
+    }
 
     #[test]
     fn debug_batch_executes_read_only_targets_as_transactions() {

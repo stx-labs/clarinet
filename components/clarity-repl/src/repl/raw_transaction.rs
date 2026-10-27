@@ -73,37 +73,41 @@ pub enum RawFailureKind {
     PostCondition,
 }
 
+impl From<&StacksTransaction> for RawTransactionMetadata {
+    fn from(tx: &StacksTransaction) -> Self {
+        Self {
+            txid: tx.txid().to_string(),
+            fee: tx.get_tx_fee(),
+            nonce: tx.get_origin_nonce(),
+            contract_call: match &tx.payload {
+                TransactionPayload::ContractCall(call) => Some(call.clone()),
+                _ => None,
+            },
+        }
+    }
+}
+
 impl RawTransactionOutcome {
+    pub(crate) fn rejected(tx: Option<&StacksTransaction>, error: String) -> Self {
+        Self::Rejected {
+            metadata: tx.map(RawTransactionMetadata::from),
+            error,
+        }
+    }
+
     pub fn is_included(&self) -> bool {
         matches!(self, Self::Included { .. })
     }
 }
 
 impl ClarityInterpreter {
-    pub fn broadcast_transaction(
+    pub(crate) fn execute_transaction(
         &mut self,
-        raw_hex: &str,
+        tx: &StacksTransaction,
         hooks: Vec<&mut dyn EvalHook>,
     ) -> RawTransactionOutcome {
-        let tx = match decode(raw_hex) {
-            Ok(tx) => tx,
-            Err(error) => {
-                return RawTransactionOutcome::Rejected {
-                    metadata: None,
-                    error,
-                }
-            }
-        };
-        let result = self.execute_raw_transaction(&tx, hooks);
-        let metadata = RawTransactionMetadata {
-            txid: tx.txid().to_string(),
-            fee: tx.get_tx_fee(),
-            nonce: tx.get_origin_nonce(),
-            contract_call: match tx.payload {
-                TransactionPayload::ContractCall(call) => Some(call),
-                _ => None,
-            },
-        };
+        let result = self.execute_raw_transaction(tx, hooks);
+        let metadata = RawTransactionMetadata::from(tx);
         match result {
             Ok(result) => RawTransactionOutcome::Included { metadata, result },
             Err(error) => RawTransactionOutcome::Rejected {
@@ -113,11 +117,7 @@ impl ClarityInterpreter {
         }
     }
 
-    fn execute_raw_transaction(
-        &mut self,
-        tx: &StacksTransaction,
-        hooks: Vec<&mut dyn EvalHook>,
-    ) -> Result<RawTransactionResult, String> {
+    pub(crate) fn check_raw_transaction(&self, tx: &StacksTransaction) -> Result<(), String> {
         let epoch = self.datastore.get_current_epoch();
         let config = self.transaction_config(epoch);
         // The node's orchestration still lives in non-Wasm stackslib. Keep these
@@ -154,6 +154,16 @@ impl ClarityInterpreter {
         ) {
             return Err("transaction payload is unsupported in simnet".into());
         }
+        Ok(())
+    }
+
+    fn execute_raw_transaction(
+        &mut self,
+        tx: &StacksTransaction,
+        hooks: Vec<&mut dyn EvalHook>,
+    ) -> Result<RawTransactionResult, String> {
+        self.check_raw_transaction(tx)?;
+        let epoch = self.datastore.get_current_epoch();
         let origin: PrincipalData = tx.origin_address().into();
         let sponsor: Option<PrincipalData> = tx.sponsor_address().map(Into::into);
         let payer = sponsor.as_ref().unwrap_or(&origin);
@@ -285,7 +295,7 @@ impl ClarityInterpreter {
     }
 }
 
-fn decode(raw_hex: &str) -> Result<StacksTransaction, String> {
+pub(crate) fn decode(raw_hex: &str) -> Result<StacksTransaction, String> {
     let hex = raw_hex.strip_prefix("0x").unwrap_or(raw_hex);
     if hex.len() > MAX_TRANSACTION_LEN as usize * 2 {
         return Err("transaction exceeds maximum length".into());
@@ -338,9 +348,7 @@ fn admit(
     if !balance.can_transfer(fee).map_err(|e| e.to_string())? {
         return Err("insufficient unlocked balance for transaction fee".into());
     }
-    // TODO: Before Epoch 2.1, fees were charged fees after execution.
-    //       It's a minor detail and shouldn't matter for current usage, but leaving a note here just in
-    //       case...
+    // TODO: Before epoch 2.1 the node charges fees after payload execution.
     balance.debit(fee).map_err(|e| e.to_string())?;
     balance.save().map_err(|e| e.to_string())?;
     Ok(nonces)
@@ -493,7 +501,7 @@ mod tests {
     }
 
     fn broadcast(session: &mut Session, fixtures: &Json, name: &str) -> RawTransactionOutcome {
-        session.broadcast_transaction(fixtures["transactions"][name]["hex"].as_str().unwrap())
+        session.execute_raw_transaction(fixtures["transactions"][name]["hex"].as_str().unwrap())
     }
 
     fn balance(session: &mut Session, principal: &PrincipalData) -> u128 {
@@ -577,6 +585,110 @@ mod tests {
             assert_eq!(balance(&mut session, &sender), 999_980);
             assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 2);
         }
+    }
+
+    fn signed_hex(mut tx: StacksTransaction) -> String {
+        use stacks_common::types::chainstate::StacksPrivateKey;
+
+        let key = StacksPrivateKey::from_hex(&format!("{:064x}01", 1)).unwrap();
+        tx.sign_next_origin(&tx.sign_begin(), &key).unwrap();
+        tx.verify(TransactionAuthVerificationMode::EnforceLowS)
+            .unwrap();
+        clarity::util::hash::to_hex(&tx.serialize_to_vec())
+    }
+
+    #[test]
+    fn mempool_policy_does_not_change_signed_block_execution() {
+        use stacks_codec::strings::StacksString;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let sender = principal(&fixtures, "sender");
+        let mut deployment =
+            decode(fixtures["transactions"]["deploy"]["hex"].as_str().unwrap()).unwrap();
+        let TransactionPayload::SmartContract(contract, _) = &mut deployment.payload else {
+            panic!("deployment fixture");
+        };
+        contract.code_body =
+            StacksString::from_str("(define-read-only (increment) (ok u1))").unwrap();
+        assert!(session
+            .execute_raw_transaction_in_next_block(&signed_hex(deployment))
+            .is_included());
+        let height = session
+            .interpreter
+            .datastore
+            .get_current_stacks_block_height();
+        let funds = balance(&mut session, &sender);
+        let raw = fixtures["transactions"]["increment"]["hex"]
+            .as_str()
+            .unwrap();
+        let mut tx = decode(raw).unwrap();
+        tx.set_tx_fee(1000);
+        let raw = signed_hex(tx);
+        let rejected = session.submit_transaction(&raw);
+        assert!(matches!(
+            rejected,
+            crate::repl::mempool::AdmissionResult::Rejected {
+                reason: "NoSuchPublicFunction",
+                ..
+            }
+        ));
+        assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 1);
+        assert_eq!(balance(&mut session, &sender), funds);
+        assert_eq!(
+            session
+                .interpreter
+                .datastore
+                .get_current_stacks_block_height(),
+            height
+        );
+
+        // A miner can include the same signed bytes despite mempool policy.
+        assert!(matches!(
+            session.execute_raw_transaction(&raw),
+            RawTransactionOutcome::Included {
+                result: RawTransactionResult::Success(_),
+                ..
+            }
+        ));
+        assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 2);
+        assert_eq!(balance(&mut session, &sender), funds - 1000);
+    }
+
+    #[test]
+    fn mempool_admission_is_read_only_and_duplicates_are_idempotent() {
+        use crate::repl::mempool::AdmissionResult;
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let sender = principal(&fixtures, "sender");
+        let mut tx = decode(
+            fixtures["transactions"]["transfer"]["hex"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        tx.set_tx_fee(1000);
+        let raw = signed_hex(tx);
+        for _ in 0..2 {
+            assert!(matches!(
+                session.submit_transaction(&raw),
+                AdmissionResult::Accepted { .. }
+            ));
+            assert_eq!(balance(&mut session, &sender), 1_000_000);
+            assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 0);
+        }
+        let queued = session.next_mempool_transaction().unwrap();
+        assert!(session.next_mempool_transaction().is_none());
+        assert!(session.execute_transaction(&queued).is_included());
+        assert_eq!(balance(&mut session, &sender), 998_900);
+        assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 1);
+        assert!(matches!(
+            session.submit_transaction(&raw),
+            AdmissionResult::Rejected {
+                reason: "BadNonce",
+                ..
+            }
+        ));
     }
 
     #[test]

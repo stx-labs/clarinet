@@ -13,6 +13,7 @@ import {
   parseEvents,
   parseBlockTransactionResult,
   type BlockTransactionResult,
+  type BroadcastTransactionResult,
   type SerializedBlockTransactionResult,
   parseCosts,
   type ClarityEvent,
@@ -61,7 +62,8 @@ export type SyncDebugSimnet = {
   readonly burnBlockHeight: number;
   readonly stacksBlockHeight: number;
   getAccounts(): Map<string, string>;
-  mineBlock(txs: Tx[]): BlockTransactionResult[];
+  broadcastTransaction(rawHex: string): BroadcastTransactionResult;
+  mineBlock(txs?: Tx[]): BlockTransactionResult[];
   mineEmptyBlock(count?: number): number;
   mineEmptyStacksBlock(): number;
   callPublicFn(
@@ -168,8 +170,13 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
       return Cl.stringify(Cl.deserialize(resp.result));
     },
 
-    mineBlock(txs: Tx[]): BlockTransactionResult[] {
+    broadcastTransaction(rawHex: string): BroadcastTransactionResult {
+      return send({ method: "broadcastTransaction", rawHex }) as BroadcastTransactionResult;
+    },
+
+    mineBlock(txs: Tx[] = []): BlockTransactionResult[] {
       const serialized = txs.map((tx) => {
+        if (tx.broadcastTx !== undefined) return { type: "broadcastTx", rawHex: tx.broadcastTx };
         if (tx.callPublicFn) {
           return {
             type: "callPublicFn",

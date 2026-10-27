@@ -123,3 +123,42 @@ it("retains nonempty batch events and decodes print and NFT values", () => {
     },
   });
 });
+
+it("submits to the debug mempool and parses signed mining metadata", () => {
+  vi.mocked(syncSend).mockReset();
+  const txid = "ab".repeat(32);
+  vi.mocked(syncSend)
+    .mockReturnValueOnce(JSON.stringify({ result: { accounts: {} } }))
+    .mockReturnValueOnce(JSON.stringify({ result: { txid } }))
+    .mockReturnValueOnce(
+      JSON.stringify({
+        result: {
+          results: [
+            {
+              status: "included_failure",
+              kind: "abort_by_response",
+              execution: null,
+              error: "response",
+              transaction: { txid, fee: "1000", nonce: "0" },
+              result: serializeCV(Cl.error(Cl.uint(7))),
+              events: "[]",
+              costs: "null",
+              performance: null,
+            },
+          ],
+        },
+      }),
+    );
+  const simnet = createSyncDebugSimnet();
+  expect(simnet.broadcastTransaction("signed-hex")).toEqual({ txid });
+  expect(simnet.mineBlock()[0]).toMatchObject({
+    status: "included_failure",
+    transaction: { txid, fee: 1000n, nonce: 0n },
+    result: Cl.error(Cl.uint(7)),
+  });
+  expect(vi.mocked(syncSend).mock.calls[1][0]).toEqual({
+    method: "broadcastTransaction",
+    rawHex: "signed-hex",
+  });
+  expect(vi.mocked(syncSend).mock.calls[2][0]).toEqual({ method: "mineBlock", txs: [] });
+});

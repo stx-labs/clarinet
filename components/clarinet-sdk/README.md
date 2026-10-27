@@ -75,12 +75,18 @@ rejects direct transactions targeting read-only functions.
 
 ## Signed transactions
 
-`simnet.broadcastTransaction(rawHex)` accepts a complete signed Stacks transaction
-serialized by Stacks.js. It verifies signatures, network/epoch rules, and origin
-and sponsor nonces; charges the fee from unlocked STX; and executes native STX
-transfers, public contract calls, or deployments. Ordinary simnet uses testnet
-transactions. Supply an explicit fee and nonce when constructing a transaction
-so Stacks.js does not fetch them from a remote node.
+`simnet.broadcastTransaction(rawHex)` submits a complete signed Stacks transaction
+serialized by Stacks.js to a session-local mempool. It returns `{ txid }` on
+acceptance or `{ error, reason, reason_data, txid? }` on rejection. Malformed
+input has no TXID. Submission is synchronous and never executes the payload,
+charges fees, consumes nonces, or advances the chain.
+
+Admission checks signatures, network/epoch rules, origin and sponsor nonces,
+unlocked funds, transfer validity, duplicate deployments, and public-function
+access and argument types (including Clarity trait casts). Read-only, private,
+and missing functions are rejected. The minimum fee matches the pinned node:
+1 micro-STX per serialized byte. Supply explicit fees and nonces so Stacks.js
+does not fetch them from a remote node.
 
 ```ts
 const transaction = await makeSTXTokenTransfer({
@@ -88,40 +94,51 @@ const transaction = await makeSTXTokenTransfer({
   senderKey,
   recipient,
   amount: 100n,
-  fee: 10n,
+  fee: 1000n,
   nonce: simnet.getAccountNonce(sender),
 });
-const outcome = simnet.broadcastTransaction(transaction.serialize());
+const admission = simnet.broadcastTransaction(transaction.serialize());
+if ("error" in admission) {
+  throw new Error(admission.reason);
+}
+const [outcome] = simnet.mineBlock();
 if (outcome.status === "success") {
-  console.log(outcome.transaction.txid, outcome.execution.result);
+  console.log(outcome.transaction?.txid, outcome.execution.result);
 }
 ```
 
-The result is a discriminated union:
+`mineBlock()` selects queued transactions with ready nonces in submission order, followed by any
+explicit entries supplied to `mineBlock(txs)`, advancing one block for the whole
+batch. Its results use the same `success`, `included_failure`, and `rejected`
+statuses as convenience entries. Signed results additionally carry `transaction`
+metadata: `txid` (64 lowercase hex characters without `0x`), `fee`, and `nonce`
+(both `bigint`). Signed included failures carry `kind` (`abort_by_response`,
+`abort_by_post_condition`, `runtime_error`, or `analysis_error`), nullable `result`,
+attempted `events`, and `costs`; response failures can also include `performance`.
+They retain fees and nonce charges while rolling back aborted payload writes.
 
-- `success`: includes `transaction` metadata and the usual parsed `execution`.
-- `abort_by_response`, `abort_by_post_condition`, `runtime_error`, or
-  `analysis_error`: included failures retain the fee and nonce charges. Results
-  include transaction metadata, an error message, an optional Clarity `result`,
-  attempted events, and costs. Aborted payload writes and asset-cache updates
-  are rolled back; attempted events do not imply committed asset movement.
-  With performance tracking enabled, `abort_by_response` also includes
-  `performance` data; other failure statuses do not.
-- `rejected`: nothing is charged or executed permanently. `transaction` is
-  present if decoding succeeded, otherwise `null`.
+Admission does not guarantee inclusion: mining checks current state again.
+Rejected mined entries charge nothing, and later entries still run. Each selected
+entry is attempted once and removed, including rejected entries. Future-nonce
+transactions remain queued until their predecessors can be mined. Repeated
+submission of identical pending bytes returns the same TXID without duplicating
+the queue. Replaying a mined transaction fails nonce validation. Future
+nonces can be queued for an origin or sponsor up to the node's chaining bound
+(mined nonce + 26); `getAccountNonce` continues to
+report the mined nonce. Calls to a pending deployment must wait until it is mined.
 
-`transaction` contains `txid` (64 lowercase hex characters, without `0x`), `fee`
-and `nonce` (both `bigint`). The ID is calculated from the complete signed
-transaction and matches Stacks.js. Replaying an included transaction is rejected
-by nonce validation. Included submissions execute in the next block and advance
-the chain by one block; rejections do not advance it.
+For direct block execution without mempool policy, use
+`mineBlock([{ broadcastTx: rawHex }])`. This permits block-valid read-only calls
+and low-fee transactions. Convenience calls remain unsigned and fee-free.
+Empty-block helpers advance the chain without draining the mempool.
 
-Raw payloads execute exactly as signed: contract source, boot addresses,
-post-conditions, and transfer memo bytes are not rewritten. Private calls and
-coinbase, tenure-change, and poison-microblock payloads are unsupported. Existing
-convenience calls remain unsigned and fee-free. Raw batch entries are not yet
-supported by `mineBlock`. This method does not
-submit to a network or emulate a mempool.
+This is a deterministic local queue, with no network propagation, fee bidding,
+replacement or expiry. Coinbase, tenure-change, and
+poison-microblock payloads remain unsupported. Raw payloads, post-conditions,
+contract source, and memo bytes execute exactly as signed.
+
+Migration: broadcast previously mined immediately and returned an execution
+result. Check the admission response, then call `mineBlock()` for execution.
 
 ## Contributing
 
