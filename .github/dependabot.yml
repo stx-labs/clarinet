@@ -6,3 +6,20 @@ updates:
       interval: "cron"
       cronjob: "0 9 1,15 * *"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "cron"
+      cronjob: "0 9 1,15 * *"
+      timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        update-types:
+          - "minor"
+          - "patch"
