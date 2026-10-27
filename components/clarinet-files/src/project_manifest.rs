@@ -268,6 +268,11 @@ pub struct RequirementConfig {
 /// Where a contract, or every contract of an address, is already deployed on
 /// testnet and mainnet. Published sources reference it there instead of
 /// publishing a copy.
+///
+/// Only fully qualified references in project contracts are remapped. A
+/// relative reference (`.name`) in a project contract always resolves to the
+/// project's deployer, even if a remap source matches it. To use the remapped
+/// contract, write its full contract ID.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]

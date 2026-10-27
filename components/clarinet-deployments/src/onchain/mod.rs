@@ -598,6 +598,10 @@ fn encode_transactions(
                     let issuer_address = tx.expected_sender.to_address();
                     let nonce = next_nonce(&mut cached_nonces, stacks_rpc, &issuer_address)?;
                     let account = stx_accounts_lookup.get(issuer_address.as_str()).unwrap();
+                    // Relative references (`.name`) in project contracts are not
+                    // remapped, by design: they always resolve to the project's
+                    // deployer. Only requirements get their relative references
+                    // qualified first (see `requirement_publish_source`).
                     let source = match network {
                         StacksNetwork::Devnet | StacksNetwork::Testnet => {
                             remap_deployment_source(&tx.source, contracts_ids_to_remap.iter())

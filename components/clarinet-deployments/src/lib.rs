@@ -979,7 +979,7 @@ pub async fn generate_default_deployment_with_cache(
 
     let mut contract_epochs = HashMap::new();
 
-    let remaps = contract_remaps::resolve_contract_remaps(manifest, network)?;
+    let mut remaps = contract_remaps::resolve_contract_remaps(manifest, network)?;
     // Sources of remapped requirements, to compare against their destination.
     let mut remapped_sources = HashMap::new();
 
@@ -1001,6 +1001,7 @@ pub async fn generate_default_deployment_with_cache(
                 continue;
             }
 
+            contract_remaps::use_testnet_requirement_in_place(&mut remaps, &contract_id, network);
             let is_sbtc = contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS;
             let is_remapped = remaps.contains(&contract_id);
 
@@ -1490,9 +1491,10 @@ pub async fn generate_default_deployment_with_cache(
     // destination uses its own dependencies. If the project dependencies are
     // incomplete, keep all publishes.
     //
-    // If a project contract also calls a dependency of a remapped contract,
-    // the plan publishes that dependency, but the destination does not use it.
-    // To share one contract, remap the dependency too.
+    // If a project contract also calls a mainnet dependency of a remapped
+    // contract, the plan publishes that dependency, but the destination does
+    // not use it. To share one contract, remap the dependency too. A testnet
+    // dependency is always used in place, so it is shared.
     //
     // Warn about a needed contract that the plan does not publish, because it
     // does not exist on testnet.

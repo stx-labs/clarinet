@@ -35,11 +35,6 @@ fn default_contract_remaps(network: &StacksNetwork) -> ContractRemaps {
     }
 }
 
-fn parse_contract_id(contract_id: &str) -> Result<QualifiedContractIdentifier, String> {
-    QualifiedContractIdentifier::parse(contract_id)
-        .map_err(|_| format!("malformatted contract_id: {contract_id}"))
-}
-
 /// The `[remap]` entries the project itself declares for `network`.
 pub fn project_remaps(
     manifest: &ProjectManifest,
@@ -54,33 +49,8 @@ pub fn project_remaps(
     Ok(remaps)
 }
 
-/// Requirements that are already testnet contracts. On testnet, each one
-/// remaps to itself, so the plan uses it in place and does not publish a copy.
-/// Mainnet plans never publish requirements, so they need no such remap.
-fn testnet_requirements_in_place(
-    manifest: &ProjectManifest,
-    network: &StacksNetwork,
-) -> Result<ContractRemaps, String> {
-    if !matches!(network, StacksNetwork::Testnet) {
-        return Ok(ContractRemaps::default());
-    }
-    manifest
-        .project
-        .requirements
-        .iter()
-        .flatten()
-        .filter_map(|requirement| {
-            parse_contract_id(&requirement.contract_id)
-                .map(|contract_id| {
-                    (!contract_id.issuer.is_mainnet()).then(|| (contract_id.clone(), contract_id))
-                })
-                .transpose()
-        })
-        .collect()
-}
-
-/// Every remap that applies on `network`: the defaults, then the testnet
-/// requirements in place, then the project's own on top.
+/// Every remap that applies on `network`: the defaults, then the project's own
+/// on top.
 pub fn resolve_contract_remaps(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
@@ -90,9 +60,30 @@ pub fn resolve_contract_remaps(
     } else {
         ContractRemaps::default()
     };
-    remaps.extend(testnet_requirements_in_place(manifest, network)?);
     remaps.extend(project_remaps(manifest, network)?);
     Ok(remaps)
+}
+
+/// On testnet, remap a requirement at a testnet address to itself, unless
+/// another remap covers it. The plan then uses the deployed contract in place
+/// and does not publish a copy. This applies to listed requirements and to
+/// discovered dependencies alike, so that every reference to a contract uses
+/// the same instance. Mainnet plans never publish requirements, so they need
+/// no such remap.
+pub fn use_testnet_requirement_in_place(
+    remaps: &mut ContractRemaps,
+    contract_id: &QualifiedContractIdentifier,
+    network: &StacksNetwork,
+) {
+    if matches!(network, StacksNetwork::Testnet)
+        && !contract_id.issuer.is_mainnet()
+        && !remaps.contains(contract_id)
+    {
+        remaps.extend(ContractRemaps::from_iter([(
+            contract_id.clone(),
+            contract_id.clone(),
+        )]));
+    }
 }
 
 /// Warnings for project remaps whose destination is not published, or whose
@@ -149,6 +140,11 @@ mod tests {
     use clarity_repl::repl::boot::{SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS};
 
     use super::*;
+
+    fn parse_contract_id(contract_id: &str) -> Result<QualifiedContractIdentifier, String> {
+        QualifiedContractIdentifier::parse(contract_id)
+            .map_err(|_| format!("malformatted contract_id: {contract_id}"))
+    }
 
     #[test]
     fn sbtc_is_remapped_to_its_testnet_deployment() {

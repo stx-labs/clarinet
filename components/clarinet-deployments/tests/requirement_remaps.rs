@@ -552,6 +552,37 @@ async fn testnet_requirement_is_used_in_place() {
 }
 
 #[tokio::test]
+async fn an_unlisted_testnet_dependency_is_used_in_place() {
+    const WRAPPER: &str = "ST1NXBK3K5YYMD6FD41MVNP3JS1GABZ8TRVX023PT.wrapper";
+    const BASE: &str = "ST1NXBK3K5YYMD6FD41MVNP3JS1GABZ8TRVX023PT.base";
+    let project = Project::new(
+        &formatdoc! {r#"
+            [[project.requirements]]
+            contract_id = "{WRAPPER}"
+        "#},
+        Some(&calls(&[WRAPPER, BASE])),
+    );
+    let wrapper_source = format!("{REQUIREMENT_SOURCE}\n{}", calls(&[BASE]));
+    // An epoch 3.2 height on testnet, before the project contract's epoch.
+    let server = mock_contract_sources_at(
+        &[(WRAPPER, &wrapper_source), (BASE, REQUIREMENT_SOURCE)],
+        730,
+    )
+    .await;
+
+    let deployment = project.generate(StacksNetwork::Testnet, &server).await;
+
+    assert_eq!(requirement_publishes(&deployment), Vec::<String>::new());
+    assert_eq!(
+        contract_remaps(&deployment),
+        BTreeMap::from([
+            (BASE.to_string(), BASE.to_string()),
+            (WRAPPER.to_string(), WRAPPER.to_string()),
+        ])
+    );
+}
+
+#[tokio::test]
 async fn opting_out_of_default_remaps_redeploys_sbtc() {
     let sbtc_deposit = format!("{SBTC_MAINNET_DEPLOYER}.sbtc-deposit");
     let project = Project::new(
