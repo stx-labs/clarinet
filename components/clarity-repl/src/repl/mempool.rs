@@ -5,7 +5,6 @@ use clarity_types::types::{PrincipalData, QualifiedContractIdentifier};
 use serde::Serialize;
 use serde_json::{json, Value};
 use stacks_codec::transaction::{StacksTransaction, TransactionPayload};
-use stacks_codec::StacksMessageCodec;
 
 use super::interpreter::ClarityInterpreter;
 use super::raw_transaction::decode;
@@ -32,6 +31,8 @@ pub enum AdmissionResult {
     },
 }
 
+// TODO(upstream): Extract stackslib's MemPoolRejection and into_json mapping
+// from node-specific errors so Wasm can share these rejection codes and data.
 #[derive(Debug)]
 struct AdmissionError {
     reason: &'static str,
@@ -62,10 +63,13 @@ fn require_funds(
     let mut balance = db
         .get_stx_balance_snapshot(principal)
         .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
-    let actual = balance
-        .get_available_balance()
-        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
-    if actual < expected {
+    if !balance
+        .can_transfer(expected)
+        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?
+    {
+        let actual = balance
+            .get_available_balance()
+            .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
         return Err(AdmissionError {
             reason: "NotEnoughFunds",
             data: json!({ "expected": format!("0x{expected:032x}"), "actual": format!("0x{actual:032x}") }),
@@ -132,6 +136,8 @@ impl Session {
 }
 
 impl ClarityInterpreter {
+    // TODO(upstream): Extract StacksChainState::can_include_tx into a Wasm-compatible
+    // API over ClarityConnection. Making it public in stackslib alone is insufficient.
     fn check_mempool_admission(
         &mut self,
         tx: &StacksTransaction,
@@ -156,8 +162,9 @@ impl ClarityInterpreter {
             .map_err(|e| AdmissionError::message("SignatureValidation", e))?;
         // Pinned stacks-node policy: MINIMUM_TX_FEE = 1 and
         // MINIMUM_TX_FEE_RATE_PER_BYTE = 1 (stackslib/db/blocks.rs).
-        // These constants need an upstream Wasm-compatible export.
-        let minimum_fee = tx.serialize_to_vec().len() as u64;
+        // TODO(upstream): Export these constants and can_include_tx's fee predicate
+        // from a Wasm-compatible crate instead of embedding the policy here.
+        let minimum_fee = tx.tx_len();
         if tx.get_tx_fee() < minimum_fee {
             return Err(AdmissionError {
                 reason: "FeeTooLow",
@@ -171,6 +178,8 @@ impl ClarityInterpreter {
             _ => None,
         };
         if let Some(version) = address_version {
+            // TODO(upstream): Expose StacksChainState::is_valid_address_version
+            // outside stackslib; is_mainnet() does not reject unknown testnet versions.
             use stacks_common::address::{
                 C32_ADDRESS_VERSION_MAINNET_MULTISIG, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
                 C32_ADDRESS_VERSION_TESTNET_MULTISIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
@@ -199,6 +208,8 @@ impl ClarityInterpreter {
             .unwrap_or_else(|| tx.origin_address())
             .into();
         connection.with_clarity_db_readonly(|db| -> Result<(), AdmissionError> {
+            // TODO(upstream): Share check_transaction_nonces and can_include_tx's
+            // chaining policy once their node-specific account/error types are extracted.
             for (principal, actual, is_origin) in tx
                 .sponsor_address()
                 .map(|_| (payer.clone(), tx.get_payer().nonce(), false))
@@ -223,7 +234,8 @@ impl ClarityInterpreter {
                     });
                 }
                 // Pinned node's MAXIMUM_MEMPOOL_TX_CHAINING is 25; its upper
-                // bound is the mined nonce + 1 + that limit.
+                // bound is the mined nonce + 1 + that limit. Import the constant
+                // when the upstream chaining policy is available to Wasm.
                 let maximum = expected.saturating_add(26);
                 if actual > maximum {
                     return Err(AdmissionError {
@@ -235,6 +247,8 @@ impl ClarityInterpreter {
                         }),
                     });
                 }
+                // TODO(upstream): Separate MemPoolDB::try_add_tx's conflict/replacement
+                // policy from SQLite and fork lookup before sharing it with this queue.
                 if pending.iter().any(|queued| {
                     (PrincipalData::from(queued.origin_address()) == principal
                         && queued.get_origin_nonce() == actual)
@@ -247,6 +261,8 @@ impl ClarityInterpreter {
                 }
             }
             if let TransactionPayload::TokenTransfer(recipient, amount, _) = &tx.payload {
+                // TODO(upstream): Extract can_admit_mempool_semantic for the
+                // self-transfer and zero-amount rules, preserving node check ordering.
                 if recipient == &origin {
                     return Err(AdmissionError::new("TransferRecipientCannotEqualSender"));
                 }

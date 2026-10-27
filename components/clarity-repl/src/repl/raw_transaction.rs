@@ -20,7 +20,7 @@ use clarity_types::types::{
 use clarity_types::Value;
 use stacks_codec::transaction::{
     StacksTransaction, TransactionAuthVerificationMode, TransactionContractCall,
-    TransactionPayload, TransactionVersion, MAX_TRANSACTION_LEN,
+    TransactionPayload, MAX_TRANSACTION_LEN,
 };
 use stacks_codec::StacksMessageCodec;
 
@@ -120,8 +120,9 @@ impl ClarityInterpreter {
     pub(crate) fn check_raw_transaction(&self, tx: &StacksTransaction) -> Result<(), String> {
         let epoch = self.datastore.get_current_epoch();
         let config = self.transaction_config(epoch);
-        // The node's orchestration still lives in non-Wasm stackslib. Keep these
-        // checks in its order; the consensus predicates themselves are upstream.
+        // TODO(upstream): Extract StacksChainState::process_transaction_precheck
+        // and StacksBlock::validate_transaction_static_epoch into Wasm-compatible
+        // helpers so their ordering and epoch gates need not be mirrored here.
         if !tx.auth.is_supported_in_epoch(epoch) {
             return Err("authentication mode is unsupported in this epoch".into());
         }
@@ -131,9 +132,7 @@ impl ClarityInterpreter {
             TransactionAuthVerificationMode::EnforceLowS
         };
         tx.verify(verification).map_err(|e| e.to_string())?;
-        if tx.chain_id != config.chain_id
-            || matches!(tx.version, TransactionVersion::Mainnet) != config.mainnet
-        {
+        if tx.chain_id != config.chain_id || tx.is_mainnet() != config.mainnet {
             return Err("transaction network or chain ID does not match this session".into());
         }
         stacks_transactions::check_post_conditions_supported_in_epoch(
@@ -317,6 +316,8 @@ fn admit(
     origin: &PrincipalData,
     payer: &PrincipalData,
 ) -> Result<Vec<(PrincipalData, u64)>, String> {
+    // TODO(upstream): Reuse StacksChainState::check_transaction_nonces once its
+    // account/error types and helper are available outside native-only stackslib.
     let origin_nonce = db.get_account_nonce(origin).map_err(|e| e.to_string())?;
     // stacks-node validates a sponsor's nonce before the origin's.
     if tx.sponsor_address().is_some() {
@@ -471,6 +472,7 @@ fn execute_payload(
 mod tests {
     use clarity::types::StacksEpochId;
     use serde_json::Value as Json;
+    use stacks_codec::transaction::TransactionVersion;
 
     use super::*;
     use crate::repl::{Session, SessionSettings};
