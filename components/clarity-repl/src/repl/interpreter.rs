@@ -918,15 +918,11 @@ impl ClarityInterpreter {
                             #[cfg(not(target_arch = "wasm32"))]
                             let start = std::time::Instant::now();
 
-                            let args: Vec<SymbolicExpression> = args
-                                .into_iter()
-                                .map(SymbolicExpression::atom_value)
-                                .collect();
                             let res = env.execute_contract(
                                 &invoke_ctx,
                                 &contract_id,
                                 &method,
-                                &args,
+                                args,
                                 false,
                             )?;
 
@@ -1166,6 +1162,17 @@ impl ClarityInterpreter {
                 global_context: g,
                 call_stack: &mut call_stack,
             };
+
+            let args = args
+                .iter()
+                .map(|arg| {
+                    arg.match_atom_value().cloned().ok_or_else(|| {
+                        VmInternalError::InvariantViolation(format!(
+                            "Passed non-value expression to exec_tx on {method}!"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
             match allow_private {
                 true => env.execute_contract_allow_private(
