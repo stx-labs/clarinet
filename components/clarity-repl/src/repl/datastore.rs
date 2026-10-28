@@ -22,7 +22,7 @@ use clarity::vm::{ContractContext, StacksEpoch};
 use clarity_types::types::{
     PrincipalData, QualifiedContractIdentifier, StandardPrincipalData, TupleData,
 };
-use pox_locking::handle_contract_call_special_cases;
+use pox_locking::{handle_contract_call_special_cases, has_contract_call_special_cases};
 use sha2::{Digest, Sha512_256};
 
 /// Local serde wrapper matching the `Contract` struct shape that Stacks nodes
@@ -694,8 +694,11 @@ impl ClarityBackingStore for ClarityDatastore {
         panic!("Datastore cannot get_metadata_manual")
     }
 
-    fn get_cc_special_cases_handler(&self) -> Option<clarity::vm::database::SpecialCaseHandler> {
-        Some(&handle_contract_call_special_cases)
+    fn get_cc_special_cases_handler(
+        &self,
+        contract: &QualifiedContractIdentifier,
+    ) -> Option<clarity::vm::database::SpecialCaseHandler> {
+        has_contract_call_special_cases(contract).then_some(&handle_contract_call_special_cases)
     }
 
     fn make_contract_commitment(&mut self, contract_hash: Sha512Trunc256Sum) -> String {
