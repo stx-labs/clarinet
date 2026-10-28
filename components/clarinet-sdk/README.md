@@ -126,6 +126,10 @@ the queue. Replaying a mined transaction fails nonce validation. Future
 nonces can be queued for an origin or sponsor up to the node's chaining bound
 (mined nonce + 26); `getAccountNonce` continues to
 report the mined nonce. Calls to a pending deployment must wait until it is mined.
+Self-sponsored transactions must use the same origin and sponsor nonce; mismatches
+are rejected with `BadNonce`. The local queue also rejects submissions that would
+create circular nonce dependencies with `ConflictingNonceInMempool`. Missing
+predecessors are still allowed when the queued dependencies are not circular.
 
 For direct block execution without mempool policy, use
 `mineBlock([{ broadcastTx: rawHex }])`. This permits block-valid read-only calls

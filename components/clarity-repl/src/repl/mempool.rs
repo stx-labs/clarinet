@@ -1,6 +1,6 @@
 //! Session-local admission and queuing, separate from block execution.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use clarity::vm::clarity::ClarityConnection;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier};
@@ -142,6 +142,95 @@ fn require_funds(
             reason: "NotEnoughFunds",
             data: AdmissionData::Funds { expected, actual },
         });
+    }
+    Ok(())
+}
+
+fn check_nonce_dependencies(
+    db: &mut clarity::vm::database::ClarityDatabase,
+    pending: &VecDeque<PendingTransaction>,
+    candidate: &StacksTransaction,
+) -> Result<(), AdmissionError> {
+    let count = pending.len() + 1;
+    let mut reservations: HashMap<PrincipalData, BTreeMap<u64, usize>> = HashMap::new();
+    let mut current_nonces = HashMap::new();
+    for (index, tx) in pending
+        .iter()
+        .map(|entry| &entry.tx)
+        .chain(std::iter::once(candidate))
+        .enumerate()
+    {
+        let nonces = std::iter::once((
+            PrincipalData::from(tx.origin_address()),
+            tx.get_origin_nonce(),
+        ))
+        .chain(
+            tx.sponsor_address()
+                .map(|address| (address.into(), tx.get_payer().nonce())),
+        );
+        let mut stale = false;
+        for (principal, nonce) in nonces.clone() {
+            let current = match current_nonces.entry(principal) {
+                std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let current = db
+                        .get_account_nonce(entry.key())
+                        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
+                    *entry.insert(current)
+                }
+            };
+            if nonce < current {
+                stale = true;
+                break;
+            }
+        }
+        // Mining removes stale entries without executing them, so they cannot
+        // impose dependencies on transactions that are still executable.
+        if stale {
+            continue;
+        }
+        for (principal, nonce) in nonces {
+            reservations
+                .entry(principal)
+                .or_default()
+                .insert(nonce, index);
+        }
+    }
+
+    let mut dependents = vec![Vec::new(); count];
+    let mut prerequisites = vec![0; count];
+    for account in reservations.values() {
+        // Missing nonces may arrive later, but existing reservations must execute
+        // in nonce order. Adjacent reservations capture that ordering transitively.
+        let mut ordered = account.values().copied();
+        if let Some(mut previous) = ordered.next() {
+            for next in ordered {
+                dependents[previous].push(next);
+                prerequisites[next] += 1;
+                previous = next;
+            }
+        }
+    }
+    let mut ready: Vec<_> = prerequisites
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &remaining)| (remaining == 0).then_some(index))
+        .collect();
+    let mut visited = 0;
+    while let Some(index) = ready.pop() {
+        visited += 1;
+        for &dependent in &dependents[index] {
+            prerequisites[dependent] -= 1;
+            if prerequisites[dependent] == 0 {
+                ready.push(dependent);
+            }
+        }
+    }
+    if visited != count {
+        return Err(AdmissionError::message(
+            "ConflictingNonceInMempool",
+            AdmissionMessage::Static("Transaction would create a circular nonce dependency"),
+        ));
     }
     Ok(())
 }
@@ -302,6 +391,20 @@ impl ClarityInterpreter {
         let origin: PrincipalData = tx.origin_address().into();
         let sponsor = tx.sponsor_address().map(PrincipalData::from);
         let payer = sponsor.as_ref().unwrap_or(&origin);
+        if sponsor.as_ref() == Some(&origin) && tx.get_origin_nonce() != tx.get_payer().nonce() {
+            return Err(AdmissionError {
+                reason: "BadNonce",
+                data: AdmissionData::Nonce {
+                    expected: tx.get_origin_nonce(),
+                    actual: tx.get_payer().nonce(),
+                    principal: Box::new(origin.clone()),
+                    is_origin: false,
+                    message: Some(
+                        "Self-sponsored transactions must use equal origin and sponsor nonces",
+                    ),
+                },
+            });
+        }
         connection.with_clarity_db_readonly(|db| -> Result<(), AdmissionError> {
             // TODO(upstream): Share check_transaction_nonces and can_include_tx's
             // chaining policy once their node-specific account/error types are extracted.
@@ -355,6 +458,7 @@ impl ClarityInterpreter {
                     return Err(AdmissionError::new("ConflictingNonceInMempool"));
                 }
             }
+            check_nonce_dependencies(db, pending, tx)?;
             if let TransactionPayload::TokenTransfer(recipient, amount, _) = &tx.payload {
                 // TODO(upstream): Extract can_admit_mempool_semantic for the
                 // self-transfer and zero-amount rules, preserving node check ordering.

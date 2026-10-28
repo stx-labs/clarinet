@@ -678,7 +678,13 @@ mod tests {
         let raw = signed_sponsored_transfer(&fixtures, 1, 1, origin_nonce, sponsor_nonce);
         let admission = session.submit_transaction(&raw);
         assert!(
-            matches!(admission, AdmissionResult::Rejected { .. }),
+            matches!(
+                admission,
+                AdmissionResult::Rejected {
+                    reason: "BadNonce",
+                    ..
+                }
+            ),
             "a self-sponsored transaction with unequal nonces can never execute: {admission:?}",
         );
         assert!(session.next_mempool_transaction().is_none());
@@ -717,8 +723,14 @@ mod tests {
             session.submit_transaction(&first),
             AdmissionResult::Accepted { .. }
         ));
-        // A cycle may be prevented at admission or broken when mining.
         let closing_admission = session.submit_transaction(&second);
+        assert!(matches!(
+            closing_admission,
+            AdmissionResult::Rejected {
+                reason: "ConflictingNonceInMempool",
+                ..
+            }
+        ));
         for _ in 0..3 {
             session.advance_chain_tip(1);
             while let Some(tx) = session.next_mempool_transaction() {
@@ -784,6 +796,92 @@ mod tests {
             session.get_nonce(&principal(&fixtures, "sponsor")).unwrap(),
             2
         );
+    }
+
+    #[test]
+    fn mempool_rejects_three_account_cycles_across_nonce_gaps() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let first = signed_sponsored_transfer(&fixtures, 1, 2, 0, 2);
+        let second = signed_sponsored_transfer(&fixtures, 2, 3, 0, 2);
+        let third = signed_sponsored_transfer(&fixtures, 3, 1, 0, 2);
+        let third_account = decode(&third).unwrap().origin_address().into();
+        session
+            .interpreter
+            .mint_stx_balance(third_account, 1_000_000)
+            .unwrap();
+        for raw in [&first, &second] {
+            assert!(matches!(
+                session.submit_transaction(raw),
+                AdmissionResult::Accepted { .. }
+            ));
+        }
+        let admission = session.submit_transaction(&third);
+        assert!(
+            matches!(
+                admission,
+                AdmissionResult::Rejected {
+                    reason: "ConflictingNonceInMempool",
+                    ..
+                }
+            ),
+            "cycle across three accounts was accepted: {admission:?}"
+        );
+        let predecessor = signed_sponsored_transfer(&fixtures, 3, 3, 0, 0);
+        assert!(matches!(
+            session.submit_transaction(&predecessor),
+            AdmissionResult::Accepted { .. }
+        ));
+        let tx = session.next_mempool_transaction().unwrap();
+        assert_eq!(tx.txid(), decode(&predecessor).unwrap().txid());
+        assert!(session.execute_transaction(&tx).is_included());
+    }
+
+    #[test]
+    fn mempool_ignores_stale_entries_when_checking_cycles() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let stale = signed_sponsored_transfer(&fixtures, 1, 2, 0, 2);
+        assert!(matches!(
+            session.submit_transaction(&stale),
+            AdmissionResult::Accepted { .. }
+        ));
+        session.set_tx_sender(fixtures["sender"].as_str().unwrap());
+        session
+            .stx_transfer(
+                1,
+                fixtures["sponsor"].as_str().unwrap(),
+                PostConditionCheck::Unchecked,
+            )
+            .unwrap();
+
+        // A/0 -> A/1 and B/1 -> B/2 would look circular if the stale entry counted.
+        let valid = signed_sponsored_transfer(&fixtures, 2, 1, 1, 1);
+        let admission = session.submit_transaction(&valid);
+        assert!(
+            matches!(admission, AdmissionResult::Accepted { .. }),
+            "{admission:?}"
+        );
+        session.advance_chain_tip(1);
+        let tx = session.next_mempool_transaction().unwrap();
+        assert_eq!(tx.txid(), decode(&stale).unwrap().txid());
+        assert!(!session.execute_transaction(&tx).is_included());
+        assert!(session.next_mempool_transaction().is_none());
+        let predecessor = signed_sponsored_transfer(&fixtures, 2, 2, 0, 0);
+        assert!(matches!(
+            session.submit_transaction(&predecessor),
+            AdmissionResult::Accepted { .. }
+        ));
+        for raw in [&predecessor, &valid] {
+            let tx = session.next_mempool_transaction().unwrap();
+            assert_eq!(tx.txid(), decode(raw).unwrap().txid());
+            assert!(session.execute_transaction(&tx).is_included());
+        }
+        assert!(session.next_mempool_transaction().is_none());
     }
 
     fn stale_sponsored_transaction_releases_other_nonce(stale_origin: bool) {
