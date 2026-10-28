@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use clarinet_files::RequirementConfig;
+use clarinet_files::{RemapConfig, RequirementConfig};
 use clarity_repl::repl::ClarityContract;
 
 #[derive(Clone, Debug)]
@@ -30,6 +30,8 @@ pub struct TOMLEdition {
     pub contracts_to_add: HashMap<String, ClarityContract>,
     pub contracts_to_rm: Vec<String>,
     pub requirements_to_add: Vec<RequirementConfig>,
+    /// `[remap]` destinations to set, keyed by the contract they replace.
+    pub remaps_to_add: Vec<(String, RemapConfig)>,
 }
 
 #[derive(Clone, Debug)]

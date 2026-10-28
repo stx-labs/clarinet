@@ -1062,6 +1062,189 @@ pub struct DeploymentSpecification {
     // Keep a cache of contract's (source, relative_path)
     #[serde(with = "contracts_serde")]
     pub contracts: BTreeMap<QualifiedContractIdentifier, (String, PathBuf)>,
+    /// References rewritten before broadcast, pointing requirements at
+    /// contracts already deployed on the target network. `None` identifies
+    /// legacy plans; an explicit empty map disables legacy defaults.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "contract_remaps_serde"
+    )]
+    pub contract_remaps: Option<ContractRemaps>,
+}
+
+/// Principals rewritten in published sources, from the one used in Clarity
+/// source code to the one deployed on the network. An address entry covers
+/// every contract of that address; a contract entry takes precedence.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContractRemaps {
+    addresses: BTreeMap<StandardPrincipalData, StandardPrincipalData>,
+    contracts: BTreeMap<QualifiedContractIdentifier, QualifiedContractIdentifier>,
+}
+
+impl ContractRemaps {
+    /// Remap `source` to `destination`: two addresses, or two contracts.
+    pub fn insert(
+        &mut self,
+        source: PrincipalData,
+        destination: PrincipalData,
+    ) -> Result<(), String> {
+        match (source, destination) {
+            (PrincipalData::Standard(source), PrincipalData::Standard(destination)) => {
+                self.addresses.insert(source, destination);
+            }
+            (PrincipalData::Contract(source), PrincipalData::Contract(destination)) => {
+                self.contracts.insert(source, destination);
+            }
+            (source, destination) => {
+                return Err(format!(
+                    "unable to remap {source} to {destination}: an address remaps to an address, and a contract to a contract"
+                ))
+            }
+        }
+        Ok(())
+    }
+
+    /// Parse `source` and `destination`, then [`Self::insert`] them.
+    pub fn insert_str(&mut self, source: &str, destination: &str) -> Result<(), String> {
+        let parse = |principal: &str| {
+            PrincipalData::parse(principal).map_err(|_| {
+                format!("unable to parse remap '{principal}' as a contract identifier or address")
+            })
+        };
+        self.insert(parse(source)?, parse(destination)?)
+    }
+
+    /// Layer `other` on top. Its entries take precedence, and each of its
+    /// address entries replaces the contract entries of that address here.
+    pub fn extend(&mut self, other: ContractRemaps) {
+        self.contracts
+            .retain(|contract_id, _| !other.addresses.contains_key(&contract_id.issuer));
+        self.addresses.extend(other.addresses);
+        self.contracts.extend(other.contracts);
+    }
+
+    /// Where `contract_id` is deployed instead, if it is remapped.
+    pub fn get(
+        &self,
+        contract_id: &QualifiedContractIdentifier,
+    ) -> Option<QualifiedContractIdentifier> {
+        self.contracts.get(contract_id).cloned().or_else(|| {
+            self.addresses.get(&contract_id.issuer).map(|issuer| {
+                QualifiedContractIdentifier::new(issuer.clone(), contract_id.name.clone())
+            })
+        })
+    }
+
+    pub fn contains(&self, contract_id: &QualifiedContractIdentifier) -> bool {
+        self.contracts.contains_key(contract_id) || self.addresses.contains_key(&contract_id.issuer)
+    }
+
+    /// Whether any contract of `issuer` is remapped.
+    pub fn covers_issuer(&self, issuer: &StandardPrincipalData) -> bool {
+        self.addresses.contains_key(issuer)
+            || self
+                .contracts
+                .keys()
+                .any(|contract_id| &contract_id.issuer == issuer)
+    }
+
+    /// The contracts remapped individually.
+    pub fn contract_ids(&self) -> impl Iterator<Item = &QualifiedContractIdentifier> {
+        self.contracts.keys()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.addresses.is_empty() && self.contracts.is_empty()
+    }
+
+    /// Every entry as a `(source, destination)` string pair.
+    pub fn pairs(&self) -> impl Iterator<Item = (String, String)> + '_ {
+        let addresses = self
+            .addresses
+            .iter()
+            .map(|(source, destination)| (source.to_string(), destination.to_string()));
+        let contracts = self
+            .contracts
+            .iter()
+            .map(|(source, destination)| (source.to_string(), destination.to_string()));
+        addresses.chain(contracts)
+    }
+
+    /// The entries whose source, as a string, satisfies `keep`.
+    pub fn filter(&self, mut keep: impl FnMut(&str) -> bool) -> Self {
+        let addresses = self
+            .addresses
+            .iter()
+            .filter(|(source, _)| keep(&source.to_string()))
+            .map(|(source, destination)| (source.clone(), destination.clone()))
+            .collect();
+        let contracts = self
+            .contracts
+            .iter()
+            .filter(|(source, _)| keep(&source.to_string()))
+            .map(|(source, destination)| (source.clone(), destination.clone()))
+            .collect();
+        Self {
+            addresses,
+            contracts,
+        }
+    }
+}
+
+impl FromIterator<(QualifiedContractIdentifier, QualifiedContractIdentifier)> for ContractRemaps {
+    fn from_iter<I>(contracts: I) -> Self
+    where
+        I: IntoIterator<Item = (QualifiedContractIdentifier, QualifiedContractIdentifier)>,
+    {
+        Self {
+            addresses: BTreeMap::new(),
+            contracts: contracts.into_iter().collect(),
+        }
+    }
+}
+
+/// The `contract-remaps` section of a plan file.
+impl TryFrom<&BTreeMap<String, String>> for ContractRemaps {
+    type Error = String;
+
+    fn try_from(specs: &BTreeMap<String, String>) -> Result<Self, String> {
+        let mut remaps = Self::default();
+        for (source, destination) in specs {
+            remaps.insert_str(source, destination)?;
+        }
+        Ok(remaps)
+    }
+}
+
+pub mod contract_remaps_serde {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserializer, Serializer};
+
+    use super::ContractRemaps;
+
+    pub fn serialize<S>(target: &Option<ContractRemaps>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match target {
+            Some(target) => serializer.collect_map(target.pairs()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(des: D) -> Result<Option<ContractRemaps>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let container: Option<BTreeMap<String, String>> = serde::Deserialize::deserialize(des)?;
+        container
+            .as_ref()
+            .map(ContractRemaps::try_from)
+            .transpose()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 pub mod contracts_serde {
@@ -1314,6 +1497,11 @@ impl DeploymentSpecification {
             genesis,
             plan,
             contracts,
+            contract_remaps: specs
+                .contract_remaps
+                .as_ref()
+                .map(ContractRemaps::try_from)
+                .transpose()?,
         })
     }
 
@@ -1331,6 +1519,10 @@ impl DeploymentSpecification {
             bitcoin_node: self.bitcoin_node.clone(),
             node: None,
             genesis: self.genesis.as_ref().map(|g| g.to_specification_file()),
+            contract_remaps: self
+                .contract_remaps
+                .as_ref()
+                .map(|remaps| remaps.pairs().collect()),
             plan: Some(self.plan.to_specification_file(project_root)),
         }
     }
@@ -1439,6 +1631,8 @@ pub struct DeploymentSpecificationFile {
     pub node: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genesis: Option<GenesisSpecificationFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_remaps: Option<BTreeMap<String, String>>,
     pub plan: Option<TransactionPlanSpecificationFile>,
 }
 

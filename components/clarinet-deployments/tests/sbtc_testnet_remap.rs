@@ -1,10 +1,11 @@
 //! Regression coverage for the sBTC testnet deployer address.
 //!
 //! `SBTC_TESTNET_ADDRESS` is only ever read on testnet code paths: the
-//! requirement remap exercised below, the contract-id remap in
-//! `onchain::apply_on_chain_deployment`, and the `print`-event filter in
-//! clarity-repl's logger hook. Simnet deploys the sBTC contracts at their
-//! *mainnet* address, so no simnet test can catch a stale or malformed value.
+//! default contract remaps (covered in `requirement_remaps.rs`), the legacy
+//! contract-id remap in `onchain::apply_on_chain_deployment`, and the
+//! `print`-event filter in clarity-repl's logger hook. Simnet deploys the sBTC
+//! contracts at their *mainnet* address, so no simnet test can catch a stale
+//! or malformed value.
 
 use std::fs;
 use std::path::Path;
@@ -17,9 +18,6 @@ use clarity_repl::utils::Environment;
 use indoc::formatdoc;
 use mockito::{Server, ServerGuard};
 use tempfile::TempDir;
-
-/// sBTC's mainnet deployer, as a project would spell it in `Clarinet.toml`.
-const SBTC_MAINNET_DEPLOYER: &str = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
 
 /// sBTC's testnet deployer, written out rather than imported from
 /// `clarity_repl::repl::boot`. Comparing against the constant would make this
@@ -130,28 +128,6 @@ async fn testnet_requirement_remap(
         .collect();
 
     (spec.remap_sender.to_string(), remap_principals)
-}
-
-#[tokio::test]
-async fn testnet_plan_remaps_sbtc_requirement_to_the_testnet_deployer() {
-    let (remap_sender, remap_principals) =
-        testnet_requirement_remap(SBTC_MAINNET_DEPLOYER, "sbtc-deposit").await;
-
-    assert_eq!(
-        remap_sender, SBTC_TESTNET_DEPLOYER,
-        "an sBTC requirement must be published from the sBTC testnet deployer, \
-         otherwise the contract lands at the wrong address on testnet"
-    );
-
-    assert_eq!(
-        remap_principals,
-        vec![(
-            SBTC_MAINNET_DEPLOYER.to_string(),
-            SBTC_TESTNET_DEPLOYER.to_string()
-        )],
-        "the sBTC mainnet deployer must be rewritten to the testnet deployer \
-         inside the contract source"
-    );
 }
 
 #[tokio::test]
