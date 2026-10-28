@@ -149,10 +149,10 @@ fn do_run_devnet(
     }
     // Check for and potentially copy snapshot data.
     // --create-new-snapshot always runs from genesis so we never load an existing snapshot.
-    let mut use_snapshot = !config.no_snapshot && !config.create_new_snapshot;
-    if config.start_local_devnet_services && use_snapshot {
-        use_snapshot = diff.is_ok() && prepare_global_snapshot(&devnet_config, &devnet_events_tx);
-    }
+    let use_snapshot = !config.no_snapshot
+        && !config.create_new_snapshot
+        && (!config.start_local_devnet_services
+            || (diff.is_ok() && prepare_global_snapshot(&devnet_config, &devnet_events_tx)));
     // if we're starting all services, all trace logs go to networking.log
     if config.start_local_devnet_services {
         let file_appender =
@@ -418,9 +418,9 @@ fn prepare_global_snapshot(
         std::fs::read_to_string(global_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER)).ok();
     let images = SnapshotImages::from(devnet_config);
 
-    match SnapshotPlan::new(cached_marker, &images) {
+    match SnapshotPlan::new(cached_marker.as_deref(), &images) {
         SnapshotPlan::UseCached => true,
-        SnapshotPlan::RunFromGenesis { cached_marker } => {
+        SnapshotPlan::RunFromGenesis => {
             let cached = cached_marker
                 .as_deref()
                 .map(describe_marker)
@@ -430,8 +430,8 @@ fn prepare_global_snapshot(
             )));
             false
         }
-        SnapshotPlan::ExtractEmbedded { stale_marker } => {
-            let msg = match stale_marker {
+        SnapshotPlan::ExtractEmbedded => {
+            let msg = match cached_marker {
                 Some(marker) => format!(
                     "Discarding cached devnet snapshot built with:\n{}\nExtracting the embedded snapshot built with:\n{images}",
                     describe_marker(&marker)
@@ -444,13 +444,7 @@ fn prepare_global_snapshot(
                 &global_snapshot_dir,
                 devnet_events_tx,
             ) {
-                Ok(true) => true,
-                Ok(false) => {
-                    let _ = devnet_events_tx.send(DevnetEvent::warning(
-                        "No embedded snapshot available".to_string(),
-                    ));
-                    false
-                }
+                Ok(()) => true,
                 Err(e) => {
                     let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
                         "Failed to extract embedded snapshot: {e}. Continuing without snapshot."

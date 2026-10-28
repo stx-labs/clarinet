@@ -1117,10 +1117,9 @@ impl DevnetOrchestrator {
             .as_ref()
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let stacks_snapshot = global_snapshot_dir.join("stacks");
 
         if !no_snapshot {
+            let stacks_snapshot = get_global_snapshot_dir().join("stacks");
             let docker_host = self.get_devnet_config()?.docker_host.as_deref();
 
             copy_snapshot_to_container(
@@ -2406,10 +2405,8 @@ pub async fn copy_snapshot_to_container(
 
     // `src/.` copies the contents and creates `dest_path` if it is missing (no bind mount)
     let copy_command = format!(
-        "docker cp {}/. {}:{}",
-        source_path.display(),
-        container_id,
-        dest_path
+        "docker cp {}/. {container_id}:{dest_path}",
+        source_path.display()
     );
     let output = run_docker_command(&copy_command, docker_host)
         .map_err(|e| format!("Failed to execute docker cp: {e}"))?;
@@ -2432,7 +2429,9 @@ pub async fn copy_snapshot_to_container(
 mod tests {
     use super::*;
 
-    fn test_orchestrator(root: &Path) -> DevnetOrchestrator {
+    fn test_orchestrator() -> (tempfile::TempDir, DevnetOrchestrator) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
         fs::create_dir_all(root.join("settings")).unwrap();
         fs::write(root.join("Clarinet.toml"), "[project]\nname = \"test\"\n").unwrap();
         let working_dir = root.join("devnet").display().to_string();
@@ -2440,38 +2439,31 @@ mod tests {
             format!("[network]\nname = \"devnet\"\n\n[devnet]\nworking_dir = {working_dir:?}\n");
         fs::write(root.join("settings").join("Devnet.toml"), devnet_settings).unwrap();
         let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
-        DevnetOrchestrator::new(manifest, None, None, false).unwrap()
+        let orchestrator = DevnetOrchestrator::new(manifest, None, None, false).unwrap();
+        (dir, orchestrator)
     }
 
     #[test]
     fn bitcoin_conf_omits_options_removed_in_core_28() {
-        let root =
-            std::env::temp_dir().join(format!("clarinet-bitcoin-conf-{}", rand::random::<u64>()));
-        let orchestrator = test_orchestrator(&root);
+        let (root, orchestrator) = test_orchestrator();
 
         orchestrator.prepare_bitcoin_node_config(1, true).unwrap();
-        let conf =
-            fs::read_to_string(root.join("devnet").join("conf").join("bitcoin.conf")).unwrap();
+        let conf = fs::read_to_string(root.path().join("devnet").join("conf").join("bitcoin.conf"))
+            .unwrap();
         assert!(!conf.contains("rpcserialversion"));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn stacks_node_config_names_the_miner_wallet() {
-        let root =
-            std::env::temp_dir().join(format!("clarinet-stacks-node-{}", rand::random::<u64>()));
-        let orchestrator = test_orchestrator(&root);
+        let (root, orchestrator) = test_orchestrator();
 
-        let conf_dir = root.join("devnet").join("conf");
+        let conf_dir = root.path().join("devnet").join("conf");
         fs::create_dir_all(&conf_dir).unwrap();
         orchestrator.prepare_stacks_node_config(1).unwrap();
         let conf = fs::read_to_string(conf_dir.join("Stacks.toml")).unwrap();
         assert!(conf.contains("wallet_name = \"miner\""));
         // stacks-node 4.0.5 rejects unknown burnchain fields
         assert!(!conf.contains("rpc_ssl"));
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

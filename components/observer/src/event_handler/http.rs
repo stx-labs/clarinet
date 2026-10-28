@@ -443,12 +443,10 @@ async fn handle_bitcoin_rpc_call(
         )
     });
 
-    // Wallet calls sent here are routed by bitcoind to its only loaded wallet.
-    let url = bitcoin_config.rpc_url.to_string();
-
     let client = Client::new();
+    // Wallet calls sent here are routed by bitcoind to its only loaded wallet.
     let builder = client
-        .post(&url)
+        .post(&bitcoin_config.rpc_url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Basic {}", token))
         .timeout(std::time::Duration::from_secs(5));
@@ -538,14 +536,7 @@ mod tests {
             bitcoind_rpc_url: bitcoind.url(),
             ..Default::default()
         };
-        let indexer = Indexer::new(IndexerConfig {
-            bitcoin_network: config.bitcoin_network.clone(),
-            stacks_network: config.stacks_network.clone(),
-            bitcoind_rpc_url: config.bitcoind_rpc_url.clone(),
-            bitcoind_rpc_username: config.bitcoind_rpc_username.clone(),
-            bitcoind_rpc_password: config.bitcoind_rpc_password.clone(),
-            stacks_node_config: config.stacks_node_config.clone(),
-        });
+        let indexer = Indexer::new(IndexerConfig::from(&config));
         let router = create_router(
             Arc::new(RwLock::new(indexer)),
             Arc::new(Mutex::new(channel().0)),

@@ -1310,14 +1310,13 @@ mod tests {
 
     use super::DEFAULT_MINER_WALLET_NAME;
     use crate::{
-        BitcoinNetwork, DevnetConfig, DevnetConfigFile, NetworkManifest, NetworkManifestFile,
-        StacksNetwork, StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE,
-        DEFAULT_STACKS_SIGNER_IMAGE,
+        DevnetConfig, DevnetConfigFile, NetworkManifest, NetworkManifestFile, StacksNetwork,
+        StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
     };
 
     fn parse_devnet_settings(settings: &str) -> DevnetConfig {
         let mut file: NetworkManifestFile = toml::from_str(settings).unwrap();
-        let networks = (BitcoinNetwork::Regtest, StacksNetwork::Devnet);
+        let networks = StacksNetwork::Devnet.get_networks();
         NetworkManifest::from_network_manifest_file(&mut file, &networks, false, None, None)
             .unwrap()
             .devnet

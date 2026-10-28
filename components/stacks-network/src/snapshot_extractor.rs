@@ -9,7 +9,6 @@ use clarinet_files::{
 use flate2::read::GzDecoder;
 use tar::Archive;
 
-use crate::orchestrator::DEVNET_SNAPSHOT_READY_MARKER;
 use crate::DevnetEvent;
 
 const DEVNET_SNAPSHOT: &[u8] = include_bytes!("../data/devnet_default_snapshot.tar.gz");
@@ -59,26 +58,19 @@ impl fmt::Display for SnapshotImages<'_> {
 pub enum SnapshotPlan {
     UseCached,
     /// Replace the cache, if any, with the embedded snapshot.
-    ExtractEmbedded {
-        stale_marker: Option<String>,
-    },
+    ExtractEmbedded,
     /// No snapshot matches the images. The cache is left untouched.
-    RunFromGenesis {
-        cached_marker: Option<String>,
-    },
+    RunFromGenesis,
 }
 
 impl SnapshotPlan {
-    pub fn new(cached_marker: Option<String>, images: &SnapshotImages) -> Self {
-        let images = images.to_string();
-        if cached_marker.as_deref() == Some(images.as_str()) {
+    pub fn new(cached_marker: Option<&str>, images: &SnapshotImages) -> Self {
+        if cached_marker == Some(images.to_string().as_str()) {
             Self::UseCached
-        } else if images == SnapshotImages::DEFAULT.to_string() {
-            Self::ExtractEmbedded {
-                stale_marker: cached_marker,
-            }
+        } else if *images == SnapshotImages::DEFAULT {
+            Self::ExtractEmbedded
         } else {
-            Self::RunFromGenesis { cached_marker }
+            Self::RunFromGenesis
         }
     }
 }
@@ -95,7 +87,7 @@ pub fn describe_marker(marker: &str) -> &str {
 pub fn extract_embedded_snapshot(
     snapshot_dir: &Path,
     devnet_event_tx: &Sender<DevnetEvent>,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     let _ = devnet_event_tx.send(DevnetEvent::info(
         "Extracting embedded devnet snapshot data...".to_string(),
     ));
@@ -132,16 +124,11 @@ pub fn extract_embedded_snapshot(
         }
     }
 
-    // A test checks that the archive's own marker matches these images
-    let marker_path = snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
-    fs::write(&marker_path, SnapshotImages::DEFAULT.to_string())
-        .map_err(|e| format!("Failed to create snapshot marker: {e}"))?;
-
     let _ = devnet_event_tx.send(DevnetEvent::success(
         "Embedded devnet snapshot extracted successfully".to_string(),
     ));
 
-    Ok(true)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -149,6 +136,7 @@ mod tests {
     use std::io::Read;
 
     use super::*;
+    use crate::orchestrator::DEVNET_SNAPSHOT_READY_MARKER;
 
     const CUSTOM: SnapshotImages = SnapshotImages {
         bitcoin_node: "example/bitcoind:custom",
@@ -167,10 +155,10 @@ mod tests {
     #[test]
     fn matching_cache_is_used() {
         let default = SnapshotImages::DEFAULT;
-        let plan = SnapshotPlan::new(Some(default.to_string()), &default);
+        let plan = SnapshotPlan::new(Some(&default.to_string()), &default);
         assert_eq!(plan, SnapshotPlan::UseCached);
 
-        let plan = SnapshotPlan::new(Some(CUSTOM.to_string()), &CUSTOM);
+        let plan = SnapshotPlan::new(Some(&CUSTOM.to_string()), &CUSTOM);
         assert_eq!(plan, SnapshotPlan::UseCached);
     }
 
@@ -178,32 +166,24 @@ mod tests {
     fn default_images_extract_embedded_snapshot() {
         let default = SnapshotImages::DEFAULT;
         let plan = SnapshotPlan::new(None, &default);
-        assert_eq!(plan, SnapshotPlan::ExtractEmbedded { stale_marker: None });
+        assert_eq!(plan, SnapshotPlan::ExtractEmbedded);
 
         // Created by an older Clarinet, before markers were keyed
-        let plan = SnapshotPlan::new(Some(String::new()), &default);
-        let stale_marker = Some(String::new());
-        assert_eq!(plan, SnapshotPlan::ExtractEmbedded { stale_marker });
+        let plan = SnapshotPlan::new(Some(""), &default);
+        assert_eq!(plan, SnapshotPlan::ExtractEmbedded);
 
-        let plan = SnapshotPlan::new(Some(CUSTOM.to_string()), &default);
-        let stale_marker = Some(CUSTOM.to_string());
-        assert_eq!(plan, SnapshotPlan::ExtractEmbedded { stale_marker });
+        let plan = SnapshotPlan::new(Some(&CUSTOM.to_string()), &default);
+        assert_eq!(plan, SnapshotPlan::ExtractEmbedded);
     }
 
     #[test]
     fn custom_images_without_matching_cache_run_from_genesis() {
         let plan = SnapshotPlan::new(None, &CUSTOM);
-        assert_eq!(
-            plan,
-            SnapshotPlan::RunFromGenesis {
-                cached_marker: None
-            }
-        );
+        assert_eq!(plan, SnapshotPlan::RunFromGenesis);
 
         let default = SnapshotImages::DEFAULT.to_string();
-        let plan = SnapshotPlan::new(Some(default.clone()), &CUSTOM);
-        let cached_marker = Some(default);
-        assert_eq!(plan, SnapshotPlan::RunFromGenesis { cached_marker });
+        let plan = SnapshotPlan::new(Some(&default), &CUSTOM);
+        assert_eq!(plan, SnapshotPlan::RunFromGenesis);
     }
 
     #[test]
