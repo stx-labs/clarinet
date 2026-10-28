@@ -1,5 +1,5 @@
 use std::convert::TryFrom;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -734,7 +734,13 @@ pub async fn create_global_snapshot(
     std::thread::sleep(Duration::from_secs(3));
 
     // Export the events
-    match export_stacks_api_events(devnet_event_observer_config, devnet_event_tx).await {
+    match export_stacks_api_events(
+        devnet_event_observer_config,
+        &global_snapshot_dir,
+        devnet_event_tx,
+    )
+    .await
+    {
         Ok(_) => {
             let _ = devnet_event_tx.send(DevnetEvent::success(
                 "Stacks API events exported successfully".to_string(),
@@ -1588,6 +1594,7 @@ fn get_stacking_tx_method_and_args(
 
 async fn export_stacks_api_events(
     config: &DevnetEventObserverConfig,
+    global_snapshot_dir: &Path,
     devnet_event_tx: &Sender<DevnetEvent>,
 ) -> Result<(), String> {
     // Get container name
@@ -1615,14 +1622,12 @@ async fn export_stacks_api_events(
     // Wait for export to complete
     std::thread::sleep(Duration::from_secs(5));
 
-    // Copy the exported file from container to host
-    let export_path = PathBuf::from(&config.devnet_config.working_dir).join("events_export");
+    let export_path = global_snapshot_dir.join("events_export");
     fs::create_dir_all(&export_path)
         .map_err(|e| format!("unable to create events export directory: {e:?}"))?;
 
     let copy_command = format!(
-        "docker cp {}:/tmp/events_cache.tsv {}",
-        container_name,
+        "docker cp {container_name}:/tmp/events_cache.tsv {}",
         export_path.join("events_cache.tsv").display()
     );
 
@@ -1635,18 +1640,6 @@ async fn export_stacks_api_events(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-
-    // Also copy to global cache
-    let global_snapshot_dir = get_global_snapshot_dir(&config.devnet_config);
-    let global_export_path = global_snapshot_dir.join("events_export");
-    fs::create_dir_all(&global_export_path)
-        .map_err(|e| format!("unable to create global events export directory: {e:?}"))?;
-
-    fs::copy(
-        export_path.join("events_cache.tsv"),
-        global_export_path.join("events_cache.tsv"),
-    )
-    .map_err(|e| format!("unable to copy to global cache: {e:?}"))?;
 
     let _ = devnet_event_tx.send(DevnetEvent::success(
         "Successfully exported Stacks API events".to_string(),

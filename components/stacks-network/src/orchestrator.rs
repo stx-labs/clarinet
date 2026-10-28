@@ -1366,23 +1366,10 @@ impl DevnetOrchestrator {
     }
 
     fn has_events_to_import(&self, devnet_config: &DevnetConfig) -> Option<PathBuf> {
-        let project_events_path = PathBuf::from(&devnet_config.working_dir)
+        let events_path = get_global_snapshot_dir(devnet_config)
             .join("events_export")
             .join("events_cache.tsv");
-
-        if project_events_path.exists() {
-            Some(project_events_path)
-        } else {
-            let global_events_path = get_global_snapshot_dir(devnet_config)
-                .join("events_export")
-                .join("events_cache.tsv");
-
-            if global_events_path.exists() {
-                Some(global_events_path)
-            } else {
-                None
-            }
-        }
+        events_path.exists().then_some(events_path)
     }
     pub async fn boot_stacks_api_container(
         &self,
