@@ -71,8 +71,9 @@ pub static SBTC_TOKEN_ASSET_IDENTIFIER: LazyLock<AssetIdentifier> =
         asset_name: ClarityName::try_from("sbtc-token").unwrap(),
     });
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::StacksEpochId;
@@ -385,9 +386,15 @@ pub fn remap_mainnet_boot_principals(source: &str) -> Option<String> {
 
     remapped.then_some(out)
 }
-pub static BOOT_CONTRACTS_DATA: LazyLock<
-    BTreeMap<QualifiedContractIdentifier, (ClarityContract, ContractAST)>,
-> = LazyLock::new(|| {
+
+/// Shared so callers can read boot ASTs without deep-copying them.
+pub type BootContract = (ClarityContract, Arc<ContractAST>);
+
+pub type BootContractsData = BTreeMap<QualifiedContractIdentifier, BootContract>;
+
+pub type SbtcBootContracts = Vec<(QualifiedContractIdentifier, BootContract)>;
+
+pub static BOOT_CONTRACTS_DATA: LazyLock<BootContractsData> = LazyLock::new(|| {
     let mut result = BTreeMap::new();
     let deploy: [(&StandardPrincipalData, [(&str, &str); 15]); 2] = [
         (&*BOOT_TESTNET_PRINCIPAL, *BOOT_CODE_TESTNET),
@@ -413,7 +420,7 @@ pub static BOOT_CONTRACTS_DATA: LazyLock<
             let (ast, _, _) = interpreter.build_ast(&boot_contract);
             result.insert(
                 boot_contract.expect_resolved_contract_identifier(None),
-                (boot_contract, ast),
+                (boot_contract, Arc::new(ast)),
             );
         }
     }
@@ -423,9 +430,14 @@ pub static BOOT_CONTRACTS_DATA: LazyLock<
 /// `overrides` maps boot contract name → Clarity source code. File I/O is the
 /// caller's responsibility so this stays runtime-agnostic — `wasm32-unknown-unknown`
 /// has no working `std::fs`.
+///
+/// Borrows [`BOOT_CONTRACTS_DATA`] when there is nothing to override.
 pub fn get_boot_contracts_data_with_overrides(
     overrides: &BTreeMap<String, String>,
-) -> BTreeMap<QualifiedContractIdentifier, (ClarityContract, ContractAST)> {
+) -> Cow<'static, BootContractsData> {
+    if overrides.is_empty() {
+        return Cow::Borrowed(&BOOT_CONTRACTS_DATA);
+    }
     let mut result = BOOT_CONTRACTS_DATA.clone();
 
     let interpreter = ClarityInterpreter::new(
@@ -467,10 +479,10 @@ pub fn get_boot_contracts_data_with_overrides(
 
             let (ast, _, _) = interpreter.build_ast(&boot_contract);
             let contract_id = boot_contract.expect_resolved_contract_identifier(None);
-            result.insert(contract_id, (boot_contract, ast));
+            result.insert(contract_id, (boot_contract, Arc::new(ast)));
         }
     }
-    result
+    Cow::Owned(result)
 }
 
 /// Pre-parsed sBTC contracts deployed at the mainnet sBTC address (SM3VDXK3...).
@@ -479,9 +491,7 @@ pub fn get_boot_contracts_data_with_overrides(
 /// - sbtc-deposit last (calls into both)
 ///
 /// The Vec preserves that deployment order.
-pub static SBTC_BOOT_CONTRACTS: LazyLock<
-    Vec<(QualifiedContractIdentifier, (ClarityContract, ContractAST))>,
-> = LazyLock::new(|| {
+pub static SBTC_BOOT_CONTRACTS: LazyLock<SbtcBootContracts> = LazyLock::new(|| {
     let mut result = Vec::new();
     let interpreter = ClarityInterpreter::new(
         StandardPrincipalData::transient(),
@@ -510,7 +520,7 @@ pub static SBTC_BOOT_CONTRACTS: LazyLock<
         };
         let (ast, _, _) = interpreter.build_ast(&contract);
         let contract_id = contract.expect_resolved_contract_identifier(None);
-        result.push((contract_id, (contract, ast)));
+        result.push((contract_id, (contract, Arc::new(ast))));
     }
 
     result

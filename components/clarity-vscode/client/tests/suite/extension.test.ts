@@ -1,4 +1,3 @@
-import { assert } from "chai";
 import {
   Uri,
   Range,
@@ -16,6 +15,12 @@ const { workspaceFolders } = workspace;
 const { uri: workspaceUri } = workspaceFolders![0];
 
 const delay = (ms: number) => new Promise((r) => setTimeout(() => r(1), ms));
+
+function strictEqual<T>(actual: T, expected: T) {
+  if (actual !== expected) {
+    throw new Error(`expected ${String(expected)}, got ${String(actual)}`);
+  }
+}
 
 before(async () => {
   // the language client registers its document sync handlers while starting, and
@@ -77,8 +82,8 @@ describe("get diagnostics", function () {
 
     await workspace.openTextDocument(contractUri);
     const diagnostics = await diagnosticsListener;
-    assert.strictEqual(diagnostics.length, 1);
-    assert.strictEqual(diagnostics[0].severity, DiagnosticSeverity.Warning);
+    strictEqual(diagnostics.length, 1);
+    strictEqual(diagnostics[0].severity, DiagnosticSeverity.Warning);
   });
 
   it("get diagnostics on contract change", async function () {
@@ -94,7 +99,7 @@ describe("get diagnostics", function () {
     await workspace.saveAll();
 
     const diagnostics = await diagnosticsListener;
-    assert.strictEqual(diagnostics.length, 0);
+    strictEqual(diagnostics.length, 0);
   });
 });
 

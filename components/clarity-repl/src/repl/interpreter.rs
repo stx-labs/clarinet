@@ -1008,15 +1008,11 @@ impl ClarityInterpreter {
                             #[cfg(not(target_arch = "wasm32"))]
                             let start = std::time::Instant::now();
 
-                            let args: Vec<SymbolicExpression> = args
-                                .into_iter()
-                                .map(SymbolicExpression::atom_value)
-                                .collect();
                             let res = env.execute_contract(
                                 &invoke_ctx,
                                 &contract_id,
                                 &method,
-                                &args,
+                                args,
                                 false,
                             )?;
 
@@ -1408,6 +1404,16 @@ impl ClarityInterpreter {
             eval_hooks,
             terms,
             |connection, callback| {
+                let values = args
+                    .iter()
+                    .map(|arg| {
+                        arg.match_atom_value().cloned().ok_or_else(|| {
+                            ClarityError::BadTransaction(
+                                "expected evaluated function argument".into(),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 let (value, _, events) = if allow_private {
                     connection
                         .with_abort_callback(
@@ -1424,7 +1430,7 @@ impl ClarityInterpreter {
                                             context,
                                             contract_id,
                                             method,
-                                            args,
+                                            values,
                                             false,
                                         )
                                     },
@@ -1440,22 +1446,12 @@ impl ClarityInterpreter {
                             None => Ok((value, assets, events)),
                         })?
                 } else {
-                    let values = args
-                        .iter()
-                        .map(|arg| {
-                            arg.match_atom_value().cloned().ok_or_else(|| {
-                                ClarityError::BadTransaction(
-                                    "expected evaluated function argument".into(),
-                                )
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
                     connection.run_contract_call(
-                        &sender,
+                        sender,
                         None,
-                        contract_id,
+                        contract_id.clone(),
                         method,
-                        &values,
+                        values,
                         callback,
                         &ResourceBudget::unlimited(),
                     )?
@@ -1517,6 +1513,17 @@ impl ClarityInterpreter {
                 global_context: g,
                 call_stack: &mut call_stack,
             };
+
+            let args = args
+                .iter()
+                .map(|arg| {
+                    arg.match_atom_value().cloned().ok_or_else(|| {
+                        VmInternalError::InvariantViolation(format!(
+                            "Passed non-value expression to exec_tx on {method}!"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
             match allow_private {
                 true => env.execute_contract_allow_private(
@@ -2295,11 +2302,11 @@ mod tests {
             } else {
                 connection
                     .run_contract_call(
-                        &sender,
+                        sender.clone(),
                         None,
-                        &id,
+                        id,
                         "send",
-                        &[],
+                        vec![],
                         |_, _| Some("abort".into()),
                         &ResourceBudget::unlimited(),
                     )

@@ -79,6 +79,19 @@ impl EventObserverConfig {
     }
 }
 
+impl From<&EventObserverConfig> for IndexerConfig {
+    fn from(config: &EventObserverConfig) -> Self {
+        Self {
+            bitcoind_rpc_url: config.bitcoind_rpc_url.clone(),
+            bitcoind_rpc_username: config.bitcoind_rpc_username.clone(),
+            bitcoind_rpc_password: config.bitcoind_rpc_password.clone(),
+            stacks_network: config.stacks_network.clone(),
+            bitcoin_network: config.bitcoin_network.clone(),
+            stacks_node_config: config.stacks_node_config.clone(),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 pub struct ContractReadonlyCall {
     pub okay: bool,
@@ -212,14 +225,7 @@ async fn start_stacks_event_observer(
     let ingestion_port = config.stacks_node_config.ingestion_port;
     let bitcoin_rpc_proxy_enabled = config.bitcoin_rpc_proxy_enabled;
 
-    let indexer_config = IndexerConfig {
-        bitcoind_rpc_url: config.bitcoind_rpc_url.clone(),
-        bitcoind_rpc_username: config.bitcoind_rpc_username.clone(),
-        bitcoind_rpc_password: config.bitcoind_rpc_password.clone(),
-        stacks_network: config.stacks_network.clone(),
-        bitcoin_network: config.bitcoin_network.clone(),
-        stacks_node_config: config.stacks_node_config.clone(),
-    };
+    let indexer_config = IndexerConfig::from(&config);
 
     let mut indexer = Indexer::new(indexer_config.clone());
     indexer.seed_stacks_block_pool(stacks_startup_context.block_pool_seed, &ctx);

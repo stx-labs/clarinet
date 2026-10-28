@@ -17,16 +17,14 @@ fn can_run_boot_contracts() {
         ClarityInterpreter::new(StandardPrincipalData::transient(), repl_settings, None);
 
     // Deploy sbtc boot contracts first (pox-5 depends on sbtc-token)
-    for (_, (contract, ast)) in SBTC_BOOT_CONTRACTS.clone() {
+    for (_, (contract, ast)) in SBTC_BOOT_CONTRACTS.iter() {
         interpreter
-            .run(&contract, Some(&ast), false, None)
+            .run(contract, Some(ast.as_ref()), false, None)
             .expect("sbtc boot contract should deploy");
     }
 
-    let boot_contracts_data = BOOT_CONTRACTS_DATA.clone();
-
-    for (_, (boot_contract, ast)) in boot_contracts_data {
-        match interpreter.run(&boot_contract, Some(&ast), false, None) {
+    for (boot_contract, ast) in BOOT_CONTRACTS_DATA.values() {
+        match interpreter.run(boot_contract, Some(ast.as_ref()), false, None) {
             Ok(res) => {
                 assert!(res.diagnostics.is_empty(), "{:?}", res.diagnostics);
             }

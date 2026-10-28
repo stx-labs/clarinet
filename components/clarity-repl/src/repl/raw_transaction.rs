@@ -18,22 +18,52 @@ use clarity_types::types::{
     BoundedErrorString, BuffData, PrincipalData, QualifiedContractIdentifier, ResponseData,
 };
 use clarity_types::Value;
+use serde::Serialize;
 use stacks_codec::transaction::{
     StacksTransaction, TransactionAuthVerificationMode, TransactionContractCall,
-    TransactionPayload, TransactionVersion, MAX_TRANSACTION_LEN,
+    TransactionPayload, MAX_TRANSACTION_LEN,
 };
 use stacks_codec::StacksMessageCodec;
+use stacks_common::types::chainstate::Txid;
 
 use super::interpreter::{public_function_args, BlockInclusion, ClarityInterpreter, NonceCharge};
 use super::post_conditions::PostConditionCheck;
 use super::transaction::SimnetTransactionConnection;
+use crate::utils::serialize_display;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, thiserror::Error)]
+pub enum RawTransactionError {
+    #[error("transaction exceeds maximum length")]
+    TooLong,
+    #[error("invalid transaction hex: {0}")]
+    Hex(#[from] stacks_common::util::HexError),
+    #[error("invalid transaction: {0}")]
+    Codec(#[from] stacks_common::codec::Error),
+    #[error("trailing bytes after transaction")]
+    TrailingBytes,
+    #[error("authentication mode is unsupported in this epoch")]
+    UnsupportedAuthentication,
+    #[error(transparent)]
+    Signature(#[from] stacks_codec::transaction::AuthError),
+    #[error("transaction network or chain ID does not match this session")]
+    NetworkMismatch,
+    #[error(transparent)]
+    PostCondition(#[from] stacks_transactions::UnsupportedPostCondition),
+    #[error(transparent)]
+    VersionedDeploy(#[from] stacks_transactions::UnsupportedVersionedDeploy),
+    #[error("transaction payload is unsupported in simnet")]
+    UnsupportedPayload,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct RawTransactionMetadata {
-    pub txid: String,
+    pub txid: Txid,
+    #[serde(serialize_with = "serialize_display")]
     pub fee: u64,
+    #[serde(serialize_with = "serialize_display")]
     pub nonce: u64,
     /// Preserve the signed call for SDK cost reports without decoding it again.
+    #[serde(skip)]
     pub contract_call: Option<TransactionContractCall>,
 }
 
@@ -61,16 +91,34 @@ pub enum RawTransactionResult {
     },
 }
 
-#[derive(Debug, Clone, Copy, strum::IntoStaticStr)]
+#[derive(Debug, Clone, Copy, Serialize, strum::IntoStaticStr)]
 pub enum RawFailureKind {
+    #[serde(rename = "abort_by_response")]
     #[strum(serialize = "abort_by_response")]
     Response,
+    #[serde(rename = "runtime_error")]
     #[strum(serialize = "runtime_error")]
     Runtime,
+    #[serde(rename = "analysis_error")]
     #[strum(serialize = "analysis_error")]
     Analysis,
+    #[serde(rename = "abort_by_post_condition")]
     #[strum(serialize = "abort_by_post_condition")]
     PostCondition,
+}
+
+impl From<&StacksTransaction> for RawTransactionMetadata {
+    fn from(tx: &StacksTransaction) -> Self {
+        Self {
+            txid: tx.txid(),
+            fee: tx.get_tx_fee(),
+            nonce: tx.get_origin_nonce(),
+            contract_call: match &tx.payload {
+                TransactionPayload::ContractCall(call) => Some(call.clone()),
+                _ => None,
+            },
+        }
+    }
 }
 
 impl RawTransactionOutcome {
@@ -80,30 +128,13 @@ impl RawTransactionOutcome {
 }
 
 impl ClarityInterpreter {
-    pub fn broadcast_transaction(
+    pub(crate) fn execute_transaction(
         &mut self,
-        raw_hex: &str,
+        tx: &StacksTransaction,
         hooks: Vec<&mut dyn EvalHook>,
     ) -> RawTransactionOutcome {
-        let tx = match decode(raw_hex) {
-            Ok(tx) => tx,
-            Err(error) => {
-                return RawTransactionOutcome::Rejected {
-                    metadata: None,
-                    error,
-                }
-            }
-        };
-        let result = self.execute_raw_transaction(&tx, hooks);
-        let metadata = RawTransactionMetadata {
-            txid: tx.txid().to_string(),
-            fee: tx.get_tx_fee(),
-            nonce: tx.get_origin_nonce(),
-            contract_call: match tx.payload {
-                TransactionPayload::ContractCall(call) => Some(call),
-                _ => None,
-            },
-        };
+        let result = self.execute_raw_transaction(tx, hooks);
+        let metadata = RawTransactionMetadata::from(tx);
         match result {
             Ok(result) => RawTransactionOutcome::Included { metadata, result },
             Err(error) => RawTransactionOutcome::Rejected {
@@ -113,38 +144,34 @@ impl ClarityInterpreter {
         }
     }
 
-    fn execute_raw_transaction(
-        &mut self,
+    pub(crate) fn check_raw_transaction(
+        &self,
         tx: &StacksTransaction,
-        hooks: Vec<&mut dyn EvalHook>,
-    ) -> Result<RawTransactionResult, String> {
+    ) -> Result<(), RawTransactionError> {
         let epoch = self.datastore.get_current_epoch();
         let config = self.transaction_config(epoch);
-        // The node's orchestration still lives in non-Wasm stackslib. Keep these
-        // checks in its order; the consensus predicates themselves are upstream.
+        // TODO(upstream): Extract StacksChainState::process_transaction_precheck
+        // and StacksBlock::validate_transaction_static_epoch into Wasm-compatible
+        // helpers so their ordering and epoch gates need not be mirrored here.
         if !tx.auth.is_supported_in_epoch(epoch) {
-            return Err("authentication mode is unsupported in this epoch".into());
+            return Err(RawTransactionError::UnsupportedAuthentication);
         }
         let verification = if epoch.allows_tx_signatures_with_high_s() {
             TransactionAuthVerificationMode::AllowHighS
         } else {
             TransactionAuthVerificationMode::EnforceLowS
         };
-        tx.verify(verification).map_err(|e| e.to_string())?;
-        if tx.chain_id != config.chain_id
-            || matches!(tx.version, TransactionVersion::Mainnet) != config.mainnet
-        {
-            return Err("transaction network or chain ID does not match this session".into());
+        tx.verify(verification)?;
+        if tx.chain_id != config.chain_id || tx.is_mainnet() != config.mainnet {
+            return Err(RawTransactionError::NetworkMismatch);
         }
         stacks_transactions::check_post_conditions_supported_in_epoch(
             &tx.post_conditions,
             &tx.post_condition_mode,
             epoch,
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         if let TransactionPayload::SmartContract(_, Some(version)) = &tx.payload {
-            stacks_transactions::check_versioned_deploy_supported_in_epoch(*version, epoch)
-                .map_err(|e| e.to_string())?;
+            stacks_transactions::check_versioned_deploy_supported_in_epoch(*version, epoch)?;
         }
         if !matches!(
             tx.payload,
@@ -152,8 +179,18 @@ impl ClarityInterpreter {
                 | TransactionPayload::ContractCall(..)
                 | TransactionPayload::SmartContract(..)
         ) {
-            return Err("transaction payload is unsupported in simnet".into());
+            return Err(RawTransactionError::UnsupportedPayload);
         }
+        Ok(())
+    }
+
+    fn execute_raw_transaction(
+        &mut self,
+        tx: &StacksTransaction,
+        hooks: Vec<&mut dyn EvalHook>,
+    ) -> Result<RawTransactionResult, String> {
+        self.check_raw_transaction(tx).map_err(|e| e.to_string())?;
+        let epoch = self.datastore.get_current_epoch();
         let origin: PrincipalData = tx.origin_address().into();
         let sponsor: Option<PrincipalData> = tx.sponsor_address().map(Into::into);
         let payer = sponsor.as_ref().unwrap_or(&origin);
@@ -285,18 +322,17 @@ impl ClarityInterpreter {
     }
 }
 
-fn decode(raw_hex: &str) -> Result<StacksTransaction, String> {
+/// Decode exactly one size-bounded signed transaction without executing it.
+pub fn decode(raw_hex: &str) -> Result<StacksTransaction, RawTransactionError> {
     let hex = raw_hex.strip_prefix("0x").unwrap_or(raw_hex);
     if hex.len() > MAX_TRANSACTION_LEN as usize * 2 {
-        return Err("transaction exceeds maximum length".into());
+        return Err(RawTransactionError::TooLong);
     }
-    let bytes =
-        clarity::util::hash::hex_bytes(hex).map_err(|e| format!("invalid transaction hex: {e}"))?;
+    let bytes = clarity::util::hash::hex_bytes(hex)?;
     let mut input = bytes.as_slice();
-    let tx = StacksTransaction::consensus_deserialize(&mut input)
-        .map_err(|e| format!("invalid transaction: {e}"))?;
+    let tx = StacksTransaction::consensus_deserialize(&mut input)?;
     if !input.is_empty() {
-        return Err("trailing bytes after transaction".into());
+        return Err(RawTransactionError::TrailingBytes);
     }
     Ok(tx)
 }
@@ -307,6 +343,8 @@ fn admit(
     origin: &PrincipalData,
     payer: &PrincipalData,
 ) -> Result<Vec<(PrincipalData, u64)>, String> {
+    // TODO(upstream): Reuse StacksChainState::check_transaction_nonces once its
+    // account/error types and helper are available outside native-only stackslib.
     let origin_nonce = db.get_account_nonce(origin).map_err(|e| e.to_string())?;
     // stacks-node validates a sponsor's nonce before the origin's.
     if tx.sponsor_address().is_some() {
@@ -338,9 +376,7 @@ fn admit(
     if !balance.can_transfer(fee).map_err(|e| e.to_string())? {
         return Err("insufficient unlocked balance for transaction fee".into());
     }
-    // TODO: Before Epoch 2.1, fees were charged fees after execution.
-    //       It's a minor detail and shouldn't matter for current usage, but leaving a note here just in
-    //       case...
+    // TODO: Before epoch 2.1 the node charges fees after payload execution.
     balance.debit(fee).map_err(|e| e.to_string())?;
     balance.save().map_err(|e| e.to_string())?;
     Ok(nonces)
@@ -402,11 +438,11 @@ fn execute_payload(
         }
         TransactionPayload::ContractCall(call) => {
             let (result, _, events) = connection.run_contract_call(
-                origin,
-                sponsor,
-                &call.to_clarity_contract_id(),
+                origin.clone(),
+                sponsor.cloned(),
+                call.to_clarity_contract_id(),
                 &call.function_name,
-                &call.function_args,
+                call.function_args.clone(),
                 callback,
                 &budget,
             )?;
@@ -463,6 +499,7 @@ fn execute_payload(
 mod tests {
     use clarity::types::StacksEpochId;
     use serde_json::Value as Json;
+    use stacks_codec::transaction::TransactionVersion;
 
     use super::*;
     use crate::repl::{Session, SessionSettings};
@@ -493,7 +530,7 @@ mod tests {
     }
 
     fn broadcast(session: &mut Session, fixtures: &Json, name: &str) -> RawTransactionOutcome {
-        session.broadcast_transaction(fixtures["transactions"][name]["hex"].as_str().unwrap())
+        session.execute_raw_transaction(fixtures["transactions"][name]["hex"].as_str().unwrap())
     }
 
     fn balance(session: &mut Session, principal: &PrincipalData) -> u128 {
@@ -527,8 +564,16 @@ mod tests {
                 panic!("{name}: {outcome:?}");
             };
             assert_eq!(
-                metadata.txid,
+                metadata.txid.to_string(),
                 fixtures["transactions"][name]["txid"].as_str().unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(&metadata).unwrap(),
+                serde_json::json!({
+                    "txid": fixtures["transactions"][name]["txid"],
+                    "fee": metadata.fee.to_string(),
+                    "nonce": metadata.nonce.to_string(),
+                }),
             );
             let sender = principal(&fixtures, "sender");
             assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 1);
@@ -577,6 +622,430 @@ mod tests {
             assert_eq!(balance(&mut session, &sender), 999_980);
             assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 2);
         }
+    }
+
+    fn signed_hex(mut tx: StacksTransaction) -> String {
+        use stacks_common::types::chainstate::StacksPrivateKey;
+
+        let key = StacksPrivateKey::from_hex(&format!("{:064x}01", 1)).unwrap();
+        tx.sign_next_origin(&tx.sign_begin(), &key).unwrap();
+        tx.verify(TransactionAuthVerificationMode::EnforceLowS)
+            .unwrap();
+        clarity::util::hash::to_hex(&tx.serialize_to_vec())
+    }
+
+    fn signed_sponsored_transfer(
+        fixtures: &Json,
+        origin_key: u8,
+        sponsor_key: u8,
+        origin_nonce: u64,
+        sponsor_nonce: u64,
+    ) -> String {
+        use stacks_codec::transaction::TransactionAuth;
+        use stacks_common::types::chainstate::StacksPrivateKey;
+
+        let mut tx = decode(
+            fixtures["transactions"]["sponsored"]["hex"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let TransactionPayload::TokenTransfer(recipient, ..) = &mut tx.payload else {
+            panic!("sponsored transfer fixture");
+        };
+        *recipient = principal(fixtures, if origin_key == 1 { "sponsor" } else { "sender" });
+        let origin = StacksPrivateKey::from_hex(&format!("{origin_key:064x}01")).unwrap();
+        let sponsor = StacksPrivateKey::from_hex(&format!("{sponsor_key:064x}01")).unwrap();
+        tx.auth = TransactionAuth::from_p2pkh(&origin)
+            .unwrap()
+            .into_sponsored(TransactionAuth::from_p2pkh(&sponsor).unwrap())
+            .unwrap();
+        tx.set_origin_nonce(origin_nonce);
+        tx.set_sponsor_nonce(sponsor_nonce).unwrap();
+        tx.set_tx_fee(1000);
+        let sighash = tx.sign_next_origin(&tx.sign_begin(), &origin).unwrap();
+        tx.sign_next_sponsor(&sighash, &sponsor).unwrap();
+        tx.verify(TransactionAuthVerificationMode::EnforceLowS)
+            .unwrap();
+        clarity::util::hash::to_hex(&tx.serialize_to_vec())
+    }
+
+    fn rejects_mismatched_self_sponsor_nonces(origin_nonce: u64, sponsor_nonce: u64) {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let raw = signed_sponsored_transfer(&fixtures, 1, 1, origin_nonce, sponsor_nonce);
+        let admission = session.submit_transaction(&raw);
+        assert!(
+            matches!(
+                admission,
+                AdmissionResult::Rejected {
+                    reason: "BadNonce",
+                    ..
+                }
+            ),
+            "a self-sponsored transaction with unequal nonces can never execute: {admission:?}",
+        );
+        assert!(session.next_mempool_transaction().is_none());
+        let valid = signed_sponsored_transfer(&fixtures, 1, 1, 0, 0);
+        assert!(matches!(
+            session.submit_transaction(&valid),
+            AdmissionResult::Accepted { .. }
+        ));
+        let tx = session.next_mempool_transaction().unwrap();
+        assert!(session.execute_transaction(&tx).is_included());
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sender")).unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn mempool_rejects_self_sponsor_with_future_sponsor_nonce() {
+        rejects_mismatched_self_sponsor_nonces(0, 1);
+    }
+
+    #[test]
+    fn mempool_rejects_self_sponsor_with_future_origin_nonce() {
+        rejects_mismatched_self_sponsor_nonces(1, 0);
+    }
+
+    #[test]
+    fn mempool_circular_sponsorship_does_not_block_both_accounts() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let first = signed_sponsored_transfer(&fixtures, 1, 2, 0, 1);
+        let second = signed_sponsored_transfer(&fixtures, 2, 1, 0, 1);
+        assert!(matches!(
+            session.submit_transaction(&first),
+            AdmissionResult::Accepted { .. }
+        ));
+        let closing_admission = session.submit_transaction(&second);
+        assert!(matches!(
+            closing_admission,
+            AdmissionResult::Rejected {
+                reason: "ConflictingNonceInMempool",
+                ..
+            }
+        ));
+        for _ in 0..3 {
+            session.advance_chain_tip(1);
+            while let Some(tx) = session.next_mempool_transaction() {
+                session.execute_transaction(&tx);
+            }
+        }
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sender")).unwrap(),
+            0
+        );
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sponsor")).unwrap(),
+            0
+        );
+
+        let replacements = [1, 2].map(|key| {
+            session.submit_transaction(&signed_sponsored_transfer(&fixtures, key, key, 0, 0))
+        });
+        assert!(
+            replacements.iter().any(|result| matches!(result, AdmissionResult::Accepted { .. })),
+            "cycle blocks both accounts: closing admission={closing_admission:?}, replacements={replacements:?}",
+        );
+        session.advance_chain_tip(1);
+        let mut included = false;
+        while let Some(tx) = session.next_mempool_transaction() {
+            included |= session.execute_transaction(&tx).is_included();
+        }
+        assert!(
+            included,
+            "breaking the cycle must allow an account to advance"
+        );
+    }
+
+    #[test]
+    fn mempool_acyclic_sponsorship_mines_predecessor_before_dependent() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let dependent = signed_sponsored_transfer(&fixtures, 1, 2, 0, 1);
+        let predecessor = signed_sponsored_transfer(&fixtures, 2, 2, 0, 0);
+        for raw in [&dependent, &predecessor] {
+            assert!(matches!(
+                session.submit_transaction(raw),
+                AdmissionResult::Accepted { .. }
+            ));
+        }
+        session.advance_chain_tip(1);
+        for raw in [&predecessor, &dependent] {
+            let tx = session.next_mempool_transaction().unwrap();
+            assert_eq!(tx.txid(), decode(raw).unwrap().txid());
+            assert!(session.execute_transaction(&tx).is_included());
+        }
+        assert!(session.next_mempool_transaction().is_none());
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sender")).unwrap(),
+            1
+        );
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sponsor")).unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn mempool_rejects_three_account_cycles_across_nonce_gaps() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let first = signed_sponsored_transfer(&fixtures, 1, 2, 0, 2);
+        let second = signed_sponsored_transfer(&fixtures, 2, 3, 0, 2);
+        let third = signed_sponsored_transfer(&fixtures, 3, 1, 0, 2);
+        let third_account = decode(&third).unwrap().origin_address().into();
+        session
+            .interpreter
+            .mint_stx_balance(third_account, 1_000_000)
+            .unwrap();
+        for raw in [&first, &second] {
+            assert!(matches!(
+                session.submit_transaction(raw),
+                AdmissionResult::Accepted { .. }
+            ));
+        }
+        let admission = session.submit_transaction(&third);
+        assert!(
+            matches!(
+                admission,
+                AdmissionResult::Rejected {
+                    reason: "ConflictingNonceInMempool",
+                    ..
+                }
+            ),
+            "cycle across three accounts was accepted: {admission:?}"
+        );
+        let predecessor = signed_sponsored_transfer(&fixtures, 3, 3, 0, 0);
+        assert!(matches!(
+            session.submit_transaction(&predecessor),
+            AdmissionResult::Accepted { .. }
+        ));
+        let tx = session.next_mempool_transaction().unwrap();
+        assert_eq!(tx.txid(), decode(&predecessor).unwrap().txid());
+        assert!(session.execute_transaction(&tx).is_included());
+    }
+
+    #[test]
+    fn mempool_ignores_stale_entries_when_checking_cycles() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let stale = signed_sponsored_transfer(&fixtures, 1, 2, 0, 2);
+        assert!(matches!(
+            session.submit_transaction(&stale),
+            AdmissionResult::Accepted { .. }
+        ));
+        session.set_tx_sender(fixtures["sender"].as_str().unwrap());
+        session
+            .stx_transfer(
+                1,
+                fixtures["sponsor"].as_str().unwrap(),
+                PostConditionCheck::Unchecked,
+            )
+            .unwrap();
+
+        // A/0 -> A/1 and B/1 -> B/2 would look circular if the stale entry counted.
+        let valid = signed_sponsored_transfer(&fixtures, 2, 1, 1, 1);
+        let admission = session.submit_transaction(&valid);
+        assert!(
+            matches!(admission, AdmissionResult::Accepted { .. }),
+            "{admission:?}"
+        );
+        session.advance_chain_tip(1);
+        let tx = session.next_mempool_transaction().unwrap();
+        assert_eq!(tx.txid(), decode(&stale).unwrap().txid());
+        assert!(!session.execute_transaction(&tx).is_included());
+        assert!(session.next_mempool_transaction().is_none());
+        let predecessor = signed_sponsored_transfer(&fixtures, 2, 2, 0, 0);
+        assert!(matches!(
+            session.submit_transaction(&predecessor),
+            AdmissionResult::Accepted { .. }
+        ));
+        for raw in [&predecessor, &valid] {
+            let tx = session.next_mempool_transaction().unwrap();
+            assert_eq!(tx.txid(), decode(raw).unwrap().txid());
+            assert!(session.execute_transaction(&tx).is_included());
+        }
+        assert!(session.next_mempool_transaction().is_none());
+    }
+
+    fn stale_sponsored_transaction_releases_other_nonce(stale_origin: bool) {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let signed = |origin_nonce, sponsor_nonce| {
+            signed_sponsored_transfer(&fixtures, 1, 2, origin_nonce, sponsor_nonce)
+        };
+        let (origin_nonce, sponsor_nonce, consumed, other) = if stale_origin {
+            (0, 1, "sender", "sponsor")
+        } else {
+            (1, 0, "sponsor", "sender")
+        };
+        let raw = signed(origin_nonce, sponsor_nonce);
+        assert!(matches!(
+            session.submit_transaction(&raw),
+            AdmissionResult::Accepted { .. }
+        ));
+        assert!(session.next_mempool_transaction().is_none());
+
+        session.set_tx_sender(fixtures[consumed].as_str().unwrap());
+        session
+            .stx_transfer(
+                1,
+                fixtures[other].as_str().unwrap(),
+                PostConditionCheck::Unchecked,
+            )
+            .unwrap();
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, consumed)).unwrap(),
+            1
+        );
+        assert_eq!(session.get_nonce(&principal(&fixtures, other)).unwrap(), 0);
+
+        // Mirror mineBlock's queue drain after one account makes the entry stale.
+        session.advance_chain_tip(1);
+        let mut outcomes = Vec::new();
+        while let Some(tx) = session.next_mempool_transaction() {
+            outcomes.push(session.execute_transaction(&tx));
+        }
+        let replacement = session.submit_transaction(&signed(1, 1));
+        assert!(
+            matches!(replacement, AdmissionResult::Accepted { .. }),
+            "stale transaction still reserves the other nonce: {replacement:?}; mined: {outcomes:?}",
+        );
+        assert_eq!(outcomes.len(), 1);
+        assert!(matches!(
+            outcomes[0],
+            RawTransactionOutcome::Rejected { .. }
+        ));
+    }
+
+    #[test]
+    fn mempool_releases_sponsor_nonce_when_origin_becomes_stale() {
+        stale_sponsored_transaction_releases_other_nonce(true);
+    }
+
+    #[test]
+    fn mempool_releases_origin_nonce_when_sponsor_becomes_stale() {
+        stale_sponsored_transaction_releases_other_nonce(false);
+    }
+
+    #[test]
+    fn mempool_policy_does_not_change_signed_block_execution() {
+        use stacks_codec::strings::StacksString;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let sender = principal(&fixtures, "sender");
+        let mut deployment =
+            decode(fixtures["transactions"]["deploy"]["hex"].as_str().unwrap()).unwrap();
+        let TransactionPayload::SmartContract(contract, _) = &mut deployment.payload else {
+            panic!("deployment fixture");
+        };
+        contract.code_body =
+            StacksString::from_str("(define-read-only (increment) (ok u1))").unwrap();
+        assert!(session
+            .execute_raw_transaction_in_next_block(&signed_hex(deployment))
+            .is_included());
+        let height = session
+            .interpreter
+            .datastore
+            .get_current_stacks_block_height();
+        let funds = balance(&mut session, &sender);
+        let raw = fixtures["transactions"]["increment"]["hex"]
+            .as_str()
+            .unwrap();
+        let mut tx = decode(raw).unwrap();
+        tx.set_tx_fee(1000);
+        let raw = signed_hex(tx);
+        let rejected = session.submit_transaction(&raw);
+        assert!(matches!(
+            rejected,
+            crate::repl::mempool::AdmissionResult::Rejected {
+                reason: "NoSuchPublicFunction",
+                ..
+            }
+        ));
+        assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 1);
+        assert_eq!(balance(&mut session, &sender), funds);
+        assert_eq!(
+            session
+                .interpreter
+                .datastore
+                .get_current_stacks_block_height(),
+            height
+        );
+
+        // A miner can include the same signed bytes despite mempool policy.
+        assert!(matches!(
+            session.execute_raw_transaction(&raw),
+            RawTransactionOutcome::Included {
+                result: RawTransactionResult::Success(_),
+                ..
+            }
+        ));
+        assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 2);
+        assert_eq!(balance(&mut session, &sender), funds - 1000);
+    }
+
+    #[test]
+    fn mempool_admission_is_read_only_and_duplicates_are_idempotent() {
+        use crate::repl::mempool::AdmissionResult;
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let sender = principal(&fixtures, "sender");
+        let mut tx = decode(
+            fixtures["transactions"]["transfer"]["hex"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        tx.set_tx_fee(1000);
+        let raw = signed_hex(tx);
+        let txid = decode(&raw).unwrap().txid();
+        for _ in 0..2 {
+            let result = session.submit_transaction(&raw);
+            assert!(
+                matches!(&result, AdmissionResult::Accepted { txid: actual } if actual == &txid)
+            );
+            assert_eq!(
+                serde_json::to_value(&result).unwrap(),
+                serde_json::json!({ "txid": txid.to_string() })
+            );
+            assert_eq!(balance(&mut session, &sender), 1_000_000);
+            assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 0);
+        }
+        let queued = session.next_mempool_transaction().unwrap();
+        assert!(session.next_mempool_transaction().is_none());
+        assert!(session.execute_transaction(&queued).is_included());
+        assert_eq!(balance(&mut session, &sender), 998_900);
+        assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 1);
+        let result = session.submit_transaction(&raw);
+        assert!(matches!(
+            &result,
+            AdmissionResult::Rejected {
+                reason: "BadNonce",
+                txid: Some(actual),
+                ..
+            } if actual == &txid
+        ));
+        assert_eq!(
+            serde_json::to_value(&result).unwrap()["txid"],
+            txid.to_string()
+        );
     }
 
     #[test]
@@ -673,9 +1142,19 @@ mod tests {
         let hex = fixtures["transactions"]["transfer"]["hex"]
             .as_str()
             .unwrap();
-        assert!(decode(&format!("{hex}00")).is_err());
-        assert!(decode("not hex").is_err());
-        assert!(decode(&"00".repeat(MAX_TRANSACTION_LEN as usize + 1)).is_err());
+        assert!(matches!(
+            decode(&format!("{hex}00")),
+            Err(RawTransactionError::TrailingBytes)
+        ));
+        assert!(matches!(
+            decode("not hex"),
+            Err(RawTransactionError::Hex(_))
+        ));
+        assert!(matches!(decode("00"), Err(RawTransactionError::Codec(_))));
+        assert!(matches!(
+            decode(&"00".repeat(MAX_TRANSACTION_LEN as usize + 1)),
+            Err(RawTransactionError::TooLong)
+        ));
         assert_eq!(
             decode(&format!("0x{hex}")).unwrap().txid(),
             decode(hex).unwrap().txid()

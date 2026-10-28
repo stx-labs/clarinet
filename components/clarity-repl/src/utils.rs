@@ -12,6 +12,13 @@ use strum::{Display, EnumString};
 use crate::analysis::annotation::AnnotationKind;
 use crate::repl::clarity_values::value_to_string;
 
+pub fn serialize_display<T: std::fmt::Display, S: serde::Serializer>(
+    value: &T,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_str(value)
+}
+
 pub const CHECK_ENVIRONMENTS: [Environment; 2] = [Environment::OnChain, Environment::Simnet];
 
 #[derive(Debug, Clone, Copy, EnumString, Display, PartialEq, Eq, Hash)]

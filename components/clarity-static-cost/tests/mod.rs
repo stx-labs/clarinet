@@ -345,15 +345,13 @@ fn execute_contract_function_and_get_cost(
     )
     .unwrap();
 
-    // Convert u64 arguments to Value::UInt, then to SymbolicExpression::atom_value
-    use clarity::vm::representations::SymbolicExpression;
-    let arg_exprs: Vec<SymbolicExpression> = args
-        .iter()
-        .map(|v| SymbolicExpression::atom_value(v.clone()))
-        .collect();
-
-    let _result =
-        env.execute_transaction(sender, None, contract_id.clone(), function_name, &arg_exprs);
+    let _result = env.execute_transaction(
+        sender,
+        None,
+        contract_id.clone(),
+        function_name,
+        args.to_vec(),
+    );
 
     let final_cost = env.get_cost_total();
 

@@ -23,19 +23,19 @@ default-members = ["components/clarinet-cli"]
 opt-level = 3
 
 [workspace.package]
-version = "3.24.1"
+version = "3.26.0"
 
 # Keep dependencies sorted alphabetically
 [workspace.dependencies]
 # stacks-core git dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "clarity", default-features = false }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "clarity-types" }
-libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "libsigner", default-features = false }
-pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "pox-locking", default-features = false }
-stacks-codec = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "stacks-codec" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "stacks-common", default-features = false }
-stacks-transactions = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "stacks-transactions", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "275c8f861159a4c4aaa4ad80ebc5e708315d51e5", package = "stackslib", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "clarity", default-features = false }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "clarity-types" }
+libsigner = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "libsigner", default-features = false }
+pox-locking = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "pox-locking", default-features = false }
+stacks-codec = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "stacks-codec" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "stacks-common", default-features = false }
+stacks-transactions = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "stacks-transactions", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core.git", rev = "26a964b01b9a72c70686ec29b126edce7647bf54", package = "stackslib", default-features = false }
 
 # Internal crates
 clarinet-defaults = { path = "components/clarinet-defaults" }
@@ -81,12 +81,12 @@ serde = "1.0.225"
 serde_json = "1.0.149"
 serde-wasm-bindgen = "0.6.4"
 signal-hook = "0.4.3"
-strum = "0.27.2"
+strum = "0.28.0"
 tempfile = "3.24.0"
 test-case = "3.1.0"
 thiserror = "2"
 tikv-jemallocator = "0.6.1"
-tokio = { version = "1.47.0", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full"] }
 tokio-util = { version = "0.7.16", features = ["codec"] }
 toml = { version = "0.5.6", features = ["preserve_order"] }
 toml_edit = "0.22"

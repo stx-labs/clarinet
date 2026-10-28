@@ -433,13 +433,13 @@ impl GetChangesForNewProject {
               }},
               "author": "",
               "license": "ISC",
-              "dependencies": {{
-                "@stacks/clarinet-sdk": "^3.9.0",
-                "@stacks/transactions": "^7.2.0",
+              "devDependencies": {{
+                "@stacks/clarinet-sdk": "^4.0.0",
+                "@stacks/transactions": "^7.6.0",
                 "@types/node": "^24.4.0",
                 "chokidar-cli": "^3.0.0",
-                "vitest": "^4.1.8",
-                "vitest-environment-clarinet": "^3.0.0"
+                "vitest": "^5.0.5",
+                "vitest-environment-clarinet": "^4.0.0"
               }}
             }}
         "#,

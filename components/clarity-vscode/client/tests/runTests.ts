@@ -1,6 +1,6 @@
 import * as path from "path";
 
-import { BrowserType, runTests } from "@vscode/test-web";
+import { type BrowserType, runTests } from "@vscode/test-web";
 
 function getArgv(name: string) {
   const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -17,9 +17,12 @@ function isValidBrowserType(browserType: unknown): browserType is BrowserType {
 }
 
 async function main() {
-  const extensionDevelopmentPath = path.resolve(__dirname, "../../../");
-  const extensionTestsPath = path.resolve(__dirname, "./suite/index");
-  const folderPath = path.resolve(__dirname, "../../../test-data");
+  const extensionDevelopmentPath = path.resolve(import.meta.dirname, "../../");
+  const extensionTestsPath = path.resolve(
+    import.meta.dirname,
+    "../dist/tests/suite/index",
+  );
+  const folderPath = path.resolve(import.meta.dirname, "../../test-data");
 
   try {
     const waitForDebugger = Number(getArgv("waitForDebugger"));

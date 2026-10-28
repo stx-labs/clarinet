@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
@@ -123,7 +122,7 @@ fn deploy_boot_contracts(
                 continue;
             }
         }
-        let result = interpreter.run(contract, Some(ast), false, None);
+        let result = interpreter.run(contract, Some(ast.as_ref()), false, None);
         if let Err(errs) = &result {
             for e in &errs.diagnostics {
                 ueprint!(
@@ -136,13 +135,8 @@ fn deploy_boot_contracts(
     }
 
     // Load boot contracts (with custom overrides if specified)
-    let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
-        Cow::Borrowed(&*boot::BOOT_CONTRACTS_DATA)
-    } else {
-        Cow::Owned(boot::get_boot_contracts_data_with_overrides(
-            &settings.override_boot_contracts_source,
-        ))
-    };
+    let boot_contracts_data =
+        boot::get_boot_contracts_data_with_overrides(&settings.override_boot_contracts_source);
 
     for (contract_id, (contract, ast)) in boot_contracts_data.iter() {
         if let Some(max_ep) = max_epoch {
@@ -152,7 +146,7 @@ fn deploy_boot_contracts(
                 continue;
             }
         }
-        let result = interpreter.run(contract, Some(ast), false, None);
+        let result = interpreter.run(contract, Some(ast.as_ref()), false, None);
         if let Err(errs) = &result {
             for e in &errs.diagnostics {
                 ueprint!(
@@ -195,7 +189,7 @@ fn deploy_boot_contracts_for_range(
         if already_deployed.contains_key(contract_id) || newly_deployed.contains_key(contract_id) {
             continue;
         }
-        let result = interpreter.run(contract, Some(ast), false, None);
+        let result = interpreter.run(contract, Some(ast.as_ref()), false, None);
         if let Err(errs) = &result {
             for e in &errs.diagnostics {
                 ueprint!(
@@ -208,13 +202,8 @@ fn deploy_boot_contracts_for_range(
     }
 
     // Deploy regular boot contracts that fall in the range
-    let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
-        Cow::Borrowed(&*boot::BOOT_CONTRACTS_DATA)
-    } else {
-        Cow::Owned(boot::get_boot_contracts_data_with_overrides(
-            &settings.override_boot_contracts_source,
-        ))
-    };
+    let boot_contracts_data =
+        boot::get_boot_contracts_data_with_overrides(&settings.override_boot_contracts_source);
 
     for (contract_id, (contract, ast)) in boot_contracts_data.iter() {
         let (contract_epoch, _) = boot::get_boot_contract_epoch_and_clarity_version(&contract.name);
@@ -225,7 +214,7 @@ fn deploy_boot_contracts_for_range(
             {
                 continue;
             }
-            let result = interpreter.run(contract, Some(ast), false, None);
+            let result = interpreter.run(contract, Some(ast.as_ref()), false, None);
             if let Err(errs) = &result {
                 for e in &errs.diagnostics {
                     ueprint!(
@@ -275,6 +264,7 @@ pub struct Session {
     unsaved_definition_snippets: usize,
 
     hooks: SessionHooks,
+    pub(crate) mempool: super::mempool::Mempool,
 }
 
 /// The optional hooks a session attaches to every evaluation.
@@ -339,6 +329,7 @@ impl Session {
             last_contract_call_trace: None,
             unsaved_definition_snippets: 0,
             hooks: SessionHooks::default(),
+            mempool: super::mempool::Mempool::default(),
         }
     }
 
@@ -788,7 +779,7 @@ impl Session {
     }
 
     /// Mine a block only if the signed transaction is included.
-    pub fn broadcast_transaction_in_next_block(
+    pub fn execute_raw_transaction_in_next_block(
         &mut self,
         raw_hex: &str,
     ) -> super::raw_transaction::RawTransactionOutcome {
@@ -798,7 +789,7 @@ impl Session {
             .checkpoint_next_block(&self.interpreter.clarity_datastore);
         self.interpreter.clarity_datastore.begin_write_journal();
         self.advance_chain_tip(1);
-        let outcome = self.broadcast_transaction(raw_hex);
+        let outcome = self.execute_raw_transaction(raw_hex);
         self.interpreter
             .clarity_datastore
             .finish_write_journal(outcome.is_included());
@@ -811,15 +802,49 @@ impl Session {
         outcome
     }
 
-    pub fn broadcast_transaction(
+    pub fn execute_raw_transaction(
         &mut self,
         raw_hex: &str,
+    ) -> super::raw_transaction::RawTransactionOutcome {
+        self.execute_raw_transaction_with_hooks(raw_hex, vec![])
+    }
+
+    pub fn execute_raw_transaction_with_hooks(
+        &mut self,
+        raw_hex: &str,
+        hooks: Vec<&mut dyn EvalHook>,
+    ) -> super::raw_transaction::RawTransactionOutcome {
+        use super::raw_transaction::{decode, RawTransactionOutcome};
+
+        match decode(raw_hex) {
+            Ok(tx) => self.execute_transaction_with_hooks(&tx, hooks),
+            Err(error) => RawTransactionOutcome::Rejected {
+                metadata: None,
+                error: error.to_string(),
+            },
+        }
+    }
+
+    pub fn execute_transaction(
+        &mut self,
+        tx: &stacks_codec::transaction::StacksTransaction,
+    ) -> super::raw_transaction::RawTransactionOutcome {
+        self.execute_transaction_with_hooks(tx, vec![])
+    }
+
+    pub fn execute_transaction_with_hooks(
+        &mut self,
+        tx: &stacks_codec::transaction::StacksTransaction,
+        mut external_hooks: Vec<&mut dyn EvalHook>,
     ) -> super::raw_transaction::RawTransactionOutcome {
         use super::raw_transaction::{RawFailureKind, RawTransactionOutcome, RawTransactionResult};
         let mut tracer = TracerHook::new();
         let mut hooks: Vec<&mut dyn EvalHook> = vec![&mut tracer];
         hooks.extend(self.hooks.enabled());
-        let outcome = self.interpreter.broadcast_transaction(raw_hex, hooks);
+        for hook in &mut external_hooks {
+            hooks.push(&mut **hook);
+        }
+        let outcome = self.interpreter.execute_transaction(tx, hooks);
         let metadata = match &outcome {
             RawTransactionOutcome::Included { metadata, .. } => Some(metadata),
             RawTransactionOutcome::Rejected { metadata, .. } => metadata.as_ref(),
