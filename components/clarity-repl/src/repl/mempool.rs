@@ -28,7 +28,7 @@ struct PendingTransaction {
 #[serde(untagged)]
 pub enum AdmissionResult {
     Accepted {
-        txid: String,
+        txid: Txid,
     },
     Rejected {
         error: String,
@@ -36,7 +36,7 @@ pub enum AdmissionResult {
         #[serde(skip_serializing_if = "Value::is_null")]
         reason_data: Value,
         #[serde(skip_serializing_if = "Option::is_none")]
-        txid: Option<String>,
+        txid: Option<Txid>,
     },
 }
 
@@ -108,28 +108,24 @@ impl Session {
             .iter()
             .any(|pending| pending.txid == txid)
         {
-            return AdmissionResult::Accepted {
-                txid: txid.to_string(),
-            };
+            return AdmissionResult::Accepted { txid };
         }
         match self
             .interpreter
             .check_mempool_admission(&tx, &self.mempool.transactions)
         {
             Ok(()) => {
-                let result = AdmissionResult::Accepted {
-                    txid: txid.to_string(),
-                };
-                self.mempool
-                    .transactions
-                    .push_back(PendingTransaction { txid, tx });
-                result
+                self.mempool.transactions.push_back(PendingTransaction {
+                    txid: txid.clone(),
+                    tx,
+                });
+                AdmissionResult::Accepted { txid }
             }
             Err(error) => AdmissionResult::Rejected {
                 error: "transaction rejected".into(),
                 reason: error.reason,
                 reason_data: error.data,
-                txid: Some(txid.to_string()),
+                txid: Some(txid),
             },
         }
     }

@@ -671,11 +671,16 @@ mod tests {
         .unwrap();
         tx.set_tx_fee(1000);
         let raw = signed_hex(tx);
+        let txid = decode(&raw).unwrap().txid();
         for _ in 0..2 {
-            assert!(matches!(
-                session.submit_transaction(&raw),
-                AdmissionResult::Accepted { .. }
-            ));
+            let result = session.submit_transaction(&raw);
+            assert!(
+                matches!(&result, AdmissionResult::Accepted { txid: actual } if actual == &txid)
+            );
+            assert_eq!(
+                serde_json::to_value(&result).unwrap(),
+                serde_json::json!({ "txid": txid.to_string() })
+            );
             assert_eq!(balance(&mut session, &sender), 1_000_000);
             assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 0);
         }
@@ -684,13 +689,19 @@ mod tests {
         assert!(session.execute_transaction(&queued).is_included());
         assert_eq!(balance(&mut session, &sender), 998_900);
         assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 1);
+        let result = session.submit_transaction(&raw);
         assert!(matches!(
-            session.submit_transaction(&raw),
+            &result,
             AdmissionResult::Rejected {
                 reason: "BadNonce",
+                txid: Some(actual),
                 ..
-            }
+            } if actual == &txid
         ));
+        assert_eq!(
+            serde_json::to_value(&result).unwrap()["txid"],
+            txid.to_string()
+        );
     }
 
     #[test]
