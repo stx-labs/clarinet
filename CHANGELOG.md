@@ -1,3 +1,29 @@
+# [3.26.0](https://github.com/stx-labs/clarinet/compare/v3.25.0...v3.26.0) (2026-10-28)
+
+##### New Features
+
+*  Upgrade devnet stacks-node and signer to 4.0.5 (#2626) (87cedb4c)
+*  Add --force/-f for cmd (#2609) (7fcc949e)
+
+##### Chores
+
+*  Remove stray bench files from repo root (#2625) (f2a5ed3a)
+*  Upgrade sdk dependencies (#2624) (602bb0cd)
+*  Add issue labels and history to LLM-generated PR reviews (#2622) (f8c62433)
+*  Refresh clarity-vscode lockfile, bump mocha 12 and playwright (#2617) (32a1167e)
+*  Remove unused clarity-vscode dev dependencies (#2616) (3a8a97bb)
+*  Cargo audit fixes (#2614) (96f26ad2)
+
+##### Continuous Integration
+
+*  Publish vscode extension without long-lived tokens (#2603) (4e92ad2b)
+
+##### Bug Fixes
+
+* **formatter:**
+  *  Fix 5 bugs in `define-trait` formatting (#2605) (0b59577f)
+  *  Fix 7 comment and tuple formatting bugs (#2604) (52e4f35e)
+
 # [3.25.0](https://github.com/stx-labs/clarinet/compare/v3.24.1...v3.25.0) (2026-10-15)
 
 ##### Bug Fixes
