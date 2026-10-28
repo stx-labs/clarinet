@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
 use crate::command::run_docker_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
+use crate::snapshot_extractor::SnapshotImages;
 
 const BITCOIND_DATA_DIR: &str = "/home/bitcoin/.bitcoin";
 
@@ -840,8 +841,11 @@ impl DevnetOrchestrator {
 
         // Copied before start: bitcoind would otherwise race the copy and reindex a partial datadir
         if !no_snapshot {
-            let bitcoin_snapshot = get_global_snapshot_dir().join("bitcoin").join("regtest");
-            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
+            let devnet_config = self.get_devnet_config()?;
+            let bitcoin_snapshot = get_global_snapshot_dir(devnet_config)
+                .join("bitcoin")
+                .join("regtest");
+            let docker_host = devnet_config.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
@@ -1119,8 +1123,9 @@ impl DevnetOrchestrator {
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
         if !no_snapshot {
-            let stacks_snapshot = get_global_snapshot_dir().join("stacks");
-            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
+            let devnet_config = self.get_devnet_config()?;
+            let stacks_snapshot = get_global_snapshot_dir(devnet_config).join("stacks");
+            let docker_host = devnet_config.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
@@ -1368,7 +1373,7 @@ impl DevnetOrchestrator {
         if project_events_path.exists() {
             Some(project_events_path)
         } else {
-            let global_events_path = get_global_snapshot_dir()
+            let global_events_path = get_global_snapshot_dir(devnet_config)
                 .join("events_export")
                 .join("events_cache.tsv");
 
@@ -2330,9 +2335,13 @@ fn formatted_docker_error(message: &str, error: DockerError) -> String {
     format!("{message}: {error}")
 }
 
-pub fn get_global_snapshot_dir() -> std::path::PathBuf {
+pub fn get_snapshot_cache_root() -> PathBuf {
     let home_dir = dirs::home_dir().expect("Unable to retrieve home dir");
     home_dir.join(".clarinet").join("cache").join("devnet")
+}
+
+pub fn get_global_snapshot_dir(devnet_config: &DevnetConfig) -> PathBuf {
+    SnapshotImages::from(devnet_config).cache_dir(&get_snapshot_cache_root())
 }
 
 pub fn get_project_snapshot_dir(devnet_config: &DevnetConfig) -> std::path::PathBuf {

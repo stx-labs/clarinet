@@ -29,10 +29,13 @@ use observer::event_handler::ObserverCommand;
 pub use observer::types::{BitcoinNetwork, StacksNetwork};
 pub use observer::utils::Context;
 pub use orchestrator::DevnetOrchestrator;
-use orchestrator::{ServicesMapHosts, DEVNET_SNAPSHOT_READY_MARKER};
+use orchestrator::{
+    get_global_snapshot_dir, get_snapshot_cache_root, ServicesMapHosts,
+    DEVNET_SNAPSHOT_READY_MARKER,
+};
 
 use self::chains_coordinator::DevnetEventObserverConfig;
-use self::snapshot_extractor::{describe_marker, SnapshotImages, SnapshotPlan};
+use self::snapshot_extractor::{SnapshotImages, SnapshotPlan};
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -147,6 +150,15 @@ fn do_run_devnet(
             "Default snapshot can not be used".to_string(),
         ));
     }
+    // Snapshots are only loaded by projects with the default devnet settings,
+    // so one built from other settings would be reused as if it had them.
+    let create_new_snapshot = config.create_new_snapshot && diff.is_ok();
+    if config.create_new_snapshot && !create_new_snapshot {
+        let _ = devnet_events_tx.send(DevnetEvent::warning(
+            "Ignoring --create-new-snapshot: the devnet settings differ from the defaults"
+                .to_string(),
+        ));
+    }
     // Check for and potentially copy snapshot data.
     // --create-new-snapshot always runs from genesis so we never load an existing snapshot.
     let use_snapshot = !config.no_snapshot
@@ -208,7 +220,7 @@ fn do_run_devnet(
                 moved_mining_command_tx,
                 mining_command_rx,
                 use_snapshot,
-                config.create_new_snapshot,
+                create_new_snapshot,
                 ctx_moved,
             ))
         })
@@ -413,7 +425,13 @@ fn prepare_global_snapshot(
     devnet_config: &DevnetConfig,
     devnet_events_tx: &Sender<DevnetEvent>,
 ) -> bool {
-    let global_snapshot_dir = orchestrator::get_global_snapshot_dir();
+    if let Err(e) = snapshot_extractor::remove_unkeyed_snapshot(&get_snapshot_cache_root()) {
+        let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
+            "Failed to remove the devnet snapshot cached by an older Clarinet: {e}"
+        )));
+    }
+
+    let global_snapshot_dir = get_global_snapshot_dir(devnet_config);
     let cached_marker =
         std::fs::read_to_string(global_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER)).ok();
     let images = SnapshotImages::from(devnet_config);
@@ -421,25 +439,12 @@ fn prepare_global_snapshot(
     match SnapshotPlan::new(cached_marker.as_deref(), &images) {
         SnapshotPlan::UseCached => true,
         SnapshotPlan::RunFromGenesis => {
-            let cached = cached_marker
-                .as_deref()
-                .map(describe_marker)
-                .unwrap_or("none");
             let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
-                "No devnet snapshot was built with these images, starting from genesis.\nConfigured:\n{images}Cached snapshot:\n{cached}\nRun with --create-new-snapshot to build one."
+                "No devnet snapshot was built with these images, starting from genesis.\n{images}Run with --create-new-snapshot to build one."
             )));
             false
         }
         SnapshotPlan::ExtractEmbedded => {
-            let msg = match cached_marker {
-                Some(marker) => format!(
-                    "Discarding cached devnet snapshot built with:\n{}\nExtracting the embedded snapshot built with:\n{images}",
-                    describe_marker(&marker)
-                ),
-                None => "No existing snapshot found, extracting embedded snapshot data...".into(),
-            };
-            let _ = devnet_events_tx.send(DevnetEvent::info(msg));
-
             match snapshot_extractor::extract_embedded_snapshot(
                 &global_snapshot_dir,
                 devnet_events_tx,

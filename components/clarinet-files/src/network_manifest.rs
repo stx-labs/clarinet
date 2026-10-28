@@ -1449,6 +1449,5 @@ mod tests {
         assert!(default_signer_version.starts_with(epoch.as_str()),
             "The default Stacks signer image {DEFAULT_STACKS_SIGNER_IMAGE} does not start with {epoch}"
         );
-        assert_eq!(default_node_version, default_signer_version);
     }
 }

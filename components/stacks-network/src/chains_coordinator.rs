@@ -1,5 +1,5 @@
 use std::convert::TryFrom;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -185,11 +185,7 @@ pub async fn start_chains_coordinator(
     } else {
         0
     };
-    let global_snapshot_dir = get_global_snapshot_dir();
     let project_snapshot_dir = get_project_snapshot_dir(&config.devnet_config);
-    // Ensure directories exist
-    fs::create_dir_all(&global_snapshot_dir)
-        .map_err(|e| format!("unable to create global snapshot directory: {e:?}"))?;
     fs::create_dir_all(&project_snapshot_dir)
         .map_err(|e| format!("unable to create project snapshot directory: {e:?}"))?;
 
@@ -233,7 +229,7 @@ pub async fn start_chains_coordinator(
         // Load events from snapshot if available
         let event_pool: Vec<StacksBlockData> = {
             let mut events = vec![];
-            let events_cache_path = get_global_snapshot_dir()
+            let events_cache_path = get_global_snapshot_dir(&config.devnet_config)
                 .join("events_export")
                 .join("events_cache.tsv");
 
@@ -669,10 +665,10 @@ fn should_publish_stacking_orders(
     true
 }
 
-async fn remove_global_snapshot(devnet_event_tx: &Sender<DevnetEvent>) -> Result<(), String> {
-    let global_snapshot_dir = get_global_snapshot_dir();
-
-    // Check if the global snapshot directory exists
+fn remove_global_snapshot(
+    global_snapshot_dir: &Path,
+    devnet_event_tx: &Sender<DevnetEvent>,
+) -> Result<(), String> {
     if !global_snapshot_dir.exists() {
         let _ = devnet_event_tx.send(DevnetEvent::info(
             "No existing global snapshot found to remove".to_string(),
@@ -684,8 +680,7 @@ async fn remove_global_snapshot(devnet_event_tx: &Sender<DevnetEvent>) -> Result
         "Removing existing global snapshot...".to_string(),
     ));
 
-    // Remove the entire global snapshot directory
-    fs::remove_dir_all(&global_snapshot_dir)
+    fs::remove_dir_all(global_snapshot_dir)
         .map_err(|e| format!("unable to remove global snapshot directory: {e:?}"))?;
 
     let _ = devnet_event_tx.send(DevnetEvent::success(
@@ -700,82 +695,34 @@ pub async fn create_global_snapshot(
     devnet_event_tx: &Sender<DevnetEvent>,
     mining_command_tx: Sender<BitcoinMiningCommand>,
 ) {
-    // First, remove the existing global snapshot if it exists
-    if let Err(e) = remove_global_snapshot(devnet_event_tx).await {
+    let devnet_config = &devnet_event_observer_config.devnet_config;
+    let global_snapshot_dir = get_global_snapshot_dir(devnet_config);
+    if let Err(e) = remove_global_snapshot(&global_snapshot_dir, devnet_event_tx) {
         let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
             "Failed to remove existing global snapshot: {e}. Continuing with new snapshot creation."
         )));
     }
 
-    let devnet_config = &devnet_event_observer_config.devnet_config;
-    let global_snapshot_dir = get_global_snapshot_dir();
     let project_snapshot_dir = get_project_snapshot_dir(devnet_config);
+    let copied = [
+        ("bitcoin", None),
+        ("stacks", Some(EXCLUDED_STACKS_SNAPSHOT_FILES)),
+    ]
+    .into_iter()
+    .all(|(name, excluded)| {
+        copy_directory(
+            &project_snapshot_dir.join(name),
+            &global_snapshot_dir.join(name),
+            excluded,
+        )
+        .inspect_err(|e| {
+            let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                "Failed to copy {name} snapshot: {e}"
+            )));
+        })
+        .is_ok()
+    });
 
-    let images = SnapshotImages::from(devnet_config).to_string();
-
-    // Project snapshot marker
-    let project_marker = project_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
-    if !project_marker.exists() {
-        match fs::write(&project_marker, &images) {
-            Ok(_) => {
-                let _ = devnet_event_tx.send(DevnetEvent::success(
-                    "Project snapshot data prepared for epoch 4.0. Future project starts will be faster.".to_string(),
-                ));
-            }
-            Err(e) => {
-                let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                    "Failed to create project snapshot marker file: {e}"
-                )));
-            }
-        }
-    }
-
-    let global_marker = global_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
-    if !global_marker.exists() {
-        // Copy project snapshot to global snapshot as a template
-        if project_snapshot_dir != global_snapshot_dir {
-            // Copy bitcoin data
-            let project_bitcoin_snapshot = project_snapshot_dir.join("bitcoin");
-            let global_bitcoin_snapshot = global_snapshot_dir.join("bitcoin");
-            if project_bitcoin_snapshot.exists() {
-                let _ = copy_directory(&project_bitcoin_snapshot, &global_bitcoin_snapshot, None)
-                    .inspect_err(|e| {
-                        let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                            "Failed to copy bitcoin snapshot: {e}"
-                        )));
-                    });
-            }
-
-            // Copy stacks data
-            let project_stacks_snapshot = project_snapshot_dir.join("stacks");
-            let global_stacks_snapshot = global_snapshot_dir.join("stacks");
-            if project_stacks_snapshot.exists() {
-                let _ = copy_directory(
-                    &project_stacks_snapshot,
-                    &global_stacks_snapshot,
-                    Some(EXCLUDED_STACKS_SNAPSHOT_FILES),
-                )
-                .inspect_err(|e| {
-                    let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                        "Failed to copy stacks snapshot: {e}"
-                    )));
-                });
-            }
-
-            match fs::write(&global_marker, &images) {
-                Ok(_) => {
-                    let _ = devnet_event_tx.send(DevnetEvent::success(
-                        "Global template snapshot data prepared. Future project initializations will be faster.".to_string()
-                    ));
-                }
-                Err(e) => {
-                    let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
-                        "Failed to create global snapshot marker file: {e}"
-                    )));
-                }
-            }
-        }
-    }
     let _ = devnet_event_tx.send(DevnetEvent::info(
         "Reached epoch 4.0 snapshot target, preparing to export Stacks API events...".to_string(),
     ));
@@ -797,6 +744,23 @@ pub async fn create_global_snapshot(
             let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
                 "Failed to export Stacks API events: {e}. Continuing without export."
             )));
+        }
+    }
+
+    // Written last, so a snapshot interrupted midway is never reused
+    if copied {
+        let marker = global_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
+        match fs::write(marker, SnapshotImages::from(devnet_config).to_string()) {
+            Ok(_) => {
+                let _ = devnet_event_tx.send(DevnetEvent::success(
+                    "Global template snapshot data prepared. Future project initializations will be faster.".to_string()
+                ));
+            }
+            Err(e) => {
+                let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
+                    "Failed to create global snapshot marker file: {e}"
+                )));
+            }
         }
     }
     // 3. Resume mining after presumed export completion
@@ -1673,7 +1637,7 @@ async fn export_stacks_api_events(
     }
 
     // Also copy to global cache
-    let global_snapshot_dir = get_global_snapshot_dir();
+    let global_snapshot_dir = get_global_snapshot_dir(&config.devnet_config);
     let global_export_path = global_snapshot_dir.join("events_export");
     fs::create_dir_all(&global_export_path)
         .map_err(|e| format!("unable to create global events export directory: {e:?}"))?;
