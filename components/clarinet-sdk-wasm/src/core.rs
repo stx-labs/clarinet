@@ -12,7 +12,7 @@ use clarinet_deployments::{
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
-use clarity::types::chainstate::StacksAddress;
+use clarity::types::chainstate::{StacksAddress, Txid};
 use clarity::types::Address;
 use clarity::vm::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
@@ -28,6 +28,7 @@ use clarity_repl::repl::interpreter::BlockInclusion;
 use clarity_repl::repl::post_conditions::{
     parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
 };
+use clarity_repl::repl::raw_transaction::{RawFailureKind, RawTransactionMetadata};
 use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -35,7 +36,7 @@ use clarity_repl::repl::{
     Session, SessionSettings,
 };
 use clarity_repl::utils::sdk_events::serialize_events;
-use clarity_repl::utils::Environment;
+use clarity_repl::utils::{serialize_display, Environment};
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
 use serde::{Deserialize, Serialize};
@@ -331,6 +332,55 @@ enum BlockTransactionResult {
     Rejected {
         error: String,
     },
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum MinedTransactionResult {
+    Unsigned(BlockTransactionResult),
+    Signed(SignedTransactionResult),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum SignedTransactionResult {
+    Rejected {
+        transaction: Option<SignedTransactionMetadata>,
+        error: String,
+    },
+    Success {
+        transaction: SignedTransactionMetadata,
+        execution: TransactionRes,
+    },
+    IncludedFailure {
+        transaction: SignedTransactionMetadata,
+        kind: RawFailureKind,
+        error: String,
+        execution: (),
+        result: Option<String>,
+        events: String,
+        costs: String,
+        performance: Option<String>,
+    },
+}
+
+#[derive(Serialize)]
+struct SignedTransactionMetadata {
+    txid: Txid,
+    #[serde(serialize_with = "serialize_display")]
+    fee: u64,
+    #[serde(serialize_with = "serialize_display")]
+    nonce: u64,
+}
+
+impl From<RawTransactionMetadata> for SignedTransactionMetadata {
+    fn from(
+        RawTransactionMetadata {
+            txid, fee, nonce, ..
+        }: RawTransactionMetadata,
+    ) -> Self {
+        Self { txid, fee, nonce }
+    }
 }
 
 impl From<Result<TransactionRes, TransactionError>> for BlockTransactionResult {
@@ -1310,20 +1360,16 @@ impl SDK {
     fn raw_transaction_response(
         &mut self,
         outcome: clarity_repl::repl::raw_transaction::RawTransactionOutcome,
-    ) -> serde_json::Value {
+    ) -> SignedTransactionResult {
         use clarity_repl::repl::raw_transaction::{
-            RawFailureKind, RawTransactionMetadata, RawTransactionOutcome, RawTransactionResult,
-        };
-        let metadata_json = |metadata: &RawTransactionMetadata| {
-            json!({
-                "txid": metadata.txid,
-                "fee": metadata.fee.to_string(),
-                "nonce": metadata.nonce.to_string(),
-            })
+            RawFailureKind, RawTransactionOutcome, RawTransactionResult,
         };
         match outcome {
             RawTransactionOutcome::Rejected { metadata, error } => {
-                json!({ "status": "rejected", "transaction": metadata.as_ref().map(metadata_json), "error": error })
+                SignedTransactionResult::Rejected {
+                    transaction: metadata.map(Into::into),
+                    error,
+                }
             }
             RawTransactionOutcome::Included { metadata, result } => {
                 // Like convenience calls, report returned responses (including err),
@@ -1349,7 +1395,7 @@ impl SDK {
                         });
                     }
                 }
-                let transaction = metadata_json(&metadata);
+
                 match result {
                     RawTransactionResult::Success(execution) => {
                         if let Some((id, interface)) = contract_interface_from_result(&execution) {
@@ -1359,7 +1405,10 @@ impl SDK {
                         if self.options.track_performance {
                             response.performance = self.get_session().get_performance_data();
                         }
-                        json!({ "status": "success", "transaction": transaction, "execution": response })
+                        SignedTransactionResult::Success {
+                            transaction: metadata.into(),
+                            execution: response,
+                        }
                     }
                     RawTransactionResult::Failure {
                         kind,
@@ -1375,11 +1424,17 @@ impl SDK {
                         } else {
                             None
                         };
-                        let status: &'static str = kind.into();
-                        json!({ "status": "included_failure", "kind": status, "execution": null, "transaction": transaction, "error": error,
-                            "result": output.as_deref().map(clarity_values::to_raw_value),
-                            "events": serialize_events(&events), "costs": serde_json::to_string(&cost).expect("execution cost is serializable"),
-                            "performance": performance })
+                        SignedTransactionResult::IncludedFailure {
+                            transaction: metadata.into(),
+                            kind,
+                            error,
+                            execution: (),
+                            result: output.as_deref().map(clarity_values::to_raw_value),
+                            events: serialize_events(&events),
+                            costs: serde_json::to_string(&cost)
+                                .expect("execution cost is serializable"),
+                            performance,
+                        }
                     }
                 }
             }
@@ -1413,7 +1468,7 @@ impl SDK {
     #[wasm_bindgen(js_name=mineBlock)]
     pub fn mine_block_js(&mut self, js_txs: js_sys::Array) -> Result<JsValue, String> {
         let tx_len = usize::try_from(js_txs.length()).unwrap();
-        let mut results: Vec<serde_json::Value> = Vec::with_capacity(tx_len);
+        let mut results: Vec<MinedTransactionResult> = Vec::with_capacity(tx_len);
 
         {
             let session = self.get_session_mut();
@@ -1422,21 +1477,29 @@ impl SDK {
 
         while let Some(tx) = self.get_session_mut().next_mempool_transaction() {
             let outcome = self.get_session_mut().execute_transaction(&tx);
-            results.push(self.raw_transaction_response(outcome));
+            results.push(MinedTransactionResult::Signed(
+                self.raw_transaction_response(outcome),
+            ));
         }
 
         for tx in js_txs.iter() {
             let tx: TxArgs = match tx.into_serde() {
                 Ok(tx) => tx,
                 Err(error) => {
-                    results.push(json!({ "status": "rejected", "error": format!("Invalid tx arguments: {error}") }));
+                    results.push(MinedTransactionResult::Unsigned(
+                        BlockTransactionResult::Rejected {
+                            error: format!("Invalid tx arguments: {error}"),
+                        },
+                    ));
                     continue;
                 }
             };
             let result = match tx {
                 TxArgs::BroadcastTx(raw_hex) => {
                     let outcome = self.get_session_mut().execute_raw_transaction(&raw_hex);
-                    results.push(self.raw_transaction_response(outcome));
+                    results.push(MinedTransactionResult::Signed(
+                        self.raw_transaction_response(outcome),
+                    ));
                     continue;
                 }
                 TxArgs::CallPublicFn(call_public) => CallFnArgs::from_json_args(call_public)
@@ -1450,9 +1513,7 @@ impl SDK {
                     self.inner_deploy_contract(&deploy_contract, false)
                 }
             };
-            results.push(
-                serde_json::to_value(BlockTransactionResult::from(result)).expect("block result"),
-            );
+            results.push(MinedTransactionResult::Unsigned(result.into()));
         }
 
         results

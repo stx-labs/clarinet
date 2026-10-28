@@ -583,17 +583,14 @@ fn run_sdk_request_loop(
 fn raw_block_result(
     outcome: clarity_repl::repl::raw_transaction::RawTransactionOutcome,
 ) -> serde_json::Value {
-    use clarity_repl::repl::raw_transaction::{
-        RawTransactionMetadata, RawTransactionOutcome, RawTransactionResult,
-    };
+    use clarity_repl::repl::raw_transaction::{RawTransactionOutcome, RawTransactionResult};
     use serde_json::json;
-    let metadata = |m: &RawTransactionMetadata| json!({"txid": m.txid, "fee": m.fee.to_string(), "nonce": m.nonce.to_string()});
     match outcome {
         RawTransactionOutcome::Rejected {
             metadata: tx,
             error,
         } => {
-            json!({"status": "rejected", "error": error, "transaction": tx.as_ref().map(metadata)})
+            json!({"status": "rejected", "error": error, "transaction": tx})
         }
         RawTransactionOutcome::Included {
             metadata: tx,
@@ -606,7 +603,7 @@ fn raw_block_result(
                         result.result.as_ref().expect("raw deployment result")
                     }
                 };
-                json!({"status": "success", "transaction": metadata(&tx), "execution": {
+                json!({"status": "success", "transaction": tx, "execution": {
                     "result": to_raw_value(value), "events": serialize_events(&execution.events),
                     "costs": serde_json::to_string(&execution.cost).unwrap(), "performance": null,
                 }})
@@ -618,9 +615,8 @@ fn raw_block_result(
                 events,
                 cost,
             } => {
-                let kind: &'static str = kind.into();
                 json!({"status": "included_failure", "kind": kind, "error": error, "execution": null,
-                    "transaction": metadata(&tx), "result": output.as_deref().map(to_raw_value),
+                    "transaction": tx, "result": output.as_deref().map(to_raw_value),
                     "events": serialize_events(&events), "costs": serde_json::to_string(&cost).unwrap(), "performance": null})
             }
         },

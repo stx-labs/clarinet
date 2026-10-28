@@ -200,3 +200,27 @@ it("retains nonce gaps and mines out-of-order submissions when their predecessor
     reason_data: { expected: 28, actual: 29 },
   });
 });
+
+it("preserves structured balance diagnostics at the JSON boundary", async () => {
+  const tx = await transfer(0n, 1000000n);
+  expect(simnet.broadcastTransaction(tx.serialize())).toEqual({
+    error: "transaction rejected",
+    reason: "NotEnoughFunds",
+    reason_data: {
+      expected: "0x" + 1001000n.toString(16).padStart(32, "0"),
+      actual: "0x" + 1000000n.toString(16).padStart(32, "0"),
+    },
+    txid: tx.txid(),
+  });
+  expect(balance(sender)).toBe(1000000n);
+  expect(simnet.getAccountNonce(sender)).toBe(0n);
+});
+
+it("preserves full-width fee and nonce values in signed receipts", async () => {
+  const maximum = (1n << 64n) - 1n;
+  const tx = await transfer(maximum, 100n, maximum);
+  expect(simnet.mineBlock([{ broadcastTx: tx.serialize() }])[0]).toMatchObject({
+    status: "rejected",
+    transaction: { txid: tx.txid(), fee: maximum, nonce: maximum },
+  });
+});

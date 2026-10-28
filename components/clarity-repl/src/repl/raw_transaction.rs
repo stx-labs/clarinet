@@ -18,22 +18,52 @@ use clarity_types::types::{
     BoundedErrorString, BuffData, PrincipalData, QualifiedContractIdentifier, ResponseData,
 };
 use clarity_types::Value;
+use serde::Serialize;
 use stacks_codec::transaction::{
     StacksTransaction, TransactionAuthVerificationMode, TransactionContractCall,
     TransactionPayload, MAX_TRANSACTION_LEN,
 };
 use stacks_codec::StacksMessageCodec;
+use stacks_common::types::chainstate::Txid;
 
 use super::interpreter::{public_function_args, BlockInclusion, ClarityInterpreter, NonceCharge};
 use super::post_conditions::PostConditionCheck;
 use super::transaction::SimnetTransactionConnection;
+use crate::utils::serialize_display;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, thiserror::Error)]
+pub enum RawTransactionError {
+    #[error("transaction exceeds maximum length")]
+    TooLong,
+    #[error("invalid transaction hex: {0}")]
+    Hex(#[from] stacks_common::util::HexError),
+    #[error("invalid transaction: {0}")]
+    Codec(#[from] stacks_common::codec::Error),
+    #[error("trailing bytes after transaction")]
+    TrailingBytes,
+    #[error("authentication mode is unsupported in this epoch")]
+    UnsupportedAuthentication,
+    #[error(transparent)]
+    Signature(#[from] stacks_codec::transaction::AuthError),
+    #[error("transaction network or chain ID does not match this session")]
+    NetworkMismatch,
+    #[error(transparent)]
+    PostCondition(#[from] stacks_transactions::UnsupportedPostCondition),
+    #[error(transparent)]
+    VersionedDeploy(#[from] stacks_transactions::UnsupportedVersionedDeploy),
+    #[error("transaction payload is unsupported in simnet")]
+    UnsupportedPayload,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct RawTransactionMetadata {
-    pub txid: String,
+    pub txid: Txid,
+    #[serde(serialize_with = "serialize_display")]
     pub fee: u64,
+    #[serde(serialize_with = "serialize_display")]
     pub nonce: u64,
     /// Preserve the signed call for SDK cost reports without decoding it again.
+    #[serde(skip)]
     pub contract_call: Option<TransactionContractCall>,
 }
 
@@ -61,14 +91,18 @@ pub enum RawTransactionResult {
     },
 }
 
-#[derive(Debug, Clone, Copy, strum::IntoStaticStr)]
+#[derive(Debug, Clone, Copy, Serialize, strum::IntoStaticStr)]
 pub enum RawFailureKind {
+    #[serde(rename = "abort_by_response")]
     #[strum(serialize = "abort_by_response")]
     Response,
+    #[serde(rename = "runtime_error")]
     #[strum(serialize = "runtime_error")]
     Runtime,
+    #[serde(rename = "analysis_error")]
     #[strum(serialize = "analysis_error")]
     Analysis,
+    #[serde(rename = "abort_by_post_condition")]
     #[strum(serialize = "abort_by_post_condition")]
     PostCondition,
 }
@@ -76,7 +110,7 @@ pub enum RawFailureKind {
 impl From<&StacksTransaction> for RawTransactionMetadata {
     fn from(tx: &StacksTransaction) -> Self {
         Self {
-            txid: tx.txid().to_string(),
+            txid: tx.txid(),
             fee: tx.get_tx_fee(),
             nonce: tx.get_origin_nonce(),
             contract_call: match &tx.payload {
@@ -117,33 +151,34 @@ impl ClarityInterpreter {
         }
     }
 
-    pub(crate) fn check_raw_transaction(&self, tx: &StacksTransaction) -> Result<(), String> {
+    pub(crate) fn check_raw_transaction(
+        &self,
+        tx: &StacksTransaction,
+    ) -> Result<(), RawTransactionError> {
         let epoch = self.datastore.get_current_epoch();
         let config = self.transaction_config(epoch);
         // TODO(upstream): Extract StacksChainState::process_transaction_precheck
         // and StacksBlock::validate_transaction_static_epoch into Wasm-compatible
         // helpers so their ordering and epoch gates need not be mirrored here.
         if !tx.auth.is_supported_in_epoch(epoch) {
-            return Err("authentication mode is unsupported in this epoch".into());
+            return Err(RawTransactionError::UnsupportedAuthentication);
         }
         let verification = if epoch.allows_tx_signatures_with_high_s() {
             TransactionAuthVerificationMode::AllowHighS
         } else {
             TransactionAuthVerificationMode::EnforceLowS
         };
-        tx.verify(verification).map_err(|e| e.to_string())?;
+        tx.verify(verification)?;
         if tx.chain_id != config.chain_id || tx.is_mainnet() != config.mainnet {
-            return Err("transaction network or chain ID does not match this session".into());
+            return Err(RawTransactionError::NetworkMismatch);
         }
         stacks_transactions::check_post_conditions_supported_in_epoch(
             &tx.post_conditions,
             &tx.post_condition_mode,
             epoch,
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         if let TransactionPayload::SmartContract(_, Some(version)) = &tx.payload {
-            stacks_transactions::check_versioned_deploy_supported_in_epoch(*version, epoch)
-                .map_err(|e| e.to_string())?;
+            stacks_transactions::check_versioned_deploy_supported_in_epoch(*version, epoch)?;
         }
         if !matches!(
             tx.payload,
@@ -151,7 +186,7 @@ impl ClarityInterpreter {
                 | TransactionPayload::ContractCall(..)
                 | TransactionPayload::SmartContract(..)
         ) {
-            return Err("transaction payload is unsupported in simnet".into());
+            return Err(RawTransactionError::UnsupportedPayload);
         }
         Ok(())
     }
@@ -161,7 +196,7 @@ impl ClarityInterpreter {
         tx: &StacksTransaction,
         hooks: Vec<&mut dyn EvalHook>,
     ) -> Result<RawTransactionResult, String> {
-        self.check_raw_transaction(tx)?;
+        self.check_raw_transaction(tx).map_err(|e| e.to_string())?;
         let epoch = self.datastore.get_current_epoch();
         let origin: PrincipalData = tx.origin_address().into();
         let sponsor: Option<PrincipalData> = tx.sponsor_address().map(Into::into);
@@ -294,18 +329,16 @@ impl ClarityInterpreter {
     }
 }
 
-pub(crate) fn decode(raw_hex: &str) -> Result<StacksTransaction, String> {
+pub(crate) fn decode(raw_hex: &str) -> Result<StacksTransaction, RawTransactionError> {
     let hex = raw_hex.strip_prefix("0x").unwrap_or(raw_hex);
     if hex.len() > MAX_TRANSACTION_LEN as usize * 2 {
-        return Err("transaction exceeds maximum length".into());
+        return Err(RawTransactionError::TooLong);
     }
-    let bytes =
-        clarity::util::hash::hex_bytes(hex).map_err(|e| format!("invalid transaction hex: {e}"))?;
+    let bytes = clarity::util::hash::hex_bytes(hex)?;
     let mut input = bytes.as_slice();
-    let tx = StacksTransaction::consensus_deserialize(&mut input)
-        .map_err(|e| format!("invalid transaction: {e}"))?;
+    let tx = StacksTransaction::consensus_deserialize(&mut input)?;
     if !input.is_empty() {
-        return Err("trailing bytes after transaction".into());
+        return Err(RawTransactionError::TrailingBytes);
     }
     Ok(tx)
 }
@@ -537,8 +570,16 @@ mod tests {
                 panic!("{name}: {outcome:?}");
             };
             assert_eq!(
-                metadata.txid,
+                metadata.txid.to_string(),
                 fixtures["transactions"][name]["txid"].as_str().unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(&metadata).unwrap(),
+                serde_json::json!({
+                    "txid": fixtures["transactions"][name]["txid"],
+                    "fee": metadata.fee.to_string(),
+                    "nonce": metadata.nonce.to_string(),
+                }),
             );
             let sender = principal(&fixtures, "sender");
             assert_eq!(session.interpreter.get_nonce(&sender).unwrap(), 1);
@@ -798,9 +839,19 @@ mod tests {
         let hex = fixtures["transactions"]["transfer"]["hex"]
             .as_str()
             .unwrap();
-        assert!(decode(&format!("{hex}00")).is_err());
-        assert!(decode("not hex").is_err());
-        assert!(decode(&"00".repeat(MAX_TRANSACTION_LEN as usize + 1)).is_err());
+        assert!(matches!(
+            decode(&format!("{hex}00")),
+            Err(RawTransactionError::TrailingBytes)
+        ));
+        assert!(matches!(
+            decode("not hex"),
+            Err(RawTransactionError::Hex(_))
+        ));
+        assert!(matches!(decode("00"), Err(RawTransactionError::Codec(_))));
+        assert!(matches!(
+            decode(&"00".repeat(MAX_TRANSACTION_LEN as usize + 1)),
+            Err(RawTransactionError::TooLong)
+        ));
         assert_eq!(
             decode(&format!("0x{hex}")).unwrap().txid(),
             decode(hex).unwrap().txid()

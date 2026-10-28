@@ -4,14 +4,14 @@ use std::collections::VecDeque;
 
 use clarity::vm::clarity::ClarityConnection;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier};
-use serde::Serialize;
-use serde_json::{json, Value};
+use serde::{Serialize, Serializer};
 use stacks_codec::transaction::{StacksTransaction, TransactionPayload};
 use stacks_common::types::chainstate::Txid;
 
 use super::interpreter::ClarityInterpreter;
-use super::raw_transaction::decode;
+use super::raw_transaction::{decode, RawTransactionError};
 use super::Session;
+use crate::utils::serialize_display;
 
 #[derive(Clone, Default)]
 pub(crate) struct Mempool {
@@ -31,13 +31,70 @@ pub enum AdmissionResult {
         txid: Txid,
     },
     Rejected {
-        error: String,
+        error: &'static str,
         reason: &'static str,
-        #[serde(skip_serializing_if = "Value::is_null")]
-        reason_data: Value,
+        #[serde(skip_serializing_if = "AdmissionData::is_none")]
+        reason_data: AdmissionData,
         #[serde(skip_serializing_if = "Option::is_none")]
         txid: Option<Txid>,
     },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum AdmissionData {
+    None,
+    Message {
+        #[serde(serialize_with = "serialize_display")]
+        message: Box<AdmissionMessage>,
+    },
+    Funds {
+        #[serde(serialize_with = "serialize_balance")]
+        expected: u128,
+        #[serde(serialize_with = "serialize_balance")]
+        actual: u128,
+    },
+    Fee {
+        expected: u64,
+        actual: u64,
+    },
+    Nonce {
+        expected: u64,
+        actual: u64,
+        #[serde(serialize_with = "serialize_display")]
+        principal: Box<PrincipalData>,
+        is_origin: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<&'static str>,
+    },
+    Contract {
+        #[serde(serialize_with = "serialize_display")]
+        contract_identifier: QualifiedContractIdentifier,
+    },
+}
+
+impl AdmissionData {
+    fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AdmissionMessage {
+    #[error("{0}")]
+    Static(&'static str),
+    #[error("{0}")]
+    Connection(String),
+    #[error(transparent)]
+    Transaction(#[from] RawTransactionError),
+    #[error(transparent)]
+    Database(#[from] clarity::vm::errors::VmExecutionError),
+    #[error(transparent)]
+    Argument(#[from] clarity::vm::analysis::errors::StaticCheckError),
+}
+
+fn serialize_balance<S: Serializer>(value: &u128, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_str(&format_args!("0x{value:032x}"))
 }
 
 // TODO(upstream): Extract stackslib's MemPoolRejection and into_json mapping
@@ -45,21 +102,23 @@ pub enum AdmissionResult {
 #[derive(Debug)]
 struct AdmissionError {
     reason: &'static str,
-    data: Value,
+    data: AdmissionData,
 }
 
 impl AdmissionError {
     fn new(reason: &'static str) -> Self {
         Self {
             reason,
-            data: Value::Null,
+            data: AdmissionData::None,
         }
     }
 
-    fn message(reason: &'static str, message: impl ToString) -> Self {
+    fn message(reason: &'static str, message: AdmissionMessage) -> Self {
         Self {
             reason,
-            data: json!({ "message": message.to_string() }),
+            data: AdmissionData::Message {
+                message: Box::new(message),
+            },
         }
     }
 }
@@ -71,17 +130,17 @@ fn require_funds(
 ) -> Result<(), AdmissionError> {
     let mut balance = db
         .get_stx_balance_snapshot(principal)
-        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
+        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?;
     if !balance
         .can_transfer(expected)
-        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?
+        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?
     {
         let actual = balance
             .get_available_balance()
-            .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
+            .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?;
         return Err(AdmissionError {
             reason: "NotEnoughFunds",
-            data: json!({ "expected": format!("0x{expected:032x}"), "actual": format!("0x{actual:032x}") }),
+            data: AdmissionData::Funds { expected, actual },
         });
     }
     Ok(())
@@ -94,9 +153,11 @@ impl Session {
             Ok(tx) => tx,
             Err(error) => {
                 return AdmissionResult::Rejected {
-                    error: "transaction rejected".into(),
+                    error: "transaction rejected",
                     reason: "Deserialization",
-                    reason_data: json!({ "message": error }),
+                    reason_data: AdmissionData::Message {
+                        message: Box::new(error.into()),
+                    },
                     txid: None,
                 }
             }
@@ -122,7 +183,7 @@ impl Session {
                 AdmissionResult::Accepted { txid }
             }
             Err(error) => AdmissionResult::Rejected {
-                error: "transaction rejected".into(),
+                error: "transaction rejected",
                 reason: error.reason,
                 reason_data: error.data,
                 txid: Some(txid),
@@ -172,13 +233,15 @@ impl ClarityInterpreter {
             TransactionPayload::PoisonMicroblock(..) => {
                 return Err(AdmissionError::message(
                     "ServerFailureOther",
-                    "PoisonMicroblock transactions not accepted via mempool",
+                    AdmissionMessage::Static(
+                        "PoisonMicroblock transactions not accepted via mempool",
+                    ),
                 ))
             }
             _ => {}
         }
         self.check_raw_transaction(tx)
-            .map_err(|e| AdmissionError::message("SignatureValidation", e))?;
+            .map_err(|e| AdmissionError::message("SignatureValidation", e.into()))?;
         // Pinned stacks-node policy: MINIMUM_TX_FEE = 1 and
         // MINIMUM_TX_FEE_RATE_PER_BYTE = 1 (stackslib/db/blocks.rs).
         // TODO(upstream): Export these constants and can_include_tx's fee predicate
@@ -187,7 +250,10 @@ impl ClarityInterpreter {
         if tx.get_tx_fee() < minimum_fee {
             return Err(AdmissionError {
                 reason: "FeeTooLow",
-                data: json!({ "expected": minimum_fee, "actual": tx.get_tx_fee() }),
+                data: AdmissionData::Fee {
+                    expected: minimum_fee,
+                    actual: tx.get_tx_fee(),
+                },
             });
         }
         let epoch = self.datastore.get_current_epoch();
@@ -220,7 +286,9 @@ impl ClarityInterpreter {
         }
         let mut connection = self
             .get_transaction_connection(epoch, false, vec![])
-            .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
+            .map_err(|e| {
+                AdmissionError::message("ServerFailureDatabase", AdmissionMessage::Connection(e))
+            })?;
         let origin: PrincipalData = tx.origin_address().into();
         let payer: PrincipalData = tx
             .sponsor_address()
@@ -237,14 +305,17 @@ impl ClarityInterpreter {
             {
                 let expected = db
                     .get_account_nonce(principal)
-                    .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
+                    .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?;
                 if actual < expected || actual == u64::MAX {
                     return Err(AdmissionError {
                         reason: "BadNonce",
-                        data: json!({
-                            "expected": expected, "actual": actual,
-                            "principal": principal.to_string(), "is_origin": is_origin,
-                        }),
+                        data: AdmissionData::Nonce {
+                            expected,
+                            actual,
+                            principal: Box::new(principal.clone()),
+                            is_origin,
+                            message: None,
+                        },
                     });
                 }
                 // Pinned node's MAXIMUM_MEMPOOL_TX_CHAINING is 25; its upper
@@ -254,11 +325,13 @@ impl ClarityInterpreter {
                 if actual > maximum {
                     return Err(AdmissionError {
                         reason: "TooMuchChaining",
-                        data: json!({
-                            "message": "Nonce would exceed chaining limit in mempool",
-                            "expected": maximum, "actual": actual,
-                            "principal": principal.to_string(), "is_origin": is_origin,
-                        }),
+                        data: AdmissionData::Nonce {
+                            expected: maximum,
+                            actual,
+                            principal: Box::new(principal.clone()),
+                            is_origin,
+                            message: Some("Nonce would exceed chaining limit in mempool"),
+                        },
                     });
                 }
                 // TODO(upstream): Separate MemPoolDB::try_add_tx's conflict/replacement
@@ -286,7 +359,7 @@ impl ClarityInterpreter {
                 if !tx.post_conditions.is_empty() {
                     return Err(AdmissionError::message(
                         "ServerFailureOther",
-                        "native transfers do not support post-conditions",
+                        AdmissionMessage::Static("native transfers do not support post-conditions"),
                     ));
                 }
                 let spent = u128::from(*amount)
@@ -315,7 +388,7 @@ impl ClarityInterpreter {
                 function
                     .check_args_by_allowing_trait_cast(db, &call.function_args, epoch, version)
                     .map(|_| ())
-                    .map_err(|e| AdmissionError::message("BadFunctionArgument", e))
+                    .map_err(|e| AdmissionError::message("BadFunctionArgument", e.into()))
             }
             TransactionPayload::SmartContract(contract, _) => {
                 let id = QualifiedContractIdentifier::new(
@@ -325,7 +398,9 @@ impl ClarityInterpreter {
                 if db.has_contract(&id) {
                     Err(AdmissionError {
                         reason: "ContractAlreadyExists",
-                        data: json!({ "contract_identifier": id.to_string() }),
+                        data: AdmissionData::Contract {
+                            contract_identifier: id,
+                        },
                     })
                 } else {
                     Ok(())

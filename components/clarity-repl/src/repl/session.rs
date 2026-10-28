@@ -826,7 +826,7 @@ impl Session {
 
         match decode(raw_hex) {
             Ok(tx) => self.execute_transaction_with_hooks(&tx, hooks),
-            Err(error) => RawTransactionOutcome::rejected(None, error),
+            Err(error) => RawTransactionOutcome::rejected(None, error.to_string()),
         }
     }
 
