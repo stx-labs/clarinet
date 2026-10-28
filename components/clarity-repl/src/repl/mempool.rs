@@ -151,6 +151,11 @@ fn check_nonce_dependencies(
     pending: &VecDeque<PendingTransaction>,
     candidate: &StacksTransaction,
 ) -> Result<(), AdmissionError> {
+    // Admission already rejects the only possible single-transaction cycle:
+    // unequal nonces for a self-sponsored transaction.
+    if pending.is_empty() {
+        return Ok(());
+    }
     let count = pending.len() + 1;
     let mut reservations: HashMap<PrincipalData, BTreeMap<u64, usize>> = HashMap::new();
     let mut current_nonces = HashMap::new();

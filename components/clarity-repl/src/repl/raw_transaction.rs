@@ -746,12 +746,9 @@ mod tests {
             0
         );
 
-        let replacements: Vec<_> = [1, 2]
-            .into_iter()
-            .map(|key| {
-                session.submit_transaction(&signed_sponsored_transfer(&fixtures, key, key, 0, 0))
-            })
-            .collect();
+        let replacements = [1, 2].map(|key| {
+            session.submit_transaction(&signed_sponsored_transfer(&fixtures, key, key, 0, 0))
+        });
         assert!(
             replacements.iter().any(|result| matches!(result, AdmissionResult::Accepted { .. })),
             "cycle blocks both accounts: closing admission={closing_admission:?}, replacements={replacements:?}",
@@ -885,29 +882,12 @@ mod tests {
     }
 
     fn stale_sponsored_transaction_releases_other_nonce(stale_origin: bool) {
-        use stacks_common::types::chainstate::StacksPrivateKey;
-
         use crate::repl::mempool::AdmissionResult;
 
         let fixtures = fixtures();
         let mut session = session(&fixtures);
         let signed = |origin_nonce, sponsor_nonce| {
-            let mut tx = decode(
-                fixtures["transactions"]["sponsored"]["hex"]
-                    .as_str()
-                    .unwrap(),
-            )
-            .unwrap();
-            tx.set_origin_nonce(origin_nonce);
-            tx.set_sponsor_nonce(sponsor_nonce).unwrap();
-            tx.set_tx_fee(1000);
-            let origin_key = StacksPrivateKey::from_hex(&format!("{:064x}01", 1)).unwrap();
-            let sponsor_key = StacksPrivateKey::from_hex(&format!("{:064x}01", 2)).unwrap();
-            let sighash = tx.sign_next_origin(&tx.sign_begin(), &origin_key).unwrap();
-            tx.sign_next_sponsor(&sighash, &sponsor_key).unwrap();
-            tx.verify(TransactionAuthVerificationMode::EnforceLowS)
-                .unwrap();
-            clarity::util::hash::to_hex(&tx.serialize_to_vec())
+            signed_sponsored_transfer(&fixtures, 1, 2, origin_nonce, sponsor_nonce)
         };
         let (origin_nonce, sponsor_nonce, consumed, other) = if stale_origin {
             (0, 1, "sender", "sponsor")
