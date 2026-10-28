@@ -3,16 +3,32 @@ import {
   deserializeTransaction,
   makeContractCall,
   makeContractDeploy,
+  sponsorTransaction,
 } from "@stacks/transactions";
 import { beforeEach, expect, it, vi } from "vitest";
-import { initSimnet, type Simnet } from "..";
+import { initSimnet, type Simnet, type RawTransactionResult } from "..";
 import fixtures from "./fixtures/raw-transactions/transactions.json";
 
 let simnet: Simnet;
 const { sender, sponsor, transactions } = fixtures;
 const balance = (address: string) => simnet.getAssetsMap().get("STX")!.get(address)!;
-const broadcast = (name: keyof typeof transactions) =>
-  simnet.broadcastTransaction(transactions[name].hex);
+// Direct miner entries exercise execution independently of mempool policy.
+const executeRaw = (hex: string): RawTransactionResult => {
+  const outcome = simnet.mineBlock([{ broadcastTx: hex }])[0];
+  if (outcome.status === "success") return { ...outcome, transaction: outcome.transaction! };
+  if (outcome.status === "rejected")
+    return { ...outcome, transaction: outcome.transaction ?? null };
+  return {
+    status: outcome.kind!,
+    transaction: outcome.transaction!,
+    error: outcome.error,
+    result: outcome.result ?? null,
+    events: outcome.events ?? [],
+    costs: outcome.costs ?? null,
+    performance: outcome.performance,
+  };
+};
+const broadcast = (name: keyof typeof transactions) => executeRaw(transactions[name].hex);
 beforeEach(async () => {
   simnet = await initSimnet("tests/fixtures/Clarinet.toml");
   simnet.setEpoch("3.4");
@@ -36,7 +52,7 @@ it("executes signed bytes, preserves the memo and canonical ID, and rejects repl
   expect(simnet.blockHeight).toBe(height + 1);
   expect(broadcast("transfer").status).toBe("rejected");
   expect(balance(sender)).toBe(999890n);
-  expect(simnet.blockHeight).toBe(height + 1);
+  expect(simnet.blockHeight).toBe(height + 2);
 });
 
 it.each([false, true])(
@@ -57,7 +73,7 @@ it.each([false, true])(
     });
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const result = simnet.broadcastTransaction(transaction.serialize());
+      const result = executeRaw(transaction.serialize());
       expect(result.status).toBe(fail ? "runtime_error" : "success");
       const trace = simnet.getLastContractCallTrace();
       expect(trace).toContain(fail ? "args: u3 u4" : "args: u4 u3");
@@ -70,10 +86,10 @@ it.each([false, true])(
       }
       // Undecodable input isn't a contract call and preserves the last call's trace.
       consoleSpy.mockClear();
-      expect(simnet.broadcastTransaction("xyz").status).toBe("rejected");
+      expect(executeRaw("xyz").status).toBe("rejected");
       expect(simnet.getLastContractCallTrace()).toBe(trace);
       // A decoded call rejected at admission replaces the old execution trace.
-      expect(simnet.broadcastTransaction(transaction.serialize()).status).toBe("rejected");
+      expect(executeRaw(transaction.serialize()).status).toBe("rejected");
       expect(simnet.getLastContractCallTrace()).not.toBe(trace);
       expect(simnet.getLastContractCallTrace()).not.toContain("args:");
       expect(consoleSpy).not.toHaveBeenCalled();
@@ -121,9 +137,7 @@ it.each([
       fee: 10n,
       postConditionMode: "allow",
     });
-    expect(simnet.broadcastTransaction(tx.serialize()).status).toBe(
-      abort ? "abort_by_response" : "success",
-    );
+    expect(executeRaw(tx.serialize()).status).toBe(abort ? "abort_by_response" : "success");
   } else {
     expect(simnet.callPublicFn("trace-parent", "run", [Cl.bool(abort)], sender).result).toEqual(
       abort ? Cl.error(Cl.uint(8)) : Cl.ok(Cl.bool(true)),
@@ -157,7 +171,7 @@ it.each([true, false])(
       fee: 10n,
       postConditionMode: "allow",
     });
-    const result = simnet.broadcastTransaction(transaction.serialize());
+    const result = executeRaw(transaction.serialize());
     expect(result.status).toBe("success");
     if (result.status !== "success") throw new Error(result.status);
     if (trackPerformance) {
@@ -165,7 +179,7 @@ it.each([true, false])(
     } else {
       expect(result.execution.performance).toBeUndefined();
     }
-    const replay = simnet.broadcastTransaction(transaction.serialize());
+    const replay = executeRaw(transaction.serialize());
     expect(replay.status).toBe("rejected");
     expect(replay).not.toHaveProperty("performance");
     expect(replay).not.toHaveProperty("execution");
@@ -207,7 +221,7 @@ it.each([true, false])(
         fee: 10n,
         postConditionMode: "allow",
       });
-      return simnet.broadcastTransaction(tx.serialize());
+      return executeRaw(tx.serialize());
     };
     const result = await call("fail");
     expect(result.status).toBe("abort_by_response");
@@ -253,11 +267,11 @@ it.each([true, false])(
       fee: 10n,
       postConditionMode: "allow",
     });
-    const result = simnet.broadcastTransaction(transaction.serialize());
+    const result = executeRaw(transaction.serialize());
     expect(result.status).toBe("success");
     if (result.status !== "success") throw new Error(result.status);
     // A rejected replay must not add another report.
-    expect(simnet.broadcastTransaction(transaction.serialize()).status).toBe("rejected");
+    expect(executeRaw(transaction.serialize()).status).toBe("rejected");
     const reports = JSON.parse(simnet.collectReport(false, "").costs);
     expect(reports).toHaveLength(trackCosts ? 1 : 0);
     if (trackCosts) {
@@ -300,7 +314,7 @@ it("formats raw and convenience cost-report arguments identically", async () => 
     fee: 10n,
     postConditionMode: "allow",
   });
-  expect(simnet.broadcastTransaction(transaction.serialize()).status).toBe("success");
+  expect(executeRaw(transaction.serialize()).status).toBe("success");
   const reports = JSON.parse(simnet.collectReport(false, "").costs);
   expect(reports).toHaveLength(2);
   expect(reports[0].args).toEqual([sponsor, `(tuple (a u1) (who ${sender}))`]);
@@ -349,18 +363,18 @@ it.each([
   expect(balance(sender)).toBe(1000000n);
   expect(balance(sponsor)).toBe(1000000n);
   expect(simnet.getAccountNonce(sender)).toBe(0n);
-  expect(simnet.blockHeight).toBe(height);
+  expect(simnet.blockHeight).toBe(height + 1);
 });
 
 it.each(["xyz", "00", transactions.transfer.hex + "00"])("rejects malformed input", (hex) => {
-  expect(simnet.broadcastTransaction(hex)).toMatchObject({ status: "rejected", transaction: null });
+  expect(executeRaw(hex)).toMatchObject({ status: "rejected", transaction: null });
   expect(simnet.getAccountNonce(sender)).toBe(0n);
 });
 
 it("checks signatures on Wasm", () => {
   const tx = deserializeTransaction(transactions.transfer.hex);
   tx.setFee(11n);
-  expect(simnet.broadcastTransaction(tx.serialize()).status).toBe("rejected");
+  expect(executeRaw(tx.serialize()).status).toBe("rejected");
   expect(balance(sender)).toBe(1000000n);
 });
 
@@ -470,7 +484,7 @@ it.each([
   ["3.4", 5, "stacks-block-height"],
   ["4.0", 6, "stacks-block-height"],
 ] as const)(
-  "executes in the inclusion block and restores rejected blocks in epoch %s",
+  "executes in the inclusion block and advances rejected blocks in epoch %s",
   async (epoch, clarityVersion, heightVariable) => {
     simnet.setEpoch(epoch);
     const options = {
@@ -490,7 +504,7 @@ it.each([
       (define-public (height) (ok ${heightVariable}))
       (define-public (fail) (err ${heightVariable}))`,
     });
-    expect(simnet.broadcastTransaction(deployment.serialize()).status).toBe("success");
+    expect(executeRaw(deployment.serialize()).status).toBe("success");
     expect(simnet.getDataVar(`${sender}.heights`, "deployed-at")).toEqual(Cl.uint(height + 1));
     expect(simnet.blockHeight).toBe(height + 1);
 
@@ -504,13 +518,13 @@ it.each([
         functionArgs: [],
       });
     const signed = await call("height");
-    const result = simnet.broadcastTransaction(signed.serialize());
+    const result = executeRaw(signed.serialize());
     expect(result.status).toBe("success");
     if (result.status !== "success") throw new Error(result.status);
     expect(result.execution.result).toEqual(Cl.ok(Cl.uint(height + 2)));
     expect(simnet.blockHeight).toBe(height + 2);
 
-    const failure = simnet.broadcastTransaction((await call("fail")).serialize());
+    const failure = executeRaw((await call("fail")).serialize());
     expect(failure).toMatchObject({
       status: "abort_by_response",
       result: Cl.error(Cl.uint(height + 3)),
@@ -527,19 +541,86 @@ it.each([
       clarityVersion,
       codeBody: "(define-constant duplicate true)",
     });
+    let rejectedCount = 0;
     for (const hex of ["xyz", signed.serialize(), duplicate.serialize()]) {
-      expect(simnet.broadcastTransaction(hex).status).toBe("rejected");
-      expect(simnet.blockHeight).toBe(height + 3);
-      expect(simnet.burnBlockHeight).toBe(burnHeight);
+      rejectedCount++;
+      expect(executeRaw(hex).status).toBe("rejected");
+      expect(simnet.blockHeight).toBe(height + 3 + rejectedCount);
+      expect(simnet.burnBlockHeight).toBeGreaterThanOrEqual(burnHeight);
       expect(simnet.getAccountNonce(sender)).toBe(nonce);
       expect(balance(sender)).toBe(funds);
-      // Also read through the VM: the datastore's shared tip must be restored.
+      // Read through the VM to confirm the inclusion height.
       expect(
         simnet.callReadOnlyFn(`${sender}.heights`, "observe-height", [], sender).result,
-      ).toEqual(Cl.ok(Cl.uint(height + 3)));
+      ).toEqual(Cl.ok(Cl.uint(height + 3 + rejectedCount)));
     }
     expect(simnet.callPublicFn(`${sender}.heights`, "height", [], sender).result).toEqual(
-      Cl.ok(Cl.uint(height + 4)),
+      Cl.ok(Cl.uint(height + 4 + rejectedCount)),
     );
+  },
+);
+
+it.each(["2.05", "3.4", "4.0"] as const)(
+  "checks mempool function access and arguments without changing block rules in epoch %s",
+  async (epoch) => {
+    simnet.setEpoch(epoch);
+    simnet.deployContract(
+      "admission",
+      `(define-read-only (read) (ok u1))
+       (define-private (private) (ok u2))
+       (define-public (write (n uint)) (ok n))`,
+      null,
+      sender,
+    );
+    const nonce = simnet.getAccountNonce(sender);
+    const funds = balance(sender);
+    const sponsorFunds = balance(sponsor);
+    const sponsorNonce = simnet.getAccountNonce(sponsor);
+    const height = simnet.blockHeight;
+    const burnHeight = simnet.burnBlockHeight;
+    for (const [contractName, functionName, functionArgs, error] of [
+      ["admission", "read", [], "NoSuchPublicFunction"],
+      ["admission", "private", [], "NoSuchPublicFunction"],
+      ["admission", "missing", [], "NoSuchPublicFunction"],
+      ["missing", "write", [], "NoSuchContract"],
+      ["admission", "write", [], "BadFunctionArgument"],
+      ["admission", "write", [Cl.bool(true)], "BadFunctionArgument"],
+      ["admission", "write", [Cl.uint(1), Cl.uint(2)], "BadFunctionArgument"],
+    ] as const) {
+      const unsignedSponsor = await makeContractCall({
+        network: "testnet",
+        senderKey: "1".padStart(64, "0") + "01",
+        contractAddress: sender,
+        contractName,
+        functionName,
+        functionArgs: [...functionArgs],
+        nonce,
+        fee: 1000n,
+        sponsored: true,
+        postConditionMode: "allow",
+      });
+      const transaction = await sponsorTransaction({
+        transaction: unsignedSponsor,
+        sponsorPrivateKey: "2".padStart(64, "0") + "01",
+        sponsorNonce,
+        fee: 1000n,
+      });
+      expect(simnet.broadcastTransaction(transaction.serialize())).toMatchObject({
+        reason: error,
+        txid: transaction.txid(),
+      });
+      expect(simnet.getAccountNonce(sender)).toBe(nonce);
+      expect(simnet.getAccountNonce(sponsor)).toBe(sponsorNonce);
+      expect(balance(sender)).toBe(funds);
+      expect(balance(sponsor)).toBe(sponsorFunds);
+      expect(simnet.blockHeight).toBe(height);
+      expect(simnet.burnBlockHeight).toBe(burnHeight);
+    }
+    const mined = simnet.mineBlock([
+      { callPublicFn: { contract: `${sender}.admission`, method: "read", args: [], sender } },
+    ]);
+    expect(mined[0].status).toBe("success");
+    expect(simnet.getAccountNonce(sender)).toBe(nonce + 1n);
+    expect(simnet.blockHeight).toBe(height + 1);
   },
 );

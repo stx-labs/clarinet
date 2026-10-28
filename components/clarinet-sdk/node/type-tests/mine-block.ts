@@ -5,8 +5,8 @@ import type { BlockTransactionResult } from "../src/index";
 declare const simnet: Simnet;
 const outcomes: BlockTransactionResult[] = simnet.mineBlock([]);
 for (const outcome of outcomes) {
-  // @ts-expect-error Results require narrowing and access through execution.
-  outcome.result;
+  const rawOutput: ClarityValue | null | undefined = outcome.result;
+  void rawOutput;
   if (outcome.status === "success") {
     const value: ClarityValue = outcome.execution.result;
     void value;

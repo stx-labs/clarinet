@@ -6,6 +6,7 @@ pub mod diagnostic;
 mod docs;
 pub mod hooks;
 pub mod interpreter;
+pub mod mempool;
 pub mod post_conditions;
 pub mod raw_transaction;
 pub mod remote_data;

@@ -524,6 +524,14 @@ fn run_sdk_request_loop(
                 let _ = writer.flush();
             }
 
+            "broadcastTransaction" => {
+                let raw = request["rawHex"].as_str().unwrap_or_default();
+                let result = session.submit_transaction(raw);
+                let response = serde_json::json!({"id": id, "result": result});
+                let _ = writeln!(writer, "{}", serde_json::to_string(&response).unwrap());
+                let _ = writer.flush();
+            }
+
             // Execute a block of transactions in order, returning one result per tx.
             "mineBlock" => {
                 let txs = request["txs"]
@@ -534,6 +542,9 @@ fn run_sdk_request_loop(
                 let mut dap_guard = dap.lock().expect("DAP mutex poisoned");
                 let mut results: Vec<serde_json::Value> = Vec::with_capacity(txs.len());
                 session.advance_chain_tip(1);
+                while let Some(tx) = session.next_mempool_transaction() {
+                    results.push(execute_signed_block_entry(session, &mut dap_guard, &tx));
+                }
                 for tx in txs {
                     results.push(execute_block_entry(session, &mut dap_guard, tx));
                 }
@@ -561,6 +572,70 @@ fn run_sdk_request_loop(
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn execute_signed_block_entry(
+    session: &mut Session,
+    dap: &mut DAPDebugger,
+    tx: &stacks_codec::transaction::StacksTransaction,
+) -> serde_json::Value {
+    use stacks_codec::transaction::TransactionPayload;
+
+    match &tx.payload {
+        TransactionPayload::ContractCall(call) => {
+            dap.prepare_for_call(&call.to_clarity_contract_id(), &call.function_name);
+        }
+        TransactionPayload::SmartContract(contract, _) => {
+            let contract_id =
+                QualifiedContractIdentifier::new(tx.origin_address().into(), contract.name.clone());
+            dap.prepare_for_call(&contract_id, &contract.code_body.to_string());
+        }
+        _ => {}
+    }
+    raw_block_result(session.execute_transaction_with_hooks(tx, vec![dap]))
+}
+
+fn raw_block_result(
+    outcome: clarity_repl::repl::raw_transaction::RawTransactionOutcome,
+) -> serde_json::Value {
+    use clarity_repl::repl::raw_transaction::{RawTransactionOutcome, RawTransactionResult};
+    use serde_json::json;
+    match outcome {
+        RawTransactionOutcome::Rejected {
+            metadata: tx,
+            error,
+        } => {
+            json!({"status": "rejected", "error": error, "transaction": tx})
+        }
+        RawTransactionOutcome::Included {
+            metadata: tx,
+            result,
+        } => match result {
+            RawTransactionResult::Success(execution) => {
+                let value = match &execution.result {
+                    EvaluationResult::Snippet(result) => &result.result,
+                    EvaluationResult::Contract(result) => {
+                        result.result.as_ref().expect("raw deployment result")
+                    }
+                };
+                json!({"status": "success", "transaction": tx, "execution": {
+                    "result": to_raw_value(value), "events": serialize_events(&execution.events),
+                    "costs": serde_json::to_string(&execution.cost).unwrap(), "performance": null,
+                }})
+            }
+            RawTransactionResult::Failure {
+                kind,
+                error,
+                output,
+                events,
+                cost,
+            } => {
+                json!({"status": "included_failure", "kind": kind, "error": error, "execution": null,
+                    "transaction": tx, "result": output.as_deref().map(to_raw_value),
+                    "events": serialize_events(&events), "costs": serde_json::to_string(&cost).unwrap(), "performance": null})
+            }
+        },
+    }
+}
+
 /// The SDK's `ContractOptions`, so both batch paths reject the same malformed options.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -574,6 +649,19 @@ fn execute_block_entry(
     dap: &mut DAPDebugger,
     tx: &serde_json::Value,
 ) -> serde_json::Value {
+    if tx["type"].as_str() == Some("broadcastTx") {
+        return match clarity_repl::repl::raw_transaction::decode(
+            tx["rawHex"].as_str().unwrap_or_default(),
+        ) {
+            Ok(tx) => execute_signed_block_entry(session, dap, &tx),
+            Err(error) => raw_block_result(
+                clarity_repl::repl::raw_transaction::RawTransactionOutcome::Rejected {
+                    metadata: None,
+                    error: error.to_string(),
+                },
+            ),
+        };
+    }
     use clarity::vm::analysis::contract_interface_builder::ContractInterfaceFunctionAccess;
     use clarity::vm::types::Value;
     use clarity::vm::{ClarityVersion, ExecutionResult, SymbolicExpression};
@@ -921,6 +1009,101 @@ mod batch_tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn signed_payloads_run_without_debugger_commands() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        for explicit in [false, true] {
+            for name in ["deploy", "increment"] {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+                let (server, _) = listener.accept().unwrap();
+                let (sender, receiver) = mpsc::channel();
+                let worker = std::thread::spawn(move || {
+                    let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+                        "../../../clarinet-sdk/node/tests/fixtures/raw-transactions/transactions.json"
+                    ))
+                    .unwrap();
+                    let mut session = Session::new(SessionSettings {
+                        epoch_id: Some(clarinet_defaults::DEFAULT_EPOCH),
+                        ..SessionSettings::default()
+                    });
+                    let principal =
+                        PrincipalData::parse(fixtures["sender"].as_str().unwrap()).unwrap();
+                    session
+                        .interpreter
+                        .mint_stx_balance(principal, 1_000_000)
+                        .unwrap();
+                    if name == "increment" {
+                        assert!(session
+                            .execute_raw_transaction(
+                                fixtures["transactions"]["deploy"]["hex"].as_str().unwrap(),
+                            )
+                            .is_included());
+                    }
+                    let mut dap = DAPDebugger::from_std_tcp_stream(server);
+                    let raw = fixtures["transactions"][name]["hex"].as_str().unwrap();
+                    let result = if explicit {
+                        execute_block_entry(
+                            &mut session,
+                            &mut dap,
+                            &json!({ "type": "broadcastTx", "rawHex": raw }),
+                        )
+                    } else {
+                        let tx = clarity_repl::repl::raw_transaction::decode(raw).unwrap();
+                        execute_signed_block_entry(&mut session, &mut dap, &tx)
+                    };
+                    sender.send(result).unwrap();
+                });
+                // Keep the connection open without sending debugger commands. An
+                // unprepared debugger waits here for initialization to complete.
+                let result = receiver.recv_timeout(Duration::from_secs(10));
+                drop(client);
+                worker.join().unwrap();
+                assert_eq!(
+                    result.expect("signed payload waited for debugger commands")["status"],
+                    "success",
+                    "{name}, explicit={explicit}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn debug_batch_preserves_signed_transaction_metadata() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../clarinet-sdk/node/tests/fixtures/raw-transactions/transactions.json"
+        ))
+        .unwrap();
+        let mut session = Session::new(SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch34),
+            ..SessionSettings::default()
+        });
+        let sender = PrincipalData::parse(fixtures["sender"].as_str().unwrap()).unwrap();
+        session
+            .interpreter
+            .mint_stx_balance(sender.clone(), 1_000_000)
+            .unwrap();
+        let mut dap = DAPDebugger::no_op();
+        let entry =
+            json!({ "type": "broadcastTx", "rawHex": fixtures["transactions"]["transfer"]["hex"] });
+        let result = execute_block_entry(&mut session, &mut dap, &entry);
+        assert_eq!(result["status"], "success");
+        assert_eq!(
+            result["transaction"],
+            json!({
+                "txid": fixtures["transactions"]["transfer"]["txid"], "fee": "10", "nonce": "0",
+            })
+        );
+        assert_eq!(session.get_nonce(&sender).unwrap(), 1);
+        assert_eq!(
+            execute_block_entry(&mut session, &mut dap, &entry)["status"],
+            "rejected"
+        );
+    }
 
     #[test]
     fn debug_batch_executes_read_only_targets_as_transactions() {
