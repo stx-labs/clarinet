@@ -322,7 +322,8 @@ impl ClarityInterpreter {
     }
 }
 
-pub(crate) fn decode(raw_hex: &str) -> Result<StacksTransaction, RawTransactionError> {
+/// Decode exactly one size-bounded signed transaction without executing it.
+pub fn decode(raw_hex: &str) -> Result<StacksTransaction, RawTransactionError> {
     let hex = raw_hex.strip_prefix("0x").unwrap_or(raw_hex);
     if hex.len() > MAX_TRANSACTION_LEN as usize * 2 {
         return Err(RawTransactionError::TooLong);
