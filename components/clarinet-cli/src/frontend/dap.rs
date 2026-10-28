@@ -625,7 +625,7 @@ fn execute_block_entry(
                 error
                     .diagnostics
                     .iter()
-                    .map(|d| d.diagnostic.message.to_string())
+                    .map(|d| &*d.diagnostic.message)
                     .collect::<Vec<_>>()
                     .join("; "),
             )
@@ -708,7 +708,7 @@ fn execute_block_entry(
                     reject(
                         diagnostics
                             .iter()
-                            .map(|d| d.diagnostic.message.to_string())
+                            .map(|d| &*d.diagnostic.message)
                             .collect::<Vec<_>>()
                             .join("; "),
                     )
@@ -763,16 +763,16 @@ fn execute_block_entry(
                 EvaluationResult::Snippet(snippet) => Some(&snippet.result),
                 EvaluationResult::Contract(contract) => contract.result.as_ref(),
             };
-            let failed = matches!(value, Some(Value::Response(response)) if !response.committed);
             let result = serde_json::json!({
                 "result": value.map(to_raw_value).unwrap_or_else(|| "0x03".into()),
                 "events": serialize_events(&execution.events),
                 "costs": serde_json::to_string(&execution.cost).unwrap(),
             });
-            if failed {
-                serde_json::json!({"status": "included_failure", "error": value_to_string(value.unwrap()), "execution": result})
-            } else {
-                serde_json::json!({"status": "success", "execution": result})
+            match value {
+                Some(value @ Value::Response(response)) if !response.committed => {
+                    serde_json::json!({"status": "included_failure", "error": value_to_string(value), "execution": result})
+                }
+                _ => serde_json::json!({"status": "success", "execution": result}),
             }
         }
         Err((BlockInclusion::Included, error)) => {

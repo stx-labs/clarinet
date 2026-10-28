@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
@@ -136,12 +137,14 @@ fn deploy_boot_contracts(
 
     // Load boot contracts (with custom overrides if specified)
     let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
-        boot::BOOT_CONTRACTS_DATA.clone()
+        Cow::Borrowed(&*boot::BOOT_CONTRACTS_DATA)
     } else {
-        boot::get_boot_contracts_data_with_overrides(&settings.override_boot_contracts_source)
+        Cow::Owned(boot::get_boot_contracts_data_with_overrides(
+            &settings.override_boot_contracts_source,
+        ))
     };
 
-    for (contract_id, (contract, ast)) in boot_contracts_data {
+    for (contract_id, (contract, ast)) in boot_contracts_data.iter() {
         if let Some(max_ep) = max_epoch {
             let (contract_epoch, _) =
                 boot::get_boot_contract_epoch_and_clarity_version(&contract.name);
@@ -149,7 +152,7 @@ fn deploy_boot_contracts(
                 continue;
             }
         }
-        let result = interpreter.run(&contract, Some(&ast), false, None);
+        let result = interpreter.run(contract, Some(ast), false, None);
         if let Err(errs) = &result {
             for e in &errs.diagnostics {
                 ueprint!(
@@ -158,7 +161,7 @@ fn deploy_boot_contracts(
                 );
             }
         }
-        boot_contracts.insert(contract_id, result.map_err(Vec::from));
+        boot_contracts.insert(contract_id.clone(), result.map_err(Vec::from));
     }
     boot_contracts
 }
@@ -206,21 +209,23 @@ fn deploy_boot_contracts_for_range(
 
     // Deploy regular boot contracts that fall in the range
     let boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
-        boot::BOOT_CONTRACTS_DATA.clone()
+        Cow::Borrowed(&*boot::BOOT_CONTRACTS_DATA)
     } else {
-        boot::get_boot_contracts_data_with_overrides(&settings.override_boot_contracts_source)
+        Cow::Owned(boot::get_boot_contracts_data_with_overrides(
+            &settings.override_boot_contracts_source,
+        ))
     };
 
-    for (contract_id, (contract, ast)) in boot_contracts_data {
+    for (contract_id, (contract, ast)) in boot_contracts_data.iter() {
         let (contract_epoch, _) = boot::get_boot_contract_epoch_and_clarity_version(&contract.name);
         if contract_epoch > from_epoch && contract_epoch <= to_epoch {
             // Skip if already deployed (e.g., deployed at session creation)
-            if already_deployed.contains_key(&contract_id)
-                || newly_deployed.contains_key(&contract_id)
+            if already_deployed.contains_key(contract_id)
+                || newly_deployed.contains_key(contract_id)
             {
                 continue;
             }
-            let result = interpreter.run(&contract, Some(&ast), false, None);
+            let result = interpreter.run(contract, Some(ast), false, None);
             if let Err(errs) = &result {
                 for e in &errs.diagnostics {
                     ueprint!(
@@ -229,7 +234,7 @@ fn deploy_boot_contracts_for_range(
                     );
                 }
             }
-            newly_deployed.insert(contract_id, result.map_err(Vec::from));
+            newly_deployed.insert(contract_id.clone(), result.map_err(Vec::from));
         }
     }
 

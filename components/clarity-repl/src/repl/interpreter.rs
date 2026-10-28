@@ -1240,16 +1240,16 @@ impl ClarityInterpreter {
             hooks,
             &terms,
             |connection, _| {
-                let (value, _, events) = match connection.run_stx_transfer(
-                    &sender,
-                    &recipient,
-                    amount.into(),
-                    &clarity_types::types::BuffData {
-                        data: EMPTY_TOKEN_TRANSFER_MEMO.to_vec(),
-                    },
-                ) {
-                    Ok(result) => result,
-                    Err(error) => {
+                let (value, _, events) = connection
+                    .run_stx_transfer(
+                        &sender,
+                        &recipient,
+                        amount.into(),
+                        &clarity_types::types::BuffData {
+                            data: EMPTY_TOKEN_TRANSFER_MEMO.to_vec(),
+                        },
+                    )
+                    .map_err(|error| {
                         // The upstream payload frame has already rolled back.
                         // Convert before settlement so hooks see the final response.
                         let reason = match error {
@@ -1260,11 +1260,8 @@ impl ClarityInterpreter {
                             }
                             error => error.to_string(),
                         };
-                        return Err(ClarityError::BadTransaction(format!(
-                            "Invalid TokenTransfer: {reason}"
-                        )));
-                    }
-                };
+                        ClarityError::BadTransaction(format!("Invalid TokenTransfer: {reason}"))
+                    })?;
                 Ok((
                     EvaluationResult::Snippet(SnippetEvaluationResult { result: value }),
                     events,
@@ -1602,14 +1599,12 @@ impl ClarityInterpreter {
         Vec<(String, String, u128)>,
         Vec<(String, String, u128)>,
     ) {
-        let mut events = vec![];
+        let events = std::mem::take(emitted_events);
         let mut accounts_to_debit = vec![];
         let mut accounts_to_credit = vec![];
-        for event in emitted_events.drain(..) {
+        for event in &events {
             match event {
-                StacksTransactionEvent::STXEvent(STXEventType::STXTransferEvent(
-                    ref event_data,
-                )) => {
+                StacksTransactionEvent::STXEvent(STXEventType::STXTransferEvent(event_data)) => {
                     accounts_to_debit.push((
                         event_data.sender.to_string(),
                         "STX".to_string(),
@@ -1621,21 +1616,21 @@ impl ClarityInterpreter {
                         event_data.amount,
                     ));
                 }
-                StacksTransactionEvent::STXEvent(STXEventType::STXMintEvent(ref event_data)) => {
+                StacksTransactionEvent::STXEvent(STXEventType::STXMintEvent(event_data)) => {
                     accounts_to_credit.push((
                         event_data.recipient.to_string(),
                         "STX".to_string(),
                         event_data.amount,
                     ));
                 }
-                StacksTransactionEvent::STXEvent(STXEventType::STXBurnEvent(ref event_data)) => {
+                StacksTransactionEvent::STXEvent(STXEventType::STXBurnEvent(event_data)) => {
                     accounts_to_debit.push((
                         event_data.sender.to_string(),
                         "STX".to_string(),
                         event_data.amount,
                     ));
                 }
-                StacksTransactionEvent::FTEvent(FTEventType::FTTransferEvent(ref event_data)) => {
+                StacksTransactionEvent::FTEvent(FTEventType::FTTransferEvent(event_data)) => {
                     accounts_to_credit.push((
                         event_data.recipient.to_string(),
                         event_data.asset_identifier.sugared(),
@@ -1647,23 +1642,21 @@ impl ClarityInterpreter {
                         event_data.amount,
                     ));
                 }
-                StacksTransactionEvent::FTEvent(FTEventType::FTMintEvent(ref event_data)) => {
+                StacksTransactionEvent::FTEvent(FTEventType::FTMintEvent(event_data)) => {
                     accounts_to_credit.push((
                         event_data.recipient.to_string(),
                         event_data.asset_identifier.sugared(),
                         event_data.amount,
                     ));
                 }
-                StacksTransactionEvent::FTEvent(FTEventType::FTBurnEvent(ref event_data)) => {
+                StacksTransactionEvent::FTEvent(FTEventType::FTBurnEvent(event_data)) => {
                     accounts_to_debit.push((
                         event_data.sender.to_string(),
                         event_data.asset_identifier.sugared(),
                         event_data.amount,
                     ));
                 }
-                StacksTransactionEvent::NFTEvent(NFTEventType::NFTTransferEvent(
-                    ref event_data,
-                )) => {
+                StacksTransactionEvent::NFTEvent(NFTEventType::NFTTransferEvent(event_data)) => {
                     accounts_to_credit.push((
                         event_data.recipient.to_string(),
                         event_data.asset_identifier.sugared(),
@@ -1675,14 +1668,14 @@ impl ClarityInterpreter {
                         1,
                     ));
                 }
-                StacksTransactionEvent::NFTEvent(NFTEventType::NFTMintEvent(ref event_data)) => {
+                StacksTransactionEvent::NFTEvent(NFTEventType::NFTMintEvent(event_data)) => {
                     accounts_to_credit.push((
                         event_data.recipient.to_string(),
                         event_data.asset_identifier.sugared(),
                         1,
                     ));
                 }
-                StacksTransactionEvent::NFTEvent(NFTEventType::NFTBurnEvent(ref event_data)) => {
+                StacksTransactionEvent::NFTEvent(NFTEventType::NFTBurnEvent(event_data)) => {
                     accounts_to_debit.push((
                         event_data.sender.to_string(),
                         event_data.asset_identifier.sugared(),
@@ -1691,7 +1684,6 @@ impl ClarityInterpreter {
                 }
                 _ => {}
             };
-            events.push(event);
         }
         (events, accounts_to_credit, accounts_to_debit)
     }

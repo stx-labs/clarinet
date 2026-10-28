@@ -75,9 +75,7 @@ impl<'a> CallChecker<'a> {
         name: &str,
         param_count: usize,
     ) {
-        let exprs: &[SymbolicExpression] = if let List(exprs) = &expr.expr {
-            exprs
-        } else {
+        let List(exprs) = &expr.expr else {
             panic!("expected list expression");
         };
         if exprs.len() != (param_count + 1) {
@@ -118,42 +116,29 @@ impl<'a> ASTVisitor<'a> for CallChecker<'a> {
         parameters: Option<Vec<TypedVar<'a>>>,
         _body: &'a SymbolicExpression,
     ) -> bool {
-        let num_params = match parameters {
-            Some(parameters) => parameters.len(),
-            None => 0,
-        };
+        let num_params = parameters.map_or(0, |parameters| parameters.len());
         self.user_funcs.insert(name, num_params);
         true
     }
 
     fn visit_define_public(
         &mut self,
-        _expr: &'a SymbolicExpression,
+        expr: &'a SymbolicExpression,
         name: &'a ClarityName,
         parameters: Option<Vec<TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
+        body: &'a SymbolicExpression,
     ) -> bool {
-        let num_params = match parameters {
-            Some(parameters) => parameters.len(),
-            None => 0,
-        };
-        self.user_funcs.insert(name, num_params);
-        true
+        self.visit_define_private(expr, name, parameters, body)
     }
 
     fn visit_define_read_only(
         &mut self,
-        _expr: &'a SymbolicExpression,
+        expr: &'a SymbolicExpression,
         name: &'a ClarityName,
         parameters: Option<Vec<TypedVar<'a>>>,
-        _body: &'a SymbolicExpression,
+        body: &'a SymbolicExpression,
     ) -> bool {
-        let num_params = match parameters {
-            Some(parameters) => parameters.len(),
-            None => 0,
-        };
-        self.user_funcs.insert(name, num_params);
-        true
+        self.visit_define_private(expr, name, parameters, body)
     }
 
     fn visit_call_user_defined(
@@ -162,8 +147,7 @@ impl<'a> ASTVisitor<'a> for CallChecker<'a> {
         name: &'a ClarityName,
         args: &'a [SymbolicExpression],
     ) -> bool {
-        if let Some(param_count) = self.user_funcs.get(name) {
-            let param_count = *param_count;
+        if let Some(&param_count) = self.user_funcs.get(name) {
             if args.len() != param_count {
                 self.add_diagnostic(expr, name, param_count, args.len());
             }
@@ -242,7 +226,7 @@ impl Lint for CallChecker<'_> {
 #[cfg(test)]
 mod tests {
     use clarity::vm::diagnostic::Level;
-    use indoc::indoc;
+    use indoc::{formatdoc, indoc};
 
     use super::CallChecker;
     use crate::analysis::linter::Lint;
@@ -338,9 +322,11 @@ mod tests {
     fn user_defined_function_arity() {
         for definition in ["define-private", "define-read-only", "define-public"] {
             for args in ["", "u1 u2"] {
-                let snippet = format!(
-                    "({definition} (foo (amount uint)) (ok amount))
-                     (define-public (main) (ok (foo {args})))"
+                let snippet = formatdoc!(
+                    "
+                    ({definition} (foo (amount uint)) (ok amount))
+                    (define-public (main) (ok (foo {args})))
+                    "
                 );
                 let diagnostics = default_session()
                     .eval(snippet, false)
@@ -379,9 +365,11 @@ mod tests {
             "(map-insert kv-store { key: 1 } { value: 1 } { value: 0 })",
             "(map-delete kv-store { key: 1 } { value: 0 })",
         ] {
-            let snippet = format!(
-                "(define-map kv-store {{ key: int }} {{ value: int }})
-                 (define-private (run) {call})"
+            let snippet = formatdoc!(
+                "
+                (define-map kv-store {{ key: int }} {{ value: int }})
+                (define-private (run) {call})
+                "
             );
             let diagnostics = default_session()
                 .eval(snippet, false)

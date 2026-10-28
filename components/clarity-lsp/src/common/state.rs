@@ -1028,11 +1028,11 @@ pub async fn build_state(
                 }
             }
 
-            match result {
+            let mut contract_lint_diags = match result {
                 Ok(annotated) => {
                     let AnnotatedExecutionResult {
                         mut execution_result,
-                        lint_diagnostics: mut contract_lint_diags,
+                        lint_diagnostics: contract_lint_diags,
                     } = annotated;
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         // Only execution diagnostics get env-tagged. Parser
@@ -1047,15 +1047,6 @@ pub async fn build_state(
                         );
                         entry.append(&mut execution_result.diagnostics);
                     }
-                    tag_lint_diagnostics(
-                        environment,
-                        global_found_env_simnet,
-                        &mut contract_lint_diags,
-                    );
-                    lint_diagnostics
-                        .entry(contract_id.clone())
-                        .or_default()
-                        .extend(contract_lint_diags);
 
                     if let EvaluationResult::Contract(contract_result) = execution_result.result {
                         if let Some(ast) = artifacts.asts.get(&contract_id) {
@@ -1067,10 +1058,10 @@ pub async fn build_state(
                         analyses
                             .insert(contract_id.clone(), Some(contract_result.contract.analysis));
                     };
+                    contract_lint_diags
                 }
                 Err(errors) => {
-                    // Rejected lints use the same tagged channel as successful ones.
-                    let (mut contract_lint_diags, plain): (Vec<_>, Vec<_>) =
+                    let (contract_lint_diags, plain): (Vec<_>, Vec<_>) =
                         errors.into_iter().partition(|d| d.lint_name.is_some());
                     if let Some(entry) = artifacts.diags.get_mut(&contract_id) {
                         let mut diags: Vec<Diagnostic> =
@@ -1078,18 +1069,18 @@ pub async fn build_state(
                         tag_diagnostics(environment, global_found_env_simnet, &mut diags);
                         entry.append(&mut diags);
                     }
-                    tag_lint_diagnostics(
-                        environment,
-                        global_found_env_simnet,
-                        &mut contract_lint_diags,
-                    );
-                    lint_diagnostics
-                        .entry(contract_id.clone())
-                        .or_default()
-                        .extend(contract_lint_diags);
-                    continue;
+                    contract_lint_diags
                 }
             };
+            tag_lint_diagnostics(
+                environment,
+                global_found_env_simnet,
+                &mut contract_lint_diags,
+            );
+            lint_diagnostics
+                .entry(contract_id.clone())
+                .or_default()
+                .extend(contract_lint_diags);
         }
 
         // overwrite the asts and deps
