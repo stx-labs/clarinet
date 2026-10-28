@@ -1233,16 +1233,29 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
-            let manifest_path = cmd.manifest_path.or_else(|| {
-                get_manifest_location(None).map(|path| path.to_string_lossy().into_owned())
-            });
-            let analysis = manifest_path
-                .map(|path| {
+            // An explicit manifest must load. A manifest found by search is optional.
+            let analysis = match cmd.manifest_path {
+                Some(path) => {
                     load_manifest_or_exit(Some(path), false)
                         .repl_settings
                         .analysis
-                })
-                .unwrap_or_else(analysis::Settings::with_default_lints);
+                }
+                None => get_manifest_location(None)
+                    .and_then(|location| {
+                        ProjectManifest::from_location(&location, false)
+                            .inspect_err(|message| {
+                                eprintln!(
+                                    "{} unable to load {}, using default lints",
+                                    yellow!("warning:"),
+                                    location.display()
+                                );
+                                eprintln!("{message}");
+                            })
+                            .ok()
+                    })
+                    .map(|manifest| manifest.repl_settings.analysis)
+                    .unwrap_or_else(analysis::Settings::with_default_lints),
+            };
             let settings = repl::SessionSettings {
                 repl_settings: repl::Settings {
                     analysis,

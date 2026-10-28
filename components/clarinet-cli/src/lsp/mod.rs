@@ -55,8 +55,17 @@ fn test_opening_counter_contract_should_return_fresh_analysis() {
         panic!("Unable to get response")
     };
 
-    // a fresh analysis reports both counter contracts, which have no diagnostics
-    assert_eq!(response.aggregated_diagnostics.len(), 2);
+    // a fresh analysis reports both counter contracts and the manifest, which have no diagnostics
+    let manifest_location = contract_location
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("Unable to get project dir")
+        .join("Clarinet.toml");
+    assert_eq!(response.aggregated_diagnostics.len(), 3);
+    assert!(response
+        .aggregated_diagnostics
+        .iter()
+        .any(|(path, _)| path == &manifest_location));
     assert!(response
         .aggregated_diagnostics
         .iter()
@@ -100,8 +109,12 @@ fn test_opening_counter_manifest_should_return_fresh_analysis() {
         panic!("Unable to get response")
     };
 
-    // a fresh analysis reports both counter contracts, which have no diagnostics
-    assert_eq!(response.aggregated_diagnostics.len(), 2);
+    // a fresh analysis reports both counter contracts and the manifest, which have no diagnostics
+    assert_eq!(response.aggregated_diagnostics.len(), 3);
+    assert!(response
+        .aggregated_diagnostics
+        .iter()
+        .any(|(path, _)| path == &manifest_location));
     assert!(response
         .aggregated_diagnostics
         .iter()
@@ -135,16 +148,22 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
     manifest_location.push("simple-nft");
     manifest_location.push("Clarinet.toml");
 
-    let _ = notification_tx.send(LspNotification::ManifestOpened(manifest_location));
+    let _ = notification_tx.send(LspNotification::ManifestOpened(manifest_location.clone()));
     let response = response_rx.recv().expect("Unable to get response");
     let LspResponse::Notification(response) = response else {
         panic!("Unable to get response")
     };
 
-    assert_eq!(response.aggregated_diagnostics.len(), 1);
-    let (_, diags_0) = &response.aggregated_diagnostics[0];
+    // one entry for simple-nft.clar and one for the manifest
+    assert_eq!(response.aggregated_diagnostics.len(), 2);
+    let (contract_diags, manifest_diags): (Vec<_>, Vec<_>) = response
+        .aggregated_diagnostics
+        .iter()
+        .partition(|(path, _)| path != &manifest_location);
+    assert_eq!(manifest_diags.len(), 1);
+    assert!(manifest_diags[0].1.is_empty());
     // default lints emit 2 warnings and 3 notes for simple-nft.clar
-    assert_eq!(diags_0.len(), 5);
+    assert_eq!(contract_diags[0].1.len(), 5);
 }
 
 /// Helper: build an `initialize` JSON-RPC request.  When `code_lens_refresh`

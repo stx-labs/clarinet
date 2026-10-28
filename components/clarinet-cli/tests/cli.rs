@@ -740,6 +740,29 @@ fn test_check_single_file_rejects_invalid_explicit_manifest() {
     }
 }
 
+/// A broken manifest found by search must not stop `clarinet check <file>`.
+#[test]
+fn test_check_single_file_ignores_invalid_implicit_manifest() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    fs::write(temp_dir.path().join("Clarinet.toml"), "[project\n").unwrap();
+    let sub_dir = temp_dir.path().join("sub");
+    fs::create_dir(&sub_dir).unwrap();
+    fs::write(sub_dir.join("standalone.clar"), "(ok true)\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["check", "standalone.clar"])
+        .env("NO_COLOR", "1")
+        .current_dir(&sub_dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "rejected the file: {stderr}");
+    assert!(
+        stderr.contains("using default lints"),
+        "expected a warning about the manifest: {stderr}"
+    );
+}
+
 /// Devnet deployments should strip `#[env(simnet)]` code from contract sources.
 /// This tests the fix for https://github.com/hirosystems/clarinet/issues/2338.
 #[test]

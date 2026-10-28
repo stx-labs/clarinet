@@ -967,6 +967,16 @@ mod lsp_tests {
         let Some(aggregate_array) = aggregated_diagnostics.as_array() else {
             panic!("aggregated_diagnostics should be an array");
         };
+        let contract_entries = aggregate_array
+            .iter()
+            .filter(|entry| {
+                !entry[0]
+                    .as_str()
+                    .unwrap_or_default()
+                    .ends_with("Clarinet.toml")
+            })
+            .count();
+        assert_eq!(contract_entries, 1);
 
         let element = aggregate_array
             .first()
@@ -1123,6 +1133,16 @@ mod lsp_tests {
         let Some(aggregate_array) = aggregated_diagnostics.as_array() else {
             panic!("aggregated_diagnostics should be an array");
         };
+        let contract_entries = aggregate_array
+            .iter()
+            .filter(|entry| {
+                !entry[0]
+                    .as_str()
+                    .unwrap_or_default()
+                    .ends_with("Clarinet.toml")
+            })
+            .count();
+        assert_eq!(contract_entries, 1);
 
         let element = aggregate_array
             .first()

@@ -379,7 +379,7 @@ impl ProjectManifest {
                 .as_ref()
                 .is_some_and(repl::SettingsFile::has_removed_analysis_section)
                 .then_some(
-                    "[repl.analysis] is no longer supported and will be ignored. Move `lints` to [linter.lints], `lint_groups` to [linter.groups], and `include`/`exclude` to [linter]",
+                    "[repl.analysis] is no longer supported and will be ignored. Move `lints` to [linter.lints], `lint_groups` to [linter.groups], and `include`/`exclude` to [linter]. `true` and \"on\" now use the default level of each lint, not `warning`",
                 ),
         ]
         .into_iter()
