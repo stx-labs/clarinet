@@ -24,7 +24,8 @@ pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:la
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
 
-pub const DEFAULT_BITCOIN_NODE_IMAGE: &str = "lncm/bitcoind:v27.2";
+pub const DEFAULT_BITCOIN_NODE_IMAGE: &str =
+    "bitcoin/bitcoin:31.1@sha256:da25cedc66b1daefff9f412ee196c901a899c3fa68a33b20849c3e08b5c40d63";
 pub const DEFAULT_MINER_WALLET_NAME: &str = "miner";
 pub const DEFAULT_BITCOIN_EXPLORER_IMAGE: &str = "quay.io/hirosystems/bitcoin-explorer:devnet";
 
@@ -1323,7 +1324,8 @@ mod tests {
     use super::DEFAULT_MINER_WALLET_NAME;
     use crate::{
         DevnetConfig, DevnetConfigFile, NetworkManifest, NetworkManifestFile, StacksNetwork,
-        StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
+        StacksNodeEventObserver, DEFAULT_BITCOIN_NODE_IMAGE, DEFAULT_STACKS_NODE_IMAGE,
+        DEFAULT_STACKS_SIGNER_IMAGE,
     };
 
     fn try_parse_devnet_settings(settings: &str) -> Result<DevnetConfig, String> {
@@ -1475,6 +1477,22 @@ mod tests {
             .expect("Default Stacks signer image should contain a version tag");
         assert!(default_signer_version.starts_with(epoch.as_str()),
             "The default Stacks signer image {DEFAULT_STACKS_SIGNER_IMAGE} does not start with {epoch}"
+        );
+    }
+
+    #[test]
+    fn test_default_bitcoin_image_is_pinned() {
+        let (name_and_tag, digest) = DEFAULT_BITCOIN_NODE_IMAGE
+            .split_once('@')
+            .expect("The default bitcoin image should be pinned by digest");
+        assert!(digest.starts_with("sha256:") && digest.len() == "sha256:".len() + 64);
+
+        let (name, tag) = name_and_tag.rsplit_once(':').unwrap();
+        assert_eq!(name, "bitcoin/bitcoin");
+        // alpine tags are amd64-only
+        assert!(
+            tag.split('.').count() == 2 && tag.split('.').all(|n| n.parse::<u32>().is_ok()),
+            "{tag} should be an exact major.minor Debian tag"
         );
     }
 }
