@@ -634,6 +634,85 @@ mod tests {
         clarity::util::hash::to_hex(&tx.serialize_to_vec())
     }
 
+    fn stale_sponsored_transaction_releases_other_nonce(stale_origin: bool) {
+        use stacks_common::types::chainstate::StacksPrivateKey;
+
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let signed = |origin_nonce, sponsor_nonce| {
+            let mut tx = decode(
+                fixtures["transactions"]["sponsored"]["hex"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            tx.set_origin_nonce(origin_nonce);
+            tx.set_sponsor_nonce(sponsor_nonce).unwrap();
+            tx.set_tx_fee(1000);
+            let origin_key = StacksPrivateKey::from_hex(&format!("{:064x}01", 1)).unwrap();
+            let sponsor_key = StacksPrivateKey::from_hex(&format!("{:064x}01", 2)).unwrap();
+            let sighash = tx.sign_next_origin(&tx.sign_begin(), &origin_key).unwrap();
+            tx.sign_next_sponsor(&sighash, &sponsor_key).unwrap();
+            tx.verify(TransactionAuthVerificationMode::EnforceLowS)
+                .unwrap();
+            clarity::util::hash::to_hex(&tx.serialize_to_vec())
+        };
+        let (origin_nonce, sponsor_nonce, consumed, other) = if stale_origin {
+            (0, 1, "sender", "sponsor")
+        } else {
+            (1, 0, "sponsor", "sender")
+        };
+        let raw = signed(origin_nonce, sponsor_nonce);
+        assert!(matches!(
+            session.submit_transaction(&raw),
+            AdmissionResult::Accepted { .. }
+        ));
+        assert!(session.next_mempool_transaction().is_none());
+
+        session.set_tx_sender(fixtures[consumed].as_str().unwrap());
+        session
+            .stx_transfer(
+                1,
+                fixtures[other].as_str().unwrap(),
+                PostConditionCheck::Unchecked,
+            )
+            .unwrap();
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, consumed)).unwrap(),
+            1
+        );
+        assert_eq!(session.get_nonce(&principal(&fixtures, other)).unwrap(), 0);
+
+        // Mirror mineBlock's queue drain after one account makes the entry stale.
+        session.advance_chain_tip(1);
+        let mut outcomes = Vec::new();
+        while let Some(tx) = session.next_mempool_transaction() {
+            outcomes.push(session.execute_transaction(&tx));
+        }
+        let replacement = session.submit_transaction(&signed(1, 1));
+        assert!(
+            matches!(replacement, AdmissionResult::Accepted { .. }),
+            "stale transaction still reserves the other nonce: {replacement:?}; mined: {outcomes:?}",
+        );
+        assert_eq!(outcomes.len(), 1);
+        assert!(matches!(
+            outcomes[0],
+            RawTransactionOutcome::Rejected { .. }
+        ));
+    }
+
+    #[test]
+    fn mempool_releases_sponsor_nonce_when_origin_becomes_stale() {
+        stale_sponsored_transaction_releases_other_nonce(true);
+    }
+
+    #[test]
+    fn mempool_releases_origin_nonce_when_sponsor_becomes_stale() {
+        stale_sponsored_transaction_releases_other_nonce(false);
+    }
+
     #[test]
     fn mempool_policy_does_not_change_signed_block_execution() {
         use stacks_codec::strings::StacksString;

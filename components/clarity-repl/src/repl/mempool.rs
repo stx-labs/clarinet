@@ -191,22 +191,32 @@ impl Session {
         }
     }
 
-    /// Select a ready transaction in submission order; leave nonce gaps queued.
+    /// Select ready or stale transactions; leave non-stale nonce gaps queued.
     pub fn next_mempool_transaction(&mut self) -> Option<StacksTransaction> {
         let index =
             self.mempool
                 .transactions
                 .iter()
                 .position(|PendingTransaction { tx, .. }| {
-                    let mut ready = |principal, nonce| {
-                        self.interpreter
-                            .get_nonce(&principal)
-                            .map_or(true, |current| nonce <= current)
-                    };
-                    ready(tx.origin_address().into(), tx.get_origin_nonce())
-                        && tx
-                            .sponsor_address()
-                            .is_none_or(|address| ready(address.into(), tx.get_payer().nonce()))
+                    let mut ready = true;
+                    for (principal, nonce) in
+                        std::iter::once((tx.origin_address().into(), tx.get_origin_nonce())).chain(
+                            tx.sponsor_address()
+                                .map(|address| (address.into(), tx.get_payer().nonce())),
+                        )
+                    {
+                        let Ok(current) = self.interpreter.get_nonce(&principal) else {
+                            return true;
+                        };
+                        // A stale nonce invalidates the transaction even if the other
+                        // account has a gap; select it so mining rejects and removes it.
+                        match nonce.cmp(&current) {
+                            std::cmp::Ordering::Less => return true,
+                            std::cmp::Ordering::Equal => {}
+                            std::cmp::Ordering::Greater => ready = false,
+                        }
+                    }
+                    ready
                 })?;
         self.mempool
             .transactions
