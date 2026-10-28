@@ -691,7 +691,7 @@ impl EditorState {
         let mut erroring_files = HashSet::new();
         let mut warning_files = HashSet::new();
 
-        for protocol_state in self.protocols.values() {
+        for (manifest_location, protocol_state) in &self.protocols {
             for (contract_url, state) in protocol_state.contracts.iter() {
                 let mut diags: Vec<LintDiagnostic> = vec![];
 
@@ -726,6 +726,11 @@ impl EditorState {
                 }
                 contracts.push((contract_url.clone(), diags));
             }
+            // Publish even an empty list to clear warnings after a manifest save.
+            contracts.push((
+                manifest_location.clone(),
+                protocol_state.manifest_diagnostics.clone(),
+            ));
         }
 
         let tldr = match (erroring_files.len(), warning_files.len()) {
@@ -821,6 +826,7 @@ impl EditorState {
 pub struct ProtocolState {
     contracts: HashMap<PathBuf, ContractState>,
     locations_lookup: HashMap<QualifiedContractIdentifier, PathBuf>,
+    manifest_diagnostics: Vec<LintDiagnostic>,
 }
 
 impl ProtocolState {
@@ -953,12 +959,16 @@ pub async fn build_state(
     // expect contracts to be created, edited, removed.
     // A on-disk deployment could quickly lead to an outdated
     // view of the repo.
-    let manifest = match file_accessor {
+    let mut manifest = match file_accessor {
         None => ProjectManifest::from_location(manifest_location, false)?,
         Some(file_accessor) => {
             ProjectManifest::from_file_accessor(manifest_location, false, file_accessor).await?
         }
     };
+    protocol_state.manifest_diagnostics = std::mem::take(&mut manifest.diagnostics)
+        .into_iter()
+        .map(LintDiagnostic::from)
+        .collect();
 
     let mut new_cache_entries: HashMap<(PathBuf, Environment), CachedContractAST> = HashMap::new();
     let mut global_found_env_simnet = false;

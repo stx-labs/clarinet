@@ -967,7 +967,6 @@ mod lsp_tests {
         let Some(aggregate_array) = aggregated_diagnostics.as_array() else {
             panic!("aggregated_diagnostics should be an array");
         };
-        assert_eq!(aggregate_array.len(), 1);
 
         let element = aggregate_array
             .first()
@@ -1124,7 +1123,6 @@ mod lsp_tests {
         let Some(aggregate_array) = aggregated_diagnostics.as_array() else {
             panic!("aggregated_diagnostics should be an array");
         };
-        assert_eq!(aggregate_array.len(), 1);
 
         let element = aggregate_array
             .first()
@@ -1350,6 +1348,61 @@ mod lsp_tests {
         // annotation on line 3 (0-indexed: 2), block ends on line 6 (0-indexed: 5)
         assert_eq!(diags[0].range.start.line, 2);
         assert_eq!(diags[0].range.end.line, 5);
+    }
+
+    #[tokio::test]
+    async fn test_removed_analysis_settings_publish_and_clear_manifest_diagnostics() {
+        let mut file_accessor =
+            TestFileAccessor::new("(define-read-only (get-count) u0)".to_string());
+        let clean_manifest = file_accessor.project_manifest.clone();
+        file_accessor.project_manifest = clean_manifest.replacen(
+            "name = 'test-project'",
+            "name = 'test-project'\nanalysis = ['check_checker']",
+            1,
+        );
+        file_accessor
+            .project_manifest
+            .push_str("\n[repl.analysis]\npasses = ['check_checker']\n");
+        let manifest_path = get_root_path().join("Clarinet.toml");
+        let mut editor_state = EditorStateInput::Owned(EditorState::new());
+
+        let response = process_notification(
+            LspNotification::ManifestOpened(manifest_path.clone()),
+            &mut editor_state,
+            Some(&file_accessor),
+        )
+        .await
+        .unwrap();
+        let published = crate::utils::merge_diagnostics(
+            response.aggregated_diagnostics,
+            response.env_simnet_diagnostics,
+        );
+        let (_, diagnostics) = published
+            .iter()
+            .find(|(path, _)| path == &manifest_path)
+            .expect("ignored analysis settings must be reported on Clarinet.toml");
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics
+            .iter()
+            .all(|d| d.severity == Some(ls_types::DiagnosticSeverity::WARNING)));
+
+        file_accessor.project_manifest = clean_manifest;
+        let response = process_notification(
+            LspNotification::ManifestSaved(manifest_path.clone()),
+            &mut editor_state,
+            Some(&file_accessor),
+        )
+        .await
+        .unwrap();
+        let published = crate::utils::merge_diagnostics(
+            response.aggregated_diagnostics,
+            response.env_simnet_diagnostics,
+        );
+        let (_, diagnostics) = published
+            .iter()
+            .find(|(path, _)| path == &manifest_path)
+            .expect("publish an empty list to clear stale manifest diagnostics");
+        assert!(diagnostics.is_empty());
     }
 
     /// A contract rejected by a lint must report it with its lint name, so the

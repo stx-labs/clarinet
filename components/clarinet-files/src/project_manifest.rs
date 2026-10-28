@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clarity::types::StacksEpochId;
+use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::ClarityVersion;
 use clarity_repl::repl::boot::BOOT_CONTRACTS_NAMES;
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
@@ -110,6 +111,8 @@ pub struct ProjectManifest {
     pub location: PathBuf,
     #[serde(skip_serializing, skip_deserializing)]
     pub contracts_settings: HashMap<PathBuf, ClarityContractMetadata>,
+    #[serde(skip)]
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 fn default_root_dir() -> PathBuf {
@@ -367,16 +370,30 @@ impl ProjectManifest {
         manifest_location: &Path,
         allow_remote_data_fetching: bool,
     ) -> Result<ProjectManifest, String> {
-        if project_manifest_file.project.analysis.is_some() {
-            clarity_repl::ueprint!("Warning: `analysis` in [project] is no longer supported and will be ignored. Configure lints in [linter.lints]");
-        }
-        if project_manifest_file
-            .repl
-            .as_ref()
-            .is_some_and(repl::SettingsFile::has_removed_analysis_section)
-        {
-            clarity_repl::ueprint!("Warning: [repl.analysis] is no longer supported and will be ignored. Move `lints` to [linter.lints], `lint_groups` to [linter.groups], and `include`/`exclude` to [linter]");
-        }
+        let diagnostics = [
+            project_manifest_file.project.analysis.is_some().then_some(
+                "`analysis` in [project] is no longer supported and will be ignored. Configure lints in [linter.lints]",
+            ),
+            project_manifest_file
+                .repl
+                .as_ref()
+                .is_some_and(repl::SettingsFile::has_removed_analysis_section)
+                .then_some(
+                    "[repl.analysis] is no longer supported and will be ignored. Move `lints` to [linter.lints], `lint_groups` to [linter.groups], and `include`/`exclude` to [linter]",
+                ),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|message| {
+            clarity_repl::ueprint!("Warning: {message}");
+            Diagnostic {
+                level: Level::Warning,
+                message: message.into(),
+                spans: vec![],
+                suggestion: None,
+            }
+        })
+        .collect();
         let mut repl_settings = project_manifest_file
             .repl
             .map(repl::Settings::from)
@@ -447,6 +464,7 @@ impl ProjectManifest {
             root_dir: root_path.to_path_buf(),
             location: manifest_location.to_path_buf(),
             contracts_settings: HashMap::new(),
+            diagnostics,
         };
         let mut config_contracts = BTreeMap::new();
         let mut contracts_settings = HashMap::new();
