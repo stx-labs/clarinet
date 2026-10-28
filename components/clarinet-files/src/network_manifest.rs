@@ -18,13 +18,15 @@ use toml::value::Value;
 use super::FileAccessor;
 use crate::paths;
 
-pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.1-alpine";
-pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.1-alpine";
+pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.5-alpine";
+pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.5-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
 
 pub const DEFAULT_BITCOIN_NODE_IMAGE: &str = "lncm/bitcoind:v27.2";
+// Bitcoin Core 31 rejects the unnamed wallet and stacks-node requires a non-empty name
+pub const DEFAULT_MINER_WALLET_NAME: &str = "miner";
 pub const DEFAULT_BITCOIN_EXPLORER_IMAGE: &str = "quay.io/hirosystems/bitcoin-explorer:devnet";
 
 pub const DEFAULT_STACKS_EXPLORER_IMAGE: &str = "ghcr.io/stx-labs/explorer:latest";
@@ -988,7 +990,10 @@ impl NetworkManifest {
                 miner_coinbase_recipient: devnet_config
                     .miner_coinbase_recipient
                     .unwrap_or(miner_stx_address),
-                miner_wallet_name: devnet_config.miner_wallet_name.unwrap_or_default(),
+                miner_wallet_name: devnet_config
+                    .miner_wallet_name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| DEFAULT_MINER_WALLET_NAME.to_string()),
                 pre_nakamoto_mock_signing: devnet_config
                     .pre_nakamoto_mock_signing
                     .unwrap_or_default(),
@@ -1155,7 +1160,7 @@ impl Default for DevnetConfig {
             miner_mnemonic: DEFAULT_STACKS_MINER_MNEMONIC.to_string(),
             miner_derivation_path: DEFAULT_DERIVATION_PATH.to_string(),
             miner_coinbase_recipient: miner_stx_address,
-            miner_wallet_name: String::new(),
+            miner_wallet_name: DEFAULT_MINER_WALLET_NAME.to_string(),
             faucet_stx_address,
             faucet_secret_key_hex,
             faucet_btc_address,
@@ -1304,10 +1309,41 @@ fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> St
 mod tests {
     use clarinet_defaults::DEFAULT_EPOCH;
 
+    use super::DEFAULT_MINER_WALLET_NAME;
     use crate::{
-        DevnetConfigFile, StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE,
+        BitcoinNetwork, DevnetConfig, DevnetConfigFile, NetworkManifest, NetworkManifestFile,
+        StacksNetwork, StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE,
         DEFAULT_STACKS_SIGNER_IMAGE,
     };
+
+    fn parse_devnet_settings(settings: &str) -> DevnetConfig {
+        let mut file: NetworkManifestFile = toml::from_str(settings).unwrap();
+        let networks = (BitcoinNetwork::Regtest, StacksNetwork::Devnet);
+        NetworkManifest::from_network_manifest_file(&mut file, &networks, false, None, None)
+            .unwrap()
+            .devnet
+            .unwrap()
+    }
+
+    #[test]
+    fn miner_wallet_name_is_never_empty() {
+        let network = "[network]\nname = \"devnet\"\n";
+        assert_eq!(
+            DevnetConfig::default().miner_wallet_name,
+            DEFAULT_MINER_WALLET_NAME
+        );
+        assert_eq!(
+            parse_devnet_settings(network).miner_wallet_name,
+            DEFAULT_MINER_WALLET_NAME
+        );
+        let blank = format!("{network}[devnet]\nminer_wallet_name = \" \"\n");
+        assert_eq!(
+            parse_devnet_settings(&blank).miner_wallet_name,
+            DEFAULT_MINER_WALLET_NAME
+        );
+        let custom = format!("{network}[devnet]\nminer_wallet_name = \"stacks\"\n");
+        assert_eq!(parse_devnet_settings(&custom).miner_wallet_name, "stacks");
+    }
 
     #[test]
     fn parses_legacy_stacks_node_event_observer() {
@@ -1415,5 +1451,6 @@ mod tests {
         assert!(default_signer_version.starts_with(epoch.as_str()),
             "The default Stacks signer image {DEFAULT_STACKS_SIGNER_IMAGE} does not start with {epoch}"
         );
+        assert_eq!(default_node_version, default_signer_version);
     }
 }

@@ -500,12 +500,13 @@ fn encode_transactions(
                     );
                     let bitcoin_rpc = Client::new(&bitcoin_node_rpc_url, auth.clone()).unwrap();
 
-                    let bitcoin_node_wallet_rpc_url = format!(
-                        "{}://{}:{}/wallet/",
-                        url.scheme(),
-                        url.host().expect("Host unknown"),
-                        url.port_or_known_default().expect("Protocol unknown")
-                    );
+                    let wallet_name = network_manifest
+                        .devnet
+                        .as_ref()
+                        .map(|devnet| devnet.miner_wallet_name.as_str())
+                        .unwrap_or_default();
+                    let bitcoin_node_wallet_rpc_url =
+                        format!("{bitcoin_node_rpc_url}/wallet/{wallet_name}");
                     let bitcoin_node_wallet_rpc =
                         Client::new(&bitcoin_node_wallet_rpc_url, auth).unwrap();
 

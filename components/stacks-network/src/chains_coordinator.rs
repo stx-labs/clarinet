@@ -53,6 +53,7 @@ use crate::orchestrator::{
     copy_directory, get_global_snapshot_dir, get_project_snapshot_dir, ServicesMapHosts,
     DEVNET_SNAPSHOT_READY_MARKER, EXCLUDED_STACKS_SNAPSHOT_FILES,
 };
+use crate::snapshot_extractor::SnapshotImages;
 
 const SNAPSHOT_BURN_START_HEIGHT: u64 = 163;
 
@@ -710,10 +711,12 @@ pub async fn create_global_snapshot(
     let global_snapshot_dir = get_global_snapshot_dir();
     let project_snapshot_dir = get_project_snapshot_dir(devnet_config);
 
+    let images = SnapshotImages::from(devnet_config).to_string();
+
     // Project snapshot marker
     let project_marker = project_snapshot_dir.join(DEVNET_SNAPSHOT_READY_MARKER);
     if !project_marker.exists() {
-        match std::fs::File::create(&project_marker) {
+        match fs::write(&project_marker, &images) {
             Ok(_) => {
                 let _ = devnet_event_tx.send(DevnetEvent::success(
                     "Project snapshot data prepared for epoch 4.0. Future project starts will be faster.".to_string(),
@@ -759,7 +762,7 @@ pub async fn create_global_snapshot(
                 });
             }
 
-            match std::fs::File::create(&global_marker) {
+            match fs::write(&global_marker, &images) {
                 Ok(_) => {
                     let _ = devnet_event_tx.send(DevnetEvent::success(
                         "Global template snapshot data prepared. Future project initializations will be faster.".to_string()

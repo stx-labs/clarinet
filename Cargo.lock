@@ -2932,6 +2932,7 @@ dependencies = [
  "hiro-system-kit",
  "libsigner",
  "miniscript",
+ "mockito",
  "reqwest",
  "serde",
  "serde_json",

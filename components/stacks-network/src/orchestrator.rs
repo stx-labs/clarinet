@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use bitcoincore_rpc::bitcoin::hex::DisplayHex;
-use bitcoincore_rpc::json::{GetBlockchainInfoResult, GetDescriptorInfoResult};
+use bitcoincore_rpc::json::GetDescriptorInfoResult;
 use bitcoincore_rpc::jsonrpc::Response as JsonRpcResponse;
 use bollard::container::{
     Config, CreateContainerOptions, InspectContainerOptions, KillContainerOptions,
@@ -31,7 +31,7 @@ use futures::stream::TryStreamExt;
 use hiro_system_kit::slog;
 use indoc::formatdoc;
 use observer::utils::Context;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
 use crate::command::run_docker_command;
@@ -118,6 +118,13 @@ pub struct DevnetOrchestrator {
     save_container_logs: bool,
     container_index: Cell<u32>,
 }
+/// Bitcoin Core 28 changed `warnings` to an array, which `GetBlockchainInfoResult` can't parse
+#[derive(Deserialize)]
+struct BlockchainVerificationInfo {
+    #[serde(rename = "verificationprogress")]
+    verification_progress: f64,
+}
+
 #[derive(Clone, Debug)]
 pub struct ServicesMapHosts {
     pub bitcoin_node_host: String,
@@ -647,7 +654,6 @@ impl DevnetOrchestrator {
             dnsseed=0
             listenonion=0
             rpcworkqueue=100
-            rpcserialversion=1
             disablewallet=0
             fallbackfee=0.00001
 
@@ -832,44 +838,26 @@ impl DevnetOrchestrator {
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
-        docker
-            .start_container::<String>(container, None)
-            .await
-            .map_err(|e| formatted_docker_error("unable to start bitcoind container", e))?;
-        // Copy snapshot if available
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let bitcoin_snapshot = global_snapshot_dir.join("bitcoin").join("regtest");
-        // XXX This shouldn't be needed
-        let exec_config = bollard::exec::CreateExecOptions {
-            cmd: Some(vec!["mkdir", "-p", BITCOIND_DATA_DIR]),
-            attach_stdout: Some(false),
-            attach_stderr: Some(false),
-            ..Default::default()
-        };
-
-        let exec = docker
-            .create_exec(container, exec_config)
-            .await
-            .map_err(|e| format!("Failed to create exec for mkdir: {e}"))?;
-
-        docker
-            .start_exec(&exec.id, None)
-            .await
-            .map_err(|e| format!("Failed to create bitcoin directory: {e}"))?;
+        // Copied before start: bitcoind would otherwise race the copy and reindex a partial datadir
         if !no_snapshot {
-            // Ensure the destination directory exists in the container
+            let bitcoin_snapshot = get_global_snapshot_dir().join("bitcoin").join("regtest");
             let docker_host = self.get_devnet_config()?.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
                 &bitcoin_snapshot,
-                BITCOIND_DATA_DIR,
+                &format!("{BITCOIND_DATA_DIR}/regtest"),
                 devnet_event_tx,
                 "Bitcoin",
                 docker_host,
             )
             .await?;
         }
+
+        docker
+            .start_container::<String>(container, None)
+            .await
+            .map_err(|e| formatted_docker_error("unable to start bitcoind container", e))?;
 
         Ok(())
     }
@@ -987,7 +975,6 @@ impl DevnetOrchestrator {
             poll_time_secs = 1
             timeout = 2
             peer_host = "host.docker.internal"
-            rpc_ssl = false
             wallet_name = "{miner_wallet_name}"
             username = "{bitcoin_node_username}"
             password = "{bitcoin_node_password}"
@@ -1131,7 +1118,7 @@ impl DevnetOrchestrator {
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
         let global_snapshot_dir = get_global_snapshot_dir();
-        let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
+        let stacks_snapshot = global_snapshot_dir.join("stacks");
 
         if !no_snapshot {
             let docker_host = self.get_devnet_config()?.docker_host.as_deref();
@@ -2158,7 +2145,7 @@ impl DevnetOrchestrator {
                 .await
                 .map_err(|e| format!("unable to parse 'getblockchaininfo' result: {e}"))?;
 
-            let info: GetBlockchainInfoResult = response
+            let info: BlockchainVerificationInfo = response
                 .result()
                 .map_err(|e| format!("unable to parse 'getblockchaininfo' result: {e}"))?;
 
@@ -2417,9 +2404,9 @@ pub async fn copy_snapshot_to_container(
         "Copying {service_name} snapshot to container..."
     )));
 
-    // Use docker cp command which handles directory creation better
+    // `src/.` copies the contents and creates `dest_path` if it is missing (no bind mount)
     let copy_command = format!(
-        "docker cp {}/ {}:{}",
+        "docker cp {}/. {}:{}",
         source_path.display(),
         container_id,
         dest_path
@@ -2444,6 +2431,48 @@ pub async fn copy_snapshot_to_container(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_orchestrator(root: &Path) -> DevnetOrchestrator {
+        fs::create_dir_all(root.join("settings")).unwrap();
+        fs::write(root.join("Clarinet.toml"), "[project]\nname = \"test\"\n").unwrap();
+        let working_dir = root.join("devnet").display().to_string();
+        let devnet_settings =
+            format!("[network]\nname = \"devnet\"\n\n[devnet]\nworking_dir = {working_dir:?}\n");
+        fs::write(root.join("settings").join("Devnet.toml"), devnet_settings).unwrap();
+        let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
+        DevnetOrchestrator::new(manifest, None, None, false).unwrap()
+    }
+
+    #[test]
+    fn bitcoin_conf_omits_options_removed_in_core_28() {
+        let root =
+            std::env::temp_dir().join(format!("clarinet-bitcoin-conf-{}", rand::random::<u64>()));
+        let orchestrator = test_orchestrator(&root);
+
+        orchestrator.prepare_bitcoin_node_config(1, true).unwrap();
+        let conf =
+            fs::read_to_string(root.join("devnet").join("conf").join("bitcoin.conf")).unwrap();
+        assert!(!conf.contains("rpcserialversion"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stacks_node_config_names_the_miner_wallet() {
+        let root =
+            std::env::temp_dir().join(format!("clarinet-stacks-node-{}", rand::random::<u64>()));
+        let orchestrator = test_orchestrator(&root);
+
+        let conf_dir = root.join("devnet").join("conf");
+        fs::create_dir_all(&conf_dir).unwrap();
+        orchestrator.prepare_stacks_node_config(1).unwrap();
+        let conf = fs::read_to_string(conf_dir.join("Stacks.toml")).unwrap();
+        assert!(conf.contains("wallet_name = \"miner\""));
+        // stacks-node 4.0.5 rejects unknown burnchain fields
+        assert!(!conf.contains("rpc_ssl"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn serializes_selective_stacks_node_event_observers() {
