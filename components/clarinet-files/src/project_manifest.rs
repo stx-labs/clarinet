@@ -625,7 +625,8 @@ mod tests {
 
         let lints = manifest.repl_settings.analysis.lints();
         assert_eq!(lints.get(&LintName::UnusedConst), Some(&Level::Error));
-        assert!(!lints.contains_key(&LintName::CallChecker));
+        // Correctness lints ignore config.
+        assert_eq!(lints.get(&LintName::CallChecker), Some(&Level::Error));
     }
 
     #[test]

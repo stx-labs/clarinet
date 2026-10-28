@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
 use clarity::vm::diagnostic::Level as ClarityDiagnosticLevel;
 #[cfg(feature = "json_schema")]
@@ -108,9 +107,9 @@ impl TryFrom<String> for LintName {
 #[serde(rename_all = "snake_case", try_from = "String")]
 #[strum(serialize_all = "snake_case")]
 pub enum LintGroup {
-    /// All lints except `correctness`
+    /// All existing lints
     All,
-    /// Find code that is certainly wrong. Rejects the contract by default
+    /// Find code that is certainly wrong. Always rejects the contract; `[linter]` config cannot change these lints
     Correctness,
     /// Find inefficient code
     Perf,
@@ -131,25 +130,13 @@ impl LintGroup {
             .collect()
     }
 
-    /// Lints that reject the contract by default. `all` leaves them alone so
-    /// that `all = false` can't silence them.
-    const CORRECTNESS: &[LintName] = &[LintName::CallChecker];
-
     /// Returns lints which belong to group
     pub fn lints(&self) -> &[LintName] {
         use LintGroup::*;
 
-        static ALL: LazyLock<Vec<LintName>> = LazyLock::new(|| {
-            LintName::VARIANTS
-                .iter()
-                .filter(|lint| !LintGroup::CORRECTNESS.contains(lint))
-                .copied()
-                .collect()
-        });
-
         match self {
-            All => &ALL,
-            Correctness => Self::CORRECTNESS,
+            All => LintName::VARIANTS,
+            Correctness => &[LintName::CallChecker],
             Perf => &[
                 LintName::FlattenVariadic,
                 LintName::UnnecessaryAsMaxLen,

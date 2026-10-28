@@ -258,6 +258,9 @@ impl TryFrom<SettingsFile> for Settings {
         for (lint, val) in from_file.lints.unwrap_or_default() {
             LintLevel::from(val).apply_to(&[lint], &defaults, &mut settings.lints);
         }
+        // Correctness lints find code that is certainly wrong, so config cannot
+        // disable them or lower their level.
+        LintGroup::Correctness.insert_into(&mut settings.lints, ClarityDiagnosticLevel::Error);
 
         // Process include patterns
         if let Some(include) = from_file.include {
@@ -389,7 +392,7 @@ mod tests {
                 (LintGroup::Style, BoolOr::Value(LintLevel::Error)),
             ])),
             lints: Some(IndexMap::from([
-                (LintName::CallChecker, BoolOr::Value(LintLevel::Warning)),
+                (LintName::UnusedConst, BoolOr::Value(LintLevel::Notice)),
                 (LintName::CaseConst, BoolOr::Bool(false)),
             ])),
             ..Default::default()
@@ -397,8 +400,8 @@ mod tests {
         let settings = Settings::try_from(file).unwrap();
 
         assert_eq!(
-            settings.lints.get(&LintName::CallChecker),
-            Some(&ClarityDiagnosticLevel::Warning)
+            settings.lints.get(&LintName::UnusedConst),
+            Some(&ClarityDiagnosticLevel::Note)
         );
         assert!(!settings.lints.contains_key(&LintName::Panic));
         assert!(!settings.lints.contains_key(&LintName::CaseConst));
@@ -408,19 +411,32 @@ mod tests {
         );
     }
 
-    /// `all` leaves `correctness` alone, as the old `lint_groups.all` left
-    /// the call-checker pass alone.
+    /// Config cannot disable correctness lints or lower their level.
     #[test]
-    fn all_group_does_not_touch_correctness() {
-        for level in [BoolOr::Bool(false), BoolOr::Value(LintLevel::Notice)] {
-            let file = SettingsFile {
-                groups: Some(IndexMap::from([(LintGroup::All, level)])),
-                ..Default::default()
-            };
-            let settings = Settings::try_from(file).unwrap();
+    fn config_does_not_change_correctness_lints() {
+        let levels = [BoolOr::Bool(false), BoolOr::Value(LintLevel::Warning)];
+        let files = levels.into_iter().flat_map(|level| {
+            [
+                SettingsFile {
+                    groups: Some(IndexMap::from([(LintGroup::All, level.clone())])),
+                    ..Default::default()
+                },
+                SettingsFile {
+                    groups: Some(IndexMap::from([(LintGroup::Correctness, level.clone())])),
+                    ..Default::default()
+                },
+                SettingsFile {
+                    lints: Some(IndexMap::from([(LintName::CallChecker, level)])),
+                    ..Default::default()
+                },
+            ]
+        });
+        for file in files {
+            let settings = Settings::try_from(file.clone()).unwrap();
             assert_eq!(
                 settings.lints.get(&LintName::CallChecker),
-                Some(&ClarityDiagnosticLevel::Error)
+                Some(&ClarityDiagnosticLevel::Error),
+                "{file:?}"
             );
         }
     }

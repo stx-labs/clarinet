@@ -658,8 +658,8 @@ fn test_check_project_rejection_keeps_lint_names() {
     );
 }
 
-/// `[linter.groups] all = false` silences the lints but leaves the `correctness`
-/// group alone, so the wrong-arity call is still rejected.
+/// `[linter.groups] all = false` silences the lints, but cannot turn off the
+/// `correctness` lints, so the wrong-arity call is still rejected.
 #[test]
 fn test_check_project_all_off_keeps_rejecting_lint() {
     let (_temp_dir, project_path) = create_project_with_rejected_contract("test_all_off");
@@ -701,19 +701,20 @@ fn test_check_single_file_uses_project_linter_config() {
     );
 
     // Explicit files use configured lint levels, even outside the project filters.
+    // Correctness lints stay at error level.
     append_to_manifest(
         &project_path,
-        "[linter]\ninclude = [\"other/*.clar\"]\nexclude = [\"contracts/*.clar\"]\n[linter.lints]\ncall_checker = \"warning\"\n",
+        "[linter]\ninclude = [\"other/*.clar\"]\nexclude = [\"contracts/*.clar\"]\n[linter.lints]\nunused_const = \"error\"\ncall_checker = \"warning\"\n",
     );
     let output = check();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        output.status.success(),
+        stdout.contains("error[unused_const]"),
         "expected the project's `[linter.lints]` to apply, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("warning[call_checker]"),
-        "expected a named warning, got:\n{stdout}"
+        !output.status.success() && stdout.contains("error[call_checker]"),
+        "expected `call_checker` to ignore the config, got:\n{stdout}"
     );
 }
 
