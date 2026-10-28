@@ -18,13 +18,14 @@ use toml::value::Value;
 use super::FileAccessor;
 use crate::paths;
 
-pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.1-alpine";
-pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.1-alpine";
+pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.5-alpine";
+pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.5-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
 
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
 
 pub const DEFAULT_BITCOIN_NODE_IMAGE: &str = "lncm/bitcoind:v27.2";
+pub const DEFAULT_MINER_WALLET_NAME: &str = "miner";
 pub const DEFAULT_BITCOIN_EXPLORER_IMAGE: &str = "quay.io/hirosystems/bitcoin-explorer:devnet";
 
 pub const DEFAULT_STACKS_EXPLORER_IMAGE: &str = "ghcr.io/stx-labs/explorer:latest";
@@ -876,6 +877,21 @@ impl NetworkManifest {
                 ));
             }
 
+            let miner_wallet_name = devnet_config
+                .miner_wallet_name
+                .take()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_MINER_WALLET_NAME.to_string());
+            // The name goes unescaped into the stacks-node config and wallet RPC URLs.
+            if !miner_wallet_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            {
+                return Err(format!(
+                    "Invalid miner_wallet_name \"{miner_wallet_name}\": use only letters, digits, '_' and '-'"
+                ));
+            }
+
             let stacker_mnemonic = devnet_config
                 .stacker_mnemonic
                 .take()
@@ -988,7 +1004,7 @@ impl NetworkManifest {
                 miner_coinbase_recipient: devnet_config
                     .miner_coinbase_recipient
                     .unwrap_or(miner_stx_address),
-                miner_wallet_name: devnet_config.miner_wallet_name.unwrap_or_default(),
+                miner_wallet_name,
                 pre_nakamoto_mock_signing: devnet_config
                     .pre_nakamoto_mock_signing
                     .unwrap_or_default(),
@@ -1155,7 +1171,7 @@ impl Default for DevnetConfig {
             miner_mnemonic: DEFAULT_STACKS_MINER_MNEMONIC.to_string(),
             miner_derivation_path: DEFAULT_DERIVATION_PATH.to_string(),
             miner_coinbase_recipient: miner_stx_address,
-            miner_wallet_name: String::new(),
+            miner_wallet_name: DEFAULT_MINER_WALLET_NAME.to_string(),
             faucet_stx_address,
             faucet_secret_key_hex,
             faucet_btc_address,
@@ -1304,10 +1320,55 @@ fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> St
 mod tests {
     use clarinet_defaults::DEFAULT_EPOCH;
 
+    use super::DEFAULT_MINER_WALLET_NAME;
     use crate::{
-        DevnetConfigFile, StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE,
-        DEFAULT_STACKS_SIGNER_IMAGE,
+        DevnetConfig, DevnetConfigFile, NetworkManifest, NetworkManifestFile, StacksNetwork,
+        StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
     };
+
+    fn try_parse_devnet_settings(settings: &str) -> Result<DevnetConfig, String> {
+        let mut file: NetworkManifestFile = toml::from_str(settings).unwrap();
+        let networks = StacksNetwork::Devnet.get_networks();
+        NetworkManifest::from_network_manifest_file(&mut file, &networks, false, None, None)
+            .map(|manifest| manifest.devnet.unwrap())
+    }
+
+    fn parse_devnet_settings(settings: &str) -> DevnetConfig {
+        try_parse_devnet_settings(settings).unwrap()
+    }
+
+    #[test]
+    fn miner_wallet_name_is_never_empty() {
+        let network = "[network]\nname = \"devnet\"\n";
+        assert_eq!(
+            DevnetConfig::default().miner_wallet_name,
+            DEFAULT_MINER_WALLET_NAME
+        );
+        assert_eq!(
+            parse_devnet_settings(network).miner_wallet_name,
+            DEFAULT_MINER_WALLET_NAME
+        );
+        let blank = format!("{network}[devnet]\nminer_wallet_name = \" \"\n");
+        assert_eq!(
+            parse_devnet_settings(&blank).miner_wallet_name,
+            DEFAULT_MINER_WALLET_NAME
+        );
+        let custom = format!("{network}[devnet]\nminer_wallet_name = \"stacks\"\n");
+        assert_eq!(parse_devnet_settings(&custom).miner_wallet_name, "stacks");
+    }
+
+    #[test]
+    fn rejects_miner_wallet_names_unsafe_in_urls() {
+        let network = "[network]\nname = \"devnet\"\n";
+        let valid = format!("{network}[devnet]\nminer_wallet_name = \"Miner_2-b\"\n");
+        assert!(try_parse_devnet_settings(&valid).is_ok());
+
+        for name in ["miner test", "miner%20test", "a/b", "a\\\"b", "mïner"] {
+            let settings = format!("{network}[devnet]\nminer_wallet_name = \"{name}\"\n");
+            let err = try_parse_devnet_settings(&settings).unwrap_err();
+            assert!(err.contains("miner_wallet_name"), "{name}: {err}");
+        }
+    }
 
     #[test]
     fn parses_legacy_stacks_node_event_observer() {

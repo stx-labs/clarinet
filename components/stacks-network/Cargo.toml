@@ -53,6 +53,7 @@ stacks-signers = ["observer/stacks-signers"]
 
 [dev-dependencies]
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
+tempfile = { workspace = true }
 
 [lib]
 name = "stacks_network"
