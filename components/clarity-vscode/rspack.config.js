@@ -68,7 +68,13 @@ const clientBrowserConfig = {
       __DEV_MODE__: JSON.stringify(false),
     }),
   ],
-  module: { rules: [swcLoader] },
+  module: {
+    rules: [
+      swcLoader,
+      // mocha.js is UMD in a "type": "module" package; parse it as CommonJS
+      { test: /[\\/]mocha[\\/]mocha\.js$/, type: "javascript/dynamic" },
+    ],
+  },
   externals: { vscode: "commonjs vscode" },
 };
 

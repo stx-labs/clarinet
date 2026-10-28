@@ -8,6 +8,7 @@ pub mod types;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_files::{paths, FileAccessor, NetworkManifest, ProjectManifest, StacksNetwork};
@@ -21,10 +22,10 @@ use clarity::vm::{
 };
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::repl::boot::{
-    get_boot_contract_epoch_and_clarity_version, remap_mainnet_boot_principals,
-    BOOT_CONTRACTS_DATA, BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL, SBTC_BOOT_CONTRACTS,
-    SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL, SBTC_TOKEN_ASSET_IDENTIFIER,
-    SBTC_TOKEN_MAINNET_ADDRESS,
+    get_boot_contract_epoch_and_clarity_version, get_boot_contracts_data_with_overrides,
+    remap_mainnet_boot_principals, BOOT_MAINNET_PRINCIPAL, BOOT_TESTNET_PRINCIPAL,
+    SBTC_BOOT_CONTRACTS, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS_PRINCIPAL,
+    SBTC_TOKEN_ASSET_IDENTIFIER, SBTC_TOKEN_MAINNET_ADDRESS,
 };
 use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::{AnnotatedExecutionResult, CallKind, ExecutionResultMap};
@@ -874,13 +875,12 @@ pub async fn generate_default_deployment_with_cache(
     let mut sbtc_sources: HashMap<String, String> = HashMap::new();
 
     if !simnet_remote_data {
-        let mut boot_contracts_data = if settings.override_boot_contracts_source.is_empty() {
-            BOOT_CONTRACTS_DATA.clone()
-        } else {
-            clarity_repl::repl::boot::get_boot_contracts_data_with_overrides(
-                &settings.override_boot_contracts_source,
-            )
-        };
+        let boot_contracts_data =
+            get_boot_contracts_data_with_overrides(&settings.override_boot_contracts_source);
+        for (id, (contract, ast)) in boot_contracts_data.iter() {
+            boot_contracts_ids.insert(id.clone());
+            requirements_data.insert(id.clone(), (contract.clarity_version, Arc::clone(ast)));
+        }
 
         // sbtc-registry and sbtc-token live at a non-boot address (SM3VDX...)
         // but pox-5 depends on sbtc-token, so they must be available in the
@@ -916,23 +916,14 @@ pub async fn generate_default_deployment_with_cache(
                 sbtc_sources.insert(id.name.to_string(), source.clone());
             }
 
-            boot_contracts_data.insert(id.clone(), (contract, ast.clone()));
-        }
-
-        let mut boot_contracts_asts = BTreeMap::new();
-        for (id, (contract, ast)) in boot_contracts_data {
             // On devnet, sbtc contracts must be deployed as real transactions
             // (RequirementPublish) so the stacks-node can find them during the
             // epoch 4.0 transition. Only treat them as boot contracts on simnet.
-            let is_sbtc = SBTC_BOOT_CONTRACTS
-                .iter()
-                .any(|(sbtc_id, _)| sbtc_id == &id);
-            if !is_sbtc || matches!(network, StacksNetwork::Simnet) {
+            if matches!(network, StacksNetwork::Simnet) {
                 boot_contracts_ids.insert(id.clone());
             }
-            boot_contracts_asts.insert(id, (contract.clarity_version, ast));
+            requirements_data.insert(id.clone(), (contract.clarity_version, Arc::clone(ast)));
         }
-        requirements_data.append(&mut boot_contracts_asts);
     }
 
     // this ephemeral interpreter is used to parse code and build ASTs
@@ -1006,7 +997,7 @@ pub async fn generate_default_deployment_with_cache(
 
             // On testnet, an sBTC requirement is published as a real transaction
             // remapped to the sBTC testnet deployer, so it has to be retrieved
-            // like any other requirement: the boot copies seeded into
+            // like any other requirement: the boot entries seeded into
             // `requirements_data` above carry no publish specification.
             let cached_requirement = if matches!(network, StacksNetwork::Testnet)
                 && contract_id.issuer.to_string() == SBTC_MAINNET_ADDRESS
@@ -1018,7 +1009,9 @@ pub async fn generate_default_deployment_with_cache(
 
             // Did we already get the source in a prior cycle?
             let (clarity_version, ast) = match cached_requirement {
-                Some(requirement_data) => requirement_data,
+                // Moves the AST, except a boot contract's, which is shared
+                // and so gets copied.
+                Some((clarity_version, ast)) => (clarity_version, Arc::unwrap_or_clone(ast)),
                 None => {
                     // Download the code
                     let (mut source, epoch, clarity_version, contract_location) =
@@ -1137,7 +1130,8 @@ pub async fn generate_default_deployment_with_cache(
                             queue.push_back(dependency.contract_id.clone());
                         }
                         requirements_deps.insert(contract_id.clone(), dependencies);
-                        requirements_data.insert(contract_id.clone(), (clarity_version, ast));
+                        requirements_data
+                            .insert(contract_id.clone(), (clarity_version, Arc::new(ast)));
                     }
                 }
                 Err((inferable_dependencies, non_inferable_dependencies)) => {
@@ -1149,7 +1143,7 @@ pub async fn generate_default_deployment_with_cache(
                             queue.push_back(dependency.contract_id.clone());
                         }
                     }
-                    requirements_data.insert(contract_id.clone(), (clarity_version, ast));
+                    requirements_data.insert(contract_id.clone(), (clarity_version, Arc::new(ast)));
                     queue.push_front(contract_id);
 
                     for non_inferable_contract_id in non_inferable_dependencies.into_iter() {

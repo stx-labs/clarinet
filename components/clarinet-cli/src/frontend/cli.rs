@@ -326,6 +326,9 @@ struct RemoveContract {
     /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
+    /// Skip the confirmation prompt
+    #[clap(long = "force", short = 'f')]
+    pub force: bool,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1088,15 +1091,17 @@ pub fn main() {
                         std::process::exit(1);
                     });
 
-                let mut answer = String::new();
-                println!(
-                    "{} This command will delete the files {contract_name}.test.ts, {contract_name}.clar, and remove the contract from the manifest. Do you confirm? [y/N]",
-                    yellow!("warning:")
-                );
-                std::io::stdin().read_line(&mut answer).unwrap();
-                if !answer.trim().eq_ignore_ascii_case("y") {
-                    eprintln!("{} Not deleting contract files", yellow!("warning:"));
-                    std::process::exit(0);
+                if !cmd.force {
+                    let mut answer = String::new();
+                    println!(
+                        "{} This command will delete the files {contract_name}.test.ts, {contract_name}.clar, and remove the contract from the manifest. Do you confirm? [y/N]",
+                        yellow!("warning:")
+                    );
+                    std::io::stdin().read_line(&mut answer).unwrap();
+                    if !answer.trim().eq_ignore_ascii_case("y") {
+                        eprintln!("{} Not deleting contract files", yellow!("warning:"));
+                        std::process::exit(0);
+                    }
                 }
                 if !execute_changes(changes) {
                     std::process::exit(1);

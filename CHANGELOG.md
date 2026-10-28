@@ -1,3 +1,76 @@
+# [3.26.0](https://github.com/stx-labs/clarinet/compare/v3.25.0...v3.26.0) (2026-10-28)
+
+##### New Features
+
+*  Upgrade devnet stacks-node and signer to 4.0.5 (#2626) (87cedb4c)
+*  Add `--force`/`-f` for the `contract rm` command (#2609) (7fcc949e)
+
+##### Chores
+
+*  Remove stray bench files from repo root (#2625) (f2a5ed3a)
+*  Upgrade sdk dependencies (#2624) (602bb0cd)
+*  Add issue labels and history to LLM-generated PR reviews (#2622) (f8c62433)
+*  Refresh clarity-vscode lockfile, bump mocha 12 and playwright (#2617) (32a1167e)
+*  Remove unused clarity-vscode dev dependencies (#2616) (3a8a97bb)
+*  Cargo audit fixes (#2614) (96f26ad2)
+
+##### Continuous Integration
+
+*  Publish vscode extension without long-lived tokens (#2603) (4e92ad2b)
+
+##### Bug Fixes
+
+* **formatter:**
+  *  Fix 5 bugs in `define-trait` formatting (#2605) (0b59577f)
+  *  Fix 7 comment and tuple formatting bugs (#2604) (52e4f35e)
+
+# [3.25.0](https://github.com/stx-labs/clarinet/compare/v3.24.1...v3.25.0) (2026-10-15)
+
+##### Bug Fixes
+
+*  Dependency detector fails on invalid Clarity code (#2593) (f8453075)
+*  Invert `CLARINET_DISABLE_HINTS` environment variable (#2581) (cc6aaba6)
+* **coverage:**  Count syntax-only lines of multi-line expressions (#2578) (92222731)
+* **formatter:**  Properly handle escaped characters in strings (#2584) (9f6bb472)
+* **repl:**  Give definition-only snippets their own contract name (#2564) (d177e1df)
+* **simnet:**  Remap boot-contract addresses in requirements (#2562) (1fbdad69)
+* **devnet:**  Default events_keys in the table form of an event observer (#2566) (6e832f6e)
+
+##### Chores
+
+*  Dedupe strum, hashbrown and windows-sys versions (#2600) (22b21d80)
+*  Upgrade examples npm dependencies (#2594) (f606fac0)
+*  Remove clarity-events (unused) (#2592) (65d47824)
+*  Remove jupyter kernel (#2591) (33752c57)
+*  Remove unused prompts and kolorist from clarinet-sdk (#2590) (814665c2)
+*  Apply Clippy lint `collection_is_never_read` (#2573) (26ebbcef)
+*  Apply 9 Clippy nursery lints (+ enable 5 in default Clippy config) (#2563) (64858749)
+*  Add simplify, review and ship agent skills (#2554) (cadc0c46)
+*  Upgrade examples to clarinet-sdk 3.24.1 (#2560) (256300ec)
+* **lsp:**  Build the wasm with fat LTO and wasm-opt -Oz (#2583) (6932edca)
+*  Spelling/grammar/correctness issues in docs and comments (#2572) (92b0fa55)
+* **CI:**  Update `quinn-proto` to `0.11.18` (#2586) (809943d8)
+
+##### Performance Improvements
+
+*  Share boot contract ASTs instead of deep-cloning them (#2599) (e9367c8d)
+*  Use `O(log n)` lookup algorithm in `ClarityBackingStore::get_data()` (e4a20f4b)
+* **formatter:**  Fix `O(n^2)` handling of UTF-8 strings and `@format-ignore` blocks (#2585) (e6f4248f)
+* **clarity-vscode:**  Coalesce queued didChange notifications per document (#2544) (052be00f)
+
+##### Refactors
+
+* **formatter:**  Intermediate Rep + idempotency fixes (#2417) (f88a4cdb)
+*  `merge_diagnostics` shared between native/vscode bridge (#2579) (9fe951c7)
+*  Drop unreachable sBTC dedup guard in devnet plan (#2558) (f7533a86)
+*  Make do_run_devnet synchronous (#2552) (2692fda1)
+* **devnet:**  Build every stacks-node event observer as one list (#2565) (82a9b3fc)
+* **sdk:**  Replace yargs with node:util parseArgs (#2575) (014d75f5)
+
+##### Tests
+
+*  Golden coverage crypto tests (#2567) (edcc5f65)
+
 # [3.24.1](https://github.com/stx-labs/clarinet/compare/v3.24.0...v3.24.1) (2026-09-24)
 
 ##### Chores

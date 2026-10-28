@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
 use clarity::types::StacksEpochId;
@@ -109,7 +109,7 @@ pub struct ASTDependencyDetector<'a> {
     >,
     params: Option<Vec<TypedVar<'a>>>,
     top_level: bool,
-    preloaded: &'a BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
+    preloaded: &'a BTreeMap<QualifiedContractIdentifier, (ClarityVersion, Arc<ContractAST>)>,
 }
 
 #[derive(Clone, Debug, Eq)]
@@ -245,7 +245,7 @@ impl DerefMut for DependencySet {
 impl<'a> ASTDependencyDetector<'a> {
     pub fn detect_dependencies(
         contract_asts: &'a BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
-        preloaded: &'a BTreeMap<QualifiedContractIdentifier, (ClarityVersion, ContractAST)>,
+        preloaded: &'a BTreeMap<QualifiedContractIdentifier, (ClarityVersion, Arc<ContractAST>)>,
     ) -> Result<
         BTreeMap<QualifiedContractIdentifier, DependencySet>,
         (

@@ -1,6 +1,7 @@
 pub mod doc;
 pub mod helpers;
 pub mod ignored;
+mod sequence;
 
 use std::collections::HashMap;
 use std::iter::Peekable;
@@ -16,6 +17,7 @@ use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionT
 use doc::{Doc, Printer};
 use helpers::t;
 use ignored::SourceLines;
+use sequence::Sequence;
 
 pub enum Indentation {
     Space(usize),
@@ -349,7 +351,7 @@ impl<'a> Aggregator<'a> {
             let (formatted, is_define) = if let Some(list) = expr.match_list() {
                 if let Some(atom_name) = list.split_first().and_then(|(f, _)| f.match_atom()) {
                     (
-                        self.format_list_call(atom_name, list, indent),
+                        self.format_list_call(expr, atom_name, list, indent),
                         is_define_fn(atom_name),
                     )
                 } else {
@@ -411,6 +413,7 @@ impl<'a> Aggregator<'a> {
     /// Dispatch a list expression `(fn-name ...)` to the appropriate formatter.
     fn format_list_call(
         &mut self,
+        expr: &'a PreSymbolicExpression,
         atom_name: &str,
         list: &'a [PreSymbolicExpression],
         indent: &Indent,
@@ -420,7 +423,13 @@ impl<'a> Aggregator<'a> {
                 NativeFunctions::Let => self.format_let(list, indent),
                 NativeFunctions::Begin => self.format_begin(list, indent),
                 NativeFunctions::Match => self.format_match(list, indent),
-                NativeFunctions::TupleCons => self.format_key_value(&list[1..], indent),
+                NativeFunctions::TupleCons => {
+                    if let Some(formatted) = self.format_key_value(&list[1..], indent) {
+                        formatted
+                    } else {
+                        self.preserve_expr(expr, indent)
+                    }
+                }
                 NativeFunctions::If => self.format_if(list, indent),
                 NativeFunctions::And | NativeFunctions::Or => self.format_booleans(list, indent),
                 NativeFunctions::ListCons => self.format_list(list, indent),
@@ -439,123 +448,194 @@ impl<'a> Aggregator<'a> {
                 | DefineFunctions::UseTrait
                 | DefineFunctions::NonFungibleToken => self.format_constant(list, indent),
                 DefineFunctions::Map => self.format_map(list, indent),
-                DefineFunctions::Trait => self.define_trait(list, indent),
+                DefineFunctions::Trait => self.define_trait(expr, list, indent),
             }
         } else {
             self.format_inner_content(list, indent)
         }
     }
 
-    // (define-trait trait-name (
-    //   (func1-name
-    //     (arg1-type arg2-type ...)
-    //     (return-type)
-    //   )
-    //   (func2-name (arg1-type arg2-type ...) (return-type))
-    // )
-    fn define_trait(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
+    fn define_trait(
+        &mut self,
+        expr: &'a PreSymbolicExpression,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
+        let sequence = Sequence::from(exprs);
+        let [keyword, name, methods] = sequence.items.as_slice() else {
+            return self.preserve_expr(expr, indent);
+        };
+        let Some(method_list) = methods.expression.match_list() else {
+            return self.preserve_expr(expr, indent);
+        };
         let nested = indent.indented(&self.indentation_str);
-        let name = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
-        let methods = exprs[2].match_list().unwrap();
+        let empty_multiline = method_list.is_empty()
+            && name.expression.span().end_line != methods.expression.span().start_line;
 
-        if methods.is_empty() {
-            let is_multiline = exprs[1].span().end_line != exprs[2].span().start_line;
-            if is_multiline {
-                let mut parts: Vec<Doc> = vec![Doc::text("(define-trait "), Doc::verbatim(name)];
-                parts.push(Doc::indent(Doc::concat(vec![
-                    Doc::Hardline,
-                    Doc::verbatim(self.display_pse(&exprs[2], &nested)),
-                ])));
-                if exprs.len() > 3 && is_comment(&exprs[3]) {
-                    parts.push(Doc::text(" "));
-                    parts.push(Doc::verbatim(self.display_pse(&exprs[3], indent)));
-                }
-                parts.push(Doc::Hardline);
-                parts.push(Doc::text(")"));
-                return self.render_doc(&Doc::concat(parts), indent);
-            } else {
-                return self.render_doc(
-                    &Doc::concat(vec![
-                        Doc::text("(define-trait "),
-                        Doc::verbatim(name),
-                        Doc::text(" ())"),
-                    ]),
-                    indent,
-                );
-            }
-        }
-
-        let double_indent = nested.indented(&self.indentation_str);
-        let mut method_parts: Vec<Doc> = Vec::new();
-
-        let mut iter = methods.iter().peekable();
-        while let Some(expr) = iter.next() {
-            let trailing = get_trailing_comment(expr, &mut iter);
-
-            if let Some(method_list) = expr.match_list() {
-                let mut method_doc: Vec<Doc> = vec![Doc::text("(")];
-
-                if let Some(method_name) = method_list.first() {
-                    method_doc.push(Doc::verbatim(self.display_pse(method_name, indent)));
-                }
-
-                let mut items_iter = method_list.iter().skip(1).peekable();
-                while let Some(arg) = items_iter.next() {
-                    if let Some(element_list) = arg.match_list() {
-                        method_doc.push(Doc::Hardline);
-                        method_doc.push(Doc::verbatim(
-                            self.display_list(element_list, &double_indent),
-                        ));
-
-                        if let Some(comment) = items_iter.next_if(|next| is_comment(next)) {
-                            method_doc
-                                .push(Doc::verbatim(self.spaced_comment(arg, comment, indent)));
-                        }
-                    } else if is_comment(arg) {
-                        method_doc.push(Doc::Hardline);
-                        method_doc.push(Doc::verbatim(self.display_pse(arg, indent)));
-                    }
-                }
-
-                if let (Some(comment), Some(last_item)) = (trailing, method_list.last()) {
-                    method_doc.push(Doc::verbatim(
-                        self.spaced_comment(last_item, comment, indent),
-                    ));
-                }
-
-                method_parts.push(Doc::indent(Doc::concat(method_doc)));
-                method_parts.push(Doc::Hardline);
-                method_parts.push(Doc::text(")"));
-
-                if iter.peek().is_some() {
-                    method_parts.push(Doc::Hardline);
-                }
-            }
-        }
-
-        method_parts.insert(0, Doc::Hardline);
-        let open = Doc::concat(vec![
-            Doc::text("(define-trait "),
-            Doc::verbatim(name),
-            Doc::text(" ("),
+        let multiline_header =
+            empty_multiline || !name.comments.is_empty() || !methods.comments.is_empty();
+        let header_indent = if multiline_header { &nested } else { indent };
+        let header = Doc::concat(vec![
+            self.trait_item_prefix(
+                name.comments,
+                Some(keyword.expression),
+                Doc::text(" "),
+                header_indent,
+            ),
+            Doc::verbatim(self.display_pse(name.expression, header_indent)),
+            self.trait_item_prefix(
+                methods.comments,
+                Some(name.expression),
+                if empty_multiline {
+                    Doc::Hardline
+                } else {
+                    Doc::text(" ")
+                },
+                header_indent,
+            ),
+            self.trait_list_doc(
+                method_list,
+                header_indent,
+                Doc::Hardline,
+                |this, _, method, nested| this.trait_method_doc(method, nested),
+            ),
         ]);
-        self.render_doc(&block(open, method_parts, "))"), indent)
+        let mut parts = vec![
+            Doc::text("(define-trait"),
+            if multiline_header {
+                Doc::indent(header)
+            } else {
+                header
+            },
+            Doc::indent(self.comment_gap_doc(
+                sequence.end_comments,
+                Some(methods.expression),
+                &nested,
+            )),
+        ];
+        if multiline_header || !sequence.end_comments.is_empty() {
+            parts.push(Doc::Hardline);
+        }
+        parts.push(Doc::text(")"));
+        self.render_doc(&Doc::concat(parts), indent)
+    }
+
+    /// Emit a gap without its final line break, so the caller controls the
+    /// indentation of the next child or closing delimiter.
+    fn comment_gap_doc(
+        &mut self,
+        comments: &'a [PreSymbolicExpression],
+        mut previous: Option<&'a PreSymbolicExpression>,
+        indent: &Indent,
+    ) -> Doc {
+        let mut parts = Vec::new();
+        for comment in comments {
+            if let Some(previous) =
+                previous.filter(|previous| previous.span().end_line == comment.span().start_line)
+            {
+                parts.push(Doc::verbatim(
+                    self.spaced_comment(previous, comment, indent),
+                ));
+            } else {
+                parts.push(Doc::Hardline);
+                parts.push(Doc::verbatim(self.display_pse(comment, indent)));
+            }
+            previous = Some(comment);
+        }
+        Doc::concat(parts)
+    }
+
+    fn trait_item_prefix(
+        &mut self,
+        comments: &'a [PreSymbolicExpression],
+        previous: Option<&'a PreSymbolicExpression>,
+        separator: Doc,
+        indent: &Indent,
+    ) -> Doc {
+        if comments.is_empty() {
+            return separator;
+        }
+        Doc::concat(vec![
+            self.comment_gap_doc(comments, previous, indent),
+            Doc::Hardline,
+        ])
+    }
+
+    /// Lay out a trait list with one item per line, keeping every comment.
+    fn trait_list_doc(
+        &mut self,
+        expressions: &'a [PreSymbolicExpression],
+        indent: &Indent,
+        first_separator: Doc,
+        mut item_doc: impl FnMut(&mut Self, usize, &'a PreSymbolicExpression, &Indent) -> Doc,
+    ) -> Doc {
+        if expressions.is_empty() {
+            return Doc::text("()");
+        }
+        let nested = indent.indented(&self.indentation_str);
+        let sequence = Sequence::from(expressions);
+        let mut first_separator = Some(first_separator);
+        let mut body = Vec::new();
+        let mut previous = None;
+        for (index, item) in sequence.items.iter().enumerate() {
+            let separator = first_separator.take().unwrap_or(Doc::Hardline);
+            body.push(self.trait_item_prefix(item.comments, previous, separator, &nested));
+            body.push(item_doc(self, index, item.expression, &nested));
+            previous = Some(item.expression);
+        }
+        body.push(self.comment_gap_doc(sequence.end_comments, previous, &nested));
+        block(Doc::text("("), body, ")")
+    }
+
+    fn trait_method_doc(&mut self, method: &'a PreSymbolicExpression, indent: &Indent) -> Doc {
+        let Some(expressions) = method.match_list() else {
+            return Doc::verbatim(self.preserve_syntax(method, indent));
+        };
+        self.trait_list_doc(
+            expressions,
+            indent,
+            Doc::text(""),
+            |this, index, item, nested| {
+                // Only the name, parameters, and return type have defined formatting,
+                // and none of them is a tuple. Anything else must not dispatch nested
+                // lists as function calls.
+                let defined =
+                    index < 3 && !matches!(item.pre_expr, PreSymbolicExpressionType::Tuple(_));
+                Doc::verbatim(if defined {
+                    this.display_pse(item, nested)
+                } else {
+                    this.preserve_syntax(item, nested)
+                })
+            },
+        )
+    }
+
+    fn preserve_expr(&mut self, expr: &'a PreSymbolicExpression, indent: &Indent) -> String {
+        if let Some(source_lines) = &self.source_lines {
+            source_lines.extract_expr_source(expr)
+        } else {
+            self.preserve_syntax(expr, indent)
+        }
     }
 
     fn format_constant(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
         let func_type = self.display_pse(exprs.first().unwrap(), &Indent::empty());
+        if contains_comments(&exprs[1..]) {
+            let nested = indent.indented(&self.indentation_str);
+            let body = self.lines_doc(&exprs[1..], &nested, false);
+            return self.render_doc(
+                &block(Doc::text(format!("({func_type}")), body, ")"),
+                indent,
+            );
+        }
         let mut parts: Vec<Doc> = vec![Doc::text(format!("({func_type} "))];
-        let mut iter = exprs[1..].iter().peekable();
-        while let Some(expr) = iter.next() {
-            let trailing = get_trailing_comment(expr, &mut iter);
-            self.check_and_cache_ignored(expr, iter.peek().copied());
+        for (i, expr) in exprs[1..].iter().enumerate() {
+            if i > 0 {
+                parts.push(Doc::text(" "));
+            }
             parts.push(Doc::verbatim(
                 self.format_source_exprs(slice::from_ref(expr), indent),
             ));
-            if iter.peek().is_some() {
-                parts.push(Doc::text(" "));
-            }
-            self.push_trailing_comment(&mut parts, trailing, indent);
         }
         parts.push(Doc::text(")"));
         self.render_doc(&Doc::concat(parts), indent)
@@ -1077,7 +1157,6 @@ impl<'a> Aggregator<'a> {
             inline
         } else {
             let nested = indent.indented(&self.indentation_str);
-            let double_indent = nested.indented(&self.indentation_str);
             let mut entry_parts: Vec<Doc> = Vec::new();
             let mut iter = exprs.iter().peekable();
             while let Some(key) = iter.next() {
@@ -1088,32 +1167,15 @@ impl<'a> Aggregator<'a> {
                 }
                 self.check_and_cache_ignored(key, iter.peek().copied());
                 let key_str = self.format_source_exprs(slice::from_ref(key), &nested);
+                let mut comments = Vec::new();
+                while let Some(comment) = iter.next_if(|next| is_comment(next)) {
+                    comments.push(comment);
+                }
                 if let Some(value) = iter.next() {
-                    entry_parts.push(Doc::Hardline);
-                    if is_comment(value) {
-                        entry_parts.push(Doc::verbatim(format!("{key_str}:")));
-                        // Comment between key and value
-                        entry_parts.push(Doc::indent(Doc::concat(vec![
-                            Doc::Hardline,
-                            Doc::verbatim(self.display_pse(value, &nested)),
-                        ])));
-                        if let Some(actual_value) = iter.next() {
-                            let trailing = get_trailing_comment(actual_value, &mut iter);
-                            let value_str = self
-                                .format_source_exprs(slice::from_ref(actual_value), &double_indent);
-                            entry_parts.push(Doc::indent(Doc::concat(vec![
-                                Doc::Hardline,
-                                Doc::verbatim(format!("{value_str},")),
-                            ])));
-                            self.push_trailing_comment(&mut entry_parts, trailing, &nested);
-                        }
-                    } else {
-                        let trailing = get_trailing_comment(value, &mut iter);
-                        self.check_and_cache_ignored(value, iter.peek().copied());
-                        let value_str = self.format_source_exprs(slice::from_ref(value), &nested);
-                        entry_parts.push(Doc::verbatim(format!("{key_str}: {value_str},")));
-                        self.push_trailing_comment(&mut entry_parts, trailing, indent);
-                    }
+                    let trailing = get_trailing_comment(value, &mut iter);
+                    self.check_and_cache_ignored(value, iter.peek().copied());
+                    entry_parts.extend(self.entry_doc(key_str, comments, value, &nested));
+                    self.push_trailing_comment(&mut entry_parts, trailing, &nested);
                 }
             }
 
@@ -1121,9 +1183,76 @@ impl<'a> Aggregator<'a> {
         }
     }
 
-    // used for (tuple (n1  1)) syntax
-    // Note: Converted to a { a: 1 } style map
-    fn format_key_value(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
+    /// A `key: value,` line of a multiline tuple. Comments between the key and
+    /// the value go on their own lines, with the value below them.
+    fn entry_doc(
+        &mut self,
+        key: String,
+        comments: impl IntoIterator<Item = &'a PreSymbolicExpression>,
+        value: &'a PreSymbolicExpression,
+        nested: &Indent,
+    ) -> Vec<Doc> {
+        let mut comment_parts = Vec::new();
+        let mut comments = comments.into_iter().peekable();
+        while let Some(comment) = comments.next() {
+            self.check_and_cache_ignored(comment, comments.peek().copied().or(Some(value)));
+            comment_parts.push(Doc::Hardline);
+            comment_parts.push(Doc::verbatim(self.display_pse(comment, nested)));
+        }
+        if comment_parts.is_empty() {
+            let fvalue = self.format_source_exprs(slice::from_ref(value), nested);
+            return vec![Doc::Hardline, Doc::verbatim(format!("{key}: {fvalue},"))];
+        }
+        let double_indent = nested.indented(&self.indentation_str);
+        let fvalue = self.format_source_exprs(slice::from_ref(value), &double_indent);
+        comment_parts.push(Doc::Hardline);
+        comment_parts.push(Doc::verbatim(format!("{fvalue},")));
+        vec![
+            Doc::Hardline,
+            Doc::verbatim(format!("{key}:")),
+            Doc::indent(Doc::concat(comment_parts)),
+        ]
+    }
+
+    /// Preserve unrecognized syntax without interpreting nested lists as function
+    /// calls or dropping extra arguments.
+    fn preserve_syntax(&mut self, expr: &'a PreSymbolicExpression, indent: &Indent) -> String {
+        let (items, open, close, tuple) = match &expr.pre_expr {
+            PreSymbolicExpressionType::List(items) => (items, "(", ')', false),
+            PreSymbolicExpressionType::Tuple(items) => (items, "{", '}', true),
+            _ => return self.display_pse(expr, indent),
+        };
+        let mut result = String::from(open);
+        let mut is_key = true;
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 && !is_comment(&items[i - 1]) {
+                result.push(' ');
+            }
+            result.push_str(&self.preserve_syntax(item, indent));
+            if is_comment(item) {
+                result.push('\n');
+            } else if tuple {
+                result.push(if is_key { ':' } else { ',' });
+                is_key = !is_key;
+            }
+        }
+        result.push(close);
+        result
+    }
+
+    /// `(tuple (n1 1))` converted to `{ n1: 1 }`, or `None` if an entry isn't a
+    /// key and a single value.
+    fn format_key_value(
+        &mut self,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> Option<String> {
+        if !exprs
+            .iter()
+            .all(|entry| is_comment(entry) || split_tuple_entry(entry).is_some())
+        {
+            return None;
+        }
         let inline = match exprs {
             [entry] => match entry.match_list().and_then(|list| list.split_first()) {
                 Some((key, value)) => self.inline_entry(key, value, indent),
@@ -1131,27 +1260,38 @@ impl<'a> Aggregator<'a> {
             },
             _ => None,
         };
-        if let Some(inline) = inline {
-            inline
-        } else {
-            let nested = indent.indented(&self.indentation_str);
-            let mut entry_parts: Vec<Doc> = Vec::new();
-            let mut iter = exprs.iter().peekable();
-            while let Some(arg) = iter.next() {
-                let trailing = get_trailing_comment(arg, &mut iter);
-                self.check_and_cache_ignored(arg, iter.peek().copied());
-                let (key, value) = arg
-                    .match_list()
-                    .and_then(|list| list.split_first())
-                    .unwrap();
-                let fkey = self.display_pse(key, &nested);
-                let fvalue = self.format_source_exprs(value, &nested);
-                entry_parts.push(Doc::Hardline);
-                entry_parts.push(Doc::verbatim(format!("{fkey}: {fvalue},")));
-                self.push_trailing_comment(&mut entry_parts, trailing, &nested);
-            }
-            self.render_doc(&block(Doc::text("{"), entry_parts, "}"), indent)
+        if inline.is_some() {
+            return inline;
         }
+        let nested = indent.indented(&self.indentation_str);
+        let mut entry_parts: Vec<Doc> = Vec::new();
+        let mut iter = exprs.iter().peekable();
+        while let Some(arg) = iter.next() {
+            if is_comment(arg) {
+                entry_parts.push(Doc::Hardline);
+                entry_parts.push(Doc::verbatim(self.display_pse(arg, &nested)));
+                continue;
+            }
+            let trailing = get_trailing_comment(arg, &mut iter);
+            self.check_and_cache_ignored(arg, iter.peek().copied());
+            let TupleEntry {
+                key,
+                before,
+                value,
+                after,
+            } = split_tuple_entry(arg)?;
+            let fkey = self.display_pse(key, &nested);
+            entry_parts.extend(self.entry_doc(fkey, before, value, &nested));
+            for comment in after.iter().chain(trailing) {
+                if comment.span().start_line == value.span().end_line {
+                    entry_parts.push(Doc::text(" "));
+                } else {
+                    entry_parts.push(Doc::Hardline);
+                }
+                entry_parts.push(Doc::verbatim(self.display_pse(comment, &nested)));
+            }
+        }
+        Some(self.render_doc(&block(Doc::text("{"), entry_parts, "}"), indent))
     }
 
     // This prints leaves of the PSE tree
@@ -1307,7 +1447,7 @@ impl<'a> Aggregator<'a> {
         indent: &Indent,
     ) -> String {
         // Simple wrappers like (ok expr) are always kept on one line
-        if list.len() == 2 && list[0].match_atom().is_some() {
+        if list.len() == 2 && list[0].match_atom().is_some() && !is_comment(&list[1]) {
             let atom_name = list[0].match_atom().unwrap();
             let is_special_format =
                 NativeFunctions::lookup_by_name(atom_name).is_some_and(|native| {
@@ -1371,7 +1511,9 @@ impl<'a> Aggregator<'a> {
             prev_is_map = text.starts_with('{');
         }
 
-        let break_lines = if !result.contains('\n') {
+        let break_lines = if list.last().is_some_and(is_comment) {
+            true
+        } else if !result.contains('\n') {
             false
         } else {
             let last_line = result
@@ -1482,6 +1624,28 @@ where
         }
         _ => None,
     }
+}
+
+/// A `(key ;; c value ;; c)` tuple entry, split around its value.
+struct TupleEntry<'a> {
+    key: &'a PreSymbolicExpression,
+    before: &'a [PreSymbolicExpression],
+    value: &'a PreSymbolicExpression,
+    after: &'a [PreSymbolicExpression],
+}
+
+/// `None` unless `entry` is a key atom followed by one value and any comments.
+fn split_tuple_entry(entry: &PreSymbolicExpression) -> Option<TupleEntry<'_>> {
+    let (key, rest) = entry.match_list()?.split_first()?;
+    key.match_atom()?;
+    let pos = rest.iter().position(|expr| !is_comment(expr))?;
+    let (before, after) = (&rest[..pos], &rest[pos + 1..]);
+    after.iter().all(is_comment).then_some(TupleEntry {
+        key,
+        before,
+        value: &rest[pos],
+        after,
+    })
 }
 
 fn contains_comments(exprs: &[PreSymbolicExpression]) -> bool {
