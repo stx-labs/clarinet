@@ -3,7 +3,7 @@
 ##### New Features
 
 *  Upgrade devnet stacks-node and signer to 4.0.5 (#2626) (87cedb4c)
-*  Add --force/-f for cmd (#2609) (7fcc949e)
+*  Add `--force`/`-f` for the `contract rm` command (#2609) (7fcc949e)
 
 ##### Chores
 
