@@ -177,16 +177,26 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
     mineBlock(txs: Tx[] = []): BlockTransactionResult[] {
       const serialized = txs.map((tx) => {
         if (tx.broadcastTx !== undefined) return { type: "broadcastTx", rawHex: tx.broadcastTx };
-        const call = tx.callPublicFn || tx.callPrivateFn;
-        if (call) {
+        if (tx.callPublicFn) {
           return {
-            type: tx.callPublicFn ? "callPublicFn" : "callPrivateFn",
-            contract: call.contract,
-            function: call.method,
-            args: call.args.map(serializeCV),
-            sender: call.sender,
-            postConditions: call.postConditions,
-            postConditionMode: call.postConditionMode,
+            type: "callPublicFn",
+            contract: tx.callPublicFn.contract,
+            function: tx.callPublicFn.method,
+            args: tx.callPublicFn.args.map(serializeCV),
+            sender: tx.callPublicFn.sender,
+            postConditions: tx.callPublicFn.postConditions,
+            postConditionMode: tx.callPublicFn.postConditionMode,
+          };
+        }
+        if (tx.callPrivateFn) {
+          return {
+            type: "callPrivateFn",
+            contract: tx.callPrivateFn.contract,
+            function: tx.callPrivateFn.method,
+            args: tx.callPrivateFn.args.map(serializeCV),
+            sender: tx.callPrivateFn.sender,
+            postConditions: tx.callPrivateFn.postConditions,
+            postConditionMode: tx.callPrivateFn.postConditionMode,
           };
         }
         if (tx.deployContract) {

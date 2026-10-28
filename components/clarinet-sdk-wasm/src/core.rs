@@ -126,7 +126,11 @@ impl CallFnArgs {
         }
     }
 
-    // JSON serializes Uint8Array arguments as index-to-byte maps.
+    /*
+      The mineBlock method receives an JSON Array of Txs, including ContractCalls.
+      Because it's JSON, the Uint8Array arguments are passed as Map<index, value> instead of Vec<u8>.
+      This method transform the Map back into a Vec.
+    */
     fn from_json_args(json_args: CallContractArgsJSON) -> Result<Self, String> {
         let args = json_args
             .args_maps
@@ -1062,11 +1066,15 @@ impl SDK {
                 }
             })?;
 
+        // Collect performance data before accessing self.costs_reports
         let performance_data = if track_performance {
             session.get_performance_data()
         } else {
             None
         };
+
+        // Release the session borrow before accessing self.costs_reports
+        let _ = session;
 
         if track_costs {
             if let Some(ref cost) = execution.cost {
@@ -1089,7 +1097,9 @@ impl SDK {
 
         let mut response = execution_result_to_transaction_res(&execution);
 
-        response.performance = performance_data;
+        if let Some(perf_data) = performance_data {
+            response.performance = Some(perf_data);
+        }
 
         Ok(response)
     }
@@ -1227,7 +1237,7 @@ impl SDK {
         let execution = match result {
             Ok(res) => res,
             Err(diagnostics) => {
-                let mut message = format!("STX transfer error: {}", args.sender);
+                let mut message = format!("{}: {}", "STX transfer error", args.sender);
                 if let Some(diag) = diagnostics.last() {
                     message = format!("{message} -> {}", diag.diagnostic.message);
                 }
@@ -1326,7 +1336,7 @@ impl SDK {
                         args.sender, args.name
                     );
                     if let Some(diag) = failure.diagnostics.last() {
-                        message = format!("{message} -> {}", diag.diagnostic.message);
+                        message = format!("{} -> {}", message, diag.diagnostic.message);
                     }
                     return Err(TransactionError {
                         message,
@@ -1336,9 +1346,13 @@ impl SDK {
             }
         };
 
-        if let Some((id, interface)) = contract_interface_from_result(&execution) {
-            self.contracts_interfaces.insert(id, interface);
-        }
+        if let EvaluationResult::Contract(ref result) = &execution.result {
+            let contract_id = result.contract.analysis.contract_identifier.clone();
+            if let Some(contract_interface) = &result.contract.analysis.contract_interface {
+                self.contracts_interfaces
+                    .insert(contract_id, contract_interface.clone());
+            }
+        };
 
         Ok(execution_result_to_transaction_res(&execution))
     }
