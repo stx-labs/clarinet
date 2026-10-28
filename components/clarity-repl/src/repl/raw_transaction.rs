@@ -122,13 +122,6 @@ impl From<&StacksTransaction> for RawTransactionMetadata {
 }
 
 impl RawTransactionOutcome {
-    pub(crate) fn rejected(tx: Option<&StacksTransaction>, error: String) -> Self {
-        Self::Rejected {
-            metadata: tx.map(RawTransactionMetadata::from),
-            error,
-        }
-    }
-
     pub fn is_included(&self) -> bool {
         matches!(self, Self::Included { .. })
     }

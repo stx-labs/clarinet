@@ -1361,9 +1361,7 @@ impl SDK {
         &mut self,
         outcome: clarity_repl::repl::raw_transaction::RawTransactionOutcome,
     ) -> SignedTransactionResult {
-        use clarity_repl::repl::raw_transaction::{
-            RawFailureKind, RawTransactionOutcome, RawTransactionResult,
-        };
+        use clarity_repl::repl::raw_transaction::{RawTransactionOutcome, RawTransactionResult};
         match outcome {
             RawTransactionOutcome::Rejected { metadata, error } => {
                 SignedTransactionResult::Rejected {

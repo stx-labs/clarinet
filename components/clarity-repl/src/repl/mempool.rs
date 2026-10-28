@@ -113,11 +113,11 @@ impl AdmissionError {
         }
     }
 
-    fn message(reason: &'static str, message: AdmissionMessage) -> Self {
+    fn message(reason: &'static str, message: impl Into<AdmissionMessage>) -> Self {
         Self {
             reason,
             data: AdmissionData::Message {
-                message: Box::new(message),
+                message: Box::new(message.into()),
             },
         }
     }
@@ -130,14 +130,14 @@ fn require_funds(
 ) -> Result<(), AdmissionError> {
     let mut balance = db
         .get_stx_balance_snapshot(principal)
-        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?;
+        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
     if !balance
         .can_transfer(expected)
-        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?
+        .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?
     {
         let actual = balance
             .get_available_balance()
-            .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?;
+            .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
         return Err(AdmissionError {
             reason: "NotEnoughFunds",
             data: AdmissionData::Funds { expected, actual },
@@ -241,7 +241,7 @@ impl ClarityInterpreter {
             _ => {}
         }
         self.check_raw_transaction(tx)
-            .map_err(|e| AdmissionError::message("SignatureValidation", e.into()))?;
+            .map_err(|e| AdmissionError::message("SignatureValidation", e))?;
         // Pinned stacks-node policy: MINIMUM_TX_FEE = 1 and
         // MINIMUM_TX_FEE_RATE_PER_BYTE = 1 (stackslib/db/blocks.rs).
         // TODO(upstream): Export these constants and can_include_tx's fee predicate
@@ -290,22 +290,20 @@ impl ClarityInterpreter {
                 AdmissionError::message("ServerFailureDatabase", AdmissionMessage::Connection(e))
             })?;
         let origin: PrincipalData = tx.origin_address().into();
-        let payer: PrincipalData = tx
-            .sponsor_address()
-            .unwrap_or_else(|| tx.origin_address())
-            .into();
+        let sponsor = tx.sponsor_address().map(PrincipalData::from);
+        let payer = sponsor.as_ref().unwrap_or(&origin);
         connection.with_clarity_db_readonly(|db| -> Result<(), AdmissionError> {
             // TODO(upstream): Share check_transaction_nonces and can_include_tx's
             // chaining policy once their node-specific account/error types are extracted.
-            for (principal, actual, is_origin) in tx
-                .sponsor_address()
-                .map(|_| (&payer, tx.get_payer().nonce(), false))
+            for (principal, actual, is_origin) in sponsor
+                .as_ref()
+                .map(|principal| (principal, tx.get_payer().nonce(), false))
                 .into_iter()
                 .chain(std::iter::once((&origin, tx.get_origin_nonce(), true)))
             {
                 let expected = db
                     .get_account_nonce(principal)
-                    .map_err(|e| AdmissionError::message("ServerFailureDatabase", e.into()))?;
+                    .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
                 if actual < expected || actual == u64::MAX {
                     return Err(AdmissionError {
                         reason: "BadNonce",
@@ -362,16 +360,16 @@ impl ClarityInterpreter {
                         AdmissionMessage::Static("native transfers do not support post-conditions"),
                     ));
                 }
-                let spent = u128::from(*amount)
-                    + if payer == origin {
-                        u128::from(tx.get_tx_fee())
-                    } else {
-                        0
-                    };
-                require_funds(db, &origin, spent)?;
+                if payer == &origin {
+                    return require_funds(
+                        db,
+                        &origin,
+                        u128::from(*amount) + u128::from(tx.get_tx_fee()),
+                    );
+                }
+                require_funds(db, &origin, u128::from(*amount))?;
             }
-            require_funds(db, &payer, u128::from(tx.get_tx_fee()))?;
-            Ok(())
+            require_funds(db, payer, u128::from(tx.get_tx_fee()))
         })?;
         // can_include_tx is private to stackslib; its type-checking APIs are
         // available here and keep trait casts and epoch-specific types upstream.
@@ -388,7 +386,7 @@ impl ClarityInterpreter {
                 function
                     .check_args_by_allowing_trait_cast(db, &call.function_args, epoch, version)
                     .map(|_| ())
-                    .map_err(|e| AdmissionError::message("BadFunctionArgument", e.into()))
+                    .map_err(|e| AdmissionError::message("BadFunctionArgument", e))
             }
             TransactionPayload::SmartContract(contract, _) => {
                 let id = QualifiedContractIdentifier::new(
