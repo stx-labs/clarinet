@@ -289,7 +289,7 @@
     "@typescript-eslint/eslint-plugin": "8.68.0",
     "@typescript-eslint/parser": "8.68.0",
     "@vscode/test-web": "0.0.81",
-    "@vscode/vsce": "3.9.2",
+    "@vscode/vsce": "4.0.0",
     "@wasm-tool/wasm-pack-plugin": "1.7.0",
     "eslint": "10.9.1",
     "path-browserify": "1.0.1",
