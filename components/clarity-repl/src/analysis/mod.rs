@@ -197,6 +197,50 @@ pub struct SettingsFile {
     /// Glob patterns for files to exclude from analysis.
     #[serde(default)]
     exclude: Option<OneOrList<String>>,
+    // Keys from the removed `[repl.analysis]` section. Reject them so that a
+    // moved section does not silently do nothing.
+    #[serde(
+        rename = "lint_groups",
+        default,
+        skip_serializing,
+        deserialize_with = "reject_lint_groups"
+    )]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    _lint_groups: (),
+    #[serde(
+        rename = "passes",
+        default,
+        skip_serializing,
+        deserialize_with = "reject_passes"
+    )]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    _passes: (),
+    #[serde(
+        rename = "check_checker",
+        default,
+        skip_serializing,
+        deserialize_with = "reject_check_checker"
+    )]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    _check_checker: (),
+}
+
+fn reject_lint_groups<'de, D: serde::Deserializer<'de>>(_: D) -> Result<(), D::Error> {
+    Err(serde::de::Error::custom(
+        "`linter.lint_groups` is not supported; use `linter.groups`",
+    ))
+}
+
+fn reject_passes<'de, D: serde::Deserializer<'de>>(_: D) -> Result<(), D::Error> {
+    Err(serde::de::Error::custom(
+        "`linter.passes` is not supported; configure lints in `linter.lints` and `linter.groups`",
+    ))
+}
+
+fn reject_check_checker<'de, D: serde::Deserializer<'de>>(_: D) -> Result<(), D::Error> {
+    Err(serde::de::Error::custom(
+        "`linter.check_checker` is not supported; the check-checker was removed",
+    ))
 }
 
 impl TryFrom<SettingsFile> for Settings {

@@ -635,6 +635,25 @@ mod tests {
     }
 
     #[test]
+    fn test_removed_analysis_keys_in_linter_are_rejected() {
+        for (key, value, expected) in [
+            ("lint_groups", "{ all = false }", "use `linter.groups`"),
+            ("passes", r#"["check_checker"]"#, "`linter.passes`"),
+            (
+                "check_checker",
+                "{ strict = false }",
+                "check-checker was removed",
+            ),
+        ] {
+            let manifest = format!("[project]\nname = \"legacy\"\n[linter]\n{key} = {value}\n");
+            let err = toml::from_str::<ProjectManifestFile>(&manifest)
+                .expect_err(&format!("`linter.{key}` should be rejected"))
+                .to_string();
+            assert!(err.contains(expected), "unexpected error for {key}: {err}");
+        }
+    }
+
+    #[test]
     fn test_get_epoch_and_clarity_version() {
         use clarity::types::StacksEpochId::*;
         use clarity::vm::ClarityVersion::*;
