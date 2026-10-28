@@ -25,7 +25,6 @@ pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:la
 pub const DEFAULT_POSTGRES_IMAGE: &str = "postgres:alpine";
 
 pub const DEFAULT_BITCOIN_NODE_IMAGE: &str = "lncm/bitcoind:v27.2";
-// Bitcoin Core 31 rejects the unnamed wallet and stacks-node requires a non-empty name
 pub const DEFAULT_MINER_WALLET_NAME: &str = "miner";
 pub const DEFAULT_BITCOIN_EXPLORER_IMAGE: &str = "quay.io/hirosystems/bitcoin-explorer:devnet";
 
