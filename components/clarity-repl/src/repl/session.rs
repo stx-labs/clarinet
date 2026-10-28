@@ -2575,6 +2575,10 @@ mod tests {
             )
             .expect_err("stacks-node rejects an underfunded TokenTransfer");
         assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0]
+            .diagnostic
+            .message
+            .contains("Invalid TokenTransfer"));
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
     }
 
@@ -2595,6 +2599,10 @@ mod tests {
             )
             .expect_err("stacks-node rejects a zero-amount TokenTransfer");
         assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0]
+            .diagnostic
+            .message
+            .contains("Invalid TokenTransfer"));
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
     }
 
@@ -2611,6 +2619,10 @@ mod tests {
             .stx_transfer(100, &sender, PostConditionCheck::Unchecked)
             .unwrap_err();
         assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0]
+            .diagnostic
+            .message
+            .contains("Invalid TokenTransfer"));
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
         assert_eq!(
             session.interpreter.get_balance_for_account(&sender, "STX"),
@@ -2765,6 +2777,7 @@ mod tests {
             deploy_and_read_nonce(&mut session, deployer, "div-zero", "(/ u1 u0)");
         let error = result.expect_err("the deploy must still be reported failed");
         assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0].diagnostic.message.contains("DivisionByZero"));
         assert!(error[0].lint_name.is_none());
         assert_eq!(after, before + 1, "divide-by-zero is included in a block");
 
