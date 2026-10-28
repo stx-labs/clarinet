@@ -702,6 +702,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "stacks-codec",
  "stacks-network",
  "strum 0.27.2",
  "tempfile",

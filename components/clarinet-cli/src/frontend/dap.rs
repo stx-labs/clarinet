@@ -543,9 +543,8 @@ fn run_sdk_request_loop(
                 let mut results: Vec<serde_json::Value> = Vec::with_capacity(txs.len());
                 session.advance_chain_tip(1);
                 while let Some(tx) = session.next_mempool_transaction() {
-                    if let Some(call) =
-                        clarity_repl::repl::raw_transaction::RawTransactionMetadata::from(&tx)
-                            .contract_call
+                    if let stacks_codec::transaction::TransactionPayload::ContractCall(call) =
+                        &tx.payload
                     {
                         dap_guard
                             .prepare_for_call(&call.to_clarity_contract_id(), &call.function_name);

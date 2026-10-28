@@ -1,10 +1,13 @@
 //! Session-local admission and queuing, separate from block execution.
 
+use std::collections::VecDeque;
+
 use clarity::vm::clarity::ClarityConnection;
 use clarity_types::types::{PrincipalData, QualifiedContractIdentifier};
 use serde::Serialize;
 use serde_json::{json, Value};
 use stacks_codec::transaction::{StacksTransaction, TransactionPayload};
+use stacks_common::types::chainstate::Txid;
 
 use super::interpreter::ClarityInterpreter;
 use super::raw_transaction::decode;
@@ -12,7 +15,13 @@ use super::Session;
 
 #[derive(Clone, Default)]
 pub(crate) struct Mempool {
-    transactions: Vec<StacksTransaction>,
+    transactions: VecDeque<PendingTransaction>,
+}
+
+#[derive(Clone)]
+struct PendingTransaction {
+    txid: Txid,
+    tx: StacksTransaction,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,46 +101,60 @@ impl Session {
                 }
             }
         };
-        let txid = tx.txid().to_string();
+        let txid = tx.txid();
         if self
             .mempool
             .transactions
             .iter()
-            .any(|pending| pending.txid() == tx.txid())
+            .any(|pending| pending.txid == txid)
         {
-            return AdmissionResult::Accepted { txid };
+            return AdmissionResult::Accepted {
+                txid: txid.to_string(),
+            };
         }
         match self
             .interpreter
             .check_mempool_admission(&tx, &self.mempool.transactions)
         {
             Ok(()) => {
-                self.mempool.transactions.push(tx);
-                AdmissionResult::Accepted { txid }
+                let result = AdmissionResult::Accepted {
+                    txid: txid.to_string(),
+                };
+                self.mempool
+                    .transactions
+                    .push_back(PendingTransaction { txid, tx });
+                result
             }
             Err(error) => AdmissionResult::Rejected {
                 error: "transaction rejected".into(),
                 reason: error.reason,
                 reason_data: error.data,
-                txid: Some(txid),
+                txid: Some(txid.to_string()),
             },
         }
     }
 
     /// Select a ready transaction in submission order; leave nonce gaps queued.
     pub fn next_mempool_transaction(&mut self) -> Option<StacksTransaction> {
-        let index = self.mempool.transactions.iter().position(|tx| {
-            let mut ready = |principal, nonce| {
-                self.interpreter
-                    .get_nonce(&principal)
-                    .map_or(true, |current| nonce <= current)
-            };
-            ready(tx.origin_address().into(), tx.get_origin_nonce())
-                && tx
-                    .sponsor_address()
-                    .is_none_or(|address| ready(address.into(), tx.get_payer().nonce()))
-        })?;
-        Some(self.mempool.transactions.remove(index))
+        let index =
+            self.mempool
+                .transactions
+                .iter()
+                .position(|PendingTransaction { tx, .. }| {
+                    let mut ready = |principal, nonce| {
+                        self.interpreter
+                            .get_nonce(&principal)
+                            .map_or(true, |current| nonce <= current)
+                    };
+                    ready(tx.origin_address().into(), tx.get_origin_nonce())
+                        && tx
+                            .sponsor_address()
+                            .is_none_or(|address| ready(address.into(), tx.get_payer().nonce()))
+                })?;
+        self.mempool
+            .transactions
+            .remove(index)
+            .map(|pending| pending.tx)
     }
 }
 
@@ -141,7 +164,7 @@ impl ClarityInterpreter {
     fn check_mempool_admission(
         &mut self,
         tx: &StacksTransaction,
-        pending: &[StacksTransaction],
+        pending: &VecDeque<PendingTransaction>,
     ) -> Result<(), AdmissionError> {
         match &tx.payload {
             TransactionPayload::Coinbase(..) => {
@@ -212,25 +235,20 @@ impl ClarityInterpreter {
             // chaining policy once their node-specific account/error types are extracted.
             for (principal, actual, is_origin) in tx
                 .sponsor_address()
-                .map(|_| (payer.clone(), tx.get_payer().nonce(), false))
+                .map(|_| (&payer, tx.get_payer().nonce(), false))
                 .into_iter()
-                .chain(std::iter::once((
-                    origin.clone(),
-                    tx.get_origin_nonce(),
-                    true,
-                )))
+                .chain(std::iter::once((&origin, tx.get_origin_nonce(), true)))
             {
                 let expected = db
-                    .get_account_nonce(&principal)
+                    .get_account_nonce(principal)
                     .map_err(|e| AdmissionError::message("ServerFailureDatabase", e))?;
-                let data = json!({
-                    "expected": expected, "actual": actual,
-                    "principal": principal.to_string(), "is_origin": is_origin,
-                });
                 if actual < expected || actual == u64::MAX {
                     return Err(AdmissionError {
                         reason: "BadNonce",
-                        data,
+                        data: json!({
+                            "expected": expected, "actual": actual,
+                            "principal": principal.to_string(), "is_origin": is_origin,
+                        }),
                     });
                 }
                 // Pinned node's MAXIMUM_MEMPOOL_TX_CHAINING is 25; its upper
@@ -249,12 +267,12 @@ impl ClarityInterpreter {
                 }
                 // TODO(upstream): Separate MemPoolDB::try_add_tx's conflict/replacement
                 // policy from SQLite and fork lookup before sharing it with this queue.
-                if pending.iter().any(|queued| {
-                    (PrincipalData::from(queued.origin_address()) == principal
-                        && queued.get_origin_nonce() == actual)
+                if pending.iter().any(|PendingTransaction { tx: queued, .. }| {
+                    (queued.get_origin_nonce() == actual
+                        && PrincipalData::from(queued.origin_address()) == *principal)
                         || queued.sponsor_address().is_some_and(|address| {
-                            PrincipalData::from(address) == principal
-                                && queued.get_payer().nonce() == actual
+                            queued.get_payer().nonce() == actual
+                                && PrincipalData::from(address) == *principal
                         })
                 }) {
                     return Err(AdmissionError::new("ConflictingNonceInMempool"));

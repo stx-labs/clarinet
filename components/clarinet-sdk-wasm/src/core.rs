@@ -1321,7 +1321,7 @@ impl SDK {
                 "nonce": metadata.nonce.to_string(),
             })
         };
-        let response = match outcome {
+        match outcome {
             RawTransactionOutcome::Rejected { metadata, error } => {
                 json!({ "status": "rejected", "transaction": metadata.as_ref().map(metadata_json), "error": error })
             }
@@ -1378,13 +1378,12 @@ impl SDK {
                         let status: &'static str = kind.into();
                         json!({ "status": "included_failure", "kind": status, "execution": null, "transaction": transaction, "error": error,
                             "result": output.as_deref().map(clarity_values::to_raw_value),
-                            "events": serialize_events(&events), "costs": json!(cost).to_string(),
+                            "events": serialize_events(&events), "costs": serde_json::to_string(&cost).expect("execution cost is serializable"),
                             "performance": performance })
                     }
                 }
             }
-        };
-        response
+        }
     }
 
     #[wasm_bindgen(js_name=deployContract)]
