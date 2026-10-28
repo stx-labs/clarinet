@@ -634,6 +634,158 @@ mod tests {
         clarity::util::hash::to_hex(&tx.serialize_to_vec())
     }
 
+    fn signed_sponsored_transfer(
+        fixtures: &Json,
+        origin_key: u8,
+        sponsor_key: u8,
+        origin_nonce: u64,
+        sponsor_nonce: u64,
+    ) -> String {
+        use stacks_codec::transaction::TransactionAuth;
+        use stacks_common::types::chainstate::StacksPrivateKey;
+
+        let mut tx = decode(
+            fixtures["transactions"]["sponsored"]["hex"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let TransactionPayload::TokenTransfer(recipient, ..) = &mut tx.payload else {
+            panic!("sponsored transfer fixture");
+        };
+        *recipient = principal(fixtures, if origin_key == 1 { "sponsor" } else { "sender" });
+        let origin = StacksPrivateKey::from_hex(&format!("{origin_key:064x}01")).unwrap();
+        let sponsor = StacksPrivateKey::from_hex(&format!("{sponsor_key:064x}01")).unwrap();
+        tx.auth = TransactionAuth::from_p2pkh(&origin)
+            .unwrap()
+            .into_sponsored(TransactionAuth::from_p2pkh(&sponsor).unwrap())
+            .unwrap();
+        tx.set_origin_nonce(origin_nonce);
+        tx.set_sponsor_nonce(sponsor_nonce).unwrap();
+        tx.set_tx_fee(1000);
+        let sighash = tx.sign_next_origin(&tx.sign_begin(), &origin).unwrap();
+        tx.sign_next_sponsor(&sighash, &sponsor).unwrap();
+        tx.verify(TransactionAuthVerificationMode::EnforceLowS)
+            .unwrap();
+        clarity::util::hash::to_hex(&tx.serialize_to_vec())
+    }
+
+    fn rejects_mismatched_self_sponsor_nonces(origin_nonce: u64, sponsor_nonce: u64) {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let raw = signed_sponsored_transfer(&fixtures, 1, 1, origin_nonce, sponsor_nonce);
+        let admission = session.submit_transaction(&raw);
+        assert!(
+            matches!(admission, AdmissionResult::Rejected { .. }),
+            "a self-sponsored transaction with unequal nonces can never execute: {admission:?}",
+        );
+        assert!(session.next_mempool_transaction().is_none());
+        let valid = signed_sponsored_transfer(&fixtures, 1, 1, 0, 0);
+        assert!(matches!(
+            session.submit_transaction(&valid),
+            AdmissionResult::Accepted { .. }
+        ));
+        let tx = session.next_mempool_transaction().unwrap();
+        assert!(session.execute_transaction(&tx).is_included());
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sender")).unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn mempool_rejects_self_sponsor_with_future_sponsor_nonce() {
+        rejects_mismatched_self_sponsor_nonces(0, 1);
+    }
+
+    #[test]
+    fn mempool_rejects_self_sponsor_with_future_origin_nonce() {
+        rejects_mismatched_self_sponsor_nonces(1, 0);
+    }
+
+    #[test]
+    fn mempool_circular_sponsorship_does_not_block_both_accounts() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let first = signed_sponsored_transfer(&fixtures, 1, 2, 0, 1);
+        let second = signed_sponsored_transfer(&fixtures, 2, 1, 0, 1);
+        assert!(matches!(
+            session.submit_transaction(&first),
+            AdmissionResult::Accepted { .. }
+        ));
+        // A cycle may be prevented at admission or broken when mining.
+        let closing_admission = session.submit_transaction(&second);
+        for _ in 0..3 {
+            session.advance_chain_tip(1);
+            while let Some(tx) = session.next_mempool_transaction() {
+                session.execute_transaction(&tx);
+            }
+        }
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sender")).unwrap(),
+            0
+        );
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sponsor")).unwrap(),
+            0
+        );
+
+        let replacements: Vec<_> = [1, 2]
+            .into_iter()
+            .map(|key| {
+                session.submit_transaction(&signed_sponsored_transfer(&fixtures, key, key, 0, 0))
+            })
+            .collect();
+        assert!(
+            replacements.iter().any(|result| matches!(result, AdmissionResult::Accepted { .. })),
+            "cycle blocks both accounts: closing admission={closing_admission:?}, replacements={replacements:?}",
+        );
+        session.advance_chain_tip(1);
+        let mut included = false;
+        while let Some(tx) = session.next_mempool_transaction() {
+            included |= session.execute_transaction(&tx).is_included();
+        }
+        assert!(
+            included,
+            "breaking the cycle must allow an account to advance"
+        );
+    }
+
+    #[test]
+    fn mempool_acyclic_sponsorship_mines_predecessor_before_dependent() {
+        use crate::repl::mempool::AdmissionResult;
+
+        let fixtures = fixtures();
+        let mut session = session(&fixtures);
+        let dependent = signed_sponsored_transfer(&fixtures, 1, 2, 0, 1);
+        let predecessor = signed_sponsored_transfer(&fixtures, 2, 2, 0, 0);
+        for raw in [&dependent, &predecessor] {
+            assert!(matches!(
+                session.submit_transaction(raw),
+                AdmissionResult::Accepted { .. }
+            ));
+        }
+        session.advance_chain_tip(1);
+        for raw in [&predecessor, &dependent] {
+            let tx = session.next_mempool_transaction().unwrap();
+            assert_eq!(tx.txid(), decode(raw).unwrap().txid());
+            assert!(session.execute_transaction(&tx).is_included());
+        }
+        assert!(session.next_mempool_transaction().is_none());
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sender")).unwrap(),
+            1
+        );
+        assert_eq!(
+            session.get_nonce(&principal(&fixtures, "sponsor")).unwrap(),
+            2
+        );
+    }
+
     fn stale_sponsored_transaction_releases_other_nonce(stale_origin: bool) {
         use stacks_common::types::chainstate::StacksPrivateKey;
 
