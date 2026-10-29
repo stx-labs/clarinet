@@ -2,6 +2,8 @@ import { Cl, serializeCVBytes } from "@stacks/transactions";
 
 import {
   parseBlockTransactionResult,
+  validateClarityVersion,
+  mineBlockWithValidatedVersions,
   parseTransactionResult,
   type SerializedTransactionResult,
   type SerializedBlockTransactionResult,
@@ -125,6 +127,7 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
           sender,
           postConditionOptions,
         ) => {
+          validateClarityVersion(options?.clarityVersion);
           const rustOptions = options
             ? new ContractOptions(options.clarityVersion)
             : new ContractOptions();
@@ -165,31 +168,32 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
       }
 
       if (prop === "mineBlock") {
-        const mineBlock: MineBlock = (txs = []) => {
-          const serializedTxs = txs.map((tx) => {
-            if (tx.callPublicFn) {
-              return {
-                callPublicFn: {
-                  ...tx.callPublicFn,
-                  args_maps: tx.callPublicFn.args.map(serializeCVBytes),
-                },
-              };
-            }
-            if (tx.callPrivateFn) {
-              return {
-                callPrivateFn: {
-                  ...tx.callPrivateFn,
-                  args_maps: tx.callPrivateFn.args.map(serializeCVBytes),
-                },
-              };
-            }
-            if (tx.deployContract) {
-              return { deployContract: { ...tx.deployContract } };
-            }
-            return tx;
+        const mineBlock: MineBlock = (txs = []) =>
+          mineBlockWithValidatedVersions(txs, (txs) => {
+            const serializedTxs = txs.map((tx) => {
+              if (tx.callPublicFn) {
+                return {
+                  callPublicFn: {
+                    ...tx.callPublicFn,
+                    args_maps: tx.callPublicFn.args.map(serializeCVBytes),
+                  },
+                };
+              }
+              if (tx.callPrivateFn) {
+                return {
+                  callPrivateFn: {
+                    ...tx.callPrivateFn,
+                    args_maps: tx.callPrivateFn.args.map(serializeCVBytes),
+                  },
+                };
+              }
+              if (tx.deployContract) {
+                return { deployContract: { ...tx.deployContract } };
+              }
+              return tx;
+            });
+            return sdk.mineBlock(serializedTxs).map(parseBlockTransactionResult);
           });
-          return sdk.mineBlock(serializedTxs).map(parseBlockTransactionResult);
-        };
         return mineBlock;
       }
 

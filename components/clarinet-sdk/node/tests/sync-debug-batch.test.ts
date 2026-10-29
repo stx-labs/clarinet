@@ -176,3 +176,43 @@ it("submits to the debug mempool and parses signed mining metadata", () => {
   });
   expect(vi.mocked(syncSend).mock.calls[2][0]).toEqual({ method: "mineBlock", txs: [] });
 });
+
+it("rejects invalid versions before JSON serialization and preserves queued result order", () => {
+  vi.mocked(syncSend).mockReset();
+  const sender = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+  const execution = { result: serializeCV(Cl.ok(Cl.bool(true))), events: "[]", costs: "null" };
+  const queued = {
+    status: "success",
+    transaction: { txid: "ab".repeat(32), fee: "1000", nonce: "0" },
+    execution,
+  };
+  vi.mocked(syncSend)
+    .mockReturnValueOnce(JSON.stringify({ result: { accounts: { deployer: sender } } }))
+    .mockReturnValueOnce(
+      JSON.stringify({ result: { results: [queued, { status: "success", execution }] } }),
+    );
+  const simnet = createSyncDebugSimnet();
+  const versions: unknown[] = [NaN, Infinity, 1.5, 4294967297, "1", true, null, 1n];
+  const invalid = versions.map((version, index) =>
+    tx.deployContract(`bad-${index}`, "true", { clarityVersion: version as number }, sender),
+  );
+  const results = simnet.mineBlock([
+    ...invalid,
+    tx.deployContract("valid", "true", { clarityVersion: 1 }, sender),
+  ]);
+  expect(results[0]).toMatchObject({
+    status: "success",
+    transaction: { txid: queued.transaction.txid },
+  });
+  expect(results.slice(1, -1)).toEqual(
+    versions.map(() => ({
+      status: "rejected",
+      error: "Invalid Clarity version: expected an unsigned 32-bit integer",
+    })),
+  );
+  expect(results.at(-1)?.status).toBe("success");
+  expect(vi.mocked(syncSend).mock.calls[1][0]).toMatchObject({
+    method: "mineBlock",
+    txs: [{ type: "deployContract", name: "valid", options: { clarityVersion: 1 } }],
+  });
+});

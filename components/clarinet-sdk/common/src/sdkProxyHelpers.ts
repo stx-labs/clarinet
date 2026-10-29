@@ -193,6 +193,45 @@ export type Tx =
       } & SerializedPostConditions;
     };
 
+/** Validate before Wasm integer coercion or JSON serialization can change the value. */
+export function validateClarityVersion(version: unknown): void {
+  if (version === undefined) return;
+  if (
+    typeof version !== "number" ||
+    !Number.isInteger(version) ||
+    version < 0 ||
+    version > 0xffffffff
+  ) {
+    throw new Error("Invalid Clarity version: expected an unsigned 32-bit integer");
+  }
+}
+
+/** Keep invalid versions as per-entry rejections, including when mining queued transactions. */
+export function mineBlockWithValidatedVersions(
+  txs: Tx[],
+  mine: (txs: Tx[]) => BlockTransactionResult[],
+): BlockTransactionResult[] {
+  const valid: Tx[] = [];
+  const errors = txs.map((entry) => {
+    try {
+      validateClarityVersion(entry.deployContract?.options?.clarityVersion);
+      valid.push(entry);
+      return undefined;
+    } catch (error) {
+      return (error as Error).message;
+    }
+  });
+  const results = mine(valid);
+  const queuedCount = results.length - valid.length;
+  let index = queuedCount;
+  return [
+    ...results.slice(0, queuedCount),
+    ...errors.map((error): BlockTransactionResult =>
+      error === undefined ? results[index++] : { status: "rejected", error },
+    ),
+  ];
+}
+
 export const tx = {
   callPublicFn: (
     contract: string,

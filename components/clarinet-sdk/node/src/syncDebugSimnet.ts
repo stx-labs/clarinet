@@ -11,6 +11,7 @@ import { Cl, serializeCV, type ClarityValue } from "@stacks/transactions";
 import { syncSend } from "./syncDebugSocket.js";
 import {
   parseEvents,
+  mineBlockWithValidatedVersions,
   parseBlockTransactionResult,
   type BlockTransactionResult,
   type BroadcastTransactionResult,
@@ -169,58 +170,60 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
     },
 
     mineBlock(txs: Tx[] = []): BlockTransactionResult[] {
-      const serialized = txs.map((tx) => {
-        if (tx.broadcastTx !== undefined) return { type: "broadcastTx", rawHex: tx.broadcastTx };
-        if (tx.callPublicFn) {
-          return {
-            type: "callPublicFn",
-            contract: tx.callPublicFn.contract,
-            function: tx.callPublicFn.method,
-            args: tx.callPublicFn.args.map(serializeCV),
-            sender: tx.callPublicFn.sender,
-            postConditions: tx.callPublicFn.postConditions,
-            postConditionMode: tx.callPublicFn.postConditionMode,
-          };
-        }
-        if (tx.callPrivateFn) {
-          return {
-            type: "callPrivateFn",
-            contract: tx.callPrivateFn.contract,
-            function: tx.callPrivateFn.method,
-            args: tx.callPrivateFn.args.map(serializeCV),
-            sender: tx.callPrivateFn.sender,
-            postConditions: tx.callPrivateFn.postConditions,
-            postConditionMode: tx.callPrivateFn.postConditionMode,
-          };
-        }
-        if (tx.deployContract) {
-          return {
-            type: "deployContract",
-            name: tx.deployContract.name,
-            content: tx.deployContract.content,
-            sender: tx.deployContract.sender,
-            options: tx.deployContract.options,
-            postConditions: tx.deployContract.postConditions,
-            postConditionMode: tx.deployContract.postConditionMode,
-          };
-        }
-        if (tx.transferSTX) {
-          return {
-            type: "transferSTX",
-            amount: tx.transferSTX.amount,
-            recipient: tx.transferSTX.recipient,
-            sender: tx.transferSTX.sender,
-            postConditions: tx.transferSTX.postConditions,
-            postConditionMode: tx.transferSTX.postConditionMode,
-          };
-        }
-        return { type: "unknown" };
-      });
+      return mineBlockWithValidatedVersions(txs, (txs) => {
+        const serialized = txs.map((tx) => {
+          if (tx.broadcastTx !== undefined) return { type: "broadcastTx", rawHex: tx.broadcastTx };
+          if (tx.callPublicFn) {
+            return {
+              type: "callPublicFn",
+              contract: tx.callPublicFn.contract,
+              function: tx.callPublicFn.method,
+              args: tx.callPublicFn.args.map(serializeCV),
+              sender: tx.callPublicFn.sender,
+              postConditions: tx.callPublicFn.postConditions,
+              postConditionMode: tx.callPublicFn.postConditionMode,
+            };
+          }
+          if (tx.callPrivateFn) {
+            return {
+              type: "callPrivateFn",
+              contract: tx.callPrivateFn.contract,
+              function: tx.callPrivateFn.method,
+              args: tx.callPrivateFn.args.map(serializeCV),
+              sender: tx.callPrivateFn.sender,
+              postConditions: tx.callPrivateFn.postConditions,
+              postConditionMode: tx.callPrivateFn.postConditionMode,
+            };
+          }
+          if (tx.deployContract) {
+            return {
+              type: "deployContract",
+              name: tx.deployContract.name,
+              content: tx.deployContract.content,
+              sender: tx.deployContract.sender,
+              options: tx.deployContract.options,
+              postConditions: tx.deployContract.postConditions,
+              postConditionMode: tx.deployContract.postConditionMode,
+            };
+          }
+          if (tx.transferSTX) {
+            return {
+              type: "transferSTX",
+              amount: tx.transferSTX.amount,
+              recipient: tx.transferSTX.recipient,
+              sender: tx.transferSTX.sender,
+              postConditions: tx.transferSTX.postConditions,
+              postConditionMode: tx.transferSTX.postConditionMode,
+            };
+          }
+          return { type: "unknown" };
+        });
 
-      const resp = send({ method: "mineBlock", txs: serialized }) as {
-        results: SerializedBlockTransactionResult[];
-      };
-      return (resp.results ?? []).map(parseBlockTransactionResult);
+        const resp = send({ method: "mineBlock", txs: serialized }) as {
+          results: SerializedBlockTransactionResult[];
+        };
+        return (resp.results ?? []).map(parseBlockTransactionResult);
+      });
     },
 
     callPublicFn(

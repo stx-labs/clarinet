@@ -97,6 +97,55 @@ it.each([0, 99, 257])("rejects Clarity version %i instead of using a default", (
   expect(simnet.getContractsInterfaces().has(`${sender}.versioned`)).toBe(false);
 });
 
+it("rejects non-integer versions without coercion and continues mining valid entries", () => {
+  const versions: unknown[] = [
+    1.5,
+    4294967297,
+    -4294967295,
+    Number.MAX_SAFE_INTEGER,
+    NaN,
+    Infinity,
+    -Infinity,
+    "1",
+    true,
+    false,
+    null,
+    1n,
+    [1],
+    {},
+  ];
+  const nonce = simnet.getAccountNonce(sender);
+  const height = simnet.blockHeight;
+  const error = "Invalid Clarity version: expected an unsigned 32-bit integer";
+  const entries = versions.map((version, index) => {
+    // Exercise JavaScript callers that do not have TypeScript's number constraint.
+    const options = { clarityVersion: version as number };
+    const name = `invalid-version-${index}`;
+    expect(() => simnet.deployContract(name, "true", options, sender)).toThrow(error);
+    return tx.deployContract(name, "true", options, sender);
+  });
+  expect(simnet.blockHeight).toBe(height);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce);
+
+  const results = simnet.mineBlock([
+    tx.deployContract("before-invalid-versions", "true", { clarityVersion: 1 }, sender),
+    ...entries,
+    tx.deployContract("after-invalid-versions", "true", null, sender),
+  ]);
+  expect(results[0].status).toBe("success");
+  expect(results.slice(1, -1)).toEqual(versions.map(() => ({ status: "rejected", error })));
+  expect(results.at(-1)?.status).toBe("success");
+  expect(simnet.blockHeight).toBe(height + 1);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce + 2n);
+  for (let index = 0; index < versions.length; index++) {
+    expect(simnet.getContractsInterfaces().has(`${sender}.invalid-version-${index}`)).toBe(false);
+  }
+
+  expect(simnet.mineBlock(entries)).toEqual(versions.map(() => ({ status: "rejected", error })));
+  expect(simnet.blockHeight).toBe(height + 2);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce + 2n);
+});
+
 it("rejects a duplicate deployment before analysis without consuming a nonce", () => {
   simnet.deployContract("existing", "(define-data-var answer uint u42)", null, sender);
   const nonce = simnet.getAccountNonce(sender);
