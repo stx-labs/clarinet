@@ -664,7 +664,7 @@ fn execute_block_entry(
     }
     use clarity::vm::analysis::contract_interface_builder::ContractInterfaceFunctionAccess;
     use clarity::vm::types::Value;
-    use clarity::vm::{ClarityVersion, ExecutionResult, SymbolicExpression};
+    use clarity::vm::{ClarityVersion, ExecutionResult};
     use clarity_repl::repl::interpreter::BlockInclusion;
     use clarity_repl::repl::post_conditions::{
         parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
@@ -736,7 +736,6 @@ fn execute_block_entry(
                         let bytes = hex_bytes(hex.strip_prefix("0x").unwrap_or(hex))
                             .map_err(|e| reject(format!("Invalid argument: {e}")))?;
                         value_from_bytes_exact(&bytes)
-                            .map(SymbolicExpression::atom_value)
                             .map_err(|e| reject(format!("Invalid Clarity argument: {e}")))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -773,7 +772,7 @@ fn execute_block_entry(
                     .call_contract_fn_with_hooks(
                         contract,
                         method,
-                        &args,
+                        args,
                         sender,
                         operation == "callPrivateFn",
                         false,
