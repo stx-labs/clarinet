@@ -85,7 +85,6 @@ export type SyncDebugSimnet = {
     sender: string,
   ): ParsedTransactionResult;
   execute(snippet: string): ParsedTransactionResult;
-  runSnippet(snippet: string): string;
   getAssetsMap(): Map<string, Map<string, bigint>>;
   getLastContractCallTrace(): string | undefined;
   setCurrentTestName(name: string): void;
@@ -163,11 +162,6 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
     ): { coverage: string; costs: string } {
       // Debug mode does not support coverage/cost reports.
       throw new Error("collectReport: coverage and cost reports are not supported in debug mode");
-    },
-
-    runSnippet(snippet: string): string {
-      const resp = send({ method: "execute", snippet }) as ServerTxResult;
-      return Cl.stringify(Cl.deserialize(resp.result));
     },
 
     broadcastTransaction(rawHex: string): BroadcastTransactionResult {

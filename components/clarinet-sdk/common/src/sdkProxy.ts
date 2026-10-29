@@ -27,12 +27,8 @@ type ProxySdk = {
   getDataVar(contract: string, varName: string): string;
   getMapEntry(contract: string, mapName: string, mapKey: Uint8Array): string;
   mineBlock(txs: unknown[]): SerializedBlockTransactionResult[];
-  runSnippet(snippet: string): string;
   transferSTX(args: unknown): SerializedTransactionResult;
 };
-
-/** @deprecated use `simnet.execute(command)` instead */
-type RunSnippet<S extends ProxySdk> = S["runSnippet"];
 
 export type ProxiedSimnet<S extends ProxySdk> = {
   [K in keyof S]: K extends "broadcastTransaction"
@@ -43,19 +39,17 @@ export type ProxiedSimnet<S extends ProxySdk> = {
         ? CallFn
         : K extends "execute"
           ? Execute
-          : K extends "runSnippet"
-            ? RunSnippet<S>
-            : K extends "deployContract"
-              ? DeployContract
-              : K extends "transferSTX"
-                ? TransferSTX
-                : K extends "mineBlock"
-                  ? MineBlock
-                  : K extends "getDataVar"
-                    ? GetDataVar
-                    : K extends "getMapEntry"
-                      ? GetMapEntry
-                      : S[K];
+          : K extends "deployContract"
+            ? DeployContract
+            : K extends "transferSTX"
+              ? TransferSTX
+              : K extends "mineBlock"
+                ? MineBlock
+                : K extends "getDataVar"
+                  ? GetDataVar
+                  : K extends "getMapEntry"
+                    ? GetMapEntry
+                    : S[K];
 };
 
 type ProxyBindings<ContractOptions> = {

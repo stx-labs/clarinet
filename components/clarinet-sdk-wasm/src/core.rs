@@ -1576,27 +1576,6 @@ impl SDK {
         session.advance_burn_chain_tip(count.unwrap_or(1))
     }
 
-    #[wasm_bindgen(js_name=runSnippet)]
-    pub fn run_snippet(&mut self, snippet: String) -> String {
-        let session = self.get_session_mut();
-        let snippet = session.remap_user_snippet(snippet);
-        match session.eval(snippet, false) {
-            Ok(res) => match res.into_inner().result {
-                EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
-                EvaluationResult::Contract(_) => unreachable!(
-                    "Contract evaluation result should not be returned from eval_snippet",
-                ),
-            },
-            Err(diagnostics) => {
-                let mut message = "error:".to_string();
-                diagnostics.iter().for_each(|d| {
-                    message = format!("{message}\n{}", d.diagnostic.message);
-                });
-                message
-            }
-        }
-    }
-
     #[wasm_bindgen(js_name=execute)]
     pub fn execute(&mut self, snippet: String) -> Result<TransactionRes, String> {
         let session = self.get_session_mut();
