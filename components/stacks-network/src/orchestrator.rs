@@ -723,8 +723,6 @@ impl DevnetOrchestrator {
             ));
         }
 
-        // Arguments only: the image entrypoint runs bitcoind (`bitcoind` in lncm/bitcoind,
-        // a root script that fixes datadir ownership then drops privileges in bitcoin/bitcoin).
         let mut cmd_args = vec![
             "-conf=/etc/bitcoin/bitcoin.conf".into(),
             "-nodebuglogfile".into(),
