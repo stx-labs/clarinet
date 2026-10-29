@@ -113,3 +113,45 @@ jobs:
 
       - name: Publish to Open VSX
         run: npx -y ovsx@1.3.0 publish --packagePath clarity.vsix --trusted-publishing
+
+  debug-open-vsx-trusted-publishing:
+    name: Debug Open VSX trusted publishing
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: release-vscode-extension
+
+    permissions:
+      id-token: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Print token claims and try the exchange
+        run: |
+          id_token=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://open-vsx.org" | jq -r .value)
+          echo "::add-mask::$id_token"
+
+          echo "$id_token" | python3 -c '
+          import base64, json, sys
+          payload = sys.stdin.read().strip().split(".")[1]
+          claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+          keys = ["iss", "aud", "sub", "repository", "repository_id", "repository_owner",
+                  "repository_owner_id", "workflow_ref", "job_workflow_ref", "environment", "ref", "event_name"]
+          print(json.dumps({k: claims.get(k) for k in keys}, indent=2))
+          '
+
+          jq -n --arg token "$id_token" '{namespace: "stackslabs", extension: "clarity-stacks", token: $token}' \
+            | curl -sS -X POST https://open-vsx.org/api/-/trusted-publishing/token \
+                -H 'Content-Type: application/json' --data-binary @- -w '\nHTTP %{http_code}\n' \
+            | python3 -c '
+          import json, sys
+          body, status = sys.stdin.read().rsplit("\n", 2)[:2]
+          try:
+              data = json.loads(body)
+              print(json.dumps({"error": data.get("error"), "issued": bool(data.get("value")),
+                                "expiresTimestamp": data.get("expiresTimestamp")}, indent=2))
+          except ValueError:
+              print(body)
+          print(status)
+          '
