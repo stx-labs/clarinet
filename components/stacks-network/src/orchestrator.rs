@@ -2477,13 +2477,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            let data_dir = root
-                .path()
-                .join("devnet")
-                .join("data")
-                .join("1")
-                .join("bitcoin");
-            let uid = fs::metadata(data_dir).unwrap().uid();
+            let uid = fs::metadata(root.path()).unwrap().uid();
             assert_eq!(config.env.unwrap(), vec![format!("UID={uid}")]);
         }
         #[cfg(not(unix))]

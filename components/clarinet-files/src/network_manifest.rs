@@ -1485,7 +1485,9 @@ mod tests {
         let (name_and_tag, digest) = DEFAULT_BITCOIN_NODE_IMAGE
             .split_once('@')
             .expect("The default bitcoin image should be pinned by digest");
-        assert!(digest.starts_with("sha256:") && digest.len() == "sha256:".len() + 64);
+        assert!(digest
+            .strip_prefix("sha256:")
+            .is_some_and(|hex| hex.len() == 64));
 
         let (name, tag) = name_and_tag.rsplit_once(':').unwrap();
         assert_eq!(name, "bitcoin/bitcoin");
