@@ -12,7 +12,6 @@ use clarity::vm::hooks::EvalHook;
 use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{
     ClarityName, ClarityVersion, CostSynthesis, EvaluationResult, ExecutionResult, ParsedContract,
-    SymbolicExpression,
 };
 use clarity_types::types::{AssetIdentifier, PrincipalData, QualifiedContractIdentifier};
 use clarity_types::Value;
@@ -1024,7 +1023,7 @@ impl Session {
         &mut self,
         contract: &str,
         method: &str,
-        args: &[SymbolicExpression],
+        args: Vec<Value>,
         sender: &str,
         allow_private: bool,
         track_costs: bool,
@@ -1050,7 +1049,7 @@ impl Session {
         &mut self,
         contract: &str,
         method: &str,
-        args: &[SymbolicExpression],
+        args: Vec<Value>,
         sender: &str,
         allow_private: bool,
         track_costs: bool,
@@ -1171,13 +1170,12 @@ impl Session {
     }
 
     /// Evaluate a Clarity snippet in order to use it as Clarity function arguments
-    pub fn eval_clarity_string(&mut self, snippet: &str) -> SymbolicExpression {
+    pub fn eval_clarity_string(&mut self, snippet: &str) -> Value {
         let eval_result = self.eval(snippet.to_string(), false);
-        let value = match eval_result.unwrap().execution_result.result {
+        match eval_result.unwrap().execution_result.result {
             EvaluationResult::Contract(_) => unreachable!(),
             EvaluationResult::Snippet(snippet_result) => snippet_result.result,
-        };
-        SymbolicExpression::atom_value(value)
+        }
     }
 
     pub fn eval_with_hooks(
@@ -2449,7 +2447,7 @@ mod tests {
                 .call_contract_fn(
                     &format!("{sender}.contract"),
                     method,
-                    &[],
+                    vec![],
                     sender,
                     false,
                     false,
@@ -2681,7 +2679,7 @@ mod tests {
             .call_contract_fn(
                 &format!("{sender}.never-deployed"),
                 "whatever",
-                &[],
+                vec![],
                 sender,
                 false,
                 false,
@@ -2764,7 +2762,7 @@ mod tests {
             .call_contract_fn(
                 &contract_id,
                 "incr",
-                &[],
+                vec![],
                 sender,
                 false,
                 false,
@@ -2778,7 +2776,7 @@ mod tests {
             .call_contract_fn(
                 &contract_id,
                 "get-x",
-                &[],
+                vec![],
                 sender,
                 false,
                 false,
@@ -2936,24 +2934,19 @@ mod tests {
         session.update_epoch(epoch);
 
         let result = session.eval_clarity_string("u1");
-        assert_eq!(result, SymbolicExpression::atom_value(Value::UInt(1)));
+        assert_eq!(result, Value::UInt(1));
 
         let result = session.eval_clarity_string("(+ 1 2)");
-        assert_eq!(result, SymbolicExpression::atom_value(Value::Int(3)));
+        assert_eq!(result, Value::Int(3));
 
         let result = session.eval_clarity_string("(list u1 u2)");
         assert_eq!(
             result,
-            SymbolicExpression::atom_value(
-                Value::cons_list_unsanitized(vec![Value::UInt(1), Value::UInt(2)]).unwrap()
-            )
+            Value::cons_list_unsanitized(vec![Value::UInt(1), Value::UInt(2)]).unwrap()
         );
 
         let result = session.eval_clarity_string("0x01");
-        assert_eq!(
-            result,
-            SymbolicExpression::atom_value(Value::buff_from_byte(0x01))
-        );
+        assert_eq!(result, Value::buff_from_byte(0x01));
     }
 
     #[test]
@@ -3064,7 +3057,7 @@ mod tests {
         let result = session.call_contract_fn(
             format!("{BOOT_MAINNET_ADDRESS}.pox-4").as_str(),
             "get-pox-info",
-            &[],
+            vec![],
             BOOT_TESTNET_ADDRESS,
             false,
             false,
@@ -3120,16 +3113,16 @@ mod tests {
 
         // Initialize pox-5 burnchain parameters (mimics stacks-core's
         // initialize_epoch_4_0)
-        let args = [
-            SymbolicExpression::atom_value(Value::UInt(0)), // first-burn-height
-            SymbolicExpression::atom_value(Value::UInt(10)), // prepare-cycle-length
-            SymbolicExpression::atom_value(Value::UInt(100)), // reward-cycle-length
-            SymbolicExpression::atom_value(Value::UInt(1)), // begin-pox5-reward-cycle
+        let args = vec![
+            Value::UInt(0),   // first-burn-height
+            Value::UInt(10),  // prepare-cycle-length
+            Value::UInt(100), // reward-cycle-length
+            Value::UInt(1),   // begin-pox5-reward-cycle
         ];
         let result = session.call_contract_fn(
             &format!("{BOOT_MAINNET_ADDRESS}.pox-5"),
             "set-burnchain-parameters",
-            &args,
+            args,
             BOOT_MAINNET_ADDRESS,
             false,
             false,
@@ -3142,7 +3135,7 @@ mod tests {
         let result = session.call_contract_fn(
             &format!("{BOOT_MAINNET_ADDRESS}.pox-5"),
             "get-first-pox-5-reward-cycle",
-            &[],
+            vec![],
             BOOT_MAINNET_ADDRESS,
             false,
             false,
@@ -3155,7 +3148,7 @@ mod tests {
         let result = session.call_contract_fn(
             &format!("{BOOT_MAINNET_ADDRESS}.pox-5"),
             "current-pox-reward-cycle",
-            &[],
+            vec![],
             BOOT_MAINNET_ADDRESS,
             false,
             false,
@@ -3178,7 +3171,7 @@ mod tests {
         let result = session.call_contract_fn(
             "contract",
             "incr",
-            &[],
+            vec![],
             &session.get_tx_sender(),
             false,
             false,
@@ -3190,7 +3183,7 @@ mod tests {
         let result = session.call_contract_fn(
             "contract",
             "get-x",
-            &[],
+            vec![],
             &session.get_tx_sender(),
             false,
             false,
@@ -3397,7 +3390,7 @@ mod tests {
         let result = session.call_contract_fn(
             "contract",
             "doesnt-exist",
-            &[],
+            vec![],
             &session.get_tx_sender(),
             false,
             false,
@@ -3434,7 +3427,7 @@ mod tests {
                 .call_contract_fn(
                     contract,
                     function,
-                    &[],
+                    vec![],
                     &sender,
                     false,
                     false,

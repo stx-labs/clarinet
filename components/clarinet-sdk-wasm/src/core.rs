@@ -18,7 +18,7 @@ use clarity::vm::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
 };
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
-use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
+use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, Value};
 use clarity_repl::repl::boot::{
     remap_mainnet_boot_principals, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS,
 };
@@ -156,11 +156,10 @@ impl CallFnArgs {
 }
 
 /// Decode contract-call arguments as a node decodes a transaction's.
-fn decode_call_args(args: &[Vec<u8>]) -> Result<Vec<SymbolicExpression>, String> {
+fn decode_call_args(args: &[Vec<u8>]) -> Result<Vec<Value>, String> {
     args.iter()
         .map(|arg| {
             value_from_bytes_exact(arg)
-                .map(SymbolicExpression::atom_value)
                 .map_err(|error| format!("Invalid Clarity argument: {error}"))
         })
         .collect()
@@ -1036,13 +1035,18 @@ impl SDK {
             post_condition_mode.as_deref(),
             sender,
         )?;
+        let cost_args: Vec<String> = if track_costs {
+            parsed_args.iter().map(ToString::to_string).collect()
+        } else {
+            vec![]
+        };
 
         let session = self.get_session_mut();
         let execution = session
             .call_contract_fn(
                 contract,
                 method,
-                &parsed_args,
+                parsed_args,
                 sender,
                 allow_private,
                 track_costs,
@@ -1089,7 +1093,7 @@ impl SDK {
                     test_name,
                     contract_id,
                     method: method.to_string(),
-                    args: parsed_args.iter().map(|a| a.to_string()).collect(),
+                    args: cost_args,
                     cost_result: cost.clone(),
                 });
             }

@@ -655,7 +655,7 @@ impl DevnetOrchestrator {
         bitcoind_data_path.push("data");
         bitcoind_data_path.push(format!("{boot_index}"));
         bitcoind_data_path.push("bitcoin");
-        fs::create_dir_all(bitcoind_data_path)
+        fs::create_dir_all(&bitcoind_data_path)
             .map_err(|e| format!("unable to create bitcoin directory: {e:?}"))?;
 
         let exposed_ports = HashMap::from([
@@ -675,6 +675,16 @@ impl DevnetOrchestrator {
         if devnet_config.bitcoin_controller_automining_disabled {
             env.push("STACKS_BITCOIN_AUTOMINING_DISABLED=1".to_string());
         }
+        // The bitcoin/bitcoin entrypoint runs bitcoind under this uid, so files in the
+        // bind-mounted datadir and those restored by `docker cp` stay owned by the host user.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let uid = fs::metadata(&bitcoind_data_path)
+                .map_err(|e| format!("unable to read bitcoin directory metadata: {e:?}"))?
+                .uid();
+            env.push(format!("UID={uid}"));
+        }
 
         let working_dir = &devnet_config.working_dir;
         let mut binds = vec![format!("{working_dir}/conf:/etc/bitcoin")];
@@ -686,7 +696,6 @@ impl DevnetOrchestrator {
         }
 
         let mut cmd_args = vec![
-            "/usr/local/bin/bitcoind".into(),
             "-conf=/etc/bitcoin/bitcoin.conf".into(),
             "-nodebuglogfile".into(),
             format!("-pid={BITCOIND_DATA_DIR}/bitcoind.pid"),
@@ -697,12 +706,10 @@ impl DevnetOrchestrator {
         }
         let config = Config {
             labels: Some(labels),
-            user: Some("1000".to_string()), // Run as user 10000
             image: Some(devnet_config.bitcoin_node_image_url.clone()),
             domainname: Some(self.network_name.to_string()),
             tty: None,
             exposed_ports: Some(exposed_ports),
-            entrypoint: Some(vec![]),
             env: Some(env),
             host_config: Some(HostConfig {
                 auto_remove: Some(true),
@@ -811,7 +818,8 @@ impl DevnetOrchestrator {
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
-        // Copied before start: bitcoind would otherwise race the copy and reindex a partial datadir
+        // Copied before start: bitcoind would otherwise race the copy and reindex a partial
+        // datadir, and the image entrypoint only chowns what is already there
         if !no_snapshot {
             let devnet_config = self.devnet_config();
             let bitcoin_snapshot = get_global_snapshot_dir(devnet_config)
@@ -2377,6 +2385,8 @@ pub async fn copy_snapshot_to_container(
 
 #[cfg(test)]
 mod tests {
+    use clarinet_files::DEFAULT_BITCOIN_NODE_IMAGE;
+
     use super::*;
 
     fn test_orchestrator() -> (tempfile::TempDir, DevnetOrchestrator) {
@@ -2401,6 +2411,34 @@ mod tests {
         let conf = fs::read_to_string(root.path().join("devnet").join("conf").join("bitcoin.conf"))
             .unwrap();
         assert!(!conf.contains("rpcserialversion"));
+    }
+
+    #[test]
+    fn bitcoin_node_runs_through_the_image_entrypoint() {
+        let (root, orchestrator) = test_orchestrator();
+
+        let config = orchestrator.prepare_bitcoin_node_config(1, true).unwrap();
+        assert_eq!(config.image.as_deref(), Some(DEFAULT_BITCOIN_NODE_IMAGE));
+        // bitcoin/bitcoin drops privileges in its entrypoint, which needs to start as root
+        assert_eq!(config.user, None);
+        assert_eq!(config.entrypoint, None);
+        let cmd = config.cmd.unwrap();
+        assert!(cmd.iter().all(|arg| arg.starts_with('-')), "{cmd:?}");
+        assert_eq!(cmd[0], "-conf=/etc/bitcoin/bitcoin.conf");
+        assert!(cmd.contains(&format!("-datadir={BITCOIND_DATA_DIR}")));
+        assert!(!cmd.contains(&"-reindex".to_string()));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let uid = fs::metadata(root.path()).unwrap().uid();
+            assert_eq!(config.env.unwrap(), vec![format!("UID={uid}")]);
+        }
+        #[cfg(not(unix))]
+        assert_eq!(config.env.unwrap(), Vec::<String>::new());
+
+        let with_snapshot = orchestrator.prepare_bitcoin_node_config(1, false).unwrap();
+        assert!(with_snapshot.cmd.unwrap().contains(&"-reindex".to_string()));
     }
 
     #[test]

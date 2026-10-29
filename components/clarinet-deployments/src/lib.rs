@@ -17,9 +17,7 @@ use clarity::util::hash::Sha256Sum;
 use clarity::vm::ast::ContractAST;
 use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
-use clarity::vm::{
-    ClarityVersion, ContractName, EvaluationResult, ExecutionResult, SymbolicExpression,
-};
+use clarity::vm::{ClarityVersion, ContractName, EvaluationResult, ExecutionResult, Value};
 use clarity_repl::analysis::ast_dependency_detector::{ASTDependencyDetector, DependencySet};
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::repl::boot::{
@@ -644,7 +642,7 @@ fn handle_emulated_contract_call(
     let default_tx_sender = session.get_tx_sender();
     session.set_tx_sender(&tx.emulated_sender.to_string());
 
-    let params: Vec<SymbolicExpression> = tx
+    let params: Vec<Value> = tx
         .parameters
         .iter()
         .map(|p| session.eval_clarity_string(p))
@@ -653,7 +651,7 @@ fn handle_emulated_contract_call(
     let result = session.call_contract_fn(
         &tx.contract_id.to_string(),
         &tx.method.to_string(),
-        &params,
+        params,
         &tx.emulated_sender.to_string(),
         true,
         false,
