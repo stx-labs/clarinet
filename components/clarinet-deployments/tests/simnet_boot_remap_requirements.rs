@@ -594,7 +594,7 @@ async fn check_requirement_withdrawal(ft_amount: u64, should_commit: bool) {
             failure
                 .diagnostics
                 .iter()
-                .any(|d| d.message.contains("Post-condition")),
+                .any(|d| d.diagnostic.message.contains("Post-condition")),
             "{:?}",
             failure.diagnostics
         );

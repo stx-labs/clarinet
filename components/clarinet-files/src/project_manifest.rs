@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clarity::types::StacksEpochId;
+use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::ClarityVersion;
-use clarity_repl::repl;
 use clarity_repl::repl::boot::BOOT_CONTRACTS_NAMES;
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
+use clarity_repl::{analysis, repl};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::ser::SerializeMap;
@@ -57,14 +58,13 @@ pub struct ProjectConfigFile {
     /// Override default boot contract implementations
     #[serde(default)]
     override_boot_contracts_source: Option<BTreeMap<String, String>>,
-
-    // The fields below have been moved into repl above, but are kept here for
-    // backwards compatibility.
-    #[cfg_attr(feature = "json_schema", schemars(skip))]
-    analysis: Option<Vec<clarity_repl::analysis::Pass>>,
     /// Directory for caching build artifacts
     #[serde(default = "default_cache_dir")]
     cache_dir: String,
+    /// Removed list of analysis passes, only captured to warn about it
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    analysis: Option<serde::de::IgnoredAny>,
 }
 
 fn default_cache_dir() -> String {
@@ -83,10 +83,17 @@ pub struct ProjectManifestFile {
         schemars(schema_with = "schema::contracts_schema")
     )]
     contracts: Option<TomlValue>,
-    /// REPL and analysis settings
+    /// REPL settings
     #[serde(default)]
     #[cfg_attr(feature = "json_schema", schemars(schema_with = "schema::repl_schema"))]
     repl: Option<repl::SettingsFile>,
+    /// Linter settings
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "json_schema",
+        schemars(schema_with = "schema::linter_schema")
+    )]
+    linter: Option<analysis::SettingsFile>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -104,6 +111,8 @@ pub struct ProjectManifest {
     pub location: PathBuf,
     #[serde(skip_serializing, skip_deserializing)]
     pub contracts_settings: HashMap<PathBuf, ClarityContractMetadata>,
+    #[serde(skip)]
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 fn default_root_dir() -> PathBuf {
@@ -361,23 +370,43 @@ impl ProjectManifest {
         manifest_location: &Path,
         allow_remote_data_fetching: bool,
     ) -> Result<ProjectManifest, String> {
-        let mut repl_settings = if let Some(repl_settings) = project_manifest_file.repl {
-            repl::Settings::try_from(repl_settings)?
-        } else {
-            repl::Settings {
-                analysis: clarity_repl::analysis::Settings::with_default_lints(),
-                ..Default::default()
+        let diagnostics = [
+            project_manifest_file.project.analysis.is_some().then_some(
+                "`analysis` in [project] is no longer supported and will be ignored. Configure lints in [linter.lints]",
+            ),
+            project_manifest_file
+                .repl
+                .as_ref()
+                .is_some_and(repl::SettingsFile::has_removed_analysis_section)
+                .then_some(
+                    "[repl.analysis] is no longer supported and will be ignored. Move `lints` to [linter.lints], `lint_groups` to [linter.groups], and `include`/`exclude` to [linter]. `true` and \"on\" now use the default level of each lint, not `warning`",
+                ),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|message| {
+            clarity_repl::ueprint!("Warning: {message}");
+            Diagnostic {
+                level: Level::Warning,
+                message: message.into(),
+                spans: vec![],
+                suggestion: None,
             }
-        };
+        })
+        .collect();
+        let mut repl_settings = project_manifest_file
+            .repl
+            .map(repl::Settings::from)
+            .unwrap_or_default();
+        repl_settings.analysis = project_manifest_file
+            .linter
+            .map(analysis::Settings::try_from)
+            .transpose()?
+            .unwrap_or_else(analysis::Settings::with_default_lints);
 
         // when performing static analysis, we never want to enable remote data fetching
         if !allow_remote_data_fetching {
             repl_settings.remote_data.enabled = false;
-        }
-
-        // Check for deprecated settings
-        if let Some(passes) = project_manifest_file.project.analysis {
-            repl_settings.analysis.enable_passes(&passes);
         }
 
         let project_name = project_manifest_file.project.name;
@@ -435,6 +464,7 @@ impl ProjectManifest {
             root_dir: root_path.to_path_buf(),
             location: manifest_location.to_path_buf(),
             contracts_settings: HashMap::new(),
+            diagnostics,
         };
         let mut config_contracts = BTreeMap::new();
         let mut contracts_settings = HashMap::new();
@@ -573,6 +603,73 @@ mod tests {
         let manifest =
             ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
         assert!(!manifest.repl_settings.remote_data.enabled);
+    }
+
+    #[test]
+    fn test_linter_settings() {
+        use clarity::vm::diagnostic::Level;
+        use clarity_repl::analysis::linter::LintName;
+
+        let manifest_toml = toml! {
+            [project]
+            name = "linter"
+            [linter.groups]
+            correctness = "off"
+            [linter.lints]
+            unused_const = "error"
+        };
+        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        let lints = manifest.repl_settings.analysis.lints();
+        assert_eq!(lints.get(&LintName::UnusedConst), Some(&Level::Error));
+        // Correctness lints ignore config.
+        assert_eq!(lints.get(&LintName::CallChecker), Some(&Level::Error));
+    }
+
+    #[test]
+    fn test_removed_repl_analysis_is_ignored() {
+        use clarity_repl::analysis::linter::LintName;
+
+        let manifest_toml = toml! {
+            [project]
+            name = "legacy"
+            [repl.analysis]
+            passes = ["check_checker"]
+            [repl.analysis.lint_groups]
+            all = false
+        };
+        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        assert!(manifest
+            .repl_settings
+            .analysis
+            .lints()
+            .contains_key(&LintName::CallChecker));
+    }
+
+    #[test]
+    fn test_removed_analysis_keys_in_linter_are_rejected() {
+        for (key, value, expected) in [
+            ("lint_groups", "{ all = false }", "use `linter.groups`"),
+            ("passes", r#"["check_checker"]"#, "`linter.passes`"),
+            (
+                "check_checker",
+                "{ strict = false }",
+                "check-checker was removed",
+            ),
+        ] {
+            let manifest = format!("[project]\nname = \"legacy\"\n[linter]\n{key} = {value}\n");
+            let err = toml::from_str::<ProjectManifestFile>(&manifest)
+                .expect_err(&format!("`linter.{key}` should be rejected"))
+                .to_string();
+            assert!(err.contains(expected), "unexpected error for {key}: {err}");
+        }
     }
 
     #[test]

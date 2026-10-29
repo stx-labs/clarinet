@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use strum::{EnumMessage, EnumString, VariantArray};
 
 use crate::analysis::annotation::Annotation;
+use crate::analysis::BoolOr;
 
 /// Represents a single linter pass
 #[derive(
@@ -30,6 +31,8 @@ pub enum LintName {
     // Keep sorted alphabetically
     /// Warn about usage of deprecated `at-block`
     AtBlock,
+    /// Check that calls pass the expected number of arguments
+    CallChecker,
     /// Enforce kebab-case for bindings
     CaseBinding,
     /// Enforce SCREAMING_SNAKE_CASE for constants
@@ -106,6 +109,8 @@ impl TryFrom<String> for LintName {
 pub enum LintGroup {
     /// All existing lints
     All,
+    /// Find code that is certainly wrong. Always rejects the contract; `[linter]` config cannot change these lints
+    Correctness,
     /// Find inefficient code
     Perf,
     /// Find code which might not work as user intended
@@ -131,6 +136,7 @@ impl LintGroup {
 
         match self {
             All => LintName::VARIANTS,
+            Correctness => &[LintName::CallChecker],
             Perf => &[
                 LintName::FlattenVariadic,
                 LintName::UnnecessaryAsMaxLen,
@@ -171,13 +177,6 @@ impl LintGroup {
             map.insert(*lint, value.clone());
         }
     }
-
-    /// Remove all members from map at given level
-    pub fn remove_from<T>(&self, map: &mut HashMap<LintName, T>) {
-        for lint in self.lints() {
-            map.remove(lint);
-        }
-    }
 }
 
 pub type LintMap = HashMap<LintName, ClarityDiagnosticLevel>;
@@ -199,6 +198,7 @@ impl LintMapBuilder {
         LintGroup::Perf.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
         LintGroup::Safety.insert_into(&mut self.map, ClarityDiagnosticLevel::Warning);
         LintGroup::Style.insert_into(&mut self.map, ClarityDiagnosticLevel::Note);
+        LintGroup::Correctness.insert_into(&mut self.map, ClarityDiagnosticLevel::Error);
 
         self
     }
@@ -231,21 +231,51 @@ pub enum LintLevel {
     #[default]
     #[serde(alias = "allow", alias = "off", alias = "none")]
     Ignore,
+    /// Same as `true`: enable without changing the level of a lint that is
+    /// already on, otherwise use its default level
+    On,
     #[serde(alias = "note")]
     Notice,
-    #[serde(alias = "warn", alias = "on")]
+    #[serde(alias = "warn")]
     Warning,
     #[serde(alias = "err")]
     Error,
 }
 
-impl From<LintLevel> for Option<ClarityDiagnosticLevel> {
-    fn from(level: LintLevel) -> Self {
-        match level {
-            LintLevel::Ignore => None,
-            LintLevel::Notice => Some(ClarityDiagnosticLevel::Note),
-            LintLevel::Warning => Some(ClarityDiagnosticLevel::Warning),
-            LintLevel::Error => Some(ClarityDiagnosticLevel::Error),
+impl LintLevel {
+    /// Set the level of `lints` in `map`, falling back on `defaults` for `On`
+    pub fn apply_to(self, lints: &[LintName], defaults: &LintMap, map: &mut LintMap) {
+        let level = match self {
+            Self::Ignore => {
+                for lint in lints {
+                    map.remove(lint);
+                }
+                return;
+            }
+            Self::On => {
+                for lint in lints {
+                    if let Some(level) = defaults.get(lint) {
+                        map.entry(*lint).or_insert_with(|| level.clone());
+                    }
+                }
+                return;
+            }
+            Self::Notice => ClarityDiagnosticLevel::Note,
+            Self::Warning => ClarityDiagnosticLevel::Warning,
+            Self::Error => ClarityDiagnosticLevel::Error,
+        };
+        for lint in lints {
+            map.insert(*lint, level.clone());
+        }
+    }
+}
+
+impl From<BoolOr<LintLevel>> for LintLevel {
+    fn from(value: BoolOr<LintLevel>) -> Self {
+        match value {
+            BoolOr::Bool(true) => Self::On,
+            BoolOr::Bool(false) => Self::Ignore,
+            BoolOr::Value(level) => level,
         }
     }
 }

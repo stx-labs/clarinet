@@ -183,8 +183,10 @@ fn notify_hooks_of_failure(global_context: &mut GlobalContext, error: &str) {
 /// A failed `ClarityInterpreter::run`.
 #[derive(Debug, Clone)]
 pub struct ExecutionError {
-    /// Everything to report to the user about the failure.
-    pub diagnostics: Vec<Diagnostic>,
+    /// Everything to report to the user about the failure. Diagnostics that come
+    /// from a lint keep their name, so callers can report `error[call_checker]:`
+    /// rather than a nameless `error:`.
+    pub diagnostics: Vec<LintDiagnostic>,
     /// Whether the operation still counts as a transaction on mainnet.
     pub inclusion: BlockInclusion,
 }
@@ -195,13 +197,21 @@ impl ExecutionError {
     /// epoch, a bad contract id — none of which mainnet would include.
     pub fn rejected(diagnostics: Vec<Diagnostic>) -> Self {
         Self {
+            diagnostics: diagnostics.into_iter().map(LintDiagnostic::from).collect(),
+            inclusion: BlockInclusion::Rejected,
+        }
+    }
+
+    /// Same as [`rejected`](Self::rejected), for diagnostics that a lint produced.
+    pub fn rejected_lints(diagnostics: Vec<LintDiagnostic>) -> Self {
+        Self {
             diagnostics,
             inclusion: BlockInclusion::Rejected,
         }
     }
 }
 
-impl From<ExecutionError> for Vec<Diagnostic> {
+impl From<ExecutionError> for Vec<LintDiagnostic> {
     fn from(e: ExecutionError) -> Self {
         e.diagnostics
     }
@@ -492,15 +502,15 @@ impl ClarityInterpreter {
         // nonce for a transaction rejected during parsing.
         if !success {
             let inclusion = self.classify_parse_failure(contract);
-            return Err(self.fail_before_execution(diagnostics, inclusion, terms));
+            return Err(self.fail_before_execution(diagnostics, vec![], inclusion, terms));
         }
 
         let (analysis, lint_diagnostics) = match self.run_analysis(contract, &ast, &annotations) {
             Ok((analysis, lint_diags)) => (analysis, lint_diags),
-            Err(mut analysis_failure) => {
-                diagnostics.append(&mut analysis_failure.diagnostics);
+            Err(analysis_failure) => {
                 return Err(self.fail_before_execution(
                     diagnostics,
+                    analysis_failure.diagnostics,
                     analysis_failure.inclusion,
                     terms,
                 ));
@@ -521,8 +531,10 @@ impl ClarityInterpreter {
         };
         let mut result = match execution {
             Ok(result) => result,
-            Err(mut runtime_failure) => {
-                diagnostics.append(&mut runtime_failure.diagnostics);
+            Err(runtime_failure) => {
+                let mut diagnostics: Vec<LintDiagnostic> =
+                    diagnostics.into_iter().map(LintDiagnostic::from).collect();
+                diagnostics.extend(runtime_failure.diagnostics);
                 return Err(ExecutionError {
                     diagnostics,
                     inclusion: runtime_failure.inclusion,
@@ -530,7 +542,7 @@ impl ClarityInterpreter {
             }
         };
 
-        result.diagnostics = diagnostics.to_vec();
+        result.diagnostics = diagnostics;
         Ok(AnnotatedExecutionResult {
             execution_result: result,
             lint_diagnostics,
@@ -540,16 +552,21 @@ impl ClarityInterpreter {
     /// Charge an included parse or analysis failure, for which no VM state exists.
     fn fail_before_execution(
         &mut self,
-        mut diagnostics: Vec<Diagnostic>,
+        diagnostics: Vec<Diagnostic>,
+        lint_diagnostics: Vec<LintDiagnostic>,
         inclusion: BlockInclusion,
         terms: &TransactionTerms,
     ) -> ExecutionError {
+        let mut diagnostics: Vec<LintDiagnostic> =
+            diagnostics.into_iter().map(LintDiagnostic::from).collect();
+        diagnostics.extend(lint_diagnostics);
+
         if let (BlockInclusion::Included, NonceCharge::Sender(principal)) =
             (inclusion, &terms.charge)
         {
             if let Err(e) = self.increment_nonce(&principal.clone()) {
-                diagnostics.push(runtime_diagnostic(e));
-                return ExecutionError::rejected(diagnostics);
+                diagnostics.push(LintDiagnostic::from(runtime_diagnostic(e)));
+                return ExecutionError::rejected_lints(diagnostics);
             }
         }
         ExecutionError {
@@ -704,7 +721,7 @@ impl ClarityInterpreter {
             ResourceLimiter::unlimited(),
         )
         .map_err(|boxed_error| {
-            let mut diagnostics = renamed_builtin_level
+            let mut diagnostics: Vec<LintDiagnostic> = renamed_builtin_level
                 .as_ref()
                 .map(|level| {
                     analysis::lints::check_renamed_builtin(
@@ -713,10 +730,16 @@ impl ClarityInterpreter {
                         annotations,
                         level.clone(),
                     )
+                    .into_iter()
+                    .map(|diagnostic| LintDiagnostic {
+                        lint_name: Some(analysis::linter::LintName::RenamedBuiltin),
+                        diagnostic,
+                    })
+                    .collect()
                 })
                 .unwrap_or_default();
             let static_check_error = boxed_error.0;
-            diagnostics.push(static_check_error.diagnostic.clone());
+            diagnostics.push(LintDiagnostic::from(static_check_error.diagnostic.clone()));
             ExecutionError {
                 diagnostics,
                 inclusion: BlockInclusion::from_analysis_error(
@@ -726,7 +749,7 @@ impl ClarityInterpreter {
             }
         })?;
 
-        // Run REPL-only analyses (linter, check_checker, etc.). These are
+        // Run REPL-only analyses (the linter). These are
         // clarinet's own lints, not consensus rules, so a mainnet node would
         // never see them — they can only reject an operation here.
         let lint_diagnostics = if !contract.skip_analysis {
@@ -736,9 +759,7 @@ impl ClarityInterpreter {
                 annotations,
                 &self.repl_settings.analysis,
             )
-            .map_err(|lds| {
-                ExecutionError::rejected(lds.into_iter().map(Diagnostic::from).collect())
-            })?
+            .map_err(ExecutionError::rejected_lints)?
         } else {
             vec![]
         };
@@ -1042,7 +1063,7 @@ impl ClarityInterpreter {
                     return Err(ExecutionError::rejected(diagnostics));
                 }
                 return Err(ExecutionError {
-                    diagnostics,
+                    diagnostics: diagnostics.into_iter().map(LintDiagnostic::from).collect(),
                     inclusion,
                 });
             }
@@ -1181,7 +1202,7 @@ impl ClarityInterpreter {
             },
         )
         .map_err(|failure| ExecutionError {
-            diagnostics: vec![runtime_diagnostic(&failure.error)],
+            diagnostics: vec![LintDiagnostic::from(runtime_diagnostic(&failure.error))],
             inclusion: failure.inclusion,
         })
     }
@@ -1247,7 +1268,7 @@ impl ClarityInterpreter {
             },
         )
         .map_err(|failure| ExecutionError {
-            diagnostics: vec![runtime_diagnostic(&failure.error)],
+            diagnostics: vec![LintDiagnostic::from(runtime_diagnostic(&failure.error))],
             inclusion: failure.inclusion,
         })
     }
@@ -1386,6 +1407,16 @@ impl ClarityInterpreter {
             eval_hooks,
             terms,
             |connection, callback| {
+                let values = args
+                    .iter()
+                    .map(|arg| {
+                        arg.match_atom_value().cloned().ok_or_else(|| {
+                            ClarityError::BadTransaction(
+                                "expected evaluated function argument".into(),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 let (value, _, events) = if allow_private {
                     connection
                         .with_abort_callback(
@@ -1402,7 +1433,7 @@ impl ClarityInterpreter {
                                             context,
                                             contract_id,
                                             method,
-                                            args,
+                                            values,
                                             false,
                                         )
                                     },
@@ -1418,22 +1449,12 @@ impl ClarityInterpreter {
                             None => Ok((value, assets, events)),
                         })?
                 } else {
-                    let values = args
-                        .iter()
-                        .map(|arg| {
-                            arg.match_atom_value().cloned().ok_or_else(|| {
-                                ClarityError::BadTransaction(
-                                    "expected evaluated function argument".into(),
-                                )
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
                     connection.run_contract_call(
-                        &sender,
+                        sender,
                         None,
-                        contract_id,
+                        contract_id.clone(),
                         method,
-                        &values,
+                        values,
                         callback,
                         &ResourceBudget::unlimited(),
                     )?
@@ -2289,11 +2310,11 @@ mod tests {
             } else {
                 connection
                     .run_contract_call(
-                        &sender,
+                        sender.clone(),
                         None,
-                        &id,
+                        id,
                         "send",
-                        &[],
+                        vec![],
                         |_, _| Some("abort".into()),
                         &ResourceBudget::unlimited(),
                     )
@@ -2978,12 +2999,12 @@ mod tests {
         let message = bounded_format!("Runtime Error: Runtime error while interpreting {}.{}: Runtime(DivisionByZero, Some([FunctionIdentifier {{ identifier: \"_native_:native_div\" }}]))", StandardPrincipalData::transient(), contract.name);
         assert_eq!(
             diagnostics[0],
-            Diagnostic {
+            LintDiagnostic::from(Diagnostic {
                 level: vm::diagnostic::Level::Error,
                 message,
                 spans: vec![],
                 suggestion: None
-            }
+            })
         );
     }
 
@@ -4010,23 +4031,25 @@ mod tests {
     }
 
     #[test]
-    fn annotation_filter_missing_value() {
+    fn legacy_check_checker_annotations_produce_no_diagnostics() {
         let interpreter = get_interpreter(None);
-        let source = ";; #[filter]";
+        let source = indoc!(
+            "
+            ;; #[filter]
+            ;; #[filter(a, b)]
+            ;; #[allow(unchecked_data, unchecked_params)]
+            "
+        );
 
         let (annotations, diagnostics) = interpreter.collect_annotations(source);
-        assert!(annotations.is_empty());
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(
-            diagnostics[0].message,
-            "missing value for 'filter' annotation"
-        );
+        assert_eq!(annotations.len(), 3);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
     fn valid_annotation_produces_no_diagnostics() {
         let interpreter = get_interpreter(None);
-        let source = ";; #[allow(unchecked_data)]";
+        let source = ";; #[allow(unused_const)]";
 
         let (annotations, diagnostics) = interpreter.collect_annotations(source);
         assert_eq!(annotations.len(), 1);

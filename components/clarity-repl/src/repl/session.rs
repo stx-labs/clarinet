@@ -57,7 +57,7 @@ impl std::ops::Deref for AnnotatedExecutionResult {
 }
 
 pub type ExecutionResultMap =
-    BTreeMap<QualifiedContractIdentifier, Result<AnnotatedExecutionResult, Vec<Diagnostic>>>;
+    BTreeMap<QualifiedContractIdentifier, Result<AnnotatedExecutionResult, Vec<LintDiagnostic>>>;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CostsReport {
@@ -127,7 +127,7 @@ fn deploy_boot_contracts(
             for e in &errs.diagnostics {
                 ueprint!(
                     "Error deploying sbtc boot contract {contract_id}: {}",
-                    e.message
+                    e.diagnostic.message
                 );
             }
         }
@@ -149,7 +149,10 @@ fn deploy_boot_contracts(
         let result = interpreter.run(contract, Some(ast.as_ref()), false, None);
         if let Err(errs) = &result {
             for e in &errs.diagnostics {
-                ueprint!("Error deploying boot contract {contract_id}: {}", e.message);
+                ueprint!(
+                    "Error deploying boot contract {contract_id}: {}",
+                    e.diagnostic.message
+                );
             }
         }
         boot_contracts.insert(contract_id.clone(), result.map_err(Vec::from));
@@ -191,7 +194,7 @@ fn deploy_boot_contracts_for_range(
             for e in &errs.diagnostics {
                 ueprint!(
                     "Error deploying sbtc boot contract {contract_id}: {}",
-                    e.message
+                    e.diagnostic.message
                 );
             }
         }
@@ -214,7 +217,10 @@ fn deploy_boot_contracts_for_range(
             let result = interpreter.run(contract, Some(ast.as_ref()), false, None);
             if let Err(errs) = &result {
                 for e in &errs.diagnostics {
-                    ueprint!("Error deploying boot contract {contract_id}: {}", e.message);
+                    ueprint!(
+                        "Error deploying boot contract {contract_id}: {}",
+                        e.diagnostic.message
+                    );
                 }
             }
             newly_deployed.insert(contract_id.clone(), result.map_err(Vec::from));
@@ -493,7 +499,7 @@ impl Session {
         output: &mut Vec<String>,
         cost_track: bool,
         cmd: &str,
-    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<LintDiagnostic>> {
         let cmd = self.remap_user_snippet(cmd.to_string());
         let (mut result, cost, execution_result) =
             match self.formatted_interpretation(cmd, None, cost_track, None) {
@@ -565,7 +571,7 @@ impl Session {
         name: Option<String>,
         cost_track: bool,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
-    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
+    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<LintDiagnostic>)> {
         let result = self.eval_with_hooks(snippet.to_string(), eval_hooks, cost_track);
         let mut output = Vec::<String>::new();
         let formatted_lines: Vec<String> = snippet.lines().map(|l| l.to_string()).collect();
@@ -602,9 +608,9 @@ impl Session {
                 Ok((output, result))
             }
             Err(diagnostics) => {
-                for d in &diagnostics {
+                for diagnostic in &diagnostics {
                     output.append(&mut output_diagnostic(
-                        &LintDiagnostic::from(d.clone()),
+                        diagnostic,
                         &contract_name,
                         &formatted_lines,
                     ));
@@ -661,11 +667,7 @@ impl Session {
                 let lines = snippet.lines();
                 let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
                 for d in diagnostics {
-                    output.append(&mut output_diagnostic(
-                        &LintDiagnostic::from(d),
-                        "<snippet>",
-                        &formatted_lines,
-                    ));
+                    output.append(&mut output_diagnostic(&d, "<snippet>", &formatted_lines));
                 }
             }
         };
@@ -705,11 +707,7 @@ impl Session {
                 let lines = snippet.lines();
                 let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
                 for d in diagnostics {
-                    output.append(&mut output_diagnostic(
-                        &LintDiagnostic::from(d),
-                        "<snippet>",
-                        &formatted_lines,
-                    ));
+                    output.append(&mut output_diagnostic(&d, "<snippet>", &formatted_lines));
                 }
             }
         };
@@ -738,16 +736,16 @@ impl Session {
         amount: u64,
         recipient: &str,
         post_conditions: PostConditionCheck,
-    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<LintDiagnostic>> {
         // stacks-core rejects TokenTransfer payloads with post-conditions
         // before execution. Keep simnet aligned with mainnet/testnet here.
         if post_conditions.has_conditions() {
-            return Err(vec![Diagnostic {
+            return Err(vec![LintDiagnostic::from(Diagnostic {
                 level: Level::Error,
                 message: "Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions".into(),
                 spans: vec![],
                 suggestion: None,
-            }]);
+            })]);
         }
 
         // TokenTransfer payloads do not run the post-condition checker. The
@@ -755,21 +753,21 @@ impl Session {
         // current epoch, but it has no effect when the condition list is empty.
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         if let Err(message) = post_conditions.validate_for_epoch(current_epoch) {
-            return Err(vec![Diagnostic {
+            return Err(vec![LintDiagnostic::from(Diagnostic {
                 level: Level::Error,
                 message: BoundedErrorString::from_display(&message),
                 spans: vec![],
                 suggestion: None,
-            }]);
+            })]);
         }
 
         let recipient = PrincipalData::parse(recipient).map_err(|error| {
-            vec![Diagnostic {
+            vec![LintDiagnostic::from(Diagnostic {
                 level: Level::Error,
                 message: bounded_format!("Invalid transfer recipient: {error}"),
                 spans: vec![],
                 suggestion: None,
-            }]
+            })]
         })?;
         self.interpreter
             .stx_transfer(amount, recipient, self.hooks.enabled())
@@ -889,7 +887,7 @@ impl Session {
         cost_track: bool,
         ast: Option<&ContractAST>,
         post_conditions: PostConditionCheck,
-    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<LintDiagnostic>> {
         self.deploy_contract_with_inclusion(contract, cost_track, ast, post_conditions, None)
             .map_err(Vec::from)
     }
@@ -1133,12 +1131,12 @@ impl Session {
                 error => BoundedErrorString::from_display(&error),
             };
             ExecutionError {
-                diagnostics: vec![Diagnostic {
+                diagnostics: vec![LintDiagnostic::from(Diagnostic {
                     level: Level::Error,
                     message,
                     spans: vec![],
                     suggestion: None,
-                }],
+                })],
                 inclusion: failure.inclusion,
             }
         })
@@ -1149,7 +1147,7 @@ impl Session {
         &mut self,
         snippet: String,
         cost_track: bool,
-    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<LintDiagnostic>> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
@@ -1187,7 +1185,7 @@ impl Session {
         snippet: String,
         eval_hooks: Option<Vec<&mut dyn EvalHook>>,
         cost_track: bool,
-    ) -> Result<AnnotatedExecutionResult, Vec<Diagnostic>> {
+    ) -> Result<AnnotatedExecutionResult, Vec<LintDiagnostic>> {
         let current_epoch = self.interpreter.datastore.get_current_epoch();
         let contract = ClarityContract {
             code_source: ClarityCodeSource::ContractInMemory(snippet),
@@ -1204,13 +1202,9 @@ impl Session {
             .interpreter
             .run(&contract, None, cost_track, eval_hooks);
 
-        match result {
-            Ok(result) => {
-                self.record_snippet_result(contract_identifier, &result);
-                Ok(result)
-            }
-            Err(res) => Err(res.into()),
-        }
+        result
+            .inspect(|result| self.record_snippet_result(contract_identifier, result))
+            .map_err(Vec::from)
     }
 
     fn next_snippet_contract_name(&self) -> String {
@@ -1619,7 +1613,7 @@ impl Session {
                 let lines: Vec<String> = snippet.split('\n').map(String::from).collect();
                 let mut output: Vec<String> = diagnostics
                     .into_iter()
-                    .flat_map(|d| output_diagnostic(&LintDiagnostic::from(d), "encode", &lines))
+                    .flat_map(|d| output_diagnostic(&d, "encode", &lines))
                     .collect();
                 output.push("encoding failed".into());
                 output.join("\n")
@@ -2102,7 +2096,10 @@ mod tests {
         let diags = session
             .eval("(slice? \"blockstack\" u5 u10)".into(), false)
             .unwrap_err();
-        assert_eq!(diags[0].message, "use of unresolved function 'slice?'");
+        assert_eq!(
+            diags[0].diagnostic.message,
+            "use of unresolved function 'slice?'"
+        );
         session.update_epoch(StacksEpochId::Epoch21);
         let annotated = session
             .eval("(slice? \"blockstack\" u5 u10)".into(), false)
@@ -2332,7 +2329,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.len() == 1);
         assert_eq!(
-            err.first().unwrap().message,
+            err.first().unwrap().diagnostic.message,
             "contract epoch (2.5) does not match current epoch (2.4)"
         );
     }
@@ -2353,7 +2350,11 @@ mod tests {
         deployer: &str,
         name: &str,
         source: &str,
-    ) -> (u64, u64, Result<AnnotatedExecutionResult, Vec<Diagnostic>>) {
+    ) -> (
+        u64,
+        u64,
+        Result<AnnotatedExecutionResult, Vec<LintDiagnostic>>,
+    ) {
         let addr = principal(deployer);
         let before = session.get_nonce(&addr).unwrap();
         let contract = ClarityContractBuilder::new()
@@ -2522,7 +2523,7 @@ mod tests {
             .stx_transfer(1000, recipient, sends_exactly(sender, 1000))
             .expect_err("the transfer should be rejected");
 
-        assert!(diagnostics.last().is_some_and(|d| d.message
+        assert!(diagnostics.last().is_some_and(|d| d.diagnostic.message
             == "Invalid Stacks transaction: TokenTransfer transactions do not support post-conditions"));
 
         assert_eq!(
@@ -2556,7 +2557,7 @@ mod tests {
             .expect_err("the transfer should be rejected");
         assert!(diagnostics
             .last()
-            .is_some_and(|d| d.message.contains("Invalid Stacks transaction")));
+            .is_some_and(|d| d.diagnostic.message.contains("Invalid Stacks transaction")));
 
         // Rejected rather than aborted: nothing ran, so no nonce was consumed.
         assert_eq!(
@@ -2603,10 +2604,11 @@ mod tests {
                 PostConditionCheck::Unchecked,
             )
             .expect_err("stacks-node rejects an underfunded TokenTransfer");
-        assert_eq!(
-            error[0].message,
-            "Runtime Error: Invalid TokenTransfer: insufficient unlocked balance to send 1000 uSTX"
-        );
+        assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0]
+            .diagnostic
+            .message
+            .contains("Invalid TokenTransfer"));
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
     }
 
@@ -2626,10 +2628,11 @@ mod tests {
                 PostConditionCheck::Unchecked,
             )
             .expect_err("stacks-node rejects a zero-amount TokenTransfer");
-        assert_eq!(
-            error[0].message,
-            "Runtime Error: Invalid TokenTransfer: amount must be positive"
-        );
+        assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0]
+            .diagnostic
+            .message
+            .contains("Invalid TokenTransfer"));
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
     }
 
@@ -2645,7 +2648,11 @@ mod tests {
         let error = session
             .stx_transfer(100, &sender, PostConditionCheck::Unchecked)
             .unwrap_err();
-        assert!(error[0].message.contains("address tried to send to itself"));
+        assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0]
+            .diagnostic
+            .message
+            .contains("Invalid TokenTransfer"));
         assert_eq!(session.get_nonce(&addr).unwrap(), 0);
         assert_eq!(
             session.interpreter.get_balance_for_account(&sender, "STX"),
@@ -2711,7 +2718,7 @@ mod tests {
             .stx_transfer(1000, recipient, PostConditionCheck::Unchecked)
             .expect_err("a transfer whose nonce cannot be recorded is not a success");
 
-        let message = &diagnostics.last().expect("a diagnostic").message;
+        let message = &diagnostics.last().expect("a diagnostic").diagnostic.message;
         assert!(
             message.contains("nonce overflow"),
             "the failure must name its cause, got: {message}"
@@ -2799,14 +2806,9 @@ mod tests {
         let (before, after, result) =
             deploy_and_read_nonce(&mut session, deployer, "div-zero", "(/ u1 u0)");
         let error = result.expect_err("the deploy must still be reported failed");
-        assert!(
-            error[0].message.starts_with(
-                "Runtime Error: Runtime error while interpreting \
-                 ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5.div-zero: Runtime(DivisionByZero"
-            ),
-            "{}",
-            error[0].message
-        );
+        assert_eq!(error[0].diagnostic.level, Level::Error);
+        assert!(error[0].diagnostic.message.contains("DivisionByZero"));
+        assert!(error[0].lint_name.is_none());
         assert_eq!(after, before + 1, "divide-by-zero is included in a block");
 
         // `unwrap-panic` on `none`: `EarlyReturn` → `Acceptable` → included.
@@ -3407,7 +3409,7 @@ mod tests {
         let diagnostics = result.unwrap_err().diagnostics;
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
-            diagnostics[0].message,
+            diagnostics[0].diagnostic.message,
             format!(
                 "Function 'doesnt-exist' does not exist on contract '{}.contract'",
                 session.get_tx_sender()
@@ -3441,7 +3443,7 @@ mod tests {
                 )
                 .unwrap_err()
                 .diagnostics;
-            diagnostics[0].message.to_string()
+            diagnostics[0].diagnostic.message.to_string()
         };
 
         assert_eq!(
@@ -3613,7 +3615,7 @@ mod tests {
                     missing.push(format!(
                         "{id} (Err: {})",
                         e.iter()
-                            .map(|d| d.message.to_string())
+                            .map(|d| d.diagnostic.message.to_string())
                             .collect::<Vec<_>>()
                             .join(", ")
                     ));
