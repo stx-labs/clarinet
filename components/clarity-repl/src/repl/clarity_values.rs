@@ -2,6 +2,7 @@ use std::fmt::Write;
 
 use clarity::codec::StacksMessageCodec;
 use clarity::util::hash;
+use clarity::vm::types::serialization::SerializationError;
 use clarity::vm::Value;
 use clarity_types::types::{CharType, SequenceData};
 
@@ -19,6 +20,17 @@ pub fn uint8_to_string(value: &[u8]) -> String {
 pub fn uint8_to_value(mut value: &[u8]) -> Value {
     Value::consensus_deserialize(&mut value)
         .unwrap_or_else(|e| panic!("failed to parse clarity value: {}", e))
+}
+
+/// Deserialize one untyped value, rejecting leftover bytes. A transaction's
+/// arguments carry no per-value lengths, so extra bytes can't belong to one.
+pub fn value_from_bytes_exact(mut bytes: &[u8]) -> Result<Value, SerializationError> {
+    let length = bytes.len();
+    let (value, read) = Value::deserialize_read_count(&mut bytes, None, false)?;
+    if read != length as u64 {
+        return Err(SerializationError::LeftoverBytesInDeserialization);
+    }
+    Ok(value)
 }
 
 pub fn value_to_string(value: &Value) -> String {
@@ -79,7 +91,19 @@ mod tests {
         StandardPrincipalData, TupleData, TypeSignature, UTF8Data, NONE,
     };
 
-    use super::value_to_string;
+    use super::{value_from_bytes_exact, value_to_string, SerializationError};
+
+    #[test]
+    fn value_from_bytes_exact_rejects_leftover_bytes() {
+        let mut bytes = Value::UInt(1).serialize_to_vec().unwrap();
+        assert_eq!(value_from_bytes_exact(&bytes), Ok(Value::UInt(1)));
+        bytes.push(0xff);
+        assert_eq!(
+            value_from_bytes_exact(&bytes),
+            Err(SerializationError::LeftoverBytesInDeserialization)
+        );
+        assert!(value_from_bytes_exact(&bytes[..4]).is_err());
+    }
 
     #[test]
     fn test_value_to_string() {

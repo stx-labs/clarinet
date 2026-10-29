@@ -702,6 +702,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "stacks-codec",
  "stacks-network",
  "strum",
  "tempfile",
@@ -725,7 +726,6 @@ name = "clarinet-deployments"
 version = "3.26.0"
 dependencies = [
  "base58",
- "base64 0.22.1",
  "bitcoin",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",
@@ -3842,6 +3842,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
+ "indexmap 2.14.2",
  "ref-cast",
  "schemars_derive",
  "serde",
@@ -4412,7 +4413,6 @@ dependencies = [
  "bitcoincore-rpc",
  "bollard",
  "chrono",
- "clap",
  "clarinet-deployments",
  "clarinet-files",
  "clarity",
@@ -4442,7 +4442,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "yaml_serde",
 ]
 
 [[package]]

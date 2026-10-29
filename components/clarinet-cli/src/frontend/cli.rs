@@ -25,13 +25,12 @@ use clarinet_files::{
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity::types::StacksEpochId;
-use clarity::vm::analysis::AnalysisDatabase;
+use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::diagnostic::Level;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
-use clarity_repl::analysis::call_checker::ContractAnalysis;
 use clarity_repl::analysis::linter::{LintGroup, LintName};
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::frontend::Terminal;
@@ -55,7 +54,6 @@ use crate::deployments::{
     self, check_deployments, generate_default_deployment, generate_devnet_deployment,
     write_deployment,
 };
-use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
 use crate::frontend::dap::{run_dap, run_dap_server};
 use crate::generate::changes::{Changes, TOMLEdition};
@@ -111,9 +109,6 @@ enum Command {
     /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
-    /// Start a local Devnet network (deprecated, use 'clarinet devnet start')
-    #[clap(name = "integrate", bin_name = "integrate")]
-    Integrate(DevnetStart),
     /// Subcommands for Devnet usage
     #[clap(subcommand, name = "devnet")]
     Devnet(Devnet),
@@ -241,10 +236,6 @@ impl FormatterInputSource {
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
 enum Devnet {
-    /// Generate package of all required devnet artifacts
-    #[clap(name = "package", bin_name = "package")]
-    Package(DevnetPackage),
-
     /// Start a local Devnet network for interacting with your contracts from your browser
     #[clap(name = "start", bin_name = "start")]
     DevnetStart(DevnetStart),
@@ -289,16 +280,6 @@ struct EncryptDeployment {
     /// Encryption strength
     #[clap(long = "strength", default_value = "medium")]
     pub strength: clarinet_utils::MnemonicEncryptionStrength,
-}
-
-#[derive(Parser, PartialEq, Clone, Debug)]
-struct DevnetPackage {
-    /// Output json file name
-    #[clap(long = "name", short = 'n')]
-    pub package_file_name: Option<String>,
-    /// Path to Clarinet.toml
-    #[clap(long = "manifest-path", short = 'm')]
-    pub manifest_path: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -552,13 +533,6 @@ struct DevnetStart {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
-    /// Path to Package.json produced by 'clarinet devnet package'
-    #[clap(
-        long = "package",
-        conflicts_with = "use_computed_deployment_plan",
-        conflicts_with = "manifest_path"
-    )]
-    pub package: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -980,7 +954,6 @@ pub fn main() {
                     &network_moved.get_networks(),
                     manifest.use_mainnet_wallets(),
                     Some(&manifest.project.cache_location),
-                    None,
                 );
                 let network_manifest = match res {
                     Ok(network_manifest) => network_manifest,
@@ -1234,15 +1207,36 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
-            let mut settings = repl::SessionSettings {
+            // An explicit manifest must load. A manifest found by search is optional.
+            let analysis = match cmd.manifest_path {
+                Some(path) => {
+                    load_manifest_or_exit(Some(path), false)
+                        .repl_settings
+                        .analysis
+                }
+                None => get_manifest_location(None)
+                    .and_then(|location| {
+                        ProjectManifest::from_location(&location, false)
+                            .inspect_err(|message| {
+                                eprintln!(
+                                    "{} unable to load {}, using default lints",
+                                    yellow!("warning:"),
+                                    location.display()
+                                );
+                                eprintln!("{message}");
+                            })
+                            .ok()
+                    })
+                    .map(|manifest| manifest.repl_settings.analysis)
+                    .unwrap_or_else(analysis::Settings::with_default_lints),
+            };
+            let settings = repl::SessionSettings {
                 repl_settings: repl::Settings {
-                    analysis: analysis::Settings::with_default_lints(),
+                    analysis,
                     ..Default::default()
                 },
                 ..Default::default()
             };
-            settings.repl_settings.analysis.enable_all_passes();
-
             let mut session = repl::Session::new(settings.clone());
             let Ok(code_source) = fs::read_to_string(&file) else {
                 eprintln!("{} unable to read file: '{file}'", red!("error:"));
@@ -1451,13 +1445,6 @@ pub fn main() {
             let exit_code = exit_codes.iter().cloned().find(|c| *c != 0).unwrap_or(0);
             std::process::exit(exit_code);
         }
-        Command::Integrate(cmd) => {
-            eprintln!(
-                "{}",
-                format_warn!("This command is deprecated. Use 'clarinet devnet start' instead"),
-            );
-            devnet_start(cmd, clarinetrc)
-        }
         Command::LSP => run_lsp(),
         Command::DAP(cmd) => {
             let result = match (cmd.sdk_port, cmd.dap_port) {
@@ -1557,13 +1544,6 @@ pub fn main() {
             }
         }
         Command::Devnet(subcommand) => match subcommand {
-            Devnet::Package(cmd) => {
-                let manifest = load_manifest_or_exit(cmd.manifest_path, false);
-                if let Err(e) = Package::pack(cmd.package_file_name, manifest) {
-                    eprintln!("Could not execute the package command. {}", format_err!(e));
-                    process::exit(1);
-                }
-            }
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
     };
@@ -1637,14 +1617,14 @@ fn print_available_lints(settings: &analysis::Settings) {
     println!("{}", "Configure lints in Clarinet.toml:".bold());
     let sample = r#"
   # Only analyze files matching these patterns
-  [repl.analysis]
+  [linter]
   include = ["contracts/*.clar"]
   exclude = []
 
-  [repl.analysis.lint_groups]
+  [linter.groups]
   style = "warning"
 
-  [repl.analysis.lints]
+  [linter.lints]
   unused_const = "error"
   at_block = false
 "#;
@@ -2317,50 +2297,37 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let project_root = &manifest.root_dir;
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {
-        None => {
-            let res = if let Some(package) = cmd.package {
-                let Ok(package_file) = File::open(package) else {
-                    eprintln!("{} package file not found", red!("error:"));
-                    std::process::exit(1);
-                };
-                let deployment: ConfigurationPackage = serde_json::from_reader(package_file)
-                    .expect("error while reading deployment specification");
-                Ok(Some(deployment.deployment_plan))
-            } else {
-                load_deployment_if_exists(
-                    &manifest,
-                    &StacksNetwork::Devnet,
-                    cmd.use_on_disk_deployment_plan,
-                    cmd.use_computed_deployment_plan,
-                )
-            };
-
-            res.and_then(|opt| match opt {
-                Some(deployment) => {
-                    println!(
-                        "{} using existing deployments/default.devnet-plan.yaml",
-                        yellow!("note:")
-                    );
-                    Ok(deployment)
-                }
-                None => {
-                    let default_deployment_path =
-                        project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
-                    let (deployment, _, _) =
-                        generate_devnet_deployment(&manifest).unwrap_or_else(|message| {
-                            eprintln!("{}", red!(message));
-                            std::process::exit(1);
-                        });
-                    write_deployment(&deployment, &default_deployment_path, project_root, true)?;
-                    println!(
-                        "{} {}",
-                        green!("Generated file"),
-                        paths::get_relative_path(&default_deployment_path, project_root).unwrap()
-                    );
-                    Ok(deployment)
-                }
-            })
-        }
+        None => load_deployment_if_exists(
+            &manifest,
+            &StacksNetwork::Devnet,
+            cmd.use_on_disk_deployment_plan,
+            cmd.use_computed_deployment_plan,
+        )
+        .and_then(|opt| match opt {
+            Some(deployment) => {
+                println!(
+                    "{} using existing deployments/default.devnet-plan.yaml",
+                    yellow!("note:")
+                );
+                Ok(deployment)
+            }
+            None => {
+                let default_deployment_path =
+                    project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
+                let (deployment, _, _) =
+                    generate_devnet_deployment(&manifest).unwrap_or_else(|message| {
+                        eprintln!("{}", red!(message));
+                        std::process::exit(1);
+                    });
+                write_deployment(&deployment, &default_deployment_path, project_root, true)?;
+                println!(
+                    "{} {}",
+                    green!("Generated file"),
+                    paths::get_relative_path(&default_deployment_path, project_root).unwrap()
+                );
+                Ok(deployment)
+            }
+        }),
         Some(deployment_plan_path) => {
             let deployment_path = project_root.join(&deployment_plan_path);
             load_deployment(project_root, &deployment_path)
@@ -2375,7 +2342,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         }
     };
 
-    let orchestrator = match DevnetOrchestrator::new(manifest, None, None, true) {
+    let orchestrator = match DevnetOrchestrator::new(manifest, true) {
         Ok(orchestrator) => orchestrator,
         Err(e) => {
             eprintln!("{}", format_err!(e));
@@ -2393,15 +2360,8 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         ));
     }
 
-    let devnet_config = match orchestrator.network_config {
-        Some(ref network_config) => match &network_config.devnet {
-            Some(devnet_config) => Ok(devnet_config.clone()),
-            _ => Err("Unable to retrieve config"),
-        },
-        _ => Err("Unable to retrieve config"),
-    };
     let differ = DevnetDiffConfig::new();
-    let compatible = differ.is_compatible(&devnet_config.unwrap());
+    let compatible = differ.is_compatible(orchestrator.devnet_config());
     if let Err(incompatibles) = compatible {
         display_devnet_incompatibilities(incompatibles);
         prompt_user_to_continue();
@@ -2410,7 +2370,6 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let config = StartConfig {
         devnet: orchestrator,
         deployment,
-        log_tx: None,
         display_dashboard: !cmd.no_dashboard,
         no_snapshot: cmd.no_snapshot,
         save_container_logs: cmd.save_container_logs,
@@ -2421,7 +2380,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
             eprintln!("{}", format_err!(e));
             process::exit(1);
         }
-        Ok(_) => {
+        Ok(()) => {
             if clarinetrc.enable_hints.unwrap_or(true) {
                 display_deploy_hint();
             }
@@ -2580,12 +2539,9 @@ mod tests {
                 # This is an important comment that should be preserved!
                 # Another comment line
 
-                [repl.analysis]
-                passes = ["check_checker"]
-
-                # Check-checker settings comment
-                [repl.analysis.check_checker]
-                strict = false
+                # Linter settings comment
+                [linter.lints]
+                unused_const = false
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
@@ -2603,8 +2559,8 @@ mod tests {
                 "Second comment should be preserved"
             );
             assert!(
-                contains_comment(&output, "Check-checker settings"),
-                "Check-checker comment should be preserved"
+                contains_comment(&output, "Linter settings"),
+                "Linter comment should be preserved"
             );
 
             // Verify the contract was added
@@ -2619,8 +2575,8 @@ mod tests {
                 "Project name should be preserved"
             );
             assert!(
-                has_toml_value(&output, "repl.analysis.check_checker.strict", "false"),
-                "Repl settings should be preserved"
+                has_toml_value(&output, "linter.lints.unused_const", "false"),
+                "Linter settings should be preserved"
             );
         }
 
@@ -2835,13 +2791,8 @@ mod tests {
                 clarity_version = 2
                 epoch = 2.4
 
-                # the analysis errors are used as a test case
-                [repl.analysis]
-                passes = ["check_checker"]
-                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
-
                 # We don't want linter diagnostics in this test
-                [repl.analysis.lint_groups]
+                [linter.groups]
                 all = false
             "#};
 
@@ -2857,10 +2808,6 @@ mod tests {
             let output = doc.to_string();
 
             // Verify comments are preserved
-            assert!(
-                contains_comment(&output, "analysis errors are used as a test case"),
-                "Analysis comment should be preserved"
-            );
             assert!(
                 contains_comment(&output, "don't want linter diagnostics"),
                 "Linter comment should be preserved"
@@ -2908,14 +2855,9 @@ mod tests {
                 clarity_version = 2
                 epoch = "2.4"
 
-                [repl.analysis]
-                passes = ["check_checker"]
-
-                [repl.analysis.check_checker]
-                strict = false
-                trusted_sender = true
-                trusted_caller = false
-                callee_filter = false
+                [linter.lints]
+                unused_const = "error"
+                case_const = false
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
@@ -2946,12 +2888,8 @@ mod tests {
                 "Project name should be preserved"
             );
             assert!(
-                has_toml_value(
-                    &output,
-                    "repl.analysis.check_checker.trusted_sender",
-                    "true"
-                ),
-                "Check checker settings should be preserved"
+                has_toml_value(&output, "linter.lints.unused_const", "error"),
+                "Linter settings should be preserved"
             );
         }
 
@@ -3008,9 +2946,8 @@ mod tests {
                 [project]
                 name = "test-project"
 
-                [repl.analysis]
-                passes = ["check_checker"]
-                check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+                [linter]
+                lints = { unused_const = false, case_const = "error" }
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
@@ -3020,7 +2957,7 @@ mod tests {
 
             // The inline table format should be preserved
             assert!(
-                output.contains("check_checker = {") || output.contains("check_checker = { "),
+                output.contains("lints = {"),
                 "Inline table format should be preserved: {}",
                 output
             );
@@ -3034,8 +2971,8 @@ mod tests {
                 authors = ["Alice", "Bob"]
                 requirements = []
 
-                [repl.analysis]
-                passes = ["check_checker", "lint"]
+                [linter]
+                include = ["contracts/*.clar", "lib/*.clar"]
             "#};
 
             let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
@@ -3051,14 +2988,14 @@ mod tests {
         }
 
         #[test]
-        fn test_preserves_lint_groups_and_lints_ordering() {
+        fn test_preserves_linter_groups_and_lints_ordering() {
             // Test with all lint groups and lints in a deliberately random order
             // with random values to ensure ordering is preserved after edits
             //
-            // LintGroups: All, Perf, Safety, Style, Unused
+            // LintGroups: All, Correctness, Perf, Safety, Style, Unused
             // LintNames: Noop, UnusedConst, UnusedDataVar, UnusedBinding, UnusedMap,
             //            UnusedPrivateFn, UnusedToken, UnusedTrait, CaseConst
-            // LintLevels: ignore/allow/off/none, notice/note, warning/warn/on, error/err
+            // LintLevels: ignore/allow/off/none, notice/note, on, warning/warn, error/err
             let input = indoc! {r#"
                 [project]
                 name = "lint-ordering-test"
@@ -3069,11 +3006,8 @@ mod tests {
                 path = "contracts/existing.clar"
 
                 # Custom comment about linting configuration
-                [repl.analysis]
-                passes = ["check_checker", "lint"]
-
                 # Lint groups in random order with random values
-                [repl.analysis.lint_groups]
+                [linter.groups]
                 style = "warn"
                 unused = "error"
                 all = false
@@ -3081,7 +3015,7 @@ mod tests {
                 perf = "off"
 
                 # Individual lints in random order with random values
-                [repl.analysis.lints]
+                [linter.lints]
                 unused_map = "error"
                 case_const = "warn"
                 unused_binding = "off"
@@ -3114,7 +3048,7 @@ mod tests {
             fn get_keys_in_order(toml_str: &str, section: &str) -> Vec<String> {
                 let doc: DocumentMut = toml_str.parse().unwrap();
 
-                // Navigate to the section (e.g., "repl.analysis.lint_groups")
+                // Navigate to the section (e.g., "linter.groups")
                 let parts: Vec<&str> = section.split('.').collect();
                 let mut current = doc.as_item();
 
@@ -3130,8 +3064,8 @@ mod tests {
                     .collect()
             }
 
-            // Verify lint_groups ordering is preserved
-            let lint_groups_order = get_keys_in_order(&output, "repl.analysis.lint_groups");
+            // Verify groups ordering is preserved
+            let lint_groups_order = get_keys_in_order(&output, "linter.groups");
             assert_eq!(
                 lint_groups_order,
                 vec!["style", "unused", "all", "safety", "perf"],
@@ -3139,7 +3073,7 @@ mod tests {
             );
 
             // Verify lints ordering is preserved
-            let lints_order = get_keys_in_order(&output, "repl.analysis.lints");
+            let lints_order = get_keys_in_order(&output, "linter.lints");
             assert_eq!(
                 lints_order,
                 vec![
@@ -3158,10 +3092,8 @@ mod tests {
 
             // Also verify the values are preserved
             let parsed: DocumentMut = output.parse().unwrap();
-            let lint_groups = parsed["repl"]["analysis"]["lint_groups"]
-                .as_table()
-                .unwrap();
-            let lints = parsed["repl"]["analysis"]["lints"].as_table().unwrap();
+            let lint_groups = parsed["linter"]["groups"].as_table().unwrap();
+            let lints = parsed["linter"]["lints"].as_table().unwrap();
 
             // Check a few lint group values
             assert_eq!(lint_groups["style"].as_str().unwrap(), "warn");
@@ -3191,7 +3123,6 @@ mod tests {
         "};
 
         let mut settings = repl::SessionSettings::default();
-        settings.repl_settings.analysis.enable_all_passes();
         settings
             .repl_settings
             .analysis

@@ -12,7 +12,6 @@ colored = { workspace = true }
 dirs = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true, features = ["preserve_order", "arbitrary_precision"] }
-yaml_serde = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3.20"
 tracing-appender = "0.2.0"
@@ -24,7 +23,6 @@ chrono = { workspace = true }
 futures = { workspace = true }
 base58 = { workspace = true }
 tokio = { workspace = true}
-clap = { workspace = true, features = ["derive"] }
 toml = { workspace = true }
 rand = { workspace = true }
 flate2 = "1.1.1"
@@ -62,10 +60,6 @@ path = "src/lib.rs"
 # crate-type = ["lib"]
 # Use this instead for WASM builds
 crate-type = ["cdylib", "rlib"]
-
-[[bin]]
-name = "stacks-network"
-path = "src/main.rs"
 
 [lints]
 workspace = true

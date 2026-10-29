@@ -8,6 +8,199 @@ The Wasm packages are built separately for Node.js and browsers. Both SDKs share
 `./common/src/sdkProxy.ts`, with small adapters in `./node/src/sdkProxy.ts` and
 `./browser/src/sdkProxy.ts`.
 
+## Migrating to 4.0
+
+### Transaction and result changes
+
+- [Transaction behavior](#transaction-behavior): deployment results, nonce charges,
+  transfer timing, map reads, and Clarity-version validation.
+- [Migrating `mineBlock` to 4.0](#migrating-mineblock-to-40): outcome statuses,
+  execution receipts, and result ordering.
+- [Signed transactions](#signed-transactions): mempool admission through
+  `broadcastTransaction` and execution through `mineBlock`.
+
+### Removed APIs
+
+- **`simnet.runSnippet(code)`**: replace with `simnet.execute(code).result`, which
+  returns a parsed Clarity value. Handle evaluation failures with `try`/`catch`;
+  `execute` throws instead of returning an `"error:"` string.
+- **`RawTransactionResult`**: replace this unused type with `BlockTransactionResult`
+  for `mineBlock` outcomes or `BroadcastTransactionResult` for mempool admission
+  responses. Read mined results under `outcome.execution` after narrowing on
+  `outcome.status`.
+
+## Transaction behavior
+
+Simnet public calls, deployments, and native STX transfers use the shared
+stacks-core Clarity transaction frame. Included execution failures and
+post-condition aborts roll back payload writes but consume the sender's nonce;
+rejected transactions consume no nonce. Existing convenience calls do not charge
+transaction fees.
+
+Deployments use stacks-node's initializer. A successful `deployContract` returns
+`Cl.ok(Cl.bool(true))`, regardless of the initializer's final expression, and
+stores the contract even if it defines no functions. Duplicate contract names
+are rejected before analysis without consuming a nonce. Use read-only calls,
+`getDataVar`, and events to check initialization effects. Use `execute` when you
+want to evaluate a snippet and receive its expression value. Deployment costs
+include contract storage and subsequent calls account for the stored contract's
+actual data size, so cost assertions may need updating. An unsupported
+`clarityVersion` throws, or is `rejected` inside `mineBlock`, instead of falling
+back to the default version. Explicit versions must be integer numbers; strings,
+fractional or non-finite numbers, and other types are rejected without coercion.
+
+`transferSTX` represents a native transfer: self-transfers, zero-amount transfers,
+and transfers exceeding the available unlocked balance throw without consuming a
+nonce. Like `callPublicFn` and `deployContract`, it advances one block before
+executing, even when the transfer is rejected; previously it executed at the
+current height and advanced only on success. Inside `mineBlock`, these transfers
+return a `rejected` outcome without consuming a nonce. Calling the Clarity
+`stx-transfer?` function inside a contract retains its ordinary response
+semantics. Private calls remain a simnet convenience and use the same transaction
+frame.
+
+Like the node's map-entry endpoint, `getMapEntry` returns `(some value)` for an
+existing entry and `none` otherwise, including for a map or contract that does not
+exist. Previously, an entry that had never been written threw `value not found`.
+
+### Known differences from a node
+
+- Cost and memory limits are enforced only when cost tracking is enabled
+  (`trackCosts`, or `--costs` with `vitest-environment-clarinet`), which is off by
+  default. Signed transactions are always limited, so a call that succeeds
+  through `callPublicFn` can fail as a signed transaction, and enabling cost
+  tracking can change test outcomes. A batch has no cumulative block budget.
+- Standalone `callPublicFn`, `callPrivateFn`, `deployContract`, and `transferSTX`
+  throw both for rejected transactions and for included runtime errors and
+  post-condition aborts, which still consume a nonce and mine their block. A
+  returned `(err ...)` does not throw. Use `mineBlock` to tell included failures
+  from rejections.
+- `getAssetsMap` reports total STX balances, including locked STX. A node's
+  `/v2/accounts` reports locked STX separately from `balance`.
+- `deployContract` accepts contract names of up to 128 bytes. A node only accepts
+  names of up to 40 bytes, so a longer name can't be deployed on chain.
+- In the synchronous debug adapter, standalone calls do not yet follow these
+  transaction rules: they consume no nonce, mine no block, and ignore
+  post-conditions. `callPrivateFn` is unsupported, and several methods are
+  missing. `mineBlock` follows the same rules as the SDK.
+
+### Migrating `mineBlock` to 4.0
+
+`mineBlock(txs)` returns one `BlockTransactionResult` per entry: first one for each
+queued signed transaction it mines (see [Signed transactions](#signed-transactions)),
+then one for each entry in `txs`, in input order. Without queued transactions,
+`results[i]` corresponds to `txs[i]`.
+
+- `success`: `execution` contains the parsed result, events, costs, and performance.
+- `included_failure`: `error` describes the failure, and `kind` classifies it as
+  `abort_by_response`, `abort_by_post_condition`, `runtime_error`, or
+  `analysis_error`. Like a node's transaction receipt, `execution` always contains
+  a result, events, and costs: a returned `(err ...)`; the value a call aborted by
+  its post-conditions would have returned, or `(ok true)` for an aborted deployment;
+  or `(err none)` when execution produced no value. A post-condition abort reports
+  the events it attempted, none of which were committed. Included failures consume
+  a nonce according to the VM's epoch rules; their payload writes roll back.
+- `rejected`: `error` describes why the transaction was rejected. No payload writes
+  or nonce changes commit.
+
+Later entries execute after either kind of failure. Every call advances exactly
+one block before execution, even for empty or entirely rejected batches. All
+entries execute at that inclusion height. Convenience entries remain unsigned
+and fee-free.
+
+Previously, entries returned the execution object directly, most failures threw
+and stopped the batch, and invalid native transfers returned `(err u1/u2/u3)`
+and consumed a nonce. Replace direct access such as `results[0].result` with a
+status check and `results[0].execution.result`:
+
+```ts
+for (const outcome of simnet.mineBlock(transactions)) {
+  if (outcome.status === "success") {
+    console.log(outcome.execution.result);
+  } else {
+    console.log(outcome.status, outcome.error);
+  }
+}
+```
+
+The synchronous debug adapter uses the same batch outcome contract, transaction
+nonce rules, and inclusion height.
+
+Contract-call transactions may target `define-public` or `define-read-only`
+functions. A read-only target still consumes a transaction nonce when invoked
+through `callPublicFn` or `mineBlock`; use `callReadOnlyFn` for a nonce-free query.
+These execution paths do not apply the node's mempool admission policy, which
+rejects direct transactions targeting read-only functions.
+
+## Signed transactions
+
+`simnet.broadcastTransaction(rawHex)` submits a complete signed Stacks transaction
+serialized by Stacks.js to a session-local mempool. It returns `{ txid }` on
+acceptance or `{ error, reason, reason_data, txid? }` on rejection. Malformed
+input has no TXID. Submission is synchronous and never executes the payload,
+charges fees, consumes nonces, or advances the chain.
+
+Admission checks signatures, network/epoch rules, origin and sponsor nonces,
+unlocked funds, transfer validity, duplicate deployments, and public-function
+access and argument types (including Clarity trait casts). Read-only, private,
+and missing functions are rejected. The minimum fee matches the pinned node:
+1 micro-STX per serialized byte. Supply explicit fees and nonces so Stacks.js
+does not fetch them from a remote node.
+
+```ts
+const transaction = await makeSTXTokenTransfer({
+  network: "testnet",
+  senderKey,
+  recipient,
+  amount: 100n,
+  fee: 1000n,
+  nonce: simnet.getAccountNonce(sender),
+});
+const admission = simnet.broadcastTransaction(transaction.serialize());
+if ("error" in admission) {
+  throw new Error(admission.reason);
+}
+const [outcome] = simnet.mineBlock();
+if (outcome.status === "success") {
+  console.log(outcome.transaction?.txid, outcome.execution.result);
+}
+```
+
+`mineBlock()` selects queued transactions with ready nonces in submission order, followed by any
+explicit entries supplied to `mineBlock(txs)`, advancing one block for the whole
+batch. Its results use the same `success`, `included_failure`, and `rejected`
+statuses as convenience entries. Signed results additionally carry `transaction`
+metadata: `txid` (64 lowercase hex characters without `0x`), `fee`, and `nonce`
+(both `bigint`). Signed included failures retain fees and nonce charges while
+rolling back aborted payload writes.
+
+Admission does not guarantee inclusion: mining checks current state again.
+Rejected mined entries charge nothing, and later entries still run. Each selected
+entry is attempted once and removed, including rejected entries. Future-nonce
+transactions remain queued until their predecessors can be mined. Repeated
+submission of identical pending bytes returns the same TXID without duplicating
+the queue. Replaying a mined transaction fails nonce validation. Future
+nonces can be queued for an origin or sponsor up to the node's chaining bound
+(mined nonce + 26); `getAccountNonce` continues to
+report the mined nonce. Calls to a pending deployment must wait until it is mined.
+Self-sponsored transactions must use the same origin and sponsor nonce; mismatches
+are rejected with `BadNonce`. The local queue also rejects submissions that would
+create circular nonce dependencies with `ConflictingNonceInMempool`. Missing
+predecessors are still allowed when the queued dependencies are not circular.
+
+For direct block execution without mempool policy, use
+`mineBlock([{ broadcastTx: rawHex }])`. This permits block-valid read-only calls
+and low-fee transactions. Convenience calls remain unsigned and fee-free.
+Empty-block helpers advance the chain without draining the mempool.
+
+This is a deterministic local queue, with no network propagation, fee bidding,
+replacement or expiry. Coinbase, tenure-change, and
+poison-microblock payloads remain unsupported. Raw payloads, post-conditions,
+contract source, and memo bytes execute exactly as signed.
+
+Migration: broadcast previously mined immediately and returned an execution
+result. Check the admission response, then call `mineBlock()` for execution.
+
 ## Contributing
 
 The clarinet-sdk requires a few steps to be built and tested locally.

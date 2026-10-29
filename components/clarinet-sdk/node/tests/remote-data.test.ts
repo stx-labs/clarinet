@@ -152,7 +152,7 @@ describe.skip("simnet remote interactions", { retry: 2 }, async () => {
       initial_height: 56231,
     });
     expect(() => simnet.callReadOnlyFn(counterAddress, "doesnt-exist", [], sender)).toThrowError(
-      `Call contract function error: ${counterAddress}::doesnt-exist() -> Method 'doesnt-exist' does not exist on contract '${counterAddress}'`,
+      `Call contract function error: ${counterAddress}::doesnt-exist() -> Function 'doesnt-exist' does not exist on contract '${counterAddress}'`,
     );
   });
 });

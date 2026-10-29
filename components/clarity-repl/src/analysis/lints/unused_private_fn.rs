@@ -18,7 +18,7 @@ use crate::analysis::cache::functions::PrivateFnData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
-use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
 pub struct UnusedPrivateFn<'a, 'b>
 where
@@ -100,7 +100,6 @@ impl<'a, 'b> AnalysisPass for UnusedPrivateFn<'a, 'b> {
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
-        _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let mut lint = UnusedPrivateFn::new(analysis_cache, level);
         lint.run()

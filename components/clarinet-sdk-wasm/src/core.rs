@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::panic;
 use std::path::{Path, PathBuf};
 
-use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
     DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
@@ -12,29 +12,31 @@ use clarinet_deployments::{
     update_session_with_deployment_plan,
 };
 use clarinet_files::{paths, FileAccessor, ProjectManifest, StacksNetwork, WASMFileSystemAccessor};
-use clarity::types::chainstate::StacksAddress;
+use clarity::types::chainstate::{StacksAddress, Txid};
 use clarity::types::Address;
 use clarity::vm::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
 };
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
-use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, SymbolicExpression};
+use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, Value};
 use clarity_repl::repl::boot::{
     remap_mainnet_boot_principals, BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS,
 };
-use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value};
+use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value, value_from_bytes_exact};
 use clarity_repl::repl::hooks::perf::CostField;
-use clarity_repl::repl::interpreter::BlockInclusion;
+use clarity_repl::repl::interpreter::{BlockInclusion, FailureKind, FailureReceipt};
 use clarity_repl::repl::post_conditions::{
     parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
 };
+use clarity_repl::repl::raw_transaction::RawTransactionMetadata;
 use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
     clarity_values, epoch_from_str, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
     Session, SessionSettings,
 };
-use clarity_repl::utils::Environment;
+use clarity_repl::utils::sdk_events::serialize_events;
+use clarity_repl::utils::{serialize_display, Environment};
 use gloo_utils::format::JsValueSerdeExt;
 use js_sys::Function as JsFunction;
 use serde::{Deserialize, Serialize};
@@ -42,8 +44,6 @@ use serde_json::json;
 use serde_wasm_bindgen::to_value as encode_to_js;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
-
-use crate::utils::events::serialize_event;
 
 #[wasm_bindgen]
 extern "C" {
@@ -131,40 +131,48 @@ impl CallFnArgs {
       Because it's JSON, the Uint8Array arguments are passed as Map<index, value> instead of Vec<u8>.
       This method transform the Map back into a Vec.
     */
-    fn from_json_args(json_args: CallContractArgsJSON) -> Self {
+    fn from_json_args(json_args: CallContractArgsJSON) -> Result<Self, String> {
         let args = json_args
             .args_maps
             .into_iter()
             .map(|arg| {
                 let mut parsed_arg = vec![0; arg.len()];
                 for (i, v) in arg {
-                    parsed_arg[i] = v;
+                    *parsed_arg.get_mut(i).ok_or("Invalid argument byte index")? = v;
                 }
-                parsed_arg
+                Ok(parsed_arg)
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
 
-        Self {
+        Ok(Self {
             contract: json_args.contract,
             method: json_args.method,
             args,
             sender: json_args.sender,
             post_conditions: json_args.post_conditions,
             post_condition_mode: json_args.post_condition_mode,
-        }
+        })
     }
+}
+
+/// Decode contract-call arguments as a node decodes a transaction's.
+fn decode_call_args(args: &[Vec<u8>]) -> Result<Vec<Value>, String> {
+    args.iter()
+        .map(|arg| {
+            value_from_bytes_exact(arg)
+                .map_err(|error| format!("Invalid Clarity argument: {error}"))
+        })
+        .collect()
 }
 
 fn clarity_version_from_u32(
     v: Option<u32>,
     current_epoch: clarity::types::StacksEpochId,
-) -> ClarityVersion {
+) -> Result<ClarityVersion, String> {
     match v {
-        Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8).unwrap_or_else(|| {
-            log!("Invalid clarity version {v}. Using default version.");
-            DEFAULT_CLARITY_VERSION
-        }),
-        None => ClarityVersion::default_for_epoch(current_epoch),
+        Some(v) => clarity_repl::repl::clarity_version_from_u32(v)
+            .ok_or_else(|| format!("Invalid Clarity version: {v}")),
+        None => Ok(ClarityVersion::default_for_epoch(current_epoch)),
     }
 }
 
@@ -275,13 +283,13 @@ fn post_condition_check(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[wasm_bindgen]
-pub struct TxArgs {
-    call_private_fn: Option<CallContractArgsJSON>,
-    call_public_fn: Option<CallContractArgsJSON>,
-    deploy_contract: Option<DeployContractArgs>,
-    #[serde(rename(serialize = "transfer_stx", deserialize = "transferSTX"))]
-    transfer_stx: Option<TransferSTXArgs>,
+enum TxArgs {
+    BroadcastTx(String),
+    CallPrivateFn(CallContractArgsJSON),
+    CallPublicFn(CallContractArgsJSON),
+    DeployContract(DeployContractArgs),
+    #[serde(rename = "transferSTX")]
+    TransferStx(TransferSTXArgs),
 }
 
 #[wasm_bindgen(getter_with_clone)]
@@ -291,6 +299,121 @@ pub struct TransactionRes {
     pub events: String,
     pub costs: String,
     pub performance: Option<String>,
+}
+
+#[derive(Debug)]
+struct TransactionError {
+    message: String,
+    inclusion: BlockInclusion,
+    receipt: Option<Box<FailureReceipt>>,
+}
+
+impl From<String> for TransactionError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            inclusion: BlockInclusion::Rejected,
+            receipt: None,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum BlockTransactionResult {
+    Success {
+        execution: TransactionRes,
+    },
+    IncludedFailure {
+        kind: FailureKind,
+        error: String,
+        execution: TransactionRes,
+    },
+    Rejected {
+        error: String,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum MinedTransactionResult {
+    Unsigned(BlockTransactionResult),
+    Signed(SignedTransactionResult),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum SignedTransactionResult {
+    Rejected {
+        transaction: Option<SignedTransactionMetadata>,
+        error: String,
+    },
+    Success {
+        transaction: SignedTransactionMetadata,
+        execution: TransactionRes,
+    },
+    IncludedFailure {
+        transaction: SignedTransactionMetadata,
+        kind: FailureKind,
+        error: String,
+        execution: TransactionRes,
+    },
+}
+
+#[derive(Serialize)]
+struct SignedTransactionMetadata {
+    txid: Txid,
+    #[serde(serialize_with = "serialize_display")]
+    fee: u64,
+    #[serde(serialize_with = "serialize_display")]
+    nonce: u64,
+}
+
+impl From<RawTransactionMetadata> for SignedTransactionMetadata {
+    fn from(
+        RawTransactionMetadata {
+            txid, fee, nonce, ..
+        }: RawTransactionMetadata,
+    ) -> Self {
+        Self { txid, fee, nonce }
+    }
+}
+
+impl From<Result<TransactionRes, TransactionError>> for BlockTransactionResult {
+    fn from(result: Result<TransactionRes, TransactionError>) -> Self {
+        match result {
+            Ok(execution) => {
+                let value =
+                    clarity::vm::types::Value::try_deserialize_hex_untyped(&execution.result)
+                        .expect("transaction results contain serialized Clarity values");
+                if matches!(value, clarity::vm::types::Value::Response(ref response) if !response.committed)
+                {
+                    Self::IncludedFailure {
+                        kind: FailureKind::Response,
+                        error: clarity_values::value_to_string(&value),
+                        execution,
+                    }
+                } else {
+                    Self::Success { execution }
+                }
+            }
+            Err(TransactionError {
+                message,
+                inclusion: BlockInclusion::Included,
+                receipt,
+            }) => {
+                // Failures rejected before execution, such as a call to a missing
+                // function, produced no value or events.
+                let receipt = receipt.unwrap_or_else(|| Box::new(FailureReceipt::runtime(None)));
+                Self::IncludedFailure {
+                    kind: receipt.kind,
+                    error: message,
+                    execution: failure_receipt_to_transaction_res(&receipt),
+                }
+            }
+            Err(TransactionError { message, .. }) => Self::Rejected { error: message },
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -313,16 +436,19 @@ pub fn execution_result_to_transaction_res(execution: &ExecutionResult) -> Trans
             _ => "0x03".into(),
         },
     };
-    let events_as_strings = execution
-        .events
-        .iter()
-        .map(|e| json!(serialize_event(e)).to_string())
-        .collect::<Vec<String>>();
-
     TransactionRes {
         result,
-        events: json!(events_as_strings).to_string(),
+        events: serialize_events(&execution.events),
         costs: json!(execution.cost).to_string(),
+        performance: None,
+    }
+}
+
+fn failure_receipt_to_transaction_res(receipt: &FailureReceipt) -> TransactionRes {
+    TransactionRes {
+        result: clarity_values::to_raw_value(&receipt.result),
+        events: serialize_events(&receipt.events),
+        costs: json!(receipt.cost).to_string(),
         performance: None,
     }
 }
@@ -511,7 +637,11 @@ impl SDK {
             .await?;
 
         let mut session = initiate_session_from_manifest(&manifest);
-        session.interpreter.repl_settings.analysis.disable_all();
+        session
+            .interpreter
+            .repl_settings
+            .analysis
+            .disable_all_lints();
         if self.options.track_coverage {
             session.enable_coverage_hook();
         }
@@ -543,8 +673,11 @@ impl SDK {
                     }
                 }
                 Err(diagnostics) => {
-                    let contract_diagnostics =
-                        HashMap::from([(contract_id.clone(), diagnostics.clone())]);
+                    // Linting is disabled for this session; report the remaining diagnostics directly.
+                    let contract_diagnostics = HashMap::from([(
+                        contract_id.clone(),
+                        diagnostics.iter().map(|d| d.diagnostic.clone()).collect(),
+                    )]);
                     let diags_digest =
                         DiagnosticsDigest::new(&contract_diagnostics, &HashMap::new(), &deployment);
                     if diags_digest.errors > 0 {
@@ -863,10 +996,12 @@ impl SDK {
             .get_session()
             .resolve_contract_id(&self.deployer, contract)?;
         let session = self.get_session_mut();
-        session
+        // Like the node's map-entry endpoint, a missing entry, map, or contract
+        // reads as `none` rather than an error.
+        Ok(session
             .interpreter
             .get_map_entry(&contract_id, map_name, &uint8_to_value(&map_key))
-            .ok_or_else(|| "value not found".into())
+            .unwrap_or_else(|| clarity_values::to_raw_value(&clarity::vm::types::Value::none())))
     }
 
     fn get_function_interface(
@@ -900,32 +1035,34 @@ impl SDK {
         }: &CallFnArgs,
         allow_private: bool,
         kind: CallKind,
-    ) -> Result<TransactionRes, String> {
+    ) -> Result<TransactionRes, TransactionError> {
         let test_name = self.current_test_name.clone();
         let track_costs = self.options.track_costs;
         let track_performance = self.options.track_performance;
 
         if PrincipalData::parse_standard_principal(sender).is_err() {
-            return Err(format!("Invalid sender address '{sender}'."));
+            return Err(format!("Invalid sender address '{sender}'.").into());
         }
 
-        let parsed_args = args
-            .iter()
-            .map(|a| SymbolicExpression::atom_value(uint8_to_value(a)))
-            .collect::<Vec<SymbolicExpression>>();
+        let parsed_args = decode_call_args(args)?;
 
         let post_conditions = post_condition_check(
             post_conditions.as_deref(),
             post_condition_mode.as_deref(),
             sender,
         )?;
+        let cost_args: Vec<String> = if track_costs {
+            parsed_args.iter().map(ToString::to_string).collect()
+        } else {
+            vec![]
+        };
 
         let session = self.get_session_mut();
         let execution = session
             .call_contract_fn(
                 contract,
                 method,
-                &parsed_args,
+                parsed_args,
                 sender,
                 allow_private,
                 track_costs,
@@ -941,9 +1078,13 @@ impl SDK {
                         .join(", ")
                 );
                 if let Some(diag) = failure.diagnostics.last() {
-                    message = format!("{message} -> {}", diag.message);
+                    message = format!("{message} -> {}", diag.diagnostic.message);
                 }
-                message
+                TransactionError {
+                    message,
+                    inclusion: failure.inclusion,
+                    receipt: failure.receipt,
+                }
             })?;
 
         // Collect performance data before accessing self.costs_reports
@@ -969,7 +1110,7 @@ impl SDK {
                     test_name,
                     contract_id,
                     method: method.to_string(),
-                    args: parsed_args.iter().map(|a| a.to_string()).collect(),
+                    args: cost_args,
                     cost_result: cost.clone(),
                 });
             }
@@ -993,6 +1134,7 @@ impl SDK {
         }
         // A read-only call sends nothing, so it is never a transaction.
         self.call_contract_fn(args, false, CallKind::NonceFree)
+            .map_err(|error| error.message)
     }
 
     /// Charge the nonce for a preflight failure if the equivalent VM error
@@ -1020,12 +1162,18 @@ impl SDK {
         args: &CallFnArgs,
         advance_chain_tip: bool,
         required_access: ContractInterfaceFunctionAccess,
-    ) -> Result<TransactionRes, String> {
+    ) -> Result<TransactionRes, TransactionError> {
         let wrong_access = match self.get_function_interface(&args.contract, &args.method) {
-            Ok(interface) if interface.access != required_access => Some(format!(
-                "{} is not a {required_access:?} function",
-                args.method
-            )),
+            Ok(interface)
+                if interface.access != required_access
+                    && !(required_access == ContractInterfaceFunctionAccess::public
+                        && interface.access == ContractInterfaceFunctionAccess::read_only) =>
+            {
+                Some(format!(
+                    "{} is not a {required_access:?} function",
+                    args.method
+                ))
+            }
             _ => None,
         };
 
@@ -1034,8 +1182,24 @@ impl SDK {
         }
 
         if let Some(message) = wrong_access {
+            let epoch = self.get_session().interpreter.datastore.get_current_epoch();
+            post_condition_check(
+                args.post_conditions.as_deref(),
+                args.post_condition_mode.as_deref(),
+                &args.sender,
+            )?
+            .validate_for_epoch(epoch)?;
+            decode_call_args(&args.args)?;
             self.charge_preflight_rejection(args)?;
-            return Err(message);
+            return Err(TransactionError {
+                message,
+                inclusion: BlockInclusion::from_uncallable_function(
+                    &args.contract,
+                    &args.method,
+                    epoch,
+                ),
+                receipt: None,
+            });
         }
 
         let allow_private = required_access == ContractInterfaceFunctionAccess::private;
@@ -1046,7 +1210,7 @@ impl SDK {
         &mut self,
         args: &CallFnArgs,
         advance_chain_tip: bool,
-    ) -> Result<TransactionRes, String> {
+    ) -> Result<TransactionRes, TransactionError> {
         self.call_fn_as_transaction(
             args,
             advance_chain_tip,
@@ -1058,7 +1222,7 @@ impl SDK {
         &mut self,
         args: &CallFnArgs,
         advance_chain_tip: bool,
-    ) -> Result<TransactionRes, String> {
+    ) -> Result<TransactionRes, TransactionError> {
         self.call_fn_as_transaction(
             args,
             advance_chain_tip,
@@ -1070,13 +1234,13 @@ impl SDK {
         &mut self,
         args: &TransferSTXArgs,
         advance_chain_tip: bool,
-    ) -> Result<TransactionRes, String> {
+    ) -> Result<TransactionRes, TransactionError> {
         if PrincipalData::parse_standard_principal(&args.sender).is_err() {
-            return Err(format!("Invalid sender address '{}'.", args.sender));
+            return Err(format!("Invalid sender address '{}'.", args.sender).into());
         }
 
         if PrincipalData::parse(&args.recipient).is_err() {
-            return Err(format!("Invalid recipient address '{}'.", args.recipient));
+            return Err(format!("Invalid recipient address '{}'.", args.recipient).into());
         }
 
         let post_conditions = post_condition_check(
@@ -1086,6 +1250,11 @@ impl SDK {
         )?;
 
         let session = self.get_session_mut();
+        // Like other transactions, a transfer executes in the new block, even
+        // when it is rejected.
+        if advance_chain_tip {
+            session.advance_chain_tip(1);
+        }
         let initial_tx_sender = session.get_tx_sender();
         session.set_tx_sender(&args.sender);
 
@@ -1097,15 +1266,12 @@ impl SDK {
             Err(diagnostics) => {
                 let mut message = format!("{}: {}", "STX transfer error", args.sender);
                 if let Some(diag) = diagnostics.last() {
-                    message = format!("{} -> {}", message, diag.message);
+                    message = format!("{message} -> {}", diag.diagnostic.message);
                 }
-                return Err(message);
+                return Err(message.into());
             }
         };
 
-        if advance_chain_tip {
-            session.advance_chain_tip(1);
-        }
         Ok(execution_result_to_transaction_res(&execution))
     }
 
@@ -1113,10 +1279,13 @@ impl SDK {
         &mut self,
         args: &DeployContractArgs,
         advance_chain_tip: bool,
-    ) -> Result<TransactionRes, String> {
+    ) -> Result<TransactionRes, TransactionError> {
         if PrincipalData::parse_standard_principal(&args.sender).is_err() {
-            return Err(format!("Invalid sender address '{}'.", args.sender));
+            return Err(format!("Invalid sender address '{}'.", args.sender).into());
         }
+
+        QualifiedContractIdentifier::parse(&format!("{}.{}", args.sender, args.name))
+            .map_err(|error| format!("Invalid contract identifier: {error}"))?;
 
         let track_costs = self.options.track_costs;
         let post_conditions = post_condition_check(
@@ -1124,18 +1293,16 @@ impl SDK {
             args.post_condition_mode.as_deref(),
             &args.sender,
         )?;
+        let current_epoch = self.get_session().interpreter.datastore.get_current_epoch();
+        let clarity_version = clarity_version_from_u32(
+            args.options.as_ref().and_then(|opts| opts.clarity_version),
+            current_epoch,
+        )?;
         let execution = {
             let session = self.get_session_mut();
             if advance_chain_tip {
                 session.advance_chain_tip(1);
             }
-
-            let current_epoch = session.interpreter.datastore.get_current_epoch();
-
-            let clarity_version = clarity_version_from_u32(
-                args.options.as_ref().and_then(|opts| opts.clarity_version),
-                current_epoch,
-            );
 
             // `deployContract` bypasses the deployment plan, so the remap that
             // `clarinet-deployments` records for manifest contracts has to be
@@ -1177,17 +1344,27 @@ impl SDK {
                 post_conditions.remap_mainnet_boot_principals()
             };
 
-            match session.deploy_contract(&contract, track_costs, None, post_conditions) {
+            match session.deploy_contract_with_inclusion(
+                &contract,
+                track_costs,
+                None,
+                post_conditions,
+                None,
+            ) {
                 Ok(res) => res,
-                Err(diagnostics) => {
+                Err(failure) => {
                     let mut message = format!(
                         "Contract deployment runtime error: {}.{}",
                         args.sender, args.name
                     );
-                    if let Some(diag) = diagnostics.last() {
-                        message = format!("{} -> {}", message, diag.message);
+                    if let Some(diag) = failure.diagnostics.last() {
+                        message = format!("{} -> {}", message, diag.diagnostic.message);
                     }
-                    return Err(message);
+                    return Err(TransactionError {
+                        message,
+                        inclusion: failure.inclusion,
+                        receipt: failure.receipt,
+                    });
                 }
             }
         };
@@ -1203,55 +1380,163 @@ impl SDK {
         Ok(execution_result_to_transaction_res(&execution))
     }
 
+    /// Submit signed bytes to the session's mempool without mining.
+    #[wasm_bindgen(js_name=broadcastTransaction)]
+    pub fn broadcast_transaction(&mut self, raw_hex: &str) -> String {
+        serde_json::to_string(&self.get_session_mut().submit_transaction(raw_hex))
+            .expect("admission response is serializable")
+    }
+
+    fn raw_transaction_response(
+        &mut self,
+        outcome: clarity_repl::repl::raw_transaction::RawTransactionOutcome,
+    ) -> SignedTransactionResult {
+        use clarity_repl::repl::raw_transaction::{RawTransactionOutcome, RawTransactionResult};
+        match outcome {
+            RawTransactionOutcome::Rejected { metadata, error } => {
+                SignedTransactionResult::Rejected {
+                    transaction: metadata.map(Into::into),
+                    error,
+                }
+            }
+            RawTransactionOutcome::Included { metadata, result } => {
+                // Like convenience calls, report returned responses (including err),
+                // but not VM errors or post-condition aborts.
+                let cost = match &result {
+                    RawTransactionResult::Success(execution) => execution.cost.as_ref(),
+                    RawTransactionResult::Failure { receipt, .. }
+                        if receipt.kind == FailureKind::Response =>
+                    {
+                        receipt.cost.as_ref()
+                    }
+                    _ => None,
+                };
+                if self.options.track_costs {
+                    if let (Some(call), Some(cost)) = (&metadata.contract_call, cost) {
+                        self.costs_reports.push(CostsReport {
+                            test_name: self.current_test_name.clone(),
+                            contract_id: call.to_clarity_contract_id().to_string(),
+                            method: call.function_name.to_string(),
+                            // Preserve the Display format used by convenience-call reports.
+                            args: call.function_args.iter().map(ToString::to_string).collect(),
+                            cost_result: cost.clone(),
+                        });
+                    }
+                }
+
+                match result {
+                    RawTransactionResult::Success(execution) => {
+                        if let Some((id, interface)) = contract_interface_from_result(&execution) {
+                            self.contracts_interfaces.insert(id, interface);
+                        }
+                        let mut response = execution_result_to_transaction_res(&execution);
+                        if self.options.track_performance {
+                            response.performance = self.get_session().get_performance_data();
+                        }
+                        SignedTransactionResult::Success {
+                            transaction: metadata.into(),
+                            execution: response,
+                        }
+                    }
+                    RawTransactionResult::Failure { error, receipt } => {
+                        let mut execution = failure_receipt_to_transaction_res(&receipt);
+                        if self.options.track_performance && receipt.kind == FailureKind::Response {
+                            execution.performance = self.get_session().get_performance_data();
+                        }
+                        SignedTransactionResult::IncludedFailure {
+                            transaction: metadata.into(),
+                            kind: receipt.kind,
+                            error,
+                            execution,
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[wasm_bindgen(js_name=deployContract)]
     pub fn deploy_contract(&mut self, args: &DeployContractArgs) -> Result<TransactionRes, String> {
         self.inner_deploy_contract(args, true)
+            .map_err(|error| error.message)
     }
 
     #[wasm_bindgen(js_name = "transferSTX")]
     pub fn transfer_stx(&mut self, args: &TransferSTXArgs) -> Result<TransactionRes, String> {
         self.inner_transfer_stx(args, true)
+            .map_err(|error| error.message)
     }
 
     #[wasm_bindgen(js_name = "callPublicFn")]
     pub fn call_public_fn(&mut self, args: &CallFnArgs) -> Result<TransactionRes, String> {
         self.inner_call_public_fn(args, true)
+            .map_err(|error| error.message)
     }
 
     #[wasm_bindgen(js_name = "callPrivateFn")]
     pub fn call_private_fn(&mut self, args: &CallFnArgs) -> Result<TransactionRes, String> {
         self.inner_call_private_fn(args, true)
+            .map_err(|error| error.message)
     }
 
     #[wasm_bindgen(js_name=mineBlock)]
     pub fn mine_block_js(&mut self, js_txs: js_sys::Array) -> Result<JsValue, String> {
-        let mut results: Vec<TransactionRes> = vec![];
-
-        let txs: Vec<TxArgs> = js_txs
-            .into_serde()
-            .map_err(|e| format!("Failed to parse js txs: {e}"))?;
+        let tx_len = usize::try_from(js_txs.length()).unwrap();
+        let mut results: Vec<MinedTransactionResult> = Vec::with_capacity(tx_len);
 
         {
             let session = self.get_session_mut();
             session.advance_chain_tip(1);
         }
 
-        for tx in txs {
-            let result = if let Some(call_public) = tx.call_public_fn {
-                self.inner_call_public_fn(&CallFnArgs::from_json_args(call_public), false)
-            } else if let Some(call_private) = tx.call_private_fn {
-                self.inner_call_private_fn(&CallFnArgs::from_json_args(call_private), false)
-            } else if let Some(transfer_stx) = tx.transfer_stx {
-                self.inner_transfer_stx(&transfer_stx, false)
-            } else if let Some(deploy_contract) = tx.deploy_contract {
-                self.inner_deploy_contract(&deploy_contract, false)
-            } else {
-                return Err("Invalid tx arguments".into());
-            }?;
-            results.push(result);
+        while let Some(tx) = self.get_session_mut().next_mempool_transaction() {
+            let outcome = self.get_session_mut().execute_transaction(&tx);
+            results.push(MinedTransactionResult::Signed(
+                self.raw_transaction_response(outcome),
+            ));
         }
 
-        encode_to_js(&results).map_err(|e| format!("error: {e}"))
+        for tx in js_txs.iter() {
+            let tx: TxArgs = match tx.into_serde() {
+                Ok(tx) => tx,
+                Err(error) => {
+                    results.push(MinedTransactionResult::Unsigned(
+                        BlockTransactionResult::Rejected {
+                            error: format!("Invalid tx arguments: {error}"),
+                        },
+                    ));
+                    continue;
+                }
+            };
+            let result = match tx {
+                TxArgs::BroadcastTx(raw_hex) => {
+                    let outcome = self.get_session_mut().execute_raw_transaction(&raw_hex);
+                    results.push(MinedTransactionResult::Signed(
+                        self.raw_transaction_response(outcome),
+                    ));
+                    continue;
+                }
+                TxArgs::CallPublicFn(call_public) => CallFnArgs::from_json_args(call_public)
+                    .map_err(TransactionError::from)
+                    .and_then(|args| self.inner_call_public_fn(&args, false)),
+                TxArgs::CallPrivateFn(call_private) => CallFnArgs::from_json_args(call_private)
+                    .map_err(TransactionError::from)
+                    .and_then(|args| self.inner_call_private_fn(&args, false)),
+                TxArgs::TransferStx(transfer_stx) => self.inner_transfer_stx(&transfer_stx, false),
+                TxArgs::DeployContract(deploy_contract) => {
+                    self.inner_deploy_contract(&deploy_contract, false)
+                }
+            };
+            results.push(MinedTransactionResult::Unsigned(result.into()));
+        }
+
+        results
+            .serialize(
+                &serde_wasm_bindgen::Serializer::new()
+                    .serialize_missing_as_null(true)
+                    .serialize_maps_as_objects(true),
+            )
+            .map_err(|e| format!("error: {e}"))
     }
 
     #[wasm_bindgen(js_name=mineEmptyBlock)]
@@ -1291,27 +1576,6 @@ impl SDK {
         session.advance_burn_chain_tip(count.unwrap_or(1))
     }
 
-    #[wasm_bindgen(js_name=runSnippet)]
-    pub fn run_snippet(&mut self, snippet: String) -> String {
-        let session = self.get_session_mut();
-        let snippet = session.remap_user_snippet(snippet);
-        match session.eval(snippet, false) {
-            Ok(res) => match res.into_inner().result {
-                EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
-                EvaluationResult::Contract(_) => unreachable!(
-                    "Contract evaluation result should not be returned from eval_snippet",
-                ),
-            },
-            Err(diagnostics) => {
-                let mut message = "error:".to_string();
-                diagnostics.iter().for_each(|d| {
-                    message = format!("{message}\n{}", d.message);
-                });
-                message
-            }
-        }
-    }
-
     #[wasm_bindgen(js_name=execute)]
     pub fn execute(&mut self, snippet: String) -> Result<TransactionRes, String> {
         let session = self.get_session_mut();
@@ -1321,7 +1585,7 @@ impl SDK {
             Err(diagnostics) => {
                 let message = diagnostics
                     .iter()
-                    .map(|d| d.message.to_string())
+                    .map(|d| d.diagnostic.message.to_string())
                     .collect::<Vec<String>>()
                     .join("\n");
                 Err(format!("error: {message}"))

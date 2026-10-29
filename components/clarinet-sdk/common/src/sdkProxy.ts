@@ -1,9 +1,14 @@
 import { Cl, serializeCVBytes } from "@stacks/transactions";
 
 import {
-  parseCosts,
-  parseEvents,
+  parseBlockTransactionResult,
+  getClarityVersionInputError,
+  mineBlockWithValidatedVersions,
+  parseTransactionResult,
+  type SerializedTransactionResult,
+  type SerializedBlockTransactionResult,
   serializePostConditions,
+  type BroadcastTransaction,
   type CallFn,
   type CallReadOnlyFn,
   type DeployContract,
@@ -11,42 +16,31 @@ import {
   type GetDataVar,
   type GetMapEntry,
   type MineBlock,
-  type ParsedTransactionResult,
   type TransferSTX,
 } from "./sdkProxyHelpers.js";
 
-type WasmTransactionRes = {
-  result: string;
-  events: string;
-  costs: string;
-  performance?: string;
-};
-
 type ProxySdk = {
-  callReadOnlyFn(args: unknown): WasmTransactionRes;
-  callPublicFn(args: unknown): WasmTransactionRes;
-  callPrivateFn(args: unknown): WasmTransactionRes;
-  deployContract(args: unknown): WasmTransactionRes;
-  execute(snippet: string): WasmTransactionRes;
+  broadcastTransaction(rawHex: string): string;
+  callReadOnlyFn(args: unknown): SerializedTransactionResult;
+  callPublicFn(args: unknown): SerializedTransactionResult;
+  callPrivateFn(args: unknown): SerializedTransactionResult;
+  deployContract(args: unknown): SerializedTransactionResult;
+  execute(snippet: string): SerializedTransactionResult;
   getDataVar(contract: string, varName: string): string;
   getMapEntry(contract: string, mapName: string, mapKey: Uint8Array): string;
-  mineBlock(txs: unknown[]): WasmTransactionRes[];
-  runSnippet(snippet: string): string;
-  transferSTX(args: unknown): WasmTransactionRes;
+  mineBlock(txs: unknown[]): SerializedBlockTransactionResult[];
+  transferSTX(args: unknown): SerializedTransactionResult;
 };
 
-/** @deprecated use `simnet.execute(command)` instead */
-type RunSnippet<S extends ProxySdk> = S["runSnippet"];
-
 export type ProxiedSimnet<S extends ProxySdk> = {
-  [K in keyof S]: K extends "callReadOnlyFn"
-    ? CallReadOnlyFn
-    : K extends "callPublicFn" | "callPrivateFn"
-      ? CallFn
-      : K extends "execute"
-        ? Execute
-        : K extends "runSnippet"
-          ? RunSnippet<S>
+  [K in keyof S]: K extends "broadcastTransaction"
+    ? BroadcastTransaction
+    : K extends "callReadOnlyFn"
+      ? CallReadOnlyFn
+      : K extends "callPublicFn" | "callPrivateFn"
+        ? CallFn
+        : K extends "execute"
+          ? Execute
           : K extends "deployContract"
             ? DeployContract
             : K extends "transferSTX"
@@ -87,15 +81,6 @@ type ProxyBindings<ContractOptions> = {
   ) => unknown;
 };
 
-function parseTxResponse(response: WasmTransactionRes): ParsedTransactionResult {
-  return {
-    result: Cl.deserialize(response.result),
-    events: parseEvents(response.events),
-    costs: parseCosts(response.costs),
-    performance: response.performance,
-  };
-}
-
 export function createSessionProxy<S extends ProxySdk, ContractOptions>(
   bindings: ProxyBindings<ContractOptions>,
 ): ProxyHandler<S> {
@@ -118,13 +103,19 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
               postConditionMode,
             ),
           );
-          return parseTxResponse(response);
+          return parseTransactionResult(response);
         };
         return callFn;
       }
 
+      if (prop === "broadcastTransaction") {
+        const broadcast: BroadcastTransaction = (rawHex) =>
+          JSON.parse(sdk.broadcastTransaction(rawHex));
+        return broadcast;
+      }
+
       if (prop === "execute") {
-        const execute: Execute = (snippet) => parseTxResponse(sdk.execute(snippet));
+        const execute: Execute = (snippet) => parseTransactionResult(sdk.execute(snippet));
         return execute;
       }
 
@@ -136,12 +127,14 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
           sender,
           postConditionOptions,
         ) => {
+          const error = getClarityVersionInputError(options?.clarityVersion);
+          if (error !== undefined) throw new Error(error);
           const rustOptions = options
             ? new ContractOptions(options.clarityVersion)
             : new ContractOptions();
           const { postConditions, postConditionMode } =
             serializePostConditions(postConditionOptions);
-          return parseTxResponse(
+          return parseTransactionResult(
             sdk.deployContract(
               new DeployContractArgs(
                 name,
@@ -160,7 +153,7 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
       if (prop === "transferSTX") {
         const transferSTX: TransferSTX = (amount, recipient, sender, options) => {
           const { postConditions, postConditionMode } = serializePostConditions(options);
-          return parseTxResponse(
+          return parseTransactionResult(
             sdk.transferSTX(
               new TransferSTXArgs(
                 BigInt(amount),
@@ -176,31 +169,32 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
       }
 
       if (prop === "mineBlock") {
-        const mineBlock: MineBlock = (txs) => {
-          const serializedTxs = txs.map((tx) => {
-            if (tx.callPublicFn) {
-              return {
-                callPublicFn: {
-                  ...tx.callPublicFn,
-                  args_maps: tx.callPublicFn.args.map(serializeCVBytes),
-                },
-              };
-            }
-            if (tx.callPrivateFn) {
-              return {
-                callPrivateFn: {
-                  ...tx.callPrivateFn,
-                  args_maps: tx.callPrivateFn.args.map(serializeCVBytes),
-                },
-              };
-            }
-            if (tx.deployContract) {
-              return { deployContract: { ...tx.deployContract } };
-            }
-            return tx;
+        const mineBlock: MineBlock = (txs = []) =>
+          mineBlockWithValidatedVersions(txs, (txs) => {
+            const serializedTxs = txs.map((tx) => {
+              if (tx.callPublicFn) {
+                return {
+                  callPublicFn: {
+                    ...tx.callPublicFn,
+                    args_maps: tx.callPublicFn.args.map(serializeCVBytes),
+                  },
+                };
+              }
+              if (tx.callPrivateFn) {
+                return {
+                  callPrivateFn: {
+                    ...tx.callPrivateFn,
+                    args_maps: tx.callPrivateFn.args.map(serializeCVBytes),
+                  },
+                };
+              }
+              if (tx.deployContract) {
+                return { deployContract: { ...tx.deployContract } };
+              }
+              return tx;
+            });
+            return sdk.mineBlock(serializedTxs).map(parseBlockTransactionResult);
           });
-          return sdk.mineBlock(serializedTxs).map(parseTxResponse);
-        };
         return mineBlock;
       }
 

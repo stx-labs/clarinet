@@ -7,10 +7,15 @@
  * breakpoints in .clar files. API coverage and transaction behavior differ
  * from the Wasm SDK; coverage and cost reports are not supported.
  */
-import { Cl, type ClarityValue } from "@stacks/transactions";
+import { Cl, serializeCV, type ClarityValue } from "@stacks/transactions";
 import { syncSend } from "./syncDebugSocket.js";
 import {
   parseEvents,
+  mineBlockWithValidatedVersions,
+  parseBlockTransactionResult,
+  type BlockTransactionResult,
+  type BroadcastTransactionResult,
+  type SerializedBlockTransactionResult,
   parseCosts,
   type ClarityEvent,
   type ClarityCosts,
@@ -22,12 +27,14 @@ import {
 type ServerTxResult = {
   result: string; // 0x-prefixed hex-encoded Clarity value
   events: string; // JSON array string (same format as WASM)
-  costs: string;  // JSON string or "null"
+  costs: string; // JSON string or "null"
 };
 
 function parseTxResult(r: ServerTxResult): ParsedTransactionResult {
   if (!r.result) {
-    throw new Error((r as unknown as { error?: string }).error ?? "transaction failed with no result");
+    throw new Error(
+      (r as unknown as { error?: string }).error ?? "transaction failed with no result",
+    );
   }
   return {
     result: Cl.deserialize(r.result),
@@ -56,7 +63,8 @@ export type SyncDebugSimnet = {
   readonly burnBlockHeight: number;
   readonly stacksBlockHeight: number;
   getAccounts(): Map<string, string>;
-  mineBlock(txs: Tx[]): ParsedTransactionResult[];
+  broadcastTransaction(rawHex: string): BroadcastTransactionResult;
+  mineBlock(txs?: Tx[]): BlockTransactionResult[];
   mineEmptyBlock(count?: number): number;
   mineEmptyStacksBlock(): number;
   callPublicFn(
@@ -78,7 +86,6 @@ export type SyncDebugSimnet = {
     sender: string,
   ): ParsedTransactionResult;
   execute(snippet: string): ParsedTransactionResult;
-  runSnippet(snippet: string): string;
   getAssetsMap(): Map<string, Map<string, bigint>>;
   getLastContractCallTrace(): string | undefined;
   setCurrentTestName(name: string): void;
@@ -87,13 +94,17 @@ export type SyncDebugSimnet = {
     bootContractsPath: string,
   ): { coverage: string; costs: string };
   // initSession is async to match the Simnet interface called in vitest.setup.ts
-  initSession(cwd: string, manifestPath: string, options?: {
-    trackCosts: boolean;
-    trackCoverage: boolean;
-    trackPerformance?: boolean;
-    performanceCostField?: string;
-    apiUrl?: string;
-  }): Promise<void>;
+  initSession(
+    cwd: string,
+    manifestPath: string,
+    options?: {
+      trackCosts: boolean;
+      trackCoverage: boolean;
+      trackPerformance?: boolean;
+      performanceCostField?: string;
+      apiUrl?: string;
+    },
+  ): Promise<void>;
 };
 
 /**
@@ -154,54 +165,65 @@ export function createSyncDebugSimnet(): SyncDebugSimnet {
       throw new Error("collectReport: coverage and cost reports are not supported in debug mode");
     },
 
-    runSnippet(snippet: string): string {
-      const resp = send({ method: "execute", snippet }) as ServerTxResult;
-      return Cl.stringify(Cl.deserialize(resp.result));
+    broadcastTransaction(rawHex: string): BroadcastTransactionResult {
+      return send({ method: "broadcastTransaction", rawHex }) as BroadcastTransactionResult;
     },
 
-    mineBlock(txs: Tx[]): ParsedTransactionResult[] {
-      const serialized = txs.map((tx) => {
-        if (tx.callPublicFn) {
-          return {
-            type: "callPublicFn",
-            contract: tx.callPublicFn.contract,
-            function: tx.callPublicFn.method,
-            args: tx.callPublicFn.args.map(argString),
-            sender: tx.callPublicFn.sender,
-          };
-        }
-        if (tx.callPrivateFn) {
-          return {
-            type: "callPrivateFn",
-            contract: tx.callPrivateFn.contract,
-            function: tx.callPrivateFn.method,
-            args: tx.callPrivateFn.args.map(argString),
-            sender: tx.callPrivateFn.sender,
-          };
-        }
-        if (tx.deployContract) {
-          return {
-            type: "deployContract",
-            name: tx.deployContract.name,
-            content: tx.deployContract.content,
-            sender: tx.deployContract.sender,
-          };
-        }
-        if (tx.transferSTX) {
-          return {
-            type: "transferSTX",
-            amount: tx.transferSTX.amount,
-            recipient: tx.transferSTX.recipient,
-            sender: tx.transferSTX.sender,
-          };
-        }
-        return { type: "unknown" };
-      });
+    mineBlock(txs: Tx[] = []): BlockTransactionResult[] {
+      return mineBlockWithValidatedVersions(txs, (txs) => {
+        const serialized = txs.map((tx) => {
+          if (tx.broadcastTx !== undefined) return { type: "broadcastTx", rawHex: tx.broadcastTx };
+          if (tx.callPublicFn) {
+            return {
+              type: "callPublicFn",
+              contract: tx.callPublicFn.contract,
+              function: tx.callPublicFn.method,
+              args: tx.callPublicFn.args.map(serializeCV),
+              sender: tx.callPublicFn.sender,
+              postConditions: tx.callPublicFn.postConditions,
+              postConditionMode: tx.callPublicFn.postConditionMode,
+            };
+          }
+          if (tx.callPrivateFn) {
+            return {
+              type: "callPrivateFn",
+              contract: tx.callPrivateFn.contract,
+              function: tx.callPrivateFn.method,
+              args: tx.callPrivateFn.args.map(serializeCV),
+              sender: tx.callPrivateFn.sender,
+              postConditions: tx.callPrivateFn.postConditions,
+              postConditionMode: tx.callPrivateFn.postConditionMode,
+            };
+          }
+          if (tx.deployContract) {
+            return {
+              type: "deployContract",
+              name: tx.deployContract.name,
+              content: tx.deployContract.content,
+              sender: tx.deployContract.sender,
+              options: tx.deployContract.options,
+              postConditions: tx.deployContract.postConditions,
+              postConditionMode: tx.deployContract.postConditionMode,
+            };
+          }
+          if (tx.transferSTX) {
+            return {
+              type: "transferSTX",
+              amount: tx.transferSTX.amount,
+              recipient: tx.transferSTX.recipient,
+              sender: tx.transferSTX.sender,
+              postConditions: tx.transferSTX.postConditions,
+              postConditionMode: tx.transferSTX.postConditionMode,
+            };
+          }
+          return { type: "unknown" };
+        });
 
-      const resp = send({ method: "mineBlock", txs: serialized }) as {
-        results: ServerTxResult[];
-      };
-      return (resp.results ?? []).map(parseTxResult);
+        const resp = send({ method: "mineBlock", txs: serialized }) as {
+          results: SerializedBlockTransactionResult[];
+        };
+        return (resp.results ?? []).map(parseBlockTransactionResult);
+      });
     },
 
     callPublicFn(

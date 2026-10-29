@@ -181,18 +181,6 @@ impl GetChangesForNewProject {
             # [contracts.counter]
             # path = "contracts/counter.clar"
             # epoch = "latest"
-
-            # Check-checker settings:
-            # trusted_sender: if true, inputs are trusted after tx_sender has been checked.
-            # trusted_caller: if true, inputs are trusted after contract-caller has been checked.
-            # callee_filter: if true, untrusted data may be passed into a private function without a
-            # warning, if it gets checked inside. This check will also propagate up to the
-            # caller.
-            # More informations: https://www.hiro.so/blog/new-safety-checks-in-clarinet
-
-            [repl.analysis]
-            passes = ["check_checker"]
-            check_checker = {{ trusted_sender = false, trusted_caller = false, callee_filter = false }}
         "#,
             name = self.project_name,
             tel = self.telemetry_enabled
@@ -445,13 +433,13 @@ impl GetChangesForNewProject {
               }},
               "author": "",
               "license": "ISC",
-              "dependencies": {{
-                "@stacks/clarinet-sdk": "^3.9.0",
-                "@stacks/transactions": "^7.2.0",
+              "devDependencies": {{
+                "@stacks/clarinet-sdk": "^4.0.0",
+                "@stacks/transactions": "^7.6.0",
                 "@types/node": "^24.4.0",
                 "chokidar-cli": "^3.0.0",
-                "vitest": "^4.1.8",
-                "vitest-environment-clarinet": "^3.0.0"
+                "vitest": "^5.0.5",
+                "vitest-environment-clarinet": "^4.0.0"
               }}
             }}
         "#,
