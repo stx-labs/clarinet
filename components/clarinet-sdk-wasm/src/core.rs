@@ -24,11 +24,11 @@ use clarity_repl::repl::boot::{
 };
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value, value_from_bytes_exact};
 use clarity_repl::repl::hooks::perf::CostField;
-use clarity_repl::repl::interpreter::BlockInclusion;
+use clarity_repl::repl::interpreter::{BlockInclusion, FailureKind, FailureReceipt};
 use clarity_repl::repl::post_conditions::{
     parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
 };
-use clarity_repl::repl::raw_transaction::{RawFailureKind, RawTransactionMetadata};
+use clarity_repl::repl::raw_transaction::RawTransactionMetadata;
 use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -307,6 +307,7 @@ pub struct TransactionRes {
 struct TransactionError {
     message: String,
     inclusion: BlockInclusion,
+    receipt: Option<Box<FailureReceipt>>,
 }
 
 impl From<String> for TransactionError {
@@ -314,6 +315,7 @@ impl From<String> for TransactionError {
         Self {
             message,
             inclusion: BlockInclusion::Rejected,
+            receipt: None,
         }
     }
 }
@@ -325,8 +327,9 @@ enum BlockTransactionResult {
         execution: TransactionRes,
     },
     IncludedFailure {
+        kind: FailureKind,
         error: String,
-        execution: Option<TransactionRes>,
+        execution: TransactionRes,
     },
     Rejected {
         error: String,
@@ -353,13 +356,9 @@ enum SignedTransactionResult {
     },
     IncludedFailure {
         transaction: SignedTransactionMetadata,
-        kind: RawFailureKind,
+        kind: FailureKind,
         error: String,
-        execution: (),
-        result: Option<String>,
-        events: String,
-        costs: String,
-        performance: Option<String>,
+        execution: TransactionRes,
     },
 }
 
@@ -392,8 +391,9 @@ impl From<Result<TransactionRes, TransactionError>> for BlockTransactionResult {
                 if matches!(value, clarity::vm::types::Value::Response(ref response) if !response.committed)
                 {
                     Self::IncludedFailure {
+                        kind: FailureKind::Response,
                         error: clarity_values::value_to_string(&value),
-                        execution: Some(execution),
+                        execution,
                     }
                 } else {
                     Self::Success { execution }
@@ -402,10 +402,17 @@ impl From<Result<TransactionRes, TransactionError>> for BlockTransactionResult {
             Err(TransactionError {
                 message,
                 inclusion: BlockInclusion::Included,
-            }) => Self::IncludedFailure {
-                error: message,
-                execution: None,
-            },
+                receipt,
+            }) => {
+                // Failures rejected before execution, such as a call to a missing
+                // function, produced no value or events.
+                let receipt = receipt.unwrap_or_else(|| Box::new(FailureReceipt::runtime(None)));
+                Self::IncludedFailure {
+                    kind: receipt.kind,
+                    error: message,
+                    execution: failure_receipt_to_transaction_res(&receipt),
+                }
+            }
             Err(TransactionError { message, .. }) => Self::Rejected { error: message },
         }
     }
@@ -435,6 +442,15 @@ pub fn execution_result_to_transaction_res(execution: &ExecutionResult) -> Trans
         result,
         events: serialize_events(&execution.events),
         costs: json!(execution.cost).to_string(),
+        performance: None,
+    }
+}
+
+fn failure_receipt_to_transaction_res(receipt: &FailureReceipt) -> TransactionRes {
+    TransactionRes {
+        result: clarity_values::to_raw_value(&receipt.result),
+        events: serialize_events(&receipt.events),
+        costs: json!(receipt.cost).to_string(),
         performance: None,
     }
 }
@@ -1067,6 +1083,7 @@ impl SDK {
                 TransactionError {
                     message,
                     inclusion: failure.inclusion,
+                    receipt: failure.receipt,
                 }
             })?;
 
@@ -1181,6 +1198,7 @@ impl SDK {
                     &args.method,
                     epoch,
                 ),
+                receipt: None,
             });
         }
 
@@ -1345,6 +1363,7 @@ impl SDK {
                     return Err(TransactionError {
                         message,
                         inclusion: failure.inclusion,
+                        receipt: failure.receipt,
                     });
                 }
             }
@@ -1385,11 +1404,11 @@ impl SDK {
                 // but not VM errors or post-condition aborts.
                 let cost = match &result {
                     RawTransactionResult::Success(execution) => execution.cost.as_ref(),
-                    RawTransactionResult::Failure {
-                        kind: RawFailureKind::Response,
-                        cost,
-                        ..
-                    } => Some(cost),
+                    RawTransactionResult::Failure { receipt, .. }
+                        if receipt.kind == FailureKind::Response =>
+                    {
+                        receipt.cost.as_ref()
+                    }
                     _ => None,
                 };
                 if self.options.track_costs {
@@ -1419,30 +1438,16 @@ impl SDK {
                             execution: response,
                         }
                     }
-                    RawTransactionResult::Failure {
-                        kind,
-                        error,
-                        output,
-                        events,
-                        cost,
-                    } => {
-                        let performance = if self.options.track_performance
-                            && matches!(kind, RawFailureKind::Response)
-                        {
-                            self.get_session().get_performance_data()
-                        } else {
-                            None
-                        };
+                    RawTransactionResult::Failure { error, receipt } => {
+                        let mut execution = failure_receipt_to_transaction_res(&receipt);
+                        if self.options.track_performance && receipt.kind == FailureKind::Response {
+                            execution.performance = self.get_session().get_performance_data();
+                        }
                         SignedTransactionResult::IncludedFailure {
                             transaction: metadata.into(),
-                            kind,
+                            kind: receipt.kind,
                             error,
-                            execution: (),
-                            result: output.as_deref().map(clarity_values::to_raw_value),
-                            events: serialize_events(&events),
-                            costs: serde_json::to_string(&cost)
-                                .expect("execution cost is serializable"),
-                            performance,
+                            execution,
                         }
                     }
                 }

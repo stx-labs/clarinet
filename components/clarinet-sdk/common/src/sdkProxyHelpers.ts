@@ -295,20 +295,29 @@ export function parseCosts(costs: string): ClarityCosts | null {
   }
 }
 
-/** One outcome per entry; rejected entries do not consume a nonce. */
+export type FailureKind =
+  "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
+
+/** Signed entries carry their transaction metadata; convenience entries do not. */
 export type MinedTransactionDetails = {
   transaction?: RawTransactionMetadata | null;
-  kind?: "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
-  result?: ClarityValue | null;
-  events?: ClarityEvent[];
-  costs?: ClarityCosts | null;
-  performance?: string;
 };
 
+/**
+ * One outcome per entry; rejected entries do not consume a nonce. Like a node's
+ * transaction receipt, an included failure's `execution` reports `(err none)`
+ * when execution produced no value, and post-condition aborts report the
+ * events they attempted, none of which were committed.
+ */
 export type BlockTransactionResult = MinedTransactionDetails &
   (
     | { status: "success"; execution: ParsedTransactionResult }
-    | { status: "included_failure"; error: string; execution: ParsedTransactionResult | null }
+    | {
+        status: "included_failure";
+        kind: FailureKind;
+        error: string;
+        execution: ParsedTransactionResult;
+      }
     | { status: "rejected"; error: string }
   );
 
@@ -334,17 +343,13 @@ export function parseTransactionResult(
 
 export type SerializedBlockTransactionResult = {
   transaction?: { txid: string; fee: string; nonce: string } | null;
-  kind?: MinedTransactionDetails["kind"];
-  result?: string | null;
-  events?: string;
-  costs?: string;
-  performance?: string | null;
 } & (
   | { status: "success"; execution: SerializedTransactionResult }
   | {
       status: "included_failure";
+      kind: FailureKind;
       error: string;
-      execution: SerializedTransactionResult | null;
+      execution: SerializedTransactionResult;
     }
   | { status: "rejected"; error: string }
 );
@@ -363,13 +368,6 @@ export function parseBlockTransactionResult(
             nonce: BigInt(response.transaction.nonce),
           };
   }
-  if (response.kind !== undefined) {
-    details.kind = response.kind;
-    details.result = response.result == null ? null : Cl.deserialize(response.result);
-    details.events = parseEvents(response.events ?? "[]");
-    details.costs = parseCosts(response.costs ?? "null");
-    details.performance = response.performance ?? undefined;
-  }
   switch (response.status) {
     case "rejected":
       return { ...details, status: "rejected", error: response.error };
@@ -383,8 +381,9 @@ export function parseBlockTransactionResult(
       return {
         ...details,
         status: "included_failure",
+        kind: response.kind,
         error: response.error,
-        execution: response.execution === null ? null : parseTransactionResult(response.execution),
+        execution: parseTransactionResult(response.execution),
       };
   }
 }

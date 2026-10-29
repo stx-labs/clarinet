@@ -3,6 +3,7 @@ export {
   type ClarityEvent,
   type ParsedTransactionResult,
   type BlockTransactionResult,
+  type FailureKind,
   type RawTransactionResult,
   type BroadcastTransactionResult,
   type RawTransactionMetadata,

@@ -16,9 +16,15 @@ it("preserves batch outcomes and transaction options through the synchronous ada
         result: {
           results: [
             { status: "rejected", error: "invalid transfer" },
-            { status: "included_failure", error: "runtime", execution: null },
             {
               status: "included_failure",
+              kind: "runtime_error",
+              error: "runtime",
+              execution: { ...execution, result: serializeCV(Cl.error(Cl.none())) },
+            },
+            {
+              status: "included_failure",
+              kind: "abort_by_response",
               error: "(err u7)",
               execution: { ...execution, result: serializeCV(Cl.error(Cl.uint(7))) },
             },
@@ -39,9 +45,15 @@ it("preserves batch outcomes and transaction options through the synchronous ada
   ]);
   expect(results).toEqual([
     { status: "rejected", error: "invalid transfer" },
-    { status: "included_failure", error: "runtime", execution: null },
     {
       status: "included_failure",
+      kind: "runtime_error",
+      error: "runtime",
+      execution: { result: Cl.error(Cl.none()), events: [], costs: null, performance: undefined },
+    },
+    {
+      status: "included_failure",
+      kind: "abort_by_response",
       error: "(err u7)",
       execution: { result: Cl.error(Cl.uint(7)), events: [], costs: null, performance: undefined },
     },
@@ -137,13 +149,14 @@ it("submits to the debug mempool and parses signed mining metadata", () => {
             {
               status: "included_failure",
               kind: "abort_by_response",
-              execution: null,
               error: "response",
               transaction: { txid, fee: "1000", nonce: "0" },
-              result: serializeCV(Cl.error(Cl.uint(7))),
-              events: "[]",
-              costs: "null",
-              performance: null,
+              execution: {
+                result: serializeCV(Cl.error(Cl.uint(7))),
+                events: "[]",
+                costs: "null",
+                performance: null,
+              },
             },
           ],
         },
@@ -153,8 +166,9 @@ it("submits to the debug mempool and parses signed mining metadata", () => {
   expect(simnet.broadcastTransaction("signed-hex")).toEqual({ txid });
   expect(simnet.mineBlock()[0]).toMatchObject({
     status: "included_failure",
+    kind: "abort_by_response",
     transaction: { txid, fee: 1000n, nonce: 0n },
-    result: Cl.error(Cl.uint(7)),
+    execution: { result: Cl.error(Cl.uint(7)) },
   });
   expect(vi.mocked(syncSend).mock.calls[1][0]).toEqual({
     method: "broadcastTransaction",

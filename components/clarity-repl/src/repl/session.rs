@@ -836,7 +836,8 @@ impl Session {
         tx: &stacks_codec::transaction::StacksTransaction,
         mut external_hooks: Vec<&mut dyn EvalHook>,
     ) -> super::raw_transaction::RawTransactionOutcome {
-        use super::raw_transaction::{RawFailureKind, RawTransactionOutcome, RawTransactionResult};
+        use super::interpreter::FailureKind;
+        use super::raw_transaction::{RawTransactionOutcome, RawTransactionResult};
         let mut tracer = TracerHook::new();
         let mut hooks: Vec<&mut dyn EvalHook> = vec![&mut tracer];
         hooks.extend(self.hooks.enabled());
@@ -854,9 +855,9 @@ impl Session {
             if matches!(
                 &outcome,
                 RawTransactionOutcome::Included {
-                    result: RawTransactionResult::Failure { kind, .. },
+                    result: RawTransactionResult::Failure { receipt, .. },
                     ..
-                } if !matches!(kind, RawFailureKind::Response)
+                } if receipt.kind != FailureKind::Response
             ) {
                 ueprint!("{trace}");
                 if let Some(error) = tracer.error {
@@ -1137,6 +1138,7 @@ impl Session {
                     suggestion: None,
                 })],
                 inclusion: failure.inclusion,
+                receipt: failure.receipt,
             }
         })
     }

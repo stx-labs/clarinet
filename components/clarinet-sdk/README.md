@@ -37,10 +37,14 @@ and use the same transaction frame.
 `mineBlock(txs)` returns one `BlockTransactionResult` per entry, in input order:
 
 - `success`: `execution` contains the parsed result, events, costs, and performance.
-- `included_failure`: `error` describes the failure. For a returned `(err ...)`,
-  `execution` contains its parsed result, events, costs, and performance. For VM,
-  analysis, or post-condition errors, `execution` is `null`. Included failures
-  consume a nonce according to the VM's epoch rules; their payload writes roll back.
+- `included_failure`: `error` describes the failure, and `kind` classifies it as
+  `abort_by_response`, `abort_by_post_condition`, `runtime_error`, or
+  `analysis_error`. Like a node's transaction receipt, `execution` always contains
+  a result, events, and costs: a returned `(err ...)`; the value a call aborted by
+  its post-conditions would have returned, or `(ok true)` for an aborted deployment;
+  or `(err none)` when execution produced no value. A post-condition abort reports
+  the events it attempted, none of which were committed. Included failures consume
+  a nonce according to the VM's epoch rules; their payload writes roll back.
 - `rejected`: `error` describes why the transaction was rejected. No payload writes
   or nonce changes commit.
 
@@ -112,10 +116,8 @@ explicit entries supplied to `mineBlock(txs)`, advancing one block for the whole
 batch. Its results use the same `success`, `included_failure`, and `rejected`
 statuses as convenience entries. Signed results additionally carry `transaction`
 metadata: `txid` (64 lowercase hex characters without `0x`), `fee`, and `nonce`
-(both `bigint`). Signed included failures carry `kind` (`abort_by_response`,
-`abort_by_post_condition`, `runtime_error`, or `analysis_error`), nullable `result`,
-attempted `events`, and `costs`; response failures can also include `performance`.
-They retain fees and nonce charges while rolling back aborted payload writes.
+(both `bigint`). Signed included failures retain fees and nonce charges while
+rolling back aborted payload writes.
 
 Admission does not guarantee inclusion: mining checks current state again.
 Rejected mined entries charge nothing, and later entries still run. Each selected

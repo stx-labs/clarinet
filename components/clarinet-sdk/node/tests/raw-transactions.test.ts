@@ -19,13 +19,10 @@ const executeRaw = (hex: string): RawTransactionResult => {
   if (outcome.status === "rejected")
     return { ...outcome, transaction: outcome.transaction ?? null };
   return {
-    status: outcome.kind!,
+    status: outcome.kind,
     transaction: outcome.transaction!,
     error: outcome.error,
-    result: outcome.result ?? null,
-    events: outcome.events ?? [],
-    costs: outcome.costs ?? null,
-    performance: outcome.performance,
+    ...outcome.execution,
   };
 };
 const broadcast = (name: keyof typeof transactions) => executeRaw(transactions[name].hex);
@@ -410,10 +407,16 @@ it.each([
   expect(simnet.getAccountNonce(sender)).toBe(2n);
   if (name === "abort" && result.status === "abort_by_post_condition")
     expect(result.events).toHaveLength(1);
+  // Like a node's receipt: `(err none)` when execution produced no value.
+  if (name === "crash") expect(result).toMatchObject({ result: Cl.error(Cl.none()), events: [] });
 });
 
 it("charges included analysis failures without caching a contract", () => {
-  expect(broadcast("bad_deploy").status).toBe("analysis_error");
+  expect(broadcast("bad_deploy")).toMatchObject({
+    status: "analysis_error",
+    result: Cl.error(Cl.none()),
+    events: [],
+  });
   expect(balance(sender)).toBe(999990n);
   expect(simnet.getAccountNonce(sender)).toBe(1n);
   expect(simnet.getContractsInterfaces().has(`${sender}.bad`)).toBe(false);
@@ -465,7 +468,7 @@ it("rejects duplicate contracts before parsing and rolls back the fee", () => {
 
 it("does not cache a deployment aborted by its post-conditions", () => {
   const result = broadcast("abort_deploy");
-  expect(result.status).toBe("abort_by_post_condition");
+  expect(result).toMatchObject({ status: "abort_by_post_condition", result: Cl.ok(Cl.bool(true)) });
   expect(simnet.getContractsInterfaces().has(`${sender}.aborted`)).toBe(false);
   expect(balance(sender)).toBe(999990n);
   expect(balance(sponsor)).toBe(1000000n);

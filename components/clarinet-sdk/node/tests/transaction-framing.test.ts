@@ -37,9 +37,23 @@ it("executes read-only batch targets as transactions and keeps RPC reads nonce-f
     { status: "success", execution: { result: Cl.uint(0) } },
     { status: "success", execution: { result: Cl.ok(Cl.bool(true)) } },
     { status: "success", execution: { result: Cl.uint(1) } },
-    { status: "included_failure", execution: { result: Cl.error(Cl.uint(7)) } },
-    { status: "included_failure", execution: null, error: expect.stringMatching(/DivisionByZero/) },
-    { status: "included_failure", execution: null, error: "hidden is not a public function" },
+    {
+      status: "included_failure",
+      kind: "abort_by_response",
+      execution: { result: Cl.error(Cl.uint(7)) },
+    },
+    {
+      status: "included_failure",
+      kind: "runtime_error",
+      execution: { result: Cl.error(Cl.none()), events: [] },
+      error: expect.stringMatching(/DivisionByZero/),
+    },
+    {
+      status: "included_failure",
+      kind: "runtime_error",
+      execution: { result: Cl.error(Cl.none()), events: [] },
+      error: "hidden is not a public function",
+    },
     { status: "success", execution: { result: Cl.uint(1) } },
   ]);
   expect(simnet.blockHeight).toBe(height + 1);
@@ -224,13 +238,23 @@ it("reports every mixed-batch outcome and keeps only committed deployment caches
     "success",
     "success",
   ]);
-  expect(results[3]).toMatchObject({ execution: { result: Cl.error(Cl.uint(7)), events: [] } });
+  expect(results[3]).toMatchObject({
+    kind: "abort_by_response",
+    execution: { result: Cl.error(Cl.uint(7)), events: [] },
+  });
+  // Like a node's receipt: `(err none)` when execution produced no value.
   expect(results[4]).toMatchObject({
-    execution: null,
+    kind: "runtime_error",
+    execution: { result: Cl.error(Cl.none()), events: [] },
     error: expect.stringMatching(/DivisionByZero/),
   });
+  // An aborted deployment reports `(ok true)` and its attempted, uncommitted events.
   expect(results[6]).toMatchObject({
-    execution: null,
+    kind: "abort_by_post_condition",
+    execution: {
+      result: Cl.ok(Cl.bool(true)),
+      events: [expect.objectContaining({ event: "stx_transfer_event" })],
+    },
     error: expect.stringMatching(/Post-condition/),
   });
   expect(results[8]).toMatchObject({ execution: { result: Cl.uint(42) } });

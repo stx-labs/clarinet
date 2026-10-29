@@ -144,7 +144,7 @@ it("validates against mined contracts, then reports execution failures at mining
   expect(simnet.mineBlock()[0]).toMatchObject({
     status: "included_failure",
     kind: "abort_by_response",
-    result: Cl.error(Cl.uint(7)),
+    execution: { result: Cl.error(Cl.uint(7)) },
     transaction: { txid: call.txid(), fee: 1000n, nonce: 1n },
   });
   expect(simnet.getAccountNonce(sender)).toBe(2n);
