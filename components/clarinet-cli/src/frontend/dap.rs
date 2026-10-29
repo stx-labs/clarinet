@@ -818,8 +818,8 @@ fn execute_block_entry(
                 let options = Option::<DeployOptions>::deserialize(&tx["options"])
                     .map_err(|e| reject(format!("Invalid deployment options: {e}")))?;
                 let clarity_version = match options.and_then(|o| o.clarity_version) {
-                    Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8)
-                        .unwrap_or(clarinet_defaults::DEFAULT_CLARITY_VERSION),
+                    Some(v) => clarity_repl::repl::clarity_version_from_u32(v)
+                        .ok_or_else(|| reject(format!("Invalid Clarity version: {v}")))?,
                     None => ClarityVersion::default_for_epoch(epoch),
                 };
                 dap.prepare_for_call(&contract_id, content);
@@ -1276,6 +1276,9 @@ mod batch_tests {
             json!(false),
             json!({"clarityVersion": "3"}),
             json!({"clarityVersion": -1}),
+            json!({"clarityVersion": 99}),
+            // Would truncate to Clarity 1 as a `u8`.
+            json!({"clarityVersion": 257}),
         ] {
             let mut invalid = deploy.clone();
             invalid["options"] = options;

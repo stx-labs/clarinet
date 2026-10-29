@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::panic;
 use std::path::{Path, PathBuf};
 
-use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
     DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
@@ -168,13 +168,11 @@ fn decode_call_args(args: &[Vec<u8>]) -> Result<Vec<Value>, String> {
 fn clarity_version_from_u32(
     v: Option<u32>,
     current_epoch: clarity::types::StacksEpochId,
-) -> ClarityVersion {
+) -> Result<ClarityVersion, String> {
     match v {
-        Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8).unwrap_or_else(|| {
-            log!("Invalid clarity version {v}. Using default version.");
-            DEFAULT_CLARITY_VERSION
-        }),
-        None => ClarityVersion::default_for_epoch(current_epoch),
+        Some(v) => clarity_repl::repl::clarity_version_from_u32(v)
+            .ok_or_else(|| format!("Invalid Clarity version: {v}")),
+        None => Ok(ClarityVersion::default_for_epoch(current_epoch)),
     }
 }
 
@@ -1295,18 +1293,16 @@ impl SDK {
             args.post_condition_mode.as_deref(),
             &args.sender,
         )?;
+        let current_epoch = self.get_session().interpreter.datastore.get_current_epoch();
+        let clarity_version = clarity_version_from_u32(
+            args.options.as_ref().and_then(|opts| opts.clarity_version),
+            current_epoch,
+        )?;
         let execution = {
             let session = self.get_session_mut();
             if advance_chain_tip {
                 session.advance_chain_tip(1);
             }
-
-            let current_epoch = session.interpreter.datastore.get_current_epoch();
-
-            let clarity_version = clarity_version_from_u32(
-                args.options.as_ref().and_then(|opts| opts.clarity_version),
-                current_epoch,
-            );
 
             // `deployContract` bypasses the deployment plan, so the remap that
             // `clarinet-deployments` records for manifest contracts has to be

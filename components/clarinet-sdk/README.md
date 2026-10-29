@@ -23,7 +23,9 @@ are rejected before analysis without consuming a nonce. Use read-only calls,
 `getDataVar`, and events to check initialization effects. Use `execute` when you
 want to evaluate a snippet and receive its expression value. Deployment costs
 include contract storage and subsequent calls account for the stored contract's
-actual data size, so cost assertions may need updating.
+actual data size, so cost assertions may need updating. An unsupported
+`clarityVersion` throws, or is `rejected` inside `mineBlock`, instead of falling
+back to the default version.
 
 `transferSTX` represents a native transfer: self-transfers, zero-amount transfers,
 and transfers exceeding the available unlocked balance throw without consuming a

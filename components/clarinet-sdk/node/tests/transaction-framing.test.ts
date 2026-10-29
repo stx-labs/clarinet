@@ -82,6 +82,21 @@ it.each(["u123", "(err u123)", "false"])(
   },
 );
 
+it.each([0, 99, 257])("rejects Clarity version %i instead of using a default", (version) => {
+  const nonce = simnet.getAccountNonce(sender);
+  const height = simnet.blockHeight;
+  expect(() =>
+    simnet.deployContract("versioned", "true", { clarityVersion: version }, sender),
+  ).toThrow(`Invalid Clarity version: ${version}`);
+  expect(
+    simnet.mineBlock([tx.deployContract("versioned", "true", { clarityVersion: version }, sender)]),
+  ).toEqual([{ status: "rejected", error: `Invalid Clarity version: ${version}` }]);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce);
+  // Malformed input throws before the standalone call mines its block.
+  expect(simnet.blockHeight).toBe(height + 1);
+  expect(simnet.getContractsInterfaces().has(`${sender}.versioned`)).toBe(false);
+});
+
 it("rejects a duplicate deployment before analysis without consuming a nonce", () => {
   simnet.deployContract("existing", "(define-data-var answer uint u42)", null, sender);
   const nonce = simnet.getAccountNonce(sender);
