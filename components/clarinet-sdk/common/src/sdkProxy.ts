@@ -2,7 +2,7 @@ import { Cl, serializeCVBytes } from "@stacks/transactions";
 
 import {
   parseBlockTransactionResult,
-  validateClarityVersion,
+  getClarityVersionInputError,
   mineBlockWithValidatedVersions,
   parseTransactionResult,
   type SerializedTransactionResult,
@@ -127,7 +127,8 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
           sender,
           postConditionOptions,
         ) => {
-          validateClarityVersion(options?.clarityVersion);
+          const error = getClarityVersionInputError(options?.clarityVersion);
+          if (error !== undefined) throw new Error(error);
           const rustOptions = options
             ? new ContractOptions(options.clarityVersion)
             : new ContractOptions();
