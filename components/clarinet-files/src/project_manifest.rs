@@ -102,7 +102,6 @@ pub struct ProjectManifest {
     pub root_dir: PathBuf,
     pub location: PathBuf,
     pub contracts_settings: HashMap<PathBuf, ClarityContractMetadata>,
-    #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
 }
 
