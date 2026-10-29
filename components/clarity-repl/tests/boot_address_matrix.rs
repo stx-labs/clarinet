@@ -27,7 +27,7 @@ fn session(epoch: StacksEpochId) -> Session {
     session
 }
 
-/// Evaluate the way the console and the SDK's `runSnippet` do: remap the
+/// Evaluate the way the console and the SDK's `execute` do: remap the
 /// user's source, then evaluate it.
 #[track_caller]
 fn run_user_snippet(session: &mut Session, snippet: &str) -> Value {

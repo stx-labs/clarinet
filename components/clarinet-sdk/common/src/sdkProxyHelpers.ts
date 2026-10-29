@@ -44,6 +44,8 @@ export type BroadcastTransactionResult =
   | { txid: string }
   | { error: string; reason: string; reason_data?: Record<string, unknown>; txid?: string };
 
+/** Submit signed bytes to the mempool without executing or advancing the chain.
+ * Call `mineBlock()` to attempt inclusion; admission does not guarantee inclusion. */
 export type BroadcastTransaction = (rawHex: string) => BroadcastTransactionResult;
 
 /**
@@ -324,8 +326,9 @@ export type MinedTransactionDetails = {
 };
 
 /**
- * One outcome per entry; rejected entries do not consume a nonce. Like a node's
- * transaction receipt, an included failure's `execution` reports `(err none)`
+ * One outcome per selected queued transaction or explicit batch entry; rejected
+ * entries do not consume a nonce. Like a node's transaction receipt, an included
+ * failure's `execution` reports `(err none)`
  * when execution produced no value, and post-condition aborts report the
  * events they attempted, none of which were committed.
  */
@@ -341,6 +344,9 @@ export type BlockTransactionResult = MinedTransactionDetails &
     | { status: "rejected"; error: string }
   );
 
+/** Advance one block and mine ready queued transactions, then explicit entries.
+ * Queued results precede explicit results, which retain input order. Rejections
+ * do not stop later entries; empty or entirely rejected batches still advance. */
 export type MineBlock = (txs?: Array<Tx>) => BlockTransactionResult[];
 
 export type SerializedTransactionResult = {

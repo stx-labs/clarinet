@@ -999,7 +999,7 @@ impl Session {
     ///
     /// The source-level counterpart of [`Session::resolve_contract_id`], for
     /// the surfaces that take Clarity *code* rather than a contract id: the
-    /// console and the SDK's `runSnippet` / `execute`. Without it,
+    /// console and the SDK's `execute`. Without it,
     /// `(contract-call? 'SP000....pox-3 ...)` typed at the console reaches the
     /// dead mainnet twin and reports mainnet constants.
     ///

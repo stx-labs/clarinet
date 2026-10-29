@@ -8,6 +8,27 @@ The Wasm packages are built separately for Node.js and browsers. Both SDKs share
 `./common/src/sdkProxy.ts`, with small adapters in `./node/src/sdkProxy.ts` and
 `./browser/src/sdkProxy.ts`.
 
+## Migrating to 4.0
+
+### Transaction and result changes
+
+- [Transaction behavior](#transaction-behavior): deployment results, nonce charges,
+  transfer timing, map reads, and Clarity-version validation.
+- [Migrating `mineBlock` to 4.0](#migrating-mineblock-to-40): outcome statuses,
+  execution receipts, and result ordering.
+- [Signed transactions](#signed-transactions): mempool admission through
+  `broadcastTransaction` and execution through `mineBlock`.
+
+### Removed APIs
+
+- **`simnet.runSnippet(code)`**: replace with `simnet.execute(code).result`, which
+  returns a parsed Clarity value. Handle evaluation failures with `try`/`catch`;
+  `execute` throws instead of returning an `"error:"` string.
+- **`RawTransactionResult`**: replace this unused type with `BlockTransactionResult`
+  for `mineBlock` outcomes or `BroadcastTransactionResult` for mempool admission
+  responses. Read mined results under `outcome.execution` after narrowing on
+  `outcome.status`.
+
 ## Transaction behavior
 
 Simnet public calls, deployments, and native STX transfers use the shared
