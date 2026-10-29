@@ -27,7 +27,9 @@ actual data size, so cost assertions may need updating.
 
 `transferSTX` represents a native transfer: self-transfers, zero-amount transfers,
 and transfers exceeding the available unlocked balance throw without consuming a
-nonce. Inside `mineBlock`, these transfers return a `rejected` outcome without
+nonce. Like `callPublicFn` and `deployContract`, it advances one block before
+executing, even when the transfer is rejected; previously it executed at the
+current height and advanced only on success. Inside `mineBlock`, these transfers return a `rejected` outcome without
 consuming a nonce. Calling the Clarity `stx-transfer?` function inside a contract
 retains its ordinary response semantics. Private calls remain a simnet convenience
 and use the same transaction frame.

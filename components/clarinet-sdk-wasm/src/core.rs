@@ -1252,6 +1252,11 @@ impl SDK {
         )?;
 
         let session = self.get_session_mut();
+        // Like other transactions, a transfer executes in the new block, even
+        // when it is rejected.
+        if advance_chain_tip {
+            session.advance_chain_tip(1);
+        }
         let initial_tx_sender = session.get_tx_sender();
         session.set_tx_sender(&args.sender);
 
@@ -1269,9 +1274,6 @@ impl SDK {
             }
         };
 
-        if advance_chain_tip {
-            session.advance_chain_tip(1);
-        }
         Ok(execution_result_to_transaction_res(&execution))
     }
 
