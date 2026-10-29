@@ -1029,17 +1029,17 @@ impl SDK {
         }
 
         let parsed_args = decode_call_args(args)?;
-        let cost_args: Vec<String> = if track_costs {
-            parsed_args.iter().map(ToString::to_string).collect()
-        } else {
-            vec![]
-        };
 
         let post_conditions = post_condition_check(
             post_conditions.as_deref(),
             post_condition_mode.as_deref(),
             sender,
         )?;
+        let cost_args: Vec<String> = if track_costs {
+            parsed_args.iter().map(ToString::to_string).collect()
+        } else {
+            vec![]
+        };
 
         let session = self.get_session_mut();
         let execution = session

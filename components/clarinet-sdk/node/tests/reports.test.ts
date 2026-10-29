@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { Cl } from "@stacks/transactions";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 // test the built package and not the source code
@@ -88,6 +89,22 @@ describe("simnet can get costs reports", () => {
     expect(report.contract_id).toBe(`${simnet.deployer}.counter`);
     expect(report.method).toBe("increment");
     expect(report.cost_result.total.write_count).toBe(3);
+  });
+
+  it("reports the call arguments", async () => {
+    const simnet = await initSimnet("tests/fixtures/Clarinet.toml", true, {
+      trackCoverage: false,
+      trackCosts: true,
+    });
+    const trait = Cl.contractPrincipal(simnet.deployer, "multiplier-contract");
+    simnet.callPublicFn("counter", "add", [Cl.uint(2)], address1);
+    simnet.callPublicFn("counter", "call-multiply", [trait], address1);
+
+    const reports = JSON.parse(simnet.collectReport(false, "").costs);
+    expect(reports.map((report: { args: string[] }) => report.args)).toStrictEqual([
+      ["u2"],
+      [`${simnet.deployer}.multiplier-contract`],
+    ]);
   });
 });
 

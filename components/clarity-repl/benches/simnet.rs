@@ -74,14 +74,14 @@ fn init_session() -> Session {
 fn call_fn(
     session: &mut Session,
     func: &str,
-    args: &[ClarityValue],
+    args: Vec<ClarityValue>,
     advance_chain: bool,
 ) -> ClarityValue {
     let ExecutionResult { result, .. } = session
         .call_contract_fn(
             "contract",
             func,
-            args.to_vec(),
+            args,
             "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
             false,
             false,
@@ -110,8 +110,8 @@ fn simnet_noop_read_only(bencher: Bencher) {
 
     bencher.bench_local(|| {
         let buff = ClarityValue::buff_from(i.to_be_bytes().to_vec()).unwrap();
-        let args = [ClarityValue::UInt(black_box(i.into())), buff];
-        let result = call_fn(black_box(&mut session), "noop-ro", &args, false);
+        let args = vec![ClarityValue::UInt(black_box(i.into())), buff];
+        let result = call_fn(black_box(&mut session), "noop-ro", args, false);
         assert_eq!(
             black_box(initial_block_height),
             session.interpreter.get_block_height()
@@ -130,8 +130,8 @@ fn simnet_noop_public(bencher: Bencher) {
 
     bencher.bench_local(|| {
         let buff = ClarityValue::buff_from(i.to_be_bytes().to_vec()).unwrap();
-        let args = [ClarityValue::UInt(black_box(i).into()), buff];
-        let result = call_fn(black_box(&mut session), "noop-pub", &args, true);
+        let args = vec![ClarityValue::UInt(black_box(i).into()), buff];
+        let result = call_fn(black_box(&mut session), "noop-pub", args, true);
 
         assert_eq!(
             black_box(initial_block_height + i + 1),
@@ -152,8 +152,8 @@ fn simnet_save(bencher: Bencher) {
 
     bencher.bench_local(|| {
         let buff = ClarityValue::buff_from(i.to_be_bytes().to_vec()).unwrap();
-        let args = [ClarityValue::UInt(black_box(i).into()), buff];
-        let result = call_fn(black_box(&mut session), "save", &args, true);
+        let args = vec![ClarityValue::UInt(black_box(i).into()), buff];
+        let result = call_fn(black_box(&mut session), "save", args, true);
 
         assert_eq!(
             black_box(initial_block_height + i + 1),
@@ -191,11 +191,11 @@ fn simnet_compute_fib(bencher: Bencher) {
 
     bencher.bench_local(|| {
         let buff = ClarityValue::buff_from(i.to_be_bytes().to_vec()).unwrap();
-        let args = [ClarityValue::UInt(black_box(i).into()), buff];
+        let args = vec![ClarityValue::UInt(black_box(i).into()), buff];
 
-        let _ = call_fn(black_box(&mut session), "save", &args, true);
+        let _ = call_fn(black_box(&mut session), "save", args, true);
 
-        let result = call_fn(black_box(&mut session), "fib", &[], false);
+        let result = call_fn(black_box(&mut session), "fib", vec![], false);
         assert_eq!(result, ClarityValue::okay_true());
 
         i += 1;
@@ -214,14 +214,14 @@ fn simnet_save_read_at_block(bencher: Bencher) {
 
     bencher.bench_local(|| {
         let buff = ClarityValue::buff_from(i.to_be_bytes().to_vec()).unwrap();
-        let args = [ClarityValue::UInt(black_box(i).into()), buff];
+        let args = vec![ClarityValue::UInt(black_box(i).into()), buff];
 
-        let _ = call_fn(black_box(&mut session), "save", &args, true);
+        let _ = call_fn(black_box(&mut session), "save", args, true);
 
         let result = call_fn(
             black_box(&mut session),
             "read-ab",
-            &[ClarityValue::UInt((initial_block_height - 1).into())],
+            vec![ClarityValue::UInt((initial_block_height - 1).into())],
             false,
         );
         assert_eq!(result, ClarityValue::buff_from_byte(0x01));
