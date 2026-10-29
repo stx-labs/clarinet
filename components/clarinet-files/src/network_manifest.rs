@@ -258,60 +258,22 @@ pub struct ExecuteScript {
     pub allow_write: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct NetworkManifest {
     pub network: NetworkConfig,
-    #[serde(with = "accounts_serde")]
     pub accounts: BTreeMap<String, AccountConfig>,
-    #[serde(rename = "devnet_settings")]
     pub devnet: Option<DevnetConfig>,
 }
 
-pub mod accounts_serde {
-    use std::collections::BTreeMap;
-
-    use serde::ser::SerializeSeq;
-    use serde::{Deserializer, Serializer};
-
-    use crate::AccountConfig;
-
-    pub fn serialize<S>(
-        target: &BTreeMap<String, AccountConfig>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut seq = serializer.serialize_seq(Some(target.len()))?;
-        for account in target.values() {
-            seq.serialize_element(account)?;
-        }
-        seq.end()
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<String, AccountConfig>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let mut res: BTreeMap<String, AccountConfig> = BTreeMap::new();
-        let container: Vec<AccountConfig> = serde::Deserialize::deserialize(deserializer)?;
-        for account in container {
-            res.insert(account.label.clone(), account);
-        }
-        Ok(res)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct NetworkConfig {
-    name: String,
     pub stacks_node_rpc_address: Option<String>,
     pub bitcoin_node_rpc_address: Option<String>,
     pub deployment_fee_rate: u64,
     pub sats_per_bytes: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct DevnetConfig {
     pub name: String,
     pub network_id: Option<u16>,
@@ -401,7 +363,7 @@ pub struct PoxStackingOrder {
     pub auto_extend: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct AccountConfig {
     pub label: String,
     pub encrypted_mnemonic: String,
@@ -420,15 +382,16 @@ impl NetworkManifest {
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
         cache_location: Option<&Path>,
-        devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_location = paths::get_network_manifest_path(project_root, &networks.1);
-        NetworkManifest::from_location(
-            &network_manifest_location,
+        let location = paths::get_network_manifest_path(project_root, &networks.1);
+        let network_manifest_file_content = paths::read_content(&location)?;
+        let mut network_manifest_file: NetworkManifestFile =
+            toml::from_slice(&network_manifest_file_content[..]).unwrap();
+        NetworkManifest::from_network_manifest_file(
+            &mut network_manifest_file,
             networks,
             use_mainnet_wallets,
             cache_location,
-            devnet_override,
         )
     }
 
@@ -450,26 +413,6 @@ impl NetworkManifest {
             networks,
             use_mainnet_wallets,
             None,
-            None,
-        )
-    }
-
-    pub fn from_location(
-        location: &Path,
-        networks: &(BitcoinNetwork, StacksNetwork),
-        use_mainnet_wallets: bool,
-        cache_location: Option<&Path>,
-        devnet_override: Option<DevnetConfigFile>,
-    ) -> Result<NetworkManifest, String> {
-        let network_manifest_file_content = paths::read_content(location)?;
-        let mut network_manifest_file: NetworkManifestFile =
-            toml::from_slice(&network_manifest_file_content[..]).unwrap();
-        NetworkManifest::from_network_manifest_file(
-            &mut network_manifest_file,
-            networks,
-            use_mainnet_wallets,
-            cache_location,
-            devnet_override,
         )
     }
 
@@ -478,7 +421,6 @@ impl NetworkManifest {
         networks: &(BitcoinNetwork, StacksNetwork),
         use_mainnet_wallets: bool,
         cache_location: Option<&Path>,
-        devnet_override: Option<DevnetConfigFile>,
     ) -> Result<NetworkManifest, String> {
         let stacks_node_rpc_address = match (
             &network_manifest_file.network.node_rpc_address,
@@ -488,7 +430,6 @@ impl NetworkManifest {
             _ => None,
         };
         let network = NetworkConfig {
-            name: network_manifest_file.network.name.clone(),
             stacks_node_rpc_address,
             bitcoin_node_rpc_address: network_manifest_file
                 .network
@@ -612,212 +553,6 @@ impl NetworkManifest {
 
         let devnet = if matches!(networks.1, StacksNetwork::Devnet) {
             let mut devnet_config = network_manifest_file.devnet.take().unwrap_or_default();
-
-            if let Some(ref devnet_override) = devnet_override {
-                if let Some(ref val) = devnet_override.name {
-                    devnet_config.name = Some(val.clone());
-                }
-
-                if let Some(val) = devnet_override.orchestrator_port {
-                    devnet_config.orchestrator_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.orchestrator_control_port {
-                    devnet_config.orchestrator_control_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.bitcoin_node_p2p_port {
-                    devnet_config.bitcoin_node_p2p_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.bitcoin_node_rpc_port {
-                    devnet_config.bitcoin_node_rpc_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.stacks_node_p2p_port {
-                    devnet_config.stacks_node_p2p_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.stacks_node_rpc_port {
-                    devnet_config.stacks_node_rpc_port = Some(val);
-                }
-
-                if let Some(ref val) = devnet_override.stacks_node_events_observers {
-                    devnet_config.stacks_node_events_observers = Some(val.clone());
-                }
-
-                if let Some(val) = devnet_override.stacks_node_next_initiative_delay {
-                    devnet_config.stacks_node_next_initiative_delay = Some(val);
-                }
-
-                if let Some(val) = devnet_override.stacks_api_port {
-                    devnet_config.stacks_api_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.stacks_api_events_port {
-                    devnet_config.stacks_api_events_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.bitcoin_explorer_port {
-                    devnet_config.bitcoin_explorer_port = Some(val);
-                }
-
-                if let Some(val) = devnet_override.stacks_explorer_port {
-                    devnet_config.stacks_explorer_port = Some(val);
-                }
-
-                if let Some(ref val) = devnet_override.bitcoin_node_username {
-                    devnet_config.bitcoin_node_username = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.bitcoin_node_password {
-                    devnet_config.bitcoin_node_password = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.miner_mnemonic {
-                    devnet_config.miner_mnemonic = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.miner_derivation_path {
-                    devnet_config.miner_derivation_path = Some(val.clone());
-                }
-
-                if let Some(val) = devnet_override.bitcoin_controller_block_time {
-                    devnet_config.bitcoin_controller_block_time = Some(val);
-                }
-
-                if let Some(ref val) = devnet_override.working_dir {
-                    devnet_config.working_dir = Some(val.clone());
-                }
-
-                if let Some(val) = devnet_override.postgres_port {
-                    devnet_config.postgres_port = Some(val);
-                }
-
-                if let Some(ref val) = devnet_override.postgres_username {
-                    devnet_config.postgres_username = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.postgres_password {
-                    devnet_config.postgres_password = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.stacks_api_postgres_database {
-                    devnet_config.stacks_api_postgres_database = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.pox_stacking_orders {
-                    devnet_config.pox_stacking_orders = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.execute_script {
-                    devnet_config.execute_script = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.bitcoin_node_image_url {
-                    devnet_config.bitcoin_node_image_url = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.bitcoin_explorer_image_url {
-                    devnet_config.bitcoin_explorer_image_url = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.stacks_node_image_url {
-                    devnet_config.stacks_node_image_url = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.stacks_api_image_url {
-                    devnet_config.stacks_api_image_url = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.stacks_explorer_image_url {
-                    devnet_config.stacks_explorer_image_url = Some(val.clone());
-                }
-
-                if let Some(ref val) = devnet_override.postgres_image_url {
-                    devnet_config.postgres_image_url = Some(val.clone());
-                }
-
-                if let Some(val) = devnet_override.disable_bitcoin_explorer {
-                    devnet_config.disable_bitcoin_explorer = Some(val);
-                }
-
-                if let Some(val) = devnet_override.disable_stacks_explorer {
-                    devnet_config.disable_stacks_explorer = Some(val);
-                }
-
-                if let Some(val) = devnet_override.disable_stacks_api {
-                    devnet_config.disable_stacks_api = Some(val);
-                }
-
-                if let Some(val) = devnet_override.disable_postgres {
-                    devnet_config.disable_postgres = Some(val);
-                }
-
-                if let Some(val) = devnet_override.bitcoin_controller_automining_disabled {
-                    devnet_config.bitcoin_controller_automining_disabled = Some(val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_2_0 {
-                    devnet_config.epoch_2_0 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_2_05 {
-                    devnet_config.epoch_2_05 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_2_1 {
-                    devnet_config.epoch_2_1 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_2_2 {
-                    devnet_config.epoch_2_2 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_2_3 {
-                    devnet_config.epoch_2_3 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_2_4 {
-                    devnet_config.epoch_2_4 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_2_5 {
-                    devnet_config.epoch_2_5 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_3_0 {
-                    devnet_config.epoch_3_0 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_3_1 {
-                    devnet_config.epoch_3_1 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_3_2 {
-                    devnet_config.epoch_3_2 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_3_3 {
-                    devnet_config.epoch_3_3 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_3_4 {
-                    devnet_config.epoch_3_4 = Some(*val);
-                }
-
-                if let Some(ref val) = devnet_override.epoch_4_0 {
-                    devnet_config.epoch_4_0 = Some(*val);
-                }
-
-                if let Some(val) = devnet_override.network_id {
-                    devnet_config.network_id = Some(val);
-                }
-
-                if let Some(val) = devnet_override.use_docker_gateway_routing {
-                    devnet_config.use_docker_gateway_routing = Some(val);
-                }
-            };
 
             let now = clarity::util::get_epoch_time_secs();
             let devnet_dir = if let Some(network_id) = devnet_config.network_id {
@@ -1320,16 +1055,16 @@ fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> St
 mod tests {
     use clarinet_defaults::DEFAULT_EPOCH;
 
-    use super::DEFAULT_MINER_WALLET_NAME;
+    use super::{DevnetConfigFile, DEFAULT_MINER_WALLET_NAME};
     use crate::{
-        DevnetConfig, DevnetConfigFile, NetworkManifest, NetworkManifestFile, StacksNetwork,
-        StacksNodeEventObserver, DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
+        DevnetConfig, NetworkManifest, NetworkManifestFile, StacksNetwork, StacksNodeEventObserver,
+        DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
     };
 
     fn try_parse_devnet_settings(settings: &str) -> Result<DevnetConfig, String> {
         let mut file: NetworkManifestFile = toml::from_str(settings).unwrap();
         let networks = StacksNetwork::Devnet.get_networks();
-        NetworkManifest::from_network_manifest_file(&mut file, &networks, false, None, None)
+        NetworkManifest::from_network_manifest_file(&mut file, &networks, false, None)
             .map(|manifest| manifest.devnet.unwrap())
     }
 

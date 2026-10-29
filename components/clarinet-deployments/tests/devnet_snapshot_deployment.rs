@@ -51,7 +51,6 @@ fn network_manifest() -> NetworkManifest {
         &StacksNetwork::Devnet.get_networks(),
         false,
         None,
-        None,
     )
     .unwrap()
 }
