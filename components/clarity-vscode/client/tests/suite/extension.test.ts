@@ -82,9 +82,8 @@ describe("get diagnostics", function () {
 
     await workspace.openTextDocument(contractUri);
     const diagnostics = await diagnosticsListener;
-    strictEqual(diagnostics.length, 2);
+    strictEqual(diagnostics.length, 1);
     strictEqual(diagnostics[0].severity, DiagnosticSeverity.Warning);
-    strictEqual(diagnostics[1].severity, DiagnosticSeverity.Information);
   });
 
   it("get diagnostics on contract change", async function () {

@@ -37,7 +37,7 @@ fn run_user_snippet(session: &mut Session, snippet: &str) -> Value {
         .unwrap_or_else(|d| {
             panic!(
                 "snippet should evaluate: {:?}",
-                d.first().map(|d| &d.message)
+                d.first().map(|d| &d.diagnostic.message)
             )
         })
         .into_inner();
@@ -154,9 +154,9 @@ fn the_testnet_sbtc_address_does_not_resolve_in_simnet() {
         .eval(snippet, false)
         .expect_err("the testnet sBTC address is not deployed in simnet");
     assert!(
-        error[0].message.contains("unresolved contract"),
+        error[0].diagnostic.message.contains("unresolved contract"),
         "expected a loud failure, got {}",
-        error[0].message
+        error[0].diagnostic.message
     );
 }
 

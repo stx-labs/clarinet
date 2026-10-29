@@ -438,11 +438,11 @@ fn execute_payload(
         }
         TransactionPayload::ContractCall(call) => {
             let (result, _, events) = connection.run_contract_call(
-                origin,
-                sponsor,
-                &call.to_clarity_contract_id(),
+                origin.clone(),
+                sponsor.cloned(),
+                call.to_clarity_contract_id(),
                 &call.function_name,
-                &call.function_args,
+                call.function_args.clone(),
                 callback,
                 &budget,
             )?;

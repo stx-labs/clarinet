@@ -12,12 +12,3 @@ contract_id = 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait'
 path = 'contracts/simple-nft.clar'
 clarity_version = 2
 epoch = 2.4
-
-# the analysis errors are used as a test case
-[repl.analysis]
-passes = ["check_checker"]
-check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
-
-# We don't want linter diagnostics in this test
-[repl.analysis.lint_groups]
-all = false
