@@ -131,8 +131,8 @@ pub fn do_run_local_devnet(
     }
     // Snapshots are only loaded by projects with the default devnet settings,
     // so one built from other settings would be reused as if it had them.
-    let create_new_snapshot = create_new_snapshot && diff.is_ok();
-    if create_new_snapshot && !create_new_snapshot {
+    let should_create_snapshot = create_new_snapshot && diff.is_ok();
+    if create_new_snapshot && !should_create_snapshot {
         let _ = devnet_events_tx.send(DevnetEvent::warning(
             "Ignoring --create-new-snapshot: the devnet settings differ from the defaults"
                 .to_string(),
@@ -189,7 +189,7 @@ pub fn do_run_local_devnet(
                 moved_mining_command_tx,
                 mining_command_rx,
                 use_snapshot,
-                create_new_snapshot,
+                should_create_snapshot,
                 ctx_moved,
             ))
         })
