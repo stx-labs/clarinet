@@ -40,19 +40,6 @@ export type ParsedTransactionResult = {
 
 export type RawTransactionMetadata = { txid: string; fee: bigint; nonce: bigint };
 
-export type RawTransactionResult =
-  | { status: "success"; transaction: RawTransactionMetadata; execution: ParsedTransactionResult }
-  | { status: "rejected"; transaction: RawTransactionMetadata | null; error: string }
-  | {
-      status: "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
-      transaction: RawTransactionMetadata;
-      error: string;
-      result: ClarityValue | null;
-      events: ClarityEvent[];
-      costs: ClarityCosts | null;
-      performance?: string;
-    };
-
 export type BroadcastTransactionResult =
   | { txid: string }
   | { error: string; reason: string; reason_data?: Record<string, unknown>; txid?: string };

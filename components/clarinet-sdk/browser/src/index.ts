@@ -15,7 +15,6 @@ export {
   type ParsedTransactionResult,
   type BlockTransactionResult,
   type FailureKind,
-  type RawTransactionResult,
   type BroadcastTransactionResult,
   type RawTransactionMetadata,
   type BroadcastTransaction,
