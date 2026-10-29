@@ -55,6 +55,8 @@ exist. Previously, an entry that had never been written threw `value not found`.
   from rejections.
 - `getAssetsMap` reports total STX balances, including locked STX. A node's
   `/v2/accounts` reports locked STX separately from `balance`.
+- `deployContract` accepts contract names of up to 128 bytes. A node only accepts
+  names of up to 40 bytes, so a longer name can't be deployed on chain.
 - In the synchronous debug adapter, standalone calls do not yet follow these
   transaction rules: they consume no nonce, mine no block, and ignore
   post-conditions. `callPrivateFn` is unsupported, and several methods are
