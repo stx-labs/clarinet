@@ -54,7 +54,6 @@ use crate::deployments::{
     self, check_deployments, generate_default_deployment, generate_devnet_deployment,
     write_deployment,
 };
-use crate::devnet::package::{self as Package, ConfigurationPackage};
 use crate::devnet::start::{start, StartConfig};
 use crate::frontend::dap::{run_dap, run_dap_server};
 use crate::generate::changes::{Changes, TOMLEdition};
@@ -240,10 +239,6 @@ impl FormatterInputSource {
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
 enum Devnet {
-    /// Generate package of all required devnet artifacts
-    #[clap(name = "package", bin_name = "package")]
-    Package(DevnetPackage),
-
     /// Start a local Devnet network for interacting with your contracts from your browser
     #[clap(name = "start", bin_name = "start")]
     DevnetStart(DevnetStart),
@@ -288,16 +283,6 @@ struct EncryptDeployment {
     /// Encryption strength
     #[clap(long = "strength", default_value = "medium")]
     pub strength: clarinet_utils::MnemonicEncryptionStrength,
-}
-
-#[derive(Parser, PartialEq, Clone, Debug)]
-struct DevnetPackage {
-    /// Output json file name
-    #[clap(long = "name", short = 'n')]
-    pub package_file_name: Option<String>,
-    /// Path to Clarinet.toml
-    #[clap(long = "manifest-path", short = 'm')]
-    pub manifest_path: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -551,13 +536,6 @@ struct DevnetStart {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
-    /// Path to Package.json produced by 'clarinet devnet package'
-    #[clap(
-        long = "package",
-        conflicts_with = "use_computed_deployment_plan",
-        conflicts_with = "manifest_path"
-    )]
-    pub package: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -979,7 +957,6 @@ pub fn main() {
                     &network_moved.get_networks(),
                     manifest.use_mainnet_wallets(),
                     Some(&manifest.project.cache_location),
-                    None,
                 );
                 let network_manifest = match res {
                     Ok(network_manifest) => network_manifest,
@@ -1577,13 +1554,6 @@ pub fn main() {
             }
         }
         Command::Devnet(subcommand) => match subcommand {
-            Devnet::Package(cmd) => {
-                let manifest = load_manifest_or_exit(cmd.manifest_path, false);
-                if let Err(e) = Package::pack(cmd.package_file_name, manifest) {
-                    eprintln!("Could not execute the package command. {}", format_err!(e));
-                    process::exit(1);
-                }
-            }
             Devnet::DevnetStart(cmd) => devnet_start(cmd, clarinetrc),
         },
     };
@@ -2337,50 +2307,37 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let project_root = &manifest.root_dir;
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {
-        None => {
-            let res = if let Some(package) = cmd.package {
-                let Ok(package_file) = File::open(package) else {
-                    eprintln!("{} package file not found", red!("error:"));
-                    std::process::exit(1);
-                };
-                let deployment: ConfigurationPackage = serde_json::from_reader(package_file)
-                    .expect("error while reading deployment specification");
-                Ok(Some(deployment.deployment_plan))
-            } else {
-                load_deployment_if_exists(
-                    &manifest,
-                    &StacksNetwork::Devnet,
-                    cmd.use_on_disk_deployment_plan,
-                    cmd.use_computed_deployment_plan,
-                )
-            };
-
-            res.and_then(|opt| match opt {
-                Some(deployment) => {
-                    println!(
-                        "{} using existing deployments/default.devnet-plan.yaml",
-                        yellow!("note:")
-                    );
-                    Ok(deployment)
-                }
-                None => {
-                    let default_deployment_path =
-                        project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
-                    let (deployment, _, _) =
-                        generate_devnet_deployment(&manifest).unwrap_or_else(|message| {
-                            eprintln!("{}", red!(message));
-                            std::process::exit(1);
-                        });
-                    write_deployment(&deployment, &default_deployment_path, project_root, true)?;
-                    println!(
-                        "{} {}",
-                        green!("Generated file"),
-                        paths::get_relative_path(&default_deployment_path, project_root).unwrap()
-                    );
-                    Ok(deployment)
-                }
-            })
-        }
+        None => load_deployment_if_exists(
+            &manifest,
+            &StacksNetwork::Devnet,
+            cmd.use_on_disk_deployment_plan,
+            cmd.use_computed_deployment_plan,
+        )
+        .and_then(|opt| match opt {
+            Some(deployment) => {
+                println!(
+                    "{} using existing deployments/default.devnet-plan.yaml",
+                    yellow!("note:")
+                );
+                Ok(deployment)
+            }
+            None => {
+                let default_deployment_path =
+                    project_root.join(get_default_deployment_path(&StacksNetwork::Devnet));
+                let (deployment, _, _) =
+                    generate_devnet_deployment(&manifest).unwrap_or_else(|message| {
+                        eprintln!("{}", red!(message));
+                        std::process::exit(1);
+                    });
+                write_deployment(&deployment, &default_deployment_path, project_root, true)?;
+                println!(
+                    "{} {}",
+                    green!("Generated file"),
+                    paths::get_relative_path(&default_deployment_path, project_root).unwrap()
+                );
+                Ok(deployment)
+            }
+        }),
         Some(deployment_plan_path) => {
             let deployment_path = project_root.join(&deployment_plan_path);
             load_deployment(project_root, &deployment_path)
@@ -2395,7 +2352,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         }
     };
 
-    let orchestrator = match DevnetOrchestrator::new(manifest, None, None, true) {
+    let orchestrator = match DevnetOrchestrator::new(manifest, true) {
         Ok(orchestrator) => orchestrator,
         Err(e) => {
             eprintln!("{}", format_err!(e));
@@ -2413,15 +2370,8 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         ));
     }
 
-    let devnet_config = match orchestrator.network_config {
-        Some(ref network_config) => match &network_config.devnet {
-            Some(devnet_config) => Ok(devnet_config.clone()),
-            _ => Err("Unable to retrieve config"),
-        },
-        _ => Err("Unable to retrieve config"),
-    };
     let differ = DevnetDiffConfig::new();
-    let compatible = differ.is_compatible(&devnet_config.unwrap());
+    let compatible = differ.is_compatible(orchestrator.devnet_config());
     if let Err(incompatibles) = compatible {
         display_devnet_incompatibilities(incompatibles);
         prompt_user_to_continue();
@@ -2430,7 +2380,6 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let config = StartConfig {
         devnet: orchestrator,
         deployment,
-        log_tx: None,
         display_dashboard: !cmd.no_dashboard,
         no_snapshot: cmd.no_snapshot,
         save_container_logs: cmd.save_container_logs,
@@ -2441,7 +2390,7 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
             eprintln!("{}", format_err!(e));
             process::exit(1);
         }
-        Ok(_) => {
+        Ok(()) => {
             if clarinetrc.enable_hints.unwrap_or(true) {
                 display_deploy_hint();
             }

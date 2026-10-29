@@ -726,7 +726,6 @@ name = "clarinet-deployments"
 version = "3.26.0"
 dependencies = [
  "base58",
- "base64 0.22.1",
  "bitcoin",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",
@@ -4414,7 +4413,6 @@ dependencies = [
  "bitcoincore-rpc",
  "bollard",
  "chrono",
- "clap",
  "clarinet-deployments",
  "clarinet-files",
  "clarity",
@@ -4444,7 +4442,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "yaml_serde",
 ]
 
 [[package]]

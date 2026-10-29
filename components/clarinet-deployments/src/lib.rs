@@ -775,7 +775,6 @@ pub async fn generate_default_deployment_with_cache(
             &network.get_networks(),
             manifest.use_mainnet_wallets(),
             Some(&manifest.project.cache_location),
-            None,
         )?,
         Some(file_accessor) => {
             NetworkManifest::from_project_root_using_file_accessor(

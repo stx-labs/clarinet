@@ -116,23 +116,12 @@ impl DevnetEventObserverConfig {
     pub fn new(
         devnet_config: DevnetConfig,
         manifest: ProjectManifest,
-        network_manifest: Option<NetworkManifest>,
+        network_manifest: NetworkManifest,
         deployment: DeploymentSpecification,
         ctx: &Context,
         services_map_hosts: ServicesMapHosts,
     ) -> Self {
         ctx.try_log(|logger| slog::info!(logger, "Checking contracts"));
-        let network_manifest = match network_manifest {
-            Some(n) => n,
-            None => NetworkManifest::from_project_root(
-                &manifest.root_dir,
-                &StacksNetwork::Devnet.get_networks(),
-                false,
-                Some(&manifest.project.cache_location),
-                None,
-            )
-            .expect("unable to load network manifest"),
-        };
         let event_observer_config = EventObserverConfig {
             bitcoin_rpc_proxy_enabled: true,
             bitcoind_rpc_username: devnet_config.bitcoin_node_username.clone(),

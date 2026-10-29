@@ -20,8 +20,8 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 pub use network_manifest::{
-    compute_addresses, AccountConfig, DevnetConfig, DevnetConfigFile, NetworkManifest,
-    NetworkManifestFile, PoxStackingOrder, StacksNodeEventObserver, DEFAULT_BITCOIN_EXPLORER_IMAGE,
+    compute_addresses, AccountConfig, DevnetConfig, NetworkManifest, NetworkManifestFile,
+    PoxStackingOrder, StacksNodeEventObserver, DEFAULT_BITCOIN_EXPLORER_IMAGE,
     DEFAULT_BITCOIN_NODE_IMAGE, DEFAULT_DERIVATION_PATH, DEFAULT_DOCKER_PLATFORM,
     DEFAULT_EPOCH_2_0, DEFAULT_EPOCH_2_05, DEFAULT_EPOCH_2_1, DEFAULT_EPOCH_2_2, DEFAULT_EPOCH_2_3,
     DEFAULT_EPOCH_2_4, DEFAULT_EPOCH_2_5, DEFAULT_EPOCH_3_0, DEFAULT_EPOCH_3_1, DEFAULT_EPOCH_3_2,
@@ -31,9 +31,7 @@ pub use network_manifest::{
     DEFAULT_STACKS_EXPLORER_IMAGE, DEFAULT_STACKS_MINER_MNEMONIC, DEFAULT_STACKS_NODE_IMAGE,
     DEFAULT_STACKS_SIGNER_IMAGE,
 };
-pub use project_manifest::{
-    ProjectManifest, ProjectManifestFile, RequirementConfig, INVALID_CLARITY_VERSION,
-};
+pub use project_manifest::{ProjectManifest, ProjectManifestFile, RequirementConfig};
 #[cfg(target_arch = "wasm32")]
 pub use wasm_fs_accessor::WASMFileSystemAccessor;
 
