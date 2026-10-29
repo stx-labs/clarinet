@@ -8,6 +8,27 @@ The Wasm packages are built separately for Node.js and browsers. Both SDKs share
 `./common/src/sdkProxy.ts`, with small adapters in `./node/src/sdkProxy.ts` and
 `./browser/src/sdkProxy.ts`.
 
+## Migrating to 4.0
+
+### Transaction and result changes
+
+- [Transaction behavior](#transaction-behavior): deployment results, nonce charges,
+  transfer timing, map reads, and Clarity-version validation.
+- [Migrating `mineBlock` to 4.0](#migrating-mineblock-to-40): outcome statuses,
+  execution receipts, and result ordering.
+- [Signed transactions](#signed-transactions): mempool admission through
+  `broadcastTransaction` and execution through `mineBlock`.
+
+### Removed APIs
+
+- **`simnet.runSnippet(code)`**: replace with `simnet.execute(code).result`, which
+  returns a parsed Clarity value. Handle evaluation failures with `try`/`catch`;
+  `execute` throws instead of returning an `"error:"` string.
+- **`RawTransactionResult`**: replace this unused type with `BlockTransactionResult`
+  for `mineBlock` outcomes or `BroadcastTransactionResult` for mempool admission
+  responses. Read mined results under `outcome.execution` after narrowing on
+  `outcome.status`.
+
 ## Transaction behavior
 
 Simnet public calls, deployments, and native STX transfers use the shared
@@ -23,24 +44,62 @@ are rejected before analysis without consuming a nonce. Use read-only calls,
 `getDataVar`, and events to check initialization effects. Use `execute` when you
 want to evaluate a snippet and receive its expression value. Deployment costs
 include contract storage and subsequent calls account for the stored contract's
-actual data size, so cost assertions may need updating.
+actual data size, so cost assertions may need updating. An unsupported
+`clarityVersion` throws, or is `rejected` inside `mineBlock`, instead of falling
+back to the default version. Explicit versions must be integer numbers; strings,
+fractional or non-finite numbers, and other types are rejected without coercion.
 
 `transferSTX` represents a native transfer: self-transfers, zero-amount transfers,
 and transfers exceeding the available unlocked balance throw without consuming a
-nonce. Inside `mineBlock`, these transfers return a `rejected` outcome without
-consuming a nonce. Calling the Clarity `stx-transfer?` function inside a contract
-retains its ordinary response semantics. Private calls remain a simnet convenience
-and use the same transaction frame.
+nonce. Like `callPublicFn` and `deployContract`, it advances one block before
+executing, even when the transfer is rejected; previously it executed at the
+current height and advanced only on success. Inside `mineBlock`, these transfers
+return a `rejected` outcome without consuming a nonce. Calling the Clarity
+`stx-transfer?` function inside a contract retains its ordinary response
+semantics. Private calls remain a simnet convenience and use the same transaction
+frame.
+
+Like the node's map-entry endpoint, `getMapEntry` returns `(some value)` for an
+existing entry and `none` otherwise, including for a map or contract that does not
+exist. Previously, an entry that had never been written threw `value not found`.
+
+### Known differences from a node
+
+- Cost and memory limits are enforced only when cost tracking is enabled
+  (`trackCosts`, or `--costs` with `vitest-environment-clarinet`), which is off by
+  default. Signed transactions are always limited, so a call that succeeds
+  through `callPublicFn` can fail as a signed transaction, and enabling cost
+  tracking can change test outcomes. A batch has no cumulative block budget.
+- Standalone `callPublicFn`, `callPrivateFn`, `deployContract`, and `transferSTX`
+  throw both for rejected transactions and for included runtime errors and
+  post-condition aborts, which still consume a nonce and mine their block. A
+  returned `(err ...)` does not throw. Use `mineBlock` to tell included failures
+  from rejections.
+- `getAssetsMap` reports total STX balances, including locked STX. A node's
+  `/v2/accounts` reports locked STX separately from `balance`.
+- `deployContract` accepts contract names of up to 128 bytes. A node only accepts
+  names of up to 40 bytes, so a longer name can't be deployed on chain.
+- In the synchronous debug adapter, standalone calls do not yet follow these
+  transaction rules: they consume no nonce, mine no block, and ignore
+  post-conditions. `callPrivateFn` is unsupported, and several methods are
+  missing. `mineBlock` follows the same rules as the SDK.
 
 ### Migrating `mineBlock` to 4.0
 
-`mineBlock(txs)` returns one `BlockTransactionResult` per entry, in input order:
+`mineBlock(txs)` returns one `BlockTransactionResult` per entry: first one for each
+queued signed transaction it mines (see [Signed transactions](#signed-transactions)),
+then one for each entry in `txs`, in input order. Without queued transactions,
+`results[i]` corresponds to `txs[i]`.
 
 - `success`: `execution` contains the parsed result, events, costs, and performance.
-- `included_failure`: `error` describes the failure. For a returned `(err ...)`,
-  `execution` contains its parsed result, events, costs, and performance. For VM,
-  analysis, or post-condition errors, `execution` is `null`. Included failures
-  consume a nonce according to the VM's epoch rules; their payload writes roll back.
+- `included_failure`: `error` describes the failure, and `kind` classifies it as
+  `abort_by_response`, `abort_by_post_condition`, `runtime_error`, or
+  `analysis_error`. Like a node's transaction receipt, `execution` always contains
+  a result, events, and costs: a returned `(err ...)`; the value a call aborted by
+  its post-conditions would have returned, or `(ok true)` for an aborted deployment;
+  or `(err none)` when execution produced no value. A post-condition abort reports
+  the events it attempted, none of which were committed. Included failures consume
+  a nonce according to the VM's epoch rules; their payload writes roll back.
 - `rejected`: `error` describes why the transaction was rejected. No payload writes
   or nonce changes commit.
 
@@ -112,10 +171,8 @@ explicit entries supplied to `mineBlock(txs)`, advancing one block for the whole
 batch. Its results use the same `success`, `included_failure`, and `rejected`
 statuses as convenience entries. Signed results additionally carry `transaction`
 metadata: `txid` (64 lowercase hex characters without `0x`), `fee`, and `nonce`
-(both `bigint`). Signed included failures carry `kind` (`abort_by_response`,
-`abort_by_post_condition`, `runtime_error`, or `analysis_error`), nullable `result`,
-attempted `events`, and `costs`; response failures can also include `performance`.
-They retain fees and nonce charges while rolling back aborted payload writes.
+(both `bigint`). Signed included failures retain fees and nonce charges while
+rolling back aborted payload writes.
 
 Admission does not guarantee inclusion: mining checks current state again.
 Rejected mined entries charge nothing, and later entries still run. Each selected

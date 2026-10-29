@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::panic;
 use std::path::{Path, PathBuf};
 
-use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
+use clarinet_defaults::DEFAULT_EPOCH;
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::types::{
     DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
@@ -24,11 +24,11 @@ use clarity_repl::repl::boot::{
 };
 use clarity_repl::repl::clarity_values::{uint8_to_string, uint8_to_value, value_from_bytes_exact};
 use clarity_repl::repl::hooks::perf::CostField;
-use clarity_repl::repl::interpreter::BlockInclusion;
+use clarity_repl::repl::interpreter::{BlockInclusion, FailureKind, FailureReceipt};
 use clarity_repl::repl::post_conditions::{
     parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
 };
-use clarity_repl::repl::raw_transaction::{RawFailureKind, RawTransactionMetadata};
+use clarity_repl::repl::raw_transaction::RawTransactionMetadata;
 use clarity_repl::repl::session::{CallKind, CostsReport};
 use clarity_repl::repl::settings::RemoteDataSettings;
 use clarity_repl::repl::{
@@ -168,13 +168,11 @@ fn decode_call_args(args: &[Vec<u8>]) -> Result<Vec<Value>, String> {
 fn clarity_version_from_u32(
     v: Option<u32>,
     current_epoch: clarity::types::StacksEpochId,
-) -> ClarityVersion {
+) -> Result<ClarityVersion, String> {
     match v {
-        Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8).unwrap_or_else(|| {
-            log!("Invalid clarity version {v}. Using default version.");
-            DEFAULT_CLARITY_VERSION
-        }),
-        None => ClarityVersion::default_for_epoch(current_epoch),
+        Some(v) => clarity_repl::repl::clarity_version_from_u32(v)
+            .ok_or_else(|| format!("Invalid Clarity version: {v}")),
+        None => Ok(ClarityVersion::default_for_epoch(current_epoch)),
     }
 }
 
@@ -307,6 +305,7 @@ pub struct TransactionRes {
 struct TransactionError {
     message: String,
     inclusion: BlockInclusion,
+    receipt: Option<Box<FailureReceipt>>,
 }
 
 impl From<String> for TransactionError {
@@ -314,6 +313,7 @@ impl From<String> for TransactionError {
         Self {
             message,
             inclusion: BlockInclusion::Rejected,
+            receipt: None,
         }
     }
 }
@@ -325,8 +325,9 @@ enum BlockTransactionResult {
         execution: TransactionRes,
     },
     IncludedFailure {
+        kind: FailureKind,
         error: String,
-        execution: Option<TransactionRes>,
+        execution: TransactionRes,
     },
     Rejected {
         error: String,
@@ -353,13 +354,9 @@ enum SignedTransactionResult {
     },
     IncludedFailure {
         transaction: SignedTransactionMetadata,
-        kind: RawFailureKind,
+        kind: FailureKind,
         error: String,
-        execution: (),
-        result: Option<String>,
-        events: String,
-        costs: String,
-        performance: Option<String>,
+        execution: TransactionRes,
     },
 }
 
@@ -392,8 +389,9 @@ impl From<Result<TransactionRes, TransactionError>> for BlockTransactionResult {
                 if matches!(value, clarity::vm::types::Value::Response(ref response) if !response.committed)
                 {
                     Self::IncludedFailure {
+                        kind: FailureKind::Response,
                         error: clarity_values::value_to_string(&value),
-                        execution: Some(execution),
+                        execution,
                     }
                 } else {
                     Self::Success { execution }
@@ -402,10 +400,17 @@ impl From<Result<TransactionRes, TransactionError>> for BlockTransactionResult {
             Err(TransactionError {
                 message,
                 inclusion: BlockInclusion::Included,
-            }) => Self::IncludedFailure {
-                error: message,
-                execution: None,
-            },
+                receipt,
+            }) => {
+                // Failures rejected before execution, such as a call to a missing
+                // function, produced no value or events.
+                let receipt = receipt.unwrap_or_else(|| Box::new(FailureReceipt::runtime(None)));
+                Self::IncludedFailure {
+                    kind: receipt.kind,
+                    error: message,
+                    execution: failure_receipt_to_transaction_res(&receipt),
+                }
+            }
             Err(TransactionError { message, .. }) => Self::Rejected { error: message },
         }
     }
@@ -435,6 +440,15 @@ pub fn execution_result_to_transaction_res(execution: &ExecutionResult) -> Trans
         result,
         events: serialize_events(&execution.events),
         costs: json!(execution.cost).to_string(),
+        performance: None,
+    }
+}
+
+fn failure_receipt_to_transaction_res(receipt: &FailureReceipt) -> TransactionRes {
+    TransactionRes {
+        result: clarity_values::to_raw_value(&receipt.result),
+        events: serialize_events(&receipt.events),
+        costs: json!(receipt.cost).to_string(),
         performance: None,
     }
 }
@@ -982,10 +996,12 @@ impl SDK {
             .get_session()
             .resolve_contract_id(&self.deployer, contract)?;
         let session = self.get_session_mut();
-        session
+        // Like the node's map-entry endpoint, a missing entry, map, or contract
+        // reads as `none` rather than an error.
+        Ok(session
             .interpreter
             .get_map_entry(&contract_id, map_name, &uint8_to_value(&map_key))
-            .ok_or_else(|| "value not found".into())
+            .unwrap_or_else(|| clarity_values::to_raw_value(&clarity::vm::types::Value::none())))
     }
 
     fn get_function_interface(
@@ -1067,6 +1083,7 @@ impl SDK {
                 TransactionError {
                     message,
                     inclusion: failure.inclusion,
+                    receipt: failure.receipt,
                 }
             })?;
 
@@ -1181,6 +1198,7 @@ impl SDK {
                     &args.method,
                     epoch,
                 ),
+                receipt: None,
             });
         }
 
@@ -1232,6 +1250,11 @@ impl SDK {
         )?;
 
         let session = self.get_session_mut();
+        // Like other transactions, a transfer executes in the new block, even
+        // when it is rejected.
+        if advance_chain_tip {
+            session.advance_chain_tip(1);
+        }
         let initial_tx_sender = session.get_tx_sender();
         session.set_tx_sender(&args.sender);
 
@@ -1249,9 +1272,6 @@ impl SDK {
             }
         };
 
-        if advance_chain_tip {
-            session.advance_chain_tip(1);
-        }
         Ok(execution_result_to_transaction_res(&execution))
     }
 
@@ -1273,18 +1293,16 @@ impl SDK {
             args.post_condition_mode.as_deref(),
             &args.sender,
         )?;
+        let current_epoch = self.get_session().interpreter.datastore.get_current_epoch();
+        let clarity_version = clarity_version_from_u32(
+            args.options.as_ref().and_then(|opts| opts.clarity_version),
+            current_epoch,
+        )?;
         let execution = {
             let session = self.get_session_mut();
             if advance_chain_tip {
                 session.advance_chain_tip(1);
             }
-
-            let current_epoch = session.interpreter.datastore.get_current_epoch();
-
-            let clarity_version = clarity_version_from_u32(
-                args.options.as_ref().and_then(|opts| opts.clarity_version),
-                current_epoch,
-            );
 
             // `deployContract` bypasses the deployment plan, so the remap that
             // `clarinet-deployments` records for manifest contracts has to be
@@ -1345,6 +1363,7 @@ impl SDK {
                     return Err(TransactionError {
                         message,
                         inclusion: failure.inclusion,
+                        receipt: failure.receipt,
                     });
                 }
             }
@@ -1385,11 +1404,11 @@ impl SDK {
                 // but not VM errors or post-condition aborts.
                 let cost = match &result {
                     RawTransactionResult::Success(execution) => execution.cost.as_ref(),
-                    RawTransactionResult::Failure {
-                        kind: RawFailureKind::Response,
-                        cost,
-                        ..
-                    } => Some(cost),
+                    RawTransactionResult::Failure { receipt, .. }
+                        if receipt.kind == FailureKind::Response =>
+                    {
+                        receipt.cost.as_ref()
+                    }
                     _ => None,
                 };
                 if self.options.track_costs {
@@ -1419,30 +1438,16 @@ impl SDK {
                             execution: response,
                         }
                     }
-                    RawTransactionResult::Failure {
-                        kind,
-                        error,
-                        output,
-                        events,
-                        cost,
-                    } => {
-                        let performance = if self.options.track_performance
-                            && matches!(kind, RawFailureKind::Response)
-                        {
-                            self.get_session().get_performance_data()
-                        } else {
-                            None
-                        };
+                    RawTransactionResult::Failure { error, receipt } => {
+                        let mut execution = failure_receipt_to_transaction_res(&receipt);
+                        if self.options.track_performance && receipt.kind == FailureKind::Response {
+                            execution.performance = self.get_session().get_performance_data();
+                        }
                         SignedTransactionResult::IncludedFailure {
                             transaction: metadata.into(),
-                            kind,
+                            kind: receipt.kind,
                             error,
-                            execution: (),
-                            result: output.as_deref().map(clarity_values::to_raw_value),
-                            events: serialize_events(&events),
-                            costs: serde_json::to_string(&cost)
-                                .expect("execution cost is serializable"),
-                            performance,
+                            execution,
                         }
                     }
                 }
@@ -1569,27 +1574,6 @@ impl SDK {
     pub fn mine_empty_burn_blocks(&mut self, count: Option<u32>) -> u32 {
         let session = self.get_session_mut();
         session.advance_burn_chain_tip(count.unwrap_or(1))
-    }
-
-    #[wasm_bindgen(js_name=runSnippet)]
-    pub fn run_snippet(&mut self, snippet: String) -> String {
-        let session = self.get_session_mut();
-        let snippet = session.remap_user_snippet(snippet);
-        match session.eval(snippet, false) {
-            Ok(res) => match res.into_inner().result {
-                EvaluationResult::Snippet(result) => clarity_values::to_raw_value(&result.result),
-                EvaluationResult::Contract(_) => unreachable!(
-                    "Contract evaluation result should not be returned from eval_snippet",
-                ),
-            },
-            Err(diagnostics) => {
-                let mut message = "error:".to_string();
-                diagnostics.iter().for_each(|d| {
-                    message = format!("{message}\n{}", d.diagnostic.message);
-                });
-                message
-            }
-        }
     }
 
     #[wasm_bindgen(js_name=execute)]

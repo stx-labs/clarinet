@@ -26,7 +26,10 @@ use stacks_codec::transaction::{
 use stacks_codec::StacksMessageCodec;
 use stacks_common::types::chainstate::Txid;
 
-use super::interpreter::{public_function_args, BlockInclusion, ClarityInterpreter, NonceCharge};
+use super::interpreter::{
+    public_function_args, BlockInclusion, ClarityInterpreter, FailureKind, FailureReceipt,
+    NonceCharge,
+};
 use super::post_conditions::PostConditionCheck;
 use super::transaction::SimnetTransactionConnection;
 use crate::utils::serialize_display;
@@ -83,28 +86,9 @@ pub enum RawTransactionOutcome {
 pub enum RawTransactionResult {
     Success(Box<ExecutionResult>),
     Failure {
-        kind: RawFailureKind,
         error: String,
-        output: Option<Box<Value>>,
-        events: Vec<StacksTransactionEvent>,
-        cost: CostSynthesis,
+        receipt: Box<FailureReceipt>,
     },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, strum::IntoStaticStr)]
-pub enum RawFailureKind {
-    #[serde(rename = "abort_by_response")]
-    #[strum(serialize = "abort_by_response")]
-    Response,
-    #[serde(rename = "runtime_error")]
-    #[strum(serialize = "runtime_error")]
-    Runtime,
-    #[serde(rename = "analysis_error")]
-    #[strum(serialize = "analysis_error")]
-    Analysis,
-    #[serde(rename = "abort_by_post_condition")]
-    #[strum(serialize = "abort_by_post_condition")]
-    PostCondition,
 }
 
 impl From<&StacksTransaction> for RawTransactionMetadata {
@@ -230,17 +214,11 @@ impl ClarityInterpreter {
             }))),
             Err(error) => {
                 let message = error.to_string();
-                let (kind, output, events) = match &error {
-                    ClarityError::AbortedByCallback {
-                        output, tx_events, ..
-                    } => (
-                        RawFailureKind::PostCondition,
-                        output.clone(),
-                        tx_events.clone(),
-                    ),
-                    _ if analysis_failure => (RawFailureKind::Analysis, None, vec![]),
-                    _ => (RawFailureKind::Runtime, None, vec![]),
-                };
+                let receipt = Box::new(if analysis_failure {
+                    FailureReceipt::analysis(Some(cost))
+                } else {
+                    FailureReceipt::from_runtime_error(&error, Some(cost))
+                });
                 let inclusion = if analysis_failure {
                     BlockInclusion::from_analysis_error(error, epoch)
                 } else {
@@ -248,11 +226,8 @@ impl ClarityInterpreter {
                 };
                 if inclusion.is_included() {
                     Ok(RawTransactionResult::Failure {
-                        kind,
                         error: message,
-                        output,
-                        events,
-                        cost,
+                        receipt,
                     })
                 } else {
                     Err(message)
@@ -310,11 +285,13 @@ impl ClarityInterpreter {
             }) = &mut execution.result
             {
                 result = RawTransactionResult::Failure {
-                    kind: RawFailureKind::Response,
                     error: "contract returned an error response".into(),
-                    output: Some(Box::new(mem::replace(output, Value::none()))),
-                    events: mem::take(&mut execution.events),
-                    cost: execution.cost.take().expect("raw transactions track costs"),
+                    receipt: Box::new(FailureReceipt {
+                        kind: FailureKind::Response,
+                        result: mem::replace(output, Value::none()),
+                        events: mem::take(&mut execution.events),
+                        cost: execution.cost.take(),
+                    }),
                 };
             }
         }

@@ -16,9 +16,15 @@ it("preserves batch outcomes and transaction options through the synchronous ada
         result: {
           results: [
             { status: "rejected", error: "invalid transfer" },
-            { status: "included_failure", error: "runtime", execution: null },
             {
               status: "included_failure",
+              kind: "runtime_error",
+              error: "runtime",
+              execution: { ...execution, result: serializeCV(Cl.error(Cl.none())) },
+            },
+            {
+              status: "included_failure",
+              kind: "abort_by_response",
               error: "(err u7)",
               execution: { ...execution, result: serializeCV(Cl.error(Cl.uint(7))) },
             },
@@ -39,9 +45,15 @@ it("preserves batch outcomes and transaction options through the synchronous ada
   ]);
   expect(results).toEqual([
     { status: "rejected", error: "invalid transfer" },
-    { status: "included_failure", error: "runtime", execution: null },
     {
       status: "included_failure",
+      kind: "runtime_error",
+      error: "runtime",
+      execution: { result: Cl.error(Cl.none()), events: [], costs: null, performance: undefined },
+    },
+    {
+      status: "included_failure",
+      kind: "abort_by_response",
       error: "(err u7)",
       execution: { result: Cl.error(Cl.uint(7)), events: [], costs: null, performance: undefined },
     },
@@ -137,13 +149,14 @@ it("submits to the debug mempool and parses signed mining metadata", () => {
             {
               status: "included_failure",
               kind: "abort_by_response",
-              execution: null,
               error: "response",
               transaction: { txid, fee: "1000", nonce: "0" },
-              result: serializeCV(Cl.error(Cl.uint(7))),
-              events: "[]",
-              costs: "null",
-              performance: null,
+              execution: {
+                result: serializeCV(Cl.error(Cl.uint(7))),
+                events: "[]",
+                costs: "null",
+                performance: null,
+              },
             },
           ],
         },
@@ -153,12 +166,53 @@ it("submits to the debug mempool and parses signed mining metadata", () => {
   expect(simnet.broadcastTransaction("signed-hex")).toEqual({ txid });
   expect(simnet.mineBlock()[0]).toMatchObject({
     status: "included_failure",
+    kind: "abort_by_response",
     transaction: { txid, fee: 1000n, nonce: 0n },
-    result: Cl.error(Cl.uint(7)),
+    execution: { result: Cl.error(Cl.uint(7)) },
   });
   expect(vi.mocked(syncSend).mock.calls[1][0]).toEqual({
     method: "broadcastTransaction",
     rawHex: "signed-hex",
   });
   expect(vi.mocked(syncSend).mock.calls[2][0]).toEqual({ method: "mineBlock", txs: [] });
+});
+
+it("rejects invalid versions before JSON serialization and preserves queued result order", () => {
+  vi.mocked(syncSend).mockReset();
+  const sender = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+  const execution = { result: serializeCV(Cl.ok(Cl.bool(true))), events: "[]", costs: "null" };
+  const queued = {
+    status: "success",
+    transaction: { txid: "ab".repeat(32), fee: "1000", nonce: "0" },
+    execution,
+  };
+  vi.mocked(syncSend)
+    .mockReturnValueOnce(JSON.stringify({ result: { accounts: { deployer: sender } } }))
+    .mockReturnValueOnce(
+      JSON.stringify({ result: { results: [queued, { status: "success", execution }] } }),
+    );
+  const simnet = createSyncDebugSimnet();
+  const versions: unknown[] = [NaN, Infinity, 1.5, 4294967297, "1", true, null, 1n];
+  const invalid = versions.map((version, index) =>
+    tx.deployContract(`bad-${index}`, "true", { clarityVersion: version as number }, sender),
+  );
+  const results = simnet.mineBlock([
+    ...invalid,
+    tx.deployContract("valid", "true", { clarityVersion: 1 }, sender),
+  ]);
+  expect(results[0]).toMatchObject({
+    status: "success",
+    transaction: { txid: queued.transaction.txid },
+  });
+  expect(results.slice(1, -1)).toEqual(
+    versions.map(() => ({
+      status: "rejected",
+      error: "Invalid Clarity version: expected an unsigned 32-bit integer",
+    })),
+  );
+  expect(results.at(-1)?.status).toBe("success");
+  expect(vi.mocked(syncSend).mock.calls[1][0]).toMatchObject({
+    method: "mineBlock",
+    txs: [{ type: "deployContract", name: "valid", options: { clarityVersion: 1 } }],
+  });
 });

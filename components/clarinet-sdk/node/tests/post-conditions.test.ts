@@ -445,7 +445,12 @@ describe("post-conditions in a mined block", () => {
       expect.arrayContaining([
         expect.objectContaining({
           status: "included_failure",
+          kind: "abort_by_post_condition",
           error: expect.stringMatching(/Post-condition check failure/),
+          execution: expect.objectContaining({
+            result: Cl.ok(Cl.bool(true)),
+            events: [expect.objectContaining({ event: "stx_transfer_event" })],
+          }),
         }),
       ]),
     );

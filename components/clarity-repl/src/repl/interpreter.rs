@@ -36,6 +36,7 @@ use clarity_types::types::{
     AssetIdentifier, PrincipalData, QualifiedContractIdentifier, StandardPrincipalData,
 };
 use clarity_types::Value;
+use serde::Serialize;
 use stacks_common::bounded_format;
 
 use super::datastore::StacksConstants;
@@ -99,6 +100,72 @@ impl From<bool> for BlockInclusion {
             BlockInclusion::Included
         } else {
             BlockInclusion::Rejected
+        }
+    }
+}
+
+/// How an included transaction failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FailureKind {
+    #[serde(rename = "abort_by_response")]
+    Response,
+    #[serde(rename = "runtime_error")]
+    Runtime,
+    #[serde(rename = "analysis_error")]
+    Analysis,
+    #[serde(rename = "abort_by_post_condition")]
+    PostCondition,
+}
+
+/// What a node's `StacksTransactionReceipt` records for an included transaction
+/// that failed.
+#[derive(Debug, Clone)]
+pub struct FailureReceipt {
+    pub kind: FailureKind,
+    /// The returned `(err ...)`, the value an aborted call would have returned,
+    /// `(ok true)` for an aborted deployment, or `(err none)` when execution
+    /// produced no value.
+    pub result: Value,
+    /// Events emitted before the failure. A post-condition abort's events were
+    /// attempted but not committed.
+    pub events: Vec<StacksTransactionEvent>,
+    pub cost: Option<CostSynthesis>,
+}
+
+impl FailureReceipt {
+    /// The receipt for a parse or analysis failure, which never executes.
+    pub fn analysis(cost: Option<CostSynthesis>) -> Self {
+        Self {
+            kind: FailureKind::Analysis,
+            result: Value::err_none(),
+            events: vec![],
+            cost,
+        }
+    }
+
+    /// The receipt for an execution failure that produced no value.
+    pub fn runtime(cost: Option<CostSynthesis>) -> Self {
+        Self {
+            kind: FailureKind::Runtime,
+            result: Value::err_none(),
+            events: vec![],
+            cost,
+        }
+    }
+
+    /// The receipt for a failure during execution.
+    pub fn from_runtime_error(error: &ClarityError, cost: Option<CostSynthesis>) -> Self {
+        match error {
+            ClarityError::AbortedByCallback {
+                output, tx_events, ..
+            } => Self {
+                kind: FailureKind::PostCondition,
+                // Upstream reports no output only for contract initialization.
+                result: output.as_deref().cloned().unwrap_or_else(Value::okay_true),
+                events: tx_events.clone(),
+                cost,
+            },
+            _ => Self::runtime(cost),
         }
     }
 }
@@ -189,6 +256,8 @@ pub struct ExecutionError {
     pub diagnostics: Vec<LintDiagnostic>,
     /// Whether the operation still counts as a transaction on mainnet.
     pub inclusion: BlockInclusion,
+    /// The node's receipt for an included failure, where simnet produced one.
+    pub receipt: Option<Box<FailureReceipt>>,
 }
 
 impl ExecutionError {
@@ -199,6 +268,7 @@ impl ExecutionError {
         Self {
             diagnostics: diagnostics.into_iter().map(LintDiagnostic::from).collect(),
             inclusion: BlockInclusion::Rejected,
+            receipt: None,
         }
     }
 
@@ -207,6 +277,7 @@ impl ExecutionError {
         Self {
             diagnostics,
             inclusion: BlockInclusion::Rejected,
+            receipt: None,
         }
     }
 }
@@ -236,6 +307,8 @@ pub struct ContractCallFailure {
     pub error: ContractCallError,
     /// Whether the call still counts as a transaction on mainnet.
     pub inclusion: BlockInclusion,
+    /// The node's receipt for an included failure, where simnet produced one.
+    pub receipt: Option<Box<FailureReceipt>>,
 }
 
 impl std::fmt::Display for ContractCallFailure {
@@ -342,6 +415,7 @@ impl ContractCallFailure {
                 ClarityError::Interpreter(as_mainnet_raised_it),
                 epoch,
             ),
+            receipt: None,
         }
     }
 }
@@ -538,6 +612,7 @@ impl ClarityInterpreter {
                 return Err(ExecutionError {
                     diagnostics,
                     inclusion: runtime_failure.inclusion,
+                    receipt: runtime_failure.receipt,
                 });
             }
         };
@@ -572,6 +647,9 @@ impl ClarityInterpreter {
         ExecutionError {
             diagnostics,
             inclusion,
+            receipt: inclusion
+                .is_included()
+                .then(|| Box::new(FailureReceipt::analysis(None))),
         }
     }
 
@@ -746,6 +824,7 @@ impl ClarityInterpreter {
                     ClarityError::StaticCheck(Box::new(static_check_error)),
                     contract.epoch.resolve(),
                 ),
+                receipt: None,
             }
         })?;
 
@@ -1065,6 +1144,7 @@ impl ClarityInterpreter {
                 return Err(ExecutionError {
                     diagnostics: diagnostics.into_iter().map(LintDiagnostic::from).collect(),
                     inclusion,
+                    receipt: None,
                 });
             }
         };
@@ -1204,6 +1284,7 @@ impl ClarityInterpreter {
         .map_err(|failure| ExecutionError {
             diagnostics: vec![LintDiagnostic::from(runtime_diagnostic(&failure.error))],
             inclusion: failure.inclusion,
+            receipt: failure.receipt,
         })
     }
 
@@ -1270,6 +1351,7 @@ impl ClarityInterpreter {
         .map_err(|failure| ExecutionError {
             diagnostics: vec![LintDiagnostic::from(runtime_diagnostic(&failure.error))],
             inclusion: failure.inclusion,
+            receipt: failure.receipt,
         })
     }
 
@@ -1292,6 +1374,7 @@ impl ClarityInterpreter {
         let rejected = |error| ContractCallFailure {
             error: ContractCallError::Uncategorized(error),
             inclusion: BlockInclusion::Rejected,
+            receipt: None,
         };
         let mut connection = self
             .get_transaction_connection(epoch, track_costs, hooks)
@@ -1306,30 +1389,40 @@ impl ClarityInterpreter {
         let result = if let Some(error) = callback_error {
             Err(rejected(error))
         } else {
-            result.map_err(|error| match error {
-                ClarityError::Interpreter(error) => {
-                    let message =
-                        format!("Runtime error while interpreting {contract_id}: {error:?}");
-                    ContractCallFailure::from_vm_error(error, message, contract_id, epoch)
-                }
-                error => {
-                    let kind = match &error {
-                        ClarityError::AbortedByCallback { reason, .. } => {
-                            ContractCallError::PostConditionAborted(reason.clone())
-                        }
-                        // Already phrased for the user by the payload.
-                        ClarityError::BadTransaction(message) => {
-                            ContractCallError::Uncategorized(message.clone())
-                        }
-                        _ => ContractCallError::Uncategorized(format!(
-                            "Runtime error while interpreting {contract_id}: {error:?}"
-                        )),
-                    };
-                    ContractCallFailure {
-                        error: kind,
-                        inclusion: BlockInclusion::from_runtime_error(error, epoch),
+            result.map_err(|error| {
+                let cost = track_costs
+                    .then(|| CostSynthesis::from_cost_tracker(connection.cost_tracker()));
+                let receipt = FailureReceipt::from_runtime_error(&error, cost);
+                let mut failure = match error {
+                    ClarityError::Interpreter(error) => {
+                        let message =
+                            format!("Runtime error while interpreting {contract_id}: {error:?}");
+                        ContractCallFailure::from_vm_error(error, message, contract_id, epoch)
                     }
+                    error => {
+                        let kind = match &error {
+                            ClarityError::AbortedByCallback { reason, .. } => {
+                                ContractCallError::PostConditionAborted(reason.clone())
+                            }
+                            // Already phrased for the user by the payload.
+                            ClarityError::BadTransaction(message) => {
+                                ContractCallError::Uncategorized(message.clone())
+                            }
+                            _ => ContractCallError::Uncategorized(format!(
+                                "Runtime error while interpreting {contract_id}: {error:?}"
+                            )),
+                        };
+                        ContractCallFailure {
+                            error: kind,
+                            inclusion: BlockInclusion::from_runtime_error(error, epoch),
+                            receipt: None,
+                        }
+                    }
+                };
+                if failure.inclusion.is_included() {
+                    failure.receipt = Some(Box::new(receipt));
                 }
+                failure
             })
         };
         let inclusion = result
@@ -1398,6 +1491,7 @@ impl ClarityInterpreter {
             .map_err(|error| ContractCallFailure {
                 error: ContractCallError::Uncategorized(error),
                 inclusion: BlockInclusion::Rejected,
+                receipt: None,
             })?;
         let sender: PrincipalData = self.tx_sender.clone().into();
         self.execute_transaction_payload(
@@ -1481,6 +1575,7 @@ impl ClarityInterpreter {
                     // Not a VM error, so there is nothing to classify.
                     error: ContractCallError::Uncategorized(e),
                     inclusion: BlockInclusion::Rejected,
+                    receipt: None,
                 })?;
 
         let mut hooks: Vec<&mut dyn EvalHook> = Vec::new();
@@ -1542,6 +1637,7 @@ impl ClarityInterpreter {
                     .map_err(|error| ContractCallFailure {
                         error: ContractCallError::Uncategorized(error.to_string()),
                         inclusion: BlockInclusion::Rejected,
+                        receipt: None,
                     })?;
                 return Err(failure);
             }
@@ -1552,6 +1648,7 @@ impl ClarityInterpreter {
             .map_err(|error| ContractCallFailure {
                 error: ContractCallError::Uncategorized(error.to_string()),
                 inclusion: BlockInclusion::Rejected,
+                receipt: None,
             })?;
 
         let (events, accounts_to_credit, accounts_to_debit) =
@@ -2701,6 +2798,37 @@ mod tests {
                 .to_string(),
             format!("Contract '{contract_id}' does not exist")
         );
+    }
+
+    #[test]
+    fn failure_receipts_report_results_like_stacks_node() {
+        let aborted = |output: Option<Value>| ClarityError::AbortedByCallback {
+            output: output.map(Box::new),
+            assets_modified: Box::default(),
+            tx_events: vec![],
+            reason: "aborted".into(),
+        };
+
+        let call = FailureReceipt::from_runtime_error(&aborted(Some(Value::UInt(1))), None);
+        assert_eq!(call.kind, FailureKind::PostCondition);
+        assert_eq!(call.result, Value::UInt(1));
+
+        // Upstream reports no output only for contract initialization.
+        let deployment = FailureReceipt::from_runtime_error(&aborted(None), None);
+        assert_eq!(deployment.result, Value::okay_true());
+
+        let runtime = FailureReceipt::from_runtime_error(
+            &ClarityError::Interpreter(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::UndefinedFunction("missing".into()),
+            )),
+            None,
+        );
+        assert_eq!(runtime.kind, FailureKind::Runtime);
+        assert_eq!(runtime.result, Value::err_none());
+
+        let analysis = FailureReceipt::analysis(None);
+        assert_eq!(analysis.kind, FailureKind::Analysis);
+        assert_eq!(analysis.result, Value::err_none());
     }
 
     #[test]

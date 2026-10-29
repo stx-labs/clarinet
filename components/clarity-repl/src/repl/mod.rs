@@ -57,6 +57,11 @@ pub fn clarity_version_from_u8(value: u8) -> Option<ClarityVersion> {
     }
 }
 
+/// Like [`clarity_version_from_u8`], rejecting values that do not fit in a `u8`.
+pub fn clarity_version_from_u32(value: u32) -> Option<ClarityVersion> {
+    u8::try_from(value).ok().and_then(clarity_version_from_u8)
+}
+
 /// Parse a human-readable epoch string (e.g. "3.4") into a StacksEpochId.
 /// Accepts aliases "2" for "2.0" and "3" for "3.0".
 pub fn epoch_from_str(s: &str) -> Option<StacksEpochId> {
@@ -305,7 +310,9 @@ pub enum ClarityCodeSource {
 
 #[cfg(test)]
 mod tests {
-    use super::{clarity_version_from_u8, clarity_version_to_u8, ClarityVersion};
+    use super::{
+        clarity_version_from_u32, clarity_version_from_u8, clarity_version_to_u8, ClarityVersion,
+    };
 
     #[test]
     fn clarity_versions_round_trip() {
@@ -316,5 +323,12 @@ mod tests {
                 "{version} must round-trip through its numeric representation"
             );
         }
+    }
+
+    #[test]
+    fn clarity_version_from_u32_rejects_values_that_would_truncate() {
+        assert_eq!(clarity_version_from_u32(1), Some(ClarityVersion::Clarity1));
+        assert_eq!(clarity_version_from_u32(257), None);
+        assert_eq!(clarity_version_from_u32(0), None);
     }
 }

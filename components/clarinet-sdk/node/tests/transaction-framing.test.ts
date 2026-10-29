@@ -37,9 +37,23 @@ it("executes read-only batch targets as transactions and keeps RPC reads nonce-f
     { status: "success", execution: { result: Cl.uint(0) } },
     { status: "success", execution: { result: Cl.ok(Cl.bool(true)) } },
     { status: "success", execution: { result: Cl.uint(1) } },
-    { status: "included_failure", execution: { result: Cl.error(Cl.uint(7)) } },
-    { status: "included_failure", execution: null, error: expect.stringMatching(/DivisionByZero/) },
-    { status: "included_failure", execution: null, error: "hidden is not a public function" },
+    {
+      status: "included_failure",
+      kind: "abort_by_response",
+      execution: { result: Cl.error(Cl.uint(7)) },
+    },
+    {
+      status: "included_failure",
+      kind: "runtime_error",
+      execution: { result: Cl.error(Cl.none()), events: [] },
+      error: expect.stringMatching(/DivisionByZero/),
+    },
+    {
+      status: "included_failure",
+      kind: "runtime_error",
+      execution: { result: Cl.error(Cl.none()), events: [] },
+      error: "hidden is not a public function",
+    },
     { status: "success", execution: { result: Cl.uint(1) } },
   ]);
   expect(simnet.blockHeight).toBe(height + 1);
@@ -68,6 +82,70 @@ it.each(["u123", "(err u123)", "false"])(
   },
 );
 
+it.each([0, 99, 257])("rejects Clarity version %i instead of using a default", (version) => {
+  const nonce = simnet.getAccountNonce(sender);
+  const height = simnet.blockHeight;
+  expect(() =>
+    simnet.deployContract("versioned", "true", { clarityVersion: version }, sender),
+  ).toThrow(`Invalid Clarity version: ${version}`);
+  expect(
+    simnet.mineBlock([tx.deployContract("versioned", "true", { clarityVersion: version }, sender)]),
+  ).toEqual([{ status: "rejected", error: `Invalid Clarity version: ${version}` }]);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce);
+  // Malformed input throws before the standalone call mines its block.
+  expect(simnet.blockHeight).toBe(height + 1);
+  expect(simnet.getContractsInterfaces().has(`${sender}.versioned`)).toBe(false);
+});
+
+it("rejects non-integer versions without coercion and continues mining valid entries", () => {
+  const versions: unknown[] = [
+    1.5,
+    4294967297,
+    -4294967295,
+    Number.MAX_SAFE_INTEGER,
+    NaN,
+    Infinity,
+    -Infinity,
+    "1",
+    true,
+    false,
+    null,
+    1n,
+    [1],
+    {},
+  ];
+  const nonce = simnet.getAccountNonce(sender);
+  const height = simnet.blockHeight;
+  const error = "Invalid Clarity version: expected an unsigned 32-bit integer";
+  const entries = versions.map((version, index) => {
+    // Exercise JavaScript callers that do not have TypeScript's number constraint.
+    const options = { clarityVersion: version as number };
+    const name = `invalid-version-${index}`;
+    expect(() => simnet.deployContract(name, "true", options, sender)).toThrow(error);
+    return tx.deployContract(name, "true", options, sender);
+  });
+  expect(simnet.blockHeight).toBe(height);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce);
+
+  const results = simnet.mineBlock([
+    tx.deployContract("before-invalid-versions", "true", { clarityVersion: 1 }, sender),
+    ...entries,
+    tx.deployContract("after-invalid-versions", "true", null, sender),
+  ]);
+  expect(results[0].status).toBe("success");
+  expect(results.slice(1, -1)).toEqual(versions.map(() => ({ status: "rejected", error })));
+  expect(results.at(-1)?.status).toBe("success");
+  expect(simnet.blockHeight).toBe(height + 1);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce + 2n);
+  for (let index = 0; index < versions.length; index++) {
+    expect(simnet.getContractsInterfaces().has(`${sender}.invalid-version-${index}`)).toBe(false);
+  }
+
+  expect(simnet.mineBlock(entries)).toEqual(versions.map(() => ({ status: "rejected", error })));
+  expect(simnet.blockHeight).toBe(height + 2);
+  expect(simnet.getAccountNonce(sender)).toBe(nonce + 2n);
+});
+
 it("rejects a duplicate deployment before analysis without consuming a nonce", () => {
   simnet.deployContract("existing", "(define-data-var answer uint u42)", null, sender);
   const nonce = simnet.getAccountNonce(sender);
@@ -78,7 +156,7 @@ it("rejects a duplicate deployment before analysis without consuming a nonce", (
   expect(simnet.getDataVar("existing", "answer")).toEqual(Cl.uint(42));
 });
 
-it("rejects invalid native transfers without consuming a nonce or mining a block", () => {
+it("rejects invalid native transfers without consuming a nonce", () => {
   const nonce = simnet.getAccountNonce(sender);
   const height = simnet.blockHeight;
   const balance = simnet.getAssetsMap().get("STX")!.get(sender)!;
@@ -89,11 +167,10 @@ it("rejects invalid native transfers without consuming a nonce or mining a block
   );
   expect(simnet.getAccountNonce(sender)).toBe(nonce);
   expect(simnet.getAssetsMap().get("STX")!.get(sender)).toBe(balance);
-  // A rejected transaction never makes it into a block.
-  expect(simnet.blockHeight).toBe(height);
-  // A valid transfer still mines one.
+  // Like `mineBlock([entry])`, each call advances one block, even when rejected.
+  expect(simnet.blockHeight).toBe(height + 3);
   simnet.transferSTX(1, recipient, sender);
-  expect(simnet.blockHeight).toBe(height + 1);
+  expect(simnet.blockHeight).toBe(height + 4);
 });
 
 it("rejects invalid transfers in a block and keeps mining it", () => {
@@ -224,13 +301,23 @@ it("reports every mixed-batch outcome and keeps only committed deployment caches
     "success",
     "success",
   ]);
-  expect(results[3]).toMatchObject({ execution: { result: Cl.error(Cl.uint(7)), events: [] } });
+  expect(results[3]).toMatchObject({
+    kind: "abort_by_response",
+    execution: { result: Cl.error(Cl.uint(7)), events: [] },
+  });
+  // Like a node's receipt: `(err none)` when execution produced no value.
   expect(results[4]).toMatchObject({
-    execution: null,
+    kind: "runtime_error",
+    execution: { result: Cl.error(Cl.none()), events: [] },
     error: expect.stringMatching(/DivisionByZero/),
   });
+  // An aborted deployment reports `(ok true)` and its attempted, uncommitted events.
   expect(results[6]).toMatchObject({
-    execution: null,
+    kind: "abort_by_post_condition",
+    execution: {
+      result: Cl.ok(Cl.bool(true)),
+      events: [expect.objectContaining({ event: "stx_transfer_event" })],
+    },
     error: expect.stringMatching(/Post-condition/),
   });
   expect(results[8]).toMatchObject({ execution: { result: Cl.uint(42) } });

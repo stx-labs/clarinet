@@ -109,9 +109,6 @@ enum Command {
     /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
-    /// Start a local Devnet network (deprecated, use 'clarinet devnet start')
-    #[clap(name = "integrate", bin_name = "integrate")]
-    Integrate(DevnetStart),
     /// Subcommands for Devnet usage
     #[clap(subcommand, name = "devnet")]
     Devnet(Devnet),
@@ -1447,13 +1444,6 @@ pub fn main() {
             // Returns first non-zero exit code, if any
             let exit_code = exit_codes.iter().cloned().find(|c| *c != 0).unwrap_or(0);
             std::process::exit(exit_code);
-        }
-        Command::Integrate(cmd) => {
-            eprintln!(
-                "{}",
-                format_warn!("This command is deprecated. Use 'clarinet devnet start' instead"),
-            );
-            devnet_start(cmd, clarinetrc)
         }
         Command::LSP => run_lsp(),
         Command::DAP(cmd) => {

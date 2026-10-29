@@ -533,7 +533,7 @@ async fn mine_block_reports_each_entry_and_continues_after_malformed_and_rejecte
     assert!(
         js_sys::Reflect::get(&failure, &JsValue::from_str("execution"))
             .unwrap()
-            .is_null()
+            .is_object()
     );
     let results: serde_json::Value = response.into_serde().unwrap();
     let statuses: Vec<_> = results
@@ -567,7 +567,11 @@ async fn mine_block_reports_each_entry_and_continues_after_malformed_and_rejecte
             ClarityValue::err_uint(7).serialize_to_hex().unwrap()
         )
     );
-    assert_eq!(results[3]["execution"], serde_json::Value::Null);
+    assert_eq!(results[3]["kind"], "runtime_error");
+    assert_eq!(
+        results[3]["execution"]["result"],
+        format!("0x{}", ClarityValue::err_none().serialize_to_hex().unwrap())
+    );
     assert_eq!(sdk.get_account_nonce(sender).unwrap(), before + 4);
     assert_eq!(sdk.block_height(), height + 1);
 }

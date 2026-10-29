@@ -40,23 +40,12 @@ export type ParsedTransactionResult = {
 
 export type RawTransactionMetadata = { txid: string; fee: bigint; nonce: bigint };
 
-export type RawTransactionResult =
-  | { status: "success"; transaction: RawTransactionMetadata; execution: ParsedTransactionResult }
-  | { status: "rejected"; transaction: RawTransactionMetadata | null; error: string }
-  | {
-      status: "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
-      transaction: RawTransactionMetadata;
-      error: string;
-      result: ClarityValue | null;
-      events: ClarityEvent[];
-      costs: ClarityCosts | null;
-      performance?: string;
-    };
-
 export type BroadcastTransactionResult =
   | { txid: string }
   | { error: string; reason: string; reason_data?: Record<string, unknown>; txid?: string };
 
+/** Submit signed bytes to the mempool without executing or advancing the chain.
+ * Call `mineBlock()` to attempt inclusion; admission does not guarantee inclusion. */
 export type BroadcastTransaction = (rawHex: string) => BroadcastTransactionResult;
 
 /**
@@ -206,6 +195,39 @@ export type Tx =
       } & SerializedPostConditions;
     };
 
+/** Check lossless u32 transport; Rust validates which Clarity versions are supported. */
+export function getClarityVersionInputError(version: unknown): string | undefined {
+  if (version === undefined) return;
+  if (
+    typeof version !== "number" ||
+    !Number.isInteger(version) ||
+    version < 0 ||
+    version > 0xffffffff
+  ) {
+    return "Invalid Clarity version: expected an unsigned 32-bit integer";
+  }
+}
+
+/** Keep invalid versions as per-entry rejections, including when mining queued transactions. */
+export function mineBlockWithValidatedVersions(
+  txs: Tx[],
+  mine: (txs: Tx[]) => BlockTransactionResult[],
+): BlockTransactionResult[] {
+  const errors = txs.map((entry) =>
+    getClarityVersionInputError(entry.deployContract?.options?.clarityVersion),
+  );
+  const valid = txs.filter((_, index) => errors[index] === undefined);
+  const results = mine(valid);
+  const queuedCount = results.length - valid.length;
+  let index = queuedCount;
+  return [
+    ...results.slice(0, queuedCount),
+    ...errors.map((error): BlockTransactionResult =>
+      error === undefined ? results[index++] : { status: "rejected", error },
+    ),
+  ];
+}
+
 export const tx = {
   callPublicFn: (
     contract: string,
@@ -295,23 +317,36 @@ export function parseCosts(costs: string): ClarityCosts | null {
   }
 }
 
-/** One outcome per entry; rejected entries do not consume a nonce. */
+export type FailureKind =
+  "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
+
+/** Signed entries carry their transaction metadata; convenience entries do not. */
 export type MinedTransactionDetails = {
   transaction?: RawTransactionMetadata | null;
-  kind?: "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
-  result?: ClarityValue | null;
-  events?: ClarityEvent[];
-  costs?: ClarityCosts | null;
-  performance?: string;
 };
 
+/**
+ * One outcome per selected queued transaction or explicit batch entry; rejected
+ * entries do not consume a nonce. Like a node's transaction receipt, an included
+ * failure's `execution` reports `(err none)`
+ * when execution produced no value, and post-condition aborts report the
+ * events they attempted, none of which were committed.
+ */
 export type BlockTransactionResult = MinedTransactionDetails &
   (
     | { status: "success"; execution: ParsedTransactionResult }
-    | { status: "included_failure"; error: string; execution: ParsedTransactionResult | null }
+    | {
+        status: "included_failure";
+        kind: FailureKind;
+        error: string;
+        execution: ParsedTransactionResult;
+      }
     | { status: "rejected"; error: string }
   );
 
+/** Advance one block and mine ready queued transactions, then explicit entries.
+ * Queued results precede explicit results, which retain input order. Rejections
+ * do not stop later entries; empty or entirely rejected batches still advance. */
 export type MineBlock = (txs?: Array<Tx>) => BlockTransactionResult[];
 
 export type SerializedTransactionResult = {
@@ -334,17 +369,13 @@ export function parseTransactionResult(
 
 export type SerializedBlockTransactionResult = {
   transaction?: { txid: string; fee: string; nonce: string } | null;
-  kind?: MinedTransactionDetails["kind"];
-  result?: string | null;
-  events?: string;
-  costs?: string;
-  performance?: string | null;
 } & (
   | { status: "success"; execution: SerializedTransactionResult }
   | {
       status: "included_failure";
+      kind: FailureKind;
       error: string;
-      execution: SerializedTransactionResult | null;
+      execution: SerializedTransactionResult;
     }
   | { status: "rejected"; error: string }
 );
@@ -363,13 +394,6 @@ export function parseBlockTransactionResult(
             nonce: BigInt(response.transaction.nonce),
           };
   }
-  if (response.kind !== undefined) {
-    details.kind = response.kind;
-    details.result = response.result == null ? null : Cl.deserialize(response.result);
-    details.events = parseEvents(response.events ?? "[]");
-    details.costs = parseCosts(response.costs ?? "null");
-    details.performance = response.performance ?? undefined;
-  }
   switch (response.status) {
     case "rejected":
       return { ...details, status: "rejected", error: response.error };
@@ -383,8 +407,9 @@ export function parseBlockTransactionResult(
       return {
         ...details,
         status: "included_failure",
+        kind: response.kind,
         error: response.error,
-        execution: response.execution === null ? null : parseTransactionResult(response.execution),
+        execution: parseTransactionResult(response.execution),
       };
   }
 }

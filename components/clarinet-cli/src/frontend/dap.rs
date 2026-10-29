@@ -10,6 +10,7 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::EvaluationResult;
 use clarity_repl::repl::clarity_values::{to_raw_value, value_from_bytes_exact, value_to_string};
 use clarity_repl::repl::debug::dap::DAPDebugger;
+use clarity_repl::repl::interpreter::FailureReceipt;
 use clarity_repl::repl::Session;
 use clarity_repl::utils::sdk_events::serialize_events;
 use clarity_repl::utils::{serialize_event, Environment};
@@ -621,19 +622,22 @@ fn raw_block_result(
                     "costs": serde_json::to_string(&execution.cost).unwrap(), "performance": null,
                 }})
             }
-            RawTransactionResult::Failure {
-                kind,
-                error,
-                output,
-                events,
-                cost,
-            } => {
-                json!({"status": "included_failure", "kind": kind, "error": error, "execution": null,
-                    "transaction": tx, "result": output.as_deref().map(to_raw_value),
-                    "events": serialize_events(&events), "costs": serde_json::to_string(&cost).unwrap(), "performance": null})
+            RawTransactionResult::Failure { error, receipt } => {
+                json!({"status": "included_failure", "kind": receipt.kind, "error": error,
+                    "transaction": tx, "execution": failure_receipt_json(&receipt)})
             }
         },
     }
+}
+
+/// A failed entry's `execution`, in the shape of a successful one.
+fn failure_receipt_json(receipt: &FailureReceipt) -> serde_json::Value {
+    serde_json::json!({
+        "result": to_raw_value(&receipt.result),
+        "events": serialize_events(&receipt.events),
+        "costs": serde_json::to_string(&receipt.cost).unwrap(),
+        "performance": null,
+    })
 }
 
 /// The SDK's `ContractOptions`, so both batch paths reject the same malformed options.
@@ -665,15 +669,17 @@ fn execute_block_entry(
     use clarity::vm::analysis::contract_interface_builder::ContractInterfaceFunctionAccess;
     use clarity::vm::types::Value;
     use clarity::vm::{ClarityVersion, ExecutionResult};
-    use clarity_repl::repl::interpreter::BlockInclusion;
+    use clarity_repl::repl::interpreter::{BlockInclusion, FailureKind};
     use clarity_repl::repl::post_conditions::{
         parse_post_condition_mode, PostConditionCheck, DEFAULT_POST_CONDITION_MODE,
     };
     use clarity_repl::repl::session::CallKind;
     use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer, Epoch};
 
-    let mut execute = || -> Result<ExecutionResult, (BlockInclusion, String)> {
-        let reject = |message: String| (BlockInclusion::Rejected, message);
+    // A failure's disposition, message, and receipt if simnet produced one.
+    type EntryFailure = (BlockInclusion, String, Option<Box<FailureReceipt>>);
+    let mut execute = || -> Result<ExecutionResult, EntryFailure> {
+        let reject = |message: String| (BlockInclusion::Rejected, message, None);
         let string_field = |field: &str| {
             tx[field]
                 .as_str()
@@ -716,6 +722,7 @@ fn execute_block_entry(
                     .map(|d| d.diagnostic.message.to_string())
                     .collect::<Vec<_>>()
                     .join("; "),
+                error.receipt,
             )
         };
         match nonempty_field("type")? {
@@ -765,6 +772,7 @@ fn execute_block_entry(
                     return Err((
                         inclusion,
                         format!("{method} is not a {required_access:?} function"),
+                        None,
                     ));
                 }
                 dap.prepare_for_call(&contract_id, method);
@@ -810,8 +818,8 @@ fn execute_block_entry(
                 let options = Option::<DeployOptions>::deserialize(&tx["options"])
                     .map_err(|e| reject(format!("Invalid deployment options: {e}")))?;
                 let clarity_version = match options.and_then(|o| o.clarity_version) {
-                    Some(v) => clarity_repl::repl::clarity_version_from_u8(v as u8)
-                        .unwrap_or(clarinet_defaults::DEFAULT_CLARITY_VERSION),
+                    Some(v) => clarity_repl::repl::clarity_version_from_u32(v)
+                        .ok_or_else(|| reject(format!("Invalid Clarity version: {v}")))?,
                     None => ClarityVersion::default_for_epoch(epoch),
                 };
                 dap.prepare_for_call(&contract_id, content);
@@ -857,15 +865,20 @@ fn execute_block_entry(
                 "costs": serde_json::to_string(&execution.cost).unwrap(),
             });
             if failed {
-                serde_json::json!({"status": "included_failure", "error": value_to_string(value.unwrap()), "execution": result})
+                serde_json::json!({"status": "included_failure", "kind": FailureKind::Response,
+                    "error": value_to_string(value.unwrap()), "execution": result})
             } else {
                 serde_json::json!({"status": "success", "execution": result})
             }
         }
-        Err((BlockInclusion::Included, error)) => {
-            serde_json::json!({"status": "included_failure", "error": error, "execution": null})
+        Err((BlockInclusion::Included, error, receipt)) => {
+            // Failures rejected before execution, such as a call to a missing
+            // function, produced no value or events.
+            let receipt = receipt.unwrap_or_else(|| Box::new(FailureReceipt::runtime(None)));
+            serde_json::json!({"status": "included_failure", "kind": receipt.kind, "error": error,
+                "execution": failure_receipt_json(&receipt)})
         }
-        Err((BlockInclusion::Rejected, error)) => {
+        Err((BlockInclusion::Rejected, error, _)) => {
             serde_json::json!({"status": "rejected", "error": error})
         }
     }
@@ -1159,12 +1172,20 @@ mod batch_tests {
             assert_eq!(results[index]["execution"]["result"], to_raw_value(&value));
             assert_eq!(results[index]["execution"]["events"], "[]");
         }
-        assert_eq!(results[4]["execution"], serde_json::Value::Null);
+        // Like a node's receipt: `(err none)` when execution produced no value.
+        for index in [4, 5] {
+            assert_eq!(results[index]["kind"], "runtime_error");
+            assert_eq!(
+                results[index]["execution"]["result"],
+                to_raw_value(&Value::err_none())
+            );
+            assert_eq!(results[index]["execution"]["events"], "[]");
+        }
+        assert_eq!(results[3]["kind"], "abort_by_response");
         assert!(results[4]["error"]
             .as_str()
             .unwrap()
             .contains("DivisionByZero"));
-        assert_eq!(results[5]["execution"], serde_json::Value::Null);
         assert_eq!(results[5]["error"], "hidden is not a public function");
         assert_eq!(session.get_nonce(&principal).unwrap(), nonce + 7);
         assert_eq!(session.interpreter.get_block_height(), height);
@@ -1255,6 +1276,9 @@ mod batch_tests {
             json!(false),
             json!({"clarityVersion": "3"}),
             json!({"clarityVersion": -1}),
+            json!({"clarityVersion": 99}),
+            // Would truncate to Clarity 1 as a `u8`.
+            json!({"clarityVersion": 257}),
         ] {
             let mut invalid = deploy.clone();
             invalid["options"] = options;
@@ -1360,7 +1384,11 @@ mod batch_tests {
             results[3]["execution"]["result"],
             to_raw_value(&Value::err_uint(7))
         );
-        assert_eq!(results[4]["execution"], serde_json::Value::Null);
+        assert_eq!(results[4]["kind"], "runtime_error");
+        assert_eq!(
+            results[4]["execution"]["result"],
+            to_raw_value(&Value::err_none())
+        );
         assert_eq!(
             results[6]["execution"]["result"],
             to_raw_value(&Value::UInt(42))

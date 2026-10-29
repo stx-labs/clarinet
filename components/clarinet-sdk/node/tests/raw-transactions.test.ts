@@ -6,28 +6,16 @@ import {
   sponsorTransaction,
 } from "@stacks/transactions";
 import { beforeEach, expect, it, vi } from "vitest";
-import { initSimnet, type Simnet, type RawTransactionResult } from "..";
+import { initSimnet, type Simnet, type BlockTransactionResult } from "..";
 import fixtures from "./fixtures/raw-transactions/transactions.json";
 
 let simnet: Simnet;
 const { sender, sponsor, transactions } = fixtures;
 const balance = (address: string) => simnet.getAssetsMap().get("STX")!.get(address)!;
 // Direct miner entries exercise execution independently of mempool policy.
-const executeRaw = (hex: string): RawTransactionResult => {
-  const outcome = simnet.mineBlock([{ broadcastTx: hex }])[0];
-  if (outcome.status === "success") return { ...outcome, transaction: outcome.transaction! };
-  if (outcome.status === "rejected")
-    return { ...outcome, transaction: outcome.transaction ?? null };
-  return {
-    status: outcome.kind!,
-    transaction: outcome.transaction!,
-    error: outcome.error,
-    result: outcome.result ?? null,
-    events: outcome.events ?? [],
-    costs: outcome.costs ?? null,
-    performance: outcome.performance,
-  };
-};
+const executeRaw = (hex: string): BlockTransactionResult =>
+  simnet.mineBlock([{ broadcastTx: hex }])[0];
+const failure = (kind: string) => ({ status: "included_failure", kind });
 const broadcast = (name: keyof typeof transactions) => executeRaw(transactions[name].hex);
 beforeEach(async () => {
   simnet = await initSimnet("tests/fixtures/Clarinet.toml");
@@ -74,7 +62,7 @@ it.each([false, true])(
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const result = executeRaw(transaction.serialize());
-      expect(result.status).toBe(fail ? "runtime_error" : "success");
+      expect(result).toMatchObject(fail ? failure("runtime_error") : { status: "success" });
       const trace = simnet.getLastContractCallTrace();
       expect(trace).toContain(fail ? "args: u3 u4" : "args: u4 u3");
       expect(trace).not.toContain("args: u9 u1");
@@ -137,7 +125,9 @@ it.each([
       fee: 10n,
       postConditionMode: "allow",
     });
-    expect(executeRaw(tx.serialize()).status).toBe(abort ? "abort_by_response" : "success");
+    expect(executeRaw(tx.serialize())).toMatchObject(
+      abort ? failure("abort_by_response") : { status: "success" },
+    );
   } else {
     expect(simnet.callPublicFn("trace-parent", "run", [Cl.bool(abort)], sender).result).toEqual(
       abort ? Cl.error(Cl.uint(8)) : Cl.ok(Cl.bool(true)),
@@ -224,21 +214,21 @@ it.each([true, false])(
       return executeRaw(tx.serialize());
     };
     const result = await call("fail");
-    expect(result.status).toBe("abort_by_response");
-    if (result.status !== "abort_by_response") throw new Error(result.status);
-    expect(result.result).toEqual(Cl.error(Cl.uint(42)));
+    expect(result).toMatchObject(failure("abort_by_response"));
+    if (result.status !== "included_failure") throw new Error(result.status);
+    expect(result.execution.result).toEqual(Cl.error(Cl.uint(42)));
     if (trackPerformance) {
       expect(previous.performance).toContain("stacks-trace-test");
-      expect(result.performance).toContain(`${simnet.deployer}.perf-errors`);
-      expect(result.performance).not.toBe(previous.performance);
+      expect(result.execution.performance).toContain(`${simnet.deployer}.perf-errors`);
+      expect(result.execution.performance).not.toBe(previous.performance);
     } else {
-      expect(result.performance).toBeUndefined();
+      expect(result.execution.performance).toBeUndefined();
     }
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const failure = await call("crash");
-      expect(failure.status).toBe("runtime_error");
-      expect(failure).toHaveProperty("performance", undefined);
+      const crash = await call("crash");
+      expect(crash).toMatchObject(failure("runtime_error"));
+      expect(crash).toHaveProperty("execution.performance", undefined);
     } finally {
       consoleSpy.mockRestore();
     }
@@ -339,7 +329,7 @@ it("reports returned err responses like convenience calls, excluding other paylo
   simnet.mintSTX(sender, 1000000n);
   simnet.setCurrentTestName("signed err response");
   expect(broadcast("deploy").status).toBe("success");
-  expect(broadcast("fail").status).toBe("abort_by_response");
+  expect(broadcast("fail")).toMatchObject(failure("abort_by_response"));
   const reports = JSON.parse(simnet.collectReport(false, "").costs);
   expect(reports).toHaveLength(1);
   expect(reports[0]).toMatchObject({
@@ -399,21 +389,27 @@ it.each([
   ["fail", "abort_by_response"],
   ["crash", "runtime_error"],
   ["abort", "abort_by_post_condition"],
-] as const)("keeps fees and nonces but rolls back %s", (name, status) => {
+] as const)("keeps fees and nonces but rolls back %s", (name, kind) => {
   broadcast("deploy");
   const result = broadcast(name);
-  expect(result.status).toBe(status);
+  expect(result).toMatchObject(failure(kind));
   expect(result.transaction).toEqual({ txid: transactions[name].txid, fee: 10n, nonce: 1n });
   expect(simnet.getDataVar(`${sender}.raw`, "count")).toEqual(Cl.uint(0));
   expect(balance(sender)).toBe(999980n);
   expect(balance(sponsor)).toBe(1000000n);
   expect(simnet.getAccountNonce(sender)).toBe(2n);
-  if (name === "abort" && result.status === "abort_by_post_condition")
-    expect(result.events).toHaveLength(1);
+  if (name === "abort" && result.status === "included_failure")
+    expect(result.execution.events).toHaveLength(1);
+  // Like a node's receipt: `(err none)` when execution produced no value.
+  if (name === "crash")
+    expect(result).toMatchObject({ execution: { result: Cl.error(Cl.none()), events: [] } });
 });
 
 it("charges included analysis failures without caching a contract", () => {
-  expect(broadcast("bad_deploy").status).toBe("analysis_error");
+  expect(broadcast("bad_deploy")).toMatchObject({
+    ...failure("analysis_error"),
+    execution: { result: Cl.error(Cl.none()), events: [] },
+  });
   expect(balance(sender)).toBe(999990n);
   expect(simnet.getAccountNonce(sender)).toBe(1n);
   expect(simnet.getContractsInterfaces().has(`${sender}.bad`)).toBe(false);
@@ -446,7 +442,7 @@ it("rejects a sponsor nonce mismatch without touching either account", () => {
 
 it("retains sponsor fees and both nonces after a post-condition abort", () => {
   broadcast("deploy");
-  expect(broadcast("sponsored_abort").status).toBe("abort_by_post_condition");
+  expect(broadcast("sponsored_abort")).toMatchObject(failure("abort_by_post_condition"));
   expect(balance(sender)).toBe(999990n);
   expect(balance(sponsor)).toBe(999990n);
   expect(simnet.getAccountNonce(sender)).toBe(2n);
@@ -465,7 +461,10 @@ it("rejects duplicate contracts before parsing and rolls back the fee", () => {
 
 it("does not cache a deployment aborted by its post-conditions", () => {
   const result = broadcast("abort_deploy");
-  expect(result.status).toBe("abort_by_post_condition");
+  expect(result).toMatchObject({
+    ...failure("abort_by_post_condition"),
+    execution: { result: Cl.ok(Cl.bool(true)) },
+  });
   expect(simnet.getContractsInterfaces().has(`${sender}.aborted`)).toBe(false);
   expect(balance(sender)).toBe(999990n);
   expect(balance(sponsor)).toBe(1000000n);
@@ -524,10 +523,9 @@ it.each([
     expect(result.execution.result).toEqual(Cl.ok(Cl.uint(height + 2)));
     expect(simnet.blockHeight).toBe(height + 2);
 
-    const failure = executeRaw((await call("fail")).serialize());
-    expect(failure).toMatchObject({
-      status: "abort_by_response",
-      result: Cl.error(Cl.uint(height + 3)),
+    expect(executeRaw((await call("fail")).serialize())).toMatchObject({
+      ...failure("abort_by_response"),
+      execution: { result: Cl.error(Cl.uint(height + 3)) },
     });
     expect(simnet.blockHeight).toBe(height + 3);
 

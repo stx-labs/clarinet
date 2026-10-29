@@ -121,6 +121,24 @@ describe("test pox-3", () => {
     );
   });
 
+  it("executes a standalone transfer in its new block, like mineBlock", () => {
+    const stackStxArgs = [
+      Cl.uint(ustxAmount),
+      Cl.tuple({
+        version: Cl.bufferFromHex("00"),
+        hashbytes: Cl.bufferFromHex("7321b74e2b6a7e949e6c4ad313035b1665095017"),
+      }),
+      Cl.uint(0),
+      Cl.uint(1),
+    ];
+    simnet.callPublicFn(poxContract, "stack-stx", stackStxArgs, address1);
+    simnet.mineEmptyBlocks(2098);
+
+    // The transfer's block is the one that unlocks the stacked STX.
+    const transfer = simnet.transferSTX(ustxAmount, address2, address1);
+    expect(transfer.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  });
+
   it("can get pox boot contract code coverage", async () => {
     const simnet = await initSimnet("tests/fixtures/Clarinet.toml", true, {
       trackCoverage: true,

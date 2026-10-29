@@ -2,6 +2,8 @@ import { Cl, serializeCVBytes } from "@stacks/transactions";
 
 import {
   parseBlockTransactionResult,
+  getClarityVersionInputError,
+  mineBlockWithValidatedVersions,
   parseTransactionResult,
   type SerializedTransactionResult,
   type SerializedBlockTransactionResult,
@@ -27,12 +29,8 @@ type ProxySdk = {
   getDataVar(contract: string, varName: string): string;
   getMapEntry(contract: string, mapName: string, mapKey: Uint8Array): string;
   mineBlock(txs: unknown[]): SerializedBlockTransactionResult[];
-  runSnippet(snippet: string): string;
   transferSTX(args: unknown): SerializedTransactionResult;
 };
-
-/** @deprecated use `simnet.execute(command)` instead */
-type RunSnippet<S extends ProxySdk> = S["runSnippet"];
 
 export type ProxiedSimnet<S extends ProxySdk> = {
   [K in keyof S]: K extends "broadcastTransaction"
@@ -43,19 +41,17 @@ export type ProxiedSimnet<S extends ProxySdk> = {
         ? CallFn
         : K extends "execute"
           ? Execute
-          : K extends "runSnippet"
-            ? RunSnippet<S>
-            : K extends "deployContract"
-              ? DeployContract
-              : K extends "transferSTX"
-                ? TransferSTX
-                : K extends "mineBlock"
-                  ? MineBlock
-                  : K extends "getDataVar"
-                    ? GetDataVar
-                    : K extends "getMapEntry"
-                      ? GetMapEntry
-                      : S[K];
+          : K extends "deployContract"
+            ? DeployContract
+            : K extends "transferSTX"
+              ? TransferSTX
+              : K extends "mineBlock"
+                ? MineBlock
+                : K extends "getDataVar"
+                  ? GetDataVar
+                  : K extends "getMapEntry"
+                    ? GetMapEntry
+                    : S[K];
 };
 
 type ProxyBindings<ContractOptions> = {
@@ -131,6 +127,8 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
           sender,
           postConditionOptions,
         ) => {
+          const error = getClarityVersionInputError(options?.clarityVersion);
+          if (error !== undefined) throw new Error(error);
           const rustOptions = options
             ? new ContractOptions(options.clarityVersion)
             : new ContractOptions();
@@ -171,31 +169,32 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
       }
 
       if (prop === "mineBlock") {
-        const mineBlock: MineBlock = (txs = []) => {
-          const serializedTxs = txs.map((tx) => {
-            if (tx.callPublicFn) {
-              return {
-                callPublicFn: {
-                  ...tx.callPublicFn,
-                  args_maps: tx.callPublicFn.args.map(serializeCVBytes),
-                },
-              };
-            }
-            if (tx.callPrivateFn) {
-              return {
-                callPrivateFn: {
-                  ...tx.callPrivateFn,
-                  args_maps: tx.callPrivateFn.args.map(serializeCVBytes),
-                },
-              };
-            }
-            if (tx.deployContract) {
-              return { deployContract: { ...tx.deployContract } };
-            }
-            return tx;
+        const mineBlock: MineBlock = (txs = []) =>
+          mineBlockWithValidatedVersions(txs, (txs) => {
+            const serializedTxs = txs.map((tx) => {
+              if (tx.callPublicFn) {
+                return {
+                  callPublicFn: {
+                    ...tx.callPublicFn,
+                    args_maps: tx.callPublicFn.args.map(serializeCVBytes),
+                  },
+                };
+              }
+              if (tx.callPrivateFn) {
+                return {
+                  callPrivateFn: {
+                    ...tx.callPrivateFn,
+                    args_maps: tx.callPrivateFn.args.map(serializeCVBytes),
+                  },
+                };
+              }
+              if (tx.deployContract) {
+                return { deployContract: { ...tx.deployContract } };
+              }
+              return tx;
+            });
+            return sdk.mineBlock(serializedTxs).map(parseBlockTransactionResult);
           });
-          return sdk.mineBlock(serializedTxs).map(parseBlockTransactionResult);
-        };
         return mineBlock;
       }
 
