@@ -23,8 +23,8 @@ use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::errors::{VmExecutionError, VmInternalError};
 use clarity::vm::events::*;
 use clarity::vm::hooks::EvalHook;
+use clarity::vm::representations::Span;
 use clarity::vm::representations::SymbolicExpressionType::{Atom, List};
-use clarity::vm::representations::{Span, SymbolicExpression};
 use clarity::vm::resource_limiter::{ResourceBudget, ResourceLimiter};
 use clarity::vm::types::BoundedErrorString;
 use clarity::vm::{
@@ -1371,7 +1371,7 @@ impl ClarityInterpreter {
         &mut self,
         contract_id: &QualifiedContractIdentifier,
         method: &str,
-        args: &[SymbolicExpression],
+        args: Vec<Value>,
         epoch: StacksEpochId,
         clarity_version: ClarityVersion,
         track_costs: bool,
@@ -1407,16 +1407,6 @@ impl ClarityInterpreter {
             eval_hooks,
             terms,
             |connection, callback| {
-                let values = args
-                    .iter()
-                    .map(|arg| {
-                        arg.match_atom_value().cloned().ok_or_else(|| {
-                            ClarityError::BadTransaction(
-                                "expected evaluated function argument".into(),
-                            )
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
                 let (value, _, events) = if allow_private {
                     connection
                         .with_abort_callback(
@@ -1433,7 +1423,7 @@ impl ClarityInterpreter {
                                             context,
                                             contract_id,
                                             method,
-                                            values,
+                                            args,
                                             false,
                                         )
                                     },
@@ -1454,7 +1444,7 @@ impl ClarityInterpreter {
                         None,
                         contract_id.clone(),
                         method,
-                        values,
+                        args,
                         callback,
                         &ResourceBudget::unlimited(),
                     )?
@@ -1474,7 +1464,7 @@ impl ClarityInterpreter {
         &mut self,
         contract_id: &QualifiedContractIdentifier,
         method: &str,
-        args: &[SymbolicExpression],
+        args: Vec<Value>,
         epoch: StacksEpochId,
         clarity_version: ClarityVersion,
         track_costs: bool,
@@ -1516,17 +1506,6 @@ impl ClarityInterpreter {
                 global_context: g,
                 call_stack: &mut call_stack,
             };
-
-            let args = args
-                .iter()
-                .map(|arg| {
-                    arg.match_atom_value().cloned().ok_or_else(|| {
-                        VmInternalError::InvariantViolation(format!(
-                            "Passed non-value expression to exec_tx on {method}!"
-                        ))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
 
             match allow_private {
                 true => env.execute_contract_allow_private(
@@ -3289,7 +3268,7 @@ mod tests {
         let result = interpreter.call_contract_fn(
             &contract_id,
             "get-height",
-            &[],
+            vec![],
             StacksEpochId::Epoch25,
             ClarityVersion::Clarity2,
             false,
@@ -3313,7 +3292,7 @@ mod tests {
         let result = interpreter.call_contract_fn(
             &contract_id,
             "get-height",
-            &[],
+            vec![],
             StacksEpochId::Epoch25,
             ClarityVersion::Clarity2,
             false,
@@ -3370,7 +3349,7 @@ mod tests {
         let result = interpreter.call_contract_fn(
             &contract_id,
             "get-height",
-            &[],
+            vec![],
             StacksEpochId::Epoch30,
             ClarityVersion::Clarity2,
             false,
@@ -3436,7 +3415,7 @@ mod tests {
         let result = interpreter.call_contract_fn(
             &contract_id,
             "get-height",
-            &[],
+            vec![],
             StacksEpochId::Epoch30,
             ClarityVersion::Clarity3,
             false,
@@ -3463,7 +3442,7 @@ mod tests {
         let result = interpreter.call_contract_fn(
             &contract_id,
             "get-height",
-            &[],
+            vec![],
             StacksEpochId::Epoch30,
             ClarityVersion::Clarity3,
             false,
@@ -3641,7 +3620,7 @@ mod tests {
             &contract
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "public-func",
-            &[],
+            vec![],
             StacksEpochId::Epoch24,
             ClarityVersion::Clarity2,
             false,
@@ -3671,7 +3650,7 @@ mod tests {
             &contract
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "undefined-function",
-            &[],
+            vec![],
             StacksEpochId::Epoch24,
             ClarityVersion::Clarity2,
             false,
@@ -3695,7 +3674,7 @@ mod tests {
                 name: ContractName::from_literal("unexisting"),
             },
             "undefined-function",
-            &[],
+            vec![],
             StacksEpochId::Epoch24,
             ClarityVersion::Clarity2,
             false,
@@ -3732,7 +3711,7 @@ mod tests {
                 .call_contract_fn(
                     &missing,
                     "whatever",
-                    &[],
+                    vec![],
                     epoch,
                     ClarityVersion::Clarity1,
                     false,
@@ -3769,7 +3748,7 @@ mod tests {
             &contract
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "private-func",
-            &[],
+            vec![],
             StacksEpochId::Epoch24,
             ClarityVersion::Clarity2,
             false,
@@ -3800,7 +3779,7 @@ mod tests {
             &contract
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "private-func",
-            &[],
+            vec![],
             StacksEpochId::Epoch24,
             ClarityVersion::Clarity2,
             false,
@@ -3843,7 +3822,7 @@ mod tests {
             &contract
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "get-hash",
-            &[],
+            vec![],
             StacksEpochId::Epoch34,
             ClarityVersion::Clarity5,
             false,
@@ -3884,7 +3863,7 @@ mod tests {
             &contract
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "get-time",
-            &[],
+            vec![],
             StacksEpochId::Epoch33,
             ClarityVersion::Clarity4,
             false,
@@ -3925,7 +3904,7 @@ mod tests {
             &contract
                 .expect_resolved_contract_identifier(Some(&StandardPrincipalData::transient())),
             "gcc",
-            &[],
+            vec![],
             StacksEpochId::Epoch33,
             ClarityVersion::Clarity4,
             false,

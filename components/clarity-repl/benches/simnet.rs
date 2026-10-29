@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use clarinet_defaults::{DEFAULT_CLARITY_VERSION, DEFAULT_EPOCH};
-use clarity::vm::{EvaluationResult, ExecutionResult, SymbolicExpression, Value as ClarityValue};
+use clarity::vm::{EvaluationResult, ExecutionResult, Value as ClarityValue};
 use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::CallKind;
 use clarity_repl::repl::{
@@ -81,10 +81,7 @@ fn call_fn(
         .call_contract_fn(
             "contract",
             func,
-            &args
-                .iter()
-                .map(|v: &ClarityValue| SymbolicExpression::atom_value(v.clone()))
-                .collect::<Vec<SymbolicExpression>>(),
+            args.to_vec(),
             "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
             false,
             false,

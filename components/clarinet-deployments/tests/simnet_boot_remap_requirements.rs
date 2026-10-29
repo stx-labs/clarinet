@@ -576,7 +576,7 @@ async fn check_requirement_withdrawal(ft_amount: u64, should_commit: bool) {
     let result = session.call_contract_fn(
         &writer,
         "withdraw",
-        &[],
+        vec![],
         DEPLOYER,
         false,
         false,

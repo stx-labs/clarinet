@@ -193,7 +193,7 @@ fn stack_in_session(session: &mut Session) -> u128 {
         .call_contract_fn(
             &stacker,
             "stack",
-            &[amount],
+            vec![amount],
             DEPLOYER,
             false,
             false,
