@@ -29,18 +29,41 @@ actual data size, so cost assertions may need updating.
 and transfers exceeding the available unlocked balance throw without consuming a
 nonce. Like `callPublicFn` and `deployContract`, it advances one block before
 executing, even when the transfer is rejected; previously it executed at the
-current height and advanced only on success. Inside `mineBlock`, these transfers return a `rejected` outcome without
-consuming a nonce. Calling the Clarity `stx-transfer?` function inside a contract
-retains its ordinary response semantics. Private calls remain a simnet convenience
-and use the same transaction frame.
+current height and advanced only on success. Inside `mineBlock`, these transfers
+return a `rejected` outcome without consuming a nonce. Calling the Clarity
+`stx-transfer?` function inside a contract retains its ordinary response
+semantics. Private calls remain a simnet convenience and use the same transaction
+frame.
 
 Like the node's map-entry endpoint, `getMapEntry` returns `(some value)` for an
 existing entry and `none` otherwise, including for a map or contract that does not
 exist. Previously, an entry that had never been written threw `value not found`.
 
+### Known differences from a node
+
+- Cost and memory limits are enforced only when cost tracking is enabled
+  (`trackCosts`, or `--costs` with `vitest-environment-clarinet`), which is off by
+  default. Signed transactions are always limited, so a call that succeeds
+  through `callPublicFn` can fail as a signed transaction, and enabling cost
+  tracking can change test outcomes. A batch has no cumulative block budget.
+- Standalone `callPublicFn`, `callPrivateFn`, `deployContract`, and `transferSTX`
+  throw both for rejected transactions and for included runtime errors and
+  post-condition aborts, which still consume a nonce and mine their block. A
+  returned `(err ...)` does not throw. Use `mineBlock` to tell included failures
+  from rejections.
+- `getAssetsMap` reports total STX balances, including locked STX. A node's
+  `/v2/accounts` reports locked STX separately from `balance`.
+- In the synchronous debug adapter, standalone calls do not yet follow these
+  transaction rules: they consume no nonce, mine no block, and ignore
+  post-conditions. `callPrivateFn` is unsupported, and several methods are
+  missing. `mineBlock` follows the same rules as the SDK.
+
 ### Migrating `mineBlock` to 4.0
 
-`mineBlock(txs)` returns one `BlockTransactionResult` per entry, in input order:
+`mineBlock(txs)` returns one `BlockTransactionResult` per entry: first one for each
+queued signed transaction it mines (see [Signed transactions](#signed-transactions)),
+then one for each entry in `txs`, in input order. Without queued transactions,
+`results[i]` corresponds to `txs[i]`.
 
 - `success`: `execution` contains the parsed result, events, costs, and performance.
 - `included_failure`: `error` describes the failure, and `kind` classifies it as
