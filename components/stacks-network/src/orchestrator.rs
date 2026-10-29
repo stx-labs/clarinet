@@ -118,11 +118,9 @@ pub struct DevnetOrchestrator {
     save_container_logs: bool,
     container_index: Cell<u32>,
 }
-/// Bitcoin Core 28 changed `warnings` to an array, which `GetBlockchainInfoResult` can't parse
 #[derive(Deserialize)]
-struct BlockchainVerificationInfo {
-    #[serde(rename = "verificationprogress")]
-    verification_progress: f64,
+struct MempoolLoadInfo {
+    loaded: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -2087,40 +2085,36 @@ impl DevnetOrchestrator {
             .await?;
         }
 
-        // Before generating a block, verify the chain is fully synced.
+        // bitcoind loads the mempool only after the -reindex import finishes. Not
+        // `verificationprogress`: on Bitcoin Core 31 regtest it stays below 1 while the tip is old.
         let mut error_count = 0;
         loop {
             let response: JsonRpcResponse = btc_rpc
-                .call("getblockchaininfo", json!([]))
+                .call("getmempoolinfo", json!([]))
                 .await
-                .map_err(|e| format!("unable to send 'getblockchaininfo' request ({e})"))?
+                .map_err(|e| format!("unable to send 'getmempoolinfo' request ({e})"))?
                 .json()
                 .await
-                .map_err(|e| format!("unable to parse 'getblockchaininfo' result: {e}"))?;
+                .map_err(|e| format!("unable to parse 'getmempoolinfo' result: {e}"))?;
 
-            let info: BlockchainVerificationInfo = response
+            let MempoolLoadInfo { loaded } = response
                 .result()
-                .map_err(|e| format!("unable to parse 'getblockchaininfo' result: {e}"))?;
+                .map_err(|e| format!("unable to parse 'getmempoolinfo' result: {e}"))?;
 
-            let verification_progress = info.verification_progress;
-
-            if verification_progress >= 1.0 {
-                let _ = devnet_event_tx.send(DevnetEvent::info(
-                    "Blockchain verification completed".to_string(),
-                ));
+            if loaded {
+                let _ = devnet_event_tx.send(DevnetEvent::info("Bitcoin chain loaded".to_string()));
                 break;
             }
 
             error_count += 1;
             if error_count > MAX_ERRORS {
-                return Err("Blockchain verification timeout".to_string());
+                return Err("Timed out waiting for bitcoind to load the chain".to_string());
             }
 
             tokio::time::sleep(Duration::from_millis(1000)).await;
-            let _ = devnet_event_tx.send(DevnetEvent::info(format!(
-                "Verification progress: {:.2}%",
-                verification_progress * 100.0
-            )));
+            let _ = devnet_event_tx.send(DevnetEvent::info(
+                "Waiting for bitcoind to load the chain".to_string(),
+            ));
         }
 
         if !no_snapshot {
