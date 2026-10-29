@@ -495,6 +495,23 @@ describe("simnet can read contracts data vars and maps", () => {
     const p = simnet.getMapEntry("counter", "participants", Cl.standardPrincipal(address1));
     expect(p).toStrictEqual(Cl.some(Cl.bool(true)));
   });
+
+  it("reads a missing map entry as none, like the node", () => {
+    const key = Cl.standardPrincipal(address2);
+    expect(simnet.getMapEntry("counter", "participants", key)).toStrictEqual(Cl.none());
+    expect(simnet.getMapEntry("counter", "missing-map", key)).toStrictEqual(Cl.none());
+    expect(simnet.getMapEntry("missing-contract", "participants", key)).toStrictEqual(Cl.none());
+
+    simnet.deployContract(
+      "deleted-entry",
+      "(define-map entries uint bool) (map-set entries u1 true) (map-delete entries u1)",
+      null,
+      address1,
+    );
+    expect(simnet.getMapEntry(`${address1}.deleted-entry`, "entries", Cl.uint(1))).toStrictEqual(
+      Cl.none(),
+    );
+  });
 });
 
 describe("simnet can get contracts info and deploy contracts", () => {

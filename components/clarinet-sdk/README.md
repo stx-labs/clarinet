@@ -32,6 +32,10 @@ consuming a nonce. Calling the Clarity `stx-transfer?` function inside a contrac
 retains its ordinary response semantics. Private calls remain a simnet convenience
 and use the same transaction frame.
 
+Like the node's map-entry endpoint, `getMapEntry` returns `(some value)` for an
+existing entry and `none` otherwise, including for a map or contract that does not
+exist. Previously, an entry that had never been written threw `value not found`.
+
 ### Migrating `mineBlock` to 4.0
 
 `mineBlock(txs)` returns one `BlockTransactionResult` per entry, in input order:

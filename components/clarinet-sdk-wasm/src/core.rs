@@ -998,10 +998,12 @@ impl SDK {
             .get_session()
             .resolve_contract_id(&self.deployer, contract)?;
         let session = self.get_session_mut();
-        session
+        // Like the node's map-entry endpoint, a missing entry, map, or contract
+        // reads as `none` rather than an error.
+        Ok(session
             .interpreter
             .get_map_entry(&contract_id, map_name, &uint8_to_value(&map_key))
-            .ok_or_else(|| "value not found".into())
+            .unwrap_or_else(|| clarity_values::to_raw_value(&clarity::vm::types::Value::none())))
     }
 
     fn get_function_interface(
