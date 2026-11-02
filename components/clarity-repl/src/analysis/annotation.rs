@@ -1,5 +1,4 @@
 use clarity::vm::representations::Span;
-use clarity::vm::ClarityName;
 use strum::EnumString;
 
 use crate::utils::Environment;
@@ -8,14 +7,15 @@ use crate::utils::Environment;
 pub enum AnnotationKind {
     Allow(Vec<WarningKind>),
     Env(Environment),
-    Filter(Vec<ClarityName>),
-    FilterAll,
+    /// `#[filter(...)]`, used by the removed check-checker. Still accepted
+    /// because deployed contracts carry it.
+    Filter,
 }
 
 impl std::str::FromStr for AnnotationKind {
     type Err = String;
 
-    /// Parse an annotation, e.g. `#[env(simnet)]` or `#[allow(unchecked_data)]`.
+    /// Parse an annotation, e.g. `#[env(simnet)]` or `#[allow(unused_const)]`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s
             .trim()
@@ -66,25 +66,7 @@ impl std::str::FromStr for AnnotationKind {
                 }
                 Ok(AnnotationKind::Env(env))
             }
-            "filter" => {
-                let value =
-                    value.ok_or_else(|| "missing value for 'filter' annotation".to_string())?;
-                if value == "*" {
-                    Ok(AnnotationKind::FilterAll)
-                } else {
-                    let params: Vec<ClarityName> = value
-                        .split(',')
-                        .filter(|s| !s.is_empty())
-                        .map(|s| ClarityName::try_from(s.trim()))
-                        .collect::<Result<_, _>>()
-                        .map_err(|e| format!("invalid filter name: {e:?}"))?;
-                    if params.is_empty() {
-                        Err("missing value for 'filter' annotation".to_string())
-                    } else {
-                        Ok(AnnotationKind::Filter(params))
-                    }
-                }
-            }
+            "filter" => Ok(AnnotationKind::Filter),
             _ => Err("unrecognized annotation".to_string()),
         }
     }
@@ -93,11 +75,13 @@ impl std::str::FromStr for AnnotationKind {
 #[derive(Debug, EnumString, PartialEq, Eq, Hash)]
 #[strum(serialize_all = "snake_case")]
 pub enum WarningKind {
-    // Check checker
+    // Used by the removed check-checker. Still accepted because deployed
+    // contracts carry them.
     UncheckedData,
     UncheckedParams,
     // Linter. Keep sorted alphabetically
     AtBlock,
+    CallChecker,
     CaseBinding,
     CaseConst,
     CaseDataVar,
@@ -232,31 +216,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_filter() {
-        match "#[filter(foo,bar)]".parse::<AnnotationKind>() {
-            Ok(AnnotationKind::Filter(params)) => {
-                assert!(
-                    params.len() == 2 && params[0].as_str() == "foo" && params[1].as_str() == "bar",
-                    "failed to parse 'filter' parameters correctly"
-                )
-            }
-            _ => panic!("failed to parse 'filter' correctly"),
-        };
-    }
-
-    #[test]
-    fn parse_filter_all() {
-        match "#[filter(*)]".parse::<AnnotationKind>() {
-            Ok(AnnotationKind::FilterAll) => (),
-            _ => panic!("failed to parse 'filter(*)' correctly"),
-        };
-    }
-
-    #[test]
-    fn parse_filter_empty() {
-        match "#[filter]".parse::<AnnotationKind>() {
-            Err(_) => (),
-            _ => panic!("failed to return error for 'filter' with no parameters"),
-        };
+    fn parse_legacy_filter() {
+        for annotation in ["#[filter(foo,bar)]", "#[filter(*)]", "#[filter]"] {
+            assert!(
+                matches!(annotation.parse(), Ok(AnnotationKind::Filter)),
+                "failed to parse '{annotation}'"
+            );
+        }
     }
 }

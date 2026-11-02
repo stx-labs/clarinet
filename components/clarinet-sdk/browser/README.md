@@ -29,7 +29,7 @@ There are two ways to use the sdk in the browser:
 ```js
 const simnet = await initSimnet();
 await simnet.initEmptySession();
-simnet.runSnippet("(+ 1 2)");
+simnet.execute("(+ 1 2)").result;
 ```
 
 - With a clarinet project (ie: with a Clarinet.toml)

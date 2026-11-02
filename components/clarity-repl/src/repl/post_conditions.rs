@@ -1,5 +1,6 @@
 use clarity::types::StacksEpochId;
 use clarity::util::hash::hex_bytes;
+use clarity::vm::database::ClarityDatabase;
 use clarity_types::effects::AssetMap;
 use clarity_types::types::{BoundedErrorString, PrincipalData};
 use stacks_codec::transaction::{
@@ -125,6 +126,23 @@ impl PostConditionCheck {
 
         stacks_transactions::check_post_conditions_supported_in_epoch(conditions, mode, epoch)
             .map_err(|reason| format!("Invalid Stacks transaction: {reason}"))
+    }
+
+    /// A VM abort callback that applies this check. A check that cannot run
+    /// also aborts, and its error is left in `error` for the caller to reject.
+    pub fn abort_callback<'a>(
+        &'a self,
+        epoch: StacksEpochId,
+        error: &'a mut Option<String>,
+    ) -> impl FnMut(&AssetMap, &mut ClarityDatabase) -> Option<BoundedErrorString> + 'a {
+        move |assets: &AssetMap, _: &mut ClarityDatabase| match self.evaluate(assets, epoch) {
+            Ok(reason) => reason,
+            Err(message) => {
+                let reason = BoundedErrorString::from_display(&message);
+                *error = Some(message);
+                Some(reason)
+            }
+        }
     }
 
     /// Why `asset_map` violates this check, if it does.

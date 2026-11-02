@@ -12,7 +12,7 @@ use crate::analysis::cache::traits::ImportedTraitData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
-use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
 pub struct UnusedTrait<'a, 'b>
 where
@@ -111,7 +111,6 @@ impl<'a, 'b> AnalysisPass for UnusedTrait<'a, 'b> {
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
-        _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let mut lint = UnusedTrait::new(analysis_cache, level);
         lint.run()

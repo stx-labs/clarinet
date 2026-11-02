@@ -11,7 +11,7 @@
 
 use clarity::types::StacksEpochId;
 use clarity::vm::types::TupleData;
-use clarity::vm::{ClarityName, EvaluationResult, SymbolicExpression, Value};
+use clarity::vm::{ClarityName, EvaluationResult, Value};
 use clarity_repl::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
 use clarity_repl::repl::post_conditions::PostConditionCheck;
 use clarity_repl::repl::session::CallKind;
@@ -41,7 +41,7 @@ fn session_with_wallet() -> Session {
 }
 
 /// `(stack-stx amount pox-addr start-burn-ht lock-period)` on pox-3.
-fn stack_stx_args(amount: u128) -> Vec<SymbolicExpression> {
+fn stack_stx_args(amount: u128) -> Vec<Value> {
     let pox_addr = Value::Tuple(
         TupleData::from_data(vec![
             (
@@ -57,10 +57,10 @@ fn stack_stx_args(amount: u128) -> Vec<SymbolicExpression> {
     );
 
     vec![
-        SymbolicExpression::atom_value(Value::UInt(amount)),
-        SymbolicExpression::atom_value(pox_addr),
-        SymbolicExpression::atom_value(Value::UInt(1)), // start-burn-ht
-        SymbolicExpression::atom_value(Value::UInt(1)), // lock-period
+        Value::UInt(amount),
+        pox_addr,
+        Value::UInt(1), // start-burn-ht
+        Value::UInt(1), // lock-period
     ]
 }
 
@@ -89,7 +89,7 @@ fn stack_stx(session: &mut Session, pox_deployer: &str) -> Value {
         .call_contract_fn(
             &format!("{pox_deployer}.pox-3"),
             "stack-stx",
-            &stack_stx_args(STACKED),
+            stack_stx_args(STACKED),
             WALLET,
             false,
             false,
@@ -173,7 +173,7 @@ fn mxs_does_not_redirect_the_mainnet_boot_address() {
     let _ = session.call_contract_fn(
         &format!("{BOOT_MAINNET_ADDRESS}.pox-3"),
         "stack-stx",
-        &stack_stx_args(STACKED),
+        stack_stx_args(STACKED),
         WALLET,
         false,
         false,

@@ -15,7 +15,7 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
-use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
 /// A single rename entry: the old name, the new name, and the minimum Clarity
 /// version in which the rename takes effect.
@@ -168,7 +168,6 @@ impl AnalysisPass for RenamedBuiltin<'_> {
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
-        _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let checker = RenamedBuiltin::new(
             analysis_cache.contract_analysis.clarity_version,
@@ -245,10 +244,8 @@ mod tests {
 
     fn run_snippet(
         snippet: String,
-    ) -> Result<
-        crate::repl::session::AnnotatedExecutionResult,
-        Vec<clarity::vm::diagnostic::Diagnostic>,
-    > {
+    ) -> Result<crate::repl::session::AnnotatedExecutionResult, Vec<crate::analysis::LintDiagnostic>>
+    {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings
@@ -272,15 +269,15 @@ mod tests {
                 (as-contract? ((with-stacking u1)) true))
         ").to_string();
 
-        let result = run_snippet(snippet);
-        match result {
-            Ok(_) => panic!("expected analysis error for unresolved `with-stacking`"),
-            Err(diagnostics) => {
-                assert!(diagnostics
-                    .iter()
-                    .any(|diagnostic| { diagnostic.message.contains("with-staking") }));
-            }
-        }
+        let diagnostics = run_snippet(snippet)
+            .expect_err("consensus analysis must reject the unresolved builtin");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.lint_name == Some(RenamedBuiltin::get_name())
+                && diagnostic.diagnostic.level == Level::Warning
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.lint_name.is_none() && diagnostic.diagnostic.level == Level::Error
+        }));
     }
 
     #[test]
@@ -433,7 +430,10 @@ mod tests {
             Ok(_) => panic!("expected analysis error for unresolved `with-stacking`"),
             Err(diagnostics) => {
                 assert!(!diagnostics.iter().any(|diagnostic| {
-                    diagnostic.message.contains("was renamed to `with-staking`")
+                    diagnostic
+                        .diagnostic
+                        .message
+                        .contains("was renamed to `with-staking`")
                 }));
             }
         }

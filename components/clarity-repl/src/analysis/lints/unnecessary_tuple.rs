@@ -17,7 +17,7 @@ use crate::analysis::annotation::{get_index_of_span, Annotation, AnnotationKind,
 use crate::analysis::ast_visitor::{traverse, ASTVisitor, TypedVar};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
-use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
 pub struct UnnecessaryTuple<'a> {
     clarity_version: ClarityVersion,
@@ -347,7 +347,6 @@ impl AnalysisPass for UnnecessaryTuple<'_> {
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
-        _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let checker = UnnecessaryTuple::new(
             analysis_cache.contract_analysis.clarity_version,

@@ -212,7 +212,7 @@ describe("calling pox-3 directly", () => {
     expect(again.result.type).toBe("err");
   });
 
-  // `execute` and `runSnippet` evaluate raw Clarity rather than taking a
+  // `execute` evaluates raw Clarity rather than taking a
   // contract id, so they need the source-level rewrite. Without it a snippet
   // reaches the dead mainnet twin and reports its constants.
   it("applies the remap to execute()", () => {
@@ -223,15 +223,6 @@ describe("calling pox-3 directly", () => {
 
     expect(read(TESTNET_BOOT)).toStrictEqual(Cl.uint(1050));
     expect(read(MAINNET_BOOT)).toStrictEqual(Cl.uint(1050));
-  });
-
-  it("applies the remap to runSnippet()", () => {
-    const snippet = (deployer: string) =>
-      simnet.runSnippet(
-        `(get reward-cycle-length (unwrap-panic (contract-call? '${deployer}.pox-3 get-pox-info)))`,
-      );
-
-    expect(snippet(MAINNET_BOOT)).toStrictEqual(snippet(TESTNET_BOOT));
   });
 
   // sBTC is deployed at its mainnet address and only there, so a snippet

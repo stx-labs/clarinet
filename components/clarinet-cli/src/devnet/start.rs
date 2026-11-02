@@ -2,42 +2,22 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc::{self, channel, Sender};
 
 use clarinet_deployments::types::DeploymentSpecification;
 use hiro_system_kit::{slog, slog_async, slog_term, Drain};
-use stacks_network::{
-    do_run_local_devnet, ChainsCoordinatorCommand, Context, DevnetEvent, DevnetOrchestrator,
-    LogData,
-};
+use stacks_network::{do_run_local_devnet, Context, DevnetOrchestrator};
 
 pub struct StartConfig {
     pub devnet: DevnetOrchestrator,
     pub deployment: DeploymentSpecification,
-    pub log_tx: Option<Sender<LogData>>,
     pub display_dashboard: bool,
     pub no_snapshot: bool,
     pub save_container_logs: bool,
     pub create_new_snapshot: bool,
 }
 
-pub fn start(
-    config: StartConfig,
-) -> Result<
-    (
-        Option<mpsc::Receiver<DevnetEvent>>,
-        Option<mpsc::Sender<bool>>,
-        Option<crossbeam_channel::Sender<ChainsCoordinatorCommand>>,
-    ),
-    String,
-> {
-    let working_dir = config
-        .devnet
-        .network_config
-        .as_ref()
-        .and_then(|c| c.devnet.as_ref())
-        .map(|d| d.working_dir.to_string())
-        .ok_or("unable to read settings/Devnet.toml")?;
+pub fn start(config: StartConfig) -> Result<(), String> {
+    let working_dir = config.devnet.devnet_config().working_dir.clone();
     fs::create_dir_all(&working_dir).map_err(|_| format!("unable to create dir {working_dir}"))?;
     let mut log_path = PathBuf::from_str(&working_dir)
         .map_err(|e| format!("unable to working_dir {working_dir}\n{e}"))?;
@@ -60,18 +40,13 @@ pub fn start(
         tracer: false,
     };
 
-    let (orchestrator_terminated_tx, orchestrator_terminated_rx) = channel();
-
     let res = do_run_local_devnet(
         config.devnet,
         config.deployment,
-        config.log_tx,
         config.display_dashboard,
         config.no_snapshot,
         config.create_new_snapshot,
         ctx,
-        orchestrator_terminated_tx,
-        Some(orchestrator_terminated_rx),
         config.save_container_logs,
     );
     println!(

@@ -95,6 +95,7 @@ impl fmt::Display for ApiUrl {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum LogPrintEvents {
     All,
@@ -116,32 +117,31 @@ pub struct Settings {
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct SettingsFile {
-    analysis: Option<analysis::SettingsFile>,
     remote_data: Option<RemoteDataSettingsFile>,
     log_print_events: Option<LogPrintEvents>,
+    /// Removed `[repl.analysis]` section, only captured to warn about it
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    analysis: Option<serde::de::IgnoredAny>,
 }
 
-impl TryFrom<SettingsFile> for Settings {
-    type Error = String;
+impl SettingsFile {
+    /// `[repl.analysis]` was replaced by `[linter]`
+    pub fn has_removed_analysis_section(&self) -> bool {
+        self.analysis.is_some()
+    }
+}
 
-    fn try_from(file: SettingsFile) -> Result<Self, Self::Error> {
-        let analysis = file
-            .analysis
-            .map(analysis::Settings::try_from)
-            .transpose()?
-            .unwrap_or_else(analysis::Settings::with_default_lints);
-
-        let remote_data = file
-            .remote_data
-            .map(RemoteDataSettings::from)
-            .unwrap_or_default();
-
-        Ok(Self {
-            analysis,
-            remote_data,
+impl From<SettingsFile> for Settings {
+    fn from(file: SettingsFile) -> Self {
+        Self {
+            remote_data: file
+                .remote_data
+                .map(RemoteDataSettings::from)
+                .unwrap_or_default(),
             log_print_events: file.log_print_events.unwrap_or_default(),
-            show_timings: false,
-        })
+            ..Default::default()
+        }
     }
 }
 

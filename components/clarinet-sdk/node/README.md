@@ -14,6 +14,11 @@ You can use this SDK to:
 - Get contract interfaces (available functions and data)
 - Write unit tests for Clarity smart contracts
 
+## Upgrading to 4.0
+
+Read the [4.0 migration guide](https://github.com/stx-labs/clarinet/blob/main/components/clarinet-sdk/README.md#migrating-to-40)
+for changed transaction results, mining behavior, and removed APIs.
+
 ## Installation
 
 ```sh

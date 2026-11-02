@@ -83,7 +83,10 @@ async fn it_can_set_epoch() {
 async fn it_can_deploy_contract() {
     let mut sdk = init_sdk().await;
     let tx = deploy_basic_contract(&mut sdk);
-    let expected = format!("0x{}", ClarityValue::Bool(true).serialize_to_hex().unwrap());
+    let expected = format!(
+        "0x{}",
+        ClarityValue::okay_true().serialize_to_hex().unwrap()
+    );
     assert_eq!(tx.result, expected);
 }
 
@@ -209,20 +212,16 @@ async fn it_charges_a_nonce_for_a_call_the_access_preflight_rejects() {
     .unwrap();
     assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
 
-    // Rejected by the preflight, because the interface says the access is wrong.
-    for (method, expected) in [
-        ("peek", "peek is not a public function"),
-        ("hidden", "hidden is not a public function"),
-    ] {
-        let before = sdk.get_account_nonce(SENDER).unwrap();
-        let err = sdk.call_public_fn(&call(method)).unwrap_err();
-        assert_eq!(err, expected);
-        assert_eq!(
-            sdk.get_account_nonce(SENDER).unwrap(),
-            before + 1,
-            "mainnet mines a call to a non-public function, so `{method}` owes a nonce"
-        );
-    }
+    // Block execution permits read-only targets and charges the transaction nonce.
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    let result = sdk.call_public_fn(&call("peek")).unwrap();
+    assert_tx_result(&result, ClarityValue::UInt(1));
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), before + 1);
+
+    let before = sdk.get_account_nonce(SENDER).unwrap();
+    let err = sdk.call_public_fn(&call("hidden")).unwrap_err();
+    assert_eq!(err, "hidden is not a public function");
+    assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), before + 1);
 
     // The same failure reached through the VM: no interface entry exists for a
     // name the contract does not define, so the preflight has nothing to say.
@@ -279,7 +278,8 @@ async fn it_gates_the_preflight_nonce_on_the_epoch_like_the_vm_does() {
         sdk.deploy_contract(&DeployContractArgs::new(
             "access-contract".into(),
             "(define-read-only (peek) u1)
-             (define-public (poke) (ok u1))"
+             (define-public (poke) (ok u1))
+             (define-private (hidden) u1)"
                 .into(),
             ContractOptions::new(None),
             SENDER.into(),
@@ -299,10 +299,15 @@ async fn it_gates_the_preflight_nonce_on_the_epoch_like_the_vm_does() {
             )
         };
 
-        // The cached interface rejects `peek` before it reaches the VM.
         let before = sdk.get_account_nonce(SENDER).unwrap();
-        let err = sdk.call_public_fn(&call("peek")).unwrap_err();
-        assert_eq!(err, "peek is not a public function");
+        let result = sdk.call_public_fn(&call("peek")).unwrap();
+        assert_tx_result(&result, ClarityValue::UInt(1));
+        assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), before + 1);
+
+        // Private targets still fail the cached-interface access check.
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        let err = sdk.call_public_fn(&call("hidden")).unwrap_err();
+        assert_eq!(err, "hidden is not a public function");
         let preflight_delta = sdk.get_account_nonce(SENDER).unwrap() - before;
 
         // An unknown function reaches the VM and produces the equivalent error.
@@ -375,8 +380,50 @@ async fn it_handles_invalid_sender_address() {
 }
 
 #[wasm_bindgen_test]
+async fn contract_calls_reject_arguments_with_leftover_bytes() {
+    let mut sdk = init_sdk().await;
+    let sender = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    sdk.deploy_contract(&DeployContractArgs::new(
+        "echo".into(),
+        "(define-public (echo (x uint)) (ok x)) (define-read-only (peek (x uint)) x) (define-private (hidden (x uint)) (ok x))".into(),
+        ContractOptions::new(None),
+        sender.into(),
+        None,
+        None,
+    ))
+    .unwrap();
+    let nonce = sdk.get_account_nonce(sender).unwrap();
+    let mut leftover = ClarityValue::UInt(1).serialize_to_vec().unwrap();
+    leftover.push(0xff);
+    let args = |method: &str| {
+        CallFnArgs::new(
+            "echo".into(),
+            method.into(),
+            vec![js_sys::Uint8Array::from(leftover.as_slice())],
+            sender.into(),
+            None,
+            None,
+        )
+    };
+
+    // `hidden` fails the public access check, which would otherwise charge a nonce.
+    for result in [
+        sdk.call_public_fn(&args("echo")),
+        sdk.call_public_fn(&args("hidden")),
+        sdk.call_private_fn(&args("hidden")),
+        sdk.call_read_only_fn(&args("peek")),
+    ] {
+        let error = result.err().unwrap();
+        assert!(error.contains("bytes left over"), "{error}");
+    }
+    assert_eq!(sdk.get_account_nonce(sender).unwrap(), nonce);
+}
+
+#[wasm_bindgen_test]
 async fn it_handles_contract_recipient_address() {
     let mut sdk = init_sdk().await;
+    sdk.mint_stx("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(), 1000)
+        .unwrap();
 
     let result = sdk.transfer_stx(&crate::core::TransferSTXArgs::new(
         1000,
@@ -387,7 +434,7 @@ async fn it_handles_contract_recipient_address() {
     ));
 
     // contract addresses are valid recipients
-    assert!(result.is_ok());
+    assert_tx_result(&result.unwrap(), ClarityValue::okay_true());
 }
 
 #[wasm_bindgen_test]
@@ -434,6 +481,8 @@ async fn it_handles_contract_address_as_sender() {
 #[wasm_bindgen_test]
 async fn it_handles_contract_address_as_recipient() {
     let mut sdk = init_sdk().await;
+    sdk.mint_stx("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM".into(), 1000)
+        .unwrap();
 
     let contract_address = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.test";
     let result = sdk.transfer_stx(&crate::core::TransferSTXArgs::new(
@@ -445,5 +494,84 @@ async fn it_handles_contract_address_as_recipient() {
     ));
 
     // we support contract addresses as recipients
-    assert!(result.is_ok());
+    assert_tx_result(&result.unwrap(), ClarityValue::okay_true());
+}
+
+#[wasm_bindgen_test]
+async fn mine_block_reports_each_entry_and_continues_after_malformed_and_rejected_entries() {
+    use serde_json::json;
+    let mut sdk = init_sdk().await;
+    let sender = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    let before = sdk.get_account_nonce(sender).unwrap();
+    let height = sdk.block_height();
+    let contract = format!("{sender}.batch");
+    let mut leftover = ClarityValue::UInt(1).serialize_to_vec().unwrap();
+    leftover.push(0xff);
+    let leftover: serde_json::Map<_, _> = leftover
+        .into_iter()
+        .enumerate()
+        .map(|(i, byte)| (i.to_string(), json!(byte)))
+        .collect();
+    let txs = json!([
+        {"deployContract": {"name": "batch", "content": "(define-public (fail) (err u7)) (define-public (yes) (ok true))", "sender": sender}},
+        {"transferSTX": {"amount": 0, "recipient": sender, "sender": sender}},
+        {"callPublicFn": {"contract": contract, "method": "fail", "args_maps": [], "sender": sender}},
+        {"callPublicFn": {"contract": contract, "method": "missing", "args_maps": [], "sender": sender}},
+        {"transferSTX": {"amount": "invalid"}},
+        {},
+        {"callPublicFn": {"contract": contract, "method": "yes", "args_maps": [], "sender": sender}, "deployContract": {"name": "extra", "content": "true", "sender": sender}},
+        {"callPublicFn": {"contract": contract, "method": "yes", "args_maps": [{"99": 3}], "sender": sender}},
+        {"callPublicFn": {"contract": contract, "method": "yes", "args_maps": [{"0": 255}], "sender": sender}},
+        {"callPublicFn": {"contract": contract, "method": "yes", "args_maps": [leftover], "sender": sender}},
+        {"deployContract": {"name": "bad-options", "content": "true", "options": false, "sender": sender}},
+        {"deployContract": {"name": "bad-version", "content": "true", "options": {"clarityVersion": "3"}, "sender": sender}},
+        {"callPublicFn": {"contract": contract, "method": "yes", "args_maps": [], "sender": sender}}
+    ]);
+    let array = js_sys::Array::from(&JsValue::from_serde(&txs).unwrap());
+    let response = sdk.mine_block_js(array).unwrap();
+    let failure = js_sys::Array::from(&response).get(3);
+    assert!(
+        js_sys::Reflect::get(&failure, &JsValue::from_str("execution"))
+            .unwrap()
+            .is_object()
+    );
+    let results: serde_json::Value = response.into_serde().unwrap();
+    let statuses: Vec<_> = results
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            "success",
+            "rejected",
+            "included_failure",
+            "included_failure",
+            "rejected",
+            "rejected",
+            "rejected",
+            "rejected",
+            "rejected",
+            "rejected",
+            "rejected",
+            "rejected",
+            "success"
+        ]
+    );
+    assert_eq!(
+        results[2]["execution"]["result"],
+        format!(
+            "0x{}",
+            ClarityValue::err_uint(7).serialize_to_hex().unwrap()
+        )
+    );
+    assert_eq!(results[3]["kind"], "runtime_error");
+    assert_eq!(
+        results[3]["execution"]["result"],
+        format!("0x{}", ClarityValue::err_none().serialize_to_hex().unwrap())
+    );
+    assert_eq!(sdk.get_account_nonce(sender).unwrap(), before + 4);
+    assert_eq!(sdk.block_height(), height + 1);
 }

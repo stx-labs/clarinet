@@ -38,6 +38,16 @@ export type ParsedTransactionResult = {
   performance: string | undefined;
 };
 
+export type RawTransactionMetadata = { txid: string; fee: bigint; nonce: bigint };
+
+export type BroadcastTransactionResult =
+  | { txid: string }
+  | { error: string; reason: string; reason_data?: Record<string, unknown>; txid?: string };
+
+/** Submit signed bytes to the mempool without executing or advancing the chain.
+ * Call `mineBlock()` to attempt inclusion; admission does not guarantee inclusion. */
+export type BroadcastTransaction = (rawHex: string) => BroadcastTransactionResult;
+
 /**
  * Post-conditions to enforce on a simnet transaction.
  *
@@ -104,6 +114,8 @@ export type CallReadOnlyFn = (
 export type DeployContractOptions = {
   clarityVersion: ClarityVersion;
 };
+/** Deploy using the node's initialization rules. Success returns `(ok true)`,
+ * regardless of the initializer's final expression. */
 export type DeployContract = (
   name: string,
   content: string,
@@ -112,6 +124,10 @@ export type DeployContract = (
   postConditionOptions?: PostConditionOptions,
 ) => ParsedTransactionResult;
 
+/** Execute a native STX transfer. Invalid transfers (self-transfers, zero
+ * amounts and insufficient funds) throw without consuming a nonce. In
+ * `mineBlock`, they return a rejected outcome without consuming a
+ * nonce instead. */
 export type TransferSTX = (
   amount: number | bigint,
   recipient: string,
@@ -125,6 +141,14 @@ export type TransferSTX = (
  */
 export type Tx =
   | {
+      broadcastTx: string;
+      callPublicFn?: never;
+      callPrivateFn?: never;
+      deployContract?: never;
+      transferSTX?: never;
+    }
+  | {
+      broadcastTx?: never;
       callPublicFn: {
         contract: string;
         method: string;
@@ -136,6 +160,7 @@ export type Tx =
       transferSTX?: never;
     }
   | {
+      broadcastTx?: never;
       callPublicFn?: never;
       callPrivateFn: {
         contract: string;
@@ -147,6 +172,7 @@ export type Tx =
       transferSTX?: never;
     }
   | {
+      broadcastTx?: never;
       callPublicFn?: never;
       callPrivateFn?: never;
       deployContract: {
@@ -158,6 +184,7 @@ export type Tx =
       transferSTX?: never;
     }
   | {
+      broadcastTx?: never;
       callPublicFn?: never;
       callPrivateFn?: never;
       deployContract?: never;
@@ -167,6 +194,39 @@ export type Tx =
         sender: string;
       } & SerializedPostConditions;
     };
+
+/** Check lossless u32 transport; Rust validates which Clarity versions are supported. */
+export function getClarityVersionInputError(version: unknown): string | undefined {
+  if (version === undefined) return;
+  if (
+    typeof version !== "number" ||
+    !Number.isInteger(version) ||
+    version < 0 ||
+    version > 0xffffffff
+  ) {
+    return "Invalid Clarity version: expected an unsigned 32-bit integer";
+  }
+}
+
+/** Keep invalid versions as per-entry rejections, including when mining queued transactions. */
+export function mineBlockWithValidatedVersions(
+  txs: Tx[],
+  mine: (txs: Tx[]) => BlockTransactionResult[],
+): BlockTransactionResult[] {
+  const errors = txs.map((entry) =>
+    getClarityVersionInputError(entry.deployContract?.options?.clarityVersion),
+  );
+  const valid = txs.filter((_, index) => errors[index] === undefined);
+  const results = mine(valid);
+  const queuedCount = results.length - valid.length;
+  let index = queuedCount;
+  return [
+    ...results.slice(0, queuedCount),
+    ...errors.map((error): BlockTransactionResult =>
+      error === undefined ? results[index++] : { status: "rejected", error },
+    ),
+  ];
+}
 
 export const tx = {
   callPublicFn: (
@@ -257,7 +317,102 @@ export function parseCosts(costs: string): ClarityCosts | null {
   }
 }
 
-export type MineBlock = (txs: Array<Tx>) => ParsedTransactionResult[];
+export type FailureKind =
+  "abort_by_response" | "abort_by_post_condition" | "runtime_error" | "analysis_error";
+
+/** Signed entries carry their transaction metadata; convenience entries do not. */
+export type MinedTransactionDetails = {
+  transaction?: RawTransactionMetadata | null;
+};
+
+/**
+ * One outcome per selected queued transaction or explicit batch entry; rejected
+ * entries do not consume a nonce. Like a node's transaction receipt, an included
+ * failure's `execution` reports `(err none)`
+ * when execution produced no value, and post-condition aborts report the
+ * events they attempted, none of which were committed.
+ */
+export type BlockTransactionResult = MinedTransactionDetails &
+  (
+    | { status: "success"; execution: ParsedTransactionResult }
+    | {
+        status: "included_failure";
+        kind: FailureKind;
+        error: string;
+        execution: ParsedTransactionResult;
+      }
+    | { status: "rejected"; error: string }
+  );
+
+/** Advance one block and mine ready queued transactions, then explicit entries.
+ * Queued results precede explicit results, which retain input order. Rejections
+ * do not stop later entries; empty or entirely rejected batches still advance. */
+export type MineBlock = (txs?: Array<Tx>) => BlockTransactionResult[];
+
+export type SerializedTransactionResult = {
+  result: string;
+  events: string;
+  costs: string;
+  performance?: string;
+};
+
+export function parseTransactionResult(
+  response: SerializedTransactionResult,
+): ParsedTransactionResult {
+  return {
+    result: Cl.deserialize(response.result),
+    events: parseEvents(response.events),
+    costs: parseCosts(response.costs),
+    performance: response.performance ?? undefined,
+  };
+}
+
+export type SerializedBlockTransactionResult = {
+  transaction?: { txid: string; fee: string; nonce: string } | null;
+} & (
+  | { status: "success"; execution: SerializedTransactionResult }
+  | {
+      status: "included_failure";
+      kind: FailureKind;
+      error: string;
+      execution: SerializedTransactionResult;
+    }
+  | { status: "rejected"; error: string }
+);
+
+export function parseBlockTransactionResult(
+  response: SerializedBlockTransactionResult,
+): BlockTransactionResult {
+  const details: MinedTransactionDetails = {};
+  if (response.transaction !== undefined) {
+    details.transaction =
+      response.transaction === null
+        ? null
+        : {
+            txid: response.transaction.txid,
+            fee: BigInt(response.transaction.fee),
+            nonce: BigInt(response.transaction.nonce),
+          };
+  }
+  switch (response.status) {
+    case "rejected":
+      return { ...details, status: "rejected", error: response.error };
+    case "success":
+      return {
+        ...details,
+        status: "success",
+        execution: parseTransactionResult(response.execution),
+      };
+    case "included_failure":
+      return {
+        ...details,
+        status: "included_failure",
+        kind: response.kind,
+        error: response.error,
+        execution: parseTransactionResult(response.execution),
+      };
+  }
+}
 export type Execute = (snippet: string) => ParsedTransactionResult;
 export type GetDataVar = (contract: string, dataVar: string) => ClarityValue;
 export type GetMapEntry = (contract: string, mapName: string, mapKey: ClarityValue) => ClarityValue;

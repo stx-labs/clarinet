@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use bitcoincore_rpc::bitcoin::hex::DisplayHex;
-use bitcoincore_rpc::json::{GetBlockchainInfoResult, GetDescriptorInfoResult};
+use bitcoincore_rpc::json::GetDescriptorInfoResult;
 use bitcoincore_rpc::jsonrpc::Response as JsonRpcResponse;
 use bollard::container::{
     Config, CreateContainerOptions, InspectContainerOptions, KillContainerOptions,
@@ -21,9 +21,8 @@ use bollard::service::Ipam;
 use bollard::Docker;
 use clarinet_deployments::types::BurnchainEpochConfig;
 use clarinet_files::{
-    DevnetConfig, DevnetConfigFile, NetworkManifest, ProjectManifest, StacksNetwork,
-    StacksNodeEventObserver, DEFAULT_DOCKER_PLATFORM, DEFAULT_POX_PREPARE_LENGTH,
-    DEFAULT_POX_REWARD_LENGTH,
+    DevnetConfig, NetworkManifest, ProjectManifest, StacksNetwork, StacksNodeEventObserver,
+    DEFAULT_DOCKER_PLATFORM, DEFAULT_POX_PREPARE_LENGTH, DEFAULT_POX_REWARD_LENGTH,
 };
 use clarity::types::chainstate::StacksPrivateKey;
 use clarity::types::PrivateKey;
@@ -31,11 +30,12 @@ use futures::stream::TryStreamExt;
 use hiro_system_kit::slog;
 use indoc::formatdoc;
 use observer::utils::Context;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
 use crate::command::run_docker_command;
 use crate::event::{send_status_update, DevnetEvent, Status};
+use crate::snapshot_extractor::SnapshotImages;
 
 const BITCOIND_DATA_DIR: &str = "/home/bitcoin/.bitcoin";
 
@@ -103,7 +103,7 @@ pub struct DevnetOrchestrator {
     pub name: String,
     network_name: String,
     pub manifest: ProjectManifest,
-    pub network_config: Option<NetworkManifest>,
+    network_config: NetworkManifest,
     pub termination_success_tx: Option<Sender<bool>>,
     pub can_exit: bool,
     stacks_node_container_id: Option<String>,
@@ -118,6 +118,11 @@ pub struct DevnetOrchestrator {
     save_container_logs: bool,
     container_index: Cell<u32>,
 }
+#[derive(Deserialize)]
+struct MempoolLoadInfo {
+    loaded: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct ServicesMapHosts {
     pub bitcoin_node_host: String,
@@ -135,85 +140,74 @@ pub const DEVNET_SNAPSHOT_READY_MARKER: &str = "epoch_4_ready";
 impl DevnetOrchestrator {
     pub fn new(
         manifest: ProjectManifest,
-        network_manifest: Option<NetworkManifest>,
-        devnet_override: Option<DevnetConfigFile>,
         should_use_docker: bool,
     ) -> Result<DevnetOrchestrator, String> {
-        let mut network_config = match network_manifest {
-            Some(n) => Ok(n),
-            None => NetworkManifest::from_project_root(
-                &manifest.root_dir,
-                &StacksNetwork::Devnet.get_networks(),
-                false,
-                Some(&manifest.project.cache_location),
-                devnet_override,
-            ),
-        }?;
-        if let Some(ref mut devnet) = network_config.devnet {
-            let working_dir = PathBuf::from(&devnet.working_dir);
-            let devnet_path = if working_dir.is_absolute() {
-                working_dir
-            } else {
-                let mut cwd = std::env::current_dir()
-                    .map_err(|e| format!("unable to retrieve current dir ({e})"))?;
-                cwd.push(&working_dir);
-                let _ = fs::create_dir(&cwd);
-                cwd.canonicalize().map_err(|e| {
-                    format!(
-                        "unable to canonicalize working_dir {} ({})",
-                        working_dir.display(),
-                        e
-                    )
-                })?
-            };
-            devnet.working_dir = format!("{}", devnet_path.display());
-        }
+        let mut network_config = NetworkManifest::from_project_root(
+            &manifest.root_dir,
+            &StacksNetwork::Devnet.get_networks(),
+            false,
+            Some(&manifest.project.cache_location),
+        )?;
+        let devnet = network_config
+            .devnet
+            .as_mut()
+            .ok_or("unable to read the devnet configuration")?;
+
+        let working_dir = PathBuf::from(&devnet.working_dir);
+        let devnet_path = if working_dir.is_absolute() {
+            working_dir
+        } else {
+            let mut cwd = std::env::current_dir()
+                .map_err(|e| format!("unable to retrieve current dir ({e})"))?;
+            cwd.push(&working_dir);
+            let _ = fs::create_dir(&cwd);
+            cwd.canonicalize().map_err(|e| {
+                format!(
+                    "unable to canonicalize working_dir {} ({})",
+                    working_dir.display(),
+                    e
+                )
+            })?
+        };
+        devnet.working_dir = format!("{}", devnet_path.display());
 
         let name = manifest.project.name.to_string();
         let mut network_name = name.clone();
-        if let Some(ref devnet) = network_config.devnet {
-            if let Some(ref network_id) = devnet.network_id {
-                network_name.push_str(&format!(".{network_id}"));
-            }
-            network_name.push_str(&format!(".{}", devnet.name));
-        } else {
-            network_name.push_str(".net");
+        if let Some(ref network_id) = devnet.network_id {
+            network_name.push_str(&format!(".{network_id}"));
         }
+        network_name.push_str(&format!(".{}", devnet.name));
 
-        let docker_client = match should_use_docker {
-            true => match network_config.devnet {
-                Some(ref devnet) => {
-                    let client = if let Some(ref host) = devnet.docker_host {
-                        Docker::connect_with_socket(host, 120, bollard::API_DEFAULT_VERSION)
-                    } else {
-                        Docker::connect_with_defaults()
-                    }
-                    .or_else(|_| Docker::connect_with_socket_defaults())
-                    .or_else(|_| {
-                        let mut user_space_docker_socket =
-                            dirs::home_dir().expect("unable to retrieve homedir");
-                        user_space_docker_socket.push(".docker");
-                        user_space_docker_socket.push("run");
-                        user_space_docker_socket.push("docker.sock");
-                        Docker::connect_with_socket(
-                            user_space_docker_socket.to_str().unwrap(),
-                            120,
-                            bollard::API_DEFAULT_VERSION,
-                        )
-                    })
-                    .map_err(|e| format!("unable to connect to docker: {e:?}"))?;
-                    Some(client)
-                }
-                None => unreachable!(),
-            },
-            false => None,
+        let docker_client = if should_use_docker {
+            let client = if let Some(ref host) = devnet.docker_host {
+                Docker::connect_with_socket(host, 120, bollard::API_DEFAULT_VERSION)
+            } else {
+                Docker::connect_with_defaults()
+            }
+            .or_else(|_| Docker::connect_with_socket_defaults())
+            .or_else(|_| {
+                let mut user_space_docker_socket =
+                    dirs::home_dir().expect("unable to retrieve homedir");
+                user_space_docker_socket.push(".docker");
+                user_space_docker_socket.push("run");
+                user_space_docker_socket.push("docker.sock");
+                Docker::connect_with_socket(
+                    user_space_docker_socket.to_str().unwrap(),
+                    120,
+                    bollard::API_DEFAULT_VERSION,
+                )
+            })
+            .map_err(|e| format!("unable to connect to docker: {e:?}"))?;
+            Some(client)
+        } else {
+            None
         };
 
         Ok(DevnetOrchestrator {
             name,
             network_name,
             manifest,
-            network_config: Some(network_config),
+            network_config,
             docker_client,
             can_exit: true,
             termination_success_tx: None,
@@ -230,11 +224,15 @@ impl DevnetOrchestrator {
         })
     }
 
-    fn get_devnet_config(&self) -> Result<&DevnetConfig, String> {
+    pub fn network_config(&self) -> &NetworkManifest {
+        &self.network_config
+    }
+
+    pub fn devnet_config(&self) -> &DevnetConfig {
         self.network_config
+            .devnet
             .as_ref()
-            .and_then(|config| config.devnet.as_ref())
-            .ok_or_else(|| "unable to get devnet configuration".to_string())
+            .expect("checked in DevnetOrchestrator::new")
     }
 
     async fn pull_image(&self, image_url: &str, platform: String) -> Result<(), String> {
@@ -292,29 +290,9 @@ impl DevnetOrchestrator {
         result
     }
 
-    pub fn prepare_network_k8s_coordinator(
-        &mut self,
-        namespace: &str,
-    ) -> Result<ServicesMapHosts, String> {
-        let services_map_hosts = ServicesMapHosts {
-            bitcoin_node_host: format!(
-                "bitcoind-chain-coordinator.{namespace}.svc.cluster.local:18443"
-            ),
-            stacks_node_host: format!("stacks-blockchain.{namespace}.svc.cluster.local:20443"),
-            postgres_host: format!("stacks-blockchain-api.{namespace}.svc.cluster.local:5432"),
-            stacks_api_host: format!("stacks-blockchain-api.{namespace}.svc.cluster.local:3999"),
-            stacks_explorer_host: "localhost".into(),
-            bitcoin_explorer_host: "localhost".into(),
-        };
-
-        self.services_map_hosts = Some(services_map_hosts.clone());
-
-        Ok(services_map_hosts)
-    }
-
     pub async fn prepare_local_network(&mut self) -> Result<ServicesMapHosts, String> {
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
 
         // prune any staled resources from previous sessions
         self.clean_previous_session().await?;
@@ -398,7 +376,7 @@ impl DevnetOrchestrator {
         save_container_logs: bool,
     ) -> Result<(), String> {
         self.save_container_logs = save_container_logs;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
 
         let mut boot_index = 1;
 
@@ -616,7 +594,7 @@ impl DevnetOrchestrator {
         boot_index: u32,
         no_snapshot: bool,
     ) -> Result<Config<String>, String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
 
         let port_bindings = HashMap::from([
             (
@@ -647,7 +625,6 @@ impl DevnetOrchestrator {
             dnsseed=0
             listenonion=0
             rpcworkqueue=100
-            rpcserialversion=1
             disablewallet=0
             fallbackfee=0.00001
 
@@ -676,7 +653,7 @@ impl DevnetOrchestrator {
         bitcoind_data_path.push("data");
         bitcoind_data_path.push(format!("{boot_index}"));
         bitcoind_data_path.push("bitcoin");
-        fs::create_dir_all(bitcoind_data_path)
+        fs::create_dir_all(&bitcoind_data_path)
             .map_err(|e| format!("unable to create bitcoin directory: {e:?}"))?;
 
         let exposed_ports = HashMap::from([
@@ -696,6 +673,16 @@ impl DevnetOrchestrator {
         if devnet_config.bitcoin_controller_automining_disabled {
             env.push("STACKS_BITCOIN_AUTOMINING_DISABLED=1".to_string());
         }
+        // The bitcoin/bitcoin entrypoint runs bitcoind under this uid, so files in the
+        // bind-mounted datadir and those restored by `docker cp` stay owned by the host user.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let uid = fs::metadata(&bitcoind_data_path)
+                .map_err(|e| format!("unable to read bitcoin directory metadata: {e:?}"))?
+                .uid();
+            env.push(format!("UID={uid}"));
+        }
 
         let working_dir = &devnet_config.working_dir;
         let mut binds = vec![format!("{working_dir}/conf:/etc/bitcoin")];
@@ -707,7 +694,6 @@ impl DevnetOrchestrator {
         }
 
         let mut cmd_args = vec![
-            "/usr/local/bin/bitcoind".into(),
             "-conf=/etc/bitcoin/bitcoin.conf".into(),
             "-nodebuglogfile".into(),
             format!("-pid={BITCOIND_DATA_DIR}/bitcoind.pid"),
@@ -718,12 +704,10 @@ impl DevnetOrchestrator {
         }
         let config = Config {
             labels: Some(labels),
-            user: Some("1000".to_string()), // Run as user 10000
             image: Some(devnet_config.bitcoin_node_image_url.clone()),
             domainname: Some(self.network_name.to_string()),
             tty: None,
             exposed_ports: Some(exposed_ports),
-            entrypoint: Some(vec![]),
             env: Some(env),
             host_config: Some(HostConfig {
                 auto_remove: Some(true),
@@ -745,14 +729,14 @@ impl DevnetOrchestrator {
         ctx: &Context,
         no_snapshot: bool,
     ) -> Result<(), String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         self.pull_image(
             &devnet_config.bitcoin_node_image_url.clone(),
             devnet_config.docker_platform.clone().unwrap_or_default(),
         )
         .await?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         let container_name = format!("bitcoin-node.{}", self.network_name);
         let options = CreateContainerOptions {
             name: container_name.as_str(),
@@ -832,38 +816,19 @@ impl DevnetOrchestrator {
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
 
-        docker
-            .start_container::<String>(container, None)
-            .await
-            .map_err(|e| formatted_docker_error("unable to start bitcoind container", e))?;
-        // Copy snapshot if available
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let bitcoin_snapshot = global_snapshot_dir.join("bitcoin").join("regtest");
-        // XXX This shouldn't be needed
-        let exec_config = bollard::exec::CreateExecOptions {
-            cmd: Some(vec!["mkdir", "-p", BITCOIND_DATA_DIR]),
-            attach_stdout: Some(false),
-            attach_stderr: Some(false),
-            ..Default::default()
-        };
-
-        let exec = docker
-            .create_exec(container, exec_config)
-            .await
-            .map_err(|e| format!("Failed to create exec for mkdir: {e}"))?;
-
-        docker
-            .start_exec(&exec.id, None)
-            .await
-            .map_err(|e| format!("Failed to create bitcoin directory: {e}"))?;
+        // Copied before start: bitcoind would otherwise race the copy and reindex a partial
+        // datadir, and the image entrypoint only chowns what is already there
         if !no_snapshot {
-            // Ensure the destination directory exists in the container
-            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
+            let devnet_config = self.devnet_config();
+            let bitcoin_snapshot = get_global_snapshot_dir(devnet_config)
+                .join("bitcoin")
+                .join("regtest");
+            let docker_host = devnet_config.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
                 &bitcoin_snapshot,
-                BITCOIND_DATA_DIR,
+                &format!("{BITCOIND_DATA_DIR}/regtest"),
                 devnet_event_tx,
                 "Bitcoin",
                 docker_host,
@@ -871,15 +836,17 @@ impl DevnetOrchestrator {
             .await?;
         }
 
+        docker
+            .start_container::<String>(container, None)
+            .await
+            .map_err(|e| formatted_docker_error("unable to start bitcoind container", e))?;
+
         Ok(())
     }
 
     pub fn prepare_stacks_node_config(&self, boot_index: u32) -> Result<Config<String>, String> {
-        let network_config = self
-            .network_config
-            .as_ref()
-            .ok_or("unable to get network configuration")?;
-        let devnet_config = self.get_devnet_config()?;
+        let network_config = &self.network_config;
+        let devnet_config = self.devnet_config();
 
         let port_bindings = HashMap::from([
             (
@@ -987,7 +954,6 @@ impl DevnetOrchestrator {
             poll_time_secs = 1
             timeout = 2
             peer_host = "host.docker.internal"
-            rpc_ssl = false
             wallet_name = "{miner_wallet_name}"
             username = "{bitcoin_node_username}"
             password = "{bitcoin_node_password}"
@@ -1093,14 +1059,14 @@ impl DevnetOrchestrator {
         boot_index: u32,
         ctx: &Context,
     ) -> Result<(), String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         self.pull_image(
             &devnet_config.stacks_node_image_url.clone(),
             devnet_config.docker_platform.clone().unwrap_or_default(),
         )
         .await?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         let options = CreateContainerOptions {
             name: format!("stacks-node.{}", self.network_name),
             platform: devnet_config.docker_platform.clone(),
@@ -1130,11 +1096,11 @@ impl DevnetOrchestrator {
             .as_ref()
             .ok_or("unable to boot container")?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let global_snapshot_dir = get_global_snapshot_dir();
-        let stacks_snapshot = global_snapshot_dir.join("stacks").join("krypton");
 
         if !no_snapshot {
-            let docker_host = self.get_devnet_config()?.docker_host.as_deref();
+            let devnet_config = self.devnet_config();
+            let stacks_snapshot = get_global_snapshot_dir(devnet_config).join("stacks");
+            let docker_host = devnet_config.docker_host.as_deref();
 
             copy_snapshot_to_container(
                 container,
@@ -1161,7 +1127,7 @@ impl DevnetOrchestrator {
         signer_id: u32,
         signer_key: &StacksPrivateKey,
     ) -> Result<Config<String>, String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
 
         let signer_conf = formatdoc!(
             r#"
@@ -1243,14 +1209,14 @@ impl DevnetOrchestrator {
         signer_id: u32,
         signer_key: &StacksPrivateKey,
     ) -> Result<(), String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         self.pull_image(
             &devnet_config.stacks_signer_image_url.clone(),
             devnet_config.docker_platform.clone().unwrap_or_default(),
         )
         .await?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         let options = CreateContainerOptions {
             name: format!("stacks-signer-{signer_id}.{}", self.network_name),
             platform: devnet_config.docker_platform.clone(),
@@ -1289,14 +1255,14 @@ impl DevnetOrchestrator {
     }
 
     pub async fn prepare_stacks_api_container(&mut self, ctx: &Context) -> Result<(), String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         self.pull_image(
             &devnet_config.stacks_api_image_url.clone(),
             devnet_config.docker_platform.clone().unwrap_or_default(),
         )
         .await?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         let options = CreateContainerOptions {
             name: format!("stacks-api.{}", self.network_name),
             platform: devnet_config.docker_platform.clone(),
@@ -1375,23 +1341,10 @@ impl DevnetOrchestrator {
     }
 
     fn has_events_to_import(&self, devnet_config: &DevnetConfig) -> Option<PathBuf> {
-        let project_events_path = PathBuf::from(&devnet_config.working_dir)
+        let events_path = get_global_snapshot_dir(devnet_config)
             .join("events_export")
             .join("events_cache.tsv");
-
-        if project_events_path.exists() {
-            Some(project_events_path)
-        } else {
-            let global_events_path = get_global_snapshot_dir()
-                .join("events_export")
-                .join("events_cache.tsv");
-
-            if global_events_path.exists() {
-                Some(global_events_path)
-            } else {
-                None
-            }
-        }
+        events_path.exists().then_some(events_path)
     }
     pub async fn boot_stacks_api_container(
         &self,
@@ -1409,12 +1362,7 @@ impl DevnetOrchestrator {
             .await
             .map_err(|e| formatted_docker_error("unable to start stacks-api container", e))?;
 
-        let Some(network_config) = &self.network_config else {
-            return Ok(());
-        };
-        let Some(devnet_config) = &network_config.devnet else {
-            return Ok(());
-        };
+        let devnet_config = self.devnet_config();
 
         // Check if we need to import events
         if !no_snapshot {
@@ -1485,7 +1433,7 @@ impl DevnetOrchestrator {
     }
 
     pub async fn prepare_postgres_container(&mut self, ctx: &Context) -> Result<(), String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         self.pull_image(
             &devnet_config.postgres_image_url.clone(),
             devnet_config.docker_platform.clone().unwrap_or_default(),
@@ -1554,7 +1502,7 @@ impl DevnetOrchestrator {
     }
 
     pub async fn prepare_stacks_explorer_container(&mut self, ctx: &Context) -> Result<(), String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         // default platform to linux/amd64 since the image is built for that
         let platform = devnet_config
             .docker_platform
@@ -1566,7 +1514,7 @@ impl DevnetOrchestrator {
         )
         .await?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         let options = CreateContainerOptions {
             name: format!("stacks-explorer.{}", self.network_name),
             platform: Some(platform),
@@ -1650,7 +1598,7 @@ impl DevnetOrchestrator {
         &mut self,
         ctx: &Context,
     ) -> Result<(), String> {
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         // default platform to linux/amd64 since the image is built for that
         let platform = devnet_config
             .docker_platform
@@ -1662,7 +1610,7 @@ impl DevnetOrchestrator {
         )
         .await?;
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
         let options = CreateContainerOptions {
             name: format!("bitcoin-explorer.{}", self.network_name),
             platform: Some(platform),
@@ -1841,11 +1789,7 @@ impl DevnetOrchestrator {
             .prune_containers(Some(PruneContainersOptions { filters }))
             .await;
 
-        let platform = self
-            .network_config
-            .as_ref()
-            .and_then(|c| c.devnet.as_ref())
-            .and_then(|c| c.docker_platform.clone());
+        let platform = self.devnet_config().docker_platform.clone();
 
         let bitcoin_options = CreateContainerOptions {
             name: format!("bitcoin-node.{}", self.network_name),
@@ -1893,9 +1837,7 @@ impl DevnetOrchestrator {
         let Some(docker) = self.docker_client.as_ref() else {
             return;
         };
-        let Ok(devnet_config) = self.get_devnet_config() else {
-            return;
-        };
+        let devnet_config = self.devnet_config();
 
         let options = Some(KillContainerOptions { signal: "SIGKILL" });
 
@@ -1965,7 +1907,7 @@ impl DevnetOrchestrator {
             .await;
     }
 
-    pub async fn initialize_bitcoin_node(
+    async fn initialize_bitcoin_node(
         &self,
         devnet_event_tx: &Sender<DevnetEvent>,
         no_snapshot: bool,
@@ -1975,12 +1917,8 @@ impl DevnetOrchestrator {
         use bitcoincore_rpc::bitcoin::Address;
         use serde_json::json;
 
-        let devnet_config = self.get_devnet_config()?;
-        let accounts = self
-            .network_config
-            .as_ref()
-            .map(|config| &config.accounts)
-            .ok_or_else(|| "unable to initialize bitcoin node".to_string())?;
+        let devnet_config = self.devnet_config();
+        let accounts = &self.network_config.accounts;
 
         let miner_address = Address::from_str(&devnet_config.miner_btc_address)
             .map_err(|e| format!("unable to create miner address: {e:?}"))?;
@@ -2147,40 +2085,36 @@ impl DevnetOrchestrator {
             .await?;
         }
 
-        // Before generating a block, verify the chain is fully synced.
+        // bitcoind loads the mempool only after the -reindex import finishes. Not
+        // `verificationprogress`: on Bitcoin Core 31 regtest it stays below 1 while the tip is old.
         let mut error_count = 0;
         loop {
             let response: JsonRpcResponse = btc_rpc
-                .call("getblockchaininfo", json!([]))
+                .call("getmempoolinfo", json!([]))
                 .await
-                .map_err(|e| format!("unable to send 'getblockchaininfo' request ({e})"))?
+                .map_err(|e| format!("unable to send 'getmempoolinfo' request ({e})"))?
                 .json()
                 .await
-                .map_err(|e| format!("unable to parse 'getblockchaininfo' result: {e}"))?;
+                .map_err(|e| format!("unable to parse 'getmempoolinfo' result: {e}"))?;
 
-            let info: GetBlockchainInfoResult = response
+            let MempoolLoadInfo { loaded } = response
                 .result()
-                .map_err(|e| format!("unable to parse 'getblockchaininfo' result: {e}"))?;
+                .map_err(|e| format!("unable to parse 'getmempoolinfo' result: {e}"))?;
 
-            let verification_progress = info.verification_progress;
-
-            if verification_progress >= 1.0 {
-                let _ = devnet_event_tx.send(DevnetEvent::info(
-                    "Blockchain verification completed".to_string(),
-                ));
+            if loaded {
+                let _ = devnet_event_tx.send(DevnetEvent::info("Bitcoin chain loaded".to_string()));
                 break;
             }
 
             error_count += 1;
             if error_count > MAX_ERRORS {
-                return Err("Blockchain verification timeout".to_string());
+                return Err("Timed out waiting for bitcoind to load the chain".to_string());
             }
 
             tokio::time::sleep(Duration::from_millis(1000)).await;
-            let _ = devnet_event_tx.send(DevnetEvent::info(format!(
-                "Verification progress: {:.2}%",
-                verification_progress * 100.0
-            )));
+            let _ = devnet_event_tx.send(DevnetEvent::info(
+                "Waiting for bitcoind to load the chain".to_string(),
+            ));
         }
 
         if !no_snapshot {
@@ -2205,7 +2139,7 @@ impl DevnetOrchestrator {
         }
 
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-        let devnet_config = self.get_devnet_config()?;
+        let devnet_config = self.devnet_config();
 
         // Start streaming stacks-node logs
         if let Some(container_id) = &self.stacks_node_container_id {
@@ -2344,9 +2278,13 @@ fn formatted_docker_error(message: &str, error: DockerError) -> String {
     format!("{message}: {error}")
 }
 
-pub fn get_global_snapshot_dir() -> std::path::PathBuf {
+pub fn get_snapshot_cache_root() -> PathBuf {
     let home_dir = dirs::home_dir().expect("Unable to retrieve home dir");
     home_dir.join(".clarinet").join("cache").join("devnet")
+}
+
+pub fn get_global_snapshot_dir(devnet_config: &DevnetConfig) -> PathBuf {
+    SnapshotImages::from(devnet_config).cache_dir(&get_snapshot_cache_root())
 }
 
 pub fn get_project_snapshot_dir(devnet_config: &DevnetConfig) -> std::path::PathBuf {
@@ -2417,12 +2355,10 @@ pub async fn copy_snapshot_to_container(
         "Copying {service_name} snapshot to container..."
     )));
 
-    // Use docker cp command which handles directory creation better
+    // `src/.` copies the contents and creates `dest_path` if it is missing (no bind mount)
     let copy_command = format!(
-        "docker cp {}/ {}:{}",
-        source_path.display(),
-        container_id,
-        dest_path
+        "docker cp {}/. {container_id}:{dest_path}",
+        source_path.display()
     );
     let output = run_docker_command(&copy_command, docker_host)
         .map_err(|e| format!("Failed to execute docker cp: {e}"))?;
@@ -2443,7 +2379,74 @@ pub async fn copy_snapshot_to_container(
 
 #[cfg(test)]
 mod tests {
+    use clarinet_files::DEFAULT_BITCOIN_NODE_IMAGE;
+
     use super::*;
+
+    fn test_orchestrator() -> (tempfile::TempDir, DevnetOrchestrator) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("settings")).unwrap();
+        fs::write(root.join("Clarinet.toml"), "[project]\nname = \"test\"\n").unwrap();
+        let working_dir = root.join("devnet").display().to_string();
+        let devnet_settings =
+            format!("[network]\nname = \"devnet\"\n\n[devnet]\nworking_dir = {working_dir:?}\n");
+        fs::write(root.join("settings").join("Devnet.toml"), devnet_settings).unwrap();
+        let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
+        let orchestrator = DevnetOrchestrator::new(manifest, false).unwrap();
+        (dir, orchestrator)
+    }
+
+    #[test]
+    fn bitcoin_conf_omits_options_removed_in_core_28() {
+        let (root, orchestrator) = test_orchestrator();
+
+        orchestrator.prepare_bitcoin_node_config(1, true).unwrap();
+        let conf = fs::read_to_string(root.path().join("devnet").join("conf").join("bitcoin.conf"))
+            .unwrap();
+        assert!(!conf.contains("rpcserialversion"));
+    }
+
+    #[test]
+    fn bitcoin_node_runs_through_the_image_entrypoint() {
+        let (root, orchestrator) = test_orchestrator();
+
+        let config = orchestrator.prepare_bitcoin_node_config(1, true).unwrap();
+        assert_eq!(config.image.as_deref(), Some(DEFAULT_BITCOIN_NODE_IMAGE));
+        // bitcoin/bitcoin drops privileges in its entrypoint, which needs to start as root
+        assert_eq!(config.user, None);
+        assert_eq!(config.entrypoint, None);
+        let cmd = config.cmd.unwrap();
+        assert!(cmd.iter().all(|arg| arg.starts_with('-')), "{cmd:?}");
+        assert_eq!(cmd[0], "-conf=/etc/bitcoin/bitcoin.conf");
+        assert!(cmd.contains(&format!("-datadir={BITCOIND_DATA_DIR}")));
+        assert!(!cmd.contains(&"-reindex".to_string()));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let uid = fs::metadata(root.path()).unwrap().uid();
+            assert_eq!(config.env.unwrap(), vec![format!("UID={uid}")]);
+        }
+        #[cfg(not(unix))]
+        assert_eq!(config.env.unwrap(), Vec::<String>::new());
+
+        let with_snapshot = orchestrator.prepare_bitcoin_node_config(1, false).unwrap();
+        assert!(with_snapshot.cmd.unwrap().contains(&"-reindex".to_string()));
+    }
+
+    #[test]
+    fn stacks_node_config_names_the_miner_wallet() {
+        let (root, orchestrator) = test_orchestrator();
+
+        let conf_dir = root.path().join("devnet").join("conf");
+        fs::create_dir_all(&conf_dir).unwrap();
+        orchestrator.prepare_stacks_node_config(1).unwrap();
+        let conf = fs::read_to_string(conf_dir.join("Stacks.toml")).unwrap();
+        assert!(conf.contains("wallet_name = \"miner\""));
+        // stacks-node 4.0.5 rejects unknown burnchain fields
+        assert!(!conf.contains("rpc_ssl"));
+    }
 
     #[test]
     fn serializes_selective_stacks_node_event_observers() {
