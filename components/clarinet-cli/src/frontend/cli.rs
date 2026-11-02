@@ -2146,7 +2146,7 @@ fn add_remap_to_doc(doc: &mut DocumentMut, source: &str, remap: &RemapConfig) {
     let entry = doc
         .entry("remap")
         .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
+        .as_table_like_mut()
         .expect("[remap] should be a table")
         .entry(source)
         .or_insert(toml_edit::value(InlineTable::new()))
@@ -2822,45 +2822,48 @@ mod tests {
         }
 
         #[test]
-        fn test_add_remap() {
-            let input = indoc! {r#"
-                [project]
-                name = "test-project"
+        fn test_add_remap_preserves_destinations_in_regular_and_inline_tables() {
+            const SOURCE: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait";
+            const TESTNET: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait";
+            const MAINNET: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.nft-trait";
+            const OTHER: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait";
 
-                [remap]
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait" = { mainnet = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.nft-trait" }
-            "#};
+            for input in [
+                format!("[remap]\n\"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }}"),
+                format!("remap = {{ \"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }} }}"),
+                "remap = {}".to_string(),
+            ] {
+                let mut doc: DocumentMut = input.parse().unwrap();
+                add_remap_to_doc(
+                    &mut doc,
+                    SOURCE,
+                    &RemapConfig {
+                        mainnet: Some(MAINNET.into()),
+                        testnet: None,
+                    },
+                );
+                add_remap_to_doc(
+                    &mut doc,
+                    SOURCE,
+                    &RemapConfig {
+                        testnet: Some(TESTNET.into()),
+                        mainnet: None,
+                    },
+                );
+                add_remap_to_doc(
+                    &mut doc,
+                    OTHER,
+                    &RemapConfig {
+                        mainnet: Some(MAINNET.into()),
+                        testnet: None,
+                    },
+                );
 
-            let mut doc: DocumentMut = input.parse().expect("Failed to parse TOML");
-            // A new network is added to an existing entry, keeping the other one.
-            add_remap_to_doc(
-                &mut doc,
-                "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
-                &RemapConfig {
-                    testnet: Some("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait".into()),
-                    mainnet: None,
-                },
-            );
-            add_remap_to_doc(
-                &mut doc,
-                "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait",
-                &RemapConfig {
-                    testnet: None,
-                    mainnet: Some("SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.real-trait".into()),
-                },
-            );
-
-            assert_eq!(
-                doc.to_string(),
-                indoc! {r#"
-                    [project]
-                    name = "test-project"
-
-                    [remap]
-                    "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait" = { mainnet = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.nft-trait", testnet = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait" }
-                    "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait" = { mainnet = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.real-trait" }
-                "#}
-            );
+                let saved: DocumentMut = doc.to_string().parse().unwrap();
+                assert_eq!(saved["remap"][SOURCE]["testnet"].as_str(), Some(TESTNET));
+                assert_eq!(saved["remap"][SOURCE]["mainnet"].as_str(), Some(MAINNET));
+                assert_eq!(saved["remap"][OTHER]["mainnet"].as_str(), Some(MAINNET));
+            }
         }
 
         #[test]
