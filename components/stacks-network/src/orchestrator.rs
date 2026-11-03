@@ -10,9 +10,8 @@ use bitcoincore_rpc::bitcoin::hex::DisplayHex;
 use bitcoincore_rpc::json::GetDescriptorInfoResult;
 use bitcoincore_rpc::jsonrpc::Response as JsonRpcResponse;
 use bollard::container::{
-    Config, CreateContainerOptions, InspectContainerOptions, KillContainerOptions,
-    ListContainersOptions, LogsOptions, PruneContainersOptions, RemoveContainerOptions,
-    WaitContainerOptions,
+    Config, CreateContainerOptions, InspectContainerOptions, ListContainersOptions, LogsOptions,
+    PruneContainersOptions, RemoveContainerOptions, WaitContainerOptions,
 };
 use bollard::errors::Error as DockerError;
 use bollard::image::CreateImageOptions;
@@ -576,14 +575,7 @@ impl DevnetOrchestrator {
         let mut exits: FuturesUnordered<_> = nodes
             .chain(signers)
             .map(|(name, id)| async move {
-                wait_for_container_exit(
-                    docker,
-                    &name,
-                    id,
-                    WAIT_RETRY_DELAY,
-                    DOCKER_UNREACHABLE_TIMEOUT,
-                )
-                .await
+                wait_for_container_exit(docker, &name, id, &WATCH_TIMINGS).await
             })
             .collect();
         match exits.next().await {
@@ -749,11 +741,9 @@ impl DevnetOrchestrator {
             Ok(container) => container.id,
             Err(_e) => {
                 // Attempt to clean eventual subsequent artifacts
-                let remove = RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                };
-                let _ = docker.remove_container(&container_name, Some(remove)).await;
+                let _ = docker
+                    .remove_container(&container_name, Some(FORCE_REMOVE))
+                    .await;
                 docker
                     .create_container::<&str, String>(Some(options), config)
                     .await
@@ -786,19 +776,10 @@ impl DevnetOrchestrator {
             format!("unable to communicate with Docker: {e}\nvisit {url} to resolve this issue.")
         })?;
 
-        let options = KillContainerOptions { signal: "SIGKILL" };
-
-        for container in containers.iter() {
-            let Some(container_id) = &container.id else {
-                continue;
-            };
+        // Removed here rather than pruned, since a prune leaves the anonymous volumes behind
+        for container_id in containers.iter().filter_map(|c| c.id.as_ref()) {
             let _ = docker
-                .kill_container(container_id, Some(options.clone()))
-                .await;
-
-            let _ = docker
-                .wait_container(container_id, None::<WaitContainerOptions<String>>)
-                .try_collect::<Vec<_>>()
+                .remove_container(container_id, Some(FORCE_REMOVE))
                 .await;
         }
         self.prune().await;
@@ -1681,8 +1662,6 @@ impl DevnetOrchestrator {
         };
         let devnet_config = self.devnet_config();
 
-        let options = Some(KillContainerOptions { signal: "SIGKILL" });
-
         // Terminate containers
         let container_ids = [
             &self.bitcoin_explorer_container_id,
@@ -1698,9 +1677,10 @@ impl DevnetOrchestrator {
             .flatten()
             .chain(&self.stacks_signers_containers_ids)
         {
-            let _ = docker.kill_container(container_id, options.clone()).await;
             ctx.try_log(|logger| slog::info!(logger, "Terminating container: {}", &container_id));
-            let _ = docker.remove_container(container_id, None).await;
+            let _ = docker
+                .remove_container(container_id, Some(FORCE_REMOVE))
+                .await;
         }
 
         // By id, not name or label: a newer session for the same project reuses both
@@ -2056,34 +2036,51 @@ impl DevnetOrchestrator {
     }
 }
 
-const WAIT_RETRY_DELAY: Duration = Duration::from_secs(1);
+/// Kills a running container, and removes its anonymous volumes along with it, as
+/// `auto_remove` would: node and signer containers are not auto-removed.
+const FORCE_REMOVE: RemoveContainerOptions = RemoveContainerOptions {
+    v: true,
+    force: true,
+    link: false,
+};
 
-/// How long Docker may stay unreachable before the watch gives up.
-const DOCKER_UNREACHABLE_TIMEOUT: Duration = Duration::from_secs(30);
+struct WatchTimings {
+    retry_delay: Duration,
+    /// bollard's client timeout stops at the response headers, so a wait on a daemon that
+    /// freezes mid-wait would otherwise never return
+    max_wait: Duration,
+    /// How long Docker may stay unreachable before the watch gives up
+    unreachable_timeout: Duration,
+}
+
+const WATCH_TIMINGS: WatchTimings = WatchTimings {
+    retry_delay: Duration::from_secs(1),
+    max_wait: Duration::from_secs(60),
+    unreachable_timeout: Duration::from_secs(30),
+};
 
 async fn wait_for_container_exit(
     docker: &Docker,
     name: &str,
     container_id: &str,
-    retry_delay: Duration,
-    unreachable_timeout: Duration,
+    timings: &WatchTimings,
 ) -> String {
+    let removed = format!("{name} container was removed unexpectedly");
     let mut unreachable_since = None;
     let code = loop {
         let attempt = Instant::now();
-        let status = docker
-            .wait_container(container_id, None::<WaitContainerOptions<String>>)
-            .try_next()
-            .await;
-        match status {
-            Ok(Some(response)) => break response.status_code,
-            Err(DockerError::DockerContainerWaitError { code, .. }) => break code,
-            Ok(None)
-            | Err(DockerError::DockerResponseServerError {
-                status_code: 404, ..
-            }) => return format!("{name} container was removed unexpectedly"),
-            // A dropped connection is not an exit: wait again while Docker still answers
-            Err(e) => {
+        let mut wait = docker.wait_container(container_id, None::<WaitContainerOptions<String>>);
+        match tokio::time::timeout(timings.max_wait, wait.try_next()).await {
+            Ok(Ok(Some(response))) => break response.status_code,
+            Ok(Err(DockerError::DockerContainerWaitError { code, .. })) => break code,
+            Ok(
+                Ok(None)
+                | Err(DockerError::DockerResponseServerError {
+                    status_code: 404, ..
+                }),
+            ) => return removed,
+            // A dropped or stalled wait is not an exit: wait again while Docker still answers
+            Ok(Err(_)) | Err(_) => {
                 let inspect = docker
                     .inspect_container(container_id, None::<InspectContainerOptions>)
                     .await;
@@ -2095,15 +2092,18 @@ async fn wait_for_container_exit(
                         ..
                     })) => break code,
                     Ok(_) => unreachable_since = None,
-                    Err(_) => {
+                    Err(DockerError::DockerResponseServerError {
+                        status_code: 404, ..
+                    }) => return removed,
+                    Err(e) => {
                         // Timed from the failed wait, since each call can block for the client timeout
                         let since = *unreachable_since.get_or_insert(attempt);
-                        if since.elapsed() >= unreachable_timeout {
+                        if since.elapsed() >= timings.unreachable_timeout {
                             return format!("unable to watch the {name} container: {e}");
                         }
                     }
                 }
-                tokio::time::sleep(retry_delay).await;
+                tokio::time::sleep(timings.retry_delay).await;
             }
         }
     };
@@ -2473,9 +2473,31 @@ mod tests {
         (root, server, orchestrator)
     }
 
+    const NO_DELAY: WatchTimings = WatchTimings {
+        retry_delay: Duration::ZERO,
+        max_wait: Duration::from_secs(5),
+        unreachable_timeout: Duration::ZERO,
+    };
+
     async fn wait_without_delay(docker: &Docker) -> String {
-        wait_for_container_exit(docker, "stacks-node", "abc", Duration::ZERO, Duration::ZERO).await
+        wait_for_container_exit(docker, "stacks-node", "abc", &NO_DELAY).await
     }
+
+    /// A response whose headers arrive but whose body stalls, like a wait on a frozen daemon.
+    fn stalled(mock: mockito::Mock) -> mockito::Mock {
+        mock.with_chunked_body(|_| {
+            std::thread::sleep(Duration::from_secs(1));
+            Ok(())
+        })
+    }
+
+    fn mock_inspect(server: &mut mockito::ServerGuard, status: usize, body: &str) -> mockito::Mock {
+        mock(server, "GET", "/containers/abc/json")
+            .with_status(status)
+            .with_body(body)
+    }
+
+    const EXITED_137: &str = r#"{"State":{"Status":"exited","Running":false,"ExitCode":137}}"#;
 
     #[tokio::test]
     async fn reports_a_removed_node() {
@@ -2492,8 +2514,7 @@ mod tests {
     async fn keeps_waiting_while_docker_answers_for_the_container() {
         let (mut server, docker) = mock_docker().await;
         mock_wait(&mut server, 500, "{}").await;
-        let inspect = mock(&mut server, "GET", "/containers/abc/json")
-            .with_body("{}")
+        let inspect = mock_inspect(&mut server, 200, "{}")
             .expect_at_least(2)
             .create_async()
             .await;
@@ -2507,8 +2528,7 @@ mod tests {
     async fn reports_an_exit_that_only_inspect_sees() {
         let (mut server, docker) = mock_docker().await;
         mock_wait(&mut server, 500, "{}").await;
-        mock(&mut server, "GET", "/containers/abc/json")
-            .with_body(r#"{"State":{"Status":"exited","Running":false,"ExitCode":137}}"#)
+        mock_inspect(&mut server, 200, EXITED_137)
             .create_async()
             .await;
 
@@ -2519,17 +2539,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gives_up_once_docker_stays_unreachable() {
+    async fn stops_waiting_when_the_wait_stalls() {
+        let (mut server, docker) = mock_docker().await;
+        stalled(mock(&mut server, "POST", "/containers/abc/wait"))
+            .create_async()
+            .await;
+        mock_inspect(&mut server, 200, EXITED_137)
+            .create_async()
+            .await;
+        let timings = WatchTimings {
+            max_wait: Duration::from_millis(100),
+            ..NO_DELAY
+        };
+
+        assert_eq!(
+            wait_for_container_exit(&docker, "stacks-node", "abc", &timings).await,
+            "stacks-node container exited unexpectedly (exit code 137)"
+        );
+    }
+
+    #[tokio::test]
+    async fn reports_a_node_removed_while_the_wait_was_down() {
         let (mut server, docker) = mock_docker().await;
         mock_wait(&mut server, 500, "{}").await;
-        mock(&mut server, "GET", "/containers/abc/json")
-            .with_status(500)
-            .with_body("{}")
+        mock_inspect(&mut server, 404, r#"{"message":"No such container"}"#)
             .create_async()
             .await;
 
-        let message = wait_without_delay(&docker).await;
+        assert_eq!(
+            wait_without_delay(&docker).await,
+            "stacks-node container was removed unexpectedly"
+        );
+    }
+
+    #[tokio::test]
+    async fn gives_up_once_docker_stays_unreachable() {
+        let (mut server, docker) = mock_docker().await;
+        mock_wait(&mut server, 500, "{}").await;
+        let inspect = mock_inspect(&mut server, 500, "{}")
+            .expect_at_least(2)
+            .create_async()
+            .await;
+        let timings = WatchTimings {
+            retry_delay: Duration::from_millis(10),
+            unreachable_timeout: Duration::from_millis(300),
+            ..NO_DELAY
+        };
+
+        let started = Instant::now();
+        let message = wait_for_container_exit(&docker, "stacks-node", "abc", &timings).await;
         assert!(message.starts_with("unable to watch the stacks-node container"));
+        assert!(started.elapsed() >= timings.unreachable_timeout);
+        inspect.assert_async().await;
     }
 
     #[tokio::test]
@@ -2556,7 +2617,7 @@ mod tests {
         );
     }
 
-    async fn start_with_mocked_docker(shutdown_requested: bool) -> Result<(), String> {
+    async fn start_with_mocked_docker(shutdown_while_booting: bool) -> Result<(), String> {
         let (_root, mut orchestrator) = test_orchestrator();
         let (mut server, docker) = mock_docker().await;
         orchestrator.docker_client = Some(docker);
@@ -2565,14 +2626,20 @@ mod tests {
         // kill must remove this session's resources by id, and never prune or remove the
         // network by name, since a newer session for the same project shares both
         let network_name = orchestrator.network_name.replace('.', "\\.");
+        let removed_with_volumes = mock(&mut server, "DELETE", "/containers/btc")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("force".into(), "true".into()),
+                mockito::Matcher::UrlEncoded("v".into(), "true".into()),
+            ]))
+            .with_status(204)
+            .expect(1);
+        let mut teardown = vec![removed_with_volumes.create_async().await];
         let calls = [
-            ("DELETE", "/containers/btc".to_string(), 1),
             ("DELETE", "/networks/net".to_string(), 1),
             ("POST", "/containers/prune".to_string(), 0),
             ("POST", "/networks/prune".to_string(), 0),
             ("DELETE", format!("/networks/{network_name}"), 0),
         ];
-        let mut teardown = vec![];
         for (method, path, expected) in calls {
             let mock = mock(&mut server, method, &path)
                 .with_status(204)
@@ -2581,8 +2648,16 @@ mod tests {
         }
         let (event_tx, _event_rx) = std::sync::mpsc::channel();
         let (terminator_tx, terminator_rx) = tokio::sync::mpsc::unbounded_channel();
-        if shutdown_requested {
-            terminator_tx.send(()).unwrap();
+        if shutdown_while_booting {
+            // boot is still pulling the bitcoin-node image when the shutdown arrives
+            let pull = stalled(mock(&mut server, "POST", "/images/create"))
+                .match_query(mockito::Matcher::Any)
+                .expect(1);
+            teardown.push(pull.create_async().await);
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                terminator_tx.send(()).unwrap();
+            });
         }
 
         let result = orchestrator
