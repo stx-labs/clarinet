@@ -293,7 +293,9 @@ export function parseEvents(events: string): ClarityEvent[] {
 
 export function parseCosts(costs: string): ClarityCosts | null {
   try {
-    let { memory, memory_limit, total, limit } = JSON.parse(costs);
+    const parsed = JSON.parse(costs);
+    if (parsed === null) return null;
+    const { memory, memory_limit, total, limit } = parsed;
     return {
       memory: memory,
       memory_limit: memory_limit,
