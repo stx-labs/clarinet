@@ -50,6 +50,7 @@ default = []
 stacks-signers = ["observer/stacks-signers"]
 
 [dev-dependencies]
+mockito = { workspace = true }
 stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 tempfile = { workspace = true }
 
