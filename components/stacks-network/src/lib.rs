@@ -32,6 +32,7 @@ pub use orchestrator::DevnetOrchestrator;
 use orchestrator::{
     get_global_snapshot_dir, get_snapshot_cache_root, DEVNET_SNAPSHOT_READY_MARKER,
 };
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use self::chains_coordinator::DevnetEventObserverConfig;
 use self::snapshot_extractor::{SnapshotImages, SnapshotPlan};
@@ -46,7 +47,7 @@ pub enum ChainsCoordinatorCommand {
 /// On Unix: Handles both SIGINT (Ctrl+C) and SIGTERM (kill) gracefully
 /// On Windows: Handles Ctrl+C via ctrlc crate
 fn setup_signal_handlers(
-    orchestrator_terminator_tx: Sender<bool>,
+    orchestrator_terminator_tx: UnboundedSender<bool>,
     observer_command_tx: Sender<ObserverCommand>,
     mining_command_tx: Sender<BitcoinMiningCommand>,
     devnet_events_tx: Sender<DevnetEvent>,
@@ -167,7 +168,7 @@ pub fn do_run_local_devnet(
     let chains_coordinator_tx = devnet_events_tx.clone();
     let (chains_coordinator_commands_tx, chains_coordinator_commands_rx) =
         crossbeam_channel::unbounded();
-    let (orchestrator_terminator_tx, terminator_rx) = channel();
+    let (orchestrator_terminator_tx, terminator_rx) = unbounded_channel();
     let (observer_command_tx, observer_command_rx) = channel();
     let (mining_command_tx, mining_command_rx) = channel();
     let moved_mining_command_tx = mining_command_tx.clone();
