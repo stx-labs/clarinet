@@ -27,7 +27,7 @@ use clarinet_files::{
 };
 use clarity::types::chainstate::StacksPrivateKey;
 use clarity::types::PrivateKey;
-use futures::stream::TryStreamExt;
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use hiro_system_kit::slog;
 use indoc::formatdoc;
 use observer::utils::Context;
@@ -365,14 +365,12 @@ impl DevnetOrchestrator {
         save_container_logs: bool,
     ) -> Result<(), String> {
         self.save_container_logs = save_container_logs;
-        let booted = tokio::select! {
-            booted = self.boot(event_tx.clone(), ctx, no_snapshot) => Some(booted),
-            _ = terminator_rx.recv() => None,
-        };
-        let result = match booted {
-            Some(Ok(())) => self.wait_for_termination(&mut terminator_rx).await,
-            Some(Err(message)) => Err(message),
-            None => Ok(()),
+        let result = tokio::select! {
+            booted = self.boot(&event_tx, ctx, no_snapshot) => match booted {
+                Ok(()) => self.wait_for_termination(&mut terminator_rx).await,
+                Err(message) => Err(message),
+            },
+            _ = terminator_rx.recv() => Ok(()),
         };
         if let Err(message) = &result {
             let _ = event_tx.send(DevnetEvent::error(format!(
@@ -386,7 +384,7 @@ impl DevnetOrchestrator {
 
     async fn boot(
         &mut self,
-        event_tx: Sender<DevnetEvent>,
+        event_tx: &Sender<DevnetEvent>,
         ctx: &Context,
         no_snapshot: bool,
     ) -> Result<(), String> {
@@ -414,20 +412,20 @@ impl DevnetOrchestrator {
         let stacks_explorer_port = devnet_config.stacks_explorer_port;
         let stacks_api_port = devnet_config.stacks_api_port;
 
-        send_status_update(&event_tx, "bitcoin-node", Status::Red, "initializing");
+        send_status_update(event_tx, "bitcoin-node", Status::Red, "initializing");
 
-        send_status_update(&event_tx, "stacks-node", Status::Red, "initializing");
+        send_status_update(event_tx, "stacks-node", Status::Red, "initializing");
 
-        send_status_update(&event_tx, "stacks-signers", Status::Red, "initializing");
+        send_status_update(event_tx, "stacks-signers", Status::Red, "initializing");
 
         if !disable_stacks_api {
-            send_status_update(&event_tx, "stacks-api", Status::Red, "initializing");
+            send_status_update(event_tx, "stacks-api", Status::Red, "initializing");
         }
         if !disable_stacks_explorer {
-            send_status_update(&event_tx, "stacks-explorer", Status::Red, "initializing");
+            send_status_update(event_tx, "stacks-explorer", Status::Red, "initializing");
         }
         if !disable_bitcoin_explorer {
-            send_status_update(&event_tx, "bitcoin-explorer", Status::Red, "initializing");
+            send_status_update(event_tx, "bitcoin-explorer", Status::Red, "initializing");
         }
 
         let _ = event_tx.send(DevnetEvent::info(format!(
@@ -438,17 +436,17 @@ impl DevnetOrchestrator {
         // Start bitcoind
         let _ = event_tx.send(DevnetEvent::info("Starting bitcoin-node".to_string()));
         send_status_update(
-            &event_tx,
+            event_tx,
             "bitcoin-node",
             Status::Yellow,
             "preparing container",
         );
         self.prepare_bitcoin_node_container(ctx, no_snapshot)
             .await?;
-        send_status_update(&event_tx, "bitcoin-node", Status::Yellow, "booting");
-        self.boot_bitcoin_node_container(&event_tx, no_snapshot)
+        send_status_update(event_tx, "bitcoin-node", Status::Yellow, "booting");
+        self.boot_bitcoin_node_container(event_tx, no_snapshot)
             .await?;
-        self.initialize_bitcoin_node(&event_tx, no_snapshot).await?;
+        self.initialize_bitcoin_node(event_tx, no_snapshot).await?;
 
         // Start postgres container
         if !disable_postgres {
@@ -460,7 +458,7 @@ impl DevnetOrchestrator {
         // Start stacks-api
         if !disable_stacks_api {
             send_status_update(
-                &event_tx,
+                event_tx,
                 "stacks-api",
                 Status::Yellow,
                 "preparing container",
@@ -469,7 +467,7 @@ impl DevnetOrchestrator {
             self.prepare_stacks_api_container(ctx).await?;
             self.boot_stacks_api_container(ctx, no_snapshot).await?;
             send_status_update(
-                &event_tx,
+                event_tx,
                 "stacks-api",
                 Status::Green,
                 &format!("http://localhost:{stacks_api_port}/doc"),
@@ -478,10 +476,10 @@ impl DevnetOrchestrator {
 
         // Start stacks-node
         let _ = event_tx.send(DevnetEvent::info("Starting stacks-node".to_string()));
-        send_status_update(&event_tx, "stacks-node", Status::Yellow, "updating image");
+        send_status_update(event_tx, "stacks-node", Status::Yellow, "updating image");
         self.prepare_stacks_node_container(ctx).await?;
-        send_status_update(&event_tx, "stacks-node", Status::Yellow, "booting");
-        self.boot_stacks_node_container(&event_tx, no_snapshot)
+        send_status_update(event_tx, "stacks-node", Status::Yellow, "booting");
+        self.boot_stacks_node_container(event_tx, no_snapshot)
             .await?;
 
         // Start streaming container logs if enabled
@@ -489,16 +487,11 @@ impl DevnetOrchestrator {
 
         for (i, signer_key) in signers_keys.iter().enumerate() {
             let _ = event_tx.send(DevnetEvent::info(format!("Starting stacks-signer-{i}")));
-            send_status_update(
-                &event_tx,
-                "stacks-signers",
-                Status::Yellow,
-                "updating image",
-            );
+            send_status_update(event_tx, "stacks-signers", Status::Yellow, "updating image");
             self.prepare_stacks_signer_container(ctx, i as u32, signer_key)
                 .await?;
             send_status_update(
-                &event_tx,
+                event_tx,
                 "stacks-signers",
                 Status::Yellow,
                 &format!("booting signer {i}"),
@@ -511,12 +504,12 @@ impl DevnetOrchestrator {
             signers_count,
             if signers_count > 1 { "s" } else { "" }
         );
-        send_status_update(&event_tx, "stacks-signers", Status::Green, &message);
+        send_status_update(event_tx, "stacks-signers", Status::Green, &message);
 
         // Start stacks-explorer
         if !disable_stacks_explorer {
             send_status_update(
-                &event_tx,
+                event_tx,
                 "stacks-explorer",
                 Status::Yellow,
                 "preparing container",
@@ -525,7 +518,7 @@ impl DevnetOrchestrator {
             let _ = event_tx.send(DevnetEvent::info("Starting stacks-explorer".to_string()));
             self.boot_stacks_explorer_container(ctx).await?;
             send_status_update(
-                &event_tx,
+                event_tx,
                 "stacks-explorer",
                 Status::Green,
                 &format!("http://localhost:{stacks_explorer_port}"),
@@ -535,7 +528,7 @@ impl DevnetOrchestrator {
         // Start bitcoin-explorer
         if !disable_bitcoin_explorer {
             send_status_update(
-                &event_tx,
+                event_tx,
                 "bitcoin-explorer",
                 Status::Yellow,
                 "preparing container",
@@ -544,7 +537,7 @@ impl DevnetOrchestrator {
             let _ = event_tx.send(DevnetEvent::info("Starting bitcoin-explorer".to_string()));
             self.boot_bitcoin_explorer_container(ctx).await?;
             send_status_update(
-                &event_tx,
+                event_tx,
                 "bitcoin-explorer",
                 Status::Green,
                 &format!("http://localhost:{bitcoin_explorer_port}"),
@@ -570,23 +563,26 @@ impl DevnetOrchestrator {
             return std::future::pending().await;
         };
         let nodes = [
-            ("bitcoin-node".to_string(), &self.bitcoin_node_container_id),
-            ("stacks-node".to_string(), &self.stacks_node_container_id),
-        ];
-        let signers = self.stacks_signers_containers_ids.iter().enumerate();
-        let containers: Vec<(String, &String)> = nodes
-            .into_iter()
-            .filter_map(|(name, id)| Some((name, id.as_ref()?)))
-            .chain(signers.map(|(i, id)| (format!("stacks-signer-{i}"), id)))
+            ("bitcoin-node", &self.bitcoin_node_container_id),
+            ("stacks-node", &self.stacks_node_container_id),
+        ]
+        .into_iter()
+        .filter_map(|(name, id)| Some((name.to_string(), id.as_deref()?)));
+        let signers = self
+            .stacks_signers_containers_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (format!("stacks-signer-{i}"), id.as_str()));
+        let mut exits: FuturesUnordered<_> = nodes
+            .chain(signers)
+            .map(|(name, id)| async move {
+                wait_for_container_exit(docker, &name, id, WAIT_RETRY_DELAY).await
+            })
             .collect();
-        if containers.is_empty() {
-            return std::future::pending().await;
+        match exits.next().await {
+            Some(message) => message,
+            None => std::future::pending().await,
         }
-        let waits = containers.iter().map(|(name, id)| {
-            Box::pin(wait_for_container_exit(docker, name, id, WAIT_RETRY_DELAY))
-        });
-        let (message, _, _) = futures::future::select_all(waits).await;
-        message
     }
 
     pub fn prepare_bitcoin_node_config(&self, no_snapshot: bool) -> Result<Config<String>, String> {
@@ -1137,8 +1133,8 @@ impl DevnetOrchestrator {
         file.write_all(signer_conf.as_bytes())
             .map_err(|e| format!("unable to write Signer.toml: {e:?}"))?;
 
-        let stacks_signer_data_path = get_project_snapshot_dir(devnet_config).join("signer");
-        fs::create_dir_all(stacks_signer_data_path)
+        let data_dir = get_project_snapshot_dir(devnet_config);
+        fs::create_dir_all(data_dir.join("signer"))
             .map_err(|e| format!("unable to create stacks directory: {e:?}"))?;
 
         let labels = self.project_labels(&format!("stacks-signer-{signer_id}"));
@@ -1149,12 +1145,7 @@ impl DevnetOrchestrator {
         )];
 
         if devnet_config.bind_containers_volumes {
-            binds.push(format!(
-                "{}:/devnet/",
-                get_project_snapshot_dir(devnet_config)
-                    .join("stacks")
-                    .display()
-            ))
+            binds.push(format!("{}:/devnet/", data_dir.join("stacks").display()))
         }
 
         let env = devnet_config.stacks_signers_env_vars.clone();
@@ -2440,6 +2431,30 @@ mod tests {
             .with_header("content-type", "application/json")
     }
 
+    async fn mock_wait(server: &mut mockito::ServerGuard, status: usize, body: &str) {
+        mock(server, "POST", "/containers/abc/wait")
+            .with_status(status)
+            .with_body(body)
+            .create_async()
+            .await;
+    }
+
+    /// An orchestrator whose Docker reports that container `abc` exited with `exit_code`.
+    async fn orchestrator_with_exited_container(
+        exit_code: i64,
+    ) -> (tempfile::TempDir, mockito::ServerGuard, DevnetOrchestrator) {
+        let (root, mut orchestrator) = test_orchestrator();
+        let (mut server, docker) = mock_docker().await;
+        mock_wait(
+            &mut server,
+            200,
+            &format!(r#"{{"StatusCode":{exit_code}}}"#),
+        )
+        .await;
+        orchestrator.docker_client = Some(docker);
+        (root, server, orchestrator)
+    }
+
     async fn wait_without_delay(docker: &Docker) -> String {
         wait_for_container_exit(docker, "stacks-node", "abc", Duration::ZERO).await
     }
@@ -2447,10 +2462,7 @@ mod tests {
     #[tokio::test]
     async fn reports_a_removed_node() {
         let (mut server, docker) = mock_docker().await;
-        let wait = mock(&mut server, "POST", "/containers/abc/wait").with_status(404);
-        wait.with_body(r#"{"message":"No such container"}"#)
-            .create_async()
-            .await;
+        mock_wait(&mut server, 404, r#"{"message":"No such container"}"#).await;
 
         assert_eq!(
             wait_without_delay(&docker).await,
@@ -2461,8 +2473,7 @@ mod tests {
     #[tokio::test]
     async fn keeps_waiting_while_docker_answers_for_the_container() {
         let (mut server, docker) = mock_docker().await;
-        let wait = mock(&mut server, "POST", "/containers/abc/wait").with_status(500);
-        wait.with_body("{}").create_async().await;
+        mock_wait(&mut server, 500, "{}").await;
         let inspect = mock(&mut server, "GET", "/containers/abc/json")
             .with_body("{}")
             .expect_at_least(DOCKER_UNREACHABLE_RETRIES as usize + 1)
@@ -2477,10 +2488,12 @@ mod tests {
     #[tokio::test]
     async fn gives_up_once_docker_stays_unreachable() {
         let (mut server, docker) = mock_docker().await;
-        let wait = mock(&mut server, "POST", "/containers/abc/wait").with_status(500);
-        wait.with_body("{}").create_async().await;
-        let inspect = mock(&mut server, "GET", "/containers/abc/json").with_status(500);
-        inspect.with_body("{}").create_async().await;
+        mock_wait(&mut server, 500, "{}").await;
+        mock(&mut server, "GET", "/containers/abc/json")
+            .with_status(500)
+            .with_body("{}")
+            .create_async()
+            .await;
 
         let message = wait_without_delay(&docker).await;
         assert!(message.starts_with("unable to watch the stacks-node container"));
@@ -2488,11 +2501,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_when_a_node_exits_before_shutdown() {
-        let (_root, mut orchestrator) = test_orchestrator();
-        let (mut server, docker) = mock_docker().await;
-        let wait = mock(&mut server, "POST", "/containers/abc/wait");
-        wait.with_body(r#"{"StatusCode":101}"#).create_async().await;
-        orchestrator.docker_client = Some(docker);
+        let (_root, _server, mut orchestrator) = orchestrator_with_exited_container(101).await;
         orchestrator.stacks_node_container_id = Some("abc".into());
         let (_terminator_tx, mut terminator_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -2505,11 +2514,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_when_a_signer_exits() {
-        let (_root, mut orchestrator) = test_orchestrator();
-        let (mut server, docker) = mock_docker().await;
-        let wait = mock(&mut server, "POST", "/containers/abc/wait");
-        wait.with_body(r#"{"StatusCode":1}"#).create_async().await;
-        orchestrator.docker_client = Some(docker);
+        let (_root, _server, mut orchestrator) = orchestrator_with_exited_container(1).await;
         orchestrator.stacks_signers_containers_ids = vec!["abc".into()];
 
         assert_eq!(
@@ -2518,12 +2523,9 @@ mod tests {
         );
     }
 
-    async fn start_with_mocked_docker(
-        server: &mut mockito::ServerGuard,
-        docker: Docker,
-        shutdown_requested: bool,
-    ) -> Result<(), String> {
+    async fn start_with_mocked_docker(shutdown_requested: bool) -> Result<(), String> {
         let (_root, mut orchestrator) = test_orchestrator();
+        let (mut server, docker) = mock_docker().await;
         orchestrator.docker_client = Some(docker);
         orchestrator.bitcoin_node_container_id = Some("btc".into());
         orchestrator.docker_network_id = Some("net".into());
@@ -2539,7 +2541,7 @@ mod tests {
         ];
         let mut teardown = vec![];
         for (method, path, expected) in calls {
-            let mock = mock(server, method, &path)
+            let mock = mock(&mut server, method, &path)
                 .with_status(204)
                 .expect(expected);
             teardown.push(mock.create_async().await);
@@ -2561,16 +2563,14 @@ mod tests {
 
     #[tokio::test]
     async fn removes_only_its_own_resources_when_start_fails() {
-        let (mut server, docker) = mock_docker().await;
         // the image pull is not mocked, so the first boot step fails
-        let result = start_with_mocked_docker(&mut server, docker, false).await;
+        let result = start_with_mocked_docker(false).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn removes_its_resources_on_a_shutdown_requested_while_booting() {
-        let (mut server, docker) = mock_docker().await;
-        let result = start_with_mocked_docker(&mut server, docker, true).await;
+        let result = start_with_mocked_docker(true).await;
         assert_eq!(result, Ok(()));
     }
 }
