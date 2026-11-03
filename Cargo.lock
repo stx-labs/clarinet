@@ -4425,6 +4425,7 @@ dependencies = [
  "futures",
  "hiro-system-kit",
  "indoc",
+ "mockito",
  "observer",
  "rand 0.9.4",
  "ratatui",
