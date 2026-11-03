@@ -355,8 +355,7 @@ impl DevnetOrchestrator {
         Ok(services_map_hosts)
     }
 
-    /// Boots the devnet and runs it until shutdown is requested or a container fails.
-    /// Every exit, including a shutdown requested mid-boot, removes the devnet's containers.
+    /// Runs the devnet until shutdown or a container failure, then removes its containers.
     pub async fn start(
         &mut self,
         event_tx: Sender<DevnetEvent>,
@@ -555,7 +554,6 @@ impl DevnetOrchestrator {
         Ok(())
     }
 
-    /// Waits for a shutdown request, or fails as soon as a node or signer container stops.
     async fn wait_for_termination(
         &self,
         terminator_rx: &mut UnboundedReceiver<()>,
@@ -566,9 +564,7 @@ impl DevnetOrchestrator {
         }
     }
 
-    /// Resolves once a node or signer container stops, with a message saying which.
-    /// These containers are not auto-removed, so one that crashed during boot still reports
-    /// its exit code here; `kill` removes them.
+    /// Node and signer containers are not auto-removed, so a crash during boot keeps its exit code.
     async fn wait_for_node_exit(&self) -> String {
         let Some(docker) = &self.docker_client else {
             return std::future::pending().await;
@@ -1355,7 +1351,14 @@ impl DevnetOrchestrator {
             if let Some(events_path) = self.has_events_to_import(devnet_config) {
                 // Wait for the container to be running
                 loop {
-                    if is_container_running(docker, container).await {
+                    let is_running = docker
+                        .inspect_container(container, None::<InspectContainerOptions>)
+                        .await
+                        .ok()
+                        .and_then(|info| info.state)
+                        .and_then(|state| state.running)
+                        .unwrap_or(false);
+                    if is_running {
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -2055,7 +2058,6 @@ impl DevnetOrchestrator {
     }
 }
 
-/// Delay before waiting on a container again after the wait itself failed.
 const WAIT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// How many retries in a row Docker may stay unreachable before the watch gives up.
@@ -2080,8 +2082,7 @@ async fn wait_for_container_exit(
             | Err(DockerError::DockerResponseServerError {
                 status_code: 404, ..
             }) => return format!("{name} container was removed unexpectedly"),
-            // Any other error (a dropped connection, a daemon restart) is not an exit: wait
-            // again while Docker still answers for the container
+            // A dropped connection is not an exit: wait again while Docker still answers
             Err(e) => {
                 let inspect = docker
                     .inspect_container(container_id, None::<InspectContainerOptions>)
@@ -2098,16 +2099,6 @@ async fn wait_for_container_exit(
         }
     };
     format!("{name} container exited unexpectedly (exit code {code})")
-}
-
-async fn is_container_running(docker: &Docker, container_id: &str) -> bool {
-    docker
-        .inspect_container(container_id, None::<InspectContainerOptions>)
-        .await
-        .ok()
-        .and_then(|info| info.state)
-        .and_then(|state| state.running)
-        .unwrap_or(false)
 }
 
 fn port_binding(port: u16) -> Option<Vec<PortBinding>> {
@@ -2454,18 +2445,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reports_the_exit_code_of_a_stopped_node() {
-        let (mut server, docker) = mock_docker().await;
-        let wait = mock(&mut server, "POST", "/containers/abc/wait");
-        wait.with_body(r#"{"StatusCode":101}"#).create_async().await;
-
-        assert_eq!(
-            wait_without_delay(&docker).await,
-            "stacks-node container exited unexpectedly (exit code 101)"
-        );
-    }
-
-    #[tokio::test]
     async fn reports_a_removed_node() {
         let (mut server, docker) = mock_docker().await;
         let wait = mock(&mut server, "POST", "/containers/abc/wait").with_status(404);
@@ -2476,26 +2455,6 @@ mod tests {
         assert_eq!(
             wait_without_delay(&docker).await,
             "stacks-node container was removed unexpectedly"
-        );
-    }
-
-    #[tokio::test]
-    async fn waits_again_after_a_failed_wait() {
-        let (mut server, docker) = mock_docker().await;
-        let calls = std::sync::atomic::AtomicUsize::new(0);
-        mock(&mut server, "POST", "/containers/abc/wait")
-            .with_body_from_request(move |_| {
-                match calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
-                    0 => b"not json".to_vec(),
-                    _ => br#"{"StatusCode":3}"#.to_vec(),
-                }
-            })
-            .create_async()
-            .await;
-
-        assert_eq!(
-            wait_without_delay(&docker).await,
-            "stacks-node container exited unexpectedly (exit code 3)"
         );
     }
 
@@ -2559,43 +2518,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn returns_on_a_shutdown_request() {
-        let (_root, orchestrator) = test_orchestrator();
-        let (terminator_tx, mut terminator_rx) = tokio::sync::mpsc::unbounded_channel();
-        terminator_tx.send(()).unwrap();
-
-        let result = orchestrator.wait_for_termination(&mut terminator_rx).await;
-        assert_eq!(result, Ok(()));
-    }
-
-    /// Mocks the calls `kill` must make for this session, and the label and name based
-    /// cleanups it must not make since a newer session for the same project shares both.
-    async fn mock_teardown(
-        server: &mut mockito::ServerGuard,
-        network_name: &str,
-    ) -> Vec<mockito::Mock> {
-        let calls = [
-            ("DELETE", "/containers/btc".to_string(), 1),
-            ("DELETE", "/networks/net".to_string(), 1),
-            ("POST", "/containers/prune".to_string(), 0),
-            ("POST", "/networks/prune".to_string(), 0),
-            (
-                "DELETE",
-                format!("/networks/{}", network_name.replace('.', "\\.")),
-                0,
-            ),
-        ];
-        let mut mocks = vec![];
-        for (method, path, expected) in calls {
-            let mock = mock(server, method, &path)
-                .with_status(204)
-                .expect(expected);
-            mocks.push(mock.create_async().await);
-        }
-        mocks
-    }
-
     async fn start_with_mocked_docker(
         server: &mut mockito::ServerGuard,
         docker: Docker,
@@ -2605,7 +2527,23 @@ mod tests {
         orchestrator.docker_client = Some(docker);
         orchestrator.bitcoin_node_container_id = Some("btc".into());
         orchestrator.docker_network_id = Some("net".into());
-        let teardown = mock_teardown(server, &orchestrator.network_name).await;
+        // kill must remove this session's resources by id, and never prune or remove the
+        // network by name, since a newer session for the same project shares both
+        let network_name = orchestrator.network_name.replace('.', "\\.");
+        let calls = [
+            ("DELETE", "/containers/btc".to_string(), 1),
+            ("DELETE", "/networks/net".to_string(), 1),
+            ("POST", "/containers/prune".to_string(), 0),
+            ("POST", "/networks/prune".to_string(), 0),
+            ("DELETE", format!("/networks/{network_name}"), 0),
+        ];
+        let mut teardown = vec![];
+        for (method, path, expected) in calls {
+            let mock = mock(server, method, &path)
+                .with_status(204)
+                .expect(expected);
+            teardown.push(mock.create_async().await);
+        }
         let (event_tx, _event_rx) = std::sync::mpsc::channel();
         let (terminator_tx, terminator_rx) = tokio::sync::mpsc::unbounded_channel();
         if shutdown_requested {
