@@ -292,10 +292,9 @@ export function parseEvents(events: string): ClarityEvent[] {
 }
 
 export function parseCosts(costs: string): ClarityCosts | null {
+  if (costs === "null") return null;
   try {
-    const parsed = JSON.parse(costs);
-    if (parsed === null) return null;
-    const { memory, memory_limit, total, limit } = parsed;
+    const { memory, memory_limit, total, limit } = JSON.parse(costs);
     return {
       memory: memory,
       memory_limit: memory_limit,
