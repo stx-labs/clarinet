@@ -292,6 +292,7 @@ export function parseEvents(events: string): ClarityEvent[] {
 }
 
 export function parseCosts(costs: string): ClarityCosts | null {
+  // Hot path: costs is "null" on every call when cost tracking is off.
   if (costs === "null") return null;
   try {
     const { memory, memory_limit, total, limit } = JSON.parse(costs);
