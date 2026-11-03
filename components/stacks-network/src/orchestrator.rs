@@ -1391,7 +1391,7 @@ impl DevnetOrchestrator {
                     .await
                     .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
 
-                let output = exec_in_container(
+                let imported = exec_in_container(
                     docker,
                     container,
                     &[
@@ -1404,16 +1404,15 @@ impl DevnetOrchestrator {
                     ],
                 )
                 .await
-                .map_err(|e| format!("Failed to import events: {e}"))?;
+                .and_then(|output| output.success.then_some(()).ok_or(output.stderr));
 
-                if !output.success {
-                    ctx.try_log(|logger| {
-                        slog::warn!(logger, "Events import failed: {}", output.stderr)
-                    });
-                } else {
-                    ctx.try_log(|logger| {
+                match imported {
+                    Ok(()) => ctx.try_log(|logger| {
                         slog::info!(logger, "Events import completed successfully")
-                    });
+                    }),
+                    Err(e) => {
+                        ctx.try_log(|logger| slog::warn!(logger, "Events import failed: {e}"))
+                    }
                 }
             }
         }

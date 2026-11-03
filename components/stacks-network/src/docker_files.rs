@@ -67,7 +67,7 @@ async fn upload(
 ) -> Result<(), String> {
     let options = UploadToContainerOptions {
         path: dir,
-        ..Default::default()
+        no_overwrite_dir_non_dir: "true",
     };
     docker
         .upload_to_container(container, Some(options), archive.into())
@@ -144,13 +144,13 @@ pub async fn exec_in_container(
     else {
         return Err(format!("exec in {container} was detached"));
     };
-    let mut stderr = String::new();
+    let mut stderr = Vec::new();
     while let Some(log) = output
         .try_next()
         .await
         .map_err(|e| formatted_docker_error("unable to read exec output", e))?
     {
-        stderr.push_str(&String::from_utf8_lossy(&log.into_bytes()));
+        stderr.extend_from_slice(&log.into_bytes());
     }
     let exit_code = docker
         .inspect_exec(&exec.id)
@@ -159,7 +159,7 @@ pub async fn exec_in_container(
         .exit_code;
     Ok(ExecOutput {
         success: exit_code == Some(0),
-        stderr,
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
     })
 }
 
