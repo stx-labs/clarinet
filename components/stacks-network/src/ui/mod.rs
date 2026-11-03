@@ -6,7 +6,7 @@ mod ui;
 mod util;
 
 use std::error::Error;
-use std::io::{stdout, Stdout};
+use std::io::stdout;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -113,11 +113,7 @@ pub fn do_start_ui(
                 app.handle_log(DevnetEvent::log_error(format!(
                     "Error receiving event: {e}"
                 )));
-                let _ = terminate(
-                    &mut terminal,
-                    chains_coordinator_commands_tx,
-                    orchestrator_terminated_rx,
-                );
+                let _ = terminate(chains_coordinator_commands_tx, orchestrator_terminated_rx);
                 break;
             }
         };
@@ -127,11 +123,7 @@ pub fn do_start_ui(
                     app.handle_log(DevnetEvent::log_warning(
                         "Ctrl+C received, initiating termination sequence.".into(),
                     ));
-                    let _ = terminate(
-                        &mut terminal,
-                        chains_coordinator_commands_tx,
-                        orchestrator_terminated_rx,
-                    );
+                    let _ = terminate(chains_coordinator_commands_tx, orchestrator_terminated_rx);
                     break;
                 }
                 (KeyModifiers::NONE, KeyCode::Char('n')) => {
@@ -175,11 +167,7 @@ pub fn do_start_ui(
             }
             DevnetEvent::FatalError(message) => {
                 app.handle_fatal_error(&message);
-                let _ = terminate(
-                    &mut terminal,
-                    chains_coordinator_commands_tx,
-                    orchestrator_terminated_rx,
-                );
+                let _ = terminate(chains_coordinator_commands_tx, orchestrator_terminated_rx);
                 return Err(message);
             }
             DevnetEvent::BootCompleted(bitcoin_mining_tx) => {
@@ -201,24 +189,20 @@ pub fn do_start_ui(
     Ok(())
 }
 
-/// Leaves raw mode and the alternate screen, for exits that bypass the dashboard loop.
 pub fn restore_terminal() {
     let _ = disable_raw_mode();
     let _ = execute!(stdout(), LeaveAlternateScreen, Show);
 }
 
 fn terminate(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     chains_coordinator_commands_tx: crossbeam_channel::Sender<ChainsCoordinatorCommand>,
     orchestrator_terminated_rx: Receiver<bool>,
 ) -> Result<(), Box<dyn Error>> {
-    let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    restore_terminal();
     let _ = chains_coordinator_commands_tx.send(ChainsCoordinatorCommand::Terminate);
     let res = orchestrator_terminated_rx.recv();
     if let Err(e) = res {
         println!("Error sending terminate command: {e}");
     }
-    let _ = terminal.show_cursor();
     Ok(())
 }
