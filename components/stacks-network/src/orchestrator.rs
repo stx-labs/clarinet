@@ -13,7 +13,6 @@ use bollard::container::{
     Config, CreateContainerOptions, InspectContainerOptions, KillContainerOptions,
     ListContainersOptions, LogsOptions, PruneContainersOptions, WaitContainerOptions,
 };
-use bollard::errors::Error as DockerError;
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, PortBinding};
 use bollard::network::{CreateNetworkOptions, PruneNetworksOptions};
@@ -33,13 +32,15 @@ use observer::utils::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
-use crate::docker_files::{copy_dir_to_container, copy_file_to_container, exec_in_container};
+use crate::docker_files::{
+    copy_dir_to_container, copy_file_to_container, exec_in_container, formatted_docker_error,
+};
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::snapshot_extractor::SnapshotImages;
 
 const BITCOIND_DATA_DIR: &str = "/home/bitcoin/.bitcoin";
 
-const DOCKER_ERR_MSG: &str = "unable to get docker client";
+pub(crate) const DOCKER_ERR_MSG: &str = "unable to get docker client";
 
 #[derive(Serialize)]
 struct StacksNodeEventObserversConfig<'a> {
@@ -1405,7 +1406,7 @@ impl DevnetOrchestrator {
                 .await
                 .map_err(|e| format!("Failed to import events: {e}"))?;
 
-                if !output.success() {
+                if !output.success {
                     ctx.try_log(|logger| {
                         slog::warn!(logger, "Events import failed: {}", output.stderr)
                     });
@@ -2252,17 +2253,6 @@ async fn register_descriptor(
             event_tx,
         )
         .await
-}
-
-fn formatted_docker_error(message: &str, error: DockerError) -> String {
-    let error = match &error {
-        DockerError::DockerResponseServerError {
-            status_code: _c,
-            message: m,
-        } => m.to_string(),
-        _ => format!("{error:?}"),
-    };
-    format!("{message}: {error}")
 }
 
 pub fn get_snapshot_cache_root() -> PathBuf {

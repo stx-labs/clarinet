@@ -1,27 +1,39 @@
 use std::io;
 use std::path::Path;
 
-use bollard::container::{DownloadFromContainerOptions, LogOutput, UploadToContainerOptions};
+use bollard::container::{DownloadFromContainerOptions, UploadToContainerOptions};
+use bollard::errors::Error as DockerError;
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::Docker;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
+
+pub fn formatted_docker_error(message: &str, error: DockerError) -> String {
+    let error = match &error {
+        DockerError::DockerResponseServerError {
+            status_code: _c,
+            message: m,
+        } => m.to_string(),
+        _ => format!("{error:?}"),
+    };
+    format!("{message}: {error}")
+}
 
 /// Archives the contents of `src_dir` under a top-level directory named `root`.
-pub fn tar_directory(src_dir: &Path, root: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+fn tar_directory(src_dir: &Path, root: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     let mut builder = tar::Builder::new(Vec::new());
     builder.follow_symlinks(false);
     builder.append_dir_all(root, src_dir)?;
     builder.into_inner()
 }
 
-pub fn tar_file(src: &Path, name: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+fn tar_file(src: &Path, name: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     let mut builder = tar::Builder::new(Vec::new());
     builder.append_path_with_name(src, name)?;
     builder.into_inner()
 }
 
 /// Writes the single file of a `GET /containers/{id}/archive` response to `dest`.
-pub fn untar_file(archive: &[u8], dest: &Path) -> io::Result<()> {
+fn untar_file(archive: &[u8], dest: &Path) -> io::Result<()> {
     let mut archive = tar::Archive::new(archive);
     let mut entry = archive
         .entries()?
@@ -60,7 +72,7 @@ async fn upload(
     docker
         .upload_to_container(container, Some(options), archive.into())
         .await
-        .map_err(|e| format!("unable to upload to {container}:{dir}: {e}"))
+        .map_err(|e| formatted_docker_error(&format!("unable to upload to {container}:{dir}"), e))
 }
 
 /// Same as `docker cp {src_dir}/. {container}:{dest}`.
@@ -101,19 +113,13 @@ pub async fn copy_file_from_container(
         .map_ok(|chunk| chunk.to_vec())
         .try_concat()
         .await
-        .map_err(|e| format!("unable to download {container}:{src}: {e}"))?;
+        .map_err(|e| formatted_docker_error(&format!("unable to download {container}:{src}"), e))?;
     untar_file(&archive, dest).map_err(|e| format!("unable to write {}: {e}", dest.display()))
 }
 
 pub struct ExecOutput {
-    pub exit_code: Option<i64>,
+    pub success: bool,
     pub stderr: String,
-}
-
-impl ExecOutput {
-    pub fn success(&self) -> bool {
-        self.exit_code == Some(0)
-    }
 }
 
 /// Same as `docker exec {container} {cmd}`: runs `cmd` to completion.
@@ -124,35 +130,37 @@ pub async fn exec_in_container(
 ) -> Result<ExecOutput, String> {
     let options = CreateExecOptions {
         cmd: Some(cmd.to_vec()),
-        attach_stdout: Some(true),
         attach_stderr: Some(true),
         ..Default::default()
     };
     let exec = docker
         .create_exec(container, options)
         .await
-        .map_err(|e| format!("unable to create exec in {container}: {e}"))?;
+        .map_err(|e| formatted_docker_error(&format!("unable to create exec in {container}"), e))?;
+    let StartExecResults::Attached { mut output, .. } = docker
+        .start_exec(&exec.id, None)
+        .await
+        .map_err(|e| formatted_docker_error(&format!("unable to start exec in {container}"), e))?
+    else {
+        return Err(format!("exec in {container} was detached"));
+    };
     let mut stderr = String::new();
-    if let StartExecResults::Attached { mut output, .. } =
-        docker
-            .start_exec(&exec.id, None)
-            .await
-            .map_err(|e| format!("unable to start exec in {container}: {e}"))?
+    while let Some(log) = output
+        .try_next()
+        .await
+        .map_err(|e| formatted_docker_error("unable to read exec output", e))?
     {
-        while let Some(log) = output.next().await {
-            if let LogOutput::StdErr { message } =
-                log.map_err(|e| format!("unable to read exec output: {e}"))?
-            {
-                stderr.push_str(&String::from_utf8_lossy(&message));
-            }
-        }
+        stderr.push_str(&String::from_utf8_lossy(&log.into_bytes()));
     }
     let exit_code = docker
         .inspect_exec(&exec.id)
         .await
-        .map_err(|e| format!("unable to inspect exec in {container}: {e}"))?
+        .map_err(|e| formatted_docker_error(&format!("unable to inspect exec in {container}"), e))?
         .exit_code;
-    Ok(ExecOutput { exit_code, stderr })
+    Ok(ExecOutput {
+        success: exit_code == Some(0),
+        stderr,
+    })
 }
 
 #[cfg(test)]

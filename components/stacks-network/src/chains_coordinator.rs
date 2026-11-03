@@ -52,7 +52,7 @@ use crate::docker_files::{copy_file_from_container, exec_in_container};
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::orchestrator::{
     copy_directory, get_global_snapshot_dir, get_project_snapshot_dir, ServicesMapHosts,
-    DEVNET_SNAPSHOT_READY_MARKER, EXCLUDED_STACKS_SNAPSHOT_FILES,
+    DEVNET_SNAPSHOT_READY_MARKER, DOCKER_ERR_MSG, EXCLUDED_STACKS_SNAPSHOT_FILES,
 };
 use crate::snapshot_extractor::SnapshotImages;
 
@@ -1597,10 +1597,7 @@ async fn export_stacks_api_events(
         "Exporting Stacks API events...".to_string(),
     ));
 
-    let docker = config
-        .docker_client
-        .as_ref()
-        .ok_or("unable to get docker client")?;
+    let docker = config.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
     let output = exec_in_container(
         docker,
         &container_name,
@@ -1616,12 +1613,9 @@ async fn export_stacks_api_events(
     .await
     .map_err(|e| format!("Failed to execute export command: {e}"))?;
 
-    if !output.success() {
+    if !output.success {
         return Err(format!("Export command failed: {}", output.stderr));
     }
-
-    // Wait for export to complete
-    std::thread::sleep(Duration::from_secs(5));
 
     let export_path = global_snapshot_dir.join("events_export");
     fs::create_dir_all(&export_path)
