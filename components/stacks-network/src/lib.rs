@@ -50,12 +50,16 @@ fn setup_signal_handlers(
     observer_command_tx: Sender<ObserverCommand>,
     mining_command_tx: Sender<BitcoinMiningCommand>,
     devnet_events_tx: Sender<DevnetEvent>,
+    display_dashboard: bool,
 ) {
     let mut shutting_down = false;
-    let mut handle_signal = move |signal_name: &str| {
+    let mut handle_signal = move |signal_name: &str, exit_code: i32| {
         if shutting_down {
+            if display_dashboard {
+                ui::restore_terminal();
+            }
             eprintln!("{signal_name} received again, exiting without removing devnet containers");
-            std::process::exit(130);
+            std::process::exit(exit_code);
         }
         shutting_down = true;
         let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
@@ -82,7 +86,8 @@ fn setup_signal_handlers(
             };
 
             for sig in signals.forever() {
-                handle_signal(if sig == SIGINT { "SIGINT" } else { "SIGTERM" });
+                let signal_name = if sig == SIGINT { "SIGINT" } else { "SIGTERM" };
+                handle_signal(signal_name, 128 + sig);
             }
         });
     }
@@ -90,7 +95,7 @@ fn setup_signal_handlers(
     #[cfg(not(unix))]
     {
         // On Windows and other platforms, use ctrlc for SIGINT/Ctrl+C
-        let _ = ctrlc::set_handler(move || handle_signal("Ctrl+C"));
+        let _ = ctrlc::set_handler(move || handle_signal("Ctrl+C", 130));
     }
 }
 
@@ -225,6 +230,7 @@ pub fn do_run_local_devnet(
         observer_command_tx,
         mining_command_tx,
         devnet_events_tx.clone(),
+        display_dashboard,
     );
 
     if display_dashboard {

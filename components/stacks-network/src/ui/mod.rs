@@ -12,6 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use app::App;
+use crossterm::cursor::Show;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -198,6 +199,12 @@ pub fn do_start_ui(
     }
 
     Ok(())
+}
+
+/// Leaves raw mode and the alternate screen, for exits that bypass the dashboard loop.
+pub fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(stdout(), LeaveAlternateScreen, Show);
 }
 
 fn terminate(

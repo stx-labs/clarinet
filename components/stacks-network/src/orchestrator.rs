@@ -4,7 +4,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bitcoincore_rpc::bitcoin::hex::DisplayHex;
 use bitcoincore_rpc::json::GetDescriptorInfoResult;
@@ -16,7 +16,7 @@ use bollard::container::{
 };
 use bollard::errors::Error as DockerError;
 use bollard::image::CreateImageOptions;
-use bollard::models::{HostConfig, PortBinding};
+use bollard::models::{ContainerState, ContainerStateStatusEnum, HostConfig, PortBinding};
 use bollard::network::{CreateNetworkOptions, PruneNetworksOptions};
 use bollard::service::Ipam;
 use bollard::Docker;
@@ -576,7 +576,14 @@ impl DevnetOrchestrator {
         let mut exits: FuturesUnordered<_> = nodes
             .chain(signers)
             .map(|(name, id)| async move {
-                wait_for_container_exit(docker, &name, id, WAIT_RETRY_DELAY).await
+                wait_for_container_exit(
+                    docker,
+                    &name,
+                    id,
+                    WAIT_RETRY_DELAY,
+                    DOCKER_UNREACHABLE_TIMEOUT,
+                )
+                .await
             })
             .collect();
         match exits.next().await {
@@ -2051,17 +2058,19 @@ impl DevnetOrchestrator {
 
 const WAIT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
-/// How many retries in a row Docker may stay unreachable before the watch gives up.
-const DOCKER_UNREACHABLE_RETRIES: u32 = 30;
+/// How long Docker may stay unreachable before the watch gives up.
+const DOCKER_UNREACHABLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 async fn wait_for_container_exit(
     docker: &Docker,
     name: &str,
     container_id: &str,
     retry_delay: Duration,
+    unreachable_timeout: Duration,
 ) -> String {
-    let mut unreachable = 0;
+    let mut unreachable_since = None;
     let code = loop {
+        let attempt = Instant::now();
         let status = docker
             .wait_container(container_id, None::<WaitContainerOptions<String>>)
             .try_next()
@@ -2078,12 +2087,21 @@ async fn wait_for_container_exit(
                 let inspect = docker
                     .inspect_container(container_id, None::<InspectContainerOptions>)
                     .await;
-                if inspect.is_ok() {
-                    unreachable = 0;
-                } else if unreachable == DOCKER_UNREACHABLE_RETRIES {
-                    return format!("unable to watch the {name} container: {e}");
-                } else {
-                    unreachable += 1;
+                match inspect.map(|container| container.state) {
+                    Ok(Some(ContainerState {
+                        status:
+                            Some(ContainerStateStatusEnum::EXITED | ContainerStateStatusEnum::DEAD),
+                        exit_code: Some(code),
+                        ..
+                    })) => break code,
+                    Ok(_) => unreachable_since = None,
+                    Err(_) => {
+                        // Timed from the failed wait, since each call can block for the client timeout
+                        let since = *unreachable_since.get_or_insert(attempt);
+                        if since.elapsed() >= unreachable_timeout {
+                            return format!("unable to watch the {name} container: {e}");
+                        }
+                    }
                 }
                 tokio::time::sleep(retry_delay).await;
             }
@@ -2456,7 +2474,7 @@ mod tests {
     }
 
     async fn wait_without_delay(docker: &Docker) -> String {
-        wait_for_container_exit(docker, "stacks-node", "abc", Duration::ZERO).await
+        wait_for_container_exit(docker, "stacks-node", "abc", Duration::ZERO, Duration::ZERO).await
     }
 
     #[tokio::test]
@@ -2476,13 +2494,28 @@ mod tests {
         mock_wait(&mut server, 500, "{}").await;
         let inspect = mock(&mut server, "GET", "/containers/abc/json")
             .with_body("{}")
-            .expect_at_least(DOCKER_UNREACHABLE_RETRIES as usize + 1)
+            .expect_at_least(2)
             .create_async()
             .await;
 
         let watch = tokio::time::timeout(Duration::from_secs(1), wait_without_delay(&docker));
         assert!(watch.await.is_err());
         inspect.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn reports_an_exit_that_only_inspect_sees() {
+        let (mut server, docker) = mock_docker().await;
+        mock_wait(&mut server, 500, "{}").await;
+        mock(&mut server, "GET", "/containers/abc/json")
+            .with_body(r#"{"State":{"Status":"exited","Running":false,"ExitCode":137}}"#)
+            .create_async()
+            .await;
+
+        assert_eq!(
+            wait_without_delay(&docker).await,
+            "stacks-node container exited unexpectedly (exit code 137)"
+        );
     }
 
     #[tokio::test]
