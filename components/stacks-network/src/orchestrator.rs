@@ -283,9 +283,10 @@ impl DevnetOrchestrator {
         event_tx: &Sender<DevnetEvent>,
         ctx: &Context,
     ) -> Result<(), String> {
+        // Kill first: without the dashboard, the process exits as soon as it sees the error
         if let Err(ref message) = result {
-            let _ = event_tx.send(DevnetEvent::FatalError(message.clone()));
             self.kill(ctx, Some(message)).await;
+            let _ = event_tx.send(DevnetEvent::FatalError(message.clone()));
         }
         result
     }
@@ -438,7 +439,8 @@ impl DevnetOrchestrator {
             .boot_bitcoin_node_container(&event_tx, no_snapshot)
             .await;
         self.or_fatal(res, &event_tx, ctx).await?;
-        self.initialize_bitcoin_node(&event_tx, no_snapshot).await?;
+        let res = self.initialize_bitcoin_node(&event_tx, no_snapshot).await;
+        self.or_fatal(res, &event_tx, ctx).await?;
 
         // Start postgres container
         if !disable_postgres {
@@ -555,14 +557,31 @@ impl DevnetOrchestrator {
             );
         }
 
+        // Bridged to tokio so a node exiting can be awaited alongside it
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        std::thread::spawn(move || {
+            while let Ok(command) = terminator_rx.recv() {
+                if command_tx.send(command).is_err() {
+                    break;
+                }
+            }
+        });
+
         loop {
             boot_index += 1;
-            match terminator_rx.recv() {
-                Ok(true) => {
+            let command = tokio::select! {
+                command = command_rx.recv() => command,
+                message = self.wait_for_node_exit() => {
+                    self.kill(ctx, Some(&message)).await;
+                    return Err(message);
+                }
+            };
+            match command {
+                Some(true) => {
                     self.kill(ctx, None).await;
                     break;
                 }
-                Ok(false) => {
+                Some(false) => {
                     send_status_update(&event_tx, "bitcoin-node", Status::Yellow, "restarting");
 
                     send_status_update(&event_tx, "stacks-node", Status::Yellow, "restarting");
@@ -581,12 +600,33 @@ impl DevnetOrchestrator {
                     // Start streaming container logs for the new containers if enabled
                     let _ = self.start_container_logs_streaming(ctx).await;
                 }
-                Err(_) => {
+                None => {
                     break;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Resolves once the bitcoin or stacks node container stops, with a message saying which.
+    async fn wait_for_node_exit(&self) -> String {
+        let Some(docker) = &self.docker_client else {
+            return std::future::pending().await;
+        };
+        let nodes = [
+            ("bitcoin-node", &self.bitcoin_node_container_id),
+            ("stacks-node", &self.stacks_node_container_id),
+        ];
+        let waits: Vec<_> = nodes
+            .into_iter()
+            .filter_map(|(name, id)| Some((name, id.as_deref()?)))
+            .map(|(name, id)| Box::pin(wait_for_container_exit(docker, name, id)))
+            .collect();
+        if waits.is_empty() {
+            return std::future::pending().await;
+        }
+        let (message, _, _) = futures::future::select_all(waits).await;
+        message
     }
 
     pub fn prepare_bitcoin_node_config(
@@ -2216,6 +2256,29 @@ impl DevnetOrchestrator {
     }
 }
 
+async fn wait_for_container_exit(docker: &Docker, name: &str, container_id: &str) -> String {
+    loop {
+        let status = docker
+            .wait_container(container_id, None::<WaitContainerOptions<String>>)
+            .try_next()
+            .await;
+        let code = match status {
+            Ok(Some(response)) => response.status_code,
+            Err(DockerError::DockerContainerWaitError { code, .. }) => code,
+            // The client timeout also applies to this long poll
+            Err(DockerError::RequestTimeoutError) => continue,
+            Ok(None)
+            | Err(DockerError::DockerResponseServerError {
+                status_code: 404, ..
+            }) => {
+                return format!("{name} container was removed unexpectedly");
+            }
+            Err(e) => return format!("unable to watch the {name} container: {e}"),
+        };
+        return format!("{name} container exited unexpectedly (exit code {code})");
+    }
+}
+
 fn port_binding(port: u16) -> Option<Vec<PortBinding>> {
     Some(vec![PortBinding {
         host_ip: Some("0.0.0.0".to_string()),
@@ -2540,5 +2603,42 @@ mod tests {
         assert!(observers
             .iter()
             .all(|observer| !observer.endpoint.starts_with("stacks-api.")));
+    }
+
+    async fn mock_container_wait(status: usize, body: &str) -> (mockito::ServerGuard, Docker) {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock(
+                "POST",
+                mockito::Matcher::Regex("/containers/abc/wait$".into()),
+            )
+            .with_status(status)
+            .with_header("content-type", "application/json")
+            .with_body(body)
+            .create_async()
+            .await;
+        let docker =
+            Docker::connect_with_http(&server.url(), 5, bollard::API_DEFAULT_VERSION).unwrap();
+        (server, docker)
+    }
+
+    #[tokio::test]
+    async fn reports_the_exit_code_of_a_stopped_node() {
+        let (_server, docker) = mock_container_wait(200, r#"{"StatusCode":101}"#).await;
+
+        let message = wait_for_container_exit(&docker, "stacks-node", "abc").await;
+        assert_eq!(
+            message,
+            "stacks-node container exited unexpectedly (exit code 101)"
+        );
+    }
+
+    #[tokio::test]
+    async fn reports_a_removed_node() {
+        let (_server, docker) =
+            mock_container_wait(404, r#"{"message":"No such container"}"#).await;
+
+        let message = wait_for_container_exit(&docker, "bitcoin-node", "abc").await;
+        assert_eq!(message, "bitcoin-node container was removed unexpectedly");
     }
 }
