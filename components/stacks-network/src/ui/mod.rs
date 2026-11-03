@@ -207,10 +207,8 @@ fn terminate(
 ) -> Result<(), Box<dyn Error>> {
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
-    let res = chains_coordinator_commands_tx.send(ChainsCoordinatorCommand::Terminate);
-    if let Err(e) = res {
-        println!("Error sending terminate command: {e}");
-    }
+    // The chains coordinator is already gone when the orchestrator stopped it after a fatal error
+    let _ = chains_coordinator_commands_tx.send(ChainsCoordinatorCommand::Terminate);
     let res = orchestrator_terminated_rx.recv();
     if let Err(e) = res {
         println!("Error sending terminate command: {e}");

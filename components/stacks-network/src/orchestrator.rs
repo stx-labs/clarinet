@@ -11,7 +11,8 @@ use bitcoincore_rpc::json::GetDescriptorInfoResult;
 use bitcoincore_rpc::jsonrpc::Response as JsonRpcResponse;
 use bollard::container::{
     Config, CreateContainerOptions, InspectContainerOptions, KillContainerOptions,
-    ListContainersOptions, LogsOptions, PruneContainersOptions, WaitContainerOptions,
+    ListContainersOptions, LogsOptions, PruneContainersOptions, RemoveContainerOptions,
+    WaitContainerOptions,
 };
 use bollard::errors::Error as DockerError;
 use bollard::image::CreateImageOptions;
@@ -354,26 +355,39 @@ impl DevnetOrchestrator {
         Ok(services_map_hosts)
     }
 
+    /// Boots the devnet and runs it until shutdown is requested or a container fails.
+    /// Every exit, including a shutdown requested mid-boot, removes the devnet's containers.
     pub async fn start(
         &mut self,
         event_tx: Sender<DevnetEvent>,
-        terminator_rx: UnboundedReceiver<bool>,
+        mut terminator_rx: UnboundedReceiver<()>,
         ctx: &Context,
         no_snapshot: bool,
         save_container_logs: bool,
     ) -> Result<(), String> {
         self.save_container_logs = save_container_logs;
-        let result = self.run(event_tx, terminator_rx, ctx, no_snapshot).await;
+        let booted = tokio::select! {
+            booted = self.boot(event_tx.clone(), ctx, no_snapshot) => Some(booted),
+            _ = terminator_rx.recv() => None,
+        };
+        let result = match booted {
+            Some(Ok(())) => self.wait_for_termination(&mut terminator_rx).await,
+            Some(Err(message)) => Err(message),
+            None => Ok(()),
+        };
         if let Err(message) = &result {
-            self.kill(ctx, Some(message)).await;
+            let _ = event_tx.send(DevnetEvent::error(format!(
+                "{message}, removing devnet containers"
+            )));
         }
+        self.kill(ctx, result.as_ref().err().map(String::as_str))
+            .await;
         result
     }
 
-    async fn run(
+    async fn boot(
         &mut self,
         event_tx: Sender<DevnetEvent>,
-        mut terminator_rx: UnboundedReceiver<bool>,
         ctx: &Context,
         no_snapshot: bool,
     ) -> Result<(), String> {
@@ -466,7 +480,7 @@ impl DevnetOrchestrator {
         // Start stacks-node
         let _ = event_tx.send(DevnetEvent::info("Starting stacks-node".to_string()));
         send_status_update(&event_tx, "stacks-node", Status::Yellow, "updating image");
-        self.prepare_stacks_node_container(1, ctx).await?;
+        self.prepare_stacks_node_container(ctx).await?;
         send_status_update(&event_tx, "stacks-node", Status::Yellow, "booting");
         self.boot_stacks_node_container(&event_tx, no_snapshot)
             .await?;
@@ -482,7 +496,7 @@ impl DevnetOrchestrator {
                 Status::Yellow,
                 "updating image",
             );
-            self.prepare_stacks_signer_container(1, ctx, i as u32, signer_key)
+            self.prepare_stacks_signer_container(ctx, i as u32, signer_key)
                 .await?;
             send_status_update(
                 &event_tx,
@@ -538,56 +552,48 @@ impl DevnetOrchestrator {
             );
         }
 
-        if self
-            .wait_for_termination(&mut terminator_rx)
-            .await?
-            .is_some()
-        {
-            self.kill(ctx, None).await;
-        }
         Ok(())
     }
 
     /// Waits for a shutdown request, or fails as soon as a node or signer container stops.
     async fn wait_for_termination(
         &self,
-        terminator_rx: &mut UnboundedReceiver<bool>,
-    ) -> Result<Option<bool>, String> {
+        terminator_rx: &mut UnboundedReceiver<()>,
+    ) -> Result<(), String> {
         tokio::select! {
-            command = terminator_rx.recv() => Ok(command),
+            _ = terminator_rx.recv() => Ok(()),
             message = self.wait_for_node_exit() => Err(message),
         }
     }
 
     /// Resolves once a node or signer container stops, with a message saying which.
+    /// These containers are not auto-removed, so one that crashed during boot still reports
+    /// its exit code here; `kill` removes them.
     async fn wait_for_node_exit(&self) -> String {
         let Some(docker) = &self.docker_client else {
             return std::future::pending().await;
         };
-        let signers = (self.stacks_signers_containers_ids.iter().enumerate())
-            .map(|(i, id)| (format!("stacks-signer-{i}"), id));
-        let containers: Vec<_> = [
-            ("bitcoin-node", &self.bitcoin_node_container_id),
-            ("stacks-node", &self.stacks_node_container_id),
-        ]
-        .into_iter()
-        .filter_map(|(name, id)| Some((name.to_string(), id.as_ref()?)))
-        .chain(signers)
-        .collect();
+        let nodes = [
+            ("bitcoin-node".to_string(), &self.bitcoin_node_container_id),
+            ("stacks-node".to_string(), &self.stacks_node_container_id),
+        ];
+        let signers = self.stacks_signers_containers_ids.iter().enumerate();
+        let containers: Vec<(String, &String)> = nodes
+            .into_iter()
+            .filter_map(|(name, id)| Some((name, id.as_ref()?)))
+            .chain(signers.map(|(i, id)| (format!("stacks-signer-{i}"), id)))
+            .collect();
         if containers.is_empty() {
             return std::future::pending().await;
         }
-        let waits = (containers.iter())
-            .map(|(name, id)| Box::pin(wait_for_container_exit(docker, name, id)));
+        let waits = containers.iter().map(|(name, id)| {
+            Box::pin(wait_for_container_exit(docker, name, id, WAIT_RETRY_DELAY))
+        });
         let (message, _, _) = futures::future::select_all(waits).await;
         message
     }
 
-    pub fn prepare_bitcoin_node_config(
-        &self,
-        boot_index: u32,
-        no_snapshot: bool,
-    ) -> Result<Config<String>, String> {
+    pub fn prepare_bitcoin_node_config(&self, no_snapshot: bool) -> Result<Config<String>, String> {
         let devnet_config = self.devnet_config();
 
         let port_bindings = HashMap::from([
@@ -643,10 +649,7 @@ impl DevnetOrchestrator {
         file.write_all(bitcoind_conf.as_bytes())
             .map_err(|e| format!("unable to write bitcoin.conf: {e:?}"))?;
 
-        let mut bitcoind_data_path = PathBuf::from(&devnet_config.working_dir);
-        bitcoind_data_path.push("data");
-        bitcoind_data_path.push(format!("{boot_index}"));
-        bitcoind_data_path.push("bitcoin");
+        let bitcoind_data_path = get_project_snapshot_dir(devnet_config).join("bitcoin");
         fs::create_dir_all(&bitcoind_data_path)
             .map_err(|e| format!("unable to create bitcoin directory: {e:?}"))?;
 
@@ -683,7 +686,8 @@ impl DevnetOrchestrator {
 
         if devnet_config.bind_containers_volumes {
             binds.push(format!(
-                "{working_dir}/data/{boot_index}/bitcoin:{BITCOIND_DATA_DIR}"
+                "{}:{BITCOIND_DATA_DIR}",
+                bitcoind_data_path.display()
             ));
         }
 
@@ -704,7 +708,6 @@ impl DevnetOrchestrator {
             exposed_ports: Some(exposed_ports),
             env: Some(env),
             host_config: Some(HostConfig {
-                auto_remove: Some(true),
                 binds: Some(binds),
                 network_mode: Some(self.network_name.clone()),
                 port_bindings: Some(port_bindings),
@@ -737,7 +740,7 @@ impl DevnetOrchestrator {
             platform: devnet_config.docker_platform.as_deref(),
         };
 
-        let config = self.prepare_bitcoin_node_config(1, no_snapshot)?;
+        let config = self.prepare_bitcoin_node_config(no_snapshot)?;
 
         let container = match docker
             .create_container::<&str, String>(Some(options.clone()), config.clone())
@@ -747,7 +750,11 @@ impl DevnetOrchestrator {
             Ok(container) => container.id,
             Err(_e) => {
                 // Attempt to clean eventual subsequent artifacts
-                let _ = docker.kill_container::<String>(&container_name, None).await;
+                let remove = RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                };
+                let _ = docker.remove_container(&container_name, Some(remove)).await;
                 docker
                     .create_container::<&str, String>(Some(options), config)
                     .await
@@ -838,7 +845,7 @@ impl DevnetOrchestrator {
         Ok(())
     }
 
-    pub fn prepare_stacks_node_config(&self, boot_index: u32) -> Result<Config<String>, String> {
+    pub fn prepare_stacks_node_config(&self) -> Result<Config<String>, String> {
         let network_config = &self.network_config;
         let devnet_config = self.devnet_config();
 
@@ -983,11 +990,8 @@ impl DevnetOrchestrator {
         file.write_all(stacks_conf.as_bytes())
             .map_err(|e| format!("unable to write Stacks.toml: {e:?}"))?;
 
-        let mut stacks_node_data_path = PathBuf::from(&devnet_config.working_dir);
-        stacks_node_data_path.push("data");
-        stacks_node_data_path.push(format!("{boot_index}"));
-        stacks_node_data_path.push("stacks");
-        fs::create_dir_all(stacks_node_data_path)
+        let stacks_node_data_path = get_project_snapshot_dir(devnet_config).join("stacks");
+        fs::create_dir_all(&stacks_node_data_path)
             .map_err(|e| format!("unable to create stacks directory: {e:?}"))?;
 
         let exposed_ports = HashMap::from([
@@ -1009,10 +1013,7 @@ impl DevnetOrchestrator {
         )];
 
         if devnet_config.bind_containers_volumes {
-            binds.push(format!(
-                "{}/data/{}/stacks:/devnet/",
-                devnet_config.working_dir, boot_index
-            ))
+            binds.push(format!("{}:/devnet/", stacks_node_data_path.display()))
         }
 
         let mut env = vec![
@@ -1035,7 +1036,6 @@ impl DevnetOrchestrator {
             ]),
             env: Some(env),
             host_config: Some(HostConfig {
-                auto_remove: Some(true),
                 binds: Some(binds),
                 network_mode: Some(self.network_name.clone()),
                 port_bindings: Some(port_bindings),
@@ -1048,11 +1048,7 @@ impl DevnetOrchestrator {
         Ok(config)
     }
 
-    pub async fn prepare_stacks_node_container(
-        &mut self,
-        boot_index: u32,
-        ctx: &Context,
-    ) -> Result<(), String> {
+    pub async fn prepare_stacks_node_container(&mut self, ctx: &Context) -> Result<(), String> {
         let devnet_config = self.devnet_config();
         self.pull_image(
             &devnet_config.stacks_node_image_url.clone(),
@@ -1066,7 +1062,7 @@ impl DevnetOrchestrator {
             platform: devnet_config.docker_platform.clone(),
         };
 
-        let config = self.prepare_stacks_node_config(boot_index)?;
+        let config = self.prepare_stacks_node_config()?;
 
         let container = docker
             .create_container::<String, String>(Some(options), config)
@@ -1117,7 +1113,6 @@ impl DevnetOrchestrator {
 
     pub fn prepare_stacks_signer_config(
         &self,
-        boot_index: u32,
         signer_id: u32,
         signer_key: &StacksPrivateKey,
     ) -> Result<Config<String>, String> {
@@ -1146,10 +1141,7 @@ impl DevnetOrchestrator {
         file.write_all(signer_conf.as_bytes())
             .map_err(|e| format!("unable to write Signer.toml: {e:?}"))?;
 
-        let mut stacks_signer_data_path = PathBuf::from(&devnet_config.working_dir);
-        stacks_signer_data_path.push("data");
-        stacks_signer_data_path.push(boot_index.to_string());
-        stacks_signer_data_path.push("signer");
+        let stacks_signer_data_path = get_project_snapshot_dir(devnet_config).join("signer");
         fs::create_dir_all(stacks_signer_data_path)
             .map_err(|e| format!("unable to create stacks directory: {e:?}"))?;
 
@@ -1162,8 +1154,10 @@ impl DevnetOrchestrator {
 
         if devnet_config.bind_containers_volumes {
             binds.push(format!(
-                "{}/data/{}/stacks:/devnet/",
-                devnet_config.working_dir, boot_index
+                "{}:/devnet/",
+                get_project_snapshot_dir(devnet_config)
+                    .join("stacks")
+                    .display()
             ))
         }
 
@@ -1183,7 +1177,6 @@ impl DevnetOrchestrator {
             ]),
             env: Some(env),
             host_config: Some(HostConfig {
-                auto_remove: Some(true),
                 binds: Some(binds),
                 network_mode: Some(self.network_name.clone()),
                 port_bindings: None,
@@ -1198,7 +1191,6 @@ impl DevnetOrchestrator {
 
     pub async fn prepare_stacks_signer_container(
         &mut self,
-        boot_index: u32,
         ctx: &Context,
         signer_id: u32,
         signer_key: &StacksPrivateKey,
@@ -1216,7 +1208,7 @@ impl DevnetOrchestrator {
             platform: devnet_config.docker_platform.clone(),
         };
 
-        let config = self.prepare_stacks_signer_config(boot_index, signer_id, signer_key)?;
+        let config = self.prepare_stacks_signer_config(signer_id, signer_key)?;
 
         let container = docker
             .create_container::<String, String>(Some(options), config)
@@ -2063,7 +2055,19 @@ impl DevnetOrchestrator {
     }
 }
 
-async fn wait_for_container_exit(docker: &Docker, name: &str, container_id: &str) -> String {
+/// Delay before waiting on a container again after the wait itself failed.
+const WAIT_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// How many retries in a row Docker may stay unreachable before the watch gives up.
+const DOCKER_UNREACHABLE_RETRIES: u32 = 30;
+
+async fn wait_for_container_exit(
+    docker: &Docker,
+    name: &str,
+    container_id: &str,
+    retry_delay: Duration,
+) -> String {
+    let mut unreachable = 0;
     let code = loop {
         let status = docker
             .wait_container(container_id, None::<WaitContainerOptions<String>>)
@@ -2076,12 +2080,20 @@ async fn wait_for_container_exit(docker: &Docker, name: &str, container_id: &str
             | Err(DockerError::DockerResponseServerError {
                 status_code: 404, ..
             }) => return format!("{name} container was removed unexpectedly"),
-            // A dropped connection is not an exit: keep waiting while the container runs
+            // Any other error (a dropped connection, a daemon restart) is not an exit: wait
+            // again while Docker still answers for the container
             Err(e) => {
-                if !is_container_running(docker, container_id).await {
+                let inspect = docker
+                    .inspect_container(container_id, None::<InspectContainerOptions>)
+                    .await;
+                if inspect.is_ok() {
+                    unreachable = 0;
+                } else if unreachable == DOCKER_UNREACHABLE_RETRIES {
                     return format!("unable to watch the {name} container: {e}");
+                } else {
+                    unreachable += 1;
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(retry_delay).await;
             }
         }
     };
@@ -2283,7 +2295,7 @@ mod tests {
     fn bitcoin_conf_omits_options_removed_in_core_28() {
         let (root, orchestrator) = test_orchestrator();
 
-        orchestrator.prepare_bitcoin_node_config(1, true).unwrap();
+        orchestrator.prepare_bitcoin_node_config(true).unwrap();
         let conf = fs::read_to_string(root.path().join("devnet").join("conf").join("bitcoin.conf"))
             .unwrap();
         assert!(!conf.contains("rpcserialversion"));
@@ -2293,7 +2305,7 @@ mod tests {
     fn bitcoin_node_runs_through_the_image_entrypoint() {
         let (root, orchestrator) = test_orchestrator();
 
-        let config = orchestrator.prepare_bitcoin_node_config(1, true).unwrap();
+        let config = orchestrator.prepare_bitcoin_node_config(true).unwrap();
         assert_eq!(config.image.as_deref(), Some(DEFAULT_BITCOIN_NODE_IMAGE));
         // bitcoin/bitcoin drops privileges in its entrypoint, which needs to start as root
         assert_eq!(config.user, None);
@@ -2313,7 +2325,7 @@ mod tests {
         #[cfg(not(unix))]
         assert_eq!(config.env.unwrap(), Vec::<String>::new());
 
-        let with_snapshot = orchestrator.prepare_bitcoin_node_config(1, false).unwrap();
+        let with_snapshot = orchestrator.prepare_bitcoin_node_config(false).unwrap();
         assert!(with_snapshot.cmd.unwrap().contains(&"-reindex".to_string()));
     }
 
@@ -2323,7 +2335,7 @@ mod tests {
 
         let conf_dir = root.path().join("devnet").join("conf");
         fs::create_dir_all(&conf_dir).unwrap();
-        orchestrator.prepare_stacks_node_config(1).unwrap();
+        orchestrator.prepare_stacks_node_config().unwrap();
         let conf = fs::read_to_string(conf_dir.join("Stacks.toml")).unwrap();
         assert!(conf.contains("wallet_name = \"miner\""));
         // stacks-node 4.0.5 rejects unknown burnchain fields
@@ -2431,31 +2443,24 @@ mod tests {
         (server, docker)
     }
 
-    async fn mock_json(
-        server: &mut mockito::ServerGuard,
-        method: &str,
-        path: &str,
-        status: usize,
-        body: &str,
-    ) -> mockito::Mock {
+    fn mock(server: &mut mockito::ServerGuard, method: &str, path: &str) -> mockito::Mock {
         server
             .mock(method, mockito::Matcher::Regex(format!("{path}$")))
-            .with_status(status)
             .with_header("content-type", "application/json")
-            .with_body(body)
-            .create_async()
-            .await
+    }
+
+    async fn wait_without_delay(docker: &Docker) -> String {
+        wait_for_container_exit(docker, "stacks-node", "abc", Duration::ZERO).await
     }
 
     #[tokio::test]
     async fn reports_the_exit_code_of_a_stopped_node() {
         let (mut server, docker) = mock_docker().await;
-        let wait = r#"{"StatusCode":101}"#;
-        mock_json(&mut server, "POST", "/containers/abc/wait", 200, wait).await;
+        let wait = mock(&mut server, "POST", "/containers/abc/wait");
+        wait.with_body(r#"{"StatusCode":101}"#).create_async().await;
 
-        let message = wait_for_container_exit(&docker, "stacks-node", "abc").await;
         assert_eq!(
-            message,
+            wait_without_delay(&docker).await,
             "stacks-node container exited unexpectedly (exit code 101)"
         );
     }
@@ -2463,23 +2468,22 @@ mod tests {
     #[tokio::test]
     async fn reports_a_removed_node() {
         let (mut server, docker) = mock_docker().await;
-        let missing = r#"{"message":"No such container"}"#;
-        mock_json(&mut server, "POST", "/containers/abc/wait", 404, missing).await;
+        let wait = mock(&mut server, "POST", "/containers/abc/wait").with_status(404);
+        wait.with_body(r#"{"message":"No such container"}"#)
+            .create_async()
+            .await;
 
-        let message = wait_for_container_exit(&docker, "bitcoin-node", "abc").await;
-        assert_eq!(message, "bitcoin-node container was removed unexpectedly");
+        assert_eq!(
+            wait_without_delay(&docker).await,
+            "stacks-node container was removed unexpectedly"
+        );
     }
 
     #[tokio::test]
-    async fn keeps_waiting_when_the_wait_fails_on_a_running_container() {
+    async fn waits_again_after_a_failed_wait() {
         let (mut server, docker) = mock_docker().await;
         let calls = std::sync::atomic::AtomicUsize::new(0);
-        server
-            .mock(
-                "POST",
-                mockito::Matcher::Regex("/containers/abc/wait$".into()),
-            )
-            .with_header("content-type", "application/json")
+        mock(&mut server, "POST", "/containers/abc/wait")
             .with_body_from_request(move |_| {
                 match calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                     0 => b"not json".to_vec(),
@@ -2488,24 +2492,38 @@ mod tests {
             })
             .create_async()
             .await;
-        let running = r#"{"State":{"Running":true}}"#;
-        mock_json(&mut server, "GET", "/containers/abc/json", 200, running).await;
 
-        let message = wait_for_container_exit(&docker, "stacks-node", "abc").await;
         assert_eq!(
-            message,
+            wait_without_delay(&docker).await,
             "stacks-node container exited unexpectedly (exit code 3)"
         );
     }
 
     #[tokio::test]
-    async fn reports_a_failed_wait_on_a_stopped_container() {
+    async fn keeps_waiting_while_docker_answers_for_the_container() {
         let (mut server, docker) = mock_docker().await;
-        mock_json(&mut server, "POST", "/containers/abc/wait", 500, "{}").await;
-        let stopped = r#"{"State":{"Running":false}}"#;
-        mock_json(&mut server, "GET", "/containers/abc/json", 200, stopped).await;
+        let wait = mock(&mut server, "POST", "/containers/abc/wait").with_status(500);
+        wait.with_body("{}").create_async().await;
+        let inspect = mock(&mut server, "GET", "/containers/abc/json")
+            .with_body("{}")
+            .expect_at_least(DOCKER_UNREACHABLE_RETRIES as usize + 1)
+            .create_async()
+            .await;
 
-        let message = wait_for_container_exit(&docker, "stacks-node", "abc").await;
+        let watch = tokio::time::timeout(Duration::from_secs(1), wait_without_delay(&docker));
+        assert!(watch.await.is_err());
+        inspect.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn gives_up_once_docker_stays_unreachable() {
+        let (mut server, docker) = mock_docker().await;
+        let wait = mock(&mut server, "POST", "/containers/abc/wait").with_status(500);
+        wait.with_body("{}").create_async().await;
+        let inspect = mock(&mut server, "GET", "/containers/abc/json").with_status(500);
+        inspect.with_body("{}").create_async().await;
+
+        let message = wait_without_delay(&docker).await;
         assert!(message.starts_with("unable to watch the stacks-node container"));
     }
 
@@ -2513,8 +2531,8 @@ mod tests {
     async fn fails_when_a_node_exits_before_shutdown() {
         let (_root, mut orchestrator) = test_orchestrator();
         let (mut server, docker) = mock_docker().await;
-        let wait = r#"{"StatusCode":101}"#;
-        mock_json(&mut server, "POST", "/containers/abc/wait", 200, wait).await;
+        let wait = mock(&mut server, "POST", "/containers/abc/wait");
+        wait.with_body(r#"{"StatusCode":101}"#).create_async().await;
         orchestrator.docker_client = Some(docker);
         orchestrator.stacks_node_container_id = Some("abc".into());
         let (_terminator_tx, mut terminator_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2530,14 +2548,13 @@ mod tests {
     async fn fails_when_a_signer_exits() {
         let (_root, mut orchestrator) = test_orchestrator();
         let (mut server, docker) = mock_docker().await;
-        let wait = r#"{"StatusCode":1}"#;
-        mock_json(&mut server, "POST", "/containers/abc/wait", 200, wait).await;
+        let wait = mock(&mut server, "POST", "/containers/abc/wait");
+        wait.with_body(r#"{"StatusCode":1}"#).create_async().await;
         orchestrator.docker_client = Some(docker);
         orchestrator.stacks_signers_containers_ids = vec!["abc".into()];
 
-        let message = orchestrator.wait_for_node_exit().await;
         assert_eq!(
-            message,
+            orchestrator.wait_for_node_exit().await,
             "stacks-signer-0 container exited unexpectedly (exit code 1)"
         );
     }
@@ -2546,31 +2563,76 @@ mod tests {
     async fn returns_on_a_shutdown_request() {
         let (_root, orchestrator) = test_orchestrator();
         let (terminator_tx, mut terminator_rx) = tokio::sync::mpsc::unbounded_channel();
-        terminator_tx.send(true).unwrap();
+        terminator_tx.send(()).unwrap();
 
         let result = orchestrator.wait_for_termination(&mut terminator_rx).await;
-        assert_eq!(result, Ok(Some(true)));
+        assert_eq!(result, Ok(()));
+    }
+
+    /// Mocks the calls `kill` must make for this session, and the label and name based
+    /// cleanups it must not make since a newer session for the same project shares both.
+    async fn mock_teardown(
+        server: &mut mockito::ServerGuard,
+        network_name: &str,
+    ) -> Vec<mockito::Mock> {
+        let calls = [
+            ("DELETE", "/containers/btc".to_string(), 1),
+            ("DELETE", "/networks/net".to_string(), 1),
+            ("POST", "/containers/prune".to_string(), 0),
+            ("POST", "/networks/prune".to_string(), 0),
+            (
+                "DELETE",
+                format!("/networks/{}", network_name.replace('.', "\\.")),
+                0,
+            ),
+        ];
+        let mut mocks = vec![];
+        for (method, path, expected) in calls {
+            let mock = mock(server, method, &path)
+                .with_status(204)
+                .expect(expected);
+            mocks.push(mock.create_async().await);
+        }
+        mocks
+    }
+
+    async fn start_with_mocked_docker(
+        server: &mut mockito::ServerGuard,
+        docker: Docker,
+        shutdown_requested: bool,
+    ) -> Result<(), String> {
+        let (_root, mut orchestrator) = test_orchestrator();
+        orchestrator.docker_client = Some(docker);
+        orchestrator.bitcoin_node_container_id = Some("btc".into());
+        orchestrator.docker_network_id = Some("net".into());
+        let teardown = mock_teardown(server, &orchestrator.network_name).await;
+        let (event_tx, _event_rx) = std::sync::mpsc::channel();
+        let (terminator_tx, terminator_rx) = tokio::sync::mpsc::unbounded_channel();
+        if shutdown_requested {
+            terminator_tx.send(()).unwrap();
+        }
+
+        let result = orchestrator
+            .start(event_tx, terminator_rx, &Context::empty(), true, false)
+            .await;
+        for mock in teardown {
+            mock.assert_async().await;
+        }
+        result
     }
 
     #[tokio::test]
-    async fn removes_its_network_when_start_fails() {
-        let (_root, mut orchestrator) = test_orchestrator();
+    async fn removes_only_its_own_resources_when_start_fails() {
         let (mut server, docker) = mock_docker().await;
-        let remove_network = server
-            .mock("DELETE", mockito::Matcher::Regex("/networks/net$".into()))
-            .with_status(204)
-            .expect(1)
-            .create_async()
-            .await;
-        orchestrator.docker_client = Some(docker);
-        orchestrator.docker_network_id = Some("net".into());
-        let (event_tx, _event_rx) = std::sync::mpsc::channel();
-        let (_terminator_tx, terminator_rx) = tokio::sync::mpsc::unbounded_channel();
-
         // the image pull is not mocked, so the first boot step fails
-        let result =
-            (orchestrator.start(event_tx, terminator_rx, &Context::empty(), true, false)).await;
+        let result = start_with_mocked_docker(&mut server, docker, false).await;
         assert!(result.is_err());
-        remove_network.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn removes_its_resources_on_a_shutdown_requested_while_booting() {
+        let (mut server, docker) = mock_docker().await;
+        let result = start_with_mocked_docker(&mut server, docker, true).await;
+        assert_eq!(result, Ok(()));
     }
 }

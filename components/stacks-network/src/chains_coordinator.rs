@@ -160,7 +160,7 @@ pub async fn start_chains_coordinator(
     devnet_event_tx: Sender<DevnetEvent>,
     chains_coordinator_commands_rx: crossbeam_channel::Receiver<ChainsCoordinatorCommand>,
     _chains_coordinator_commands_tx: crossbeam_channel::Sender<ChainsCoordinatorCommand>,
-    orchestrator_terminator_tx: UnboundedSender<bool>,
+    orchestrator_terminator_tx: UnboundedSender<()>,
     observer_command_tx: Sender<ObserverCommand>,
     observer_command_rx: Receiver<ObserverCommand>,
     mining_command_tx: Sender<BitcoinMiningCommand>,
@@ -318,7 +318,7 @@ pub async fn start_chains_coordinator(
             i if i == chains_coordinator_commands_oper => {
                 match oper.recv(&chains_coordinator_commands_rx) {
                     Ok(ChainsCoordinatorCommand::Terminate) => {
-                        let _ = orchestrator_terminator_tx.send(true);
+                        let _ = orchestrator_terminator_tx.send(());
                         let _ = observer_command_tx.send(ObserverCommand::Terminate);
                         let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
                         break;
