@@ -2393,10 +2393,12 @@ mod tests {
         );
 
         let warnings = sbtc_funding_warnings(Some(500), EpochSpec::Epoch2_5);
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        let [warning] = warnings.as_slice() else {
+            panic!("expected exactly one warning, got {}", warnings.len());
+        };
         assert!(
-            warnings[0].contains("unable to mint the configured sbtc_balance"),
-            "{warnings:?}"
+            warning.contains("unable to mint the configured sbtc_balance"),
+            "the warning should name the unmintable sbtc_balance"
         );
     }
 
