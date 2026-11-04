@@ -30,11 +30,19 @@ fn tar_directory(src_dir: &Path, root: impl AsRef<Path>) -> io::Result<Vec<u8>> 
     builder.into_inner()
 }
 
+/// Keeps file I/O off the single-threaded runtimes, which also poll for shutdown.
+async fn run_blocking<T: Send + 'static>(
+    work: impl FnOnce() -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(io::Error::other)?
+}
+
 async fn archive_directory(src_dir: &Path, root: &str) -> Result<Vec<u8>, String> {
     let (src, root) = (src_dir.to_path_buf(), root.to_string());
-    tokio::task::spawn_blocking(move || tar_directory(&src, root))
+    run_blocking(move || tar_directory(&src, root))
         .await
-        .map_err(|e| e.to_string())?
         .map_err(|e| format!("unable to archive {}: {e}", src_dir.display()))
 }
 
@@ -119,8 +127,10 @@ pub async fn copy_file_to_container(
     dest: &str,
 ) -> Result<(), String> {
     let (dir, name) = split_dest(dest)?;
-    let archive =
-        tar_file(src, name).map_err(|e| format!("unable to archive {}: {e}", src.display()))?;
+    let (src_path, name) = (src.to_path_buf(), name.to_string());
+    let archive = run_blocking(move || tar_file(&src_path, name))
+        .await
+        .map_err(|e| format!("unable to archive {}: {e}", src.display()))?;
     upload(docker, container, dir, archive)
         .await
         .map_err(|e| formatted_docker_error(&format!("unable to upload to {container}:{dest}"), e))
@@ -139,7 +149,10 @@ pub async fn copy_file_from_container(
         .try_concat()
         .await
         .map_err(|e| formatted_docker_error(&format!("unable to download {container}:{src}"), e))?;
-    untar_file(&archive, dest).map_err(|e| format!("unable to write {}: {e}", dest.display()))
+    let dest_path = dest.to_path_buf();
+    run_blocking(move || untar_file(&archive, &dest_path))
+        .await
+        .map_err(|e| format!("unable to write {}: {e}", dest.display()))
 }
 
 /// Same as `docker exec {container} {cmd}`: runs `cmd` to completion, and fails with its
