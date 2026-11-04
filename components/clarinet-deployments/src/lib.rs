@@ -309,40 +309,49 @@ fn is_sbtc_token_deployed(session: &Session) -> bool {
 
 /// Credit the `sbtc_balance` configured for each genesis wallet, writing the
 /// balance and total supply straight into the datastore like genesis STX.
-fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &DeploymentSpecification) {
+/// Returns the warnings to print, one per balance that couldn't be minted.
+#[must_use]
+fn fund_genesis_accounts_with_sbtc(
+    session: &mut Session,
+    deployment: &DeploymentSpecification,
+) -> Vec<String> {
     let Some(spec) = deployment.genesis.as_ref() else {
-        return;
+        return vec![];
     };
 
     if !is_sbtc_token_deployed(session) {
-        if spec.has_configured_sbtc_balance() {
-            let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-token");
-            ueprint!(
-                "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this \
-                 session. The sBTC contracts require epoch {sbtc_epoch} or later.",
-                *SBTC_TOKEN_MAINNET_ADDRESS
-            );
+        if !spec.has_configured_sbtc_balance() {
+            return vec![];
         }
-        return;
+        let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-token");
+        return vec![format!(
+            "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this \
+             session. The sBTC contracts require epoch {sbtc_epoch} or later.",
+            *SBTC_TOKEN_MAINNET_ADDRESS
+        )];
     }
 
-    let funded_wallets = spec
-        .wallets
+    spec.wallets
         .iter()
         .map(|wallet| (wallet, wallet.sbtc_balance_or_default()))
-        .filter(|(_, balance)| *balance > 0);
-    for (wallet, balance) in funded_wallets {
-        if let Err(reason) = session.interpreter.mint_ft_balance(
-            &SBTC_TOKEN_ASSET_IDENTIFIER,
-            &wallet.address.clone().into(),
-            balance,
-        ) {
-            ueprint!(
-                "Warning: unable to mint {balance} sBTC to {}: {reason}",
-                wallet.address
-            );
-        }
-    }
+        .filter(|(_, balance)| *balance > 0)
+        .filter_map(|(wallet, balance)| {
+            session
+                .interpreter
+                .mint_ft_balance(
+                    &SBTC_TOKEN_ASSET_IDENTIFIER,
+                    &wallet.address.clone().into(),
+                    balance,
+                )
+                .err()
+                .map(|reason| {
+                    format!(
+                        "Warning: unable to mint {balance} sBTC to {}: {reason}",
+                        wallet.address
+                    )
+                })
+        })
+        .collect()
 }
 
 static IMPLICIT_BATCH: TransactionsBatchSpecification = TransactionsBatchSpecification {
@@ -574,7 +583,9 @@ fn run_deployment_plan(
         }
     }
 
-    fund_genesis_accounts_with_sbtc(session, deployment);
+    for warning in fund_genesis_accounts_with_sbtc(session, deployment) {
+        ueprint!("{warning}");
+    }
 
     contracts
 }
@@ -2359,6 +2370,34 @@ mod tests {
             .interpreter
             .datastore
             .get_current_stacks_block_height()
+    }
+
+    fn sbtc_funding_warnings(sbtc_balance: Option<u128>, epoch: EpochSpec) -> Vec<String> {
+        let mut genesis = genesis_with_balance(1_000);
+        genesis.wallets[0].sbtc_balance = sbtc_balance;
+        let deployment = contractless_deployment(genesis, epoch);
+        let mut session = Session::new(SessionSettings::default());
+        prepare_session_for_deployment_plan(&mut session, &deployment);
+        fund_genesis_accounts_with_sbtc(&mut session, &deployment)
+    }
+
+    #[test]
+    fn warns_about_unmintable_sbtc_only_when_configured() {
+        assert_eq!(
+            sbtc_funding_warnings(None, EpochSpec::Epoch2_5),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            sbtc_funding_warnings(None, EpochSpec::Epoch3_0),
+            Vec::<String>::new()
+        );
+
+        let warnings = sbtc_funding_warnings(Some(500), EpochSpec::Epoch2_5);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("unable to mint the configured sbtc_balance"),
+            "{warnings:?}"
+        );
     }
 
     #[test]

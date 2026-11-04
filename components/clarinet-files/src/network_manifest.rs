@@ -463,10 +463,20 @@ impl NetworkManifest {
                         Some(Value::Integer(balance)) => *balance as u64,
                         _ => 0,
                     };
-                    let sbtc_balance = match account_settings.get("sbtc_balance") {
-                        Some(Value::Integer(balance)) => Some(*balance as u64),
-                        _ => None,
-                    };
+                    let sbtc_balance = account_settings
+                        .get("sbtc_balance")
+                        .map(|value| {
+                            value
+                                .as_integer()
+                                .and_then(|balance| u64::try_from(balance).ok())
+                                .ok_or_else(|| {
+                                    format!(
+                                        "sbtc_balance for account {account_name} (located in ./settings/{:?}.toml) must be a non-negative integer",
+                                        networks.1
+                                    )
+                                })
+                        })
+                        .transpose()?;
 
                     let mut mnemonic = match account_settings.get("mnemonic") {
                         Some(Value::String(phrase)) => match mnemonic_from_phrase(phrase) {
@@ -1121,6 +1131,22 @@ mod tests {
         let wallet_1 = &manifest.accounts["wallet_1"];
         assert_eq!(wallet_1.sbtc_balance, Some(500));
         assert_eq!(wallet_1.sbtc_balance_or_default(), 500);
+    }
+
+    #[test]
+    fn rejects_an_sbtc_balance_that_is_not_a_non_negative_integer() {
+        let networks = StacksNetwork::Simnet.get_networks();
+        for value in ["\"500\"", "-1", "5e2"] {
+            let settings = format!(
+                "[network]\nname = \"devnet\"\n[accounts.wallet_1]\nsbtc_balance = {value}\n"
+            );
+            let mut file: NetworkManifestFile = toml::from_str(&settings).unwrap();
+            let err =
+                NetworkManifest::from_network_manifest_file(&mut file, &networks, false, None)
+                    .err()
+                    .unwrap_or_else(|| panic!("sbtc_balance = {value} should be rejected"));
+            assert!(err.contains("sbtc_balance for account wallet_1"), "{err}");
+        }
     }
 
     #[test]
