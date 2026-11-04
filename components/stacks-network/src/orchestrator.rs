@@ -1393,11 +1393,10 @@ impl DevnetOrchestrator {
                 });
 
                 // Copy the events file to the container
-                let container_name = format!("stacks-api.{}", self.network_name);
+                let container_name = self.stacks_api_container_name();
                 let copy_command = format!(
-                    "docker cp {} {}:/tmp/events_cache.tsv",
-                    events_path.display(),
-                    container_name
+                    "docker cp {} {container_name}:/tmp/events_cache.tsv",
+                    events_path.display()
                 );
                 let output =
                     run_docker_command(&copy_command, devnet_config.docker_host.as_deref())

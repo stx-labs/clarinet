@@ -78,7 +78,7 @@ pub struct DevnetEventObserverConfig {
     pub deployment_fee_rate: u64,
     pub services_map_hosts: ServicesMapHosts,
     pub network_manifest: NetworkManifest,
-    pub stacks_api_container: String,
+    pub stacks_api_container_name: String,
 }
 
 impl DevnetEventObserverConfig {
@@ -121,7 +121,7 @@ impl DevnetEventObserverConfig {
         deployment: DeploymentSpecification,
         ctx: &Context,
         services_map_hosts: ServicesMapHosts,
-        stacks_api_container: String,
+        stacks_api_container_name: String,
     ) -> Self {
         ctx.try_log(|logger| slog::info!(logger, "Checking contracts"));
         let event_observer_config = EventObserverConfig {
@@ -153,7 +153,7 @@ impl DevnetEventObserverConfig {
             deployment_fee_rate: network_manifest.network.deployment_fee_rate,
             services_map_hosts,
             network_manifest,
-            stacks_api_container,
+            stacks_api_container_name,
         }
     }
 }
@@ -1589,7 +1589,7 @@ async fn export_stacks_api_events(
     global_snapshot_dir: &Path,
     devnet_event_tx: &Sender<DevnetEvent>,
 ) -> Result<(), String> {
-    let container_name = &config.stacks_api_container;
+    let container_name = &config.stacks_api_container_name;
 
     let _ = devnet_event_tx.send(DevnetEvent::info(
         "Exporting Stacks API events...".to_string(),
