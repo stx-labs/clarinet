@@ -764,6 +764,7 @@ dependencies = [
  "stacks-rpc-client",
  "strum",
  "tempfile",
+ "test-case",
  "tokio",
  "toml",
  "web-sys",

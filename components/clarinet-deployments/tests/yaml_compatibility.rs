@@ -2,6 +2,7 @@ use clarinet_deployments::types::{
     DeploymentSpecificationFile, EpochSpec, TransactionSpecificationFile,
 };
 use clarinet_deployments::yaml::from_yaml;
+use indoc::{formatdoc, indoc};
 use serde_json::{json, Value};
 
 fn transactions() -> Vec<(&'static str, Value)> {
@@ -46,13 +47,15 @@ fn all_transaction_variants_accept_all_three_formats() {
         let expected: TransactionSpecificationFile =
             serde_json::from_value(current.clone()).unwrap();
         let body = serde_saphyr::to_string(&fields).unwrap();
-        let legacy = format!(
-            "{variant}:\n{}",
-            body.lines()
-                .map(|line| format!("  {line}\n"))
-                .collect::<String>()
-        );
-        let tagged = format!("!{variant}\n{body}");
+        let indented: String = body.lines().map(|line| format!("  {line}\n")).collect();
+        let legacy = formatdoc! {"
+            {variant}:
+            {indented}
+        "};
+        let tagged = formatdoc! {"
+            !{variant}
+            {body}
+        "};
         let current = serde_saphyr::to_string(&current).unwrap();
 
         for input in [current, legacy, tagged] {
@@ -78,11 +81,26 @@ fn malformed_transactions_are_rejected() {
     for input in [
         "transaction-type: nonexistent\n",
         "!nonexistent {}",
-        "transaction-type: stx-transfer\ncost: 1\n",
+        indoc! {"
+            transaction-type: stx-transfer
+            cost: 1
+        "},
         "[]",
         "null",
-        "transaction-type: btc-transfer\nexpected-sender: sender\nrecipient: recipient\nsats-amount: -1\nsats-per-byte: 1\n",
-        "transaction-type: btc-transfer\nexpected-sender: sender\nrecipient: recipient\nsats-amount: 18446744073709551616\nsats-per-byte: 1\n",
+        indoc! {"
+            transaction-type: btc-transfer
+            expected-sender: sender
+            recipient: recipient
+            sats-amount: -1
+            sats-per-byte: 1
+        "},
+        indoc! {"
+            transaction-type: btc-transfer
+            expected-sender: sender
+            recipient: recipient
+            sats-amount: 18446744073709551616
+            sats-per-byte: 1
+        "},
     ] {
         assert!(
             from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_err(),
@@ -159,7 +177,7 @@ fn parse_counter_devnet_deployment_file() {
 /// Unquoted legacy boolean words stay strings through the custom transaction deserializer.
 #[test]
 fn unquoted_call_strings_in_all_transaction_formats() {
-    let fields = indoc::indoc! {"
+    let fields = indoc! {"
         contract-id: ST000000000000000000002AMW42H.test
         expected-sender: ST000000000000000000002AMW42H
         method: on
@@ -168,9 +186,18 @@ fn unquoted_call_strings_in_all_transaction_formats() {
     "};
     let indented: String = fields.lines().map(|line| format!("  {line}\n")).collect();
     for input in [
-        format!("transaction-type: contract-call\n{fields}"),
-        format!("contract-call:\n{indented}"),
-        format!("!contract-call\n{fields}"),
+        formatdoc! {"
+            transaction-type: contract-call
+            {fields}
+        "},
+        formatdoc! {"
+            contract-call:
+            {indented}
+        "},
+        formatdoc! {"
+            !contract-call
+            {fields}
+        "},
     ] {
         let TransactionSpecificationFile::ContractCall(call) = from_yaml(input.as_bytes()).unwrap()
         else {

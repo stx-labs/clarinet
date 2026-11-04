@@ -22,6 +22,7 @@ stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 mockito = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
+test-case = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 

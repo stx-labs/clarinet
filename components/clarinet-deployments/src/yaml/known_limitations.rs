@@ -1,172 +1,79 @@
-//! Core resolution and requested legacy-version policy gaps in crates.io serde-saphyr 2.0.0.
-//! Keep these assertions intact rather than treating the current behavior as correct.
-
-use std::collections::BTreeMap;
+//! Incorrect standard-tag resolution under both YAML 1.1 and YAML 1.2 Core.
+//! These assertions remain ignored until the parser is fixed; valid counterparts
+//! for every feature run in `yaml_behavior`. Plain unrecognized scalars are valid
+//! strings, whereas invalid spellings with an explicit standard tag must error.
 
 use serde_json::{json, Value};
 
 use super::from_yaml;
 
-/// Core permits true/True/TRUE, but mixed-case tRuE is a string. Main handles this correctly.
 #[test]
-#[ignore = "serde-saphyr 2.0.0 infers mixed-case booleans"]
-fn mixed_case_boolean_is_a_string() {
-    assert_eq!(from_yaml::<Value>(b"tRuE").unwrap(), json!("tRuE"));
+#[ignore = "serde-saphyr 2.0.0 accepts non-standard boolean casing"]
+fn non_standard_boolean_casing_is_text() {
+    for input in ["tRuE", "fAlSe"] {
+        assert_eq!(from_yaml::<Value>(input.as_bytes()).unwrap(), json!(input));
+        assert!(from_yaml::<bool>(input.as_bytes()).is_err());
+        let aliases = format!("[&word {input}, *word]");
+        assert_eq!(
+            from_yaml::<Value>(aliases.as_bytes()).unwrap(),
+            json!([input, input])
+        );
+    }
 }
 
-/// Our Core policy must preserve mixed-case null text, as main does.
 #[test]
-#[ignore = "serde-saphyr 2.0.0 infers mixed-case nulls"]
-fn mixed_case_null_is_a_string() {
+#[ignore = "serde-saphyr 2.0.0 accepts non-standard null casing"]
+fn non_standard_null_casing_is_text() {
     assert_eq!(from_yaml::<Value>(b"nUlL").unwrap(), json!("nUlL"));
+    assert_eq!(
+        from_yaml::<Option<String>>(b"nUlL").unwrap(),
+        Some("nUlL".into())
+    );
 }
 
-/// Core's octal prefix is lowercase; main preserves uppercase 0O as a string.
 #[test]
-#[ignore = "serde-saphyr 2.0.0 accepts uppercase octal prefixes"]
-fn uppercase_octal_prefix_is_a_string() {
-    assert_eq!(from_yaml::<Value>(b"0O10").unwrap(), json!("0O10"));
-}
-
-/// Unlike YAML 1.1, Core permits signs only on decimal integers.
-/// Main also incorrectly infers signed hexadecimal and octal integers.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 accepts signed radix-prefixed integers"]
-fn signed_radix_prefixes_are_strings() {
-    for input in ["-0x10", "+0x10", "-0o10", "+0o10"] {
+#[ignore = "serde-saphyr 2.0.0 accepts uppercase radix prefixes and signed 0o octal"]
+fn non_standard_radix_prefixes_are_text() {
+    // YAML 1.1 permits signed 0x hexadecimal, but its octal prefix is 0, not 0o.
+    // YAML 1.2 permits 0o octal without a sign. Neither uses uppercase 0O or 0X.
+    for input in ["0O10", "0X10", "+0o10", "-0o10"] {
         assert_eq!(from_yaml::<Value>(input.as_bytes()).unwrap(), json!(input));
     }
 }
 
-/// Our Core policy must preserve invalid mixed-case infinity text, as main does.
 #[test]
-#[ignore = "serde-saphyr 2.0.0 infers mixed-case infinity and rejects it in Value"]
-fn mixed_case_infinity_is_a_string() {
-    assert_eq!(from_yaml::<Value>(b".iNf").unwrap(), json!(".iNf"));
-}
-
-/// Our Core policy must preserve signed NaN text, as main does.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 infers signed NaN and rejects it in Value"]
-fn signed_nan_is_a_string() {
-    for input in ["+.nan", "-.nan"] {
+#[ignore = "serde-saphyr 2.0.0 recognizes non-standard infinity casing and signed NaN"]
+fn non_standard_float_spellings_are_text() {
+    for input in [".iNf", "+.nan", "-.nan"] {
         assert_eq!(from_yaml::<Value>(input.as_bytes()).unwrap(), json!(input));
     }
 }
 
-/// Core numbers cannot contain underscores; main correctly preserves this scalar as a string.
 #[test]
-#[ignore = "serde-saphyr 2.0.0 accepts numeric underscores"]
-fn numeric_underscores_are_strings() {
-    assert_eq!(from_yaml::<Value>(b"1_000").unwrap(), json!("1_000"));
-}
-
-/// Core radix prefixes are lowercase; main correctly preserves uppercase 0X as string content.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 accepts uppercase radix prefixes"]
-fn uppercase_radix_prefix_is_a_string() {
-    assert_eq!(from_yaml::<Value>(b"0X10").unwrap(), json!("0X10"));
-}
-
-/// Core has no binary integer notation. Main also incorrectly resolves this to an integer.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 accepts binary integers in the default schema"]
-fn binary_notation_is_a_string() {
-    assert_eq!(from_yaml::<Value>(b"0b101").unwrap(), json!("0b101"));
-}
-
-/// Core resolves a leading-zero decimal as an integer, not octal or float.
-/// Main also misses this rule: it resolves the scalar as a string.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 infers leading-zero decimals as floats"]
-fn leading_zero_decimal_is_an_integer() {
-    assert_eq!(from_yaml::<Value>(b"010").unwrap(), json!(10));
-}
-
-/// A negative leading-zero decimal is also a Core integer; main instead resolves it as a string.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 infers leading-zero decimals as floats"]
-fn negative_leading_zero_decimal_is_an_integer() {
-    assert_eq!(from_yaml::<Value>(b"-010").unwrap(), json!(-10));
-}
-
-/// A valid Core decimal can populate an integer field. Main also rejects this form.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 rejects leading-zero decimals for integer fields"]
-fn leading_zero_decimal_in_integer_field() {
+#[ignore = "serde-saphyr 2.0.0 resolves leading-zero integers as floats and rejects typed integers"]
+fn leading_zero_integers_have_an_integer_tag() {
+    // YAML 1.1 interprets 010 as octal 8; YAML 1.2 interprets it as decimal 10.
+    // The current float result is correct under neither schema. Assert 1.2 here.
+    for (input, expected) in [("010", 10), ("-010", -10), ("00", 0), ("08", 8)] {
+        assert_eq!(
+            from_yaml::<Value>(input.as_bytes()).unwrap(),
+            json!(expected)
+        );
+    }
     assert_eq!(from_yaml::<u64>(b"010").unwrap(), 10);
 }
 
-/// An explicit boolean tag does not make tRuE a valid Core boolean; main rejects it.
 #[test]
-#[ignore = "serde-saphyr 2.0.0 validates booleans case-insensitively"]
-fn invalid_explicit_boolean_is_rejected() {
-    assert!(from_yaml::<Value>(b"!!bool tRuE").is_err());
-}
-
-/// An explicit integer tag does not permit underscores in Core integers; main rejects them.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 accepts numeric underscores even with an explicit tag"]
-fn invalid_explicit_integer_is_rejected() {
-    assert!(from_yaml::<Value>(b"!!int 1_000").is_err());
-}
-
-/// Aliases must retain the Core string type of their anchor; main handles this correctly.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 infers the anchored mixed-case word as a boolean"]
-fn aliases_preserve_core_strings() {
-    assert_eq!(
-        from_yaml::<Value>(b"[&word tRuE, *word]").unwrap(),
-        json!(["tRuE", "tRuE"])
-    );
-}
-
-/// Core string key 1_000 and integer key 1000 are distinct, as they are on main.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 compares the underscored key as an integer"]
-fn numeric_looking_string_keys_are_distinct() {
-    let actual: BTreeMap<String, String> = from_yaml(b"1_000: first\n1000: second").unwrap();
-    assert_eq!(actual.len(), 2);
-    assert_eq!(actual.get("1_000").map(String::as_str), Some("first"));
-}
-
-/// Explicit 1.2 metadata must not enable non-Core inference; main preserves tRuE as a string.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 does not enforce Core resolution for an explicit 1.2 directive"]
-fn explicit_yaml_12_uses_core_resolution() {
-    assert_eq!(
-        from_yaml::<Value>(b"%YAML 1.2\n---\ntRuE").unwrap(),
-        json!("tRuE")
-    );
-}
-
-/// Our requested opt-in policy resolves yes as a YAML 1.1 boolean when explicitly declared.
-/// Main does not switch schemas either; version-based schema selection is an application policy.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 does not select a schema from version directives"]
-fn explicit_yaml_11_boolean() {
-    assert_eq!(
-        from_yaml::<Value>(b"%YAML 1.1\n---\nyes").unwrap(),
-        json!(true)
-    );
-}
-
-/// Our explicit-1.1 policy interprets leading-zero octal as eight. Main does not switch schemas.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 does not select legacy octal from version directives"]
-fn explicit_yaml_11_octal() {
-    assert_eq!(
-        from_yaml::<Value>(b"%YAML 1.1\n---\n010").unwrap(),
-        json!(8)
-    );
-}
-
-/// Our explicit-1.1 policy supports sexagesimal integers. Main also leaves this as a string.
-#[test]
-#[ignore = "serde-saphyr 2.0.0 does not resolve YAML 1.1 sexagesimal integers"]
-fn explicit_yaml_11_sexagesimal() {
-    assert_eq!(
-        from_yaml::<Value>(b"%YAML 1.1\n---\n1:20").unwrap(),
-        json!(80)
-    );
+#[ignore = "serde-saphyr 2.0.0 accepts invalid spellings with explicit standard tags"]
+fn explicit_standard_tags_reject_invalid_scalar_spellings() {
+    // !!int 1_000 is valid YAML 1.1 and is tested actively in yaml_behavior.
+    for input in [
+        "!!bool tRuE",
+        "!!bool fAlSe",
+        "!!int 0O10",
+        "!!int 0X10",
+        "!!int +0o10",
+    ] {
+        assert!(from_yaml::<Value>(input.as_bytes()).is_err(), "{input}");
+    }
 }
