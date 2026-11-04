@@ -2394,7 +2394,7 @@ mod tests {
 
         let warnings = sbtc_funding_warnings(Some(500), EpochSpec::Epoch2_5);
         let [warning] = warnings.as_slice() else {
-            panic!("expected exactly one warning, got {}", warnings.len());
+            panic!("expected exactly one warning");
         };
         assert!(
             warning.contains("unable to mint the configured sbtc_balance"),

@@ -455,6 +455,8 @@ impl NetworkManifest {
 
         let mut accounts = BTreeMap::new();
         let is_mainnet = matches!(networks.1, StacksNetwork::Mainnet);
+        let settings_file = paths::get_network_manifest_path(Path::new("."), &networks.1);
+        let settings_file = settings_file.display();
 
         if let Some(Value::Table(entries)) = &network_manifest_file.accounts {
             for (account_name, account_settings) in entries.iter() {
@@ -471,8 +473,7 @@ impl NetworkManifest {
                                 .and_then(|balance| u64::try_from(balance).ok())
                                 .ok_or_else(|| {
                                     format!(
-                                        "sbtc_balance for account {account_name} (located in ./settings/{:?}.toml) must be a non-negative integer",
-                                        networks.1
+                                        "sbtc_balance for account {account_name} (located in {settings_file}) must be a non-negative integer"
                                     )
                                 })
                         })
@@ -483,9 +484,8 @@ impl NetworkManifest {
                             Ok(result) => result.to_string(),
                             Err(e) => {
                                 return Err(format!(
-                                        "mnemonic (located in ./settings/{:?}.toml) for deploying address is invalid: {}",
-                                        networks.1 , e
-                                    ));
+                                    "mnemonic (located in {settings_file}) for deploying address is invalid: {e}"
+                                ));
                             }
                         },
                         _ => random_mnemonic().to_string(),
@@ -1146,6 +1146,7 @@ mod tests {
                     .err()
                     .unwrap_or_else(|| panic!("sbtc_balance = {value} should be rejected"));
             assert!(err.contains("sbtc_balance for account wallet_1"), "{err}");
+            assert!(err.contains("Devnet.toml"), "{err}");
         }
     }
 
