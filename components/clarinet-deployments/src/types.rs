@@ -17,7 +17,7 @@ use clarity_repl::utils::{remove_env_simnet, Environment};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 
-use crate::yaml::from_yaml;
+use crate::yaml::{from_yaml, to_yaml};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy, Eq, PartialOrd, Ord, EnumIter)]
 pub enum EpochSpec {
@@ -1029,7 +1029,7 @@ impl DeploymentSpecification {
     }
 
     pub fn to_file_content(&self, project_root: &Path) -> Result<Vec<u8>, String> {
-        serde_saphyr::to_string(&self.to_specification_file(project_root))
+        to_yaml(&self.to_specification_file(project_root))
             .map(|s| s.into_bytes())
             .map_err(|err| format!("failed to serialize deployment\n{err}"))
     }

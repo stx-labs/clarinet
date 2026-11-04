@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use test_case::test_case;
 
-use super::from_yaml;
+use super::{from_yaml, to_yaml};
 use crate::types::{DeploymentSpecificationFile, TransactionSpecificationFile};
 
 /// Check the configured default reader; no version is selected by the test harness.
@@ -484,12 +484,63 @@ fn transaction_buffer_converts_integer_remap_keys_to_strings() {
     );
 }
 
+/// Expect YAML 1.2 quoting: words, dates, and sexagesimal forms that YAML 1.1
+/// resolves as other types can be emitted as plain strings. Omit the directive
+/// and document marker, and preserve the string when read with our default policy.
+#[test_case("yes"; "yes")]
+#[test_case("NO"; "no")]
+#[test_case("on"; "on")]
+#[test_case("Off"; "off")]
+#[test_case("y"; "y")]
+#[test_case("n"; "n")]
+#[test_case("2001-12-15"; "date")]
+#[test_case("2001-12-15T02:59:43Z"; "timestamp")]
+#[test_case("1:20"; "sexagesimal_integer")]
+#[test_case("1:20.5"; "sexagesimal_float")]
+fn emitter_uses_yaml12_plain_strings_without_a_directive(value: &str) {
+    let expected = json!({"value": value});
+    let emitted = to_yaml(&expected).unwrap();
+    assert_eq!(
+        emitted,
+        formatdoc! {"
+        value: {value}
+    "}
+    );
+    assert_eq!(from_yaml::<Value>(emitted.as_bytes()).unwrap(), expected);
+}
+
+/// YAML 1.2 booleans, nulls, and numbers must stay quoted when emitted as
+/// strings. Also keep quoting the parser's extra integer forms so they round-trip
+/// as strings despite the reader's mixed 1.1/1.2 behavior.
+#[test_case("true"; "boolean")]
+#[test_case("null"; "null")]
+#[test_case("~"; "null_tilde")]
+#[test_case("42"; "decimal_integer")]
+#[test_case("010"; "leading_zero_integer")]
+#[test_case("1e2"; "float")]
+#[test_case("0o10"; "octal")]
+#[test_case("0x10"; "hexadecimal")]
+#[test_case("0b101"; "binary")]
+#[test_case("-0x10"; "signed_hexadecimal")]
+#[test_case("1_000"; "digit_separators")]
+fn emitter_quotes_scalar_looking_strings(value: &str) {
+    let expected = json!({"value": value});
+    let emitted = to_yaml(&expected).unwrap();
+    assert_eq!(
+        emitted,
+        formatdoc! {r#"
+        value: "{value}"
+    "#}
+    );
+    assert_eq!(from_yaml::<Value>(emitted.as_bytes()).unwrap(), expected);
+}
+
 /// Emitter presentation policy: numeric-looking strings use double quotes. Both
 /// versions permit either quote style; guard the rewrite-causing output and its type.
 #[test]
 fn emitter_quotes_numeric_strings_with_double_quotes() {
     let expected = json!({"balance": "100000000000000"});
-    let emitted = serde_saphyr::to_string(&expected).unwrap();
+    let emitted = to_yaml(&expected).unwrap();
     assert_eq!(emitted, "balance: \"100000000000000\"\n");
     assert_eq!(from_yaml::<Value>(emitted.as_bytes()).unwrap(), expected);
 }
@@ -499,7 +550,7 @@ fn emitter_quotes_numeric_strings_with_double_quotes() {
 #[test]
 fn emitter_folds_long_strings_without_changing_their_value() {
     let expected = json!({"name": "Simulated deployment, used as a default for `clarinet console`, `clarinet test` and `clarinet check`"});
-    let emitted = serde_saphyr::to_string(&expected).unwrap();
+    let emitted = to_yaml(&expected).unwrap();
     assert!(emitted.contains(">-\n"), "{emitted}");
     assert_eq!(from_yaml::<Value>(emitted.as_bytes()).unwrap(), expected);
 }

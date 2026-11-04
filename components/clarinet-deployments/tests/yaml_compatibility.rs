@@ -1,7 +1,11 @@
+use std::path::Path;
+
 use clarinet_deployments::types::{
-    DeploymentSpecificationFile, EpochSpec, TransactionSpecificationFile,
+    DeploymentSpecification, DeploymentSpecificationFile, EpochSpec, TransactionPlanSpecification,
+    TransactionSpecificationFile,
 };
-use clarinet_deployments::yaml::from_yaml;
+use clarinet_deployments::yaml::{from_yaml, to_yaml};
+use clarinet_files::StacksNetwork;
 use indoc::{formatdoc, indoc};
 use serde_json::{json, Value};
 
@@ -46,7 +50,7 @@ fn all_transaction_variants_accept_all_three_formats() {
         current["transaction-type"] = json!(variant);
         let expected: TransactionSpecificationFile =
             serde_json::from_value(current.clone()).unwrap();
-        let body = serde_saphyr::to_string(&fields).unwrap();
+        let body = to_yaml(&fields).unwrap();
         let indented: String = body.lines().map(|line| format!("  {line}\n")).collect();
         let legacy = formatdoc! {"
             {variant}:
@@ -56,13 +60,13 @@ fn all_transaction_variants_accept_all_three_formats() {
             !{variant}
             {body}
         "};
-        let current = serde_saphyr::to_string(&current).unwrap();
+        let current = to_yaml(&current).unwrap();
 
         for input in [current, legacy, tagged] {
             let actual: TransactionSpecificationFile =
                 from_yaml(input.as_bytes()).unwrap_or_else(|error| panic!("{input}\n{error}"));
             assert_eq!(actual, expected, "{input}");
-            let emitted = serde_saphyr::to_string(&actual).unwrap();
+            let emitted = to_yaml(&actual).unwrap();
             assert!(
                 emitted.contains(&format!("transaction-type: {variant}")),
                 "{emitted}"
@@ -140,7 +144,7 @@ fn parse_counter_simnet_deployment_file() {
         panic!("expected emulated contract publish");
     };
     assert_eq!(publish.contract_name, "counter");
-    let emitted = serde_saphyr::to_string(&deployment).unwrap();
+    let emitted = to_yaml(&deployment).unwrap();
     assert_eq!(
         DeploymentSpecificationFile::from_file_content(&emitted).unwrap(),
         deployment
@@ -167,10 +171,39 @@ fn parse_counter_devnet_deployment_file() {
     assert_eq!(publish.contract_name, "counter");
     assert_eq!(publish.cost, 5960);
     assert_eq!(publish.anchor_block_only, Some(true));
-    let emitted = serde_saphyr::to_string(&deployment).unwrap();
+    let emitted = to_yaml(&deployment).unwrap();
     assert_eq!(
         DeploymentSpecificationFile::from_file_content(&emitted).unwrap(),
         deployment
+    );
+}
+
+/// Production deployment output uses YAML 1.2 quoting without a version directive
+/// or document marker. The emitted legacy boolean word remains a string on re-reading.
+#[test]
+fn generated_deployment_uses_yaml12_quoting_without_a_directive() {
+    let deployment = DeploymentSpecification {
+        id: 0,
+        name: "yes".into(),
+        network: StacksNetwork::Simnet,
+        stacks_node: None,
+        bitcoin_node: None,
+        genesis: None,
+        plan: TransactionPlanSpecification { batches: vec![] },
+        contracts: Default::default(),
+    };
+    let project_root = Path::new(".");
+    let emitted = String::from_utf8(deployment.to_file_content(project_root).unwrap()).unwrap();
+    assert!(
+        emitted.starts_with(indoc! {"
+        id: 0
+        name: yes
+    "}),
+        "{emitted}"
+    );
+    assert_eq!(
+        DeploymentSpecificationFile::from_file_content(&emitted).unwrap(),
+        deployment.to_specification_file(project_root)
     );
 }
 
