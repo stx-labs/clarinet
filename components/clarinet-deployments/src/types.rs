@@ -1222,8 +1222,7 @@ impl GenesisSpecification {
         }
     }
 
-    /// Whether any wallet explicitly asks for sBTC. The default balance alone
-    /// doesn't count, so pre-sBTC projects don't warn about a mint nobody asked for.
+    /// Whether any wallet explicitly asks for sBTC; the default balance doesn't count.
     pub fn has_configured_sbtc_balance(&self) -> bool {
         self.wallets
             .iter()

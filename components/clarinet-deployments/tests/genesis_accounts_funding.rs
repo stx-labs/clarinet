@@ -104,8 +104,6 @@ fn does_not_fund_sbtc_before_epoch_3_0() {
     assert!(assets_maps.contains_key("STX"));
 }
 
-/// Only an explicit `sbtc_balance` warns when sBTC can't be minted. Projects
-/// that never set it would otherwise warn on every pre-3.0 session.
 #[test]
 fn only_an_explicit_sbtc_balance_counts_as_configured() {
     assert!(!genesis_with_sbtc_balance(None).has_configured_sbtc_balance());
@@ -127,26 +125,23 @@ fn funds_the_default_sbtc_balance_when_none_is_configured() {
     );
 }
 
-/// The plan file keeps the distinction: an unset balance is omitted rather
-/// than written as the default, which would read back as explicit.
 #[test]
 fn plan_file_round_trips_an_unset_sbtc_balance() {
     for sbtc_balance in [None, Some(500)] {
         let genesis = genesis_with_sbtc_balance(sbtc_balance);
-        let file = genesis.to_specification_file();
+        let yaml = yaml_serde::to_string(&genesis.to_specification_file()).unwrap();
         assert_eq!(
-            file.wallets[0].sbtc_balance,
-            sbtc_balance.map(|balance| balance.to_string())
+            yaml.contains("sbtc-balance"),
+            sbtc_balance.is_some(),
+            "{yaml}"
         );
+
+        let file: GenesisSpecificationFile = yaml_serde::from_str(&yaml).unwrap();
         assert_eq!(
             GenesisSpecification::from_specifications(&file).unwrap(),
             genesis
         );
     }
-
-    let yaml =
-        yaml_serde::to_string(&genesis_with_sbtc_balance(None).to_specification_file()).unwrap();
-    assert!(!yaml.contains("sbtc-balance"), "{yaml}");
 }
 
 /// A wallet with `sbtc_balance = 0` must not show up in the sBTC asset map.
