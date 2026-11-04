@@ -1,7 +1,7 @@
-//! Incorrect standard-tag resolution under both YAML 1.1 and YAML 1.2 Core.
-//! These assertions remain ignored until the parser is fixed; valid counterparts
-//! for every feature run in `yaml_behavior`. Plain unrecognized scalars are valid
-//! strings, whereas invalid spellings with an explicit standard tag must error.
+//! Scalar/tag behavior in serde-saphyr 2.0.0 that deviates from YAML 1.1 and 1.2 Core.
+//! These ignored assertions describe the standard behavior we want, not parser
+//! behavior we intend to preserve. Active valid-form controls live in `yaml_behavior`.
+//! Unrecognized plain scalars remain strings; invalid explicit standard tags must error.
 
 use serde_json::{json, Value};
 

@@ -26,7 +26,7 @@ fn assert_scalar(input: &str, expected: Value) {
 }
 
 /// YAML 1.1 and 1.2 share these boolean spellings. Keep one control for the
-/// incorrect mixed-case spellings tracked in known_limitations.
+/// incorrect mixed-case spellings tracked in known_spec_deviations.
 #[test]
 fn boolean_spellings() {
     assert_scalar(
@@ -46,7 +46,7 @@ fn legacy_boolean_words_are_text() {
 }
 
 /// YAML 1.1 and 1.2 share these null spellings. This is the valid-form control
-/// for the mixed-case null resolution bug in known_limitations.
+/// for the mixed-case null resolution bug in known_spec_deviations.
 #[test]
 fn null_spellings() {
     assert_scalar("[null, Null, NULL, ~]", json!([null, null, null, null]));
@@ -66,7 +66,7 @@ fn octal_prefix() {
 }
 
 /// Both versions accept lowercase 0x hexadecimal. This controls the incorrect
-/// uppercase-prefix inference tracked in known_limitations.
+/// uppercase-prefix inference tracked in known_spec_deviations.
 #[test]
 fn hexadecimal_prefix() {
     assert_scalar("0x1f", json!(31));
@@ -133,7 +133,7 @@ fn quotes_preserve_scalar_text() {
 }
 
 /// Both versions accept these infinity/NaN spellings. Keep valid f64 controls
-/// for the non-standard spellings tracked in known_limitations.
+/// for the non-standard spellings tracked in known_spec_deviations.
 #[test]
 fn floating_point_special_values() {
     for input in [".inf", ".Inf", ".INF", "+.inf"] {
