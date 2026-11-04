@@ -580,7 +580,10 @@ impl SDK {
 
         let mut settings = SessionSettings::default();
         settings.repl_settings.remote_data = config.unwrap_or_default();
-        let session = Session::new(settings);
+        let mut session = Session::new(settings);
+        if self.options.track_coverage {
+            session.enable_coverage_hook();
+        }
 
         self.session = Some(session);
         Ok(())
