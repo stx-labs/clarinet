@@ -72,6 +72,7 @@ pub struct ClarityDatastore {
     current_chain_tip: Rc<RefCell<StacksBlockId>>,
     store: HashMap<String, BTreeMap<u32, String>>,
     metadata: HashMap<(String, String), String>,
+    write_journal: Option<WriteJournal>,
     height_at_chain_tip: HashMap<StacksBlockId, u32>,
     chain_tip_at_height: HashMap<u32, StacksBlockId>,
 
@@ -95,6 +96,7 @@ impl Clone for ClarityDatastore {
             current_chain_tip: Rc::clone(&self.current_chain_tip),
             store: self.store.clone(),
             metadata: self.metadata.clone(),
+            write_journal: None,
             height_at_chain_tip: self.height_at_chain_tip.clone(),
             chain_tip_at_height: self.chain_tip_at_height.clone(),
             remote_network_info: self.remote_network_info.clone(),
@@ -174,6 +176,82 @@ pub struct Datastore {
     client: HttpClient,
 }
 
+/// One overwritten or inserted map entry, rather than a copy of the map.
+struct EntryUndo<K, V> {
+    key: K,
+    previous: Option<V>,
+}
+
+impl<K: Eq + std::hash::Hash, V: Clone> EntryUndo<K, V> {
+    fn capture(map: &HashMap<K, V>, key: K) -> Self {
+        let previous = map.get(&key).cloned();
+        Self { key, previous }
+    }
+
+    fn restore(self, map: &mut HashMap<K, V>) {
+        match self.previous {
+            Some(value) => {
+                map.insert(self.key, value);
+            }
+            None => {
+                map.remove(&self.key);
+            }
+        }
+    }
+}
+
+/// Original values for each distinct write during a tentative block.
+#[derive(Default)]
+struct WriteJournal {
+    data: HashMap<(String, u32), Option<String>>,
+    metadata: HashMap<(String, String), Option<String>>,
+}
+
+struct BurnAdvanceUndo {
+    tip: BurnchainHeaderHash,
+    height: u32,
+    tenure: u32,
+    block: EntryUndo<BurnchainHeaderHash, BurnBlockInfo>,
+    consensus: EntryUndo<ConsensusHash, SortitionId>,
+    sortition: EntryUndo<SortitionId, BurnchainHeaderHash>,
+    stacks_height: EntryUndo<u32, u32>,
+}
+
+/// Restore block tables and tips; VM storage is covered by the write journal.
+pub(super) struct BlockAdvanceUndo {
+    open_tip: StacksBlockId,
+    current_tip: StacksBlockId,
+    height: u32,
+    block: EntryUndo<StacksBlockId, StacksBlockInfo>,
+    tenure: EntryUndo<u32, u32>,
+    height_at_tip: EntryUndo<StacksBlockId, u32>,
+    tip_at_height: EntryUndo<u32, StacksBlockId>,
+    burn: Option<BurnAdvanceUndo>,
+}
+
+impl BlockAdvanceUndo {
+    pub(super) fn restore(self, store: &mut ClarityDatastore, blocks: &mut Datastore) {
+        self.block.restore(&mut blocks.stacks_blocks);
+        self.tenure
+            .restore(&mut blocks.tenure_height_at_stacks_height);
+        self.height_at_tip.restore(&mut store.height_at_chain_tip);
+        self.tip_at_height.restore(&mut store.chain_tip_at_height);
+        if let Some(burn) = self.burn {
+            burn.block.restore(&mut blocks.burn_blocks);
+            burn.consensus.restore(&mut blocks.consensus_hash_lookup);
+            burn.sortition.restore(&mut blocks.sortition_lookup);
+            burn.stacks_height
+                .restore(&mut blocks.stacks_height_at_tenure_height);
+            blocks.burn_chain_tip = burn.tip;
+            blocks.burn_chain_height = burn.height;
+            blocks.tenure_height = burn.tenure;
+        }
+        blocks.stacks_chain_height = self.height;
+        store.open_chain_tip = self.open_tip;
+        *store.current_chain_tip.borrow_mut() = self.current_tip;
+    }
+}
+
 fn height_to_hashed_bytes(height: u32) -> [u8; 32] {
     let input_bytes = height.to_be_bytes();
     let mut hasher = Sha512_256::new();
@@ -227,6 +305,7 @@ impl ClarityDatastore {
             current_chain_tip: Rc::new(RefCell::new(id.clone())),
             store: HashMap::new(),
             metadata: HashMap::new(),
+            write_journal: None,
             height_at_chain_tip: HashMap::from([(id.clone(), height)]),
             chain_tip_at_height: HashMap::from([(height, id)]),
 
@@ -260,6 +339,7 @@ impl ClarityDatastore {
             current_chain_tip: Rc::new(RefCell::new(id.clone())),
             store: HashMap::new(),
             metadata: HashMap::new(),
+            write_journal: None,
             height_at_chain_tip: HashMap::from([(id.clone(), height)]),
             chain_tip_at_height: HashMap::from([(height, id)]),
             remote_network_info: Some(remote_network_info),
@@ -342,12 +422,51 @@ impl ClarityDatastore {
         false
     }
 
+    pub(super) fn begin_write_journal(&mut self) {
+        assert!(
+            self.write_journal.is_none(),
+            "nested datastore write journal"
+        );
+        self.write_journal = Some(WriteJournal::default());
+    }
+
+    pub(super) fn finish_write_journal(&mut self, included: bool) {
+        let journal = self
+            .write_journal
+            .take()
+            .expect("active datastore write journal");
+        if included {
+            return;
+        }
+        // Each entry holds its pre-checkpoint value, so restoration order is immaterial.
+        for ((key, height), previous) in journal.data {
+            if let Some(value) = previous {
+                self.store.entry(key).or_default().insert(height, value);
+            } else if let Some(values) = self.store.get_mut(&key) {
+                values.remove(&height);
+                if values.is_empty() {
+                    self.store.remove(&key);
+                }
+            }
+        }
+        for (key, previous) in journal.metadata {
+            EntryUndo { key, previous }.restore(&mut self.metadata);
+        }
+    }
+
     fn put(&mut self, key: &str, value: &str) {
         let height = self.get_current_block_height();
-        self.store
+        let previous = self
+            .store
             .entry(key.to_string())
             .or_default()
             .insert(height, value.to_string());
+        if let Some(journal) = &mut self.write_journal {
+            journal
+                .data
+                .entry((key.to_string(), height))
+                .or_insert(previous);
+        }
     }
 
     fn fetch_block(&mut self, url: &str) -> Block {
@@ -654,8 +773,14 @@ impl ClarityBackingStore for ClarityDatastore {
         key: &str,
         value: &str,
     ) -> Result<(), VmExecutionError> {
-        self.metadata
-            .insert((contract.to_string(), key.to_string()), value.to_string());
+        let key = (contract.to_string(), key.to_string());
+        if let Some(journal) = &mut self.write_journal {
+            journal
+                .metadata
+                .entry(key.clone())
+                .or_insert_with(|| self.metadata.get(&key).cloned());
+        }
+        self.metadata.insert(key, value.to_string());
         Ok(())
     }
 
@@ -924,6 +1049,38 @@ impl Datastore {
             block_header_hash,
             burn_block_header_hash: self.burn_chain_tip.clone(),
             stacks_block_time,
+        }
+    }
+
+    /// Capture the bounded set of entries touched by advancing one simnet block.
+    pub(super) fn checkpoint_next_block(&self, store: &ClarityDatastore) -> BlockAdvanceUndo {
+        let height = self.stacks_chain_height + 1;
+        let tip = StacksBlockId(height_to_hashed_bytes(height));
+        let burn = (self.current_epoch < StacksEpochId::Epoch30).then(|| {
+            let hashes = BurnBlockHashes::from_height(self.burn_chain_height + 1);
+            BurnAdvanceUndo {
+                tip: self.burn_chain_tip.clone(),
+                height: self.burn_chain_height,
+                tenure: self.tenure_height,
+                block: EntryUndo::capture(&self.burn_blocks, hashes.header_hash),
+                consensus: EntryUndo::capture(&self.consensus_hash_lookup, hashes.consensus_hash),
+                sortition: EntryUndo::capture(&self.sortition_lookup, hashes.sortition_id),
+                stacks_height: EntryUndo::capture(
+                    &self.stacks_height_at_tenure_height,
+                    self.tenure_height + 1,
+                ),
+            }
+        });
+        let current_tip = store.current_chain_tip.borrow().clone();
+        BlockAdvanceUndo {
+            open_tip: store.open_chain_tip.clone(),
+            current_tip,
+            height: self.stacks_chain_height,
+            block: EntryUndo::capture(&self.stacks_blocks, tip.clone()),
+            tenure: EntryUndo::capture(&self.tenure_height_at_stacks_height, height),
+            height_at_tip: EntryUndo::capture(&store.height_at_chain_tip, tip),
+            tip_at_height: EntryUndo::capture(&store.chain_tip_at_height, height),
+            burn,
         }
     }
 
@@ -1477,6 +1634,182 @@ mod tests {
         );
         let datastore = Datastore::new(&clarity_datastore, constants, client);
         (clarity_datastore, datastore)
+    }
+
+    #[test]
+    fn write_journal_restores_first_values_and_retains_included_writes() {
+        let (mut store, _) = get_datastores();
+        let contract =
+            QualifiedContractIdentifier::parse("ST000000000000000000002AMW42H.journal").unwrap();
+        store.put("existing", "original");
+        store
+            .insert_metadata(&contract, "existing", "original")
+            .unwrap();
+        let data = store.store.clone();
+        let metadata = store.metadata.clone();
+        for included in [false, true] {
+            store.begin_write_journal();
+            for value in ["first", "last"] {
+                for key in ["existing", "new"] {
+                    store.put(key, value);
+                    store.insert_metadata(&contract, key, value).unwrap();
+                }
+            }
+            store.finish_write_journal(included);
+            assert!(store.write_journal.is_none());
+            if included {
+                for key in ["existing", "new"] {
+                    assert_eq!(store.get_data(key).unwrap().as_deref(), Some("last"));
+                    assert_eq!(
+                        store.get_metadata(&contract, key).unwrap().as_deref(),
+                        Some("last")
+                    );
+                }
+            } else {
+                assert_eq!(store.store, data);
+                assert_eq!(store.metadata, metadata);
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_block_restores_advancement_entries() {
+        use crate::repl::{Session, SessionSettings};
+
+        fn assert_entries_eq<K: Eq + std::hash::Hash + std::fmt::Debug, V: std::fmt::Debug>(
+            actual: &HashMap<K, V>,
+            expected: &HashMap<K, V>,
+        ) {
+            assert_eq!(actual.len(), expected.len());
+            for (key, value) in expected {
+                assert_eq!(
+                    format!("{:?}", actual.get(key).unwrap()),
+                    format!("{value:?}")
+                );
+            }
+        }
+
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../clarinet-sdk/node/tests/fixtures/raw-transactions/transactions.json"
+        ))
+        .unwrap();
+        let wrong_nonce = fixtures["transactions"]["wrong_nonce"]["hex"]
+            .as_str()
+            .unwrap();
+
+        for epoch in [
+            StacksEpochId::Epoch2_05,
+            StacksEpochId::Epoch34,
+            StacksEpochId::Epoch40,
+        ] {
+            let mut session = Session::new(SessionSettings {
+                epoch_id: Some(epoch),
+                ..SessionSettings::default()
+            });
+            session.advance_chain_tip(3);
+            // Include historical data so undo must preserve overwritten values,
+            // not simply discard everything at or above the old height.
+            session
+                .interpreter
+                .clarity_datastore
+                .put("unrelated", "keep");
+            if epoch.uses_marfed_block_time() {
+                session
+                    .interpreter
+                    .clarity_datastore
+                    .put(CLARITY_STORAGE_BLOCK_TIME_KEY, "123");
+            }
+            let store = session.interpreter.clarity_datastore.clone();
+            let blocks = session.interpreter.datastore.clone();
+            for raw in ["xyz", wrong_nonce, wrong_nonce] {
+                let outcome = session.execute_raw_transaction_in_next_block(raw);
+                assert!(!outcome.is_included());
+                if raw == wrong_nonce {
+                    assert!(format!("{outcome:?}").contains("origin nonce mismatch"));
+                }
+                assert!(session
+                    .interpreter
+                    .clarity_datastore
+                    .write_journal
+                    .is_none());
+                let actual = &session.interpreter.clarity_datastore;
+                assert_eq!(actual.store, store.store);
+                assert_eq!(actual.metadata, store.metadata);
+                assert_eq!(actual.open_chain_tip, store.open_chain_tip);
+                assert_eq!(*actual.current_chain_tip.borrow(), store.open_chain_tip);
+                assert_eq!(actual.height_at_chain_tip, store.height_at_chain_tip);
+                assert_eq!(actual.chain_tip_at_height, store.chain_tip_at_height);
+                let actual = &session.interpreter.datastore;
+                assert_eq!(*actual.current_chain_tip.borrow(), store.open_chain_tip);
+                assert_eq!(actual.stacks_chain_height, blocks.stacks_chain_height);
+                assert_eq!(actual.burn_chain_tip, blocks.burn_chain_tip);
+                assert_eq!(actual.burn_chain_height, blocks.burn_chain_height);
+                assert_eq!(actual.tenure_height, blocks.tenure_height);
+                assert_entries_eq(&actual.stacks_blocks, &blocks.stacks_blocks);
+                assert_entries_eq(&actual.burn_blocks, &blocks.burn_blocks);
+                assert_eq!(actual.consensus_hash_lookup, blocks.consensus_hash_lookup);
+                assert_eq!(actual.sortition_lookup, blocks.sortition_lookup);
+                assert_eq!(
+                    actual.tenure_height_at_stacks_height,
+                    blocks.tenure_height_at_stacks_height
+                );
+                assert_eq!(
+                    actual.stacks_height_at_tenure_height,
+                    blocks.stacks_height_at_tenure_height
+                );
+            }
+            // Reusing the rejected height must produce the same block as a
+            // session that never attempted the rejected submissions.
+            let mut expected = session.clone();
+            expected.advance_chain_tip(1);
+            // Session clones share the read-tip pointer; reset it before using
+            // the original session, as loading a cached session would do.
+            let tip = session.interpreter.clarity_datastore.get_open_chain_tip();
+            session
+                .interpreter
+                .clarity_datastore
+                .set_block_hash(tip)
+                .unwrap();
+            session.advance_chain_tip(1);
+            assert_eq!(
+                session.interpreter.clarity_datastore.store,
+                expected.interpreter.clarity_datastore.store
+            );
+            assert_entries_eq(
+                &session.interpreter.datastore.stacks_blocks,
+                &expected.interpreter.datastore.stacks_blocks,
+            );
+            // A leaked epoch value at the rejected height would shadow this
+            // transition, including when that block is later read historically.
+            let next_epoch = if epoch < StacksEpochId::Epoch30 {
+                StacksEpochId::Epoch30
+            } else {
+                StacksEpochId::Epoch41
+            };
+            // Use a fresh rejection to exercise precisely that boundary.
+            assert!(!session
+                .execute_raw_transaction_in_next_block(wrong_nonce)
+                .is_included());
+            session
+                .interpreter
+                .datastore
+                .set_current_epoch(&mut session.interpreter.clarity_datastore, next_epoch);
+            let historical_tip = session.interpreter.clarity_datastore.get_open_chain_tip();
+            session.advance_chain_tip(1);
+            session
+                .interpreter
+                .clarity_datastore
+                .set_block_hash(historical_tip)
+                .unwrap();
+            assert_eq!(
+                session
+                    .interpreter
+                    .clarity_datastore
+                    .get_data("vm-epoch::epoch-version")
+                    .unwrap(),
+                Some(format!("{:08x}", next_epoch as u32)),
+            );
+        }
     }
 
     #[test]

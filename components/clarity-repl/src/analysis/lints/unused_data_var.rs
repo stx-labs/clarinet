@@ -15,7 +15,7 @@ use crate::analysis::cache::data_vars::DataVarData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
-use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
 struct UnusedDataVarSettings {
     // TODO
@@ -131,7 +131,6 @@ impl<'a, 'b> AnalysisPass for UnusedDataVar<'a, 'b> {
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
-        _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = UnusedDataVarSettings::new();
         let mut lint = UnusedDataVar::new(analysis_cache, level, settings);

@@ -12,7 +12,7 @@ use crate::analysis::annotation::{Annotation, AnnotationKind, WarningKind};
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
-use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
 pub struct CaseTrait<'a, 'b>
 where
@@ -105,7 +105,6 @@ impl<'a, 'b> AnalysisPass for CaseTrait<'a, 'b> {
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
-        _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let mut lint = CaseTrait::new(analysis_cache, level);
         lint.run()
@@ -127,20 +126,21 @@ impl Lint for CaseTrait<'_, '_> {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::Level;
     use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseTrait;
     use crate::analysis::linter::Lint;
     use crate::analysis::util::CaseError;
+    use crate::analysis::LintDiagnostic;
     use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
     use crate::test_fixtures::clarity_contract::ClarityContractBuilder;
 
     fn run_snippet_no_panic(
         snippet: String,
-    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
+    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<LintDiagnostic>)> {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings

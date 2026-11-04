@@ -62,7 +62,9 @@ describe("performance tracking", () => {
     ]);
 
     expect(result).toHaveLength(1);
-    expect(result[0].performance).toBeDefined();
-    expect(result[0].performance).not.toBeNull();
+    expect(result[0].status).toBe("success");
+    if (result[0].status !== "success") throw new Error("Expected success");
+    expect(result[0].execution.performance).toBeDefined();
+    expect(result[0].execution.performance).not.toBeNull();
   });
 });

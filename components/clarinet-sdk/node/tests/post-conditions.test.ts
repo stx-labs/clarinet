@@ -228,7 +228,7 @@ describe("post-conditions on contract deployments", () => {
       postConditions: [Pc.principal(address1).willSendEq(500).ustx()],
     });
 
-    expect(result).toStrictEqual(Cl.bool(true));
+    expect(result).toStrictEqual(Cl.ok(Cl.bool(true)));
   });
 
   it("aborts a deployment that violates the conditions", () => {
@@ -393,14 +393,14 @@ describe("post-conditions in a mined block", () => {
       }),
     ]);
 
-    expect(ok.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+    expect(ok).toMatchObject({ status: "success", execution: { result: Cl.ok(Cl.bool(true)) } });
   });
 
   it("surfaces a violation in the batch as an error", () => {
     const address1Nonce = simnet.getAccountNonce(address1);
     const address2Nonce = simnet.getAccountNonce(address2);
 
-    expect(() =>
+    expect(
       simnet.mineBlock([
         tx.callPublicFn("counter", "increment", [], address1, {
           postConditions: [Pc.principal(address1).willSendEq(INCREMENT_COST).ustx()],
@@ -409,7 +409,14 @@ describe("post-conditions in a mined block", () => {
           postConditions: [Pc.principal(address2).willSendEq(1).ustx()],
         }),
       ]),
-    ).toThrow(/Post-condition check failure/);
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "included_failure",
+          error: expect.stringMatching(/Post-condition check failure/),
+        }),
+      ]),
+    );
 
     // Transactions before the abort remain committed; the aborted transaction
     // rolls back its payload but still consumes its nonce.
@@ -426,25 +433,42 @@ describe("post-conditions in a mined block", () => {
         postConditions: [Pc.principal(address1).willSendEq(500).ustx()],
       }),
     ]);
-    expect(ok.result).toStrictEqual(Cl.bool(true));
+    expect(ok).toMatchObject({ status: "success", execution: { result: Cl.ok(Cl.bool(true)) } });
 
-    expect(() =>
+    expect(
       simnet.mineBlock([
         tx.deployContract("pays-again", source, null, address1, {
           postConditions: [Pc.principal(address1).willSendEq(1).ustx()],
         }),
       ]),
-    ).toThrow(/Post-condition check failure/);
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "included_failure",
+          kind: "abort_by_post_condition",
+          error: expect.stringMatching(/Post-condition check failure/),
+          execution: expect.objectContaining({
+            result: Cl.ok(Cl.bool(true)),
+            events: [expect.objectContaining({ event: "stx_transfer_event" })],
+          }),
+        }),
+      ]),
+    );
   });
 
   it("rejects post-conditions on a transferSTX in mineBlock", () => {
-    expect(() =>
+    expect(
       simnet.mineBlock([
         tx.transferSTX(1000, address2, address1, {
           postConditions: [Pc.principal(address1).willSendEq(1000).ustx()],
         }),
       ]),
-    ).toThrow(/TokenTransfer transactions do not support post-conditions/);
+    ).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        error: expect.stringMatching(/TokenTransfer transactions do not support post-conditions/),
+      }),
+    ]);
   });
 });
 

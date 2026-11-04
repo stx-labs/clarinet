@@ -1,4 +1,4 @@
-use clarity_repl::repl;
+use clarity_repl::{analysis, repl};
 use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -104,6 +104,10 @@ pub(crate) fn repl_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Sche
     gen.subschema_for::<repl::SettingsFile>()
 }
 
+pub(crate) fn linter_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    gen.subschema_for::<analysis::SettingsFile>()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -140,6 +144,7 @@ mod tests {
         // Verify other properties exist
         assert!(schema["properties"]["contracts"].is_object());
         assert!(schema["properties"]["repl"].is_object());
+        assert!(schema["properties"]["linter"].is_object());
 
         // Verify required fields
         let required = schema["required"].as_array().unwrap();

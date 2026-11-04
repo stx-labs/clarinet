@@ -161,7 +161,7 @@ fn build_manifest(n: usize) -> String {
         "#});
     }
     out.push_str(indoc! {r#"
-        [repl.analysis.lint_groups]
+        [linter.groups]
         all = false
     "#});
     out

@@ -216,15 +216,17 @@ impl EvalHook for TracerHook {
             }
         }
 
-        // Print events as they are emitted
-        let emitted_events = env
-            .global_context
-            .event_batches
-            .iter()
-            .flat_map(|b| &b.0.events)
-            .collect::<Vec<_>>();
-        if emitted_events.len() > self.nb_of_emitted_events {
-            for event in emitted_events.iter().skip(self.nb_of_emitted_events) {
+        let batches = &env.global_context.event_batches;
+        let event_count: usize = batches.iter().map(|(batch, _)| batch.events.len()).sum();
+        if event_count > self.nb_of_emitted_events {
+            // Skip whole batches without revisiting events already printed.
+            let mut remaining = self.nb_of_emitted_events;
+            let new_events = batches.iter().flat_map(|(batch, _)| {
+                let skip = remaining.min(batch.events.len());
+                remaining -= skip;
+                &batch.events[skip..]
+            });
+            for event in new_events {
                 let event_message = format_event_data(event);
                 self.add_to_output(format!(
                     "{}│ {}",
@@ -237,7 +239,7 @@ impl EvalHook for TracerHook {
                     black!("✸ {event_message}"),
                 ));
             }
-            self.nb_of_emitted_events = emitted_events.len();
+            self.nb_of_emitted_events = event_count;
         }
 
         if let Some(last) = self.stack.last() {

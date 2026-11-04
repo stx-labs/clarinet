@@ -9,7 +9,7 @@ license = "GPL-3.0"
 libsecp256k1 = { workspace = true }
 rpassword = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, optional = true }
 toml = { workspace = true }
 url = { version = "2.5.4", features = ["serde"] }
 schemars = { workspace = true, optional = true }
@@ -31,7 +31,7 @@ wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 
 [features]
-json_schema = ["schemars", "clarity-repl/json_schema"]
+json_schema = ["schemars", "serde_json", "clarity-repl/json_schema"]
 
 [lib]
 name = "clarinet_files"

@@ -186,8 +186,8 @@ fn can_read_the_funded_sbtc_balance_and_supply_from_clarity() {
     let supply = session.eval_clarity_string(&format!("(contract-call? {token} get-total-supply)"));
 
     let expected = Value::okay(Value::UInt(10_000_000_000)).unwrap();
-    assert_eq!(balance.match_atom_value(), Some(&expected));
-    assert_eq!(supply.match_atom_value(), Some(&expected));
+    assert_eq!(balance, expected);
+    assert_eq!(supply, expected);
 }
 
 /// A deliberate difference from devnet, which still submits a real deposit and
@@ -207,10 +207,7 @@ fn funds_an_sbtc_balance_below_the_bitcoin_dust_limit() {
         "(contract-call? '{} get-total-supply)",
         *SBTC_TOKEN_MAINNET_ADDRESS
     ));
-    assert_eq!(
-        supply.match_atom_value(),
-        Some(&Value::okay(Value::UInt(500)).unwrap())
-    );
+    assert_eq!(supply, Value::okay(Value::UInt(500)).unwrap());
 }
 
 /// sBTC funding is the last thing the plan does, so the epoch it ran at is

@@ -1,4 +1,5 @@
 mod at_block;
+mod call_checker;
 mod case_binding;
 mod case_const;
 mod case_data_var;
@@ -23,6 +24,7 @@ mod unused_token;
 mod unused_trait;
 
 pub use at_block::AtBlock;
+pub use call_checker::CallChecker;
 pub use case_binding::CaseBinding;
 pub use case_const::CaseConst;
 pub use case_data_var::CaseDataVar;

@@ -13,7 +13,7 @@ use crate::analysis::cache::bindings::BindingData;
 use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
-use crate::analysis::{self, AnalysisPass, AnalysisResult, LintName};
+use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
 struct CaseBindingSettings {
     // TODO
@@ -107,7 +107,6 @@ impl<'a, 'b> AnalysisPass for CaseBinding<'a, 'b> {
         _analysis_db: &mut AnalysisDatabase,
         analysis_cache: &mut AnalysisCache,
         level: Level,
-        _settings: &analysis::Settings,
     ) -> AnalysisResult {
         let settings = CaseBindingSettings::new();
         let mut lint = CaseBinding::new(analysis_cache, level, settings);
@@ -131,19 +130,20 @@ impl Lint for CaseBinding<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::diagnostic::{Diagnostic, Level};
+    use clarity::vm::diagnostic::Level;
     use clarity::vm::ClarityName;
     use indoc::indoc;
 
     use super::CaseBinding;
     use crate::analysis::linter::Lint;
     use crate::analysis::util::CaseError;
+    use crate::analysis::LintDiagnostic;
     use crate::repl::session::{AnnotatedExecutionResult, Session};
     use crate::repl::SessionSettings;
 
     fn run_snippet_no_panic(
         snippet: String,
-    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<Diagnostic>)> {
+    ) -> Result<(Vec<String>, AnnotatedExecutionResult), (Vec<String>, Vec<LintDiagnostic>)> {
         let mut settings = SessionSettings::default();
         settings
             .repl_settings

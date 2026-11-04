@@ -63,3 +63,12 @@ pub fn serialize_event(event: &StacksTransactionEvent) -> StacksEvent {
         },
     }
 }
+
+/// Events as the SDK parses them: a JSON array of JSON-encoded events.
+pub fn serialize_events(events: &[StacksTransactionEvent]) -> String {
+    let events: Vec<_> = events
+        .iter()
+        .map(|event| serde_json::json!(serialize_event(event)).to_string())
+        .collect();
+    serde_json::json!(events).to_string()
+}

@@ -2,7 +2,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
 
 use axum::extract::Extension;
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::response::Json;
 use axum::routing::post;
 use axum::Router;
@@ -368,6 +368,7 @@ async fn handle_mined_microblock(
 
 async fn handle_bitcoin_wallet_rpc_call(
     Extension(app_state): Extension<AppState>,
+    uri: Uri,
     Json(bitcoin_rpc_call): Json<BitcoinRPCRequest>,
 ) -> Json<JsonValue> {
     let AppState {
@@ -376,7 +377,7 @@ async fn handle_bitcoin_wallet_rpc_call(
         bitcoin_config,
         ctx,
     } = app_state;
-    ctx.try_log(|logger| slog::debug!(logger, "POST /wallet"));
+    ctx.try_log(|logger| slog::debug!(logger, "POST {}", uri.path()));
 
     use base64::engine::general_purpose::STANDARD as BASE64;
     use base64::engine::Engine as _;
@@ -391,7 +392,7 @@ async fn handle_bitcoin_wallet_rpc_call(
         bitcoin_config.username, bitcoin_config.password
     ));
 
-    let url = bitcoin_config.rpc_url.to_string();
+    let url = format!("{}{}", bitcoin_config.rpc_url, uri.path());
     let client = Client::new();
     let builder = client
         .post(&url)
@@ -442,15 +443,10 @@ async fn handle_bitcoin_rpc_call(
         )
     });
 
-    let url = if method == "listunspent" {
-        format!("{}/wallet/", bitcoin_config.rpc_url)
-    } else {
-        bitcoin_config.rpc_url.to_string()
-    };
-
     let client = Client::new();
+    // Wallet calls sent here are routed by bitcoind to its only loaded wallet.
     let builder = client
-        .post(&url)
+        .post(&bitcoin_config.rpc_url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Basic {}", token))
         .timeout(std::time::Duration::from_secs(5));
@@ -506,8 +502,66 @@ pub fn create_router(
     if bitcoin_rpc_proxy_enabled {
         router = router
             .route("/", post(handle_bitcoin_rpc_call))
-            .route("/wallet/", post(handle_bitcoin_wallet_rpc_call));
+            .route("/wallet/", post(handle_bitcoin_wallet_rpc_call))
+            .route("/wallet/{*name}", post(handle_bitcoin_wallet_rpc_call));
     }
 
     router.layer(axum::Extension(app_state))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc::channel;
+
+    use super::*;
+    use crate::event_handler::EventObserverConfig;
+    use crate::indexer::IndexerConfig;
+
+    #[tokio::test]
+    async fn proxies_wallet_calls_to_the_requested_wallet() {
+        let mut bitcoind = mockito::Server::new_async().await;
+        let response = r#"{"result":[],"error":null,"id":0}"#;
+        let named_wallet = bitcoind
+            .mock("POST", "/wallet/miner")
+            .with_body(response)
+            .create_async()
+            .await;
+        let node = bitcoind
+            .mock("POST", "/")
+            .with_body(response)
+            .create_async()
+            .await;
+
+        let config = EventObserverConfig {
+            bitcoind_rpc_url: bitcoind.url(),
+            ..Default::default()
+        };
+        let indexer = Indexer::new(IndexerConfig::from(&config));
+        let router = create_router(
+            Arc::new(RwLock::new(indexer)),
+            Arc::new(Mutex::new(channel().0)),
+            config.get_bitcoin_config(),
+            Context::empty(),
+            true,
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, router).await });
+
+        let call = json!({ "method": "listunspent", "params": [], "id": 0, "jsonrpc": "2.0" });
+        for path in ["/wallet/miner", "/"] {
+            let res = reqwest::Client::new()
+                .post(format!("http://{proxy}{path}"))
+                .header("Content-Type", "application/json")
+                .body(call.to_string())
+                .send()
+                .await
+                .unwrap();
+            assert!(res.status().is_success(), "{path}: {}", res.status());
+        }
+
+        named_wallet.assert_async().await;
+        // bitcoind routes wallet calls without a wallet path to its only loaded wallet
+        node.assert_async().await;
+    }
 }

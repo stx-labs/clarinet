@@ -3,15 +3,14 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clarity::types::StacksEpochId;
+use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::ClarityVersion;
-use clarity_repl::repl;
 use clarity_repl::repl::boot::BOOT_CONTRACTS_NAMES;
 use clarity_repl::repl::{ClarityCodeSource, ClarityContract, ContractDeployer};
+use clarity_repl::{analysis, repl};
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
-use serde::ser::SerializeMap;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value as JsonValue;
+use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
 
 #[cfg(feature = "json_schema")]
@@ -21,7 +20,7 @@ use crate::{paths, FileAccessor};
 pub const INVALID_CLARITY_VERSION: &str =
     "clarity_version field invalid (value supported: 1, 2, 3, 4, 5, 6, 7)";
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ClarityContractMetadata {
     pub name: String,
     pub deployer: ContractDeployer,
@@ -57,14 +56,13 @@ pub struct ProjectConfigFile {
     /// Override default boot contract implementations
     #[serde(default)]
     override_boot_contracts_source: Option<BTreeMap<String, String>>,
-
-    // The fields below have been moved into repl above, but are kept here for
-    // backwards compatibility.
-    #[cfg_attr(feature = "json_schema", schemars(skip))]
-    analysis: Option<Vec<clarity_repl::analysis::Pass>>,
     /// Directory for caching build artifacts
     #[serde(default = "default_cache_dir")]
     cache_dir: String,
+    /// Removed list of analysis passes, only captured to warn about it
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature = "json_schema", schemars(skip))]
+    analysis: Option<serde::de::IgnoredAny>,
 }
 
 fn default_cache_dir() -> String {
@@ -83,105 +81,36 @@ pub struct ProjectManifestFile {
         schemars(schema_with = "schema::contracts_schema")
     )]
     contracts: Option<TomlValue>,
-    /// REPL and analysis settings
+    /// REPL settings
     #[serde(default)]
     #[cfg_attr(feature = "json_schema", schemars(schema_with = "schema::repl_schema"))]
     repl: Option<repl::SettingsFile>,
+    /// Linter settings
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "json_schema",
+        schemars(schema_with = "schema::linter_schema")
+    )]
+    linter: Option<analysis::SettingsFile>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ProjectManifest {
     pub project: ProjectConfig,
-    #[serde(serialize_with = "toml::ser::tables_last")]
-    #[serde(deserialize_with = "contracts_deserializer")]
     pub contracts: BTreeMap<String, ClarityContract>,
-    #[serde(rename = "repl")]
     pub repl_settings: repl::Settings,
-    #[serde(skip_serializing)]
-    #[serde(default = "default_root_dir")]
     pub root_dir: PathBuf,
-    #[serde(skip_serializing)]
     pub location: PathBuf,
-    #[serde(skip_serializing, skip_deserializing)]
     pub contracts_settings: HashMap<PathBuf, ClarityContractMetadata>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
-fn default_root_dir() -> PathBuf {
-    std::env::temp_dir()
-}
-
-fn contracts_deserializer<'de, D>(des: D) -> Result<BTreeMap<String, ClarityContract>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let mut map: BTreeMap<String, ClarityContract> = BTreeMap::new();
-
-    let container: HashMap<String, HashMap<String, JsonValue>> =
-        serde::Deserialize::deserialize(des)?;
-
-    for (contract_name, contract_settings) in container {
-        let Some(JsonValue::String(contract_path)) = contract_settings.get("path") else {
-            continue;
-        };
-
-        let code_source = match PathBuf::from_str(contract_path) {
-            Ok(path) => ClarityCodeSource::ContractOnDisk(path),
-            Err(e) => {
-                return Err(serde::de::Error::custom(format!(
-                    "unable to parse path {contract_path} ({e})"
-                )))
-            }
-        };
-
-        let deployer = match contract_settings.get("deployer") {
-            Some(JsonValue::String(path)) => ContractDeployer::LabeledDeployer(path.clone()),
-            _ => ContractDeployer::DefaultDeployer,
-        };
-
-        let parsed_settings_epoch = match contract_settings.get("epoch") {
-            None => None,
-            Some(JsonValue::String(epoch)) => Some(epoch.as_str()),
-            Some(JsonValue::Number(epoch)) => Some(epoch.as_str()),
-            Some(value) => {
-                return Err(serde::de::Error::invalid_type(
-                    serde::de::Unexpected::Other(&format!("{value}")),
-                    // we try to parse the epoch as a string or number, but it's recommended to use a string
-                    &"epoch must be a string in json config",
-                ));
-            }
-        };
-
-        let parsed_clarity_version = match contract_settings.get("clarity_version") {
-            None => None,
-            Some(JsonValue::Number(version)) => Some(version.as_str()),
-            _ => return Err(serde::de::Error::custom(INVALID_CLARITY_VERSION)),
-        };
-
-        let (epoch, clarity_version) =
-            get_epoch_and_clarity_version(parsed_settings_epoch, parsed_clarity_version)
-                .map_err(serde::de::Error::custom)?;
-
-        let cc = ClarityContract {
-            code_source,
-            name: contract_name.clone(),
-            deployer,
-            clarity_version,
-            epoch,
-            skip_analysis: false,
-        };
-
-        map.insert(contract_name, cc);
-    }
-    Ok(map)
-}
-
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct OverrideBootContract {
     /// Path as written in `Clarinet.toml`, relative to the manifest root.
     pub path: String,
     /// Pre-loaded Clarity source. Populated by `from_location` / `from_file_accessor`
     /// so consumers don't need filesystem access.
-    #[serde(skip_deserializing)]
     pub source: String,
 }
 
@@ -191,49 +120,17 @@ impl OverrideBootContract {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ProjectConfig {
     pub name: String,
     pub authors: Vec<String>,
     pub description: String,
     pub telemetry: bool,
     pub requirements: Option<Vec<RequirementConfig>>,
-    #[serde(rename = "cache_dir")]
     pub cache_location: PathBuf,
-    #[serde(skip_deserializing)]
     pub boot_contracts: Vec<String>,
-    // Populated by `from_location` / `from_file_accessor`. The custom `Serialize`
-    // impl emits paths as a `BTreeMap<String, String>` for inspection, which is
-    // shape-incompatible with the in-memory struct — so JSON unpack ignores it
-    // and the manifest is always reloaded from disk.
-    #[serde(skip_deserializing)]
+    // Populated by `from_location` / `from_file_accessor`.
     pub override_boot_contracts_source: BTreeMap<String, OverrideBootContract>,
-}
-
-impl Serialize for ProjectConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(1))?;
-        map.serialize_entry("name", &self.name)?;
-        map.serialize_entry("description", &self.description)?;
-        map.serialize_entry("authors", &self.authors)?;
-        map.serialize_entry("telemetry", &self.telemetry)?;
-        map.serialize_entry("cache_dir", &self.cache_location.to_string_lossy())?;
-        if self.requirements.is_some() {
-            map.serialize_entry("requirements", &self.requirements)?;
-        }
-        if !self.override_boot_contracts_source.is_empty() {
-            let paths: BTreeMap<&str, &str> = self
-                .override_boot_contracts_source
-                .iter()
-                .map(|(name, entry)| (name.as_str(), entry.path.as_str()))
-                .collect();
-            map.serialize_entry("override_boot_contracts_source", &paths)?;
-        }
-        map.end()
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
@@ -361,23 +258,43 @@ impl ProjectManifest {
         manifest_location: &Path,
         allow_remote_data_fetching: bool,
     ) -> Result<ProjectManifest, String> {
-        let mut repl_settings = if let Some(repl_settings) = project_manifest_file.repl {
-            repl::Settings::try_from(repl_settings)?
-        } else {
-            repl::Settings {
-                analysis: clarity_repl::analysis::Settings::with_default_lints(),
-                ..Default::default()
+        let diagnostics = [
+            project_manifest_file.project.analysis.is_some().then_some(
+                "`analysis` in [project] is no longer supported and will be ignored. Configure lints in [linter.lints]",
+            ),
+            project_manifest_file
+                .repl
+                .as_ref()
+                .is_some_and(repl::SettingsFile::has_removed_analysis_section)
+                .then_some(
+                    "[repl.analysis] is no longer supported and will be ignored. Move `lints` to [linter.lints], `lint_groups` to [linter.groups], and `include`/`exclude` to [linter]. `true` and \"on\" now use the default level of each lint, not `warning`",
+                ),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|message| {
+            clarity_repl::ueprint!("Warning: {message}");
+            Diagnostic {
+                level: Level::Warning,
+                message: message.into(),
+                spans: vec![],
+                suggestion: None,
             }
-        };
+        })
+        .collect();
+        let mut repl_settings = project_manifest_file
+            .repl
+            .map(repl::Settings::from)
+            .unwrap_or_default();
+        repl_settings.analysis = project_manifest_file
+            .linter
+            .map(analysis::Settings::try_from)
+            .transpose()?
+            .unwrap_or_else(analysis::Settings::with_default_lints);
 
         // when performing static analysis, we never want to enable remote data fetching
         if !allow_remote_data_fetching {
             repl_settings.remote_data.enabled = false;
-        }
-
-        // Check for deprecated settings
-        if let Some(passes) = project_manifest_file.project.analysis {
-            repl_settings.analysis.enable_passes(&passes);
         }
 
         let project_name = project_manifest_file.project.name;
@@ -435,6 +352,7 @@ impl ProjectManifest {
             root_dir: root_path.to_path_buf(),
             location: manifest_location.to_path_buf(),
             contracts_settings: HashMap::new(),
+            diagnostics,
         };
         let mut config_contracts = BTreeMap::new();
         let mut contracts_settings = HashMap::new();
@@ -576,6 +494,73 @@ mod tests {
     }
 
     #[test]
+    fn test_linter_settings() {
+        use clarity::vm::diagnostic::Level;
+        use clarity_repl::analysis::linter::LintName;
+
+        let manifest_toml = toml! {
+            [project]
+            name = "linter"
+            [linter.groups]
+            correctness = "off"
+            [linter.lints]
+            unused_const = "error"
+        };
+        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        let lints = manifest.repl_settings.analysis.lints();
+        assert_eq!(lints.get(&LintName::UnusedConst), Some(&Level::Error));
+        // Correctness lints ignore config.
+        assert_eq!(lints.get(&LintName::CallChecker), Some(&Level::Error));
+    }
+
+    #[test]
+    fn test_removed_repl_analysis_is_ignored() {
+        use clarity_repl::analysis::linter::LintName;
+
+        let manifest_toml = toml! {
+            [project]
+            name = "legacy"
+            [repl.analysis]
+            passes = ["check_checker"]
+            [repl.analysis.lint_groups]
+            all = false
+        };
+        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
+        let location = PathBuf::from("/tmp/clarinet.toml");
+        let manifest =
+            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
+
+        assert!(manifest
+            .repl_settings
+            .analysis
+            .lints()
+            .contains_key(&LintName::CallChecker));
+    }
+
+    #[test]
+    fn test_removed_analysis_keys_in_linter_are_rejected() {
+        for (key, value, expected) in [
+            ("lint_groups", "{ all = false }", "use `linter.groups`"),
+            ("passes", r#"["check_checker"]"#, "`linter.passes`"),
+            (
+                "check_checker",
+                "{ strict = false }",
+                "check-checker was removed",
+            ),
+        ] {
+            let manifest = format!("[project]\nname = \"legacy\"\n[linter]\n{key} = {value}\n");
+            let err = toml::from_str::<ProjectManifestFile>(&manifest)
+                .expect_err(&format!("`linter.{key}` should be rejected"))
+                .to_string();
+            assert!(err.contains(expected), "unexpected error for {key}: {err}");
+        }
+    }
+
+    #[test]
     fn test_get_epoch_and_clarity_version() {
         use clarity::types::StacksEpochId::*;
         use clarity::vm::ClarityVersion::*;
@@ -670,7 +655,7 @@ mod tests {
             ProjectManifest::from_project_manifest_file(manifest_file, &location, true).unwrap();
         let contract = manifest.contracts.get("test-contract").unwrap();
         assert!(matches!(contract.epoch, clarity_repl::repl::Epoch::Latest));
-        let toml_value = toml::Value::try_from(&manifest).unwrap();
+        let toml_value = toml::Value::try_from(contract).unwrap();
         let pretty_toml = toml::ser::to_string_pretty(&toml_value).unwrap();
         assert!(pretty_toml.contains("epoch = 'latest'"));
     }
