@@ -1372,8 +1372,7 @@ impl DevnetOrchestrator {
                         "--wipe-db",
                     ],
                 )
-                .await
-                .and_then(|output| output.success.then_some(()).ok_or(output.stderr));
+                .await;
 
                 match imported {
                     Ok(()) => ctx.try_log(|logger| {

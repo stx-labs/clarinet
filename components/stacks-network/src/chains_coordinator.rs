@@ -1599,7 +1599,7 @@ async fn export_stacks_api_events(
     ));
 
     let docker = config.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
-    let output = exec_in_container(
+    exec_in_container(
         docker,
         &container_name,
         &[
@@ -1612,11 +1612,7 @@ async fn export_stacks_api_events(
         ],
     )
     .await
-    .map_err(|e| format!("Failed to execute export command: {e}"))?;
-
-    if !output.success {
-        return Err(format!("Export command failed: {}", output.stderr));
-    }
+    .map_err(|e| format!("Export command failed: {e}"))?;
 
     let export_path = global_snapshot_dir.join("events_export");
     fs::create_dir_all(&export_path)

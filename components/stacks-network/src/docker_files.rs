@@ -1,11 +1,15 @@
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 use bollard::container::{DownloadFromContainerOptions, UploadToContainerOptions};
 use bollard::errors::Error as DockerError;
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::Docker;
 use futures::TryStreamExt;
+
+/// The daemon answers an upload only once the archive is extracted.
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 pub fn formatted_docker_error(message: &str, error: DockerError) -> String {
     let error = match &error {
@@ -24,6 +28,14 @@ fn tar_directory(src_dir: &Path, root: impl AsRef<Path>) -> io::Result<Vec<u8>> 
     builder.follow_symlinks(false);
     builder.append_dir_all(root, src_dir)?;
     builder.into_inner()
+}
+
+async fn archive_directory(src_dir: &Path, root: &str) -> Result<Vec<u8>, String> {
+    let (src, root) = (src_dir.to_path_buf(), root.to_string());
+    tokio::task::spawn_blocking(move || tar_directory(&src, root))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("unable to archive {}: {e}", src_dir.display()))
 }
 
 fn tar_file(src: &Path, name: impl AsRef<Path>) -> io::Result<Vec<u8>> {
@@ -49,8 +61,7 @@ fn untar_file(archive: &[u8], dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Splits `dest` into the directory to upload into and the archive root that lands at `dest`,
-/// so `dest` is created when missing, like `docker cp`.
+/// Splits `dest` into the directory to upload into and the archive root that lands at `dest`.
 fn split_dest(dest: &str) -> Result<(&str, &str), String> {
     let path = Path::new(dest);
     path.parent()
@@ -64,15 +75,16 @@ async fn upload(
     container: &str,
     dir: &str,
     archive: Vec<u8>,
-) -> Result<(), String> {
+) -> Result<(), DockerError> {
     let options = UploadToContainerOptions {
         path: dir,
         no_overwrite_dir_non_dir: "true",
     };
     docker
+        .clone()
+        .with_timeout(UPLOAD_TIMEOUT)
         .upload_to_container(container, Some(options), archive.into())
         .await
-        .map_err(|e| formatted_docker_error(&format!("unable to upload to {container}:{dir}"), e))
 }
 
 /// Same as `docker cp {src_dir}/. {container}:{dest}`.
@@ -82,10 +94,21 @@ pub async fn copy_dir_to_container(
     src_dir: &Path,
     dest: &str,
 ) -> Result<(), String> {
-    let (dir, root) = split_dest(dest)?;
-    let archive = tar_directory(src_dir, root)
-        .map_err(|e| format!("unable to archive {}: {e}", src_dir.display()))?;
-    upload(docker, container, dir, archive).await
+    // A `.` root merges into an existing `dest` and leaves its own metadata alone
+    let archive = archive_directory(src_dir, ".").await?;
+    let uploaded = match upload(docker, container, dest, archive).await {
+        // `dest` is missing: create it from `src_dir`
+        Err(DockerError::DockerResponseServerError {
+            status_code: 404, ..
+        }) => {
+            let (dir, root) = split_dest(dest)?;
+            let archive = archive_directory(src_dir, root).await?;
+            upload(docker, container, dir, archive).await
+        }
+        uploaded => uploaded,
+    };
+    uploaded
+        .map_err(|e| formatted_docker_error(&format!("unable to upload to {container}:{dest}"), e))
 }
 
 /// Same as `docker cp {src} {container}:{dest}`.
@@ -98,7 +121,9 @@ pub async fn copy_file_to_container(
     let (dir, name) = split_dest(dest)?;
     let archive =
         tar_file(src, name).map_err(|e| format!("unable to archive {}: {e}", src.display()))?;
-    upload(docker, container, dir, archive).await
+    upload(docker, container, dir, archive)
+        .await
+        .map_err(|e| formatted_docker_error(&format!("unable to upload to {container}:{dest}"), e))
 }
 
 /// Same as `docker cp {container}:{src} {dest}`.
@@ -117,17 +142,13 @@ pub async fn copy_file_from_container(
     untar_file(&archive, dest).map_err(|e| format!("unable to write {}: {e}", dest.display()))
 }
 
-pub struct ExecOutput {
-    pub success: bool,
-    pub stderr: String,
-}
-
-/// Same as `docker exec {container} {cmd}`: runs `cmd` to completion.
+/// Same as `docker exec {container} {cmd}`: runs `cmd` to completion, and fails with its
+/// stderr if it exits non-zero.
 pub async fn exec_in_container(
     docker: &Docker,
     container: &str,
     cmd: &[&str],
-) -> Result<ExecOutput, String> {
+) -> Result<(), String> {
     let options = CreateExecOptions {
         cmd: Some(cmd.to_vec()),
         attach_stderr: Some(true),
@@ -157,10 +178,10 @@ pub async fn exec_in_container(
         .await
         .map_err(|e| formatted_docker_error(&format!("unable to inspect exec in {container}"), e))?
         .exit_code;
-    Ok(ExecOutput {
-        success: exit_code == Some(0),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-    })
+    match exit_code {
+        Some(0) => Ok(()),
+        _ => Err(String::from_utf8_lossy(&stderr).into_owned()),
+    }
 }
 
 #[cfg(test)]
@@ -198,6 +219,17 @@ mod tests {
                 "devnet/marf.sqlite",
             ]
         );
+    }
+
+    #[test]
+    fn tar_directory_dot_root_is_a_bare_dot_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("blocks")).unwrap();
+        fs::write(dir.path().join("marf.sqlite"), "marf").unwrap();
+
+        let archive = tar_directory(dir.path(), ".").unwrap();
+
+        assert_eq!(entry_paths(&archive), ["./", "blocks", "marf.sqlite"]);
     }
 
     #[test]
