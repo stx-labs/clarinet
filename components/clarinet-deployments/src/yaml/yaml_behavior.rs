@@ -1,6 +1,7 @@
-//! Default YAML behavior; version parameters identify the expected schema for a feature.
-//! They do not add directives or configure the parser. A feature matching YAML 1.1
-//! does not imply that the complete default schema implements YAML 1.1.
+//! Tests of the configured default YAML reader and writer, with no version selection.
+//! Each test documents whether its expectation follows YAML 1.1, YAML 1.2 Core,
+//! both versions, or an application policy. Shared behavior is tested once as a
+//! control for known failures or a boundary affected by the parser migration.
 //! YAML 1.1 types: https://yaml.org/type/
 //! YAML 1.2 Core: https://yaml.org/spec/1.2.2/#1032-tag-resolution
 //! Serde coercions and emitter presentation are application policies, tested separately.
@@ -15,52 +16,131 @@ use test_case::test_case;
 use super::from_yaml;
 use crate::types::{DeploymentSpecificationFile, TransactionSpecificationFile};
 
-#[derive(Debug, Clone, Copy)]
-enum YamlVersion {
-    V1_1,
-    V1_2,
-}
-
-use YamlVersion::{V1_1, V1_2};
-
-#[test_case(V1_1, "[true, True, TRUE, false, False, FALSE]", json!([true, true, true, false, false, false]); "yaml11_boolean_spellings")]
-#[test_case(V1_2, "[true, True, TRUE, false, False, FALSE]", json!([true, true, true, false, false, false]); "yaml12_boolean_spellings")]
-#[test_case(V1_2, "[yes, NO, y, n, on, Off]", json!(["yes", "NO", "y", "n", "on", "Off"]); "yaml12_legacy_boolean_words_are_text")]
-#[test_case(V1_1, "[null, Null, NULL, ~]", json!([null, null, null, null]); "yaml11_null_spellings")]
-#[test_case(V1_2, "[null, Null, NULL, ~]", json!([null, null, null, null]); "yaml12_null_spellings")]
-#[test_case(V1_2, "[0, 42, +42, -42]", json!([0, 42, 42, -42]); "yaml12_decimal_integers")]
-#[test_case(V1_2, "0o10", json!(8); "yaml12_octal_prefix")]
-#[test_case(V1_2, "0x1f", json!(31); "yaml12_hexadecimal_prefix")]
-#[test_case(V1_1, "[-0x10, +0x10]", json!([-16, 16]); "yaml11_signed_hexadecimal")]
-#[test_case(V1_1, "[0b101, -0b101, +0b101]", json!([5, -5, 5]); "yaml11_binary_integers")]
-#[test_case(V1_1, "1_000", json!(1000); "yaml11_decimal_digit_separators")]
-#[test_case(V1_1, "!!int 1_000", json!(1000); "yaml11_explicit_integer_digit_separators")]
-#[test_case(V1_2, "1e2", json!(100.0); "yaml12_exponent_without_decimal_point")]
-#[test_case(V1_2, "1:20", json!("1:20"); "yaml12_sexagesimal_is_text")]
-#[test_case(V1_2, "2001-12-15", json!("2001-12-15"); "yaml12_timestamp_is_text")]
-#[test_case(V1_2, "!!str tRuE", json!("tRuE"); "yaml12_explicit_string_tag")]
-#[test_case(V1_1, "!!bool true", json!(true); "yaml11_explicit_boolean_tag")]
-#[test_case(V1_2, "!!bool true", json!(true); "yaml12_explicit_boolean_tag")]
-#[test_case(V1_2, "!!int 123", json!(123); "yaml12_explicit_integer_tag")]
-#[test_case(V1_2, "!!float 1.5", json!(1.5); "yaml12_explicit_float_tag")]
-#[test_case(V1_2, "!!null ''", json!(null); "yaml12_explicit_empty_null_tag")]
-#[test_case(V1_2, "['tRuE', 'nUlL', '0O10', '0X10', '010', '1_000', '.iNf', '+.nan']", json!(["tRuE", "nUlL", "0O10", "0X10", "010", "1_000", ".iNf", "+.nan"]); "yaml12_quotes_preserve_scalar_text")]
-fn scalar_resolution(version: YamlVersion, input: &str, expected: Value) {
+/// Check the configured default reader; no version is selected by the test harness.
+fn assert_scalar(input: &str, expected: Value) {
     assert_eq!(
         from_yaml::<Value>(input.as_bytes()).unwrap(),
         expected,
-        "{version:?}: {input}"
+        "{input}"
     );
 }
 
-#[test_case(V1_1; "yaml11_non_finite_floats")]
-#[test_case(V1_2; "yaml12_non_finite_floats")]
-fn floating_point_special_values(version: YamlVersion) {
+/// YAML 1.1 and 1.2 share these boolean spellings. Keep one control for the
+/// incorrect mixed-case spellings tracked in known_limitations.
+#[test]
+fn boolean_spellings() {
+    assert_scalar(
+        "[true, True, TRUE, false, False, FALSE]",
+        json!([true, true, true, false, false, false]),
+    );
+}
+
+/// Expect YAML 1.2 Core: legacy boolean words remain strings. YAML 1.1 would
+/// resolve these words as booleans, so this identifies the default choice.
+#[test]
+fn legacy_boolean_words_are_text() {
+    assert_scalar(
+        "[yes, NO, y, n, on, Off]",
+        json!(["yes", "NO", "y", "n", "on", "Off"]),
+    );
+}
+
+/// YAML 1.1 and 1.2 share these null spellings. This is the valid-form control
+/// for the mixed-case null resolution bug in known_limitations.
+#[test]
+fn null_spellings() {
+    assert_scalar("[null, Null, NULL, ~]", json!([null, null, null, null]));
+}
+
+/// Both versions resolve these decimal spellings as integers. Check the Value
+/// type as a control for the leading-zero inputs incorrectly resolved as floats.
+#[test]
+fn decimal_integers() {
+    assert_scalar("[0, 42, +42, -42]", json!([0, 42, 42, -42]));
+}
+
+/// Expect YAML 1.2's lowercase 0o octal prefix; YAML 1.1 uses leading-zero octal.
+#[test]
+fn octal_prefix() {
+    assert_scalar("0o10", json!(8));
+}
+
+/// Both versions accept lowercase 0x hexadecimal. This controls the incorrect
+/// uppercase-prefix inference tracked in known_limitations.
+#[test]
+fn hexadecimal_prefix() {
+    assert_scalar("0x1f", json!(31));
+}
+
+/// Expect YAML 1.1 signed hexadecimal integers. YAML 1.2 Core leaves these as strings.
+#[test]
+fn signed_hexadecimal() {
+    assert_scalar("[-0x10, +0x10]", json!([-16, 16]));
+}
+
+/// Expect YAML 1.1 binary integers; YAML 1.2 Core does not infer binary notation.
+#[test]
+fn binary_integers() {
+    assert_scalar("[0b101, -0b101, +0b101]", json!([5, -5, 5]));
+}
+
+/// Expect YAML 1.1 digit separators, for both implicit and explicit integer tags.
+/// YAML 1.2 Core would preserve the plain scalar as text and reject the !!int form.
+#[test_case("1_000"; "plain")]
+#[test_case("!!int 1_000"; "explicit_tag")]
+fn decimal_digit_separators(input: &str) {
+    assert_scalar(input, json!(1000));
+}
+
+/// Expect YAML 1.2: an exponent does not require a decimal point or exponent sign.
+/// This spelling does not match YAML 1.1's float pattern.
+#[test]
+fn exponent_without_decimal_point() {
+    assert_scalar("1e2", json!(100.0));
+}
+
+/// Expect YAML 1.2 Core text; YAML 1.1 would resolve 1:20 as a base-60 integer.
+#[test]
+fn sexagesimal_is_text() {
+    assert_scalar("1:20", json!("1:20"));
+}
+
+/// Expect YAML 1.2 Core text; the YAML 1.1 timestamp type is not inferred.
+#[test]
+fn timestamp_is_text() {
+    assert_scalar("2001-12-15", json!("2001-12-15"));
+}
+
+/// Both versions support these valid explicit standard tags. Keep controls for
+/// invalid tag spellings/kinds and typed-string conversion tests elsewhere here.
+#[test_case("!!str tRuE", json!("tRuE"); "string")]
+#[test_case("!!bool true", json!(true); "boolean")]
+#[test_case("!!int 123", json!(123); "integer")]
+#[test_case("!!float 1.5", json!(1.5); "float")]
+#[test_case("!!null ''", json!(null); "empty_null")]
+fn explicit_standard_scalar_tags(input: &str, expected: Value) {
+    assert_scalar(input, expected);
+}
+
+/// Both versions preserve quoted scalar text. This checks that quoting avoids
+/// inference even for the spellings with known default-resolution bugs.
+#[test]
+fn quotes_preserve_scalar_text() {
+    assert_scalar(
+        "['tRuE', 'nUlL', '0O10', '0X10', '010', '1_000', '.iNf', '+.nan']",
+        json!(["tRuE", "nUlL", "0O10", "0X10", "010", "1_000", ".iNf", "+.nan"]),
+    );
+}
+
+/// Both versions accept these infinity/NaN spellings. Keep valid f64 controls
+/// for the non-standard spellings tracked in known_limitations.
+#[test]
+fn floating_point_special_values() {
     for input in [".inf", ".Inf", ".INF", "+.inf"] {
         assert_eq!(
             from_yaml::<f64>(input.as_bytes()).unwrap(),
             f64::INFINITY,
-            "{version:?}: {input}"
+            "{input}"
         );
     }
     assert_eq!(from_yaml::<f64>(b"-.inf").unwrap(), f64::NEG_INFINITY);
@@ -69,6 +149,8 @@ fn floating_point_special_values(version: YamlVersion) {
     }
 }
 
+/// Expect YAML 1.2 boolean resolution even for a Rust bool target: legacy words
+/// are rejected. YAML 1.1 would accept them, so this guards the typed-reader path.
 #[test_case("yes")]
 #[test_case("NO")]
 #[test_case("y")]
@@ -80,7 +162,8 @@ fn legacy_words_are_not_typed_booleans(input: &str) {
     assert!(from_yaml::<bool>(b"true").unwrap());
 }
 
-/// Rust string fields retain plain scalar text, matching main's application-level conversion policy.
+/// Application policy: direct Rust String conversion retains plain scalar text.
+/// This does not test implicit YAML 1.1/1.2 tag resolution; transactions use a buffer.
 #[test]
 fn typed_strings_preserve_text() {
     for input in ["123", "true", "010", "0x10", "3.0"] {
@@ -88,21 +171,24 @@ fn typed_strings_preserve_text() {
     }
 }
 
-/// String-keyed Rust maps preserve numeric-looking key text, matching main's conversion policy.
+/// Application policy: string-keyed Rust maps retain a numeric-looking key
+/// verbatim. This guards lexical preservation independently of schema resolution.
 #[test]
 fn typed_string_mapping_keys() {
     let actual: BTreeMap<String, String> = from_yaml(b"010: value").unwrap();
     assert_eq!(actual.get("010").map(String::as_str), Some("value"));
 }
 
-/// An alias resolves to its anchor's value without changing scalar types.
+/// Alias identity is shared by YAML 1.1 and 1.2; the word yes follows our default
+/// 1.2 string behavior. Guard against aliases changing the resolved value or type.
 #[test]
 fn aliases_preserve_values() {
     let actual: Value = from_yaml(b"[&word yes, *word]").unwrap();
     assert_eq!(actual, json!(["yes", "yes"]));
 }
 
-/// Merge keys remain ordinary keys, matching main and the YAML 1.2 Core schema.
+/// Expect YAML 1.2 Core: << is an ordinary key, not the YAML 1.1 merge extension.
+/// This guards the configured merge-key policy when aliases are present.
 #[test]
 fn merge_keys_are_ordinary() {
     let actual: Value = from_yaml(indoc! {b"
@@ -113,8 +199,8 @@ fn merge_keys_are_ordinary() {
     assert_eq!(actual["copy"], json!({"<<": {"value": 1}}));
 }
 
-/// Binary-tagged strings keep their encoded text, matching main's compatibility policy.
-/// This is an application policy, not a YAML 1.2 Core requirement for the non-Core binary tag.
+/// Application compatibility policy: !!binary retains encoded text instead of
+/// decoding bytes. This is not a claim about YAML 1.1/1.2 binary-type conformance.
 #[test]
 fn binary_strings_keep_encoded_text() {
     let actual: Value = from_yaml(b"!!binary aGVsbG8=").unwrap();
@@ -125,7 +211,8 @@ fn binary_strings_keep_encoded_text() {
     );
 }
 
-/// Internally tagged enums buffer values without turning legacy boolean words into booleans.
+/// Expect YAML 1.2 legacy-word strings to survive internally tagged Serde enum
+/// buffering. This guards a different reader path from direct scalar parsing.
 #[test]
 fn internally_tagged_enum_strings() {
     #[derive(Debug, Deserialize, PartialEq)]
@@ -141,7 +228,8 @@ fn internally_tagged_enum_strings() {
     assert_eq!(actual, Item::Text { value: "on".into() });
 }
 
-/// Untagged enums preserve legacy boolean words while trying their candidate variants.
+/// Expect YAML 1.2 legacy-word strings while Serde tries untagged enum variants.
+/// The boolean candidate must not capture yes using YAML 1.1 resolution.
 #[test]
 fn untagged_enum_strings() {
     #[derive(Debug, Deserialize, PartialEq)]
@@ -153,7 +241,8 @@ fn untagged_enum_strings() {
     assert_eq!(from_yaml::<Item>(b"yes").unwrap(), Item::Text("yes".into()));
 }
 
-/// Flattened fields preserve legacy boolean words through Serde's intermediate buffer.
+/// Expect YAML 1.2 legacy-word strings through Serde flattened-field buffering.
+/// Keep this control for conversions that occur before the final Rust string field.
 #[test]
 fn flattened_strings() {
     #[derive(Debug, Deserialize)]
@@ -165,7 +254,8 @@ fn flattened_strings() {
     assert_eq!(actual.fields.get("value").map(String::as_str), Some("off"));
 }
 
-/// Directive-like text inside a literal block is content and does not affect other values.
+/// Both versions treat literal-block contents as text. A directive-looking line
+/// inside that block must not change the following scalar's default 1.2 resolution.
 #[test]
 fn directive_text_in_scalar_content() {
     let actual: Value = from_yaml(indoc! {b"
@@ -177,6 +267,8 @@ fn directive_text_in_scalar_content() {
     assert_eq!(actual, json!({"text": "%YAML 1.1\n", "value": "yes"}));
 }
 
+/// Application policy: null mapping values require Option<String>; a required
+/// String rejects them. Both YAML versions distinguish null from a quoted string.
 #[test_case("null"; "lowercase_null")]
 #[test_case("Null"; "titlecase_null")]
 #[test_case("NULL"; "uppercase_null")]
@@ -207,6 +299,8 @@ fn null_requires_an_optional_string(input: &str) {
     );
 }
 
+/// Application policy: explicit numeric/boolean tags block direct String
+/// coercion, even when quoted. These tagged inputs are valid in both YAML versions.
 #[test_case("!!int 123")]
 #[test_case("!!bool true")]
 #[test_case("!!float 1.5")]
@@ -219,6 +313,8 @@ fn explicit_scalar_tags_are_not_coerced_into_strings(input: &str) {
     assert!(from_yaml::<String>(format!("!!str {quoted}").as_bytes()).is_ok());
 }
 
+/// Both versions distinguish explicitly tagged null from an empty string.
+/// Check the application binding: null becomes None, while an untagged empty string does not.
 #[test_case("!!null ''")]
 #[test_case("!!null null")]
 fn explicit_null_tags_produce_none(input: &str) {
@@ -226,30 +322,40 @@ fn explicit_null_tags_produce_none(input: &str) {
     assert_eq!(from_yaml::<Option<String>>(b"''").unwrap(), Some("".into()));
 }
 
+/// Application coercion policy: the Rust integer reader accepts quoted decimals,
+/// uppercase radix prefixes and digit separators. This is not standard-tag inference.
 #[test_case("'1'", 1; "quoted_decimal")]
 #[test_case("0X1F", 31; "uppercase_hexadecimal")]
 #[test_case("0O10", 8; "uppercase_octal")]
 #[test_case("1_000", 1000; "decimal_digit_separators")]
 fn typed_unsigned_integer_conversion(input: &str, expected: u32) {
-    // Typed conversion accepts more spellings than either standard's scalar resolver.
     assert_eq!(from_yaml::<u32>(input.as_bytes()).unwrap(), expected);
 }
 
-#[test_case(V1_1, indoc! {"
-    1_000: first
-    1000: second
-"}; "yaml11_digit_separators_do_not_distinguish_integer_keys")]
-#[test_case(V1_2, indoc! {"
-    0xB: first
-    11: second
-"}; "yaml12_radix_does_not_distinguish_integer_keys")]
-fn equivalent_numeric_keys_are_duplicates(version: YamlVersion, input: &str) {
-    assert!(
-        from_yaml::<BTreeMap<String, String>>(input.as_bytes()).is_err(),
-        "{version:?}: {input}"
-    );
+/// Expect YAML 1.1 digit-separator resolution: these keys both mean integer 1000.
+/// Under YAML 1.2 Core the underscored key would be text, making them distinct.
+#[test]
+fn digit_separators_do_not_distinguish_integer_keys() {
+    let input = indoc! {"
+        1_000: first
+        1000: second
+    "};
+    assert!(from_yaml::<BTreeMap<String, String>>(input.as_bytes()).is_err());
 }
 
+/// Both versions compare integer keys by value. Keep a control for duplicate-key
+/// validation: a different radix must not allow the integer 11 to appear twice.
+#[test]
+fn radix_does_not_distinguish_integer_keys() {
+    let input = indoc! {"
+        0xB: first
+        11: second
+    "};
+    assert!(from_yaml::<BTreeMap<String, String>>(input.as_bytes()).is_err());
+}
+
+/// Directive handling only: declaring 1.1, 1.2 or a future minor version retains
+/// the default YAML 1.2 treatment of yes as text; it does not select a legacy schema.
 #[test_case("1.1")]
 #[test_case("1.2")]
 #[test_case("1.3")]
@@ -262,34 +368,36 @@ fn version_directives_do_not_select_a_different_schema(declared_version: &str) {
     assert_eq!(from_yaml::<Value>(input.as_bytes()).unwrap(), json!("yes"));
 }
 
-#[test_case(V1_2, '\u{0085}'; "yaml12_next_line_is_content")]
-#[test_case(V1_2, '\u{2028}'; "yaml12_line_separator_is_content")]
-#[test_case(V1_2, '\u{2029}'; "yaml12_paragraph_separator_is_content")]
-fn unicode_non_ascii_line_breaks(version: YamlVersion, character: char) {
+/// Expect YAML 1.2: NEL, line separator and paragraph separator are string content.
+/// YAML 1.1 treats them as line breaks; check both flow and block mapping contexts.
+#[test_case('\u{0085}'; "next_line_is_content")]
+#[test_case('\u{2028}'; "line_separator_is_content")]
+#[test_case('\u{2029}'; "paragraph_separator_is_content")]
+fn unicode_non_ascii_line_breaks(character: char) {
     let input = format!("[before{character}after]");
     assert_eq!(
         from_yaml::<Value>(input.as_bytes()).unwrap(),
-        json!([format!("before{character}after")]),
-        "{version:?}"
+        json!([format!("before{character}after")])
     );
     let mapping = format!("name: before{character}after");
     assert_eq!(
         from_yaml::<Value>(mapping.as_bytes()).unwrap(),
-        json!({"name": format!("before{character}after")}),
-        "{version:?}"
+        json!({"name": format!("before{character}after")})
     );
 }
 
-#[test_case(V1_1; "yaml11_utf8_bom")]
-#[test_case(V1_2; "yaml12_utf8_bom")]
-fn utf8_byte_order_mark(version: YamlVersion) {
+/// Both versions permit a leading UTF-8 BOM. Keep one input-boundary control
+/// because an earlier migration review incorrectly reported this as a difference.
+#[test]
+fn utf8_byte_order_mark() {
     assert_eq!(
         from_yaml::<Value>("\u{feff}name: test".as_bytes()).unwrap(),
-        json!({"name": "test"}),
-        "{version:?}"
+        json!({"name": "test"})
     );
 }
 
+/// Expect YAML 1.2 JSON compatibility: paired surrogate escapes decode to one
+/// character. The YAML Unicode escape is a control for the resulting code point.
 #[test]
 fn unicode_surrogate_pair_escapes_follow_json_compatibility() {
     assert_eq!(
@@ -299,12 +407,16 @@ fn unicode_surrogate_pair_escapes_follow_json_compatibility() {
     assert_eq!(from_yaml::<String>(br#""\U0001F600""#).unwrap(), "😀");
 }
 
+/// Neither version permits an isolated surrogate as a Unicode scalar value.
+/// Guard rejection of individual halves alongside the accepted pair test.
 #[test_case(br#""\uD83D""#; "unpaired_high_surrogate")]
 #[test_case(br#""\uDE00""#; "unpaired_low_surrogate")]
 fn unpaired_unicode_surrogate_escapes_are_rejected(input: &[u8]) {
     assert!(from_yaml::<Value>(input).is_err());
 }
 
+/// Both versions require standard tags to match the node kind. Guard against
+/// silently ignoring a scalar/sequence/map tag attached to the wrong collection.
 #[test_case("!!str {}")]
 #[test_case("!!seq {}")]
 #[test_case("!!map []")]
@@ -313,6 +425,8 @@ fn explicit_tags_require_the_matching_node_kind(input: &str) {
     assert_eq!(from_yaml::<Value>(b"!!map {}").unwrap(), json!({}));
 }
 
+/// Application policy: the transaction buffer rejects null for Vec<String>.
+/// Check empty/null spellings against the valid [] form emitted for an empty vector.
 #[test_case(""; "empty_value")]
 #[test_case("~"; "tilde_null")]
 #[test_case("null"; "null_word")]
@@ -333,6 +447,8 @@ fn null_is_not_a_call_parameter_sequence(parameters: &str) {
     assert!(from_yaml::<TransactionSpecificationFile>(sequence.as_bytes()).is_ok());
 }
 
+/// Application policy: JSON buffering converts integer/boolean keys to strings,
+/// after which unknown fields are ignored. YAML 1.1 and 1.2 both allow scalar keys.
 #[test_case("1"; "integer_key")]
 #[test_case("true"; "boolean_key")]
 fn transaction_buffer_converts_scalar_keys_to_strings(key: &str) {
@@ -347,6 +463,8 @@ fn transaction_buffer_converts_scalar_keys_to_strings(key: &str) {
     assert!(from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_ok());
 }
 
+/// Application policy: JSON buffering stringifies a numeric remap key before
+/// field deserialization. This tests loading, not later principal validation.
 #[test]
 fn transaction_buffer_converts_integer_remap_keys_to_strings() {
     let input = indoc! {b"
@@ -366,6 +484,8 @@ fn transaction_buffer_converts_integer_remap_keys_to_strings() {
     );
 }
 
+/// Emitter presentation policy: numeric-looking strings use double quotes. Both
+/// versions permit either quote style; guard the rewrite-causing output and its type.
 #[test]
 fn emitter_quotes_numeric_strings_with_double_quotes() {
     let expected = json!({"balance": "100000000000000"});
@@ -374,6 +494,8 @@ fn emitter_quotes_numeric_strings_with_double_quotes() {
     assert_eq!(from_yaml::<Value>(emitted.as_bytes()).unwrap(), expected);
 }
 
+/// Emitter presentation policy: long strings use folded blocks without changing
+/// content. Both versions permit this; guard the generated deployment-name rewrite.
 #[test]
 fn emitter_folds_long_strings_without_changing_their_value() {
     let expected = json!({"name": "Simulated deployment, used as a default for `clarinet console`, `clarinet test` and `clarinet check`"});
@@ -382,6 +504,8 @@ fn emitter_folds_long_strings_without_changing_their_value() {
     assert_eq!(from_yaml::<Value>(emitted.as_bytes()).unwrap(), expected);
 }
 
+/// Error-reporting policy: duplicate keys include a source location and library
+/// advice. Duplicate-key rejection itself is required by both YAML versions.
 #[test]
 fn duplicate_key_diagnostics_include_source_location() {
     let error = from_yaml::<Value>(indoc! {b"
@@ -395,6 +519,8 @@ fn duplicate_key_diagnostics_include_source_location() {
     assert!(error.contains("line 2"), "{error}");
 }
 
+/// Error-reporting policy: an invalid typed integer reports u32 in the header.
+/// This captures the changed diagnostic, not a YAML-version resolution choice.
 #[test]
 fn unsigned_integer_diagnostics_describe_the_expected_type() {
     let error = from_yaml::<u32>(b"not-an-integer").unwrap_err().to_string();
@@ -405,6 +531,8 @@ fn unsigned_integer_diagnostics_describe_the_expected_type() {
     );
 }
 
+/// Error-reporting policy: a buffered transaction error points at its mapping
+/// and omits the nested field path. Guard this observed diagnostic boundary.
 #[test]
 fn deployment_diagnostics_point_to_the_transaction_mapping() {
     let input = indoc! {"
