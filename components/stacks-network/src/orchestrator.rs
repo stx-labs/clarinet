@@ -13,6 +13,7 @@ use bollard::container::{
     Config, CreateContainerOptions, InspectContainerOptions, ListContainersOptions, LogsOptions,
     RemoveContainerOptions,
 };
+use bollard::errors::Error as DockerError;
 use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerState, ContainerStateStatusEnum, HostConfig, PortBinding};
 use bollard::network::{CreateNetworkOptions, PruneNetworksOptions};
