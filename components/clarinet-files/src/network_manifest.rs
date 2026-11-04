@@ -32,6 +32,8 @@ pub const DEFAULT_BITCOIN_EXPLORER_IMAGE: &str = "quay.io/hirosystems/bitcoin-ex
 pub const DEFAULT_STACKS_EXPLORER_IMAGE: &str = "ghcr.io/stx-labs/explorer:latest";
 
 pub const DEFAULT_DOCKER_PLATFORM: &str = "linux/amd64";
+/// 10 sBTC, for accounts that don't set `sbtc_balance`.
+pub const DEFAULT_SBTC_BALANCE: u64 = 1_000_000_000;
 
 /// Normalize a user-provided docker_host value to include a scheme prefix.
 /// Bare paths like "/var/run/docker.sock" or "//./pipe/docker_engine" are
@@ -371,10 +373,18 @@ pub struct AccountConfig {
     pub mnemonic: String,
     pub derivation: String,
     pub balance: u64,
-    pub sbtc_balance: u64,
+    /// `None` when the account doesn't set `sbtc_balance`, so the default can be
+    /// minted quietly where sBTC exists instead of warning where it doesn't.
+    pub sbtc_balance: Option<u64>,
     pub stx_address: String,
     pub btc_address: String,
     pub is_mainnet: bool,
+}
+
+impl AccountConfig {
+    pub fn sbtc_balance_or_default(&self) -> u64 {
+        self.sbtc_balance.unwrap_or(DEFAULT_SBTC_BALANCE)
+    }
 }
 
 impl NetworkManifest {
@@ -454,8 +464,8 @@ impl NetworkManifest {
                         _ => 0,
                     };
                     let sbtc_balance = match account_settings.get("sbtc_balance") {
-                        Some(Value::Integer(balance)) => *balance as u64,
-                        _ => 1_000_000_000, // mint 10 sBTC by default
+                        Some(Value::Integer(balance)) => Some(*balance as u64),
+                        _ => None,
                     };
 
                     let mut mnemonic = match account_settings.get("mnemonic") {
@@ -647,7 +657,7 @@ impl NetworkManifest {
                     encrypted_mnemonic: "".to_string(),
                     derivation: stacker_derivation_path.clone(),
                     balance: 100_000_000_000_000,
-                    sbtc_balance: 1_000_000_000,
+                    sbtc_balance: None,
                     stx_address,
                     btc_address,
                     is_mainnet: false,
@@ -1059,7 +1069,8 @@ mod tests {
     use super::{DevnetConfigFile, DEFAULT_MINER_WALLET_NAME};
     use crate::{
         DevnetConfig, NetworkManifest, NetworkManifestFile, StacksNetwork, StacksNodeEventObserver,
-        DEFAULT_BITCOIN_NODE_IMAGE, DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
+        DEFAULT_BITCOIN_NODE_IMAGE, DEFAULT_SBTC_BALANCE, DEFAULT_STACKS_NODE_IMAGE,
+        DEFAULT_STACKS_SIGNER_IMAGE,
     };
 
     fn try_parse_devnet_settings(settings: &str) -> Result<DevnetConfig, String> {
@@ -1091,6 +1102,25 @@ mod tests {
         );
         let custom = format!("{network}[devnet]\nminer_wallet_name = \"stacks\"\n");
         assert_eq!(parse_devnet_settings(&custom).miner_wallet_name, "stacks");
+    }
+
+    #[test]
+    fn sbtc_balance_is_only_set_when_configured() {
+        let settings = "[network]\nname = \"devnet\"\n\
+            [accounts.deployer]\nbalance = 1_000\n\
+            [accounts.wallet_1]\nsbtc_balance = 500\n";
+        let mut file: NetworkManifestFile = toml::from_str(settings).unwrap();
+        let networks = StacksNetwork::Simnet.get_networks();
+        let manifest =
+            NetworkManifest::from_network_manifest_file(&mut file, &networks, false, None).unwrap();
+
+        let deployer = &manifest.accounts["deployer"];
+        assert_eq!(deployer.sbtc_balance, None);
+        assert_eq!(deployer.sbtc_balance_or_default(), DEFAULT_SBTC_BALANCE);
+
+        let wallet_1 = &manifest.accounts["wallet_1"];
+        assert_eq!(wallet_1.sbtc_balance, Some(500));
+        assert_eq!(wallet_1.sbtc_balance_or_default(), 500);
     }
 
     #[test]

@@ -314,34 +314,31 @@ fn fund_genesis_accounts_with_sbtc(session: &mut Session, deployment: &Deploymen
         return;
     };
 
-    let mut funded_wallets = spec
+    if !is_sbtc_token_deployed(session) {
+        if spec.has_configured_sbtc_balance() {
+            let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-token");
+            ueprint!(
+                "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this \
+                 session. The sBTC contracts require epoch {sbtc_epoch} or later.",
+                *SBTC_TOKEN_MAINNET_ADDRESS
+            );
+        }
+        return;
+    }
+
+    let funded_wallets = spec
         .wallets
         .iter()
-        .filter(|wallet| wallet.sbtc_balance > 0)
-        .peekable();
-    if funded_wallets.peek().is_none() {
-        return;
-    }
-
-    if !is_sbtc_token_deployed(session) {
-        let (sbtc_epoch, _) = get_boot_contract_epoch_and_clarity_version("sbtc-token");
-        ueprint!(
-            "Warning: unable to mint the configured sbtc_balance: {} is not deployed in this \
-             session. The sBTC contracts require epoch {sbtc_epoch} or later.",
-            *SBTC_TOKEN_MAINNET_ADDRESS
-        );
-        return;
-    }
-
-    for wallet in funded_wallets {
+        .map(|wallet| (wallet, wallet.sbtc_balance_or_default()))
+        .filter(|(_, balance)| *balance > 0);
+    for (wallet, balance) in funded_wallets {
         if let Err(reason) = session.interpreter.mint_ft_balance(
             &SBTC_TOKEN_ASSET_IDENTIFIER,
             &wallet.address.clone().into(),
-            wallet.sbtc_balance,
+            balance,
         ) {
             ueprint!(
-                "Warning: unable to mint {} sBTC to {}: {reason}",
-                wallet.sbtc_balance,
+                "Warning: unable to mint {balance} sBTC to {}: {reason}",
                 wallet.address
             );
         }
@@ -1560,7 +1557,7 @@ pub async fn generate_default_deployment_with_cache(
                 name,
                 address,
                 balance: account.balance.into(),
-                sbtc_balance: account.sbtc_balance.into(),
+                sbtc_balance: account.sbtc_balance.map(Into::into),
             });
         }
     }
@@ -2306,7 +2303,7 @@ mod tests {
                 name: "deployer".to_string(),
                 address: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
                 balance,
-                sbtc_balance: 0,
+                sbtc_balance: Some(0),
             }],
             contracts: vec![],
         }
