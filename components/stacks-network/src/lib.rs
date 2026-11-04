@@ -12,8 +12,6 @@ mod ui;
 
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
-use std::thread::sleep;
-use std::time::Duration;
 
 use chains_coordinator::{start_chains_coordinator, BitcoinMiningCommand};
 use clarinet_deployments::types::DeploymentSpecification;
@@ -32,6 +30,7 @@ pub use orchestrator::DevnetOrchestrator;
 use orchestrator::{
     get_global_snapshot_dir, get_snapshot_cache_root, DEVNET_SNAPSHOT_READY_MARKER,
 };
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use self::chains_coordinator::DevnetEventObserverConfig;
 use self::snapshot_extractor::{SnapshotImages, SnapshotPlan};
@@ -45,12 +44,33 @@ pub enum ChainsCoordinatorCommand {
 /// Sets up signal handlers for SIGINT and SIGTERM on Unix systems
 /// On Unix: Handles both SIGINT (Ctrl+C) and SIGTERM (kill) gracefully
 /// On Windows: Handles Ctrl+C via ctrlc crate
+/// A second signal exits right away, leaving the devnet containers behind.
 fn setup_signal_handlers(
-    orchestrator_terminator_tx: Sender<bool>,
+    orchestrator_terminator_tx: UnboundedSender<()>,
     observer_command_tx: Sender<ObserverCommand>,
     mining_command_tx: Sender<BitcoinMiningCommand>,
     devnet_events_tx: Sender<DevnetEvent>,
+    display_dashboard: bool,
 ) {
+    let mut shutting_down = false;
+    let mut handle_signal = move |signal_name: &str, exit_code: i32| {
+        if shutting_down {
+            if display_dashboard {
+                ui::restore_terminal();
+            }
+            eprintln!("{signal_name} received again, exiting without removing devnet containers");
+            std::process::exit(exit_code);
+        }
+        shutting_down = true;
+        let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
+            "{signal_name} received, initiating graceful shutdown..."
+        )));
+        // The orchestrator sends DevnetEvent::Terminate once the containers are removed
+        let _ = orchestrator_terminator_tx.send(());
+        let _ = observer_command_tx.send(ObserverCommand::Terminate);
+        let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
+    };
+
     #[cfg(unix)]
     {
         thread::spawn(move || {
@@ -66,24 +86,8 @@ fn setup_signal_handlers(
             };
 
             for sig in signals.forever() {
-                match sig {
-                    SIGINT | SIGTERM => {
-                        let signal_name = if sig == SIGINT { "SIGINT" } else { "SIGTERM" };
-                        let _ = devnet_events_tx.send(DevnetEvent::warning(format!(
-                            "{} received, initiating graceful shutdown...",
-                            signal_name
-                        )));
-
-                        // Trigger graceful shutdown
-                        let _ = orchestrator_terminator_tx.send(true);
-                        let _ = observer_command_tx.send(ObserverCommand::Terminate);
-                        let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
-                        sleep(Duration::from_secs(3));
-                        let _ = devnet_events_tx.send(DevnetEvent::Terminate);
-                        break;
-                    }
-                    _ => {}
-                }
+                let signal_name = if sig == SIGINT { "SIGINT" } else { "SIGTERM" };
+                handle_signal(signal_name, 128 + sig);
             }
         });
     }
@@ -91,16 +95,7 @@ fn setup_signal_handlers(
     #[cfg(not(unix))]
     {
         // On Windows and other platforms, use ctrlc for SIGINT/Ctrl+C
-        let _ = ctrlc::set_handler(move || {
-            let _ = devnet_events_tx.send(DevnetEvent::warning(
-                "Ctrl+C received, initiating graceful shutdown...".into(),
-            ));
-            let _ = orchestrator_terminator_tx.send(true);
-            let _ = observer_command_tx.send(ObserverCommand::Terminate);
-            let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
-            sleep(Duration::from_secs(3));
-            let _ = devnet_events_tx.send(DevnetEvent::Terminate);
-        });
+        let _ = ctrlc::set_handler(move || handle_signal("Ctrl+C", 130));
     }
 }
 
@@ -168,7 +163,7 @@ pub fn do_run_local_devnet(
     let chains_coordinator_tx = devnet_events_tx.clone();
     let (chains_coordinator_commands_tx, chains_coordinator_commands_rx) =
         crossbeam_channel::unbounded();
-    let (orchestrator_terminator_tx, terminator_rx) = channel();
+    let (orchestrator_terminator_tx, terminator_rx) = unbounded_channel();
     let (observer_command_tx, observer_command_rx) = channel();
     let (mining_command_tx, mining_command_rx) = channel();
     let moved_mining_command_tx = mining_command_tx.clone();
@@ -199,7 +194,7 @@ pub fn do_run_local_devnet(
     // Let's start the orchestration
 
     // The devnet orchestrator should be able to send some events to the UI thread,
-    // and should be able to be restarted/terminated
+    // and should be able to be terminated
     let orchestrator_event_tx = devnet_events_tx.clone();
     let chains_coordinator_commands_tx_moved = chains_coordinator_commands_tx.clone();
     let ctx_moved = ctx.clone();
@@ -215,10 +210,15 @@ pub fn do_run_local_devnet(
                     !use_snapshot,
                     save_container_logs,
                 ));
-                if let Err(ref e) = res {
-                    let _ = orchestrator_event_tx.send(DevnetEvent::FatalError(e.clone()));
-                    let _ = chains_coordinator_commands_tx_moved
-                        .send(ChainsCoordinatorCommand::Terminate);
+                match &res {
+                    Ok(()) => {
+                        let _ = orchestrator_event_tx.send(DevnetEvent::Terminate);
+                    }
+                    Err(e) => {
+                        let _ = orchestrator_event_tx.send(DevnetEvent::FatalError(e.clone()));
+                        let _ = chains_coordinator_commands_tx_moved
+                            .send(ChainsCoordinatorCommand::Terminate);
+                    }
                 }
                 res
             })
@@ -231,6 +231,7 @@ pub fn do_run_local_devnet(
         observer_command_tx,
         mining_command_tx,
         devnet_events_tx.clone(),
+        display_dashboard,
     );
 
     if display_dashboard {
@@ -252,9 +253,13 @@ pub fn do_run_local_devnet(
             }
         }
 
-        if let Err(e) = orchestrator_handle.join() {
-            if let Ok(message) = e.downcast::<String>() {
-                return Err(*message);
+        // The UI can return before seeing the error, e.g. when the user quits during teardown
+        match orchestrator_handle.join() {
+            Ok(result) => result?,
+            Err(e) => {
+                if let Ok(message) = e.downcast::<String>() {
+                    return Err(*message);
+                }
             }
         }
     } else {
