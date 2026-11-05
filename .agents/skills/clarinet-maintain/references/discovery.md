@@ -3,6 +3,13 @@
 Use available tools or targeted inspection; record unavailable checks.
 Apply [repository checks](maintenance-checks.md).
 
+## TODO/FIXME items
+
+Some issues may already be known and documented. Check for these first:
+
+- Search the codebase for comments containing `TODO` or `FIXME`
+- Also search the reposiroty for files containing these strings. Make sure to include hidden (prefixed with `.`) files and directories also
+
 ## Dependencies
 
 ### Rust
@@ -123,3 +130,4 @@ Docs: [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html).
   options structs.
 - Preserve messages, serialization, defaults, accepted inputs, public signatures.
   Use internal conversions or defer public type migrations.
+

@@ -10,7 +10,8 @@ description: Find and perform Clarinet maintenance tasks without new product req
 - Default: whole repository, including code unchanged on this branch.
 - Work from existing contracts; preserve observable behavior except for confirmed bug fixes.
 - Prioritize confirmed bugs and high-confidence removals. Choose topics from the
-  [discovery guide](references/discovery.md); rotate topics during longer runs.
+  [discovery guide](references/discovery.md) and the [run log](`.agents/logs/improvements.md`) (gitignored);
+  rotate topics during longer runs.
 - Allow dependency removals, compatible deduplication, and focused upgrades or
   replacements addressing demonstrated problems.
 - Unless explicitly in scope, defer product/compatibility decisions: public APIs,
@@ -42,12 +43,10 @@ $clarinet-maintain until 07:00 UTC tomorrow
 
 ## Run
 
-1. Read `.agents/notes/TODO.md` if present, including Completed, Decisions, audit
-   notes. Revalidate historical findings; revisit rejections only with new evidence.
-2. Keep a run log: `.agents/reviews/maintenance-<branch>.md` (gitignored). Replace
-   branch `/` with `-`; use short HEAD when detached. Record HEAD, UTC start/deadline,
-   budget, candidates/verdicts, verification, next actions. Update after each batch.
-3. Complete coherent batches using relevant [repository checks](references/maintenance-checks.md).
+1. Keep a run log, as mentioned in "Scope".
+2. On each run, record HEAD, UTC start/deadline, budget, verification, next actions.
+3. Keep a section in the run log for tracking candidates for future runs.
+2. Complete coherent batches using relevant [repository checks](references/maintenance-checks.md).
    Log deferred decisions; continue independent work. Defer candidates lacking
    required validation rather than accumulating batches behind that gap.
 
