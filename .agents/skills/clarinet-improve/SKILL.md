@@ -1,9 +1,9 @@
 ---
-name: clarinet-maintain
-description: Find and perform Clarinet maintenance tasks without new product requirements. For cleanup or review of a particular change, use clarinet-simplify or clarinet-review.
+name: clarinet-improve
+description: Find and implement Clarinet improvements without new product requirements. For cleanup or review of a particular change, use clarinet-simplify or clarinet-review.
 ---
 
-# Maintain Clarinet
+# Improve Clarinet
 
 ## Scope
 
@@ -37,8 +37,8 @@ description: Find and perform Clarinet maintenance tasks without new product req
   use harness continuation support for long runs.
 
 ```text
-$clarinet-maintain for 1 hour; focus on unused dependencies
-$clarinet-maintain until 07:00 UTC tomorrow
+$clarinet-improve for 1 hour; focus on unused dependencies
+$clarinet-improve until 07:00 UTC tomorrow
 ```
 
 ## Run

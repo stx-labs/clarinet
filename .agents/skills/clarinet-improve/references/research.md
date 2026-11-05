@@ -91,7 +91,7 @@ both harnesses without installing a plugin or copying instructions.
 
 The existing skills leave a narrow gap: `clarinet-simplify` cleans up a selected
 change, `clarinet-review` reports defects introduced or exposed by a change, and
-`clarinet-ship` handles checks and delivery. `clarinet-maintain` discovers and fixes
+`clarinet-ship` handles checks and delivery. `clarinet-improve` discovers and fixes
 pre-existing problems throughout the requested scope, reusing those checks and
 review workflows where useful.
 
@@ -114,14 +114,14 @@ no third-party skill implementation or tooling was vendored.
 Codex:
 
 ```text
-Use $clarinet-maintain for an overnight pass on this branch until 07:00 UTC.
+Use $clarinet-improve for an overnight pass on this branch until 07:00 UTC.
 Prioritize confirmed bugs and unused dependencies. Do not commit.
 ```
 
 Claude Code:
 
 ```text
-/clarinet-maintain Focus on formatter and LSP robustness. Work for up to two hours.
+/clarinet-improve Focus on formatter and LSP robustness. Work for up to two hours.
 Leave changes uncommitted and record anything that needs a design decision.
 ```
 
