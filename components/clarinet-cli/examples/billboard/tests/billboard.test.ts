@@ -1,6 +1,6 @@
 import { tx } from "@stacks/clarinet-sdk";
 import { Cl } from "@stacks/transactions";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 const accounts = simnet.getAccounts();
 const address1 = accounts.get("wallet_1")!;
@@ -73,10 +73,14 @@ describe("The billboard works as expected", () => {
       ),
     ]);
 
-    expect(block).toHaveLength(3);
-    expect(block[0].result).toBeOk(Cl.uint(110));
-    expect(block[1].result).toBeOk(Cl.uint(120));
-    expect(block[2].result).toBeOk(Cl.uint(130));
+    const txs = block.map((r, i) => {
+      assert(r.status === "success", `tx ${i}: ${r.status}`);
+      return r.execution;
+    });
+    expect(txs).toHaveLength(3);
+    expect(txs[0].result).toBeOk(Cl.uint(110));
+    expect(txs[1].result).toBeOk(Cl.uint(120));
+    expect(txs[2].result).toBeOk(Cl.uint(130));
 
     const newPrice = simnet.getDataVar("billboard", "price");
     expect(newPrice).toBeUint(130);
