@@ -20,7 +20,7 @@ use clarinet_deployments::{
 use clarinet_files::clarinetrc::ClarinetRC;
 use clarinet_files::devnet_diff::DevnetDiffConfig;
 use clarinet_files::{
-    get_manifest_location, paths, NetworkManifest, ProjectManifest, RequirementConfig,
+    get_manifest_location, paths, NetworkManifest, ProjectManifest, RemapConfig, RequirementConfig,
     StacksNetwork,
 };
 use clarinet_format::formatter::{self, ClarityFormatter};
@@ -97,7 +97,7 @@ enum Command {
     /// Subcommands for working with contracts
     #[clap(subcommand, name = "contracts", aliases = &["contract"])]
     Contracts(Contracts),
-    /// Interact with contracts deployed on Mainnet
+    /// Manage the deployed contracts that the project depends on
     #[clap(subcommand, name = "requirements", aliases = &["requirement"])]
     Requirements(Requirements),
     /// Manage contracts deployments on Simnet/Devnet/Testnet/Mainnet
@@ -253,7 +253,7 @@ enum Contracts {
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
 enum Requirements {
-    /// Interact with contracts deployed on Mainnet
+    /// Add or update a deployed contract that the project depends on
     #[clap(name = "add", bin_name = "add")]
     AddRequirement(AddRequirement),
 }
@@ -314,8 +314,14 @@ struct RemoveContract {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct AddRequirement {
-    /// Contract id (ex. "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait")
+    /// Contract id that the project's sources use, on mainnet or testnet (ex. "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait")
     pub contract_id: String,
+    /// Testnet contract to use instead of publishing a copy; saved in [remaps]. Not needed for a testnet contract id
+    #[clap(long = "testnet-remap", value_name = "ID")]
+    pub testnet_remap: Option<String>,
+    /// Mainnet contract to use; saved in [remaps]. Needed for a testnet contract id
+    #[clap(long = "mainnet-remap", value_name = "ID")]
+    pub mainnet_remap: Option<String>,
     /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
@@ -1088,6 +1094,20 @@ pub fn main() {
             Requirements::AddRequirement(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
 
+                let remap = RemapConfig {
+                    testnet: cmd.testnet_remap,
+                    mainnet: cmd.mainnet_remap,
+                };
+                if let Err(e) = remap.validate(&cmd.contract_id) {
+                    eprintln!("{} {e}", red!("error:"));
+                    std::process::exit(1);
+                }
+                let remaps_to_add = if remap == RemapConfig::default() {
+                    vec![]
+                } else {
+                    vec![(cmd.contract_id.clone(), remap)]
+                };
+
                 let change = TOMLEdition {
                     comment: format!(
                         "{} with requirement {}",
@@ -1100,6 +1120,7 @@ pub fn main() {
                     requirements_to_add: vec![RequirementConfig {
                         contract_id: cmd.contract_id,
                     }],
+                    remaps_to_add,
                 };
                 if !execute_changes(vec![Changes::EditTOML(change)]) {
                     std::process::exit(1);
@@ -2063,6 +2084,10 @@ fn edit_toml_document(mut doc: DocumentMut, options: &mut TOMLEdition) -> Docume
         add_requirement_to_doc(&mut doc, &req.contract_id);
     }
 
+    for (source, remap) in options.remaps_to_add.drain(..) {
+        add_remap_to_doc(&mut doc, &source, &remap);
+    }
+
     for (name, contract) in options.contracts_to_add.drain() {
         add_contract_to_doc(&mut doc, &name, &contract);
     }
@@ -2111,6 +2136,30 @@ fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
         new_req["contract_id"] = toml_edit::value(contract_id);
         requirements.push(new_req);
     }
+}
+
+/// Set the destinations of `source` in the [remaps] table, keeping any
+/// destination it already has on another network.
+fn add_remap_to_doc(doc: &mut DocumentMut, source: &str, remap: &RemapConfig) {
+    use toml_edit::{InlineTable, Item, Table};
+
+    let entry = doc
+        .entry("remaps")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_like_mut()
+        .expect("[remaps] should be a table")
+        .entry(source)
+        .or_insert(toml_edit::value(InlineTable::new()))
+        .as_table_like_mut()
+        .expect("[remaps] entries should be tables");
+
+    for (key, destination) in [("testnet", &remap.testnet), ("mainnet", &remap.mainnet)] {
+        if let Some(destination) = destination {
+            entry.insert(key, toml_edit::value(destination.as_str()));
+        }
+    }
+    // An appended inline-table key keeps the decor of the previous last value.
+    entry.fmt();
 }
 
 /// Add a contract to the [contracts.<name>] section in the document.
@@ -2770,6 +2819,51 @@ mod tests {
                 ),
                 "New requirement should be added"
             );
+        }
+
+        #[test]
+        fn test_add_remap_preserves_destinations_in_regular_and_inline_tables() {
+            const SOURCE: &str = "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait";
+            const TESTNET: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait";
+            const MAINNET: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.nft-trait";
+            const OTHER: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait";
+
+            for input in [
+                format!("[remaps]\n\"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }}"),
+                format!("remaps = {{ \"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }} }}"),
+                "remaps = {}".to_string(),
+            ] {
+                let mut doc: DocumentMut = input.parse().unwrap();
+                add_remap_to_doc(
+                    &mut doc,
+                    SOURCE,
+                    &RemapConfig {
+                        mainnet: Some(MAINNET.into()),
+                        testnet: None,
+                    },
+                );
+                add_remap_to_doc(
+                    &mut doc,
+                    SOURCE,
+                    &RemapConfig {
+                        testnet: Some(TESTNET.into()),
+                        mainnet: None,
+                    },
+                );
+                add_remap_to_doc(
+                    &mut doc,
+                    OTHER,
+                    &RemapConfig {
+                        mainnet: Some(MAINNET.into()),
+                        testnet: None,
+                    },
+                );
+
+                let saved: DocumentMut = doc.to_string().parse().unwrap();
+                assert_eq!(saved["remaps"][SOURCE]["testnet"].as_str(), Some(TESTNET));
+                assert_eq!(saved["remaps"][SOURCE]["mainnet"].as_str(), Some(MAINNET));
+                assert_eq!(saved["remaps"][OTHER]["mainnet"].as_str(), Some(MAINNET));
+            }
         }
 
         #[test]
