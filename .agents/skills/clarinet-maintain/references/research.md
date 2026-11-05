@@ -126,8 +126,10 @@ Leave changes uncommitted and record anything that needs a design decision.
 ```
 
 For repeated Claude execution, supply an explicit maintenance prompt to `/loop`.
-For Codex, use the skill in a goal or scheduled-task prompt. Set a concrete time or
-token budget for an unattended run; a skill file alone is not an execution service.
+For Codex, use the skill in a goal or scheduled-task prompt. Supply a concrete
+duration or deadline for longer unattended runs; the skill defaults to one hour
+when no time limit is supplied. A skill file alone is not an execution service or
+an enforced timeout.
 
 ## Validation and limits
 

@@ -71,6 +71,42 @@ handling. Look for malformed-input panics, incorrect state transitions, and miss
 cleanup on failure. Establish the expected behavior from existing contracts and
 produce a reproducer before choosing a fix.
 
+## Unit test coverage and quality
+
+Review Rust unit tests and TypeScript test suites alongside the behavior they exercise.
+Trace assertions to production code, supported contracts, and past regressions.
+Use reference searches and existing coverage reports to locate gaps; `cargo cov-dev`
+generates the repository's native Rust HTML coverage report when its tooling is
+available. Check SDK/WASM tests separately. Coverage is a discovery aid: an executed
+line may have no meaningful assertion, and a low percentage alone does not justify
+adding tests.
+
+- **Missing coverage:** add focused tests for observable behavior with plausible
+  failure modes, especially boundary values, malformed inputs, error paths, state
+  transitions, and target-specific behavior. Derive expected results independently
+  of the implementation. Identify the defect each test would catch; where useful,
+  verify sensitivity with a temporary, reverted fault. Tests for existing correct
+  behavior should pass without production changes; newly discovered bugs follow
+  the regression-first workflow.
+- **Duplicate tests:** compare inputs, execution paths, assertions, and the contract
+  each protects. Consolidate or remove tests with no distinct protection, preserving
+  useful cases through parameterization when appropriate. Similar tests may cover
+  different boundaries, platforms, or historical bugs; preserve that coverage.
+- **Obsolete tests:** verify that a feature or limitation has actually been removed
+  from the supported contract before deleting or updating its tests and unused
+  fixtures. A regression test remains useful after its bug is fixed. A failing test
+  is not evidence that its expectation is obsolete.
+- **Tautological or trivial tests:** look for self-comparisons, expected values
+  computed by the same code being tested, mocks that only confirm their own setup,
+  and assertions about language/library behavior without a repository invariant.
+  Replace them with meaningful behavioral assertions or remove them if they protect
+  nothing. A small or obvious test can still guard a real contract.
+
+Run the affected suite after additions, consolidation, or removal. Keep tests
+deterministic and focused on contracts rather than implementation details. Record
+the coverage gained or the reason a removed test added no protection; do not weaken
+assertions, delete failing tests, or rewrite snapshots merely to make the suite pass.
+
 ## Performance and allocations
 
 Inspect repeated parsing, serialization, filesystem/network work, linear searches

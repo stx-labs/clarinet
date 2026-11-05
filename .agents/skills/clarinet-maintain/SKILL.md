@@ -11,25 +11,50 @@ bug fixes.
 
 ## Establish the run
 
-- Default to the whole repository, including code unchanged on this branch. A bare
-  invocation completes one coherent batch; an extended or overnight pass continues
-  with further batches within the requested budget.
+- Accept a wall-clock duration or an absolute deadline in the invocation, such as
+  `for 1 hour`, `for 8 hours`, or `until 07:00 UTC tomorrow`. If none is supplied,
+  default to **1 hour** and announce that budget before starting. If the user asks
+  for a longer run without a concrete limit (for example, `overnight`), ask for a
+  duration or deadline; do not silently substitute the one-hour default. Clarify an
+  ambiguous deadline's date or timezone unless established by context.
+- Read the clock at the start and calculate a concrete deadline. The budget includes
+  discovery, implementation, validation, and handoff. Check remaining time between
+  batches and before lengthy commands, reserving time for verification and reporting.
+  Do not start changes that cannot reasonably be validated within the remaining time.
+- Default to the whole repository, including code unchanged on this branch. Continue
+  with coherent batches within the budget; stop earlier if useful work is exhausted
+  or blocked. At the deadline, stop and report unfinished work and incomplete checks
+  rather than extending the run or claiming unverified changes are complete.
 - Read `.agents/notes/TODO.md` if present, including Completed and Decisions and
   audit notes. Revalidate historical findings against this checkout, and retain
   recorded rejections unless new evidence warrants revisiting them.
 - Keep a compact run log in `.agents/reviews/maintenance-<branch>.md`, replacing `/`
   with `-` (use the short HEAD when detached). This directory is gitignored. Record
-  starting HEAD, candidates and verdicts, verification, and next actions. Update it
-  after each batch so interrupted runs can resume.
+  starting HEAD, start time and deadline in UTC, the supplied or default budget,
+  candidates and verdicts, verification, and next actions. Update it after each batch
+  so interrupted runs can resume. A continuation retains the original deadline unless
+  the user changes it; do not restart the budget after an interruption or compaction.
+
+Examples:
+
+```text
+$clarinet-maintain
+$clarinet-maintain for 1 hour; focus on unused dependencies
+$clarinet-maintain until 07:00 UTC tomorrow
+```
+
+These are instructions for managing elapsed time, not a host-enforced timeout or a
+mechanism for keeping the session alive. Use the harness's continuation support for
+long runs when needed; the skill alone does not provide it.
 
 ## Choose work
 
 Prefer confirmed correctness problems and high-confidence removals over cosmetic
 changes. Use the [discovery guide](references/discovery.md) to investigate dependencies,
-dead code, performance, language idioms, static analysis, build settings, unsafe code,
-and structural or type-driven refactors. Choose relevant topics for the run; this is
-a menu, not a checklist to exhaust before making progress. Investigate beyond TODOs
-and lint output.
+dead code, unit test coverage and quality, performance, language idioms, static
+analysis, build settings, unsafe code, and structural or type-driven refactors.
+Choose relevant topics for the run; this is a menu, not a checklist to exhaust
+before making progress. Investigate beyond TODOs and lint output.
 
 Defer candidates that need a product or compatibility decision, such as cache-sharing
 policy or SDK reset semantics. Record the question and continue independent work.
@@ -46,6 +71,8 @@ minor syntax cleanup alone does not justify one.
 2. Require a regression test that fails before a bug fix, equivalent-output checks
    for refactors, and comparable before/after release measurements for optimizations.
    Straightforward removals can use existing build/test checks.
+   For test-only batches, run the affected tests and record the behavioral gap closed
+   or why removed tests provided no unique protection.
 3. Run the applicable **Checks** from [clarinet-ship](../clarinet-ship/SKILL.md);
    use only its validation workflow.
 4. Use [clarinet-simplify](../clarinet-simplify/SKILL.md) and
