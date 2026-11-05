@@ -55,10 +55,13 @@ pub struct ProjectConfigFile {
         schemars(schema_with = "schema::requirements_schema")
     )]
     requirements: Option<TomlValue>,
-    /// Remap well-known contracts (such as sBTC) to their existing testnet
-    /// deployments instead of redeploying them (default: true)
+    /// Use built-in remaps (default: true). Currently maps mainnet sBTC
+    /// contracts to their existing testnet deployments instead of redeploying them.
+    /// Set false to deploy a separate copy of those requirements on testnet.
+    /// Explicit [remaps] entries still apply and override built-ins, so choosing
+    /// another deployed contract does not require disabling this.
     #[serde(default)]
-    default_contract_remaps: Option<bool>,
+    builtin_remaps: Option<bool>,
     /// List of boot contracts to include
     #[serde(default)]
     boot_contracts: Option<Vec<String>>,
@@ -97,7 +100,7 @@ pub struct ProjectManifestFile {
     /// Contracts already deployed on testnet or mainnet, keyed by the contract
     /// ID, or the address of every contract, that the project's sources use
     #[serde(default)]
-    remap: Option<BTreeMap<String, RemapConfig>>,
+    remaps: Option<BTreeMap<String, RemapConfig>>,
     /// Linter settings
     #[serde(default)]
     #[cfg_attr(
@@ -112,8 +115,8 @@ pub struct ProjectManifest {
     pub project: ProjectConfig,
     pub contracts: BTreeMap<String, ClarityContract>,
     pub repl_settings: repl::Settings,
-    /// Validated `[remap]` entries.
-    pub remap: BTreeMap<String, RemapConfig>,
+    /// Validated `[remaps]` entries.
+    pub remaps: BTreeMap<String, RemapConfig>,
     pub root_dir: PathBuf,
     pub location: PathBuf,
     pub contracts_settings: HashMap<PathBuf, ClarityContractMetadata>,
@@ -142,7 +145,7 @@ pub struct ProjectConfig {
     pub description: String,
     pub telemetry: bool,
     pub requirements: Option<Vec<RequirementConfig>>,
-    pub default_contract_remaps: bool,
+    pub builtin_remaps: bool,
     pub cache_location: PathBuf,
     pub boot_contracts: Vec<String>,
     // Populated by `from_location` / `from_file_accessor`.
@@ -434,10 +437,7 @@ impl ProjectManifest {
         let project = ProjectConfig {
             name: project_name,
             requirements: None,
-            default_contract_remaps: project_manifest_file
-                .project
-                .default_contract_remaps
-                .unwrap_or(true),
+            builtin_remaps: project_manifest_file.project.builtin_remaps.unwrap_or(true),
             description: project_manifest_file
                 .project
                 .description
@@ -449,8 +449,8 @@ impl ProjectManifest {
             override_boot_contracts_source,
         };
 
-        let remap = project_manifest_file.remap.unwrap_or_default();
-        for (source, config) in &remap {
+        let remaps = project_manifest_file.remaps.unwrap_or_default();
+        for (source, config) in &remaps {
             config.validate(source)?;
         }
 
@@ -458,7 +458,7 @@ impl ProjectManifest {
             project,
             contracts: BTreeMap::new(),
             repl_settings,
-            remap,
+            remaps,
             root_dir: root_path.to_path_buf(),
             location: manifest_location.to_path_buf(),
             contracts_settings: HashMap::new(),
@@ -892,8 +892,8 @@ mod tests {
         "#})
         .unwrap();
 
-        assert!(manifest.remap.is_empty());
-        assert!(manifest.project.default_contract_remaps);
+        assert!(manifest.remaps.is_empty());
+        assert!(manifest.project.builtin_remaps);
     }
 
     #[test]
@@ -901,29 +901,29 @@ mod tests {
         let manifest = parse_manifest(indoc! {r#"
             [project]
             name = "test-project"
-            default_contract_remaps = false
+            builtin_remaps = false
 
-            [remap]
+            [remaps]
             "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9" = { testnet = "ST1NXBK3K5YYMD6FD41MVNP3JS1GABZ8TRVX023PT" }
             "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait" = { testnet = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait", mainnet = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.nft-trait" }
         "#})
         .unwrap();
 
-        let address = &manifest.remap["SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9"];
+        let address = &manifest.remaps["SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9"];
         assert_eq!(
             address.for_network(&StacksNetwork::Testnet),
             Some("ST1NXBK3K5YYMD6FD41MVNP3JS1GABZ8TRVX023PT")
         );
         assert_eq!(address.for_network(&StacksNetwork::Mainnet), None);
 
-        let contract = &manifest.remap["SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"];
+        let contract = &manifest.remaps["SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait"];
         assert_eq!(
             contract.for_network(&StacksNetwork::Mainnet),
             Some("SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.nft-trait")
         );
         assert_eq!(contract.for_network(&StacksNetwork::Devnet), None);
         assert_eq!(contract.for_network(&StacksNetwork::Simnet), None);
-        assert!(!manifest.project.default_contract_remaps);
+        assert!(!manifest.project.builtin_remaps);
     }
 
     #[test]
@@ -935,7 +935,7 @@ mod tests {
                 [project]
                 name = "p"
 
-                [remap]
+                [remaps]
                 "{source}" = {{ {destination} }}
             "#})
         };

@@ -316,12 +316,12 @@ struct RemoveContract {
 struct AddRequirement {
     /// Contract id that the project's sources use, on mainnet or testnet (ex. "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait")
     pub contract_id: String,
-    /// Testnet contract to remap it to in [remap], instead of publishing a copy. Not needed for a testnet contract id
-    #[clap(long = "testnet")]
-    pub testnet: Option<String>,
-    /// Mainnet contract to remap it to in [remap]. Needed for a testnet contract id
-    #[clap(long = "mainnet")]
-    pub mainnet: Option<String>,
+    /// Testnet contract to use instead of publishing a copy; saved in [remaps]. Not needed for a testnet contract id
+    #[clap(long = "testnet-remap", value_name = "ID")]
+    pub testnet_remap: Option<String>,
+    /// Mainnet contract to use; saved in [remaps]. Needed for a testnet contract id
+    #[clap(long = "mainnet-remap", value_name = "ID")]
+    pub mainnet_remap: Option<String>,
     /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
@@ -1095,8 +1095,8 @@ pub fn main() {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
 
                 let remap = RemapConfig {
-                    testnet: cmd.testnet,
-                    mainnet: cmd.mainnet,
+                    testnet: cmd.testnet_remap,
+                    mainnet: cmd.mainnet_remap,
                 };
                 if let Err(e) = remap.validate(&cmd.contract_id) {
                     eprintln!("{} {e}", red!("error:"));
@@ -2138,20 +2138,20 @@ fn add_requirement_to_doc(doc: &mut DocumentMut, contract_id: &str) {
     }
 }
 
-/// Set the destinations of `source` in the [remap] table, keeping any
+/// Set the destinations of `source` in the [remaps] table, keeping any
 /// destination it already has on another network.
 fn add_remap_to_doc(doc: &mut DocumentMut, source: &str, remap: &RemapConfig) {
     use toml_edit::{InlineTable, Item, Table};
 
     let entry = doc
-        .entry("remap")
+        .entry("remaps")
         .or_insert(Item::Table(Table::new()))
         .as_table_like_mut()
-        .expect("[remap] should be a table")
+        .expect("[remaps] should be a table")
         .entry(source)
         .or_insert(toml_edit::value(InlineTable::new()))
         .as_table_like_mut()
-        .expect("[remap] entries should be tables");
+        .expect("[remaps] entries should be tables");
 
     for (key, destination) in [("testnet", &remap.testnet), ("mainnet", &remap.mainnet)] {
         if let Some(destination) = destination {
@@ -2829,9 +2829,9 @@ mod tests {
             const OTHER: &str = "SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.another-trait";
 
             for input in [
-                format!("[remap]\n\"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }}"),
-                format!("remap = {{ \"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }} }}"),
-                "remap = {}".to_string(),
+                format!("[remaps]\n\"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }}"),
+                format!("remaps = {{ \"{SOURCE}\" = {{ mainnet = \"{MAINNET}\" }} }}"),
+                "remaps = {}".to_string(),
             ] {
                 let mut doc: DocumentMut = input.parse().unwrap();
                 add_remap_to_doc(
@@ -2860,9 +2860,9 @@ mod tests {
                 );
 
                 let saved: DocumentMut = doc.to_string().parse().unwrap();
-                assert_eq!(saved["remap"][SOURCE]["testnet"].as_str(), Some(TESTNET));
-                assert_eq!(saved["remap"][SOURCE]["mainnet"].as_str(), Some(MAINNET));
-                assert_eq!(saved["remap"][OTHER]["mainnet"].as_str(), Some(MAINNET));
+                assert_eq!(saved["remaps"][SOURCE]["testnet"].as_str(), Some(TESTNET));
+                assert_eq!(saved["remaps"][SOURCE]["mainnet"].as_str(), Some(MAINNET));
+                assert_eq!(saved["remaps"][OTHER]["mainnet"].as_str(), Some(MAINNET));
             }
         }
 

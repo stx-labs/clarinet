@@ -13,10 +13,10 @@ use crate::types::ContractRemaps;
 
 /// Well-known contracts and where they are deployed on `network`.
 ///
-/// Applied unless the project sets `default_contract_remaps = false`; the
-/// project's own `[remap]` entries take precedence. Only list contracts whose
-/// deployment on that network is maintained, since every project that
-/// references them is pointed there.
+/// Applied unless the project sets `builtin_remaps = false` to redeploy its
+/// requirements instead of reusing these deployments. Explicit `[remaps]`
+/// entries still apply and take precedence, even with built-ins disabled.
+/// Only list contracts whose deployment on that network is maintained.
 fn default_contract_remaps(network: &StacksNetwork) -> ContractRemaps {
     match network {
         StacksNetwork::Testnet => SBTC_BOOT_CONTRACTS
@@ -35,13 +35,13 @@ fn default_contract_remaps(network: &StacksNetwork) -> ContractRemaps {
     }
 }
 
-/// The `[remap]` entries the project itself declares for `network`.
+/// The `[remaps]` entries the project itself declares for `network`.
 pub fn project_remaps(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
 ) -> Result<ContractRemaps, String> {
     let mut remaps = ContractRemaps::default();
-    for (source, config) in &manifest.remap {
+    for (source, config) in &manifest.remaps {
         if let Some(destination) = config.for_network(network) {
             remaps.insert_str(source, destination)?;
         }
@@ -55,7 +55,7 @@ pub fn resolve_contract_remaps(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
 ) -> Result<ContractRemaps, String> {
-    let mut remaps = if manifest.project.default_contract_remaps {
+    let mut remaps = if manifest.project.builtin_remaps {
         default_contract_remaps(network)
     } else {
         ContractRemaps::default()

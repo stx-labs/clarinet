@@ -82,6 +82,51 @@ clarinet console
 (contract-call? .counter get-count tx-sender)
 ```
 
+## Requirement remaps
+
+Use `[remaps]` in `Clarinet.toml` to point references at contracts already deployed
+on a target network instead of publishing copies of those requirements:
+
+```toml
+[remaps]
+"SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait" = { testnet = "ST1NXBK3K5YYMD6FD41MVNP3JS1GABZ8TRVX023PT.nft-trait" }
+```
+
+Keys can be full contract IDs or addresses. An address entry applies to every
+contract at that address; a full contract entry takes precedence. Destinations
+must have the same form as their key and use an address for the target network.
+In project contracts, write the full contract ID to use a remap: relative
+references such as `.nft-trait` still refer to the project's deployer.
+
+Add a requirement and its destinations together with:
+
+```bash
+clarinet requirements add <CONTRACT_ID> --testnet-remap <ID> --mainnet-remap <ID>
+```
+
+Either flag can be omitted. Testnet requirements are used at their existing
+testnet address without `--testnet-remap`.
+
+### Built-in remaps
+
+`[project].builtin_remaps` defaults to `true`. Currently, the built-ins map
+mainnet sBTC requirements (`sbtc-registry`, `sbtc-token`, and `sbtc-deposit`)
+to their shared testnet deployments. No built-in remaps apply on other networks.
+
+To deploy separate copies of those requirements on testnet instead of reusing
+the shared deployments, set:
+
+```toml
+[project]
+name = "my-project"
+builtin_remaps = false
+```
+
+This disables only the built-ins, not explicit `[remaps]` entries or the use of
+testnet requirements in place. Explicit entries always override the built-ins,
+so pointing a requirement at a different deployed contract does **not** require
+disabling `builtin_remaps`.
+
 ## Contributing
 
 Contributions are welcome and appreciated. The following sections provide information on how you can

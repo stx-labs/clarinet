@@ -1702,8 +1702,7 @@ pub async fn generate_default_deployment_with_cache(
         // `None` keeps a testnet plan's legacy sBTC seed; an empty section
         // turns it off for a project that opted out of the defaults.
         contract_remaps: (!contract_remaps.is_empty()
-            || (matches!(network, StacksNetwork::Testnet)
-                && !manifest.project.default_contract_remaps))
+            || (matches!(network, StacksNetwork::Testnet) && !manifest.project.builtin_remaps))
             .then_some(contract_remaps),
     };
 

@@ -1,5 +1,5 @@
 //! Contracts remapped to a contract already deployed on the target network:
-//! by the project's `[remap]` entries, or by the built-in defaults (sBTC on
+//! by the project's `[remaps]` entries, or by the built-in defaults (sBTC on
 //! testnet).
 
 use std::collections::BTreeMap;
@@ -199,7 +199,7 @@ async fn testnet_override_replaces_the_requirement_publish() {
             [[project.requirements]]
             contract_id = "{NFT_TRAIT}"
 
-            [remap]
+            [remaps]
             "{NFT_TRAIT}" = {{ testnet = "{TESTNET_NFT_TRAIT}" }}
         "#},
         Some(&calls(&[NFT_TRAIT])),
@@ -222,7 +222,7 @@ async fn contract_remaps_round_trip_through_the_plan_file() {
             [[project.requirements]]
             contract_id = "{NFT_TRAIT}"
 
-            [remap]
+            [remaps]
             "{NFT_TRAIT}" = {{ testnet = "{TESTNET_NFT_TRAIT}" }}
         "#},
         Some(&calls(&[NFT_TRAIT])),
@@ -335,7 +335,7 @@ async fn remaps_referenced_by_a_redeployed_requirement_are_recorded() {
             [[project.requirements]]
             contract_id = "{NFT_TRAIT}"
 
-            [remap]
+            [remaps]
             "{NFT_TRAIT}" = {{ testnet = "{canonical}" }}
         "#},
         None,
@@ -372,7 +372,7 @@ async fn relative_references_select_their_remap() {
             [[project.requirements]]
             contract_id = "{base}"
 
-            [remap]
+            [remaps]
             "{base}" = {{ testnet = "{canonical}" }}
         "#},
         None,
@@ -415,7 +415,7 @@ async fn dependencies_of_a_remapped_requirement_are_not_redeployed() {
             [[project.requirements]]
             contract_id = "{ROUTER}"
 
-            [remap]
+            [remaps]
             "{ROUTER}" = {{ testnet = "{TESTNET_ROUTER}" }}
         "#},
         Some(&calls(&[ROUTER])),
@@ -434,7 +434,7 @@ async fn a_dependency_also_used_directly_is_still_redeployed() {
             [[project.requirements]]
             contract_id = "{ROUTER}"
 
-            [remap]
+            [remaps]
             "{ROUTER}" = {{ testnet = "{TESTNET_ROUTER}" }}
         "#},
         Some(&calls(&[ROUTER, POOL])),
@@ -483,12 +483,12 @@ async fn partially_remapped_sbtc_generates_a_plan() {
     let sbtc_deposit = format!("{SBTC_MAINNET_DEPLOYER}.sbtc-deposit");
     let project = Project::new(
         &formatdoc! {r#"
-            default_contract_remaps = false
+            builtin_remaps = false
 
             [[project.requirements]]
             contract_id = "{sbtc_deposit}"
 
-            [remap]
+            [remaps]
             "{sbtc_deposit}" = {{ testnet = "{SBTC_TESTNET_DEPLOYER}.sbtc-deposit" }}
         "#},
         Some(&format!(
@@ -508,12 +508,12 @@ async fn a_redeployed_sbtc_contract_keeps_its_dependencies() {
     let sbtc_token = format!("{SBTC_MAINNET_DEPLOYER}.sbtc-token");
     let project = Project::new(
         &formatdoc! {r#"
-            default_contract_remaps = false
+            builtin_remaps = false
 
             [[project.requirements]]
             contract_id = "{sbtc_deposit}"
 
-            [remap]
+            [remaps]
             "{sbtc_deposit}" = {{ testnet = "{SBTC_TESTNET_DEPLOYER}.sbtc-deposit" }}
         "#},
         Some(&format!(
@@ -587,7 +587,7 @@ async fn opting_out_of_default_remaps_redeploys_sbtc() {
     let sbtc_deposit = format!("{SBTC_MAINNET_DEPLOYER}.sbtc-deposit");
     let project = Project::new(
         &formatdoc! {r#"
-            default_contract_remaps = false
+            builtin_remaps = false
 
             [[project.requirements]]
             contract_id = "{sbtc_deposit}"
@@ -619,7 +619,7 @@ async fn project_override_beats_the_default() {
             [[project.requirements]]
             contract_id = "{sbtc_token}"
 
-            [remap]
+            [remaps]
             "{sbtc_token}" = {{ testnet = "{mock_token}" }}
         "#},
         Some(&calls(&[
@@ -651,7 +651,7 @@ async fn mainnet_override_is_recorded() {
             [[project.requirements]]
             contract_id = "{NFT_TRAIT}"
 
-            [remap]
+            [remaps]
             "{NFT_TRAIT}" = {{ mainnet = "{mainnet_trait}" }}
         "#},
         Some(&calls(&[NFT_TRAIT])),
@@ -676,7 +676,7 @@ async fn an_address_remap_covers_every_contract_of_that_address() {
             [[project.requirements]]
             contract_id = "{ROUTER}"
 
-            [remap]
+            [remaps]
             "{address}" = {{ testnet = "{testnet_address}" }}
         "#},
         Some(&calls(&[ROUTER])),
