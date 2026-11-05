@@ -5,10 +5,15 @@ Apply [repository checks](maintenance-checks.md).
 
 ## TODO/FIXME items
 
-Some issues may already be known and documented. Check for these first:
+Start with known issues:
 
-- Search the codebase for comments containing `TODO` or `FIXME`
-- Also search the reposiroty for files containing these strings. Make sure to include hidden (prefixed with `.`) files and directories also
+```bash
+# Contents, including hidden files; respects ignore rules
+rg --hidden -n 'TODO|FIXME' -g '!.git/**'
+
+# Filenames, including hidden and gitignored files
+rg --files --hidden --no-ignore -g '*TODO*' -g '*FIXME*' -g '!.git/**'
+```
 
 ## Dependencies
 
