@@ -48,7 +48,7 @@ $clarinet-improve until 07:00 UTC tomorrow
 2. Record each run's HEAD, UTC start/deadline, budget, verification, next actions.
    Update after each batch.
 3. Track future candidates; retain completed, deferred, and rejected items with reasons.
-4. Complete coherent batches using relevant [repository checks](references/maintenance-checks.md).
+4. Complete coherent batches using relevant [repository checks](references/checks.md).
    Log deferred decisions; continue independent work. Defer candidates lacking
    required validation rather than accumulating batches behind that gap.
 
@@ -59,8 +59,7 @@ $clarinet-improve until 07:00 UTC tomorrow
 | Bug fix | Regression test failing before fix |
 | Refactor | Equivalent-output checks |
 | Optimization | Comparable before/after release measurements |
-| Straightforward removal | Existing build/test checks |
-| Test changes | Affected suite; gap closed or reason removed tests added no protection |
+| Test changes | Gap closed or reason removed tests added no protection |
 
 - Run applicable **Checks** from [clarinet-ship](../clarinet-ship/SKILL.md), validation only.
 - Apply [clarinet-simplify](../clarinet-simplify/SKILL.md) and

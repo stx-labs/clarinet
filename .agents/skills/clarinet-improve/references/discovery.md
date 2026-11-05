@@ -1,7 +1,7 @@
 # Maintenance discovery
 
 Use available tools or targeted inspection; record unavailable checks.
-Apply [repository checks](maintenance-checks.md).
+Apply [repository checks](checks.md).
 
 ## TODO/FIXME items
 
@@ -100,8 +100,7 @@ coverage percentage.
   `cargo clippy -p <crate> --tests -- -W clippy::nursery` with relevant target/features.
   Adopt individual useful lints after checking false positives and fixes across
   supported builds; verify crates inherit workspace lints.
-- Extension ESLint: `pnpm --dir components/clarity-vscode run lint`.
-- Consider typed typescript-eslint rules: `no-floating-promises`,
+- Extend existing extension ESLint with typed rules: `no-floating-promises`,
   `no-misused-promises`, `switch-exhaustiveness-check`; reuse tooling for SDK where
   useful. Configure TS projects; assess false positives, promise semantics, CI cost.
 

@@ -1,4 +1,4 @@
-# Clarinet maintenance checks
+# Clarinet-specific checks
 
 ## Dead code and dependencies
 
@@ -7,8 +7,6 @@
 - Check `stacks-signers` when removing a `stacks-network` dependency. Derive other
   supported target/feature combinations from manifests and CI; `--all-features`
   alone does not cover them.
-- The SDK's root pnpm workspace and `components/clarity-vscode` are separate
-  workspaces; configure TypeScript scanners accordingly.
 - Exclude generated WASM packages, vendored boot contracts in
   `components/clarity-repl/src/repl/boot/`, and `components/stacks-network/data/`
   from routine cleanup.
