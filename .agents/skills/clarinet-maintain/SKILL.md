@@ -6,7 +6,8 @@ description: Find and implement proactive or unattended maintenance in Clarinet,
 # Maintain Clarinet
 
 Choose work whose expected outcome can be established from existing contracts,
-without new product requirements.
+without new product requirements. Preserve observable behavior except for confirmed
+bug fixes.
 
 ## Establish the run
 
@@ -24,12 +25,20 @@ without new product requirements.
 ## Choose work
 
 Prefer confirmed correctness problems and high-confidence removals over cosmetic
-changes. Investigate beyond TODOs and lint output.
+changes. Use the [discovery guide](references/discovery.md) to investigate dependencies,
+dead code, performance, language idioms, static analysis, build settings, unsafe code,
+and structural or type-driven refactors. Choose relevant topics for the run; this is
+a menu, not a checklist to exhaust before making progress. Investigate beyond TODOs
+and lint output.
 
 Defer candidates that need a product or compatibility decision, such as cache-sharing
 policy or SDK reset semantics. Record the question and continue independent work.
-Dependency upgrades and changes to public APIs, defaults, or Stacks protocol
-semantics require explicit scope beyond general maintenance.
+Dependency removals, compatible deduplication, and focused upgrades or replacements
+can qualify when they address a demonstrated problem and preserve supported behavior
+and platforms. Defer broad dependency migrations and changes to public APIs,
+defaults, or Stacks protocol semantics unless explicitly in scope. An MSRV or runtime
+baseline increase needs a material benefit and an explicit compatibility decision;
+minor syntax cleanup alone does not justify one.
 
 ## Complete each batch
 
