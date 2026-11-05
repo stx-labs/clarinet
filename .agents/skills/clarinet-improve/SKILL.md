@@ -67,5 +67,3 @@ $clarinet-improve until 07:00 UTC tomorrow
   [clarinet-review](../clarinet-review/SKILL.md) where useful, scoped to this run's diff.
 - Update resolved TODOs and run log. Leave changes **uncommitted** by default;
   link log in final report.
-
-Background only: [research and alternatives](references/research.md).
