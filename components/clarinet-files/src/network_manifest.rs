@@ -387,7 +387,8 @@ impl NetworkManifest {
         let location = paths::get_network_manifest_path(project_root, &networks.1);
         let network_manifest_file_content = paths::read_content(&location)?;
         let mut network_manifest_file: NetworkManifestFile =
-            toml::from_slice(&network_manifest_file_content[..]).unwrap();
+            toml::from_slice(&network_manifest_file_content)
+                .map_err(|e| format!("unable to parse {}: {e}", location.display()))?;
         NetworkManifest::from_network_manifest_file(
             &mut network_manifest_file,
             networks,
@@ -402,13 +403,14 @@ impl NetworkManifest {
         use_mainnet_wallets: bool,
         file_accessor: &dyn FileAccessor,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_location = project_root.join("settings/Devnet.toml");
+        let location = project_root.join("settings/Devnet.toml");
         let content = file_accessor
-            .read_file(network_manifest_location.to_string_lossy().into_owned())
+            .read_file(location.to_string_lossy().into_owned())
             .await?;
 
         let mut network_manifest_file: NetworkManifestFile =
-            toml::from_slice(content.as_bytes()).unwrap();
+            toml::from_slice(content.as_bytes())
+                .map_err(|e| format!("unable to parse {}: {e}", location.display()))?;
         NetworkManifest::from_network_manifest_file(
             &mut network_manifest_file,
             networks,
@@ -1054,13 +1056,113 @@ fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> St
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::future::{ready, Future};
+    use std::path::Path;
+    use std::task::{Context, Poll, Waker};
+
     use clarinet_defaults::DEFAULT_EPOCH;
 
     use super::{DevnetConfigFile, DEFAULT_MINER_WALLET_NAME};
     use crate::{
-        DevnetConfig, NetworkManifest, NetworkManifestFile, StacksNetwork, StacksNodeEventObserver,
-        DEFAULT_BITCOIN_NODE_IMAGE, DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
+        DevnetConfig, FileAccessor, FileAccessorResult, NetworkManifest, NetworkManifestFile,
+        StacksNetwork, StacksNodeEventObserver, DEFAULT_BITCOIN_NODE_IMAGE,
+        DEFAULT_STACKS_NODE_IMAGE, DEFAULT_STACKS_SIGNER_IMAGE,
     };
+
+    struct ManifestAccessor(Result<String, String>);
+
+    impl FileAccessor for ManifestAccessor {
+        fn read_file(&self, path: String) -> FileAccessorResult<String> {
+            assert_eq!(
+                Path::new(&path),
+                Path::new("project").join("settings/Devnet.toml")
+            );
+            Box::pin(ready(self.0.clone()))
+        }
+
+        fn file_exists(&self, _: String) -> FileAccessorResult<bool> {
+            unreachable!("network manifest loading only reads a file")
+        }
+
+        fn read_files(&self, _: Vec<String>) -> FileAccessorResult<HashMap<String, String>> {
+            unreachable!("network manifest loading only reads a file")
+        }
+
+        fn write_file(&self, _: String, _: &[u8]) -> FileAccessorResult<()> {
+            unreachable!("network manifest loading only reads a file")
+        }
+    }
+
+    fn load_from_accessor(content: Result<&str, &str>) -> Result<NetworkManifest, String> {
+        let accessor = ManifestAccessor(content.map(str::to_owned).map_err(str::to_owned));
+        let networks = StacksNetwork::Devnet.get_networks();
+        let future = NetworkManifest::from_project_root_using_file_accessor(
+            Path::new("project"),
+            &networks,
+            false,
+            &accessor,
+        );
+        // The in-memory accessor is immediately ready; no async runtime is needed.
+        let mut future = std::pin::pin!(future);
+        match future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            Poll::Ready(result) => result,
+            Poll::Pending => panic!("in-memory accessor unexpectedly suspended"),
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn filesystem_loader_returns_network_manifest_parse_error() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/invalid-network");
+        let error = NetworkManifest::from_project_root(
+            &root,
+            &StacksNetwork::Devnet.get_networks(),
+            false,
+            None,
+        )
+        .expect_err("invalid TOML must return an error");
+        assert!(error.contains("unable to parse"), "{error}");
+        assert!(
+            error.contains(&root.join("settings").join("Devnet.toml").display().to_string()),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn accessor_loader_returns_network_manifest_parse_errors() {
+        for content in ["[network", "[network]\nname = 42"] {
+            let error =
+                load_from_accessor(Ok(content)).expect_err("invalid TOML must return an error");
+            assert!(error.contains("unable to parse"), "{error}");
+            assert!(
+                error.contains(
+                    &Path::new("project")
+                        .join("settings/Devnet.toml")
+                        .display()
+                        .to_string()
+                ),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn accessor_loader_preserves_valid_settings() {
+        let manifest =
+            load_from_accessor(Ok("[network]\nname = 'devnet'\ndeployment_fee_rate = 123"))
+                .unwrap();
+        assert_eq!(manifest.network.deployment_fee_rate, 123);
+    }
+
+    #[test]
+    fn accessor_loader_preserves_read_errors() {
+        let error = load_from_accessor(Err("manifest not found")).unwrap_err();
+        assert_eq!(error, "manifest not found");
+    }
 
     fn try_parse_devnet_settings(settings: &str) -> Result<DevnetConfig, String> {
         let mut file: NetworkManifestFile = toml::from_str(settings).unwrap();
