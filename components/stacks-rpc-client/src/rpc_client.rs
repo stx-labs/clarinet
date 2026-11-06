@@ -148,7 +148,15 @@ impl StacksRpc {
         let path = format!("{}/v2/fees/transaction", self.url);
         let res: FeeEstimationReport = self.client.post(path).json(&payload).send()?.json()?;
 
-        Ok(res.estimations[priority].fee)
+        res.estimations
+            .get(priority)
+            .map(|estimation| estimation.fee)
+            .ok_or_else(|| {
+                RpcError::Message(format!(
+                    "fee estimate missing priority {priority} (received {} estimations)",
+                    res.estimations.len()
+                ))
+            })
     }
 
     pub fn post_transaction(
@@ -172,9 +180,7 @@ impl StacksRpc {
             return Err(err);
         }
 
-        let txid: String = res.json().unwrap();
-        let res = PostTransactionResult { txid };
-        Ok(res)
+        Ok(PostTransactionResult { txid: res.json()? })
     }
 
     fn get_json<T: DeserializeOwned>(&self, request_url: String) -> Result<T, RpcError> {
@@ -293,5 +299,117 @@ impl StacksRpc {
             }
         }
         Err(RpcError::Generic)
+    }
+}
+
+#[cfg(all(test, feature = "mock"))]
+mod tests {
+    use super::{RpcError, StacksRpc};
+    use crate::crypto::build_contract_publish_transaction;
+
+    fn transaction() -> stacks_codec::transaction::StacksTransaction {
+        build_contract_publish_transaction(
+            "counter",
+            "(define-constant value u1)",
+            None,
+            0,
+            100,
+            &[1; 32],
+        )
+    }
+
+    #[test]
+    fn fee_estimation_preserves_priority_selection() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/v2/fees/transaction")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"estimations":[{"fee":100},{"fee":200},{"fee":300}]}"#)
+            .expect(3)
+            .create();
+        let rpc = StacksRpc::new(&server.url());
+        let tx = transaction();
+        for (priority, expected) in [100, 200, 300].into_iter().enumerate() {
+            assert_eq!(
+                rpc.estimate_transaction_fee(&tx.payload, priority).unwrap(),
+                expected
+            );
+        }
+        mock.assert();
+    }
+
+    #[test]
+    fn fee_estimation_returns_errors_for_missing_priorities() {
+        for (body, priority) in [
+            (r#"{"estimations":[]}"#, 0),
+            (r#"{"estimations":[{"fee":100}]}"#, 2),
+            (r#"{"estimations":[{"fee":100}]}"#, usize::MAX),
+        ] {
+            let mut server = mockito::Server::new();
+            let mock = server
+                .mock("POST", "/v2/fees/transaction")
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(body)
+                .create();
+            let rpc = StacksRpc::new(&server.url());
+            assert!(matches!(
+                rpc.estimate_transaction_fee(&transaction().payload, priority),
+                Err(RpcError::Message(_))
+            ));
+            mock.assert();
+        }
+    }
+
+    #[test]
+    fn post_transaction_returns_errors_for_malformed_success_responses() {
+        for body in ["not json", "null", r#"{"txid":"unexpected object"}"#] {
+            let mut server = mockito::Server::new();
+            let mock = server
+                .mock("POST", "/v2/transactions")
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(body)
+                .create();
+            let rpc = StacksRpc::new(&server.url());
+            assert!(matches!(
+                rpc.post_transaction(&transaction()),
+                Err(RpcError::Message(_))
+            ));
+            mock.assert();
+        }
+    }
+
+    #[test]
+    fn post_transaction_preserves_successful_txid() {
+        let mut server = mockito::Server::new();
+        let tx = transaction();
+        let txid = tx.txid().to_string();
+        let mock = server
+            .mock("POST", "/v2/transactions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&txid).unwrap())
+            .create();
+        let rpc = StacksRpc::new(&server.url());
+        assert_eq!(rpc.post_transaction(&tx).unwrap().txid, txid);
+        mock.assert();
+    }
+
+    #[test]
+    fn post_transaction_preserves_node_rejection() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/v2/transactions")
+            .with_status(400)
+            .with_body("transaction rejected")
+            .create();
+        let rpc = StacksRpc::new(&server.url());
+        assert!(matches!(
+            rpc.post_transaction(&transaction()),
+            Err(RpcError::Message(message)) if message == "transaction rejected"
+        ));
+        mock.assert();
     }
 }
