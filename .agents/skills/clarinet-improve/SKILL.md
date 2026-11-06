@@ -46,7 +46,8 @@ $clarinet-improve until 07:00 UTC tomorrow
 
 1. Read existing run log first; create if absent. Revalidate candidates against HEAD;
    revisit rejections only with new evidence.
-2. Record starting HEAD, target base (normally `main`), UTC start/deadline, and budget.
+2. Record starting branch/HEAD, staged/unstaged/untracked work, UTC start/deadline,
+   and budget. Preserve the original checkout; prefer a separate worktree.
 3. Repeat the issue workflow below while time permits. Log each issue's branch,
    verification, PR link or blocker, and next actions. Retain completed, deferred,
    and rejected candidates with reasons.
@@ -58,11 +59,12 @@ unless the user requests local-only work. Use [clarinet-ship](../clarinet-ship/S
 for applicable checks on each PR's final diff and for publishing; the exceptions
 below override its git conventions.
 
-1. **Isolate:** choose one change or a few small related changes per PR. Start a
-   separate branch (kebab-case topic) from the target base, never from a previous
-   issue's branch. Related changes might be three small Clippy lint fixes or two
-   formatter whitespace fixes.
-   Use a separate worktree when needed to preserve existing work.
+1. **Isolate:** choose one change or a few small related changes per PR, e.g. three
+   small Clippy lint fixes or two formatter whitespace fixes.
+   Before each issue, fetch `main` from **`stx-labs/clarinet`** (verify the remote URL).
+   Fast-forward local `main` when safe; preserve divergent commits and occupied
+   worktrees. Always start a separate branch (kebab-case topic) from the freshly
+   fetched upstream `main` tip, never from another issue's branch or a stale local base.
 2. **Implement:** use relevant [repository checks](references/checks.md) and collect
    the evidence below. Defer issues lacking required validation; continue independent work.
 3. **Simplify:** run [clarinet-simplify](../clarinet-simplify/SKILL.md) on this issue's diff.
@@ -94,3 +96,6 @@ below override its git conventions.
 Update resolved TODOs with their changes. Link the run log and draft PRs in the final
 report; list unfinished work, branch locations, and validation or publishing blockers.
 Preserve unfinished work locally at deadline; do not publish an unvalidated PR.
+Before finishing, including deadline or blocker exits, verify the original checkout
+is on its starting branch with its original staged, unstaged, and untracked work intact.
+Keep improvement work on its own branches/worktrees; restore any starting work moved aside.
