@@ -1,6 +1,6 @@
 ---
 name: clarinet-improve
-description: Find and implement Clarinet improvements without new product requirements. For cleanup or review of a particular change, use clarinet-simplify or clarinet-review.
+description: Find and implement Clarinet improvements within a time budget, delivering focused draft PRs. For cleanup or review of a particular change, use clarinet-simplify or clarinet-review.
 ---
 
 # Improve Clarinet
@@ -28,9 +28,10 @@ description: Find and implement Clarinet improvements without new product requir
 | Duration or deadline | Use supplied limit; clarify ambiguous date/timezone |
 | Vague longer run, e.g. `overnight` | Ask for duration or deadline |
 
-- Read clock; calculate deadline. Include discovery, implementation, checks, handoff.
-- Check remaining time between batches and before lengthy commands. Reserve time
-  for validation; avoid changes that cannot reasonably be verified before deadline.
+- Read clock; calculate deadline. Include discovery, implementation, simplification,
+  review, checks, PR creation, and handoff.
+- Check remaining time between issues and before lengthy commands. Start another
+  issue only if the full workflow can reasonably finish before deadline.
 - Stop by deadline, reporting unfinished work; stop earlier if useful work is exhausted
   or blocked. Resumption/compaction retains deadline unless user changes it.
 - Skill instructions provide neither an enforced timeout nor session persistence;
@@ -45,14 +46,44 @@ $clarinet-improve until 07:00 UTC tomorrow
 
 1. Read existing run log first; create if absent. Revalidate candidates against HEAD;
    revisit rejections only with new evidence.
-2. Record each run's HEAD, UTC start/deadline, budget, verification, next actions.
-   Update after each batch.
-3. Track future candidates; retain completed, deferred, and rejected items with reasons.
-4. Complete coherent batches using relevant [repository checks](references/checks.md).
-   Log deferred decisions; continue independent work. Defer candidates lacking
-   required validation rather than accumulating batches behind that gap.
+2. Record starting HEAD, target base (normally `main`), UTC start/deadline, and budget.
+3. Repeat the issue workflow below while time permits. Log each issue's branch,
+   verification, PR link or blocker, and next actions. Retain completed, deferred,
+   and rejected candidates with reasons.
 
-## Validate and handoff
+## Issue workflow
+
+Invoking this skill authorizes commits, pushes, and draft PRs for completed issues,
+unless the user requests local-only work. Use [clarinet-ship](../clarinet-ship/SKILL.md)
+for checks and publishing; the conventions below override its git conventions.
+
+1. **Isolate:** choose one change or a few small related changes per PR. Start a
+   separate branch from the target base, never from a previous issue's branch.
+   Use a separate worktree when needed to preserve existing work.
+2. **Implement:** use relevant [repository checks](references/checks.md) and collect
+   the evidence below. Defer issues lacking required validation; continue independent work.
+3. **Simplify:** run [clarinet-simplify](../clarinet-simplify/SKILL.md) on this issue's diff.
+4. **Self-review:** run [clarinet-review](../clarinet-review/SKILL.md) on the resulting
+   diff, then fix confirmed findings. This workflow authorizes those fixes.
+   Repeat simplification/review as needed for fixes; validate the final diff before publishing.
+5. **Publish:** commit, push, and open a **draft** PR using `clarinet-ship`. Record
+   publishing blockers and preserve the branch if publication fails.
+6. **Continue:** after opening the PR, select another issue if the full workflow fits
+   the remaining budget. Otherwise, hand off.
+
+### Branches and PRs
+
+| Item | Convention |
+| --- | --- |
+| Branch | `<type>/<topic-in-kebab-case>`, e.g. `chore/remove-unused-deps`, `fix/panic-on-malformed-input` |
+| PR title | `[AI] ` followed by a Conventional Commit title; scope optional. Example: `[AI] perf(linter): Reduce runtime by 10%` |
+| Commits | Conventional Commit format optional; PRs are squash-merged |
+| Status | Always draft; never mark ready during this run. Initial human review must precede readiness |
+
+Related changes can share a PR, e.g. three Clippy lints touching a few files each,
+or two formatter whitespace fixes. Keep unrelated issues in separate PRs.
+
+### Validation evidence
 
 | Change | Evidence |
 | --- | --- |
@@ -61,8 +92,10 @@ $clarinet-improve until 07:00 UTC tomorrow
 | Optimization | Comparable before/after release measurements |
 | Test changes | Gap closed or reason removed tests added no protection |
 
-- Run applicable **Checks** from [clarinet-ship](../clarinet-ship/SKILL.md), validation only.
-- Apply [clarinet-simplify](../clarinet-simplify/SKILL.md) and
-  [clarinet-review](../clarinet-review/SKILL.md) where useful, scoped to this run's diff.
-- Update resolved TODOs and run log. Leave changes **uncommitted** by default;
-  link log in final report.
+Run applicable **Checks** from `clarinet-ship` on each PR's final diff.
+
+## Handoff
+
+Update resolved TODOs with their changes. Link the run log and draft PRs in the final
+report; list unfinished work, branch locations, and validation or publishing blockers.
+Preserve unfinished work locally at deadline; do not publish an unvalidated PR.
