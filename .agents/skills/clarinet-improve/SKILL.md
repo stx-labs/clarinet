@@ -55,10 +55,13 @@ $clarinet-improve until 07:00 UTC tomorrow
 
 Invoking this skill authorizes commits, pushes, and draft PRs for completed issues,
 unless the user requests local-only work. Use [clarinet-ship](../clarinet-ship/SKILL.md)
-for checks and publishing; the conventions below override its git conventions.
+for applicable checks on each PR's final diff and for publishing; the exceptions
+below override its git conventions.
 
 1. **Isolate:** choose one change or a few small related changes per PR. Start a
-   separate branch from the target base, never from a previous issue's branch.
+   separate branch (kebab-case topic) from the target base, never from a previous
+   issue's branch. Related changes might be three small Clippy lint fixes or two
+   formatter whitespace fixes.
    Use a separate worktree when needed to preserve existing work.
 2. **Implement:** use relevant [repository checks](references/checks.md) and collect
    the evidence below. Defer issues lacking required validation; continue independent work.
@@ -71,17 +74,11 @@ for checks and publishing; the conventions below override its git conventions.
 6. **Continue:** after opening the PR, select another issue if the full workflow fits
    the remaining budget. Otherwise, hand off.
 
-### Branches and PRs
+### Publishing exceptions
 
-| Item | Convention |
-| --- | --- |
-| Branch | `<type>/<topic-in-kebab-case>`, e.g. `chore/remove-unused-deps`, `fix/panic-on-malformed-input` |
-| PR title | `[AI] ` followed by a Conventional Commit title; scope optional. Example: `[AI] perf(linter): Reduce runtime by 10%` |
-| Commits | Conventional Commit format optional; PRs are squash-merged |
-| Status | Always draft; never mark ready during this run. Initial human review must precede readiness |
-
-Related changes can share a PR, e.g. three Clippy lints touching a few files each,
-or two formatter whitespace fixes. Keep unrelated issues in separate PRs.
+- Prefix PR titles with `[AI] `, e.g. `[AI] perf(linter): Reduce runtime by 10%`.
+- Conventional Commit format is optional for individual commits.
+- Never mark PRs ready during this run; initial human review must precede readiness.
 
 ### Validation evidence
 
@@ -91,8 +88,6 @@ or two formatter whitespace fixes. Keep unrelated issues in separate PRs.
 | Refactor | Equivalent-output checks |
 | Optimization | Comparable before/after release measurements |
 | Test changes | Gap closed or reason removed tests added no protection |
-
-Run applicable **Checks** from `clarinet-ship` on each PR's final diff.
 
 ## Handoff
 
