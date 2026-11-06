@@ -1092,7 +1092,13 @@ mod tests {
         .expect_err("invalid TOML must return an error");
         assert!(error.contains("unable to parse"), "{error}");
         assert!(
-            error.contains(&root.join("settings").join("Devnet.toml").display().to_string()),
+            error.contains(
+                &root
+                    .join("settings")
+                    .join("Devnet.toml")
+                    .display()
+                    .to_string()
+            ),
             "{error}"
         );
     }
