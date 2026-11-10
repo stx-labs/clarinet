@@ -38,15 +38,8 @@ web = [
   "clarity-repl/web",
 ]
 
-# DEV
-[profile.dev]
-# switch to 1 if it's too slow
-opt-level = 0
-debug = true
-debug-assertions = true
-incremental = true
-codegen-units = 256
-
+# Cargo ignores [profile.*] in workspace members; the release Cargo profile is set
+# by build.mjs. These wasm-pack settings are read by wasm-pack itself.
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
 
@@ -55,15 +48,6 @@ debug-js-glue = true
 demangle-name-section = true
 dwarf-debug-info = true
 
-# RELEASE
-[profile.release]
-opt-level = "s"
-debug = false
-debug-assertions = false
-lto = true
-incremental = false
-codegen-units = 16
-
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ['-Oz']
 
@@ -71,10 +55,6 @@ wasm-opt = ['-Oz']
 debug-js-glue = false
 demangle-name-section = true
 dwarf-debug-info = false
-
-# profiling
-[profile.profiling]
-debug = 1
 
 [package.metadata.wasm-pack.profile.profiling]
 wasm-opt = ['-g', '-O']
