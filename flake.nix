@@ -37,7 +37,7 @@
 
         # Hash for clarity git dependency - update this when Cargo.lock changes
         # Run `nix run .#check-git-dependencies-hash` to verify or get the new hash
-        clarityHash = "sha256-NLY84vafB5uV3dtngetks7FZk5rvWgoC2ruH0baiBdg=";
+        clarityHash = "sha256-lDlMpT+UbKonv/NYX+g9e+tM1BQtLKYx9E/9p54VEjM=";
 
         clarinet = rustPlatform.buildRustPackage {
           inherit pname version;

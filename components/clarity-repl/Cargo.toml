@@ -42,7 +42,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 clarity-types = { workspace = true, features = ["developer-mode"] }
 stacks-codec = { workspace = true }
 stacks-transactions = { workspace = true }
-rusqlite = { version = "0.31.0", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 pox-locking = { workspace = true, default-features = true }
 
 comfy-table = "=7.2.2"
