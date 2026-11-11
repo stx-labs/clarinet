@@ -50,8 +50,7 @@ demangle-name-section = true
 dwarf-debug-info = true
 
 [package.metadata.wasm-pack.profile.release]
-# -O3 makes contract calls ~4% faster than -Oz, for a ~1% larger Wasm.
-wasm-opt = ['-O3']
+wasm-opt = ['-Oz']
 
 [package.metadata.wasm-pack.profile.release.wasm-bindgen]
 debug-js-glue = false

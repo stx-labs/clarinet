@@ -4,43 +4,18 @@
 # CLI. Wasm SIMD is enabled in build.mjs instead, because CI's RUSTFLAGS would
 # override rustflags set here. Measured with
 # components/clarinet-sdk/node/benches/simnet.bench.mjs.
+#
+# Tried and left out, because with Rust 1.99 they made contract calls 2-4% slower
+# and the Wasm larger: fat LTO (which also adds ~50 s of CI build time), and
+# wasm-opt -O3 instead of -Oz (set in Cargo.toml).
 
 [profile.release]
-# Inlines across crates: contract calls are 2-10% faster, and the Wasm is ~3%
-# larger. The opt-level stays at the default 3: "s" made the Wasm ~30%
-# smaller but slowed contract calls by 15-40%.
-lto = "fat"
-# Lets LLVM optimize each crate as a whole: the Wasm is ~3% smaller and
-# CPU-heavy contract code 3-5% faster, but the CI build takes ~35 s longer.
+# Lets LLVM optimize each crate as a whole: the Wasm is ~9% smaller, with no
+# measurable change in speed, for ~12 s more CI build time.
 codegen-units = 1
 
-# Optimize for size the crates that only run at startup (manifest, deployment
-# plan, YAML and TOML parsing) or that only validate names (regex). Together they
-# save ~230 KB with no measurable slowdown.
-[profile.release.package.clarinet-deployments]
-opt-level = "s"
-
-[profile.release.package.clarinet-files]
-opt-level = "s"
-
-[profile.release.package.yaml_serde]
-opt-level = "s"
-
-[profile.release.package.libyaml-rs]
-opt-level = "s"
-
-[profile.release.package.toml]
-opt-level = "s"
-
-[profile.release.package.comfy-table]
-opt-level = "s"
-
-[profile.release.package.url]
-opt-level = "s"
-
-[profile.release.package.idna]
-opt-level = "s"
-
+# The regex crates only validate names, so optimize them for size: the Wasm is
+# ~1.4% smaller, with no measurable slowdown.
 [profile.release.package.regex]
 opt-level = "s"
 

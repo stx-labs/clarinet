@@ -19,7 +19,7 @@ async function build_wasm_sdk() {
     ? []
     : ["--config", path.join(rootDir, "release-profile.toml")];
   if (!isDev) {
-    // Wasm SIMD makes the Wasm ~2% smaller. It needs Chrome 91, Firefox 89,
+    // Wasm SIMD makes the Wasm ~3% smaller. It needs Chrome 91, Firefox 89,
     // Safari 16.4 or Node.js 16.4. It's in RUSTFLAGS, not release-profile.toml,
     // because Cargo ignores config rustflags when RUSTFLAGS is set, as in CI.
     const rustflags = process.env.RUSTFLAGS ?? "";
