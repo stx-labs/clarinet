@@ -17,7 +17,9 @@ pub fn check_entry_points(
 ) {
     let formatter = ClarityFormatter::new(settings);
     let modes: [(&str, &dyn Fn(&str) -> String); 3] = [
-        ("file", &|source| formatter.format_file(source, None)),
+        ("file", &|source| {
+            formatter.format_file(source, None).unwrap()
+        }),
         ("section", &|source| {
             formatter.format_section(source, None).unwrap()
         }),

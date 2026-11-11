@@ -259,12 +259,12 @@ fn ignored_tuple_values_keep_their_source() {
                  {value} }}"},
         ] {
             assert_eq!(
-                formatter.format_file(&source, None),
+                formatter.format_file(&source, None).unwrap(),
                 format!("{expected}\n")
             );
             assert_eq!(formatter.format_section(&source, None).unwrap(), expected);
             assert_eq!(
-                formatter.format_file(&expected, None),
+                formatter.format_file(&expected, None).unwrap(),
                 format!("{expected}\n")
             );
         }
