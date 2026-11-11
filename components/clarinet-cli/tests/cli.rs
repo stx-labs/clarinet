@@ -622,6 +622,74 @@ fn test_check_project_standard_output_shows_notes_without_warnings() {
     );
 }
 
+/// `--min-level` hides diagnostics below it in every output of `clarinet check`.
+#[test]
+fn test_check_min_level() {
+    let project_name = "test_min_level";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    // A style note (getValue) and a warning (the unused constant)
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(
+        &contract_path,
+        "(define-constant MY_UNUSED_CONST u42)\n(define-read-only (getValue) u42)\n",
+    )
+    .expect("Failed to write contract");
+
+    let check = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+            .args(args)
+            .env("NO_COLOR", "1")
+            .current_dir(&project_path)
+            .output()
+            .expect("Failed to execute clarinet check");
+        assert!(output.status.success(), "clarinet {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    let stdout = check(&["check"]);
+    assert!(
+        stdout.contains("note") && stdout.contains("never used"),
+        "{stdout}"
+    );
+
+    let stdout = check(&["check", "--min-level", "warning"]);
+    assert!(!stdout.contains("note"), "{stdout}");
+    assert!(
+        stdout.contains("never used") && stdout.contains("1 warning detected"),
+        "{stdout}"
+    );
+
+    let stdout = check(&["check", "--min-level", "error"]);
+    assert!(
+        !stdout.contains("note") && !stdout.contains("warning"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("1 contract checked"), "{stdout}");
+
+    let levels = |json: &serde_json::Value| -> Vec<String> {
+        collect_lint_names(json)
+            .into_iter()
+            .map(|(_, level)| level.to_string())
+            .collect()
+    };
+    let json = run_clarinet_check_json(&["--min-level", "warning"], &project_path);
+    assert_eq!(levels(&json), ["Warning"]);
+    let json = run_clarinet_check_json(
+        &["contracts/my-contract.clar", "--min-level", "warning"],
+        &project_path,
+    );
+    assert_eq!(levels(&json), ["Warning"]);
+}
+
 /// Create a project with one contract that both trips a lint and is rejected by
 /// `call_checker`, and return its path.
 fn create_project_with_rejected_contract(
