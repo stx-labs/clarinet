@@ -1,0 +1,49 @@
+# Cargo release profile for the SDK Wasm build. build.mjs passes it to cargo with
+# `--config`. It can't go in this crate's Cargo.toml, because Cargo ignores
+# [profile.*] in workspace members, and the root Cargo.toml would also change the
+# CLI. Measured with components/clarinet-sdk/node/benches/simnet.bench.mjs.
+
+[profile.release]
+# Inlines across crates: contract calls are 2-10% faster, and the Wasm is ~3%
+# larger. The opt-level stays at the default 3: "s" made the Wasm ~30%
+# smaller but slowed contract calls by 15-40%.
+lto = "fat"
+
+# Optimize for size the crates that only run at startup (manifest, deployment
+# plan, YAML and TOML parsing) or that only validate names (regex). Together they
+# save ~230 KB with no measurable slowdown.
+[profile.release.package.clarinet-deployments]
+opt-level = "s"
+
+[profile.release.package.clarinet-files]
+opt-level = "s"
+
+[profile.release.package.yaml_serde]
+opt-level = "s"
+
+[profile.release.package.libyaml-rs]
+opt-level = "s"
+
+[profile.release.package.toml]
+opt-level = "s"
+
+[profile.release.package.comfy-table]
+opt-level = "s"
+
+[profile.release.package.url]
+opt-level = "s"
+
+[profile.release.package.idna]
+opt-level = "s"
+
+[profile.release.package.regex]
+opt-level = "s"
+
+[profile.release.package.regex-automata]
+opt-level = "s"
+
+[profile.release.package.regex-syntax]
+opt-level = "s"
+
+[profile.release.package.aho-corasick]
+opt-level = "s"

@@ -7,19 +7,17 @@ import path from "node:path";
 // directory of the current file
 const rootDir = new URL(".", import.meta.url).pathname;
 
-// Cargo ignores [profile.*] in workspace members, so set the release profile
-// here for wasm-pack to inherit. Fat LTO makes contract calls a few percent
-// faster at a small size cost. The opt-level stays at the default 3: "s" made
-// the Wasm ~28% smaller but slowed contract calls by 13-30%
-// (see components/clarinet-sdk/node/benches/simnet.bench.mjs).
-process.env.CARGO_PROFILE_RELEASE_LTO ??= "fat";
-
 /**
  * build clarinet-sdk-wasm
  */
 async function build_wasm_sdk() {
   const isDev = process.argv.includes("--dev");
   const profileFlag = isDev ? "--dev" : "--release";
+  // wasm-pack passes options it doesn't know (like `--features`) on to cargo.
+  // No `--` separator: after `--features`, wasm-pack would forward it literally.
+  const cargoArgs = isDev
+    ? []
+    : ["--config", path.join(rootDir, "release-profile.toml")];
   console.log(`Building wasm SDK (${profileFlag})`);
 
   console.log("Deleting pkg-node");
@@ -37,6 +35,7 @@ async function build_wasm_sdk() {
       "pkg-node",
       "--target",
       "nodejs",
+      ...cargoArgs,
     ]),
     execCommand("wasm-pack", [
       "build",
@@ -49,6 +48,7 @@ async function build_wasm_sdk() {
       "web",
       "--features",
       "web",
+      ...cargoArgs,
     ]),
   ]);
 

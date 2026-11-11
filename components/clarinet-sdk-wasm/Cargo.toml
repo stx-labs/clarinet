@@ -38,8 +38,9 @@ web = [
   "clarity-repl/web",
 ]
 
-# Cargo ignores [profile.*] in workspace members; the release Cargo profile is set
-# by build.mjs. These wasm-pack settings are read by wasm-pack itself.
+# Cargo ignores [profile.*] in workspace members; the release Cargo profile is in
+# release-profile.toml, passed to cargo by build.mjs. These wasm-pack settings are
+# read by wasm-pack itself.
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
 
