@@ -112,13 +112,15 @@ const expectOk = (res) => expectType(res, "ok");
 const scale = args.quick ? 0.2 : 1;
 const benches = [
   {
-    // Reads the existing deployment plan, regenerates it and compares (YAML parse + emit).
+    // Uncached init: reads the existing deployment plan, regenerates it and compares
+    // (YAML parse + emit), then deploys the fixture contracts. Without `noCache`,
+    // `initSimnet` would only clone the session cached by the first call.
     name: "initSimnet (existing plan)",
     iters: 3,
     rounds: 10,
     setup: async () => {},
     run: async () => {
-      await initSimnet(manifestPath);
+      await initSimnet(manifestPath, true);
     },
   },
   {
@@ -156,13 +158,14 @@ const benches = [
     name: "save + read-ab (at-block, early height)",
     iters: 150,
     rounds: 15,
+    // Reads the deployment block, which the first `save` makes historical.
     setup: async () => {
       await freshSession();
-      return simnet.blockHeight - 1;
+      return simnet.blockHeight;
     },
     run: (i, height) => {
       simnet.callPublicFn("bench", "save", [u(i), buff(i)], sender);
-      simnet.callReadOnlyFn("bench", "read-ab", [u(height)], sender);
+      expectType(simnet.callReadOnlyFn("bench", "read-ab", [u(height)], sender), "buffer");
     },
   },
   {
