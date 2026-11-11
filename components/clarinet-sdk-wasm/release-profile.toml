@@ -1,7 +1,9 @@
 # Cargo release profile for the SDK Wasm build. build.mjs passes it to cargo with
 # `--config`. It can't go in this crate's Cargo.toml, because Cargo ignores
 # [profile.*] in workspace members, and the root Cargo.toml would also change the
-# CLI. Measured with components/clarinet-sdk/node/benches/simnet.bench.mjs.
+# CLI. Wasm SIMD is enabled in build.mjs instead, because CI's RUSTFLAGS would
+# override rustflags set here. Measured with
+# components/clarinet-sdk/node/benches/simnet.bench.mjs.
 
 [profile.release]
 # Inlines across crates: contract calls are 2-10% faster, and the Wasm is ~3%
