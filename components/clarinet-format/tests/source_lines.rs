@@ -75,12 +75,12 @@ fn source_extraction_preserves_literals_and_ignored_blocks() {
                 assert_eq!(aggregator.generate().trim_end(), source);
                 continue;
             }
-            assert_eq!(formatter.format_file(&input, None), expected);
+            assert_eq!(formatter.format_file(&input, None).unwrap(), expected);
             assert_eq!(
                 formatter.format_section(&input, None).unwrap().trim_end(),
                 source
             );
-            assert_eq!(formatter.format_file(&expected, None), expected);
+            assert_eq!(formatter.format_file(&expected, None).unwrap(), expected);
         }
     }
 }

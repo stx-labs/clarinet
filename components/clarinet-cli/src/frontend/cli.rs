@@ -1517,10 +1517,21 @@ pub fn main() {
 
             let mut all_files_formatted = true;
             let mut unformatted_files = Vec::new();
+            let mut unparsed_files = 0;
 
             for source in sources {
                 let input = source.get_input();
-                let output = formatter.format(&input, source.epoch());
+                // One contract that doesn't parse is reported, and the rest
+                // are still formatted.
+                let output = match formatter.format(&input, source.epoch()) {
+                    Ok(output) => output,
+                    Err(error) => {
+                        let name = source.file_path().unwrap_or("<stdin>");
+                        eprintln!("{} {name}: {error}", red!("✗"));
+                        unparsed_files += 1;
+                        continue;
+                    }
+                };
 
                 if cmd.check {
                     if let Some(file_path) = source.file_path() {
@@ -1542,8 +1553,19 @@ pub fn main() {
                 }
             }
 
+            if unparsed_files > 0 {
+                eprintln!(
+                    "{} {unparsed_files} {} could not be parsed",
+                    red!("✗"),
+                    if unparsed_files == 1 { "file" } else { "files" }
+                );
+            }
+
             if cmd.check {
                 if all_files_formatted {
+                    if unparsed_files > 0 {
+                        std::process::exit(1);
+                    }
                     println!("{} All files are properly formatted", green!("✔"));
                     std::process::exit(0);
                 } else {
@@ -1562,6 +1584,10 @@ pub fn main() {
                     }
                     std::process::exit(1);
                 }
+            }
+
+            if unparsed_files > 0 {
+                std::process::exit(1);
             }
         }
         Command::Devnet(subcommand) => match subcommand {

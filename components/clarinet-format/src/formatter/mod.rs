@@ -114,18 +114,25 @@ impl ClarityFormatter {
         Self { settings }
     }
     /// formatting for files to ensure a newline at the end
-    pub fn format_file(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
+    ///
+    /// Returns the parse error for a source that doesn't parse, such as a
+    /// contract with an unclosed list or a non-ASCII character.
+    pub fn format_file(
+        &self,
+        source: &str,
+        epoch: Option<StacksEpochId>,
+    ) -> Result<String, String> {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
         let pse = clarity::vm::ast::parser::v2::parse(
             trimmed_source,
             StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
         )
-        .unwrap();
+        .map_err(|e| e.to_string())?;
         let mut agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
         let result = agg.generate();
 
         // make sure the file ends with a newline
-        format!("{}\n", result.trim_end_matches(['\n', '\r']))
+        Ok(format!("{}\n", result.trim_end_matches(['\n', '\r'])))
     }
     /// formatting an AST without a source file
     pub fn format_ast(&self, pse: &[PreSymbolicExpression]) -> String {
@@ -133,7 +140,7 @@ impl ClarityFormatter {
         agg.generate()
     }
     /// Alias `format_file` to `format`
-    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
+    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> Result<String, String> {
         self.format_file(source, epoch)
     }
     /// for range formatting within editors
@@ -1757,7 +1764,7 @@ mod tests_formatter {
             assert!(!expected_values.is_empty());
 
             for (mode, formatted) in [
-                ("file", formatter.format_file(&source, None)),
+                ("file", formatter.format_file(&source, None).unwrap()),
                 ("section", formatter.format_section(&source, None).unwrap()),
                 ("ast", formatter.format_ast(&original)),
             ] {
@@ -1766,12 +1773,22 @@ mod tests_formatter {
                 });
                 assert_eq!(values(&reparsed), expected_values, "{mode}: {source}");
                 let reformatted = match mode {
-                    "file" => formatter.format_file(&formatted, None),
+                    "file" => formatter.format_file(&formatted, None).unwrap(),
                     "section" => formatter.format_section(&formatted, None).unwrap(),
                     _ => formatter.format_ast(&reparsed),
                 };
                 assert_eq!(reformatted, formatted, "{mode}: {source}");
             }
+        }
+    }
+
+    #[test]
+    fn test_format_file_reports_parse_errors() {
+        let formatter = ClarityFormatter::new(Settings::default());
+        // Unclosed, and a non-ASCII character the lexer rejects in every epoch
+        for src in ["(define-constant a u1", ";; café\n(define-constant a u1)"] {
+            assert!(formatter.format_file(src, None).is_err(), "{src}");
+            assert!(formatter.format_section(src, None).is_err(), "{src}");
         }
     }
 
@@ -2859,11 +2876,11 @@ mod tests_formatter {
     /// Formats `src` as a file and checks the output parses and is stable.
     fn format_valid_and_stable(src: &str) -> String {
         let formatter = ClarityFormatter::new(Settings::default());
-        let result = formatter.format_file(src, None);
+        let result = formatter.format_file(src, None).unwrap();
         clarity::vm::ast::parser::v2::parse(&result, StackDepthLimits::for_epoch(DEFAULT_EPOCH))
             .unwrap_or_else(|e| panic!("invalid output for {src:?}:\n{result}\n{e}"));
         assert_eq!(
-            formatter.format_file(&result, None),
+            formatter.format_file(&result, None).unwrap(),
             result,
             "not idempotent"
         );
